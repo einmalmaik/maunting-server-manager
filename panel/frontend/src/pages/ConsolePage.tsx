@@ -49,7 +49,7 @@ export default function ConsolePage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `dayz-console-${source}-${Date.now()}.txt`
+    link.download = `conan-console-${source}-${Date.now()}.txt`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)

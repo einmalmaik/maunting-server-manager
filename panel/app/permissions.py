@@ -60,7 +60,7 @@ ALL_PERMISSIONS: dict[str, str] = {
     P_SERVER_WIPE:        "Wipe server data",
     P_WORKSHOP_UPDATE:    "Run workshop update",
     P_CONSOLE_VIEW:       "View console page",
-    P_CONSOLE_LOG:        "View RPT log console",
+    P_CONSOLE_LOG:        "View server log console",
     P_CONSOLE_TMUX:       "View tmux console",
     P_RCON_SEND:          "Send RCON commands",
     P_FILES_READ:         "Read files",

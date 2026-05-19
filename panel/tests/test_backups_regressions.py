@@ -75,79 +75,79 @@ def test_create_backup_returns_clean_cli_error_detail(monkeypatch: pytest.Monkey
     assert exc_info.value.detail == "[ Error ] Could not create backup"
 
 
-def test_get_backup_file_content_reads_mission_file_from_tar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_get_backup_file_content_reads_conan_save_file_from_tar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     server_root = tmp_path / "servers" / "alpha"
     run_dir = server_root / "backup" / "2026-03-19_12-30"
     run_dir.mkdir(parents=True)
-    archive_path = run_dir / "mission-empty.deerisle.tar"
+    archive_path = run_dir / "conan-saved.tar"
 
     with tarfile.open(archive_path, "w") as archive:
-        source = tmp_path / "types.xml"
-        source.write_text("<types />\n", encoding="utf-8")
-        archive.add(source, arcname="empty.deerisle/db/types.xml")
+        source = tmp_path / "game_0.db"
+        source.write_text("sqlite placeholder\n", encoding="utf-8")
+        archive.add(source, arcname="ConanSandbox/Saved/game_0.db")
 
     monkeypatch.setattr(backups, "get_server_base_dir", lambda server: server_root)
 
     response = backups.get_backup_file_content(
         timestamp="2026-03-19_12-30",
-        path="serverfiles/mpmissions/empty.deerisle/db/types.xml",
+        path="serverfiles/ConanSandbox/Saved/game_0.db",
         user=_user(),
         server="alpha",
     )
 
-    assert response["archive"] == "mission-empty.deerisle.tar"
-    assert response["content"] == "<types />\n"
+    assert response["archive"] == "conan-saved.tar"
+    assert response["content"] == "sqlite placeholder\n"
 
 
 def test_restore_backup_file_writes_selected_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     server_root = tmp_path / "servers" / "alpha"
-    live_file = server_root / "serverprofile" / "cfg" / "players.json"
+    live_file = server_root / "serverfiles" / "ConanSandbox" / "Saved" / "game_0.db"
     live_file.parent.mkdir(parents=True)
-    live_file.write_text('{"old": true}\n', encoding="utf-8")
+    live_file.write_text("old save\n", encoding="utf-8")
 
     run_dir = server_root / "backup" / "2026-03-19_12-30"
     run_dir.mkdir(parents=True)
-    archive_path = run_dir / "serverprofile.tar"
-    backup_source = tmp_path / "players.json"
-    backup_source.write_text('{"restored": true}\n', encoding="utf-8")
+    archive_path = run_dir / "conan-saved.tar"
+    backup_source = tmp_path / "game_0.db"
+    backup_source.write_text("restored save\n", encoding="utf-8")
     with tarfile.open(archive_path, "w") as archive:
-        archive.add(backup_source, arcname="serverprofile/cfg/players.json")
+        archive.add(backup_source, arcname="ConanSandbox/Saved/game_0.db")
 
     monkeypatch.setattr(backups, "get_server_base_dir", lambda server: server_root)
     monkeypatch.setattr(backups, "_record_audit", lambda *args, **kwargs: None)
 
     response = backups.restore_backup_file(
-        body=BackupFileBody(timestamp="2026-03-19_12-30", path="serverprofile/cfg/players.json"),
+        body=BackupFileBody(timestamp="2026-03-19_12-30", path="serverfiles/ConanSandbox/Saved/game_0.db"),
         db=SimpleNamespace(),
         user=_user(),
         server="alpha",
     )
 
     assert response["ok"] is True
-    assert live_file.read_text(encoding="utf-8") == '{"restored": true}\n'
+    assert live_file.read_text(encoding="utf-8") == "restored save\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode preservation is only meaningful on Linux hosts.")
 def test_restore_backup_file_preserves_existing_file_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     server_root = tmp_path / "servers" / "alpha"
-    live_file = server_root / "serverprofile" / "cfg" / "players.json"
+    live_file = server_root / "serverfiles" / "ConanSandbox" / "Saved" / "game_0.db"
     live_file.parent.mkdir(parents=True)
-    live_file.write_text('{"old": true}\n', encoding="utf-8")
+    live_file.write_text("old save\n", encoding="utf-8")
     live_file.chmod(0o640)
 
     run_dir = server_root / "backup" / "2026-03-19_12-30"
     run_dir.mkdir(parents=True)
-    archive_path = run_dir / "serverprofile.tar"
-    backup_source = tmp_path / "players.json"
-    backup_source.write_text('{"restored": true}\n', encoding="utf-8")
+    archive_path = run_dir / "conan-saved.tar"
+    backup_source = tmp_path / "game_0.db"
+    backup_source.write_text("restored save\n", encoding="utf-8")
     with tarfile.open(archive_path, "w") as archive:
-        archive.add(backup_source, arcname="serverprofile/cfg/players.json")
+        archive.add(backup_source, arcname="ConanSandbox/Saved/game_0.db")
 
     monkeypatch.setattr(backups, "get_server_base_dir", lambda server: server_root)
     monkeypatch.setattr(backups, "_record_audit", lambda *args, **kwargs: None)
 
     backups.restore_backup_file(
-        body=BackupFileBody(timestamp="2026-03-19_12-30", path="serverprofile/cfg/players.json"),
+        body=BackupFileBody(timestamp="2026-03-19_12-30", path="serverfiles/ConanSandbox/Saved/game_0.db"),
         db=SimpleNamespace(),
         user=_user(),
         server="alpha",
@@ -158,17 +158,17 @@ def test_restore_backup_file_preserves_existing_file_mode(tmp_path: Path, monkey
 
 def test_restore_backup_file_returns_permission_hint_when_write_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     server_root = tmp_path / "servers" / "alpha"
-    live_file = server_root / "serverprofile" / "cfg" / "players.json"
+    live_file = server_root / "serverfiles" / "ConanSandbox" / "Saved" / "game_0.db"
     live_file.parent.mkdir(parents=True)
-    live_file.write_text('{"old": true}\n', encoding="utf-8")
+    live_file.write_text("old save\n", encoding="utf-8")
 
     run_dir = server_root / "backup" / "2026-03-19_12-30"
     run_dir.mkdir(parents=True)
-    archive_path = run_dir / "serverprofile.tar"
-    backup_source = tmp_path / "players.json"
-    backup_source.write_text('{"restored": true}\n', encoding="utf-8")
+    archive_path = run_dir / "conan-saved.tar"
+    backup_source = tmp_path / "game_0.db"
+    backup_source.write_text("restored save\n", encoding="utf-8")
     with tarfile.open(archive_path, "w") as archive:
-        archive.add(backup_source, arcname="serverprofile/cfg/players.json")
+        archive.add(backup_source, arcname="ConanSandbox/Saved/game_0.db")
 
     monkeypatch.setattr(backups, "get_server_base_dir", lambda server: server_root)
     monkeypatch.setattr(backups, "_record_audit", lambda *args, **kwargs: None)
@@ -176,7 +176,7 @@ def test_restore_backup_file_returns_permission_hint_when_write_fails(tmp_path: 
 
     with pytest.raises(HTTPException) as exc:
         backups.restore_backup_file(
-            body=BackupFileBody(timestamp="2026-03-19_12-30", path="serverprofile/cfg/players.json"),
+            body=BackupFileBody(timestamp="2026-03-19_12-30", path="serverfiles/ConanSandbox/Saved/game_0.db"),
             db=SimpleNamespace(),
             user=_user(),
             server="alpha",

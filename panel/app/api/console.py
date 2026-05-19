@@ -144,15 +144,18 @@ def _make_line(text: str, seq: int) -> dict:
     return {"id": seq, "text": text, "level": _detect_level(text)}
 
 
-def _find_active_rpt(server_name: str = "default") -> Path | None:
+def _find_active_log(server_name: str = "default") -> Path | None:
     if not _SERVER_NAME_RE.match(server_name):
         return None
     base = Path(os.path.expanduser("~")) / "servers"
-    profile_dir = (base / server_name / "serverprofile").resolve()
-    if not profile_dir.is_relative_to(base.resolve()):
+    server_dir = (base / server_name).resolve()
+    if not server_dir.is_relative_to(base.resolve()):
         return None
-    if not profile_dir.is_dir():
-        return None
+
+    log_dirs = [
+        server_dir / "serverfiles" / "ConanSandbox" / "Saved" / "Logs",
+        server_dir / "serverprofile",
+    ]
 
     def _safe_mtime(path: Path) -> float:
         try:
@@ -160,8 +163,15 @@ def _find_active_rpt(server_name: str = "default") -> Path | None:
         except OSError:
             return 0.0
 
-    rpts = sorted(profile_dir.glob("*.RPT"), key=_safe_mtime, reverse=True)
-    return rpts[0] if rpts else None
+    candidates: list[Path] = []
+    for log_dir in log_dirs:
+        if not log_dir.is_dir():
+            continue
+        candidates.extend(path for path in log_dir.glob("*.log") if path.is_file())
+        candidates.extend(path for path in log_dir.glob("*.txt") if path.is_file())
+        candidates.extend(path for path in log_dir.glob("*.RPT") if path.is_file())
+    candidates.sort(key=_safe_mtime, reverse=True)
+    return candidates[0] if candidates else None
 
 
 def _strip_ansi_sequences(text: str) -> str:
@@ -338,14 +348,14 @@ async def console_ws(ws: WebSocket) -> None:
         if entry.source == "tmux":
             await _stream_tmux(ws, server_name=entry.server_name)
         else:
-            rpt_path = _find_active_rpt(server_name=entry.server_name)
+            rpt_path = _find_active_log(server_name=entry.server_name)
             if rpt_path is None:
                 await ws.send_text(
                     json.dumps(
                         {
                             "type": "error",
                             "data": (
-                                f"No .RPT log file found in ~/servers/{entry.server_name}/serverprofile/. "
+                                f"No Conan log file found in ~/servers/{entry.server_name}/serverfiles/ConanSandbox/Saved/Logs/. "
                                 "Is the Conan Exiles server running?"
                             ),
                         }

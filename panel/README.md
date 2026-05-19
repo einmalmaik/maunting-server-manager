@@ -30,13 +30,14 @@ sudo ./conanserver.sh panel install
 That flow:
 
 1. checks for a working Conan Exiles core install
-2. installs Python, Caddy, MariaDB, and phpMyAdmin if missing
+2. installs Python, Caddy, MariaDB, and phpMyAdmin if requested
 3. creates the MariaDB schema and panel DB user
-4. creates the initial admin account
-5. creates the Python virtual environment
-6. installs the Python dependencies
-7. writes the systemd unit and managed Caddy block
-8. enables the panel under the configured domain or `http://<server-ip>`
+4. writes a production `.env` with generated secrets and secure cookie defaults
+5. creates the initial owner account without passing the password on the command line
+6. creates the Python virtual environment
+7. installs the Python dependencies
+8. writes the systemd unit and managed Caddy block
+9. enables the panel under the configured domain or `http://<server-ip>`
 
 ## Development Notes
 

@@ -20,16 +20,18 @@ def create_admin(username: str, password: str, force: bool = False) -> int:
                 print(f"User already exists: {username}")
                 return 1
             existing.password_hash = hash_password(password)
+            existing.role = "owner"
+            existing.permissions = None
             existing.is_active = True
             db.add(existing)
             db.commit()
-            print(f"Updated admin user: {username}")
+            print(f"Updated owner user: {username}")
             return 0
 
-        user = User(username=username, password_hash=hash_password(password), is_active=True)
+        user = User(username=username, password_hash=hash_password(password), role="owner", permissions=None, is_active=True)
         db.add(user)
         db.commit()
-        print(f"Created admin user: {username}")
+        print(f"Created owner user: {username}")
         return 0
 
 

@@ -1654,6 +1654,7 @@ fn_panel_install_command() {
         fn_panel_require_user_exists "$runtime_user" && break
     done
     fn_panel_prompt_public_domain
+    fn_panel_setup_admin_credentials || return 1
     fn_panel_require_existing_core_for_user "$runtime_user" || return 1
 
     db_password="$(fn_panel_generate_secret)"
@@ -1665,6 +1666,8 @@ fn_panel_install_command() {
     fn_panel_ensure_nodejs || return 1
     fn_panel_build_frontend || return 1
     fn_panel_run_migrations || return 1
+    fn_panel_create_admin_user "$PANEL_ADMIN_USERNAME" "$PANEL_ADMIN_PASSWORD" || return 1
+    unset PANEL_ADMIN_USERNAME PANEL_ADMIN_PASSWORD
     fn_panel_render_service_file "$runtime_user" || return 1
     fn_panel_render_caddy_file || return 1
     fn_panel_chown_runtime_paths "$runtime_user"

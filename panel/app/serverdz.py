@@ -125,8 +125,8 @@ def _parse_value(value: str, kind: str) -> Any:
 
 
 def parse_serverdz(raw: str) -> dict[str, Any]:
-    # Compatibility name: the panel API used to expose serverDZ.cfg. For Conan,
-    # this parses ConanSandbox/Saved/Config/LinuxServer/ServerSettings.ini.
+    # Compatibility function name: older panel clients use the same endpoint.
+    # For Conan, this parses ConanSandbox/Saved/Config/LinuxServer/ServerSettings.ini.
     normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
     lines = normalized.split("\n")
     known = _default_known()
