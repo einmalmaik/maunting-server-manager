@@ -1,0 +1,144 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Singra-inspired cool-blue palette ─────────────────────────── */
+    --background:             206 31% 4%;
+    --foreground:             188 29% 95%;
+
+    --card:                   204 25% 10%;
+    --card-foreground:        188 29% 95%;
+
+    --primary:                193 45% 86%;
+    --primary-foreground:     195 43% 5%;
+
+    --secondary:              198 30% 12%;
+    --secondary-foreground:   188 29% 80%;
+
+    --accent:                 194 31% 65%;
+    --accent-foreground:      195 43% 5%;
+
+    --muted:                  201 27% 13%;
+    --muted-foreground:       196 19% 67%;
+
+    --destructive:            0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border:                 198 22% 20%;
+    --input:                  204 25% 8%;
+    --ring:                   194 44% 68%;
+
+    --radius: 0.625rem;
+
+    /* ── 6-level elevation ─────────────────────────────────────────── */
+    --el-0: hsl(206 31% 4%);
+    --el-1: hsl(205 30% 6%);
+    --el-2: hsl(204 28% 8%);
+    --el-3: hsl(203 27% 11%);
+    --el-4: hsl(201 25% 16%);
+    --el-5: hsl(198 22% 24%);
+
+    /* ── Sidebar ───────────────────────────────────────────────────── */
+    --sidebar-w: 256px;
+    --sidebar-w-collapsed: 58px;
+    --topbar-h: 56px;
+
+    /* ── Glow ──────────────────────────────────────────────────────── */
+    --glow-primary:  hsl(194 44% 68% / 0.18);
+    --glow-strong:   hsl(194 44% 68% / 0.35);
+
+    /* ── Status colours ────────────────────────────────────────────── */
+    --status-online: 141 69% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border box-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Thin scrollbar */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border) / 0.8);
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--accent) / 0.5);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border) / 0.8) transparent;
+  }
+}
+
+/* ── Utility classes ─────────────────────────────────────────────────────── */
+@layer utilities {
+  .font-display {
+    font-family: 'Rajdhani', 'DM Sans', sans-serif;
+  }
+  .font-mono {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+  }
+
+  /* Glow effects */
+  .glow-ring {
+    box-shadow: 0 0 0 1px hsl(var(--ring) / 0.25),
+                0 0 16px hsl(var(--ring) / 0.1);
+  }
+  .glow-ring-focus:focus-within {
+    box-shadow: 0 0 0 1px hsl(var(--ring) / 0.35),
+                0 0 20px hsl(var(--ring) / 0.12);
+  }
+
+  /* Status dot */
+  .status-dot-online {
+    @apply w-2.5 h-2.5 rounded-full;
+    background: hsl(var(--status-online));
+    box-shadow: 0 0 0 3px hsl(var(--status-online) / 0.2), 0 0 8px hsl(var(--status-online) / 0.4);
+  }
+  .status-dot-offline {
+    @apply w-2.5 h-2.5 rounded-full bg-muted-foreground;
+  }
+
+  /* Card surface styles */
+  .surface-0 { background: var(--el-0); }
+  .surface-1 { background: var(--el-1); }
+  .surface-2 { background: var(--el-2); }
+  .surface-3 { background: var(--el-3); }
+
+  /* Sidebar active item */
+  .nav-item-active {
+    @apply bg-accent/10 text-primary;
+    border-left: 2px solid hsl(var(--accent));
+  }
+
+  @keyframes pulse-subtle {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+  }
+  .animate-pulse-subtle {
+    animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}

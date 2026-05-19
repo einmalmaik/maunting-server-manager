@@ -1,0 +1,35 @@
+# Environment files (anywhere in the repository)
+.env
+.env.*
+!.env.example
+
+# Virtual environments (anywhere in the repository)
+.venv/
+venv/
+env/
+__pycache__/
+panel/frontend/node_modules/
+panel/frontend/dist/
+panel/frontend/tsconfig.app.tsbuildinfo
+*.pyc
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+cloud.md
+CLOUD.md
+
+.pytest-panel-remove-
+.pytest-panel-missing-mod-
+.pytest-panel-unsafe-remove-
+.pytest-panel-add-mod-
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Claude Code local settings
+.claude/settings.local.json
+*.kiro
+/.pytest-panel-add-config-262
+/docs/agent-rules

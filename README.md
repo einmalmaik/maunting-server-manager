@@ -1,0 +1,2 @@
+# Conan Exiles Panel Linux
+

@@ -1,0 +1,11 @@
+fastapi==0.115.11
+uvicorn[standard]==0.34.0
+gunicorn==23.0.0
+python-multipart==0.0.20
+sqlalchemy==2.0.39
+alembic==1.15.1
+pymysql==1.1.1
+argon2-cffi==23.1.0
+itsdangerous==2.2.0
+httpx==0.28.1
+pyotp==2.9.0
