@@ -1,4 +1,4 @@
-"""GameModule plugin interface for Maunting Server Panel.
+"""GameModule plugin interface for Maunting Server Manager.
 
 Each supported game lives in a sub-package and implements the GameModule
 protocol. The core panel is game-agnostic and delegates all game-specific

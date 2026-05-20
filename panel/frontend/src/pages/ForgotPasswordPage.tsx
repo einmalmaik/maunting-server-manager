@@ -103,7 +103,7 @@ export default function ForgotPasswordPage() {
           </div>
           <div className="space-y-2">
             <h2 className="font-display text-xl font-bold uppercase tracking-widest text-foreground/90">
-              Maunting Server Panel
+              Maunting Server Manager
             </h2>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
               Secure your server management. Password reset links expire in 24 hours for your safety.

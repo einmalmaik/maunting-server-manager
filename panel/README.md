@@ -1,4 +1,4 @@
-# Maunting Server Panel
+# Maunting Server Manager
 
 This folder contains the optional web panel that sits on top of the existing game server manager core.
 

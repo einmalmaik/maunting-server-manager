@@ -129,7 +129,7 @@ def get_settings() -> Settings:
             logger.warning("EMAIL_PROVIDER is resend but RESEND_API_KEY is not set.")
 
     return Settings(
-        app_name="Maunting Server Panel",
+        app_name="Maunting Server Manager",
         root_path=root_path,
         secret_key=secret_key,
         session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "maunting_panel_session").strip(),
@@ -151,7 +151,7 @@ def get_settings() -> Settings:
         smtp_starttls=os.getenv("SMTP_STARTTLS", "true").strip().lower() == "true",
         resend_api_key=resend_api_key,
         email_from=os.getenv("EMAIL_FROM", "").strip(),
-        email_from_name=os.getenv("EMAIL_FROM_NAME", "Maunting Server Panel").strip(),
+        email_from_name=os.getenv("EMAIL_FROM_NAME", "Maunting Server Manager").strip(),
         password_reset_token_hours=_safe_int(os.getenv("PASSWORD_RESET_TOKEN_HOURS", "24"), 24),
         verification_token_hours=_safe_int(os.getenv("VERIFICATION_TOKEN_HOURS", "24"), 24),
     )

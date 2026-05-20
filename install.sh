@@ -1,5 +1,5 @@
 #!/bin/bash
-# Maunting Server Panel — One-Click Installer Wrapper
+# Maunting Server Manager — One-Click Installer Wrapper
 # Führt panel/install.py aus mit Python 3
 
 set -e
@@ -9,7 +9,7 @@ GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-echo -e "${CYAN}Maunting Server Panel Installer${NC}"
+echo -e "${CYAN}Maunting Server Manager Installer${NC}"
 echo "================================"
 
 if [ "$EUID" -ne 0 ]; then

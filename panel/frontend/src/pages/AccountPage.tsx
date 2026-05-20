@@ -14,7 +14,7 @@ import { useUiLanguage } from '@/lib/ui-language'
 
 function downloadBackupCodesFile(codes: string[]) {
   const content = [
-    'Maunting Server Panel 2FA Backup Codes',
+    'Maunting Server Manager 2FA Backup Codes',
     '',
     'Store these codes somewhere safe.',
     'Each code can be used once for login only.',

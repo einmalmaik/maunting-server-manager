@@ -85,7 +85,7 @@ export default function SetupPage() {
             </div>
             <div className="text-center">
               <h1 className="font-display text-2xl font-bold uppercase tracking-widest text-foreground">
-                Maunting Server Panel
+                Maunting Server Manager
               </h1>
               <p className="mt-1 text-xs text-muted-foreground tracking-wide">
                 {t.subtitle}

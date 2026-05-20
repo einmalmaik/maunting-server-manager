@@ -63,7 +63,7 @@ export default function RegisterPage() {
                 Create Account
               </h1>
               <p className="mt-1 text-xs tracking-wide text-muted-foreground">
-                Register for the Maunting Server Panel
+                Register for the Maunting Server Manager
               </p>
             </div>
           </div>
@@ -180,7 +180,7 @@ export default function RegisterPage() {
           </div>
           <div className="space-y-2">
             <h2 className="font-display text-xl font-bold uppercase tracking-widest text-foreground/90">
-              Maunting Server Panel
+              Maunting Server Manager
             </h2>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
               Manage your game servers with ease. Multi-game support — all in one place.

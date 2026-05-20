@@ -101,7 +101,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </div>
         {!collapsed && (
           <span className="font-display font-semibold text-sm uppercase tracking-wider text-foreground/90 whitespace-nowrap">
-            Maunting Server Panel
+            Maunting Server Manager
           </span>
         )}
       </div>

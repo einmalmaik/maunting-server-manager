@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Maunting Server Panel — One-Click Installer
+Maunting Server Manager — One-Click Installer
 Anfängerfreundliche Installation für Linux (Debian/Ubuntu).
 
 Usage:
@@ -85,7 +85,7 @@ def _python_version_ok() -> bool:
 
 def step_1_welcome() -> None:
     _print("=" * 60, C_BOLD)
-    _print("  Maunting Server Panel — Installation", f"{C_BOLD}{C_CYAN}")
+    _print("  Maunting Server Manager — Installation", f"{C_BOLD}{C_CYAN}")
     _print("  Einfach. Sicher. Schritt für Schritt.", C_DIM)
     _print("=" * 60, C_BOLD)
     _print("")
@@ -400,7 +400,7 @@ def step_10_systemd() -> None:
     user = _ask("System-Benutzer", "root")
 
     service_content = f"""[Unit]
-Description=Maunting Server Panel
+Description=Maunting Server Manager
 After=network.target
 
 [Service]

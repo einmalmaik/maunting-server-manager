@@ -103,7 +103,7 @@ def setup_2fa(
     secret = pyotp.random_base32()
     uri = pyotp.totp.TOTP(secret).provisioning_uri(
         name=user.username,
-        issuer_name="Maunting Server Panel",
+        issuer_name="Maunting Server Manager",
     )
     return {
         "secret": secret,

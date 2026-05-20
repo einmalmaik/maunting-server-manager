@@ -1,1 +1,1 @@
-"""Maunting Server Panel package."""
+"""Maunting Server Manager package."""

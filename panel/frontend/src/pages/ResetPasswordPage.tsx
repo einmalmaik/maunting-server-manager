@@ -155,7 +155,7 @@ export default function ResetPasswordPage() {
           </div>
           <div className="space-y-2">
             <h2 className="font-display text-xl font-bold uppercase tracking-widest text-foreground/90">
-              Maunting Server Panel
+              Maunting Server Manager
             </h2>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
               Keep your account secure. Use a strong, unique password.

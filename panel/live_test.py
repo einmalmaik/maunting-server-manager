@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Maunting Server Panel — Live API Test
+Maunting Server Manager — Live API Test
 Testet alle Auth-Flows, Edge-Cases und Permission-Checks.
 """
 from __future__ import annotations

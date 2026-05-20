@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #=======================================================================================#
-#                         Conan Exiles Enhanced Server Panel
+#                         Maunting Server Manager
 #=======================================================================================#
 #     Adapted and maintained by:
 #     Maik (MauntingStudios)
@@ -16,7 +16,7 @@
 
 CONFIG_FILE_NAME="config.ini"
 CONFIG_FILE=""
-LOCK_DIR="${HOME}/.conanserver.lock"
+LOCK_DIR="${HOME}/.msm.lock"
 
 # ── Parse --server <name> before sourcing libs ────────────────────────────────
 SERVER_NAME=""
@@ -61,7 +61,7 @@ REQUESTED_COMMAND=""
 REQUESTED_SUBCOMMAND=""
 REQUESTED_THIRD_ARG=""
 CONFIG_WAS_CREATED="0"
-PROJECT_NAME="Conan Exiles Enhanced Server Panel"
+PROJECT_NAME="Maunting Server Manager"
 PROJECT_MAINTAINER_NAME="Maik"
 PROJECT_MAINTAINER_BRAND="MauntingStudios"
 PROJECT_ORIGIN_AUTHORS="@fiskce / @tootlejack / @thelastnoc / @haywardgg"
@@ -176,7 +176,7 @@ CONFIG_FILE="${SERVER_DIR}/config.ini"
 # directory may not exist yet, so keep the home-level lock to avoid a chicken-and-egg
 # failure where fn_acquire_lock cannot create its mutex directory.
 if [ "$_SKIP_SETUP" = "0" ]; then
-    LOCK_DIR="${SERVER_DIR}/.conanserver.lock"
+    LOCK_DIR="${SERVER_DIR}/.msm.lock"
 fi
 
 # Verify the server directory exists. Do NOT auto-create it — that is the exclusive job of

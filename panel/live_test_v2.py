@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Maunting Server Panel — Live API Test v2 (einfacher, stabil)"""
+"""Maunting Server Manager — Live API Test v2 (einfacher, stabil)"""
 from __future__ import annotations
 
 import random
@@ -29,7 +29,7 @@ def check(name, ok, detail=""):
         print(f"  ✗ {name}: {detail}")
 
 print("=" * 60)
-print("  LIVE TEST — Maunting Server Panel API")
+print("  LIVE TEST — Maunting Server Manager API")
 print("=" * 60)
 
 # ── 1. Basic Health ──────────────────────────────────────────────────────────

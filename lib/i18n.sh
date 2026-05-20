@@ -178,10 +178,10 @@ fn_tr() {
         en:no_server_install) printf '%s' 'No installed SteamCMD and/or server files found.' ;;
         de:unknown_command) printf '%s' 'Unbekannter Command: %s %s' ;;
         en:unknown_command) printf '%s' 'Unknown command: %s %s' ;;
-        de:help_title) printf '%s' 'Conan Exiles Enhanced Server Panel' ;;
-        en:help_title) printf '%s' 'Conan Exiles Enhanced Server Panel' ;;
-        de:help_tagline) printf '%s' 'Lifecycle, Wartung und Neustart-Automation fuer Conan Exiles-Server.' ;;
-        en:help_tagline) printf '%s' 'Lifecycle, maintenance, and restart automation for Conan Exiles servers.' ;;
+        de:help_title) printf '%s' 'Maunting Server Manager' ;;
+        en:help_title) printf '%s' 'Maunting Server Manager' ;;
+        de:help_tagline) printf '%s' 'Lifecycle, Wartung und Neustart-Automation fuer Game-Server.' ;;
+        en:help_tagline) printf '%s' 'Lifecycle, maintenance, and restart automation for game servers.' ;;
         de:help_usage) printf '%s' 'Verwendung: %s [command]' ;;
         en:help_usage) printf '%s' 'Usage: %s [command]' ;;
         de:help_commands) printf '%s' 'Command-Uebersicht' ;;
