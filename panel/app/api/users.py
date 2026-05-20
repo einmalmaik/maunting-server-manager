@@ -12,6 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import hash_password
+from ..config import get_settings
+from ..email_service import (
+    compute_expires_at,
+    generate_verification_token,
+    send_verification_email,
+    send_welcome_email,
+)
 from ..models import User
 from ..notifications import notify_account_created, notify_password_reset
 from ..permissions import (
@@ -216,7 +223,22 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
-    notify_account_created(user.email, user.username)
+
+    if user.email:
+        token = generate_verification_token()
+        user.verification_token = token
+        user.verification_expires_at = compute_expires_at("verification")
+        db.commit()
+        settings = get_settings()
+        base_url = settings.root_path if settings.root_path != "/" else ""
+        panel_url = f"{settings.bind_host}:{settings.bind_port}"
+        full_url = f"http://{panel_url}{base_url}"
+        sent = send_verification_email(user.email, user.username, token, full_url)
+        if not sent:
+            send_welcome_email(user.email, user.username, full_url)
+    else:
+        notify_account_created(None, user.username)
+
     logger.info("User %s created by %s", user.username, current_user.username)
     return {"user": _user_dict(user)}
 

@@ -83,10 +83,10 @@ def send_email(to_email: str | None, subject: str, body: str) -> bool:
 def notify_account_created(to_email: str | None, username: str) -> None:
     send_email(
         to_email,
-        "Conan Exiles Panel account created",
+        "Maunting Server Panel account created",
         (
             f"Hello {username},\n\n"
-            "An account was created for you in the Conan Exiles Enhanced Server Panel.\n"
+            "An account was created for you in the Maunting Server Panel.\n"
             "Use the password provided by your administrator and enable 2FA after first login.\n"
         ),
     )
@@ -95,10 +95,10 @@ def notify_account_created(to_email: str | None, username: str) -> None:
 def notify_password_reset(to_email: str | None, username: str) -> None:
     send_email(
         to_email,
-        "Conan Exiles Panel password changed",
+        "Maunting Server Panel password changed",
         (
             f"Hello {username},\n\n"
-            "Your Conan Exiles Enhanced Server Panel password was changed by an administrator.\n"
+            "Your Maunting Server Panel password was changed by an administrator.\n"
             "If you did not expect this, contact the panel owner immediately.\n"
         ),
     )

@@ -31,6 +31,21 @@ class Settings:
     command_timeout: int
     https_only: bool
     default_server_name: str
+    # Email (SMTP or Resend)
+    email_provider: str  # "smtp" | "resend" | "none"
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_password: str
+    smtp_from: str
+    smtp_tls: bool
+    smtp_starttls: bool
+    resend_api_key: str
+    email_from: str
+    email_from_name: str
+    # Security
+    password_reset_token_hours: int
+    verification_token_hours: int
 
     @property
     def game_managers(self) -> dict[str, str]:
@@ -104,6 +119,15 @@ def get_settings() -> Settings:
     else:
         https_only = raw_https_only == "true"
 
+    email_provider = os.getenv("EMAIL_PROVIDER", "none").strip().lower()
+    smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
+    resend_api_key = os.getenv("RESEND_API_KEY", "").strip()
+    if app_env in ("production", "prod") and email_provider != "none":
+        if email_provider == "smtp" and not smtp_password:
+            logger.warning("EMAIL_PROVIDER is smtp but SMTP_PASSWORD is not set.")
+        if email_provider == "resend" and not resend_api_key:
+            logger.warning("EMAIL_PROVIDER is resend but RESEND_API_KEY is not set.")
+
     return Settings(
         app_name="Maunting Server Panel",
         root_path=root_path,
@@ -117,4 +141,17 @@ def get_settings() -> Settings:
         command_timeout=_safe_int(os.getenv("PANEL_COMMAND_TIMEOUT", "1800"), 1800),
         https_only=https_only,
         default_server_name=os.getenv("CONAN_DEFAULT_SERVER", "default").strip() or "default",
+        email_provider=email_provider,
+        smtp_host=os.getenv("SMTP_HOST", "").strip(),
+        smtp_port=_safe_int(os.getenv("SMTP_PORT", "587"), 587),
+        smtp_user=os.getenv("SMTP_USER", "").strip(),
+        smtp_password=smtp_password,
+        smtp_from=os.getenv("SMTP_FROM", "").strip(),
+        smtp_tls=os.getenv("SMTP_TLS", "").strip().lower() == "true",
+        smtp_starttls=os.getenv("SMTP_STARTTLS", "true").strip().lower() == "true",
+        resend_api_key=resend_api_key,
+        email_from=os.getenv("EMAIL_FROM", "").strip(),
+        email_from_name=os.getenv("EMAIL_FROM_NAME", "Maunting Server Panel").strip(),
+        password_reset_token_hours=_safe_int(os.getenv("PASSWORD_RESET_TOKEN_HOURS", "24"), 24),
+        verification_token_hours=_safe_int(os.getenv("VERIFICATION_TOKEN_HOURS", "24"), 24),
     )

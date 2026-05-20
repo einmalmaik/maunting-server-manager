@@ -24,6 +24,13 @@ class User(Base):
     totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     backup_codes_downloaded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Email verification
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    verification_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    verification_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Password reset
+    reset_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

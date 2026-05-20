@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import authenticate_user, verify_password
+from ..auth import authenticate_user, hash_password, verify_password
+from ..config import get_settings
+from ..email_service import (
+    compute_expires_at,
+    generate_reset_token,
+    generate_verification_token,
+    send_password_reset_email,
+    send_verification_email,
+)
 from ..models import AuthThrottle, BackupCode, User
 from ..permissions import get_effective_permissions
 from .deps import get_current_user, get_db
@@ -188,3 +198,141 @@ def logout(request: Request):
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
     return {"user": _user_dict(user)}
+
+
+# ── Self Registration ────────────────────────────────────────────────────────
+
+class RegisterBody(BaseModel):
+    username: str
+    email: str
+    password: str
+
+
+@router.post("/register")
+def register(body: RegisterBody, request: Request, db: Session = Depends(get_db)):
+    throttle_scope = f"register:{_client_ip(request)}"
+    _ensure_not_blocked(db, throttle_scope, "Too many registration attempts. Please try again later.")
+
+    username = body.username.strip()
+    if len(username) < 1 or len(username) > 64:
+        raise HTTPException(status_code=422, detail="Username must be 1–64 characters.")
+    if len(body.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters.")
+    email = body.email.strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=422, detail="Invalid email address.")
+
+    existing_user = db.scalar(select(User).where(User.username == username))
+    if existing_user:
+        _record_failure(db, throttle_scope, limit=5, block_minutes=15)
+        raise HTTPException(status_code=409, detail="Username already taken.")
+    existing_email = db.scalar(select(User).where(User.email == email))
+    if existing_email:
+        _record_failure(db, throttle_scope, limit=5, block_minutes=15)
+        raise HTTPException(status_code=409, detail="Email already in use.")
+
+    user = User(
+        username=username,
+        email=email,
+        password_hash=hash_password(body.password),
+        role="user",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = generate_verification_token()
+    user.verification_token = token
+    user.verification_expires_at = compute_expires_at("verification")
+    db.commit()
+
+    settings = get_settings()
+    base_url = settings.root_path if settings.root_path != "/" else ""
+    panel_url = request.headers.get("x-forwarded-host") or request.headers.get("host") or f"{settings.bind_host}:{settings.bind_port}"
+    scheme = "https" if settings.https_only else "http"
+    full_url = f"{scheme}://{panel_url}{base_url}"
+    sent = send_verification_email(user.email, user.username, token, full_url)
+    if not sent:
+        logger.warning("Failed to send verification email to %s", email)
+
+    _clear_throttle(db, throttle_scope)
+    logger.info("User registered: user_id=%s", user.id)
+    return {
+        "ok": True,
+        "message": "Account created. Please check your email to verify your address before logging in.",
+    }
+
+
+# ── Password Reset ────────────────────────────────────────────────────────────
+
+class ForgotPasswordBody(BaseModel):
+    email: str
+
+
+@router.post("/forgot-password")
+def forgot_password(body: ForgotPasswordBody, request: Request, db: Session = Depends(get_db)):
+    throttle_scope = f"forgot-password:{_client_ip(request)}"
+    _ensure_not_blocked(db, throttle_scope, "Too many requests. Please try again later.")
+
+    email = body.email.strip().lower()
+    user = db.scalar(select(User).where(User.email == email))
+
+    if user is not None and user.is_active:
+        token = generate_reset_token()
+        user.reset_token = token
+        user.reset_expires_at = compute_expires_at("password_reset")
+        db.commit()
+        settings = get_settings()
+        base_url = settings.root_path if settings.root_path != "/" else ""
+        panel_url = request.headers.get("x-forwarded-host") or request.headers.get("host") or f"{settings.bind_host}:{settings.bind_port}"
+        scheme = "https" if settings.https_only else "http"
+        full_url = f"{scheme}://{panel_url}{base_url}"
+        sent = send_password_reset_email(user.email, user.username, token, full_url)
+        if not sent:
+            logger.warning("Failed to send password reset email to %s", email)
+
+    _record_failure(db, throttle_scope, limit=3, block_minutes=15)
+    return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
+
+
+class ResetPasswordBody(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/reset-password")
+def reset_password(body: ResetPasswordBody, db: Session = Depends(get_db)):
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters.")
+
+    user = db.scalar(select(User).where(User.reset_token == body.token))
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
+    if user.reset_expires_at is None or user.reset_expires_at < _now_utc():
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
+
+    user.password_hash = hash_password(body.new_password)
+    user.reset_token = None
+    user.reset_expires_at = None
+    db.commit()
+    logger.info("Password reset completed for user_id=%s", user.id)
+    return {"ok": True, "message": "Password has been reset."}
+
+
+# ── Email Verification ─────────────────────────────────────────────────────
+
+@router.get("/verify-email")
+def verify_email(token: str, db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.verification_token == token))
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid verification token.")
+    if user.verification_expires_at is None or user.verification_expires_at < _now_utc():
+        raise HTTPException(status_code=400, detail="Verification token has expired.")
+
+    user.email_verified = True
+    user.verification_token = None
+    user.verification_expires_at = None
+    db.commit()
+    logger.info("Email verified for user_id=%s", user.id)
+    return {"ok": True, "message": "Email verified successfully."}
