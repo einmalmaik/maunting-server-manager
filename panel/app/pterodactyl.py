@@ -195,7 +195,7 @@ def migrate_pterodactyl_server(
             break
             
     if not found_db:
-        raise FileNotFoundError("Conan Exiles database file (game.db / game_0.db) not found in candidate directory.")
+        raise FileNotFoundError("Game database file (game.db / game_0.db) not found in candidate directory.")
 
     # Create target server
     if create_target:

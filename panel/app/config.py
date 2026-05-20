@@ -132,7 +132,7 @@ def get_settings() -> Settings:
         app_name="Maunting Server Panel",
         root_path=root_path,
         secret_key=secret_key,
-        session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "conan_panel_session").strip(),
+        session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "maunting_panel_session").strip(),
         conan_manager_path=os.getenv("CONAN_MANAGER_PATH", "").strip(),
         dayz_manager_path=os.getenv("DAYZ_MANAGER_PATH", "").strip(),
         database_url=os.getenv("DATABASE_URL", "").strip(),

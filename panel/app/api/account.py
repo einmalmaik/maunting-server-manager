@@ -103,7 +103,7 @@ def setup_2fa(
     secret = pyotp.random_base32()
     uri = pyotp.totp.TOTP(secret).provisioning_uri(
         name=user.username,
-        issuer_name="Conan Exiles Panel",
+        issuer_name="Maunting Server Panel",
     )
     return {
         "secret": secret,

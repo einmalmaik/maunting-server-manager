@@ -1,6 +1,6 @@
-# Conan Exiles Enhanced Server Panel
+# Maunting Server Panel
 
-This folder contains the optional web panel that sits on top of the existing Bash core.
+This folder contains the optional web panel that sits on top of the existing game server manager core.
 
 ## Stack
 
@@ -8,15 +8,15 @@ This folder contains the optional web panel that sits on top of the existing Bas
 - Jinja2 templates
 - SQLAlchemy
 - Alembic
-- MariaDB
+- MariaDB / SQLite
 - Uvicorn
 - Caddy reverse proxy on the configured panel domain
 
 ## Runtime Model
 
-- The Bash core remains the source of truth and performs all Conan Exiles operations.
+- The Bash core remains the source of truth and performs all game server operations.
 - The panel calls the existing manager through `subprocess`.
-- Read-heavy pages use JSON bridge commands exposed through `./conanserver.sh panel bridge ...`.
+- Read-heavy pages use JSON bridge commands exposed through the game manager script.
 - Mutating actions still run the same CLI commands as the terminal workflow.
 
 ## Installation

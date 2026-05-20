@@ -1,5 +1,5 @@
 """
-WebSocket-based live console for the Conan Exiles server log and tmux session.
+WebSocket-based live console for the game server log and tmux session.
 
 Auth flow:
   1. GET /api/console/token?source=log|tmux -> { token, expires_in, source }
@@ -355,8 +355,8 @@ async def console_ws(ws: WebSocket) -> None:
                         {
                             "type": "error",
                             "data": (
-                                f"No Conan log file found in ~/servers/{entry.server_name}/serverfiles/ConanSandbox/Saved/Logs/. "
-                                "Is the Conan Exiles server running?"
+                                f"No game log file found in ~/servers/{entry.server_name}/serverfiles/ConanSandbox/Saved/Logs/. "
+                                "Is the server running?"
                             ),
                         }
                     )

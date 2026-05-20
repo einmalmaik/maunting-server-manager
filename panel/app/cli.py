@@ -36,7 +36,7 @@ def create_admin(username: str, password: str, force: bool = False) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Conan Exiles Enhanced Server Panel utilities")
+    parser = argparse.ArgumentParser(description="Maunting Server Panel utilities")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     create_admin_parser = subparsers.add_parser("create-admin", help="Create or update the initial admin account")

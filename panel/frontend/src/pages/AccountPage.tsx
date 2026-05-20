@@ -14,7 +14,7 @@ import { useUiLanguage } from '@/lib/ui-language'
 
 function downloadBackupCodesFile(codes: string[]) {
   const content = [
-    'Conan Exiles Panel 2FA Backup Codes',
+    'Maunting Server Panel 2FA Backup Codes',
     '',
     'Store these codes somewhere safe.',
     'Each code can be used once for login only.',
@@ -26,7 +26,7 @@ function downloadBackupCodesFile(codes: string[]) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'conan-panel-backup-codes.txt'
+  link.download = 'maunting-panel-backup-codes.txt'
   document.body.appendChild(link)
   link.click()
   link.remove()

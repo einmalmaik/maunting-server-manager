@@ -157,7 +157,7 @@ async function downloadBatchRequest(paths: string[]): Promise<BatchDownloadRespo
   const disposition = res.headers.get('content-disposition') ?? ''
   const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i)
   const asciiMatch = disposition.match(/filename="([^"]+)"/i)
-  const rawName = utf8Match?.[1] ?? asciiMatch?.[1] ?? 'conan-files.zip'
+  const rawName = utf8Match?.[1] ?? asciiMatch?.[1] ?? 'maunting-files.zip'
   let filename: string
   try {
     filename = decodeURIComponent(rawName)

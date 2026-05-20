@@ -1,1 +1,1 @@
-"""Conan Exiles Enhanced Server Panel package."""
+"""Maunting Server Panel package."""

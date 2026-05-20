@@ -183,7 +183,7 @@ export default function RegisterPage() {
               Maunting Server Panel
             </h2>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
-              Manage your game servers with ease. Conan Exiles, DayZ and more — all in one place.
+              Manage your game servers with ease. Multi-game support — all in one place.
             </p>
           </div>
         </div>
