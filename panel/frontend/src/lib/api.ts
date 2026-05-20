@@ -178,6 +178,18 @@ export const authApi = {
 
   me: () =>
     request<{ user: User }>('GET', '/auth/me'),
+
+  register: (username: string, email: string, password: string) =>
+    request<{ ok: boolean; message: string }>('POST', '/auth/register', { username, email, password }),
+
+  forgotPassword: (email: string) =>
+    request<{ ok: boolean; message: string }>('POST', '/auth/forgot-password', { email }),
+
+  resetPassword: (token: string, new_password: string) =>
+    request<{ ok: boolean; message: string }>('POST', '/auth/reset-password', { token, new_password }),
+
+  verifyEmail: (token: string) =>
+    request<{ ok: boolean; message: string }>('GET', `/auth/verify-email?token=${encodeURIComponent(token)}`),
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────

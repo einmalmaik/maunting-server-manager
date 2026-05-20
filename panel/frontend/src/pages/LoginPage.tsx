@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { ServerCog, Eye, EyeOff, Loader2, Shield } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useQueryClient } from '@tanstack/react-query'
@@ -136,6 +136,15 @@ export default function LoginPage() {
               <Button type="submit" className="mt-2 h-10 w-full" disabled={pending}>
                 {pending ? <><Loader2 className="h-4 w-4 animate-spin" />&nbsp;{t.signingIn}</> : t.signIn}
               </Button>
+
+              <div className="flex items-center justify-between text-xs">
+                <Link to="/register" className="text-accent hover:underline">
+                  Create account
+                </Link>
+                <Link to="/forgot-password" className="text-muted-foreground transition-colors hover:text-foreground">
+                  Forgot password?
+                </Link>
+              </div>
             </form>
           )}
 

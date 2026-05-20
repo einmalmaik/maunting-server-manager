@@ -5,6 +5,9 @@ import { AuthContext, useAuthState } from '@/hooks/useAuth'
 import AppLayout from '@/components/layout/AppLayout'
 import ProtectedRoute from '@/components/layout/ProtectedRoute'
 import LoginPage from '@/pages/LoginPage'
+import RegisterPage from '@/pages/RegisterPage'
+import ForgotPasswordPage from '@/pages/ForgotPasswordPage'
+import ResetPasswordPage from '@/pages/ResetPasswordPage'
 import SetupPage from '@/pages/SetupPage'
 import DashboardPage from '@/pages/DashboardPage'
 import BackupsPage from '@/pages/BackupsPage'
@@ -86,6 +89,9 @@ export default function App() {
             <Routes>
               <Route path="/setup" element={<SetupPage />} />
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
 
               <Route element={<ProtectedRoute />}>
                 <Route element={<AppLayout />}>
