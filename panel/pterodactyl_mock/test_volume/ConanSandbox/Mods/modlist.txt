@@ -1,2 +1,0 @@
-C:/pterodactyl/volumes/test_volume/ConanSandbox/Mods/880603823.pak
-C:/pterodactyl/volumes/test_volume/ConanSandbox/Mods/1113901966.pak
