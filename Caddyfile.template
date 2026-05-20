@@ -1,0 +1,17 @@
+{{DOMAIN}} {
+    root * /opt/msm/frontend/dist
+    file_server
+    try_files {path} /index.html
+
+    # API Proxy
+    handle_path /api/* {
+        reverse_proxy localhost:8000
+    }
+
+    # WebSocket falls später
+    handle_path /ws/* {
+        reverse_proxy localhost:8000
+    }
+
+    tls internal
+}

@@ -1,0 +1,67 @@
+{
+  "panel": {
+    "title": "Maunting Server Manager"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "servers": "Server",
+    "backups": "Backups",
+    "users": "Benutzer",
+    "settings": "Einstellungen",
+    "logout": "Abmelden"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "Übersicht aller Server und Systemstatus",
+    "servers": "Server",
+    "running": "läuft",
+    "supportedGames": "Unterstützte Spiele",
+    "system": "Systemstatus",
+    "allSystemsOperational": "Alle Systeme funktionsfähig",
+    "noServers": "Keine Server vorhanden",
+    "createFirstServer": "Erstelle deinen ersten Server, um loszulegen.",
+    "createServer": "Server erstellen"
+  },
+  "auth": {
+    "login": "Anmelden",
+    "loginDescription": "Melde dich bei deinem Server Manager an",
+    "register": "Registrieren",
+    "registerDescription": "Erstelle ein neues Konto",
+    "username": "Benutzername",
+    "email": "E-Mail",
+    "password": "Passwort",
+    "confirmPassword": "Passwort bestätigen",
+    "otpCode": "2FA-Code (6 Ziffern)",
+    "signIn": "Anmelden",
+    "createAccount": "Konto erstellen",
+    "verify2FA": "2FA bestätigen",
+    "noAccount": "Noch kein Konto?",
+    "hasAccount": "Bereits ein Konto?",
+    "forgotPassword": "Passwort vergessen?",
+    "loginFailed": "Anmeldung fehlgeschlagen. Benutzername oder Passwort falsch.",
+    "registerFailed": "Registrierung fehlgeschlagen.",
+    "registerSuccess": "Registrierung erfolgreich",
+    "verifyEmailHint": "Bitte prüfe deine E-Mails und verifiziere deine Adresse.",
+    "goToLogin": "Zur Anmeldung",
+    "passwordMismatch": "Passwörter stimmen nicht überein.",
+    "passwordTooShort": "Passwort muss mindestens 8 Zeichen haben."
+  },
+  "setup": {
+    "title": "Ersteinrichtung",
+    "description": "Erstelle den Owner-Account für deinen Server Manager",
+    "createOwner": "Owner erstellen",
+    "error": "Einrichtung fehlgeschlagen."
+  },
+  "common": {
+    "unlimited": "unbegrenzt",
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "delete": "Löschen",
+    "edit": "Bearbeiten",
+    "create": "Erstellen",
+    "search": "Suchen",
+    "loading": "Laden...",
+    "error": "Fehler",
+    "success": "Erfolg"
+  }
+}

@@ -1,0 +1,18 @@
+[Unit]
+Description=Maunting Server Manager Panel
+After=network.target
+
+[Service]
+Type=simple
+User=msm
+Group=msm
+WorkingDirectory={{MSM_DIR}}/backend
+Environment="PATH={{MSM_DIR}}/backend/venv/bin"
+ExecStart={{MSM_DIR}}/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

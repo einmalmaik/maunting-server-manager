@@ -1,0 +1,67 @@
+{
+  "panel": {
+    "title": "Maunting Server Manager"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "servers": "Servers",
+    "backups": "Backups",
+    "users": "Users",
+    "settings": "Settings",
+    "logout": "Logout"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "Overview of all servers and system status",
+    "servers": "Servers",
+    "running": "running",
+    "supportedGames": "Supported Games",
+    "system": "System Status",
+    "allSystemsOperational": "All systems operational",
+    "noServers": "No servers yet",
+    "createFirstServer": "Create your first server to get started.",
+    "createServer": "Create Server"
+  },
+  "auth": {
+    "login": "Sign In",
+    "loginDescription": "Sign in to your Server Manager",
+    "register": "Register",
+    "registerDescription": "Create a new account",
+    "username": "Username",
+    "email": "Email",
+    "password": "Password",
+    "confirmPassword": "Confirm Password",
+    "otpCode": "2FA Code (6 digits)",
+    "signIn": "Sign In",
+    "createAccount": "Create Account",
+    "verify2FA": "Verify 2FA",
+    "noAccount": "No account?",
+    "hasAccount": "Already have an account?",
+    "forgotPassword": "Forgot password?",
+    "loginFailed": "Login failed. Invalid username or password.",
+    "registerFailed": "Registration failed.",
+    "registerSuccess": "Registration successful",
+    "verifyEmailHint": "Please check your emails and verify your address.",
+    "goToLogin": "Go to Login",
+    "passwordMismatch": "Passwords do not match.",
+    "passwordTooShort": "Password must be at least 8 characters."
+  },
+  "setup": {
+    "title": "Initial Setup",
+    "description": "Create the owner account for your Server Manager",
+    "createOwner": "Create Owner",
+    "error": "Setup failed."
+  },
+  "common": {
+    "unlimited": "unlimited",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success"
+  }
+}
