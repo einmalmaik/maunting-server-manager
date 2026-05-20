@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Server, Plus, Trash2, AlertTriangle, Loader2, ArrowRightLeft, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { serversApi, ApiError } from '@/lib/api'
-import type { ServersData, PterodactylCandidate } from '@/lib/types'
+import { serversApi, gamesApi, ApiError } from '@/lib/api'
+import type { ServersData, PterodactylCandidate, GameInfo } from '@/lib/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,15 +40,24 @@ function CreateDialog({ onCreated }: { onCreated: () => void }) {
   const t = copy.serversPage
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
+  const [gameId, setGameId] = useState('conan_exiles')
+
+  const { data: gamesData } = useQuery({
+    queryKey: ['games'],
+    queryFn: () => gamesApi.list(),
+    enabled: open,
+  })
+  const games = gamesData?.games ?? []
 
   const nameError = getServerNameError(name, t.nameError, t.nameTooLong)
 
   const createMutation = useMutation({
-    mutationFn: (serverName: string) => serversApi.create(serverName),
-    onSuccess: (_data, serverName) => {
-      toast.success(t.createSuccess(serverName))
+    mutationFn: (payload: { name: string; game_id: string }) => serversApi.create(payload.name, payload.game_id),
+    onSuccess: (_data, payload) => {
+      toast.success(t.createSuccess(payload.name))
       setOpen(false)
       setName('')
+      setGameId('conan_exiles')
       onCreated()
     },
     onError: (err: unknown) => {
@@ -59,7 +68,10 @@ function CreateDialog({ onCreated }: { onCreated: () => void }) {
   const handleOpen = (nextOpen: boolean) => {
     if (createMutation.isPending) return
     setOpen(nextOpen)
-    if (!nextOpen) setName('')
+    if (!nextOpen) {
+      setName('')
+      setGameId('conan_exiles')
+    }
   }
 
   const canSubmit =
@@ -80,25 +92,46 @@ function CreateDialog({ onCreated }: { onCreated: () => void }) {
           <DialogDescription>{t.createDescription}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value.toLowerCase())}
-            placeholder={t.serverNamePlaceholder}
-            disabled={createMutation.isPending}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && canSubmit) createMutation.mutate(name.trim())
-            }}
-            aria-label={t.serverNameAria}
-          />
-          {nameError && <p className="text-xs text-destructive">{nameError}</p>}
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Game</label>
+            <select
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              value={gameId}
+              onChange={(e) => setGameId(e.target.value)}
+              disabled={createMutation.isPending}
+            >
+              {games.map((g: GameInfo) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+              {games.length === 0 && (
+                <option value="conan_exiles">Conan Exiles</option>
+              )}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value.toLowerCase())}
+              placeholder={t.serverNamePlaceholder}
+              disabled={createMutation.isPending}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && canSubmit) createMutation.mutate({ name: name.trim(), game_id: gameId })
+              }}
+              aria-label={t.serverNameAria}
+            />
+            {nameError && <p className="text-xs text-destructive">{nameError}</p>}
+          </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => handleOpen(false)}>
             {copy.files.cancel}
           </Button>
-          <Button onClick={() => createMutation.mutate(name.trim())} disabled={!canSubmit}>
+          <Button onClick={() => createMutation.mutate({ name: name.trim(), game_id: gameId })} disabled={!canSubmit}>
             {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : t.create}
           </Button>
         </DialogFooter>
@@ -672,6 +705,7 @@ export default function ServersPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t.name}</TableHead>
+                    <TableHead>Game</TableHead>
                     <TableHead>{t.status}</TableHead>
                     <TableHead className="w-28 text-right">{t.actions}</TableHead>
                   </TableRow>
@@ -680,6 +714,11 @@ export default function ServersPage() {
                   {servers.map((server) => (
                     <TableRow key={server.name}>
                       <TableCell className="font-mono font-medium">{server.name}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px]">
+                          {server.game_id === 'dayz' ? 'DayZ' : server.game_id === 'conan_exiles' ? 'Conan Exiles' : server.game_id || 'Conan Exiles'}
+                        </Badge>
+                      </TableCell>
                       <TableCell>
                         {server.name === current ? (
                           <Badge variant="success">{t.active}</Badge>

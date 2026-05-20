@@ -1,5 +1,5 @@
 {
-  "name": "conan-panel-frontend",
+  "name": "maunting-panel-frontend",
   "private": true,
   "version": "0.1.0",
   "type": "module",

@@ -278,14 +278,28 @@ export interface ModUpdatesData {
 
 // ── Servers ───────────────────────────────────────────────────────────────────
 
+export interface GameInfo {
+  id: string
+  name: string
+  short_name: string
+  supports_mods: boolean
+  mod_system: string
+  default_ports: Array<{ name: string; port: number; protocol: string }>
+}
+
 export interface ServerEntry {
   name: string
   display_name: string | null
+  game_id?: string
 }
 
 export interface ServersData {
   servers: ServerEntry[]
   current: string | null
+}
+
+export interface GamesData {
+  games: GameInfo[]
 }
 
 // ── Files ─────────────────────────────────────────────────────────────────────

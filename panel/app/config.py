@@ -105,7 +105,7 @@ def get_settings() -> Settings:
         https_only = raw_https_only == "true"
 
     return Settings(
-        app_name="Conan Exiles Enhanced Server Panel",
+        app_name="Maunting Server Panel",
         root_path=root_path,
         secret_key=secret_key,
         session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "conan_panel_session").strip(),

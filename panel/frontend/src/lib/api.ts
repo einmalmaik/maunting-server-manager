@@ -26,6 +26,7 @@ import type {
   User,
   UserProfile,
   PterodactylCandidate,
+  GamesData,
 } from './types'
 
 export class ApiError extends Error {
@@ -294,8 +295,8 @@ export const serversApi = {
   select: (name: string) =>
     request<{ ok: boolean; current_server: string }>('POST', '/servers/select', { name }),
 
-  create: (name: string) =>
-    request<{ ok: boolean; name: string }>('POST', '/servers', { name }),
+  create: (name: string, game_id?: string) =>
+    request<{ ok: boolean; name: string; game_id: string }>('POST', '/servers', { name, game_id: game_id || 'conan_exiles' }),
 
   clone: (source: string, name: string) =>
     request<{ ok: boolean; source: string; name: string; current_server: string }>('POST', '/servers/clone', { source, name }),
@@ -314,6 +315,12 @@ export const serversApi = {
 
   migratePterodactyl: (payload: { pterodactyl_path: string; target_server_name: string; create_target?: boolean }) =>
     request<{ ok: boolean; name: string; target_dir: string }>('POST', '/servers/pterodactyl/migrate', payload),
+}
+
+// ── Games ─────────────────────────────────────────────────────────────────────
+export const gamesApi = {
+  list: () =>
+    request<GamesData>('GET', '/games'),
 }
 
 // ── Language ──────────────────────────────────────────────────────────────────
