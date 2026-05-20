@@ -84,7 +84,7 @@ export default function LoginPage() {
             </div>
             <div className="text-center">
               <h1 className="font-display text-2xl font-bold uppercase tracking-widest text-foreground">
-                Conan Exiles Manager
+                Maunting Server Panel
               </h1>
               <p className="mt-1 text-xs tracking-wide text-muted-foreground">
                 {needs2fa ? t.twoFactorTitle : t.panelTitle}
