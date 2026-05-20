@@ -18,7 +18,7 @@ from ..shell import (
     fetch_panel_status,
     fetch_workshop_status,
 )
-from .deps import get_current_server, get_db
+from .deps import get_current_server, get_db, get_current_server_with_info
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ def dashboard(
     db: Session = Depends(get_db),
     _: User = require_perm(P_DASHBOARD_VIEW),
     server: str | None = Depends(get_current_server),
+    server_info: dict[str, str] = Depends(get_current_server_with_info),
 ):
     errors: list[str] = []
     core_status = None
@@ -54,9 +55,8 @@ def dashboard(
     autorestart = None
     workshop = None
     backup_runs: list = []
+    manager_path = server_info.get("manager_path")
 
-    # Fetch panel_status and audit_entries regardless of server selection
-    # since they don't depend on a specific server
     try:
         panel_status = fetch_panel_status()
     except PanelCommandError as exc:
@@ -71,7 +71,6 @@ def dashboard(
         logger.exception("Failed to fetch audit log entries.")
         errors.append("Failed to fetch audit log.")
 
-    # If no server is selected, return early with minimal data
     if server is None:
         return {
             "core_status": None,
@@ -84,25 +83,23 @@ def dashboard(
             "task": None,
         }
 
-    # Fetch each data source independently so a single failure does not
-    # prevent the rest of the dashboard from loading.
     try:
-        core_status = fetch_core_status(server_name=server)
+        core_status = fetch_core_status(server_name=server, manager_path=manager_path)
     except PanelCommandError as exc:
         errors.append(_extract_bridge_error(exc))
 
     try:
-        autorestart = fetch_autorestart_status(server_name=server)
+        autorestart = fetch_autorestart_status(server_name=server, manager_path=manager_path)
     except PanelCommandError as exc:
         errors.append(_extract_bridge_error(exc))
 
     try:
-        workshop = fetch_workshop_status(server_name=server)
+        workshop = fetch_workshop_status(server_name=server, manager_path=manager_path)
     except PanelCommandError as exc:
         errors.append(_extract_bridge_error(exc))
 
     try:
-        result = fetch_backup_runs(server_name=server)
+        result = fetch_backup_runs(server_name=server, manager_path=manager_path)
         backup_runs = ((result or {}).get("runs") or [])[:5]
     except PanelCommandError as exc:
         errors.append(_extract_bridge_error(exc))

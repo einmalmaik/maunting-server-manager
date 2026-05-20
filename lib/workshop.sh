@@ -417,7 +417,7 @@ fn_workshop_mods_selective() {
     fn_workshop_clear_download_cache "${requested_ids[@]}"
 
     # SteamCMD download (only the requested IDs)
-    if ! "${STEAMCMD_DIR}/steamcmd.sh" +force_install_dir "${SERVERFILES}" \
+    if ! "${STEAMCMD_DIR}/steamcmd.sh" +@sSteamCmdForcePlatformType linux +force_install_dir "${SERVERFILES}" \
         +login "${steamlogin}" "${download_args[@]}" +quit; then
         download_failed="1"
     fi

@@ -1,0 +1,31 @@
+id: conan_exiles
+name: Conan Exiles
+short_name: Conan
+steam_app_id: 440900
+steamcmd_app_id: 443030
+supports_mods: true
+mod_system: workshop
+supports_wine: false
+install_method: steamcmd
+executable_name: ConanSandboxServer.exe
+default_ports:
+  - name: game
+    port: 7777
+    protocol: udp
+    description: Main game port
+  - name: query
+    port: 27015
+    protocol: udp
+    description: Steam query port
+  - name: rcon
+    port: 25575
+    protocol: tcp
+    description: RCON admin port
+config_files:
+  - ConanSandbox/Saved/Config/WindowsServer/ServerSettings.ini
+  - ConanSandbox/Saved/Config/WindowsServer/Engine.ini
+  - ConanSandbox/Saved/Config/WindowsServer/Game.ini
+  - config.ini
+save_paths:
+  - ConanSandbox/Saved/game.db
+  - ConanSandbox/Saved/game_0.db

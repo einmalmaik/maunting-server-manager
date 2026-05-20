@@ -60,6 +60,10 @@ export interface CoreStatus {
   backup_root: string
   autorestart_mode?: string
   autorestart_summary?: string
+  port?: number
+  queryport?: number
+  rconport?: number
+  rcon_enabled?: boolean
 }
 
 export interface PanelStatus {
@@ -378,3 +382,15 @@ export interface ConsoleTokenResponse {
   expires_in: number
   source: ConsoleSource
 }
+
+export interface PterodactylCandidate {
+  pterodactyl_path: string
+  volume_name: string
+  server_name: string
+  db_size: number
+  db_modified: number
+  mods_count: number
+  max_players: number
+  admin_password: string
+}
+

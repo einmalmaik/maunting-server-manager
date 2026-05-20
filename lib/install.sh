@@ -48,9 +48,9 @@ fn_install_dayz() {
 
 fn_runupdate_dayz() {
     if [ "${steamlogin}" = "anonymous" ]; then
-        "${STEAMCMD_DIR}/steamcmd.sh" +force_install_dir "${SERVERFILES}" +login anonymous +app_update "${appid}" +quit
+        "${STEAMCMD_DIR}/steamcmd.sh" +@sSteamCmdForcePlatformType linux +force_install_dir "${SERVERFILES}" +login anonymous +app_update "${appid}" +quit
     else
-        "${STEAMCMD_DIR}/steamcmd.sh" +force_install_dir "${SERVERFILES}" +login "${steamlogin}" "${steampassword}" +app_update "${appid}" +quit
+        "${STEAMCMD_DIR}/steamcmd.sh" +@sSteamCmdForcePlatformType linux +force_install_dir "${SERVERFILES}" +login "${steamlogin}" "${steampassword}" +app_update "${appid}" +quit
     fi
     return $?
 }
@@ -78,9 +78,9 @@ fn_update_dayz() {
     fi
 
     if [ "${steamlogin}" = "anonymous" ]; then
-        availablebuild="$("${STEAMCMD_DIR}/steamcmd.sh" +login anonymous +app_info_update 1 +app_info_print "${appid}" +app_info_print "${appid}" +quit | sed -n '/branch/,$p' | grep -m 1 buildid | tr -cd '[:digit:]')"
+        availablebuild="$("${STEAMCMD_DIR}/steamcmd.sh" +@sSteamCmdForcePlatformType linux +login anonymous +app_info_update 1 +app_info_print "${appid}" +app_info_print "${appid}" +quit | sed -n '/branch/,$p' | grep -m 1 buildid | tr -cd '[:digit:]')"
     else
-        availablebuild="$("${STEAMCMD_DIR}/steamcmd.sh" +login "${steamlogin}" "${steampassword}" +app_info_update 1 +app_info_print "${appid}" +app_info_print "${appid}" +quit | sed -n '/branch/,$p' | grep -m 1 buildid | tr -cd '[:digit:]')"
+        availablebuild="$("${STEAMCMD_DIR}/steamcmd.sh" +@sSteamCmdForcePlatformType linux +login "${steamlogin}" "${steampassword}" +app_info_update 1 +app_info_print "${appid}" +app_info_print "${appid}" +quit | sed -n '/branch/,$p' | grep -m 1 buildid | tr -cd '[:digit:]')"
     fi
 
     if [ -z "${availablebuild}" ]; then
@@ -132,9 +132,9 @@ fn_update_dayz() {
 
 fn_runvalidate_dayz() {
     if [ "${steamlogin}" = "anonymous" ]; then
-        "${STEAMCMD_DIR}/steamcmd.sh" +force_install_dir "${SERVERFILES}" +login anonymous +app_update "${appid}" validate +quit
+        "${STEAMCMD_DIR}/steamcmd.sh" +@sSteamCmdForcePlatformType linux +force_install_dir "${SERVERFILES}" +login anonymous +app_update "${appid}" validate +quit
     else
-        "${STEAMCMD_DIR}/steamcmd.sh" +force_install_dir "${SERVERFILES}" +login "${steamlogin}" "${steampassword}" +app_update "${appid}" validate +quit
+        "${STEAMCMD_DIR}/steamcmd.sh" +@sSteamCmdForcePlatformType linux +force_install_dir "${SERVERFILES}" +login "${steamlogin}" "${steampassword}" +app_update "${appid}" validate +quit
     fi
     return $?
 }

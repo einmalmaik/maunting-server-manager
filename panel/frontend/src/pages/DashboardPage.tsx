@@ -381,6 +381,94 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ── UFW Rules Card ─────────────────────────────────────── */}
+      {core && (
+        <Card className="border-border/60 bg-background/40 backdrop-blur-md shadow-lg transition-all duration-300 hover:shadow-cyan-500/5">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-cyan-400 animate-pulse-subtle" />
+              <CardTitle className="text-md font-bold tracking-wide text-foreground">
+                {t.ufwRulesTitle || 'Erforderliche UFW-Regeln'}
+              </CardTitle>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {t.ufwRulesDesc || 'Um Spieler-Verbindungen zu ermöglichen, müssen Sie diese Ports auf der Firewall Ihres Hosts mit den folgenden Befehlen freigeben:'}
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <div className="flex flex-col p-3 rounded-lg bg-muted/30 border border-border/40 hover:border-cyan-500/30 transition-all duration-200 group">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Game Port (UDP)</span>
+                <span className="font-mono text-lg font-bold text-cyan-400 mt-0.5">{core.port ?? 7777}</span>
+                <div className="flex items-center gap-1.5 mt-2 bg-black/40 rounded p-1.5 border border-border/20 justify-between">
+                  <code className="text-xs font-mono text-muted-foreground/90 truncate select-all">
+                    sudo ufw allow {core.port ?? 7777}/udp
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-cyan-400 shrink-0"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`sudo ufw allow ${core.port ?? 7777}/udp`)
+                      toast.success('Game port command copied!')
+                    }}
+                  >
+                    <Terminal className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-col p-3 rounded-lg bg-muted/30 border border-border/40 hover:border-cyan-500/30 transition-all duration-200 group">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Query Port (UDP)</span>
+                <span className="font-mono text-lg font-bold text-cyan-400 mt-0.5">{core.queryport ?? 27015}</span>
+                <div className="flex items-center gap-1.5 mt-2 bg-black/40 rounded p-1.5 border border-border/20 justify-between">
+                  <code className="text-xs font-mono text-muted-foreground/90 truncate select-all">
+                    sudo ufw allow {core.queryport ?? 27015}/udp
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-cyan-400 shrink-0"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`sudo ufw allow ${core.queryport ?? 27015}/udp`)
+                      toast.success('Query port command copied!')
+                    }}
+                  >
+                    <Terminal className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {core.rcon_enabled && (
+                <div className="flex flex-col p-3 rounded-lg bg-muted/30 border border-border/40 hover:border-cyan-500/30 transition-all duration-200 group">
+                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">RCON Port (TCP)</span>
+                  <span className="font-mono text-lg font-bold text-cyan-400 mt-0.5">{core.rconport ?? 25575}</span>
+                  <div className="flex items-center gap-1.5 mt-2 bg-black/40 rounded p-1.5 border border-border/20 justify-between">
+                    <code className="text-xs font-mono text-muted-foreground/90 truncate select-all">
+                      sudo ufw allow {core.rconport ?? 25575}/tcp
+                    </code>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-cyan-400 shrink-0"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`sudo ufw allow ${core.rconport ?? 25575}/tcp`)
+                        toast.success('RCON port command copied!')
+                      }}
+                    >
+                      <Terminal className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground italic mt-2">
+              {t.ufwRulesNotice || 'Hinweis: Das Panel ändert Ihre Firewall aus Sicherheitsgründen nicht automatisch.'}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ── Actions + Restart Schedule ───────────────────────── */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
 

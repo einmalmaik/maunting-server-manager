@@ -145,19 +145,23 @@ def _claim_task_slot(task_file_path: Path, lock_file_path: Path, task_info: dict
 
 
 def _get_base_args(
+    *,
     server_name: str | None = None,
     forwarded_env: dict[str, str] | None = None,
+    manager_path: str | None = None,
 ) -> list[str]:
     """Helper to construct the base command with sudo support if needed."""
     settings = get_settings()
+    path = manager_path or settings.conan_manager_path
+    if not path:
+        raise RuntimeError("Manager path is not configured.")
     runtime_user = os.getenv("PANEL_RUNTIME_USER", "")
-    args = []
+    args: list[str] = []
 
     if runtime_user:
         try:
             import getpass
             if getpass.getuser() != runtime_user:
-                # We use -n (non-interactive) to fail if password is required
                 args = ["sudo", "-n", "-u", runtime_user]
                 forwarded_pairs = [
                     f"{key}={value}"
@@ -170,24 +174,149 @@ def _get_base_args(
             # Fallback or ignore if getpass fails (e.g. no tty)
             pass
 
-    args += ["bash", settings.conan_manager_path]
+    args += ["bash", path]
     if server_name:
         args += ["--server", server_name]
     return args
 
 
-def run_manager_command(*args: str, server_name: str | None = None, expect_json: bool = False) -> Any:
+def _get_base_args_for_manager(
+    manager_path: str,
+    server_name: str | None = None,
+    forwarded_env: dict[str, str] | None = None,
+) -> list[str]:
+    """Helper to construct the base command with sudo support if needed."""
+    runtime_user = os.getenv("PANEL_RUNTIME_USER", "")
+    args: list[str] = []
+
+    if runtime_user:
+        try:
+            import getpass
+            if getpass.getuser() != runtime_user:
+                args = ["sudo", "-n", "-u", runtime_user]
+                forwarded_pairs = [
+                    f"{key}={value}"
+                    for key, value in (forwarded_env or {}).items()
+                    if key in _SUDO_FORWARD_ENV_KEYS and value is not None
+                ]
+                if forwarded_pairs:
+                    args += ["env", *forwarded_pairs]
+        except (ImportError, Exception):
+            pass
+
+    args += ["bash", manager_path]
+    if server_name:
+        args += ["--server", server_name]
+    return args
+
+
+def run_game_command(
+    manager_path: str,
+    *args: str,
+    server_name: str | None = None,
+    expect_json: bool = False,
+) -> Any:
+    """Generic game command runner using the given manager script path."""
+    if not manager_path:
+        raise RuntimeError("Manager path is not configured.")
+
+    s = get_settings()
+    manager_env = _manager_env()
+    base_args = _get_base_args_for_manager(manager_path, server_name=server_name, forwarded_env=manager_env)
+    full_args = base_args + list(args)
+
+    try:
+        completed = subprocess.run(
+            full_args,
+            cwd=Path(manager_path).resolve().parent,
+            capture_output=True,
+            text=True,
+            timeout=s.command_timeout,
+            check=False,
+            env=manager_env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PanelCommandError(
+            CommandResult(
+                args=full_args,
+                returncode=-1,
+                stdout="",
+                stderr=f"Command timed out after {s.command_timeout}s.",
+            )
+        ) from exc
+
+    result = CommandResult(
+        args=full_args,
+        returncode=completed.returncode,
+        stdout=_clean_command_text(completed.stdout),
+        stderr=_clean_command_text(completed.stderr),
+    )
+
+    if result.returncode != 0:
+        raise PanelCommandError(result)
+
+    if expect_json:
+        if not result.stdout:
+            raise RuntimeError("Bridge command returned empty output when JSON was expected.")
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Bridge command returned invalid JSON: {exc}. Output: {result.stdout[:200]!r}"
+            ) from exc
+
+    return result
+
+
+def _get_base_args_for_manager(
+    manager_path: str,
+    server_name: str | None = None,
+    forwarded_env: dict[str, str] | None = None,
+) -> list[str]:
+    """Helper to construct the base command with sudo support if needed."""
+    runtime_user = os.getenv("PANEL_RUNTIME_USER", "")
+    args: list[str] = []
+
+    if runtime_user:
+        try:
+            import getpass
+            if getpass.getuser() != runtime_user:
+                args = ["sudo", "-n", "-u", runtime_user]
+                forwarded_pairs = [
+                    f"{key}={value}"
+                    for key, value in (forwarded_env or {}).items()
+                    if key in _SUDO_FORWARD_ENV_KEYS and value is not None
+                ]
+                if forwarded_pairs:
+                    args += ["env", *forwarded_pairs]
+        except (ImportError, Exception):
+            pass
+
+    args += ["bash", manager_path]
+    if server_name:
+        args += ["--server", server_name]
+    return args
+
+
+def run_manager_command(
+    *args: str,
+    server_name: str | None = None,
+    expect_json: bool = False,
+    manager_path: str | None = None,
+) -> Any:
+    """Run a manager command; uses CONAN_MANAGER_PATH by default, or the given manager_path."""
     settings = get_settings()
-    if not settings.conan_manager_path:
-        raise RuntimeError("CONAN_MANAGER_PATH is not configured.")
+    path = manager_path or settings.conan_manager_path
+    if not path:
+        raise RuntimeError("Manager path is not configured.")
 
     manager_env = _manager_env()
-    base_args = _get_base_args(server_name=server_name, forwarded_env=manager_env)
+    base_args = _get_base_args(server_name=server_name, forwarded_env=manager_env, manager_path=path)
     full_args = base_args + list(args)
     try:
         completed = subprocess.run(
             full_args,
-            cwd=settings.manager_workdir,
+            cwd=settings.manager_workdir(path),
             capture_output=True,
             text=True,
             timeout=settings.command_timeout,
@@ -235,20 +364,24 @@ def fetch_panel_status() -> Any:
     return run_manager_command("panel", "status", "--json", expect_json=True)
 
 
-def fetch_backup_runs(server_name: str | None = None) -> Any:
-    return run_manager_command("panel", "bridge", "backups", server_name=server_name, expect_json=True)
+def fetch_backup_runs(server_name: str | None = None, manager_path: str | None = None) -> Any:
+    return run_manager_command("panel", "bridge", "backups", server_name=server_name, expect_json=True, manager_path=manager_path)
 
 
-def fetch_autorestart_status(server_name: str | None = None) -> Any:
-    return run_manager_command("panel", "bridge", "autorestart", server_name=server_name, expect_json=True)
+def fetch_autorestart_status(server_name: str | None = None, manager_path: str | None = None) -> Any:
+    return run_manager_command("panel", "bridge", "autorestart", server_name=server_name, expect_json=True, manager_path=manager_path)
 
 
-def fetch_workshop_status(server_name: str | None = None) -> Any:
-    return run_manager_command("panel", "bridge", "workshop", server_name=server_name, expect_json=True)
+def fetch_workshop_status(server_name: str | None = None, manager_path: str | None = None) -> Any:
+    return run_manager_command("panel", "bridge", "workshop", server_name=server_name, expect_json=True, manager_path=manager_path)
 
 
-def invoke_core_action(*args: str, server_name: str | None = None) -> CommandResult:
-    return run_manager_command(*args, server_name=server_name, expect_json=False)
+def invoke_core_action(
+    *args: str,
+    server_name: str | None = None,
+    manager_path: str | None = None,
+) -> CommandResult:
+    return run_manager_command(*args, server_name=server_name, expect_json=False, manager_path=manager_path)
 
 
 def _validate_mod_id(mod_id: str) -> None:
@@ -256,19 +389,19 @@ def _validate_mod_id(mod_id: str) -> None:
         raise ValueError(f"Invalid mod_id: {mod_id!r}")
 
 
-def fetch_mods_list(server_name: str | None = None) -> Any:
-    return run_manager_command("panel", "bridge", "mods", "list", server_name=server_name, expect_json=True)
+def fetch_mods_list(server_name: str | None = None, manager_path: str | None = None) -> Any:
+    return run_manager_command("panel", "bridge", "mods", "list", server_name=server_name, expect_json=True, manager_path=manager_path)
 
 
-def mods_add(mod_id: str, mod_name: str, server_name: str | None = None) -> Any:
+def mods_add(mod_id: str, mod_name: str, server_name: str | None = None, manager_path: str | None = None) -> Any:
     _validate_mod_id(mod_id)
     _validate_mod_name(mod_name)
-    return run_manager_command("panel", "bridge", "mods", "add", mod_id, mod_name, server_name=server_name, expect_json=True)
+    return run_manager_command("panel", "bridge", "mods", "add", mod_id, mod_name, server_name=server_name, expect_json=True, manager_path=manager_path)
 
 
-def mods_remove(mod_id: str, server_name: str | None = None) -> Any:
+def mods_remove(mod_id: str, server_name: str | None = None, manager_path: str | None = None) -> Any:
     _validate_mod_id(mod_id)
-    return run_manager_command("panel", "bridge", "mods", "remove", mod_id, server_name=server_name, expect_json=True)
+    return run_manager_command("panel", "bridge", "mods", "remove", mod_id, server_name=server_name, expect_json=True, manager_path=manager_path)
 
 
 _VALID_MOD_TYPES = frozenset({"client", "server"})
@@ -292,7 +425,7 @@ def _validate_state(state: str) -> None:
         raise ValueError(f"Invalid state: {state!r}. Must be one of: {sorted(_VALID_MOD_STATES)}")
 
 
-def mods_toggle(mod_id: str, mod_type: str, state: str, server_name: str | None = None) -> Any:
+def mods_toggle(mod_id: str, mod_type: str, state: str, server_name: str | None = None, manager_path: str | None = None) -> Any:
     _validate_mod_id(mod_id)
     _validate_mod_type(mod_type)
     _validate_state(state)
@@ -300,26 +433,27 @@ def mods_toggle(mod_id: str, mod_type: str, state: str, server_name: str | None 
         "panel", "bridge", "mods", "toggle", mod_id, mod_type, state,
         server_name=server_name,
         expect_json=True,
+        manager_path=manager_path,
     )
 
 
-def fetch_mods_timestamps(server_name: str | None = None) -> Any:
-    return run_manager_command("panel", "bridge", "mods", "timestamps", server_name=server_name, expect_json=True)
+def fetch_mods_timestamps(server_name: str | None = None, manager_path: str | None = None) -> Any:
+    return run_manager_command("panel", "bridge", "mods", "timestamps", server_name=server_name, expect_json=True, manager_path=manager_path)
 
 
-def mods_reorder(mod_ids: list[str], server_name: str | None = None) -> Any:
+def mods_reorder(mod_ids: list[str], server_name: str | None = None, manager_path: str | None = None) -> Any:
     for mod_id in mod_ids:
         _validate_mod_id(mod_id)
-    return run_manager_command("panel", "bridge", "mods", "reorder", *mod_ids, server_name=server_name, expect_json=True)
+    return run_manager_command("panel", "bridge", "mods", "reorder", *mod_ids, server_name=server_name, expect_json=True, manager_path=manager_path)
 
 
-def invoke_mods_update_selective(mod_ids: list[str], server_name: str | None = None) -> CommandResult:
+def invoke_mods_update_selective(mod_ids: list[str], server_name: str | None = None, manager_path: str | None = None) -> CommandResult:
     for mod_id in mod_ids:
         _validate_mod_id(mod_id)
-    return run_manager_command("panel", "bridge", "mods", "update", *mod_ids, server_name=server_name, expect_json=False)
+    return run_manager_command("panel", "bridge", "mods", "update", *mod_ids, server_name=server_name, expect_json=False, manager_path=manager_path)
 
 
-def invoke_workshop_autoupdate_set(interval_minutes: int, server_name: str | None = None) -> CommandResult:
+def invoke_workshop_autoupdate_set(interval_minutes: int, server_name: str | None = None, manager_path: str | None = None) -> CommandResult:
     if interval_minutes in {10, 30}:
         return run_manager_command(
             "workshop",
@@ -329,6 +463,7 @@ def invoke_workshop_autoupdate_set(interval_minutes: int, server_name: str | Non
             str(interval_minutes),
             server_name=server_name,
             expect_json=False,
+            manager_path=manager_path,
         )
 
     if interval_minutes > 0 and interval_minutes % 60 == 0:
@@ -340,13 +475,14 @@ def invoke_workshop_autoupdate_set(interval_minutes: int, server_name: str | Non
             str(interval_minutes // 60),
             server_name=server_name,
             expect_json=False,
+            manager_path=manager_path,
         )
 
     raise ValueError(f"Invalid interval_minutes: {interval_minutes!r}")
 
 
-def invoke_workshop_autoupdate_clear(server_name: str | None = None) -> CommandResult:
-    return run_manager_command("workshop", "autoupdate", "clear", server_name=server_name, expect_json=False)
+def invoke_workshop_autoupdate_clear(server_name: str | None = None, manager_path: str | None = None) -> CommandResult:
+    return run_manager_command("workshop", "autoupdate", "clear", server_name=server_name, expect_json=False, manager_path=manager_path)
 
 
 def fetch_servers_list(server_name: str | None = None) -> Any:
@@ -365,12 +501,10 @@ def invoke_core_action_async(
     *args: str,
     server_name: str | None = None,
     task_channel: str = "default",
+    manager_path: str | None = None,
 ) -> None:
     """Runs a core action in the background, logging output to a file."""
     server_dir = get_server_dir(server_name)
-    # Do NOT mkdir here — the directory must already exist (created via `server create`).
-    # Auto-creating it silently produces ~/servers/default/ whenever no server is selected.
-
     normalized_channel = _normalize_task_channel(task_channel)
     log_file_path, task_file_path, task_lock_path = _task_artifact_paths(server_dir, normalized_channel)
 
@@ -398,8 +532,9 @@ def invoke_core_action_async(
 
     def run_command():
         settings = get_settings()
+        path = manager_path or settings.conan_manager_path
         manager_env = _manager_env()
-        base_args = _get_base_args(server_name=server_name, forwarded_env=manager_env)
+        base_args = _get_base_args(server_name=server_name, forwarded_env=manager_env, manager_path=path)
         full_args = base_args + [action_name] + list(args)
 
         try:
@@ -410,7 +545,7 @@ def invoke_core_action_async(
                     full_args,
                     stdout=log_f,
                     stderr=subprocess.STDOUT,
-                    cwd=settings.manager_workdir,
+                    cwd=settings.manager_workdir(path),
                     text=True,
                     env=manager_env,
                 )

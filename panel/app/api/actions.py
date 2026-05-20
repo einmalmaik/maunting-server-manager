@@ -28,7 +28,7 @@ from ..shell import (
     invoke_core_action,
     invoke_core_action_async,
 )
-from .deps import get_current_user, get_db, require_server
+from .deps import get_current_user, get_db, require_server, require_server_with_info
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +97,10 @@ def invoke_action(
     action_name: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> dict[str, Any]:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     if action_name not in _ALLOWED_ACTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown action: {action_name}")
 
@@ -114,6 +116,7 @@ def invoke_action(
                 *_ALLOWED_ACTIONS[action_name],
                 server_name=server,
                 task_channel="workshop" if action_name == "workshop" else "default",
+                manager_path=manager_path,
             )
             _record_audit(db, user, action_name, "started", "Async action started", target=server)
             return {"ok": True, "async": True}
@@ -132,7 +135,7 @@ def invoke_action(
             )
 
     try:
-        result = invoke_core_action(*_ALLOWED_ACTIONS[action_name], server_name=server)
+        result = invoke_core_action(*_ALLOWED_ACTIONS[action_name], server_name=server, manager_path=manager_path)
         try:
             success_detail = (result.stdout or "OK")[:500]
             _record_audit(db, user, action_name, "success", success_detail, target=server)

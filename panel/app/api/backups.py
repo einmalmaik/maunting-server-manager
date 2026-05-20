@@ -17,7 +17,7 @@ from ..models import AuditLog, User
 from ..permissions import P_BACKUPS_CREATE, P_BACKUPS_RESTORE, P_BACKUPS_VIEW, require_perm
 from ..server_layout import get_server_base_dir
 from ..shell import PanelCommandError, fetch_backup_runs, invoke_core_action
-from .deps import get_db, require_server
+from .deps import get_db, require_server, require_server_with_info
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -237,10 +237,12 @@ class BackupFileBody(RestoreBody):
 @router.get("/backups")
 def list_backups(
     user: User = require_perm(P_BACKUPS_VIEW),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ):
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     try:
-        return fetch_backup_runs(server_name=server)
+        return fetch_backup_runs(server_name=server, manager_path=manager_path)
     except PanelCommandError as exc:
         detail = exc.result.stderr or str(exc)
         logger.error("backup list failed: %s", detail)
@@ -285,10 +287,12 @@ def get_backup_file_content(
 def create_backup(
     db: Session = Depends(get_db),
     user: User = require_perm(P_BACKUPS_CREATE),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ):
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     try:
-        result = invoke_core_action("backup", server_name=server)
+        result = invoke_core_action("backup", server_name=server, manager_path=manager_path)
         _record_audit(db, user, "backup.create", None, "success", result.stdout or "OK")
         return {"ok": True}
     except PanelCommandError as exc:
@@ -306,10 +310,12 @@ def restore_backup(
     body: RestoreBody,
     db: Session = Depends(get_db),
     user: User = require_perm(P_BACKUPS_RESTORE),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ):
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     try:
-        result = invoke_core_action("backup", "restore", body.timestamp, server_name=server)
+        result = invoke_core_action("backup", "restore", body.timestamp, server_name=server, manager_path=manager_path)
         _record_audit(db, user, "backup.restore", body.timestamp, "success", result.stdout or "OK")
         return {"ok": True}
     except PanelCommandError as exc:

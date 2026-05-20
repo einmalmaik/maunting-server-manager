@@ -39,7 +39,7 @@ from ..shell import (
     mods_remove,
     mods_toggle,
 )
-from .deps import get_db, require_server
+from .deps import get_db, require_server, require_server_with_info
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -531,10 +531,12 @@ def _build_mod_dry_run(analysis: dict[str, Any]) -> dict[str, Any]:
 @router.get("/mods")
 def get_mods(
     user: User = require_perm(P_MODS_VIEW),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> Any:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     try:
-        return fetch_mods_list(server_name=server)
+        return fetch_mods_list(server_name=server, manager_path=manager_path)
     except PanelCommandError as exc:
         detail = exc.result.stderr or str(exc)
         logger.error("mods list failed: %s", detail)
@@ -571,8 +573,10 @@ async def add_mod(
     body: AddModBody,
     db: Session = Depends(get_db),
     user: User = require_perm(P_MODS_INSTALL),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> Any:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     resolution = await _resolve_mod_dependencies(body.mod_id)
     if resolution.status == "unverified" and not body.confirm_unverified_dependencies:
         return {
@@ -584,7 +588,7 @@ async def add_mod(
         }
 
     try:
-        result = await asyncio.to_thread(mods_add, body.mod_id, body.mod_name, server_name=server)
+        result = await asyncio.to_thread(mods_add, body.mod_id, body.mod_name, server_name=server, manager_path=manager_path)
         if isinstance(result, dict) and result.get("error"):
             raise HTTPException(status_code=409, detail=result["error"])
         _record_audit(db, user, "mods.add", body.mod_id, "success", body.mod_name)
@@ -614,6 +618,7 @@ async def add_mod(
                     dependency_id,
                     dependency_name,
                     server_name=server,
+                    manager_path=manager_path,
                 )
                 if isinstance(dep_result, dict):
                     dep_error_value = dep_result.get("error")
@@ -651,12 +656,14 @@ def remove_mod(
     mod_id: str,
     db: Session = Depends(get_db),
     user: User = require_perm(P_MODS_MANAGE),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> Any:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     if not re.fullmatch(r"\d+", mod_id):
         raise HTTPException(status_code=400, detail="Invalid mod_id.")
     try:
-        result = mods_remove(mod_id, server_name=server)
+        result = mods_remove(mod_id, server_name=server, manager_path=manager_path)
         if isinstance(result, dict) and result.get("error"):
             raise HTTPException(status_code=400, detail=result["error"])
         _record_audit(db, user, "mods.remove", mod_id, "success", None)
@@ -683,14 +690,16 @@ def toggle_mod(
     body: ToggleBody,
     db: Session = Depends(get_db),
     user: User = require_perm(P_MODS_MANAGE),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> Any:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     if not re.fullmatch(r"\d+", mod_id):
         raise HTTPException(status_code=400, detail="Invalid mod_id.")
     state = "on" if body.enabled else "off"
     action = f"mods.{'enable' if body.enabled else 'disable'}.{body.mod_type}"
     try:
-        result = mods_toggle(mod_id, body.mod_type, state, server_name=server)
+        result = mods_toggle(mod_id, body.mod_type, state, server_name=server, manager_path=manager_path)
         if isinstance(result, dict) and result.get("error"):
             raise HTTPException(status_code=400, detail=result["error"])
         _record_audit(db, user, action, mod_id, "success", None)
@@ -725,10 +734,12 @@ class UpdateSelectiveBody(BaseModel):
 @router.get("/mods/updates")
 async def get_mod_updates(
     user: User = require_perm(P_MODS_VIEW),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> Any:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     try:
-        mods_data = await asyncio.to_thread(fetch_mods_list, server_name=server)
+        mods_data = await asyncio.to_thread(fetch_mods_list, server_name=server, manager_path=manager_path)
     except PanelCommandError as exc:
         detail = exc.result.stderr or str(exc)
         logger.error("mods list failed: %s", detail)
@@ -738,7 +749,7 @@ async def get_mod_updates(
         return {"mods": []}
 
     try:
-        ts_data = await asyncio.to_thread(fetch_mods_timestamps, server_name=server)
+        ts_data = await asyncio.to_thread(fetch_mods_timestamps, server_name=server, manager_path=manager_path)
         local_timestamps: dict[str, int] = ts_data.get("timestamps", {})
     except Exception as exc:
         logger.warning("Failed to fetch local mod timestamps: %s", exc)
@@ -797,11 +808,13 @@ def reorder_mods(
     body: UpdateSelectiveBody,
     db: Session = Depends(get_db),
     user: User = require_perm(P_MODS_REORDER),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> Any:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     target_str = ",".join(body.mod_ids)[:128]
     try:
-        result = mods_reorder(body.mod_ids, server_name=server)
+        result = mods_reorder(body.mod_ids, server_name=server, manager_path=manager_path)
         if isinstance(result, dict) and result.get("error"):
             raise HTTPException(status_code=400, detail=result["error"])
         _record_audit(db, user, "mods.reorder", target_str, "success", None)
@@ -819,8 +832,10 @@ def update_mods_selective(
     body: UpdateSelectiveBody,
     db: Session = Depends(get_db),
     user: User = require_perm(P_MODS_UPDATE),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> Any:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     target_str = ",".join(body.mod_ids)[:128]
     try:
         invoke_core_action_async(
@@ -828,6 +843,7 @@ def update_mods_selective(
             *body.mod_ids,
             server_name=server,
             task_channel="workshop",
+            manager_path=manager_path,
         )
         _record_audit(db, user, "mods.update.selective", target_str, "started", None)
         return {"ok": True, "async": True}
@@ -894,10 +910,12 @@ class AutoUpdateBody(BaseModel):
 @router.get("/mods/autoupdate")
 def get_mod_autoupdate(
     user: User = require_perm(P_MODS_VIEW),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> Any:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     try:
-        status = fetch_workshop_status(server_name=server)
+        status = fetch_workshop_status(server_name=server, manager_path=manager_path)
         return {
             "enabled": bool(status.get("autoupdate_enabled", False)),
             "interval_minutes": status.get("autoupdate_interval_minutes"),
@@ -920,16 +938,18 @@ def set_mod_autoupdate(
     body: AutoUpdateBody,
     db: Session = Depends(get_db),
     user: User = require_perm(P_WORKSHOP_UPDATE),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ) -> Any:
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     try:
         if body.interval_minutes is None:
-            invoke_workshop_autoupdate_clear(server_name=server)
+            invoke_workshop_autoupdate_clear(server_name=server, manager_path=manager_path)
             _record_audit(db, user, "mods.autoupdate.clear", None, "success", None)
         else:
-            invoke_workshop_autoupdate_set(body.interval_minutes, server_name=server)
+            invoke_workshop_autoupdate_set(body.interval_minutes, server_name=server, manager_path=manager_path)
             _record_audit(db, user, "mods.autoupdate.set", str(body.interval_minutes), "success", None)
-        return get_mod_autoupdate(user=user, server=server)
+        return get_mod_autoupdate(user=user, server_info=server_info)
     except PanelCommandError as exc:
         detail = (exc.result.stderr or exc.result.stdout or str(exc))[:255]
         logger.error("autoupdate set/clear failed: %s", detail)

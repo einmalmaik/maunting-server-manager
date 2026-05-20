@@ -17,14 +17,17 @@ from .api.console import router as console_router
 from .api.config_center import router as config_router
 from .api.dashboard import router as dashboard_router
 from .api.files import router as files_router
+from .api.games import router as games_router
 from .api.language import router as language_router
 from .api.mods import router as mods_router
 from .api.rcon import router as rcon_router
 from .api.servers import router as servers_router
 from .api.users import router as users_router
 from .config import get_settings
+from .game_modules import load_all_modules
 
 settings = get_settings()
+load_all_modules()
 BASE_DIR = Path(__file__).resolve().parents[1]
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
@@ -66,6 +69,7 @@ api_router.include_router(config_router, tags=["config"])
 api_router.include_router(mods_router, tags=["mods"])
 api_router.include_router(rcon_router, tags=["rcon"])
 api_router.include_router(servers_router, tags=["servers"])
+api_router.include_router(games_router, tags=["games"])
 api_router.include_router(files_router, tags=["files"])
 api_router.include_router(language_router, tags=["language"])
 app.include_router(api_router)

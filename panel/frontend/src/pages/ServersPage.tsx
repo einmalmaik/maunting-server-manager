@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Server, Plus, Trash2, AlertTriangle, Loader2, ArrowRightLeft, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { serversApi, ApiError } from '@/lib/api'
-import type { ServersData } from '@/lib/types'
+import type { ServersData, PterodactylCandidate } from '@/lib/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -362,10 +362,209 @@ function MigrationDialog({ onMigrated }: { onMigrated: () => void }) {
   )
 }
 
+function PterodactylMigrateDialog({
+  candidate,
+  onMigrated,
+}: {
+  candidate: PterodactylCandidate
+  onMigrated: () => void
+}) {
+  const { copy } = useUiLanguage()
+  const t = copy.serversPage
+  const [open, setOpen] = useState(false)
+  const [targetName, setTargetName] = useState(candidate.volume_name.toLowerCase())
+
+  const nameError = getServerNameError(targetName, t.nameError, t.nameTooLong)
+
+  const migrateMutation = useMutation({
+    mutationFn: () =>
+      serversApi.migratePterodactyl({
+        pterodactyl_path: candidate.pterodactyl_path,
+        target_server_name: targetName.trim(),
+        create_target: true,
+      }),
+    onSuccess: () => {
+      toast.success(t.pteroMigrateSuccess(targetName.trim()))
+      setOpen(false)
+      onMigrated()
+    },
+    onError: (err: unknown) => {
+      toast.error(errMsg(err, t.pteroMigrateFailed))
+    },
+  })
+
+  const canSubmit =
+    targetName.trim().length > 0 &&
+    targetName.trim().length <= MAX_SERVER_NAME_LENGTH &&
+    NAME_RE.test(targetName.trim()) &&
+    !migrateMutation.isPending
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button size="sm" onClick={() => setOpen(true)}>
+        {t.pteroActionMigrate}
+      </Button>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t.pteroImportTitle}</DialogTitle>
+          <DialogDescription>{t.pteroImportDesc}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <p className="text-sm font-medium">{t.pteroColVolume}</p>
+            <Input value={candidate.pterodactyl_path} readOnly className="font-mono bg-muted" />
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-sm font-medium">{t.pteroTargetLabel}</p>
+            <Input
+              value={targetName}
+              onChange={(e) => setTargetName(e.target.value.toLowerCase())}
+              placeholder={candidate.volume_name.toLowerCase()}
+              disabled={migrateMutation.isPending}
+            />
+            {nameError && <p className="text-xs text-destructive">{nameError}</p>}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            {copy.files.cancel}
+          </Button>
+          <Button onClick={() => migrateMutation.mutate()} disabled={!canSubmit}>
+            {migrateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : t.pteroActionMigrate}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function PterodactylImport({ onMigrated }: { onMigrated: () => void }) {
+  const { copy } = useUiLanguage()
+  const t = copy.serversPage
+  const [rootPath, setRootPath] = useState('/var/lib/pterodactyl/volumes')
+  const [candidates, setCandidates] = useState<PterodactylCandidate[]>([])
+
+  const scanMutation = useMutation({
+    mutationFn: (path: string) => serversApi.listPterodactylCandidates(path),
+    onSuccess: (data) => {
+      setCandidates(data)
+    },
+    onError: (err: unknown) => {
+      toast.error(errMsg(err, t.loadFailed))
+    },
+  })
+
+  const handleScan = () => {
+    scanMutation.mutate(rootPath)
+  }
+
+  useEffect(() => {
+    handleScan()
+  }, [])
+
+  return (
+    <div className="space-y-6">
+      <Card className="border-border/60">
+        <CardHeader>
+          <CardTitle>{t.pteroImportTitle}</CardTitle>
+          <CardDescription>{t.pteroImportDesc}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <div className="flex-1 space-y-1">
+              <label className="text-sm font-medium">{t.pteroScanPath}</label>
+              <Input
+                value={rootPath}
+                onChange={(e) => setRootPath(e.target.value)}
+                placeholder="/var/lib/pterodactyl/volumes"
+                disabled={scanMutation.isPending}
+              />
+            </div>
+            <div className="flex items-end">
+              <Button onClick={handleScan} disabled={scanMutation.isPending} className="w-full sm:w-auto gap-2">
+                {scanMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  t.pteroScanButton
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardHeader>
+          <CardTitle>{t.pteroCandidatesTitle}</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {scanMutation.isPending ? (
+            <div className="p-5 space-y-2">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="h-12 rounded-md bg-muted/50 animate-pulse" />
+              ))}
+            </div>
+          ) : candidates.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t.pteroColVolume}</TableHead>
+                  <TableHead>{t.pteroColServer}</TableHead>
+                  <TableHead>{t.pteroColDb}</TableHead>
+                  <TableHead>{t.pteroColMods}</TableHead>
+                  <TableHead className="w-36 text-right">{t.pteroColAction}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {candidates.map((cand) => (
+                  <TableRow key={cand.pterodactyl_path}>
+                    <TableCell className="font-mono text-xs max-w-[200px] truncate" title={cand.pterodactyl_path}>
+                      {cand.volume_name}
+                      <span className="block text-[10px] text-muted-foreground truncate">
+                        {cand.pterodactyl_path}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-medium block">{cand.server_name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        Max: {cand.max_players} | PW: <span className="font-mono text-[10px] bg-muted px-1 rounded">{cand.admin_password}</span>
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="block text-xs font-semibold">
+                        {(cand.db_size / (1024 * 1024)).toFixed(2)} MB
+                      </span>
+                      <span className="block text-[10px] text-muted-foreground">
+                        {new Date(cand.db_modified * 1000).toLocaleString()}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{cand.mods_count}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <PterodactylMigrateDialog candidate={cand} onMigrated={onMigrated} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="p-5 text-sm text-muted-foreground">{t.pteroNoCandidates}</p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 export default function ServersPage() {
   const { copy } = useUiLanguage()
   const t = copy.serversPage
   const queryClient = useQueryClient()
+  const [activeTab, setActiveTab] = useState<'list' | 'pterodactyl'>('list')
 
   const serversQuery = useQuery<ServersData>({
     queryKey: ['servers'],
@@ -426,59 +625,86 @@ export default function ServersPage() {
         </Alert>
       )}
 
-      <Card className="border-border/60">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Server className="h-4 w-4 text-muted-foreground" />
-              <CardTitle>{t.serversTitle}</CardTitle>
+      <div className="flex border-b border-border/60 gap-4 mb-4">
+        <button
+          onClick={() => setActiveTab('list')}
+          className={`pb-2 px-1 font-medium transition-colors border-b-2 -mb-[2px] ${
+            activeTab === 'list'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {t.tabsList}
+        </button>
+        <button
+          onClick={() => setActiveTab('pterodactyl')}
+          className={`pb-2 px-1 font-medium transition-colors border-b-2 -mb-[2px] ${
+            activeTab === 'pterodactyl'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {t.tabsPterodactyl}
+        </button>
+      </div>
+
+      {activeTab === 'list' ? (
+        <Card className="border-border/60">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Server className="h-4 w-4 text-muted-foreground" />
+                <CardTitle>{t.serversTitle}</CardTitle>
+              </div>
+              <CreateDialog onCreated={refresh} />
             </div>
-            <CreateDialog onCreated={refresh} />
-          </div>
-          <CardDescription>{t.serversDescription}</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          {serversQuery.isLoading ? (
-            <div className="p-5 space-y-2">
-              {Array.from({ length: 2 }).map((_, i) => (
-                <div key={i} className="h-10 rounded-md bg-muted/50 animate-pulse" />
-              ))}
-            </div>
-          ) : servers.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t.name}</TableHead>
-                  <TableHead>{t.status}</TableHead>
-                  <TableHead className="w-28 text-right">{t.actions}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {servers.map((server) => (
-                  <TableRow key={server.name}>
-                    <TableCell className="font-mono font-medium">{server.name}</TableCell>
-                    <TableCell>
-                      {server.name === current ? (
-                        <Badge variant="success">{t.active}</Badge>
-                      ) : (
-                        <Badge variant="secondary">{t.inactive}</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <CloneDialog sourceName={server.name} onCloned={refreshAfterClone} />
-                        <DeleteDialog serverName={server.name} onDeleted={refresh} />
-                      </div>
-                    </TableCell>
-                  </TableRow>
+            <CardDescription>{t.serversDescription}</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            {serversQuery.isLoading ? (
+              <div className="p-5 space-y-2">
+                {Array.from({ length: 2 }).map((_, i) => (
+                  <div key={i} className="h-10 rounded-md bg-muted/50 animate-pulse" />
                 ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="p-5 text-sm text-muted-foreground">{t.noServers}</p>
-          )}
-        </CardContent>
-      </Card>
+              </div>
+            ) : servers.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t.name}</TableHead>
+                    <TableHead>{t.status}</TableHead>
+                    <TableHead className="w-28 text-right">{t.actions}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {servers.map((server) => (
+                    <TableRow key={server.name}>
+                      <TableCell className="font-mono font-medium">{server.name}</TableCell>
+                      <TableCell>
+                        {server.name === current ? (
+                          <Badge variant="success">{t.active}</Badge>
+                        ) : (
+                          <Badge variant="secondary">{t.inactive}</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <CloneDialog sourceName={server.name} onCloned={refreshAfterClone} />
+                          <DeleteDialog serverName={server.name} onDeleted={refresh} />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="p-5 text-sm text-muted-foreground">{t.noServers}</p>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <PterodactylImport onMigrated={refresh} />
+      )}
     </div>
   )
 }

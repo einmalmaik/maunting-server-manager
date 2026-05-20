@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..models import AuditLog, User
 from ..permissions import P_AUTORESTART_MANAGE, P_AUTORESTART_VIEW, require_perm
 from ..shell import PanelCommandError, fetch_autorestart_status, invoke_core_action
-from .deps import get_db, require_server
+from .deps import get_db, require_server, require_server_with_info
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -47,10 +47,12 @@ def _record_audit(
 @router.get("/autorestart")
 def get_autorestart(
     user: User = require_perm(P_AUTORESTART_VIEW),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ):
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     try:
-        return fetch_autorestart_status(server_name=server)
+        return fetch_autorestart_status(server_name=server, manager_path=manager_path)
     except PanelCommandError as exc:
         detail = exc.result.stderr or str(exc)
         logger.error("autorestart fetch failed: %s", detail)
@@ -68,11 +70,13 @@ def update_autorestart(
     body: AutorestartUpdate,
     db: Session = Depends(get_db),
     user: User = require_perm(P_AUTORESTART_MANAGE),
-    server: str = Depends(require_server),
+    server_info: dict[str, str] = Depends(require_server_with_info),
 ):
+    server = server_info["name"]
+    manager_path = server_info["manager_path"]
     try:
         if body.mode == "off":
-            invoke_core_action("autorestart", "clear", server_name=server)
+            invoke_core_action("autorestart", "clear", server_name=server, manager_path=manager_path)
         elif body.mode == "times":
             time_tokens = [t.strip() for t in body.times.split() if t.strip()]
             if not time_tokens:
@@ -80,7 +84,7 @@ def update_autorestart(
             invalid = [t for t in time_tokens if not _TIME_RE.match(t)]
             if invalid:
                 raise HTTPException(status_code=422, detail=f"Invalid time format(s): {', '.join(invalid)}. Expected HH:MM.")
-            invoke_core_action("autorestart", "set", "times", *time_tokens, server_name=server)
+            invoke_core_action("autorestart", "set", "times", *time_tokens, server_name=server, manager_path=manager_path)
         else:  # interval
             raw_interval = body.interval_hours.strip()
             if not raw_interval:
@@ -94,10 +98,10 @@ def update_autorestart(
                     status_code=422,
                     detail=f"interval_hours must be one of: {', '.join(str(value) for value in sorted(_VALID_INTERVAL_HOURS))}.",
                 )
-            invoke_core_action("autorestart", "set", "interval", str(interval_val), server_name=server)
+            invoke_core_action("autorestart", "set", "interval", str(interval_val), server_name=server, manager_path=manager_path)
 
         try:
-            updated = fetch_autorestart_status(server_name=server)
+            updated = fetch_autorestart_status(server_name=server, manager_path=manager_path)
         except PanelCommandError as exc:
             detail = exc.result.stderr or exc.result.stdout or str(exc)
             _record_audit(db, user, "autorestart.update", body.mode, "success", "Applied, but status refresh failed.")

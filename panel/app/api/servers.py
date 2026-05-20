@@ -47,11 +47,21 @@ def _validate_server_name_value(v: str) -> str:
 
 class ServerCreateBody(BaseModel):
     name: str
+    game_id: str = "conan_exiles"
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
         return _validate_server_name_value(v)
+
+    @field_validator("game_id")
+    @classmethod
+    def validate_game_id(cls, v: str) -> str:
+        from ..config import get_settings
+        settings = get_settings()
+        if v not in settings.game_managers:
+            raise ValueError(f"Unknown game_id: {v!r}. Supported: {list(settings.game_managers)}")
+        return v
 
 
 class ServerCloneBody(BaseModel):
@@ -70,11 +80,20 @@ class ServerCloneBody(BaseModel):
 def list_servers(
     user: User = require_perm(P_SERVERS_VIEW),
     current_server: str | None = Depends(get_current_server),
+    db: Session = Depends(get_db),
 ) -> Any:
     try:
         data = fetch_servers_list()
         response = dict(data or {})
         response["current"] = current_server
+        # Enrich server entries with DB game_id
+        servers_db = {s.name: {"game_id": s.game_id, "manager_path": s.manager_path} for s in db.query(Server).all()}
+        for entry in response.get("servers", []):
+            name = entry.get("name")
+            if name and name in servers_db:
+                entry["game_id"] = servers_db[name]["game_id"]
+            elif name:
+                entry["game_id"] = "conan_exiles"
         return response
     except PanelCommandError as exc:
         detail = _panel_error_detail(exc)
@@ -137,9 +156,26 @@ def create_server(
     request: Request,
     body: ServerCreateBody,
     user: User = require_perm(P_SERVERS_CREATE),
+    db: Session = Depends(get_db),
 ) -> Any:
+    from ..config import get_settings
+    settings = get_settings()
+    manager_path = settings.resolve_manager_path(body.game_id)
+    server_dir = str(get_server_dir(body.name))
     try:
-        invoke_core_action("server", "create", body.name)
+        invoke_core_action("server", "create", body.name, manager_path=manager_path)
+        # Persist in DB
+        existing = db.query(Server).filter(Server.name == body.name).first()
+        if not existing:
+            db.add(
+                Server(
+                    name=body.name,
+                    game_id=body.game_id,
+                    server_dir=server_dir,
+                    manager_path=manager_path,
+                )
+            )
+            db.commit()
         # Select the newly created server automatically
         request.session["current_server"] = body.name
     except PanelCommandError as exc:
@@ -148,8 +184,8 @@ def create_server(
             raise HTTPException(status_code=409, detail=f"Server '{body.name}' already exists.")
         logger.error("server create failed: %s", detail)
         raise HTTPException(status_code=500, detail="Failed to create server.")
-    logger.info("server created and selected: name=%s by user_id=%s", body.name, user.id)
-    return {"ok": True, "name": body.name}
+    logger.info("server created and selected: name=%s game=%s by user_id=%s", body.name, body.game_id, user.id)
+    return {"ok": True, "name": body.name, "game_id": body.game_id}
 
 
 @router.post("/servers/clone", status_code=200)
@@ -220,7 +256,7 @@ def delete_server(
     return {"ok": True, "name": name}
 
 
-# ── Trigger migration from legacy layout ──────────────────────────────────────
+# ── Trigger migration from legacy layout ──────────────────────────────
 
 @router.post("/servers/migrate", status_code=200)
 def migrate_server(
@@ -237,3 +273,51 @@ def migrate_server(
         raise HTTPException(status_code=500, detail="Migration failed.")
     logger.info("legacy migration completed: target=%s by user_id=%s", body.name, user.id)
     return {"ok": True, "name": body.name}
+
+
+# ── Pterodactyl candidates and migration ───────────────────────────
+
+class PterodactylMigrateBody(BaseModel):
+    pterodactyl_path: str
+    target_server_name: str
+    create_target: bool = True
+
+    @field_validator("target_server_name")
+    @classmethod
+    def validate_target_name(cls, value: str) -> str:
+        name = value.strip().lower()
+        if not _NAME_RE.match(name):
+            raise ValueError("Invalid server name.")
+        if len(name) > 64:
+            raise ValueError("Server name is too long.")
+        return name
+
+
+@router.get("/servers/pterodactyl/candidates")
+def get_pterodactyl_candidates(
+    root_path: str = "/var/lib/pterodactyl/volumes",
+    _: User = require_perm(P_SERVERS_VIEW),
+) -> Any:
+    from ..pterodactyl import scan_pterodactyl_volumes
+    return scan_pterodactyl_volumes(root_path)
+
+
+@router.post("/servers/pterodactyl/migrate")
+def migrate_pterodactyl(
+    body: PterodactylMigrateBody,
+    user: User = require_perm(P_SERVERS_CREATE),
+    db: Session = Depends(get_db),
+) -> Any:
+    from ..pterodactyl import migrate_pterodactyl_server
+    try:
+        res = migrate_pterodactyl_server(
+            pterodactyl_path=body.pterodactyl_path,
+            target_server_name=body.target_server_name,
+            create_target=body.create_target,
+            db_session=db
+        )
+        logger.info("Pterodactyl migration completed: source=%s target=%s by user_id=%s", body.pterodactyl_path, body.target_server_name, user.id)
+        return res
+    except Exception as exc:
+        logger.error("Pterodactyl migration failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))

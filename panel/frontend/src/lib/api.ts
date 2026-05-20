@@ -25,6 +25,7 @@ import type {
   SteamModWithDeps,
   User,
   UserProfile,
+  PterodactylCandidate,
 } from './types'
 
 export class ApiError extends Error {
@@ -307,6 +308,12 @@ export const serversApi = {
 
   migrate: (name: string) =>
     request<{ ok: boolean; name: string }>('POST', '/servers/migrate', { name }),
+
+  listPterodactylCandidates: (rootPath?: string) =>
+    request<PterodactylCandidate[]>('GET', `/servers/pterodactyl/candidates${rootPath ? `?root_path=${encodeURIComponent(rootPath)}` : ''}`),
+
+  migratePterodactyl: (payload: { pterodactyl_path: string; target_server_name: string; create_target?: boolean }) =>
+    request<{ ok: boolean; name: string; target_dir: string }>('POST', '/servers/pterodactyl/migrate', payload),
 }
 
 // ── Language ──────────────────────────────────────────────────────────────────

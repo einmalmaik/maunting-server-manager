@@ -60,6 +60,7 @@ class Server(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    game_id: Mapped[str] = mapped_column(String(32), default="conan_exiles", nullable=False)
     server_dir: Mapped[str] = mapped_column(String(512), nullable=False)
     manager_path: Mapped[str] = mapped_column(String(512), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -76,6 +77,19 @@ class BackupCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
     user: Mapped[User] = relationship(back_populates="backup_codes")
+
+
+class ServerMembership(Base):
+    __tablename__ = "server_memberships"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True)
+    # role on this server: "owner" | "operator" | "viewer"
+    role: Mapped[str] = mapped_column(String(32), default="viewer", nullable=False)
+    # JSON array of extra permission strings for this server
+    permissions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
 
 class AuthThrottle(Base):

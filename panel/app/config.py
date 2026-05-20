@@ -24,6 +24,7 @@ class Settings:
     secret_key: str
     session_cookie_name: str
     conan_manager_path: str
+    dayz_manager_path: str
     database_url: str
     bind_host: str
     bind_port: int
@@ -32,16 +33,32 @@ class Settings:
     default_server_name: str
 
     @property
-    def manager_workdir(self) -> Path:
-        if not self.conan_manager_path:
-            raise ValueError("CONAN_MANAGER_PATH is not configured.")
-        return Path(self.conan_manager_path).resolve().parent
+    def game_managers(self) -> dict[str, str]:
+        m: dict[str, str] = {}
+        if self.conan_manager_path:
+            m["conan_exiles"] = self.conan_manager_path
+        if self.dayz_manager_path:
+            m["dayz"] = self.dayz_manager_path
+        return m
+
+    def manager_workdir(self, manager_path: str | None = None) -> Path:
+        path = manager_path or self.conan_manager_path
+        if not path:
+            raise ValueError("Manager path is not configured.")
+        return Path(path).resolve().parent
+
+    def resolve_manager_path(self, game_id: str | None = None) -> str:
+        game = game_id or "conan_exiles"
+        path = self.game_managers.get(game)
+        if not path:
+            raise ValueError(f"No manager path configured for game: {game!r}")
+        return path
 
     def __repr__(self) -> str:
         return (
             f"Settings(app_name={self.app_name!r}, root_path={self.root_path!r}, "
             f"secret_key='*', session_cookie_name={self.session_cookie_name!r}, "
-            f"conan_manager_path={self.conan_manager_path!r}, database_url='*', "
+            f"conan_manager_path={self.conan_manager_path!r}, dayz_manager_path={self.dayz_manager_path!r}, database_url='*', "
             f"bind_host={self.bind_host!r}, bind_port={self.bind_port!r}, "
             f"command_timeout={self.command_timeout!r}, https_only={self.https_only!r}, "
             f"default_server_name={self.default_server_name!r})"
@@ -93,6 +110,7 @@ def get_settings() -> Settings:
         secret_key=secret_key,
         session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "conan_panel_session").strip(),
         conan_manager_path=os.getenv("CONAN_MANAGER_PATH", "").strip(),
+        dayz_manager_path=os.getenv("DAYZ_MANAGER_PATH", "").strip(),
         database_url=os.getenv("DATABASE_URL", "").strip(),
         bind_host=os.getenv("PANEL_BIND_HOST", "127.0.0.1").strip(),
         bind_port=_safe_int(os.getenv("PANEL_BIND_PORT", "8710"), 8710),
