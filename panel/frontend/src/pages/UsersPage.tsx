@@ -27,7 +27,6 @@ function RoleBadge({ role }: { role: string }) {
   const { copy } = useUiLanguage()
   const t = copy.usersPage
   if (role === 'owner') return <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/40">{t.owner}</Badge>
-  if (role === 'admin') return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/40">{t.admin}</Badge>
   return <Badge variant="secondary">{t.user}</Badge>
 }
 
@@ -135,7 +134,6 @@ function CreateUserDialog({
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole] = useState<'admin' | 'user'>('user')
   const [perms, setPerms] = useState<string[]>([])
   const canManageCustomPermissions = currentRole === 'owner'
 
@@ -144,7 +142,6 @@ function CreateUserDialog({
       username: username.trim(),
       email: email.trim() || undefined,
       password,
-      role,
       permissions: canManageCustomPermissions ? perms : undefined,
     }),
     onSuccess: () => {
@@ -153,7 +150,6 @@ function CreateUserDialog({
       setUsername('')
       setEmail('')
       setPassword('')
-      setRole('user')
       setPerms([])
       onClose()
     },
@@ -163,7 +159,7 @@ function CreateUserDialog({
   })
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { setUsername(''); setEmail(''); setPassword(''); setRole('user'); setPerms([]); onClose() } }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) { setUsername(''); setEmail(''); setPassword(''); setPerms([]); onClose() } }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{t.createUser}</DialogTitle>
@@ -184,24 +180,7 @@ function CreateUserDialog({
             <Label htmlFor="cu-password">{t.password}</Label>
             <Input id="cu-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
-          {currentRole === 'owner' && (
-            <div className="space-y-1">
-              <Label>{t.role}</Label>
-              <div className="flex gap-2">
-                {(['user', 'admin'] as const).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setRole(r)}
-                    className={`px-3 py-1 text-xs rounded border transition-colors ${role === r ? 'border-accent bg-accent/10 text-accent' : 'border-border text-muted-foreground hover:border-accent/40'}`}
-                  >
-                    {r === 'user' ? t.user : t.admin}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {canManageCustomPermissions && role === 'user' && (
+          {canManageCustomPermissions && (
             <div className="space-y-1">
               <Label>{t.permissions}</Label>
               <PermissionPicker allPerms={allPerms} selected={perms} onChange={setPerms} />
@@ -235,14 +214,12 @@ function EditUserDialog({
   const t = copy.usersPage
   const queryClient = useQueryClient()
   const [perms, setPerms] = useState<string[]>(user.permissions)
-  const [role, setRole] = useState(user.role)
   const [isActive, setIsActive] = useState(user.is_active)
   const canManageCustomPermissions = currentUserRole === 'owner'
 
   const mutation = useMutation({
     mutationFn: () => usersApi.update(user.id, {
-      role: canManageCustomPermissions ? role : undefined,
-      permissions: canManageCustomPermissions && role === 'user' ? perms : undefined,
+      permissions: canManageCustomPermissions ? perms : undefined,
       is_active: isActive,
     }),
     onSuccess: () => {
@@ -263,24 +240,7 @@ function EditUserDialog({
           <DialogDescription>{t.editDescription}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          {currentUserRole === 'owner' && (
-            <div className="space-y-1">
-              <Label>{t.role}</Label>
-              <div className="flex gap-2">
-                {(['user', 'admin'] as const).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setRole(r)}
-                    className={`px-3 py-1 text-xs rounded border transition-colors ${role === r ? 'border-accent bg-accent/10 text-accent' : 'border-border text-muted-foreground hover:border-accent/40'}`}
-                  >
-                    {r === 'user' ? t.user : t.admin}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {canManageCustomPermissions && role === 'user' && (
+          {canManageCustomPermissions && (
             <div className="space-y-1">
               <Label>{t.permissions}</Label>
               <PermissionPicker allPerms={allPerms} selected={perms} onChange={setPerms} />

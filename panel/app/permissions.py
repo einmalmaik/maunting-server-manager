@@ -82,35 +82,14 @@ ALL_PERMISSIONS: dict[str, str] = {
     P_USERS_MANAGE:       "Manage users",
 }
 
-# Default permission sets per role (owner always gets everything)
-_ADMIN_DEFAULT: frozenset[str] = frozenset(ALL_PERMISSIONS.keys()) - {P_USERS_MANAGE, P_SERVER_WIPE}
-_USER_DEFAULT: frozenset[str] = frozenset({
-    P_DASHBOARD_VIEW,
-    P_CONSOLE_VIEW,
-    P_CONSOLE_LOG,
-    P_CONSOLE_TMUX,
-    P_FILES_READ,
-    P_MODS_VIEW,
-    P_BACKUPS_VIEW,
-    P_SERVERS_VIEW,
-    P_AUTORESTART_VIEW,
-})
-
-
 def get_effective_permissions(user: User) -> frozenset[str]:
-    """Return the effective permission set for a user."""
+    """Return the effective permission set for a user.
+
+    Owner always gets everything.
+    Every other user gets exactly the permissions stored in user.permissions.
+    """
     if user.role == "owner":
         return frozenset(ALL_PERMISSIONS.keys())
-    if user.role == "admin":
-        if user.permissions:
-            try:
-                parsed = json.loads(user.permissions)
-                if isinstance(parsed, list) and all(isinstance(p, str) for p in parsed):
-                    return frozenset(parsed)
-            except (json.JSONDecodeError, TypeError):
-                pass
-        return _ADMIN_DEFAULT
-    # role == "user" (or unknown)
     if user.permissions:
         try:
             parsed = json.loads(user.permissions)
@@ -118,7 +97,7 @@ def get_effective_permissions(user: User) -> frozenset[str]:
                 return frozenset(parsed)
         except (json.JSONDecodeError, TypeError):
             pass
-    return _USER_DEFAULT
+    return frozenset()
 
 
 def has_permission(user: User, *perms: str) -> bool:

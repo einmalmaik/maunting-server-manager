@@ -74,7 +74,6 @@ class CreateUserBody(BaseModel):
     username: str
     email: str | None = None
     password: str
-    role: str = "user"
     permissions: list[str] | None = None
 
     @field_validator("username")
@@ -102,13 +101,6 @@ class CreateUserBody(BaseModel):
             raise ValueError("Invalid email address.")
         return v
 
-    @field_validator("role")
-    @classmethod
-    def validate_role(cls, v: str) -> str:
-        if v not in ("admin", "user"):
-            raise ValueError("Role must be 'admin' or 'user'.")
-        return v
-
     @field_validator("permissions")
     @classmethod
     def validate_permissions(cls, v: list[str] | None) -> list[str] | None:
@@ -122,7 +114,6 @@ class CreateUserBody(BaseModel):
 
 class UpdateUserBody(BaseModel):
     email: str | None = None
-    role: str | None = None
     permissions: list[str] | None = None
     is_active: bool | None = None
 
@@ -134,15 +125,6 @@ class UpdateUserBody(BaseModel):
         v = v.strip().lower()
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
             raise ValueError("Invalid email address.")
-        return v
-
-    @field_validator("role")
-    @classmethod
-    def validate_role(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        if v not in ("admin", "user"):
-            raise ValueError("Role must be 'admin' or 'user'.")
         return v
 
     @field_validator("permissions")
@@ -193,9 +175,6 @@ def create_user(
 ) -> Any:
     _require_admin_or_owner(current_user)
 
-    # Only owner may create admin accounts
-    if body.role == "admin" and current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Only the owner can create admin accounts.")
     if body.permissions is not None and current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Only the owner can set custom permissions.")
 
@@ -209,14 +188,12 @@ def create_user(
             raise HTTPException(status_code=409, detail="Email already in use.")
 
     stored_permissions = body.permissions
-    if body.role == "admin":
-        stored_permissions = None
 
     user = User(
         username=body.username,
         email=body.email,
         password_hash=hash_password(body.password),
-        role=body.role,
+        role="user",
         permissions=json.dumps(stored_permissions) if stored_permissions is not None else None,
         is_active=True,
     )
@@ -269,9 +246,6 @@ def update_user(
     if user.role == "owner":
         raise HTTPException(status_code=403, detail="Cannot modify the owner account.")
 
-    # Only owner can change role or grant admin
-    if body.role is not None and current_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Only the owner can change roles.")
     if body.permissions is not None and current_user.role != "owner":
         raise HTTPException(status_code=403, detail="Only the owner can change permissions.")
 
@@ -281,11 +255,7 @@ def update_user(
             if existing:
                 raise HTTPException(status_code=409, detail="Email already in use.")
         user.email = body.email or None
-    if body.role is not None:
-        user.role = body.role
-        if body.role == "admin":
-            user.permissions = None
-    if body.permissions is not None and user.role != "admin":
+    if body.permissions is not None:
         user.permissions = json.dumps(body.permissions)
     if body.is_active is not None:
         user.is_active = body.is_active

@@ -8,13 +8,11 @@ export interface User {
 
 // ── Full user profile (from /account/me and /users) ───────────────────────────
 
-export type UserRole = 'owner' | 'admin' | 'user'
-
 export interface UserProfile {
   id: number
   username: string
   email: string | null
-  role: UserRole
+  role: string
   permissions: string[]
   is_active: boolean
   totp_enabled: boolean

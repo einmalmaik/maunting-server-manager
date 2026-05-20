@@ -436,13 +436,13 @@ export const usersApi = {
   permissions: () =>
     request<{ permissions: PermissionEntry[] }>('GET', '/users/permissions'),
 
-  create: (data: { username: string; email?: string; password: string; role: string; permissions?: string[] }) =>
+  create: (data: { username: string; email?: string; password: string; permissions?: string[] }) =>
     request<{ user: UserProfile }>('POST', '/users', data),
 
   get: (id: number) =>
     request<{ user: UserProfile }>('GET', `/users/${id}`),
 
-  update: (id: number, data: { email?: string | null; role?: string; permissions?: string[]; is_active?: boolean }) =>
+  update: (id: number, data: { email?: string | null; permissions?: string[]; is_active?: boolean }) =>
     request<{ user: UserProfile }>('PATCH', `/users/${id}`, data),
 
   delete: (id: number) =>
