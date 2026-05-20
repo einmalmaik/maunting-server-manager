@@ -5,7 +5,7 @@ import re
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -268,6 +268,14 @@ def register(body: RegisterBody, request: Request, db: Session = Depends(get_db)
 
 class ForgotPasswordBody(BaseModel):
     email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
+            raise ValueError("Invalid email address.")
+        return v
 
 
 @router.post("/forgot-password")
