@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import {
@@ -6,14 +6,20 @@ import {
   Server,
   Users,
   Settings,
-  Shield,
   LogOut,
   HardDrive,
+  Plus,
 } from 'lucide-react'
 
 export function Sidebar() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { user, logout } = useAuthStore()
+
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login', { replace: true })
+  }
 
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: t('nav.dashboard') },
@@ -26,49 +32,59 @@ export function Sidebar() {
   ]
 
   return (
-    <aside className="w-64 h-screen border-r border-border bg-card/50 backdrop-blur-md flex flex-col sticky top-0">
-      <div className="p-5 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-            <Shield className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold tracking-tight text-foreground leading-tight">
-              Maunting
-            </h1>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-              Server Manager
-            </p>
-          </div>
+    <aside className="msm-sidebar hidden md:flex flex-col h-screen fixed left-0 top-0 w-64 z-40">
+      {/* Brand */}
+      <div className="px-6 pt-6 pb-8 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-md bg-primary flex items-center justify-center text-on-primary font-headline text-headline-md font-extrabold">
+          M
+        </div>
+        <div>
+          <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
+            MauntingStudios
+          </h1>
+          <p className="font-mono-sm text-mono-sm text-on-surface-variant">
+            Infrastructure Control
+          </p>
         </div>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+      {/* Create Server Button */}
+      {user?.is_owner && (
+        <div className="px-4 mb-6">
+          <NavLink
+            to="/servers"
+            className="w-full bg-primary text-on-primary font-label-md text-label-md py-3 rounded-md hover:shadow-primary-glow-hover transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+          >
+            <Plus className="w-4 h-4" />
+            {t('servers.create', 'Server erstellen')}
+          </NavLink>
+        </div>
+      )}
+
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto px-2">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150 ${
-                isActive
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-              }`
+              isActive ? 'msm-nav-link-active' : 'msm-nav-link'
             }
           >
-            <item.icon className="w-4 h-4" />
-            {item.label}
+            <item.icon className="w-[18px] h-[18px]" />
+            <span className="font-label-md text-label-md">{item.label}</span>
           </NavLink>
         ))}
       </nav>
 
-      <div className="p-3 border-t border-border">
+      {/* Footer */}
+      <div className="mt-auto pt-4 border-t border-outline-variant/30 px-2 pb-4">
         <button
-          onClick={logout}
-          className="flex w-full items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-150"
+          onClick={handleLogout}
+          className="msm-nav-link text-on-surface-variant hover:text-error hover:bg-error-container/20"
         >
-          <LogOut className="w-4 h-4" />
-          {t('nav.logout')}
+          <LogOut className="w-[18px] h-[18px]" />
+          <span className="font-label-md text-label-md">{t('nav.logout')}</span>
         </button>
       </div>
     </aside>

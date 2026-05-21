@@ -3,39 +3,40 @@ import { api } from '@/api/client'
 import type { User } from '@/types'
 
 interface AuthState {
-  token: string | null
   user: User | null
   isLoading: boolean
-  setToken: (token: string) => void
-  setUser: (user: User) => void
-  logout: () => void
-  fetchUser: () => Promise<void>
+  isAuthenticated: boolean
+  setUser: (user: User | null) => void
+  setAuthenticated: (val: boolean) => void
+  logout: () => Promise<void>
+  checkAuth: () => Promise<void>
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  token: localStorage.getItem('token'),
   user: null,
-  isLoading: false,
-
-  setToken: (token) => {
-    localStorage.setItem('token', token)
-    set({ token })
-  },
+  isLoading: true,
+  isAuthenticated: false,
 
   setUser: (user) => set({ user }),
 
-  logout: () => {
-    localStorage.removeItem('token')
-    set({ token: null, user: null })
+  setAuthenticated: (val) => set({ isAuthenticated: val }),
+
+  logout: async () => {
+    try {
+      await api('/auth/logout', { method: 'POST' })
+    } catch {
+      // Ignorieren: Backend hat Cookies geloescht, Client-State wird hier bereinigt
+    }
+    set({ user: null, isAuthenticated: false, isLoading: false })
   },
 
-  fetchUser: async () => {
+  checkAuth: async () => {
+    set({ isLoading: true })
     try {
       const user = await api<User>('/auth/me')
-      set({ user })
+      set({ user, isAuthenticated: true, isLoading: false })
     } catch {
-      localStorage.removeItem('token')
-      set({ token: null, user: null })
+      set({ user: null, isAuthenticated: false, isLoading: false })
     }
   },
 }))
