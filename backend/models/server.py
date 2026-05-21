@@ -29,6 +29,11 @@ class Server(Base):
     ram_limit_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     disk_limit_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Netzwerk — Ports (automatisch vergeben, aber überschreibbar)
+    game_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    query_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rcon_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

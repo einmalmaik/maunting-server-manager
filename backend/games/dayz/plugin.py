@@ -2,17 +2,15 @@ import os
 import subprocess
 
 from config import settings
-from games.base import GamePlugin, ServerStatus, ConfigField
+from games.base import GamePlugin, ServerStatus, ConfigField, build_systemd_unit
 
 
 class DayZPlugin(GamePlugin):
-    """DayZ Linux Dedicated Server Plugin.
+    """DayZ Linux Dedicated Server Plugin — Linux native.
 
     Offizielle Doku: https://community.bistudio.com/wiki/DayZ:Server_Hosting
-    App ID: 223350 (DayZ Server).
-    Supports native Linux server binary (no Wine required).
-    Requires Steam account (not anonymous) for server download.
-    Mods are linked via symlinks into @mod folders.
+    App ID: 223350. Es wird ausschließlich die native Linux-Version genutzt.
+    Wine-Fallback ist nicht vorgesehen.
     """
 
     game_id = "dayz"
@@ -23,11 +21,10 @@ class DayZPlugin(GamePlugin):
     WORKSHOP_ID = "221100"
 
     def _resolve_executable(self, server) -> str | None:
-        """Find the DayZ server executable (native Linux)."""
+        """Nur native Linux-Binaries — kein Wine-Fallback."""
         candidates = [
             os.path.join(server.install_dir, "DayZServer"),
             os.path.join(server.install_dir, "DayZServer_x64"),
-            os.path.join(server.install_dir, "DayZServer.exe"),
         ]
         for candidate in candidates:
             if os.path.exists(candidate):
@@ -56,28 +53,26 @@ class DayZPlugin(GamePlugin):
         unit_name = f"msm-{server.linux_user}.service"
         unit_path = f"/etc/systemd/system/{unit_name}"
 
-        exec_start = exe
-        if exe.endswith(".exe"):
-            wine_prefix = os.path.join(server.install_dir, ".wine")
-            exec_start = f"WINEPREFIX={wine_prefix} wine {exe}"
+        # Port-Parameter hinzufügen
+        port_args = ""
+        if server.game_port:
+            port_args += f" -port={server.game_port}"
+        # DayZ nutzt automatisch game_port+1 für Steam Query
+        # und game_port+3 für BattlEye — durch unseren Port-Block (5 Ports)
+        # ist das automatisch sicher.
 
-        unit_content = f"""[Unit]
-Description=MSM Server {server.name}
-After=network.target
+        # Nur native Linux — kein Wine-Fallback
+        exec_start = f"{exe}{port_args}"
 
-[Service]
-Type=simple
-User={server.linux_user}
-WorkingDirectory={server.install_dir}
-ExecStart={exec_start}
-Restart=on-failure
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-"""
+        unit_content = build_systemd_unit(
+            name=server.name,
+            linux_user=server.linux_user,
+            working_dir=server.install_dir,
+            exec_start=exec_start,
+            cpu_limit_percent=server.cpu_limit_percent,
+            ram_limit_mb=server.ram_limit_mb,
+            disk_limit_gb=server.disk_limit_gb,
+        )
         try:
             with open(unit_path, "w", encoding="utf-8") as f:
                 f.write(unit_content)

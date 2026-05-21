@@ -2,16 +2,15 @@ import os
 import subprocess
 
 from config import settings
-from games.base import GamePlugin, ServerStatus, ConfigField
+from games.base import GamePlugin, ServerStatus, ConfigField, build_systemd_unit
 
 
 class ConanExilesUE5Plugin(GamePlugin):
-    """Conan Exiles Enhanced (UE5) Dedicated Server Plugin.
+    """Conan Exiles Enhanced (UE5) Dedicated Server Plugin — Linux native.
 
     Offizielle Doku: https://exiles-enhanced.inflexion.io/servers/linux/
-    App ID: 443030 (unchanged from UE4 Legacy).
-    Enhanced includes a native Linux server binary per official docs.
-    Falls back to Wine if native binary is not found (legacy behaviour).
+    App ID: 443030. Es wird ausschließlich die native Linux-Version genutzt.
+    Wine/UE4-Fallback ist nicht vorgesehen (dazu wäre ein separates Plugin nötig).
     """
 
     game_id = "conan_exiles_ue5"
@@ -22,11 +21,10 @@ class ConanExilesUE5Plugin(GamePlugin):
     WORKSHOP_ID = "440900"
 
     def _resolve_executable(self, server) -> str | None:
-        """Find the server executable, preferring native Linux over Wine."""
+        """Nur native Linux-Binaries — kein Wine-Fallback."""
         candidates = [
             os.path.join(server.install_dir, "ConanSandboxServer.sh"),
             os.path.join(server.install_dir, "ConanSandboxServer"),
-            os.path.join(server.install_dir, "ConanSandboxServer.exe"),
         ]
         for candidate in candidates:
             if os.path.exists(candidate):
@@ -34,13 +32,19 @@ class ConanExilesUE5Plugin(GamePlugin):
         return None
 
     def _build_exec_start(self, server, exe: str) -> str:
-        """Build the ExecStart line for systemd, handling Wine fallback."""
-        if exe.endswith(".exe"):
-            wine_prefix = os.path.join(server.install_dir, ".wine")
-            return f"WINEPREFIX={wine_prefix} wine {exe} -log"
+        """Build the ExecStart line für systemd (nur native Linux).
+        Fügt Port-Parameter hinzu (Game, Query, RCon)."""
+        args = "-log"
+        if server.game_port:
+            args += f" -Port={server.game_port}"
+        if server.query_port:
+            args += f" -QueryPort={server.query_port}"
+        if server.rcon_port:
+            args += f" -RconPort={server.rcon_port}"
+
         if exe.endswith(".sh"):
-            return f"/bin/bash {exe} -log"
-        return f"{exe} -log"
+            return f"/bin/bash {exe} {args}"
+        return f"{exe} {args}"
 
     def install(self, server) -> dict:
         cmd = [
@@ -65,23 +69,15 @@ class ConanExilesUE5Plugin(GamePlugin):
         unit_path = f"/etc/systemd/system/{unit_name}"
         exec_start = self._build_exec_start(server, exe)
 
-        unit_content = f"""[Unit]
-Description=MSM Server {server.name}
-After=network.target
-
-[Service]
-Type=simple
-User={server.linux_user}
-WorkingDirectory={server.install_dir}
-ExecStart={exec_start}
-Restart=on-failure
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-"""
+        unit_content = build_systemd_unit(
+            name=server.name,
+            linux_user=server.linux_user,
+            working_dir=server.install_dir,
+            exec_start=exec_start,
+            cpu_limit_percent=server.cpu_limit_percent,
+            ram_limit_mb=server.ram_limit_mb,
+            disk_limit_gb=server.disk_limit_gb,
+        )
         try:
             with open(unit_path, "w", encoding="utf-8") as f:
                 f.write(unit_content)

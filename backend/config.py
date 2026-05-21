@@ -18,13 +18,16 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 30  # 30 Tage Refresh-Token
     csrf_token_expire_minutes: int = 60 * 24  # 24h CSRF-Token
 
-    # Email (SMTP)
+    # Email — SMTP oder Resend (resend.com)
+    # Resend API-Key hat Vorrang vor SMTP wenn beides gesetzt
+    email_provider: str = "smtp"  # "smtp" | "resend"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_tls: bool = True
     smtp_from: str = "noreply@mauntingstudios.de"
+    resend_api_key: str = ""
 
     # Panel
     panel_url: str = "http://localhost"

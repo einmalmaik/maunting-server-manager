@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Maunting Server Manager — Python Setup Helper
-Wird von install.sh aufgerufen, kann aber auch standalone laufen.
+Maunting Server Manager — Developer Setup Helper
+NUR für lokale Entwicklung. Für Server-Installation: sudo bash install.sh
 """
 
 import argparse
@@ -23,18 +23,18 @@ def setup_backend(msm_dir: Path) -> None:
     if not venv.exists():
         run([sys.executable, "-m", "venv", str(venv)], cwd=backend)
 
-    pip = venv / "bin" / "pip"
+    pip = venv / "bin" / "pip" if os.name != "nt" else venv / "Scripts" / "pip.exe"
     run([str(pip), "install", "--upgrade", "pip"], cwd=backend)
     run([str(pip), "install", "-r", "requirements.txt"], cwd=backend)
 
     # Init DB
-    alembic = venv / "bin" / "alembic"
+    alembic = venv / "bin" / "alembic" if os.name != "nt" else venv / "Scripts" / "alembic.exe"
+    python = venv / "bin" / "python" if os.name != "nt" else venv / "Scripts" / "python.exe"
     if alembic.exists():
         try:
             run([str(alembic), "upgrade", "head"], cwd=backend)
         except subprocess.CalledProcessError:
             print("[WARN] Alembic fehlgeschlagen, erstelle Tabellen direkt...")
-            python = venv / "bin" / "python"
             run([str(python), "-c",
                  "from database import engine, Base; from models import *; Base.metadata.create_all(engine)"],
                 cwd=backend)
@@ -43,39 +43,11 @@ def setup_backend(msm_dir: Path) -> None:
 def setup_frontend(msm_dir: Path) -> None:
     frontend = msm_dir / "frontend"
     run(["npm", "install"], cwd=frontend)
-    run(["npm", "run", "build"], cwd=frontend)
-
-
-def setup_caddy(msm_dir: Path, domain: str | None) -> None:
-    template = msm_dir / "Caddyfile.template"
-    caddyfile = Path("/etc/caddy/Caddyfile")
-
-    content = template.read_text(encoding="utf-8")
-    content = content.replace("{{DOMAIN}}", domain or "localhost")
-
-    if not domain:
-        content = content.replace(":443", ":80")
-        content = content.replace("tls internal", "# tls internal")
-
-    caddyfile.write_text(content, encoding="utf-8")
-    run(["systemctl", "reload", "caddy"])
-
-
-def setup_systemd(msm_dir: Path) -> None:
-    template = msm_dir / "msm.service.template"
-    content = template.read_text(encoding="utf-8")
-    content = content.replace("{{MSM_DIR}}", str(msm_dir))
-
-    service_path = Path("/etc/systemd/system/msm-panel.service")
-    service_path.write_text(content, encoding="utf-8")
-    run(["systemctl", "daemon-reload"])
-    run(["systemctl", "enable", "msm-panel.service"])
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="MSM Setup Helper")
-    parser.add_argument("--dir", default="/opt/msm", help="MSM Installationsverzeichnis")
-    parser.add_argument("--domain", default=None, help="Domain für Caddy (leer = IP)")
+    parser = argparse.ArgumentParser(description="MSM Dev Setup Helper")
+    parser.add_argument("--dir", default=".", help="MSM Projektverzeichnis")
     parser.add_argument("--skip-backend", action="store_true")
     parser.add_argument("--skip-frontend", action="store_true")
     args = parser.parse_args()
@@ -92,10 +64,9 @@ def main() -> int:
     if not args.skip_frontend:
         setup_frontend(msm_dir)
 
-    setup_caddy(msm_dir, args.domain)
-    setup_systemd(msm_dir)
-
-    print("[OK] Setup abgeschlossen.")
+    print("[OK] Dev-Setup abgeschlossen.")
+    print("     Backend:  cd backend && source venv/bin/activate && uvicorn main:app --reload")
+    print("     Frontend: cd frontend && npm run dev")
     return 0
 
 

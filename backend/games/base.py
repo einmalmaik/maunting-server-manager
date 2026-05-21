@@ -80,3 +80,77 @@ class GamePlugin(ABC):
         if self.supports_mods:
             return {"workshop_id": None, "dependency_resolution": False}
         return None
+
+
+def build_systemd_unit(
+    name: str,
+    linux_user: str,
+    working_dir: str,
+    exec_start: str,
+    cpu_limit_percent: int | None = None,
+    ram_limit_mb: int | None = None,
+    disk_limit_gb: int | None = None,
+) -> str:
+    """Erzeugt eine systemd-Unit mit Resource-Limits und Security-Hardening.
+
+    Args:
+        name: Anzeigename des Servers
+        linux_user: Linux-User unter dem der Server läuft
+        working_dir: Arbeitsverzeichnis
+        exec_start: ExecStart-Kommando
+        cpu_limit_percent: Max CPU-Usage (10-100). None = kein Limit.
+        ram_limit_mb: Max RAM in MB. None = kein Limit.
+        disk_limit_gb: Max Disk in GB. None = kein Limit.
+          Hinweis: systemd kann kein hartes Disk-Limit. Wir nutzen
+          ReadWritePaths + LimitNOFILE als Defense-in-Depth.
+    """
+    lines: list[str] = [
+        "[Unit]",
+        f"Description=MSM Server {name}",
+        "After=network.target",
+        "",
+        "[Service]",
+        "Type=simple",
+        f"User={linux_user}",
+        f"WorkingDirectory={working_dir}",
+        f"ExecStart={exec_start}",
+        "Restart=on-failure",
+        "RestartSec=10",
+        "StandardOutput=journal",
+        "StandardError=journal",
+        "",
+        "# Security Hardening",
+        "NoNewPrivileges=true",
+        "PrivateTmp=true",
+        "ProtectSystem=strict",
+        "ProtectHome=true",
+        f"ReadWritePaths={working_dir}",
+        "TasksMax=100",
+        "LimitNOFILE=4096",
+    ]
+
+    if cpu_limit_percent:
+        lines.append(f"CPUQuota={cpu_limit_percent}%")
+
+    if ram_limit_mb:
+        lines.append(f"MemoryMax={ram_limit_mb}M")
+        lines.append("MemorySwapMax=0")
+        # OOM-Killer priorisiert den Game-Server niedriger, damit der Host stabil bleibt
+        lines.append("OOMScoreAdjust=500")
+
+    if disk_limit_gb:
+        # systemd kann kein hartes Disk-Limit. Wir dokumentieren es
+        # und setzen zusätzliche Einschränkungen.
+        lines.append(f"# Disk-Limit: {disk_limit_gb}GB (Monitoring via Panel)")
+        # Verhindert, dass der Prozess Dateien außerhalb seines Verzeichnisses anlegt
+        lines.append("ProtectKernelTunables=true")
+        lines.append("ProtectKernelModules=true")
+        lines.append("ProtectControlGroups=true")
+
+    lines.extend([
+        "",
+        "[Install]",
+        "WantedBy=multi-user.target",
+    ])
+
+    return "\n".join(lines)

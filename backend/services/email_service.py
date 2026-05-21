@@ -1,3 +1,4 @@
+import httpx
 import aiosmtplib
 from email.message import EmailMessage
 
@@ -5,15 +6,38 @@ from config import settings
 
 
 class EmailService:
+    """Email-Service mit SMTP und Resend-Unterstützung.
+
+    Provider-Priorität:
+      1. Resend (falls MSM_RESEND_API_KEY gesetzt)
+      2. SMTP (falls MSM_SMTP_HOST gesetzt)
+    """
+
     @staticmethod
     def is_configured() -> bool:
+        if settings.resend_api_key:
+            return True
         return bool(settings.smtp_host and settings.smtp_user)
 
     @staticmethod
-    async def send_email(to: str, subject: str, body: str) -> bool:
-        if not EmailService.is_configured():
-            return False
+    def _get_provider() -> str:
+        if settings.resend_api_key:
+            return "resend"
+        if settings.smtp_host and settings.smtp_user:
+            return "smtp"
+        return "none"
 
+    @staticmethod
+    async def send_email(to: str, subject: str, body: str) -> bool:
+        provider = EmailService._get_provider()
+        if provider == "none":
+            return False
+        if provider == "resend":
+            return await EmailService._send_resend(to, subject, body)
+        return await EmailService._send_smtp(to, subject, body)
+
+    @staticmethod
+    async def _send_smtp(to: str, subject: str, body: str) -> bool:
         msg = EmailMessage()
         msg["From"] = settings.smtp_from
         msg["To"] = to
@@ -30,6 +54,28 @@ class EmailService:
                 start_tls=settings.smtp_tls,
             )
             return True
+        except Exception:
+            return False
+
+    @staticmethod
+    async def _send_resend(to: str, subject: str, body: str) -> bool:
+        """Sendet via Resend API (resend.com) — kein SMTP nötig."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://api.resend.com/emails",
+                    headers={
+                        "Authorization": f"Bearer {settings.resend_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "from": settings.smtp_from,
+                        "to": [to],
+                        "subject": subject,
+                        "text": body,
+                    },
+                )
+                return response.status_code in (200, 202)
         except Exception:
             return False
 

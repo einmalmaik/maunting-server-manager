@@ -12,6 +12,11 @@ class ServerCreate(BaseModel):
     ram_limit_mb: int | None = Field(None, ge=512)
     disk_limit_gb: int | None = Field(None, ge=1)
 
+    # Ports — leer lassen für automatische Vergabe
+    game_port: int | None = Field(None, ge=1024, le=65535)
+    query_port: int | None = Field(None, ge=1024, le=65535)
+    rcon_port: int | None = Field(None, ge=1024, le=65535)
+
 
 class ServerUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=128)
@@ -21,6 +26,9 @@ class ServerUpdate(BaseModel):
     cpu_limit_percent: int | None = Field(None, ge=10, le=100)
     ram_limit_mb: int | None = Field(None, ge=512)
     disk_limit_gb: int | None = Field(None, ge=1)
+    game_port: int | None = Field(None, ge=1024, le=65535)
+    query_port: int | None = Field(None, ge=1024, le=65535)
+    rcon_port: int | None = Field(None, ge=1024, le=65535)
 
 
 class ServerResponse(BaseModel):
@@ -37,6 +45,9 @@ class ServerResponse(BaseModel):
     cpu_limit_percent: int | None
     ram_limit_mb: int | None
     disk_limit_gb: int | None
+    game_port: int | None
+    query_port: int | None
+    rcon_port: int | None
     created_at: datetime
 
     class Config:

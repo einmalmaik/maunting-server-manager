@@ -9,6 +9,8 @@ from models import Server, Permission, User
 from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from games import get_plugin
+from services.port_allocation_service import allocate_ports
+from services.firewall_service import open_ports, close_ports
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
@@ -32,12 +34,33 @@ def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User =
     install_dir = f"/opt/msm/servers/{req.game_type}_{db.query(Server).count() + 1}"
     linux_user = f"msm_srv_{db.query(Server).count() + 1}"
 
-    # Linux-User erstellen
+    # Linux-User erstellen (isoliert, keine Login-Shell)
     try:
-        subprocess.run(["useradd", "-r", "-m", "-d", install_dir, linux_user], check=True, capture_output=True)
+        subprocess.run(
+            ["useradd", "-r", "-m", "-s", "/usr/sbin/nologin", "-d", install_dir, linux_user],
+            check=True, capture_output=True,
+        )
     except subprocess.CalledProcessError:
-        # User existiert vielleicht schon
-        pass
+        # User existiert vielleicht schon — sicherstellen dass er nologin hat
+        subprocess.run(["usermod", "-s", "/usr/sbin/nologin", linux_user], check=False, capture_output=True)
+
+    # Verzeichnis anlegen und Rechte setzen
+    os.makedirs(install_dir, exist_ok=True)
+    subprocess.run(["chown", f"{linux_user}:{linux_user}", install_dir], check=False, capture_output=True)
+    subprocess.run(["chmod", "750", install_dir], check=False, capture_output=True)
+
+    # Ports automatisch vergeben (oder vom Nutzer übernehmen)
+    try:
+        game_port, query_port, rcon_port = allocate_ports(
+            db,
+            requested_game_port=req.game_port,
+            requested_query_port=req.query_port,
+            requested_rcon_port=req.rcon_port,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     server = Server(
         name=req.name,
@@ -51,10 +74,17 @@ def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User =
         cpu_limit_percent=req.cpu_limit_percent,
         ram_limit_mb=req.ram_limit_mb,
         disk_limit_gb=req.disk_limit_gb,
+        game_port=game_port,
+        query_port=query_port,
+        rcon_port=rcon_port,
     )
     db.add(server)
     db.commit()
     db.refresh(server)
+
+    # Firewall-Regeln anlegen (nur auf Linux mit UFW)
+    open_ports(server.name, game_port, query_port, rcon_port)
+
     return server
 
 
@@ -73,10 +103,69 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+    old_ports = (server.game_port, server.query_port, server.rcon_port)
+
+    # ── Port-Änderung: validieren + Firewall aktualisieren ──
+    port_fields = {"game_port", "query_port", "rcon_port"}
+    changed_ports = port_fields & set(req.model_dump(exclude_unset=True).keys())
+
+    if changed_ports:
+        # Validierung: keine Konflikte mit anderen Servern
+        try:
+            new_game, new_query, new_rcon = allocate_ports(
+                db,
+                requested_game_port=req.game_port if req.game_port is not None else server.game_port,
+                requested_query_port=req.query_port if req.query_port is not None else server.query_port,
+                requested_rcon_port=req.rcon_port if req.rcon_port is not None else server.rcon_port,
+                exclude_server_id=server.id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+
+        # Werte überschreiben (damit setattr korrekt arbeitet)
+        if req.game_port is not None:
+            req.game_port = new_game
+        if req.query_port is not None:
+            req.query_port = new_query
+        if req.rcon_port is not None:
+            req.rcon_port = new_rcon
+
+    # Standard-Update
     for key, val in req.model_dump(exclude_unset=True).items():
         setattr(server, key, val)
     db.commit()
     db.refresh(server)
+
+    if changed_ports:
+        # Alte Firewall-Regeln schließen, neue öffnen
+        close_ports(
+            game_port=old_ports[0] or 0,
+            query_port=old_ports[1],
+            rcon_port=old_ports[2],
+        )
+        open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+
+        # systemd-Unit neu schreiben (damit Ports im ExecStart greifen)
+        plugin = get_plugin(server.game_type)
+        if plugin:
+            # Server kurz stoppen, Unit neu schreiben, wieder starten
+            was_running = False
+            try:
+                result = subprocess.run(
+                    ["systemctl", "is-active", f"msm-{server.linux_user}.service"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                was_running = result.stdout.strip() == "active"
+            except Exception:
+                pass
+
+            if was_running:
+                plugin.stop(server)
+                plugin.start(server)
+
     return server
 
 
@@ -87,9 +176,43 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+    # systemd-Unit stoppen und entfernen (nur auf Linux)
+    unit_name = f"msm-{server.linux_user}.service"
+    try:
+        subprocess.run(["systemctl", "stop", unit_name], check=False, capture_output=True)
+        subprocess.run(["systemctl", "disable", unit_name], check=False, capture_output=True)
+        unit_path = f"/etc/systemd/system/{unit_name}"
+        if os.path.exists(unit_path):
+            os.remove(unit_path)
+        subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True)
+    except (FileNotFoundError, OSError):
+        pass
+
+    # Firewall-Regeln schließen
+    close_ports(
+        game_port=server.game_port or 0,
+        query_port=server.query_port,
+        rcon_port=server.rcon_port,
+    )
+
+    # Linux-User und Home-Verzeichnis entfernen (nur auf Linux)
+    try:
+        subprocess.run(["userdel", "-r", server.linux_user], check=False, capture_output=True)
+    except (FileNotFoundError, OSError):
+        pass
+
+    # Verzeichnis aufräumen (falls userdel es nicht gelöscht hat)
+    if os.path.exists(server.install_dir):
+        import shutil
+        try:
+            shutil.rmtree(server.install_dir)
+        except OSError:
+            pass
+
     db.delete(server)
     db.commit()
-    return {"message": "Server gelöscht"}
+    return {"message": "Server gelöscht", "cleanup": {"user_removed": server.linux_user, "dir_removed": server.install_dir}}
 
 
 @router.post("/{server_id}/start")

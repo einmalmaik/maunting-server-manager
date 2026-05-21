@@ -1,14 +1,24 @@
+# Caddy-Konfiguration für Maunting Server Manager
+# Wird durch install.sh automatisch generiert. Manuelle Änderungen gehen bei Re-Install verloren.
+
 {{DOMAIN}} {
     root * /opt/msm/frontend/dist
     file_server
     try_files {path} /index.html
 
-    # API Proxy
+    encode gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    }
+
     handle_path /api/* {
         reverse_proxy localhost:8000
     }
 
-    # WebSocket falls später
     handle_path /ws/* {
         reverse_proxy localhost:8000
     }
