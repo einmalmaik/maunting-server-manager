@@ -6,11 +6,41 @@ from games.base import GamePlugin, ServerStatus, ConfigField
 
 
 class ConanExilesUE5Plugin(GamePlugin):
+    """Conan Exiles Enhanced (UE5) Dedicated Server Plugin.
+
+    Offizielle Doku: https://exiles-enhanced.inflexion.io/servers/linux/
+    App ID: 443030 (unchanged from UE4 Legacy).
+    Enhanced includes a native Linux server binary per official docs.
+    Falls back to Wine if native binary is not found (legacy behaviour).
+    """
+
     game_id = "conan_exiles_ue5"
     game_name = "Conan Exiles (UE5)"
     supports_mods = True
 
-    APP_ID = "1790600"  # Conan Exiles Dedicated Server
+    APP_ID = "443030"
+    WORKSHOP_ID = "440900"
+
+    def _resolve_executable(self, server) -> str | None:
+        """Find the server executable, preferring native Linux over Wine."""
+        candidates = [
+            os.path.join(server.install_dir, "ConanSandboxServer.sh"),
+            os.path.join(server.install_dir, "ConanSandboxServer"),
+            os.path.join(server.install_dir, "ConanSandboxServer.exe"),
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def _build_exec_start(self, server, exe: str) -> str:
+        """Build the ExecStart line for systemd, handling Wine fallback."""
+        if exe.endswith(".exe"):
+            wine_prefix = os.path.join(server.install_dir, ".wine")
+            return f"WINEPREFIX={wine_prefix} wine {exe} -log"
+        if exe.endswith(".sh"):
+            return f"/bin/bash {exe} -log"
+        return f"{exe} -log"
 
     def install(self, server) -> dict:
         cmd = [
@@ -27,12 +57,14 @@ class ConanExilesUE5Plugin(GamePlugin):
         return self.install(server)
 
     def start(self, server) -> dict:
-        exe = os.path.join(server.install_dir, "ConanSandboxServer.sh")
-        if not os.path.exists(exe):
+        exe = self._resolve_executable(server)
+        if not exe:
             return {"error": "Server-Executable nicht gefunden. Bitte zuerst installieren."}
-        # systemd service unit erstellen und starten
+
         unit_name = f"msm-{server.linux_user}.service"
         unit_path = f"/etc/systemd/system/{unit_name}"
+        exec_start = self._build_exec_start(server, exe)
+
         unit_content = f"""[Unit]
 Description=MSM Server {server.name}
 After=network.target
@@ -41,7 +73,7 @@ After=network.target
 Type=simple
 User={server.linux_user}
 WorkingDirectory={server.install_dir}
-ExecStart={exe}
+ExecStart={exec_start}
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -50,8 +82,12 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 """
-        with open(unit_path, "w", encoding="utf-8") as f:
-            f.write(unit_content)
+        try:
+            with open(unit_path, "w", encoding="utf-8") as f:
+                f.write(unit_content)
+        except OSError as e:
+            return {"error": f"Konnte systemd-Unit nicht schreiben: {e}"}
+
         subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True)
         subprocess.run(["systemctl", "enable", unit_name], check=False, capture_output=True)
         subprocess.run(["systemctl", "start", unit_name], check=False, capture_output=True)
@@ -99,6 +135,10 @@ WantedBy=multi-user.target
             ConfigField("ServerPassword", "Server-Passwort", "text", default="", description="Leer = kein Passwort"),
             ConfigField("AdminPassword", "Admin-Passwort", "text", default="", required=True),
             ConfigField("serverVoiceChat", "Voice Chat", "bool", default=True),
+            ConfigField("serverCommunity", "Community", "number", default=0, description="0=none, 1=filtering, 2=PvE, 3=RP, 4=PvP"),
+            ConfigField("PvPBlitzServer", "PvP Blitz", "bool", default=False),
+            ConfigField("NetServerMaxTickRate", "Tick Rate", "number", default=30),
+            ConfigField("MaxTransferDistance", "Max Transfer Distance", "number", default=100000),
         ]
 
     def get_config_files(self) -> list[dict]:
@@ -115,6 +155,6 @@ WantedBy=multi-user.target
 
     def get_mod_support(self) -> dict | None:
         return {
-            "workshop_id": "440900",  # Conan Exiles Workshop
+            "workshop_id": self.WORKSHOP_ID,
             "dependency_resolution": True,
         }

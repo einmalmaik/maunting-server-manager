@@ -1,0 +1,282 @@
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Shield, Server, ChevronRight, Check } from 'lucide-react'
+
+interface SetupWizardProps {
+  onComplete: () => void
+}
+
+export function SetupWizard({ onComplete }: SetupWizardProps) {
+  const { t } = useTranslation()
+  const [step, setStep] = useState(1)
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [form, setForm] = useState({
+    username: '',
+    email: '',
+    password: '',
+    confirm: '',
+  })
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+
+    if (form.password !== form.confirm) {
+      setError(t('auth.passwordMismatch', 'Passwörter stimmen nicht überein'))
+      return
+    }
+    if (form.password.length < 8) {
+      setError(t('auth.passwordTooShort', 'Passwort muss mindestens 8 Zeichen haben'))
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/auth/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: form.username,
+          email: form.email,
+          password: form.password,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'Setup failed')
+      }
+      setStep(3)
+      setTimeout(onComplete, 2000)
+    } catch (err: any) {
+      setError(err.message || t('setup.error', 'Einrichtung fehlgeschlagen'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const steps = [
+    { num: 1, label: 'Willkommen' },
+    { num: 2, label: 'Owner erstellen' },
+    { num: 3, label: 'Fertig' },
+  ]
+
+  return (
+    <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
+      {/* Deep Grid Background */}
+      <div className="absolute inset-0 msm-deep-grid opacity-50" />
+
+      {/* Ambient Glow */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute top-20 right-20 w-64 h-64 bg-cyan-glow blur-[80px] rounded-full pointer-events-none opacity-40" />
+
+      <div className="relative z-10 w-full max-w-lg">
+        {/* Brand Header */}
+        <div className="flex items-center justify-center gap-3 mb-8">
+          <div className="w-10 h-10 rounded-md bg-primary flex items-center justify-center text-on-primary font-headline text-headline-md font-extrabold">
+            M
+          </div>
+          <div>
+            <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
+              MauntingStudios
+            </h1>
+            <p className="font-mono-sm text-mono-sm text-on-surface-variant">
+              Infrastructure Control
+            </p>
+          </div>
+        </div>
+
+        {/* Step Indicator */}
+        <div className="flex items-center justify-center gap-2 mb-8">
+          {steps.map((s, i) => (
+            <div key={s.num} className="flex items-center gap-2">
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors duration-300 ${
+                  step >= s.num
+                    ? 'bg-secondary-container text-on-secondary-container'
+                    : 'bg-surface-container-high text-on-surface-variant'
+                }`}
+              >
+                {step > s.num ? <Check className="w-4 h-4" /> : s.num}
+              </div>
+              <span
+                className={`font-label-md text-xs uppercase tracking-wider hidden sm:inline ${
+                  step >= s.num ? 'text-on-surface' : 'text-on-surface-variant'
+                }`}
+              >
+                {s.label}
+              </span>
+              {i < steps.length - 1 && (
+                <div
+                  className={`w-8 h-px transition-colors duration-300 ${
+                    step > s.num ? 'bg-secondary-container' : 'bg-outline-variant'
+                  }`}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Main Panel */}
+        <div className="msm-card overflow-hidden">
+          {/* Step 1: Welcome */}
+          {step === 1 && (
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-6">
+                <Server className="w-8 h-8 text-secondary" />
+              </div>
+              <h2 className="font-headline text-headline-md text-primary mb-3">
+                {t('setup.welcome', 'Willkommen beim MSM')}
+              </h2>
+              <p className="font-body-md text-body-md text-on-surface-variant mb-8 max-w-sm mx-auto">
+                {t(
+                  'setup.welcomeDesc',
+                  'Der Maunting Server Manager ist bereit. Erstelle jetzt den Owner-Account, um deine Game-Server zu verwalten.'
+                )}
+              </p>
+              <button
+                onClick={() => setStep(2)}
+                className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
+              >
+                {t('setup.start', 'Loslegen')}
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Step 2: Create Owner */}
+          {step === 2 && (
+            <div className="p-8">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-secondary" />
+                </div>
+                <div>
+                  <h2 className="font-headline text-headline-md text-primary">
+                    {t('setup.title', 'Ersteinrichtung')}
+                  </h2>
+                  <p className="font-body-md text-sm text-on-surface-variant">
+                    {t('setup.description', 'Erstelle den Owner-Account')}
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('auth.username', 'Benutzername')}
+                  </label>
+                  <input
+                    type="text"
+                    value={form.username}
+                    onChange={(e) => setForm({ ...form, username: e.target.value })}
+                    className="msm-input"
+                    placeholder="admin"
+                    required
+                    minLength={3}
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('auth.email', 'E-Mail')}
+                  </label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    className="msm-input"
+                    placeholder="admin@example.com"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('auth.password', 'Passwort')}
+                  </label>
+                  <input
+                    type="password"
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    className="msm-input"
+                    placeholder="••••••••"
+                    required
+                    minLength={8}
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('auth.confirmPassword', 'Passwort bestätigen')}
+                  </label>
+                  <input
+                    type="password"
+                    value={form.confirm}
+                    onChange={(e) => setForm({ ...form, confirm: e.target.value })}
+                    className="msm-input"
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
+
+                {error && (
+                  <div className="msm-alert-error">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setStep(1)}
+                    className="msm-btn-secondary flex-1 py-3"
+                  >
+                    {t('common.back', 'Zurück')}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="msm-btn-primary flex-1 py-3 disabled:opacity-50"
+                  >
+                    {submitting ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                        {t('common.loading', 'Laden...')}
+                      </span>
+                    ) : (
+                      t('setup.createOwner', 'Owner erstellen')
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Step 3: Success */}
+          {step === 3 && (
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 rounded-full bg-status-success/10 border border-status-success/30 flex items-center justify-center mx-auto mb-6">
+                <Check className="w-8 h-8 text-status-success" />
+              </div>
+              <h2 className="font-headline text-headline-md text-primary mb-3">
+                {t('setup.success', 'Einrichtung abgeschlossen')}
+              </h2>
+              <p className="font-body-md text-body-md text-on-surface-variant mb-2">
+                {t('setup.successDesc', 'Der Owner-Account wurde erfolgreich erstellt.')}
+              </p>
+              <p className="font-mono-sm text-mono-sm text-on-surface-variant">
+                {t('setup.redirecting', 'Weiterleitung zum Login...')}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <p className="text-center font-mono-sm text-mono-sm text-on-surface-variant mt-6 opacity-60">
+          Maunting Server Manager v1.0.0
+        </p>
+      </div>
+    </div>
+  )
+}
