@@ -45,8 +45,8 @@ def clean_db():
         for table in reversed(db_module.Base.metadata.sorted_tables):
             conn.execute(table.delete())
     # Reset rate limiting store between tests
-    import main as main_module
-    main_module._rate_limit_store.clear()
+    import middleware.rate_limit as rate_limit_module
+    rate_limit_module._rate_limit_store.clear()
     yield
 
 
@@ -123,12 +123,12 @@ def user_cookies(client: TestClient, regular_user: User) -> dict:
 
 @pytest.fixture
 def csrf_token(owner_cookies: dict) -> str | None:
-    return owner_cookies.get("csrf_token")
+    return owner_cookies.get("__Secure-csrf_token")
 
 
 @pytest.fixture
 def user_csrf_token(user_cookies: dict) -> str | None:
-    return user_cookies.get("csrf_token")
+    return user_cookies.get("__Secure-csrf_token")
 
 
 # ── Server fixture ──

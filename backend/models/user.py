@@ -19,8 +19,10 @@ class User(Base):
 
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email_verification_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     two_factor_secret: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    two_factor_secret_encrypted: Mapped[str | None] = mapped_column(String(255), nullable=True)
     two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -53,6 +53,25 @@ class TestAccessToken:
         assert payload.get("type") is None  # Missing type field
 
 
+class Test2FASecretEncryption:
+    def test_encrypt_and_decrypt_2fa_secret(self):
+        secret = "JBSWY3DPEHPK3PXP"
+        encrypted = AuthService.encrypt_2fa_secret(secret)
+        assert encrypted != secret
+        decrypted = AuthService.decrypt_2fa_secret(encrypted)
+        assert decrypted == secret
+
+    def test_encrypt_is_deterministic_with_same_key(self):
+        secret = "JBSWY3DPEHPK3PXP"
+        encrypted1 = AuthService.encrypt_2fa_secret(secret)
+        encrypted2 = AuthService.encrypt_2fa_secret(secret)
+        assert encrypted1 != encrypted2  # Fernet uses random IV
+        decrypted1 = AuthService.decrypt_2fa_secret(encrypted1)
+        decrypted2 = AuthService.decrypt_2fa_secret(encrypted2)
+        assert decrypted1 == secret
+        assert decrypted2 == secret
+
+
 class TestCsrfToken:
     def test_create_csrf_token_is_random(self):
         t1 = AuthService.create_csrf_token()

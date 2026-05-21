@@ -14,9 +14,9 @@ class TestLogin:
         })
         assert response.status_code == 200
         # Must have all three cookies
-        assert "access_token" in response.cookies
-        assert "refresh_token" in response.cookies
-        assert "csrf_token" in response.cookies
+        assert "__Secure-access_token" in response.cookies
+        assert "__Secure-refresh_token" in response.cookies
+        assert "__Secure-csrf_token" in response.cookies
         # access_token and refresh_token must be httponly (FastAPI TestClient exposes them)
 
     def test_login_wrong_password(self, client: TestClient, owner_user: User):
@@ -42,14 +42,13 @@ class TestLogin:
             "password": "Inactive123!",
             "otp_code": None,
         })
-        # Login succeeds but subsequent /me should fail
-        assert response.status_code == 200
-        cookies = dict(response.cookies)
-        me = client.get("/api/auth/me", cookies=cookies)
-        assert me.status_code == 401
+        # Inactive users cannot login at all
+        assert response.status_code == 401
+        assert "deaktiviert" in response.json()["detail"]
 
     def test_login_2fa_required(self, client: TestClient, db: Session, owner_user: User):
-        owner_user.two_factor_secret = "JBSWY3DPEHPK3PXP"
+        from services.auth_service import AuthService
+        owner_user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret("JBSWY3DPEHPK3PXP")
         owner_user.two_factor_enabled = True
         db.commit()
         response = client.post("/api/auth/login", json={
@@ -64,7 +63,7 @@ class TestLogin:
 
 class TestLogout:
     def test_logout_revokes_refresh_token(self, client: TestClient, owner_user: User, owner_cookies: dict, db: Session):
-        csrf = owner_cookies.get("csrf_token")
+        csrf = owner_cookies.get("__Secure-csrf_token")
         assert csrf is not None
 
         # Count active refresh tokens before
@@ -87,7 +86,7 @@ class TestLogout:
         assert after == 0
 
         # Cookies cleared
-        assert "access_token" not in response.cookies or response.cookies.get("access_token") == ""
+        assert "__Secure-access_token" not in response.cookies or response.cookies.get("__Secure-access_token") == ""
 
     def test_logout_without_csrf_fails(self, client: TestClient, owner_cookies: dict):
         response = client.post("/api/auth/logout", cookies=owner_cookies)
@@ -102,10 +101,33 @@ class TestLogout:
         )
         assert response.status_code == 403
 
+    def test_logout_blacklists_access_token(self, client: TestClient, owner_user: User, db: Session):
+        # Login to get fresh cookies
+        login_response = client.post("/api/auth/login", json={
+            "username": "owner",
+            "password": "OwnerPass123!",
+            "otp_code": None,
+        })
+        assert login_response.status_code == 200
+        cookies = dict(login_response.cookies)
+        csrf = cookies.get("__Secure-csrf_token")
+
+        # Logout with CSRF
+        logout_response = client.post(
+            "/api/auth/logout",
+            cookies=cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert logout_response.status_code == 200
+
+        # Try /api/auth/me with old access_token cookie -> should fail with 401
+        me_response = client.get("/api/auth/me", cookies=cookies)
+        assert me_response.status_code == 401
+
 
 class TestRefresh:
     def test_refresh_rotates_token(self, client: TestClient, owner_user: User, owner_cookies: dict, db: Session):
-        old_refresh = owner_cookies.get("refresh_token")
+        old_refresh = owner_cookies.get("__Secure-refresh_token")
         response = client.post("/api/auth/refresh", cookies=owner_cookies)
         assert response.status_code == 200
 
@@ -140,9 +162,23 @@ class TestGetCurrentUser:
         assert response.status_code == 401
 
     def test_me_with_invalid_token_fails(self, client: TestClient):
-        client.cookies.set("access_token", "invalid.token.here")
+        client.cookies.set("__Secure-access_token", "invalid.token.here")
         response = client.get("/api/auth/me")
         assert response.status_code == 401
+
+
+class TestVerifyEmail:
+    def test_verify_email_expired_token(self, client: TestClient, db: Session):
+        from datetime import datetime, timedelta, timezone
+        from services.auth_service import AuthService
+        user = AuthService.create_user(db, "verifytest", "verify@test.de", "Verify123!")
+        user.email_verification_token = "expired_token_123"
+        user.email_verification_expires = datetime.now(timezone.utc) - timedelta(hours=1)
+        db.commit()
+
+        response = client.get("/api/auth/verify-email?token=expired_token_123")
+        assert response.status_code == 400
+        assert "abgelaufen" in response.json()["detail"]
 
 
 class TestSetupStatus:
@@ -176,7 +212,7 @@ class TestCsrfProtectionOnEndpoints:
         from unittest.mock import patch
         with patch("routers.servers.subprocess.run") as mock_run:
             mock_run.return_value = type("obj", (object,), {"returncode": 0})()
-            csrf = owner_cookies.get("csrf_token")
+            csrf = owner_cookies.get("__Secure-csrf_token")
             response = client.post(
                 "/api/servers",
                 json={"name": "Test", "game_type": "dayz"},

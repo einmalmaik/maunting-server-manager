@@ -5,17 +5,7 @@ function getCsrfToken(): string | null {
   return match ? decodeURIComponent(match[2]) : null
 }
 
-let isRefreshing = false
-let refreshSubscribers: Array<() => void> = []
-
-function onTokenRefreshed() {
-  refreshSubscribers.forEach((cb) => cb())
-  refreshSubscribers = []
-}
-
-function addRefreshSubscriber(cb: () => void) {
-  refreshSubscribers.push(cb)
-}
+let refreshPromise: Promise<void> | null = null
 
 async function doRefresh(): Promise<void> {
   const res = await fetch(`${API_BASE}/auth/refresh`, {
@@ -28,15 +18,14 @@ async function doRefresh(): Promise<void> {
 }
 
 async function refreshToken(): Promise<void> {
-  if (isRefreshing) {
-    return new Promise((resolve) => addRefreshSubscriber(resolve))
+  if (refreshPromise) {
+    return refreshPromise
   }
-  isRefreshing = true
+  refreshPromise = doRefresh()
   try {
-    await doRefresh()
-    onTokenRefreshed()
+    await refreshPromise
   } finally {
-    isRefreshing = false
+    refreshPromise = null
   }
 }
 
