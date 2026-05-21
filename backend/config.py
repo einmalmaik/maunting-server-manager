@@ -14,7 +14,9 @@ class Settings(BaseSettings):
     # Sicherheit
     secret_key: str = "change-me-in-production-please-use-a-256-bit-key"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60 * 24  # 24h
+    access_token_expire_minutes: int = 15  # 15 Min — kurzlebig fuer Rotation
+    refresh_token_expire_days: int = 30  # 30 Tage Refresh-Token
+    csrf_token_expire_minutes: int = 60 * 24  # 24h CSRF-Token
 
     # Email (SMTP)
     smtp_host: str = ""
