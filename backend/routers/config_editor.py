@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Server, Permission, User
-from routers.auth import get_current_user
+from routers.auth import get_current_user, verify_csrf
+from games import get_plugin
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -22,28 +23,16 @@ def _check_perm(user: User, server_id: int, db: Session) -> None:
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
 
 
-# Game-spezifische Config-Dateien (später aus Plugin geladen)
-CONFIG_FILES = {
-    "conan_exiles_ue5": [
-        {"name": "Engine.ini", "path": "ConanSandbox/Saved/Config/LinuxServer/Engine.ini"},
-        {"name": "Game.ini", "path": "ConanSandbox/Saved/Config/LinuxServer/Game.ini"},
-        {"name": "ServerSettings.ini", "path": "ConanSandbox/Saved/Config/LinuxServer/ServerSettings.ini"},
-    ],
-    "dayz": [
-        {"name": "serverDZ.cfg", "path": "serverDZ.cfg"},
-        {"name": "cfgplayerspawn.xml", "path": "cfgplayerspawn.xml"},
-        {"name": "cfgeconomy.xml", "path": "cfgeconomy.xml"},
-    ],
-}
-
-
 @router.get("/{server_id}/files")
 def list_config_files(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
     _check_perm(user, server_id, db)
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    return CONFIG_FILES.get(server.game_type, [])
+    plugin = get_plugin(server.game_type)
+    if not plugin:
+        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    return plugin.get_config_files()
 
 
 @router.get("/{server_id}/files/{file_name}")
@@ -52,8 +41,10 @@ def get_config_file(server_id: int, file_name: str, db: Session = Depends(get_db
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-
-    files = CONFIG_FILES.get(server.game_type, [])
+    plugin = get_plugin(server.game_type)
+    if not plugin:
+        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    files = plugin.get_config_files()
     file_info = next((f for f in files if f["name"] == file_name), None)
     if not file_info:
         raise HTTPException(status_code=404, detail="Config-Datei unbekannt")
@@ -70,13 +61,15 @@ def get_config_file(server_id: int, file_name: str, db: Session = Depends(get_db
 
 
 @router.put("/{server_id}/files/{file_name}")
-def update_config_file(server_id: int, file_name: str, content: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+def update_config_file(server_id: int, file_name: str, content: str, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     _check_perm(user, server_id, db)
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-
-    files = CONFIG_FILES.get(server.game_type, [])
+    plugin = get_plugin(server.game_type)
+    if not plugin:
+        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    files = plugin.get_config_files()
     file_info = next((f for f in files if f["name"] == file_name), None)
     if not file_info:
         raise HTTPException(status_code=404, detail="Config-Datei unbekannt")
@@ -88,3 +81,16 @@ def update_config_file(server_id: int, file_name: str, content: str, db: Session
         return {"message": "Config gespeichert", "name": file_name}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schreiben fehlgeschlagen: {e}")
+
+
+@router.get("/{server_id}/schema")
+def get_config_schema(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    _check_perm(user, server_id, db)
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    if not plugin:
+        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    schema = plugin.get_config_schema()
+    return [field.model_dump() for field in schema]

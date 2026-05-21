@@ -5,7 +5,7 @@ from database import get_db
 from models import User, Permission, Server
 from schemas.user import UserUpdate, UserResponse
 from schemas.permission import PermissionCreate, PermissionResponse
-from routers.auth import get_current_owner
+from routers.auth import get_current_owner, verify_csrf
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -24,7 +24,7 @@ def get_user(user_id: int, db: Session = Depends(get_db), owner: User = Depends(
 
 
 @router.patch("/users/{user_id}", response_model=UserResponse)
-def update_user(user_id: int, req: UserUpdate, db: Session = Depends(get_db), owner: User = Depends(get_current_owner)) -> User:
+def update_user(user_id: int, req: UserUpdate, db: Session = Depends(get_db), owner: User = Depends(get_current_owner), _: None = Depends(verify_csrf)) -> User:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User nicht gefunden")
@@ -40,7 +40,7 @@ def update_user(user_id: int, req: UserUpdate, db: Session = Depends(get_db), ow
 
 
 @router.delete("/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db), owner: User = Depends(get_current_owner)) -> dict:
+def delete_user(user_id: int, db: Session = Depends(get_db), owner: User = Depends(get_current_owner), _: None = Depends(verify_csrf)) -> dict:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User nicht gefunden")
@@ -57,7 +57,7 @@ def list_permissions(user_id: int, db: Session = Depends(get_db), owner: User = 
 
 
 @router.post("/permissions", response_model=PermissionResponse, status_code=201)
-def create_permission(req: PermissionCreate, db: Session = Depends(get_db), owner: User = Depends(get_current_owner)) -> Permission:
+def create_permission(req: PermissionCreate, db: Session = Depends(get_db), owner: User = Depends(get_current_owner), _: None = Depends(verify_csrf)) -> Permission:
     # Upsert-Logik: Wenn schon existiert, updaten
     perm = db.query(Permission).filter(
         Permission.user_id == req.user_id,

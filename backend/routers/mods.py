@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Mod, Server, Permission, User
-from routers.auth import get_current_user
+from schemas import ModResponse
+from routers.auth import get_current_user, verify_csrf
 
 router = APIRouter(prefix="/api/mods", tags=["mods"])
 
@@ -19,14 +20,14 @@ def _check_perm(user: User, server_id: int, db: Session) -> None:
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
 
 
-@router.get("/{server_id}")
-def list_mods(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Mod]:
+@router.get("/{server_id}", response_model=list[ModResponse])
+def list_mods(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _check_perm(user, server_id, db)
     return db.query(Mod).filter(Mod.server_id == server_id).order_by(Mod.load_order.asc()).all()
 
 
-@router.post("/{server_id}")
-def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Mod:
+@router.post("/{server_id}", response_model=ModResponse)
+def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
     _check_perm(user, server_id, db)
     existing = db.query(Mod).filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id).first()
     if existing:
@@ -46,8 +47,8 @@ def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db:
     return mod
 
 
-@router.patch("/{server_id}/{mod_id}")
-def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_update: bool | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Mod:
+@router.patch("/{server_id}/{mod_id}", response_model=ModResponse)
+def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_update: bool | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
     _check_perm(user, server_id, db)
     mod = db.query(Mod).filter(Mod.id == mod_id, Mod.server_id == server_id).first()
     if not mod:
@@ -62,7 +63,7 @@ def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_
 
 
 @router.delete("/{server_id}/{mod_id}")
-def unsubscribe_mod(server_id: int, mod_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+def unsubscribe_mod(server_id: int, mod_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     _check_perm(user, server_id, db)
     mod = db.query(Mod).filter(Mod.id == mod_id, Mod.server_id == server_id).first()
     if not mod:
@@ -72,8 +73,8 @@ def unsubscribe_mod(server_id: int, mod_id: int, db: Session = Depends(get_db), 
     return {"message": "Mod entfernt"}
 
 
-@router.post("/{server_id}/reorder")
-def reorder_mods(server_id: int, order: list[int], db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Mod]:
+@router.post("/{server_id}/reorder", response_model=list[ModResponse])
+def reorder_mods(server_id: int, order: list[int], db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
     _check_perm(user, server_id, db)
     mods = db.query(Mod).filter(Mod.server_id == server_id).all()
     mod_map = {m.id: m for m in mods}

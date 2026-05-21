@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Server, Permission, User
 from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
-from routers.auth import get_current_user
+from routers.auth import get_current_user, verify_csrf
+from games import get_plugin
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
@@ -32,7 +33,7 @@ def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current
 
 
 @router.post("", response_model=ServerResponse, status_code=201)
-def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Server:
+def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> Server:
     if not user.is_owner:
         raise HTTPException(status_code=403, detail="Nur Owner kann Server erstellen")
 
@@ -42,7 +43,7 @@ def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User =
     # Linux-User erstellen
     try:
         subprocess.run(["useradd", "-r", "-m", "-d", install_dir, linux_user], check=True, capture_output=True)
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         # User existiert vielleicht schon
         pass
 
@@ -75,7 +76,7 @@ def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depen
 
 
 @router.patch("/{server_id}", response_model=ServerResponse)
-def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Server:
+def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> Server:
     _check_perm(user, server_id, db, "can_edit_config")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -88,7 +89,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
 
 @router.delete("/{server_id}")
-def delete_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+def delete_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     if not user.is_owner:
         raise HTTPException(status_code=403, detail="Nur Owner kann Server löschen")
     server = db.query(Server).filter(Server.id == server_id).first()
@@ -100,37 +101,57 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
 
 
 @router.post("/{server_id}/start")
-def start_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+def start_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     _check_perm(user, server_id, db, "can_start")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    # Plugin-Logik später
+    plugin = get_plugin(server.game_type)
+    if not plugin:
+        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    result = plugin.start(server)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
     server.status = "running"
     db.commit()
-    return {"message": "Start-Befehl gesendet", "status": server.status}
+    return {"message": "Start-Befehl gesendet", "status": server.status, **result}
 
 
 @router.post("/{server_id}/stop")
-def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     _check_perm(user, server_id, db, "can_stop")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    if not plugin:
+        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    result = plugin.stop(server)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
     server.status = "stopped"
     db.commit()
-    return {"message": "Stop-Befehl gesendet", "status": server.status}
+    return {"message": "Stop-Befehl gesendet", "status": server.status, **result}
 
 
 @router.post("/{server_id}/restart")
-def restart_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+def restart_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     _check_perm(user, server_id, db, "can_restart")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    if not plugin:
+        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    stop_result = plugin.stop(server)
+    if "error" in stop_result:
+        raise HTTPException(status_code=500, detail=stop_result["error"])
+    start_result = plugin.start(server)
+    if "error" in start_result:
+        raise HTTPException(status_code=500, detail=start_result["error"])
     server.status = "running"
     db.commit()
-    return {"message": "Restart-Befehl gesendet", "status": server.status}
+    return {"message": "Restart-Befehl gesendet", "status": server.status, "stop": stop_result, "start": start_result}
 
 
 @router.get("/{server_id}/status", response_model=ServerStatusResponse)
@@ -139,15 +160,31 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    if not plugin:
+        return {
+            "id": server.id,
+            "status": server.status,
+            "status_message": server.status_message,
+            "cpu_percent": None,
+            "ram_mb": None,
+            "disk_mb": None,
+            "uptime_seconds": None,
+            "players_online": None,
+        }
+    plugin_status = plugin.get_status(server)
+    server.status = plugin_status.status
+    server.status_message = plugin_status.status_message or ""
+    db.commit()
     return {
         "id": server.id,
-        "status": server.status,
-        "status_message": server.status_message,
-        "cpu_percent": None,
-        "ram_mb": None,
-        "disk_mb": None,
-        "uptime_seconds": None,
-        "players_online": None,
+        "status": plugin_status.status,
+        "status_message": plugin_status.status_message,
+        "cpu_percent": plugin_status.cpu_percent,
+        "ram_mb": plugin_status.ram_mb,
+        "disk_mb": plugin_status.disk_mb,
+        "uptime_seconds": plugin_status.uptime_seconds,
+        "players_online": plugin_status.players_online,
     }
 
 
@@ -157,12 +194,22 @@ def server_logs(server_id: int, lines: int = 100, db: Session = Depends(get_db),
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    log_path = os.path.join(server.install_dir, "logs", "latest.log")
-    if not os.path.exists(log_path):
-        return {"logs": "", "path": log_path}
-    try:
-        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-            all_lines = f.readlines()
-        return {"logs": "".join(all_lines[-lines:]), "path": log_path}
-    except Exception:
-        return {"logs": "", "path": log_path}
+    plugin = get_plugin(server.game_type)
+    if plugin:
+        logs = plugin.get_logs(server, lines=lines)
+        return {"logs": logs, "path": "plugin-provided"}
+    # Fallback: generische Log-Pfade
+    fallback_paths = [
+        os.path.join(server.install_dir, "logs", "latest.log"),
+        os.path.join(server.install_dir, "log_1.txt"),
+        os.path.join(server.install_dir, "log", "script_1.log"),
+    ]
+    for path in fallback_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    all_lines = f.readlines()
+                return {"logs": "".join(all_lines[-lines:]), "path": path}
+            except Exception:
+                continue
+    return {"logs": "", "path": "none"}
