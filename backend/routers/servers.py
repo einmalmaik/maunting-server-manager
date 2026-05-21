@@ -7,21 +7,13 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Server, Permission, User
 from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
-from routers.auth import get_current_user, verify_csrf
+from dependencies import get_current_user, verify_csrf, require_server_permission
 from games import get_plugin
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
 
-def _check_perm(user: User, server_id: int, db: Session, action: str) -> None:
-    if user.is_owner:
-        return
-    perm = db.query(Permission).filter(
-        Permission.user_id == user.id,
-        Permission.server_id == server_id
-    ).first()
-    if not perm or not getattr(perm, action, False):
-        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
 
 
 @router.get("", response_model=list[ServerResponse])
@@ -68,7 +60,7 @@ def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User =
 
 @router.get("/{server_id}", response_model=ServerResponse)
 def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Server:
-    _check_perm(user, server_id, db, "can_view_console")
+    require_server_permission(user, server_id, db, "can_view_console")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -77,7 +69,7 @@ def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depen
 
 @router.patch("/{server_id}", response_model=ServerResponse)
 def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> Server:
-    _check_perm(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "can_edit_config")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -102,7 +94,7 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
 
 @router.post("/{server_id}/start")
 def start_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    _check_perm(user, server_id, db, "can_start")
+    require_server_permission(user, server_id, db, "can_start")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -119,7 +111,7 @@ def start_server(server_id: int, db: Session = Depends(get_db), user: User = Dep
 
 @router.post("/{server_id}/stop")
 def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    _check_perm(user, server_id, db, "can_stop")
+    require_server_permission(user, server_id, db, "can_stop")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -136,7 +128,7 @@ def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depe
 
 @router.post("/{server_id}/restart")
 def restart_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    _check_perm(user, server_id, db, "can_restart")
+    require_server_permission(user, server_id, db, "can_restart")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -156,7 +148,7 @@ def restart_server(server_id: int, db: Session = Depends(get_db), user: User = D
 
 @router.get("/{server_id}/status", response_model=ServerStatusResponse)
 def server_status(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    _check_perm(user, server_id, db, "can_view_console")
+    require_server_permission(user, server_id, db, "can_view_console")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -190,7 +182,7 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
 
 @router.get("/{server_id}/logs")
 def server_logs(server_id: int, lines: int = 100, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    _check_perm(user, server_id, db, "can_view_logs")
+    require_server_permission(user, server_id, db, "can_view_logs")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")

@@ -4,31 +4,23 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Mod, Server, Permission, User
 from schemas import ModResponse
-from routers.auth import get_current_user, verify_csrf
+from dependencies import get_current_user, verify_csrf, require_server_permission
 
 router = APIRouter(prefix="/api/mods", tags=["mods"])
 
 
-def _check_perm(user: User, server_id: int, db: Session) -> None:
-    if user.is_owner:
-        return
-    perm = db.query(Permission).filter(
-        Permission.user_id == user.id,
-        Permission.server_id == server_id
-    ).first()
-    if not perm or not perm.can_manage_mods:
-        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
 
 
 @router.get("/{server_id}", response_model=list[ModResponse])
 def list_mods(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    _check_perm(user, server_id, db)
+    require_server_permission(user, server_id, db, "can_manage_mods")
     return db.query(Mod).filter(Mod.server_id == server_id).order_by(Mod.load_order.asc()).all()
 
 
 @router.post("/{server_id}", response_model=ModResponse)
 def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
-    _check_perm(user, server_id, db)
+    require_server_permission(user, server_id, db, "can_manage_mods")
     existing = db.query(Mod).filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Mod bereits abonniert")
@@ -49,7 +41,7 @@ def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db:
 
 @router.patch("/{server_id}/{mod_id}", response_model=ModResponse)
 def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_update: bool | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
-    _check_perm(user, server_id, db)
+    require_server_permission(user, server_id, db, "can_manage_mods")
     mod = db.query(Mod).filter(Mod.id == mod_id, Mod.server_id == server_id).first()
     if not mod:
         raise HTTPException(status_code=404, detail="Mod nicht gefunden")
@@ -64,7 +56,7 @@ def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_
 
 @router.delete("/{server_id}/{mod_id}")
 def unsubscribe_mod(server_id: int, mod_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    _check_perm(user, server_id, db)
+    require_server_permission(user, server_id, db, "can_manage_mods")
     mod = db.query(Mod).filter(Mod.id == mod_id, Mod.server_id == server_id).first()
     if not mod:
         raise HTTPException(status_code=404, detail="Mod nicht gefunden")
@@ -75,7 +67,7 @@ def unsubscribe_mod(server_id: int, mod_id: int, db: Session = Depends(get_db), 
 
 @router.post("/{server_id}/reorder", response_model=list[ModResponse])
 def reorder_mods(server_id: int, order: list[int], db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
-    _check_perm(user, server_id, db)
+    require_server_permission(user, server_id, db, "can_manage_mods")
     mods = db.query(Mod).filter(Mod.server_id == server_id).all()
     mod_map = {m.id: m for m in mods}
     for idx, mod_id in enumerate(order):

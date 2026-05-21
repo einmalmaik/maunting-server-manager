@@ -11,23 +11,14 @@ from typing import List, Optional
 
 from database import get_db
 from models import Server, Permission, User
-from routers.auth import get_current_user
+from dependencies import get_current_user, require_server_permission
 from services.steam_service import get_steam_service, SteamModInfo
 from games import get_plugin
 
 router = APIRouter(prefix="/api/steam", tags=["steam"])
 
 
-def _check_perm(user: User, server_id: int, db: Session) -> None:
-    """Check if user has permission to manage mods for server."""
-    if user.is_owner:
-        return
-    perm = db.query(Permission).filter(
-        Permission.user_id == user.id,
-        Permission.server_id == server_id
-    ).first()
-    if not perm or not perm.can_manage_mods:
-        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
 
 
 @router.get("/workshop/search")
@@ -40,7 +31,7 @@ async def search_workshop_mods(
     user: User = Depends(get_current_user)
 ) -> List[dict]:
     """Search workshop mods for server's game."""
-    _check_perm(user, server_id, db)
+    require_server_permission(user, server_id, db, "can_manage_mods")
     
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -79,7 +70,7 @@ async def get_popular_mods(
     user: User = Depends(get_current_user)
 ) -> List[dict]:
     """Get popular workshop mods for server's game."""
-    _check_perm(user, server_id, db)
+    require_server_permission(user, server_id, db, "can_manage_mods")
     
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -116,7 +107,7 @@ async def get_mod_details(
     user: User = Depends(get_current_user)
 ) -> dict:
     """Get detailed information for a specific workshop mod."""
-    _check_perm(user, server_id, db)
+    require_server_permission(user, server_id, db, "can_manage_mods")
     
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:

@@ -5,7 +5,7 @@ from database import get_db
 from models import User, Permission, Server
 from schemas.user import UserUpdate, UserResponse
 from schemas.permission import PermissionCreate, PermissionResponse
-from routers.auth import get_current_owner, verify_csrf
+from dependencies import get_current_owner, verify_csrf
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 

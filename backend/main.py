@@ -1,6 +1,4 @@
 from contextlib import asynccontextmanager
-from collections import defaultdict
-import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +17,7 @@ from routers import (
     system_router,
     steam_router,
 )
+from middleware.rate_limit import rate_limit_middleware
 from services.steam_service import close_steam_service
 from services.scheduler_service import start_scheduler, stop_scheduler, init_server_schedules
 
@@ -66,33 +65,7 @@ app.add_middleware(
 
 
 # ── Rate Limiting ──
-_rate_limit_store: dict[str, list[float]] = defaultdict(list)
-_RATE_WINDOW = 60  # Sekunden
-_RATE_MAX = 100    # Requests pro Window (global pro IP)
-_AUTH_RATE_MAX = 10  # Auth-Endpunkte: 10 pro Minute
-
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    client_ip = request.client.host if request.client else "unknown"
-    now = time.time()
-    is_auth = request.url.path.startswith("/api/auth")
-    max_req = _AUTH_RATE_MAX if is_auth else _RATE_MAX
-
-    # Alte Eintraege entfernen
-    _rate_limit_store[client_ip] = [
-        t for t in _rate_limit_store[client_ip] if now - t < _RATE_WINDOW
-    ]
-
-    if len(_rate_limit_store[client_ip]) >= max_req:
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Zu viele Anfragen. Bitte warten Sie einen Moment."},
-            headers={"Retry-After": str(_RATE_WINDOW)},
-        )
-
-    _rate_limit_store[client_ip].append(now)
-    return await call_next(request)
+app.middleware("http")(rate_limit_middleware)
 
 
 # ── CSP + Security Headers Middleware ──

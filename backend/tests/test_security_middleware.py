@@ -26,6 +26,20 @@ class TestRateLimiting:
                 return
         assert False, "Rate limiting did not trigger for general endpoints"
 
+    def test_rate_limit_uses_x_forwarded_for(self, client: TestClient):
+        """Rate limiting should respect X-Forwarded-For header for reverse proxies."""
+        for i in range(12):
+            response = client.post(
+                "/api/auth/login",
+                json={"username": "nonexistent", "password": "wrong", "otp_code": None},
+                headers={"X-Forwarded-For": "1.2.3.4"},
+            )
+            if response.status_code == 429:
+                assert "Zu viele Anfragen" in response.json()["detail"]
+                assert "Retry-After" in response.headers
+                return
+        assert False, "Rate limiting did not trigger with X-Forwarded-For"
+
 
 class TestSecurityHeaders:
     def test_csp_header_present(self, client: TestClient):

@@ -9,31 +9,23 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Backup, Server, Permission, User
 from schemas import BackupResponse
-from routers.auth import get_current_user, verify_csrf
+from dependencies import get_current_user, verify_csrf, require_server_permission
 
 router = APIRouter(prefix="/api/backups", tags=["backups"])
 
 
-def _check_perm(user: User, server_id: int, db: Session, action: str) -> None:
-    if user.is_owner:
-        return
-    perm = db.query(Permission).filter(
-        Permission.user_id == user.id,
-        Permission.server_id == server_id
-    ).first()
-    if not perm or not getattr(perm, action, False):
-        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
 
 
 @router.get("/{server_id}", response_model=list[BackupResponse])
 def list_backups(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    _check_perm(user, server_id, db, "can_backup")
+    require_server_permission(user, server_id, db, "can_backup")
     return db.query(Backup).filter(Backup.server_id == server_id).order_by(Backup.created_at.desc()).all()
 
 
 @router.post("/{server_id}")
 def create_backup(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    _check_perm(user, server_id, db, "can_backup")
+    require_server_permission(user, server_id, db, "can_backup")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -62,7 +54,7 @@ def create_backup(server_id: int, db: Session = Depends(get_db), user: User = De
 
 @router.post("/{server_id}/restore/{backup_id}")
 def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    _check_perm(user, server_id, db, "can_restore")
+    require_server_permission(user, server_id, db, "can_restore")
     server = db.query(Server).filter(Server.id == server_id).first()
     backup = db.query(Backup).filter(Backup.id == backup_id, Backup.server_id == server_id).first()
     if not server or not backup:
@@ -87,7 +79,7 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
 
 @router.delete("/{server_id}/{backup_id}")
 def delete_backup(server_id: int, backup_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    _check_perm(user, server_id, db, "can_backup")
+    require_server_permission(user, server_id, db, "can_backup")
     backup = db.query(Backup).filter(Backup.id == backup_id, Backup.server_id == server_id).first()
     if not backup:
         raise HTTPException(status_code=404, detail="Backup nicht gefunden")
