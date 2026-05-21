@@ -157,6 +157,8 @@ cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
 cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
 cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
 cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
+cp "$SCRIPT_DIR/update.sh" "$MSM_DIR/" 2>/dev/null || true
+chmod +x "$MSM_DIR/update.sh" 2>/dev/null || true
 chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR"
 ok "Dateien kopiert"
 
@@ -294,6 +296,12 @@ MSM_PANEL_URL="$PANEL_URL"
 MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
 MSM_STEAMCMD_PATH="/usr/games/steamcmd"
 REDIS_URL="$REDIS_URL"
+
+# Auto-Update (GitHub Releases)
+MSM_GITHUB_OWNER="einmalmaik"
+MSM_GITHUB_REPO="mauntingservermanager"
+MSM_AUTO_UPDATE=false
+MSM_AUTO_UPDATE_INTERVAL_HOURS=24
 EOF
 
 chmod 600 "$ENV_FILE"
@@ -435,6 +443,19 @@ EOF
 
 systemctl daemon-reload
 systemctl enable msm-panel.service
+
+# Update-Timer (optional — deaktiviert per Default)
+cp "$SCRIPT_DIR/msm-update.service" /etc/systemd/system/msm-update.service 2>/dev/null || true
+cp "$SCRIPT_DIR/msm-update.timer" /etc/systemd/system/msm-update.timer 2>/dev/null || true
+systemctl daemon-reload
+systemctl enable msm-update.timer 2>/dev/null || true
+# Timer starten nur, wenn AUTO_UPDATE=true
+if [[ "$MSM_AUTO_UPDATE" == "true" ]]; then
+    systemctl start msm-update.timer 2>/dev/null || true
+    ok "Auto-Update Timer aktiviert (24h Intervall)"
+else
+    ok "Auto-Update Timer registriert (deaktiviert — setze MSM_AUTO_UPDATE=true)"
+fi
 ok "Service registriert"
 
 # ═══════════════════════════════════════════════════════════════

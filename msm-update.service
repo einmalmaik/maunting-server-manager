@@ -1,0 +1,10 @@
+[Unit]
+Description=Maunting Server Manager — Auto-Update (GitHub Releases)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/msm/update.sh
+StandardOutput=journal
+StandardError=journal
+User=root

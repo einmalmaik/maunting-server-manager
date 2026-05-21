@@ -1,11 +1,34 @@
+import subprocess
+
+import httpx
 import psutil
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from config import settings
+from dependencies import get_current_user
 from models import User
-from routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+
+def _get_current_version() -> str:
+    """Liest die aktuelle Version aus Git-Tags oder einer Datei."""
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--always"],
+            capture_output=True, text=True, timeout=5, cwd="/opt/msm",
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    try:
+        with open("/opt/msm/.version", "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 @router.get("/resources")
@@ -48,3 +71,39 @@ def supported_games(user: User = Depends(get_current_user)) -> list[dict]:
             "mod_support": True,
         },
     ]
+
+
+@router.get("/version")
+def system_version(user: User = Depends(get_current_user)) -> dict:
+    """Aktuelle Version + Update-Status (GitHub Releases).
+
+    Für Tauri: derselbe Endpunkt kann als Update-Quelle genutzt werden.
+    """
+    current = _get_current_version()
+    latest = None
+    update_available = False
+    release_url = None
+
+    try:
+        url = (
+            f"https://api.github.com/repos/"
+            f"{settings.github_owner}/{settings.github_repo}/releases/latest"
+        )
+        resp = httpx.get(url, headers={"Accept": "application/vnd.github+json"}, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            latest = data.get("tag_name", "unknown")
+            release_url = data.get("html_url", "")
+            # Einfacher String-Vergleich (Tags sollten SemVer nutzen)
+            update_available = current != latest and latest != "unknown"
+    except Exception:
+        pass
+
+    return {
+        "current_version": current,
+        "latest_version": latest,
+        "update_available": update_available,
+        "release_url": release_url,
+        "auto_update_enabled": settings.auto_update,
+        "github_repo": f"{settings.github_owner}/{settings.github_repo}",
+    }
