@@ -6,10 +6,10 @@ describe('api client', () => {
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(global, 'fetch')
-    // Clear cookies
+    // Clear cookies (must include secure flag for __Secure- prefixed cookies)
     document.cookie.split(';').forEach((c) => {
       const [name] = c.split('=')
-      document.cookie = `${name.trim()}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;`
+      document.cookie = `${name.trim()}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;secure`
     })
   })
 
@@ -29,7 +29,7 @@ describe('api client', () => {
 
   describe('CSRF header', () => {
     it('should send X-CSRF-Token for POST requests', async () => {
-      document.cookie = 'csrf_token=test_csrf_value;path=/'
+      document.cookie = '__Secure-csrf_token=test_csrf_value;path=/;secure'
       fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
 
       await api('/test', { method: 'POST', body: '{}' })
@@ -43,7 +43,7 @@ describe('api client', () => {
     })
 
     it('should send X-CSRF-Token for PUT requests', async () => {
-      document.cookie = 'csrf_token=put_csrf;path=/'
+      document.cookie = '__Secure-csrf_token=put_csrf;path=/;secure'
       fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
 
       await api('/test', { method: 'PUT' })
@@ -53,7 +53,7 @@ describe('api client', () => {
     })
 
     it('should send X-CSRF-Token for PATCH requests', async () => {
-      document.cookie = 'csrf_token=patch_csrf;path=/'
+      document.cookie = '__Secure-csrf_token=patch_csrf;path=/;secure'
       fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
 
       await api('/test', { method: 'PATCH' })
@@ -63,7 +63,7 @@ describe('api client', () => {
     })
 
     it('should send X-CSRF-Token for DELETE requests', async () => {
-      document.cookie = 'csrf_token=del_csrf;path=/'
+      document.cookie = '__Secure-csrf_token=del_csrf;path=/;secure'
       fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
 
       await api('/test', { method: 'DELETE' })
@@ -73,7 +73,7 @@ describe('api client', () => {
     })
 
     it('should NOT send X-CSRF-Token for GET requests', async () => {
-      document.cookie = 'csrf_token=get_csrf;path=/'
+      document.cookie = '__Secure-csrf_token=get_csrf;path=/;secure'
       fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
 
       await api('/test')
@@ -111,9 +111,9 @@ describe('api client', () => {
         .mockReturnValueOnce(mockResponse(200, { message: 'refreshed' }))
         .mockReturnValueOnce(mockResponse(200, { ok: true }))
 
-      document.cookie = 'csrf_token=initial;path=/'
+      document.cookie = '__Secure-csrf_token=initial;path=/'
 
-      const result = await api('/test')
+      await api('/test')
 
       expect(fetchSpy).toHaveBeenCalledTimes(3)
       // First call
