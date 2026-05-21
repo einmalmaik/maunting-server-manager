@@ -5,7 +5,9 @@ from database import get_db
 from models import User, Permission, Server
 from schemas.user import UserUpdate, UserResponse
 from schemas.permission import PermissionCreate, PermissionResponse
+from schemas.user import AdminUserCreate
 from dependencies import get_current_owner, verify_csrf
+from services import AuthService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -49,6 +51,24 @@ def delete_user(user_id: int, db: Session = Depends(get_db), owner: User = Depen
     db.delete(user)
     db.commit()
     return {"message": "User gelöscht"}
+
+
+@router.post("/users", response_model=UserResponse, status_code=201)
+def create_user_admin(
+    req: AdminUserCreate,
+    db: Session = Depends(get_db),
+    owner: User = Depends(get_current_owner),
+    _: None = Depends(verify_csrf),
+) -> User:
+    if AuthService.get_user_by_username(db, req.username):
+        raise HTTPException(status_code=400, detail="Username bereits vergeben")
+    if AuthService.get_user_by_email(db, req.email):
+        raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
+    user = AuthService.create_user(db, req.username, req.email, req.password)
+    if req.is_owner:
+        user.is_owner = True
+        db.commit()
+    return user
 
 
 @router.get("/permissions/{user_id}", response_model=list[PermissionResponse])

@@ -3,8 +3,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import hashlib
 import secrets
-import time
-import uuid
 
 from cryptography.fernet import Fernet
 from jose import jwt, JWTError
@@ -15,18 +13,6 @@ from config import settings
 from models import User, RefreshToken
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
-
-# ── JWT Blacklist (In-Memory, TTL-basiert) ──
-_jwt_blacklist: dict[str, float] = {}
-_BLACKLIST_TTL_SECONDS = 15 * 60  # 15 Minuten
-
-
-def _cleanup_blacklist() -> None:
-    """Entfernt Blacklist-Eintraege aelter als 15 Minuten."""
-    now = time.time()
-    expired = [jti for jti, ts in _jwt_blacklist.items() if now - ts > _BLACKLIST_TTL_SECONDS]
-    for jti in expired:
-        del _jwt_blacklist[jti]
 
 
 class AuthService:
@@ -69,18 +55,6 @@ class AuthService:
             return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         except JWTError:
             return None
-
-    @staticmethod
-    def blacklist_jwt(jti: str) -> None:
-        """Speichert JTI in der In-Memory-Blacklist mit aktuellem Timestamp."""
-        _cleanup_blacklist()
-        _jwt_blacklist[jti] = time.time()
-
-    @staticmethod
-    def is_jwt_blacklisted(jti: str) -> bool:
-        """Prueft ob JTI in der Blacklist ist und noch nicht abgelaufen (TTL 15 Min)."""
-        _cleanup_blacklist()
-        return jti in _jwt_blacklist
 
     # ── Refresh Token (DB-gestuetzt, rotierbar, revozierbar) ──
     @staticmethod

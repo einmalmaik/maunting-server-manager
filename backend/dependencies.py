@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User, Permission
 from services.auth_service import AuthService
+from services.jwt_blacklist_service import is_jwt_blacklisted
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -14,7 +15,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     if not payload or "sub" not in payload or payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Ungueltiges Token")
     jti = payload.get("jti")
-    if jti and AuthService.is_jwt_blacklisted(jti):
+    if jti and is_jwt_blacklisted(db, jti):
         raise HTTPException(status_code=401, detail="Token widerrufen")
     user = AuthService.get_user_by_username(db, payload["sub"])
     if not user or not user.is_active:

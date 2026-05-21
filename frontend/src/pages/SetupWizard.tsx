@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Shield, Server, ChevronRight, Check } from 'lucide-react'
+import { Shield, Server, ChevronRight, Check, Mail } from 'lucide-react'
+import { api } from '@/api/client'
 
 interface SetupWizardProps {
   onComplete: () => void
@@ -16,6 +17,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     email: '',
     password: '',
     confirm: '',
+    code: '',
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,23 +35,59 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
     setSubmitting(true)
     try {
-      const res = await fetch('/api/auth/setup', {
+      const res = await api<{ requires_verification: boolean; message: string }>('/auth/setup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: form.username,
           email: form.email,
           password: form.password,
         }),
       })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Setup failed')
+
+      if (res.requires_verification) {
+        setStep(3)
+      } else {
+        setStep(4)
+        setTimeout(onComplete, 2000)
       }
-      setStep(3)
-      setTimeout(onComplete, 2000)
     } catch (err: any) {
       setError(err.message || t('setup.error', 'Einrichtung fehlgeschlagen'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setSubmitting(true)
+    try {
+      await api('/auth/setup-verify', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: form.email,
+          code: form.code,
+        }),
+      })
+      setStep(4)
+      setTimeout(onComplete, 2000)
+    } catch (err: any) {
+      setError(err.message || t('setup.verificationFailed', 'Verifizierung fehlgeschlagen'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleResendCode = async () => {
+    setError('')
+    setSubmitting(true)
+    try {
+      await api('/auth/setup-resend', {
+        method: 'POST',
+        body: JSON.stringify({ email: form.email }),
+      })
+    } catch (err: any) {
+      setError(err.message || t('setup.resendFailed', 'Code konnte nicht erneut gesendet werden'))
     } finally {
       setSubmitting(false)
     }
@@ -58,7 +96,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const steps = [
     { num: 1, label: 'Willkommen' },
     { num: 2, label: 'Owner erstellen' },
-    { num: 3, label: 'Fertig' },
+    { num: 3, label: 'Verifizieren' },
+    { num: 4, label: 'Fertig' },
   ]
 
   return (
@@ -253,8 +292,75 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
           )}
 
-          {/* Step 3: Success */}
+          {/* Step 3: Email Verification Code */}
           {step === 3 && (
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-6">
+                <Mail className="w-8 h-8 text-secondary" />
+              </div>
+              <h2 className="font-headline text-headline-md text-primary mb-3">
+                {t('setup.verifyEmail', 'E-Mail verifizieren')}
+              </h2>
+              <p className="font-body-md text-body-md text-on-surface-variant mb-2 max-w-sm mx-auto">
+                {t('setup.verifyEmailDesc', 'Wir haben einen 6-stelligen Code an {email} gesendet. Gib ihn ein, um fortzufahren.', { email: form.email })}
+              </p>
+              <p className="font-mono-sm text-mono-sm text-on-surface-variant mb-8">
+                {t('setup.codeExpires', 'Code gültig für 10 Minuten')}
+              </p>
+
+              <form onSubmit={handleVerify} className="space-y-4 max-w-xs mx-auto">
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('setup.verificationCode', 'Verifizierungscode')}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\d{6}"
+                    maxLength={6}
+                    value={form.code}
+                    onChange={(e) => setForm({ ...form, code: e.target.value })}
+                    className="msm-input text-center text-2xl tracking-[0.5em] font-mono"
+                    placeholder="000000"
+                    required
+                  />
+                </div>
+
+                {error && (
+                  <div className="msm-alert-error text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={submitting || form.code.length !== 6}
+                  className="msm-btn-primary w-full py-3 disabled:opacity-50"
+                >
+                  {submitting ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      {t('common.loading', 'Laden...')}
+                    </span>
+                  ) : (
+                    t('setup.verify', 'Verifizieren')
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResendCode}
+                  disabled={submitting}
+                  className="text-sm text-secondary hover:text-mint-accent transition-colors disabled:opacity-50"
+                >
+                  {t('setup.resendCode', 'Code erneut senden')}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* Step 4: Success */}
+          {step === 4 && (
             <div className="p-8 text-center">
               <div className="w-16 h-16 rounded-full bg-status-success/10 border border-status-success/30 flex items-center justify-center mx-auto mb-6">
                 <Check className="w-8 h-8 text-status-success" />
@@ -263,7 +369,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 {t('setup.success', 'Einrichtung abgeschlossen')}
               </h2>
               <p className="font-body-md text-body-md text-on-surface-variant mb-2">
-                {t('setup.successDesc', 'Der Owner-Account wurde erfolgreich erstellt.')}
+                {t('setup.successDesc', 'Der Owner-Account wurde erfolgreich erstellt und verifiziert.')}
               </p>
               <p className="font-mono-sm text-mono-sm text-on-surface-variant">
                 {t('setup.redirecting', 'Weiterleitung zum Login...')}

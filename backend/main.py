@@ -1,9 +1,15 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+
+from limits import parse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from config import settings
 from database import engine, Base
@@ -17,9 +23,23 @@ from routers import (
     system_router,
     steam_router,
 )
-from middleware.rate_limit import rate_limit_middleware
+from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
 from services.scheduler_service import start_scheduler, stop_scheduler, init_server_schedules
+
+
+# ── Auth-Endpunkte: 10/minute (strenger als global) ──
+_auth_limit_item = parse("10/minute")
+
+
+def auth_rate_limit(request: Request) -> None:
+    key = get_remote_address(request)
+    if not limiter.limiter.hit(_auth_limit_item, key):
+        raise HTTPException(
+            status_code=429,
+            detail="Zu viele Anfragen. Bitte warten Sie einen Moment.",
+            headers={"Retry-After": "60"},
+        )
 
 
 @asynccontextmanager
@@ -64,8 +84,10 @@ app.add_middleware(
 )
 
 
-# ── Rate Limiting ──
-app.middleware("http")(rate_limit_middleware)
+# ── Rate Limiting (slowapi) ──
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 
 # ── CSP + Security Headers Middleware ──
@@ -91,7 +113,7 @@ async def security_headers_middleware(request: Request, call_next):
 
 
 # Router
-app.include_router(auth_router)
+app.include_router(auth_router, dependencies=[Depends(auth_rate_limit)])
 app.include_router(admin_router)
 app.include_router(servers_router)
 app.include_router(backups_router)

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=1)
-    otp_code: str | None = Field(None, pattern=r"^\d{6}$")
+    otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
 
 
 class TokenResponse(BaseModel):

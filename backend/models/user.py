@@ -21,7 +21,6 @@ class User(Base):
     email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_verification_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    two_factor_secret: Mapped[str | None] = mapped_column(String(32), nullable=True)
     two_factor_secret_encrypted: Mapped[str | None] = mapped_column(String(255), nullable=True)
     two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -34,3 +33,4 @@ class User(Base):
 
     permissions: Mapped[list["Permission"]] = relationship("Permission", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    backup_codes: Mapped[list["BackupCode"]] = relationship("BackupCode", back_populates="user", cascade="all, delete-orphan")

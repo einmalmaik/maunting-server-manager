@@ -44,9 +44,9 @@ def clean_db():
     with db_module.engine.begin() as conn:
         for table in reversed(db_module.Base.metadata.sorted_tables):
             conn.execute(table.delete())
-    # Reset rate limiting store between tests
-    import middleware.rate_limit as rate_limit_module
-    rate_limit_module._rate_limit_store.clear()
+    # Reset slowapi in-memory storage between tests
+    from middleware.rate_limit import limiter
+    limiter.reset()
     yield
 
 

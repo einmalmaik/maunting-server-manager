@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import type { User } from '@/types'
-import { Shield, ArrowRight, Globe } from 'lucide-react'
+import { Shield, ArrowRight, Globe, KeyRound } from 'lucide-react'
 
 export function Login() {
   const { t, i18n } = useTranslation()
@@ -13,6 +13,7 @@ export function Login() {
   const [error, setError] = useState('')
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
+  const [useBackupCode, setUseBackupCode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -36,7 +37,6 @@ export function Login() {
         return
       }
 
-      // Token wird vom Backend als httpOnly Cookie gesetzt
       const user = await api<User>('/auth/me')
       setUser(user)
       setAuthenticated(true)
@@ -54,15 +54,11 @@ export function Login() {
 
   return (
     <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
-      {/* Deep Grid Background */}
       <div className="absolute inset-0 msm-deep-grid opacity-50" />
-
-      {/* Ambient Glow */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute top-20 right-20 w-64 h-64 bg-cyan-glow blur-[80px] rounded-full pointer-events-none opacity-40" />
 
       <div className="relative z-10 w-full max-w-md">
-        {/* Language Toggle */}
         <div className="flex justify-end mb-4">
           <button
             onClick={toggleLang}
@@ -73,7 +69,6 @@ export function Login() {
           </button>
         </div>
 
-        {/* Brand */}
         <div className="flex items-center justify-center gap-3 mb-8">
           <div className="w-10 h-10 rounded-md bg-primary flex items-center justify-center text-on-primary font-headline text-headline-md font-extrabold">
             M
@@ -88,7 +83,6 @@ export function Login() {
           </div>
         </div>
 
-        {/* Login Card */}
         <div className="msm-card p-8">
           <div className="text-center mb-6">
             <div className="w-12 h-12 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-4">
@@ -134,21 +128,37 @@ export function Login() {
             </div>
 
             {requires2FA && (
-              <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                  {t('auth.otpCode')}
-                </label>
-                <input
-                  type="text"
-                  value={form.otp}
-                  onChange={(e) => setForm({ ...form, otp: e.target.value })}
-                  className="msm-input"
-                  placeholder="000000"
-                  required
-                  pattern="\d{6}"
-                  maxLength={6}
-                />
-              </div>
+              <>
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {useBackupCode
+                      ? t('auth.backupCode', 'Backup-Code')
+                      : t('auth.otpCode', '2FA-Code')}
+                  </label>
+                  <input
+                    type="text"
+                    value={form.otp}
+                    onChange={(e) => setForm({ ...form, otp: e.target.value })}
+                    className="msm-input"
+                    placeholder={useBackupCode ? 'XXXX-XXXX' : '000000'}
+                    required
+                    maxLength={useBackupCode ? 12 : 6}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseBackupCode(!useBackupCode)
+                    setForm({ ...form, otp: '' })
+                  }}
+                  className="text-xs text-secondary hover:text-mint-accent transition-colors flex items-center gap-1"
+                >
+                  <KeyRound className="w-3 h-3" />
+                  {useBackupCode
+                    ? t('auth.use2FAInstead', '2FA-Code stattdessen verwenden')
+                    : t('auth.useBackupCode', 'Backup-Code verwenden')}
+                </button>
+              </>
             )}
 
             {error && (

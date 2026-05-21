@@ -62,3 +62,18 @@ Dieser Link ist 1 Stunde gültig.
 Maunting Server Manager
 """
         return await EmailService.send_email(to, subject, body)
+
+    @staticmethod
+    async def send_verification_code_email(to: str, username: str, code: str) -> bool:
+        subject = "Maunting Server Manager — Verifizierungscode"
+        body = f"""Hallo {username},
+
+Dein Verifizierungscode lautet:
+
+{code}
+
+Gültig für 10 Minuten.
+
+Maunting Server Manager
+"""
+        return await EmailService.send_email(to, subject, body)

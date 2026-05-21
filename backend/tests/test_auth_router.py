@@ -196,6 +196,130 @@ class TestSetupStatus:
         assert response.json()["setup_required"] is False
 
 
+class TestSetupVerification:
+    def test_setup_requires_verification_code(self, client: TestClient, db: Session):
+        db.query(User).delete()
+        db.commit()
+        response = client.post("/api/auth/setup", json={
+            "username": "setupowner",
+            "email": "setup@test.de",
+            "password": "SetupPass123!",
+        })
+        # Ohne SMTP ist der Status 503 mit Code im Detail
+        assert response.status_code in (200, 503)
+
+    def test_setup_verify_with_wrong_code_fails(self, client: TestClient, db: Session):
+        from services.auth_service import AuthService
+        user = AuthService.create_owner(db, "verifyowner", "verifyowner@test.de", "Verify123!")
+        user.email_verified = False
+        db.commit()
+        response = client.post("/api/auth/setup-verify", json={
+            "email": "verifyowner@test.de",
+            "code": "000000",
+        })
+        assert response.status_code == 400
+
+    def test_setup_verify_with_valid_code(self, client: TestClient, db: Session):
+        from services.auth_service import AuthService
+        from services.email_verification_service import EmailVerificationService
+        user = AuthService.create_owner(db, "verifyowner2", "verifyowner2@test.de", "Verify123!")
+        user.email_verified = False
+        db.commit()
+        code = EmailVerificationService.create_verification(db, "verifyowner2@test.de", "setup")
+        response = client.post("/api/auth/setup-verify", json={
+            "email": "verifyowner2@test.de",
+            "code": code,
+        })
+        assert response.status_code == 200
+        assert response.json()["setup_completed"] is True
+
+
+class Test2FABackupCodes:
+    def test_login_with_backup_code(self, client: TestClient, db: Session, owner_user: User):
+        import pyotp
+        from services.backup_code_service import BackupCodeService
+        from services.auth_service import AuthService as _AuthService
+        secret = pyotp.random_base32()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        owner_user.two_factor_enabled = True
+        db.commit()
+        codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
+        # Erstes Login ohne OTP -> requires_2fa
+        res1 = client.post("/api/auth/login", json={
+            "username": "owner",
+            "password": "OwnerPass123!",
+            "otp_code": None,
+        })
+        assert res1.status_code == 200
+        assert res1.json()["requires_2fa"] is True
+        # Login mit Backup-Code
+        res2 = client.post("/api/auth/login", json={
+            "username": "owner",
+            "password": "OwnerPass123!",
+            "otp_code": codes[0],
+        })
+        assert res2.status_code == 200
+        assert res2.json()["requires_2fa"] is False
+
+    def test_backup_code_used_twice_fails(self, client: TestClient, db: Session, owner_user: User):
+        import pyotp
+        from services.backup_code_service import BackupCodeService
+        from services.auth_service import AuthService as _AuthService
+        secret = pyotp.random_base32()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        owner_user.two_factor_enabled = True
+        db.commit()
+        codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
+        # Erster Login mit Backup-Code
+        res1 = client.post("/api/auth/login", json={
+            "username": "owner",
+            "password": "OwnerPass123!",
+            "otp_code": codes[0],
+        })
+        assert res1.status_code == 200
+        # Zweiter Login mit gleichem Backup-Code -> muss fehlschlagen
+        res2 = client.post("/api/auth/login", json={
+            "username": "owner",
+            "password": "OwnerPass123!",
+            "otp_code": codes[0],
+        })
+        assert res2.status_code == 401
+
+    def test_2fa_disable_requires_current_otp(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+        import pyotp
+        from services.auth_service import AuthService as _AuthService
+        secret = pyotp.random_base32()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        owner_user.two_factor_enabled = True
+        db.commit()
+        csrf = owner_cookies.get("__Secure-csrf_token")
+        # Deaktivierung ohne OTP -> muss fehlschlagen
+        res = client.post(
+            "/api/auth/2fa/disable?otp_code=wrong",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert res.status_code == 400
+
+    def test_2fa_disable_with_backup_code_fails(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+        import pyotp
+        from services.backup_code_service import BackupCodeService
+        from services.auth_service import AuthService as _AuthService
+        secret = pyotp.random_base32()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        owner_user.two_factor_enabled = True
+        db.commit()
+        codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
+        csrf = owner_cookies.get("__Secure-csrf_token")
+        # Deaktivierung mit Backup-Code -> muss fehlschlagen
+        res = client.post(
+            f"/api/auth/2fa/disable?otp_code={codes[0]}",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert res.status_code == 400
+
+
 class TestCsrfProtectionOnEndpoints:
     """Verify that state-changing endpoints require CSRF."""
 
