@@ -48,7 +48,7 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 GITHUB_OWNER="${GITHUB_OWNER:-einmalmaik}"
-GITHUB_REPO="${GITHUB_REPO:-mauntingservermanager}"
+GITHUB_REPO="${GITHUB_REPO:-maunting-server-manager}"
 AUTO_UPDATE="${AUTO_UPDATE:-false}"
 
 log "=== Maunting Server Manager Updater ==="

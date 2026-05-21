@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { Server, GameInfo } from '@/types'
+import { UpdateBanner } from '@/components/UpdateBanner'
 import { Server as ServerIcon, Activity, Users } from 'lucide-react'
 
 export function Dashboard() {
@@ -35,6 +36,8 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
+      <UpdateBanner />
+
       <div>
         <h1 className="font-headline text-headline-sm text-primary">{t('dashboard.title')}</h1>
         <p className="font-body-md text-body-md text-on-surface-variant mt-1">

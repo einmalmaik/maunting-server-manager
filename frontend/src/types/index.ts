@@ -23,6 +23,9 @@ export interface Server {
   cpu_limit_percent: number | null
   ram_limit_mb: number | null
   disk_limit_gb: number | null
+  game_port: number | null
+  query_port: number | null
+  rcon_port: number | null
   created_at: string
 }
 
@@ -31,4 +34,13 @@ export interface GameInfo {
   name: string
   platform: string
   mod_support: boolean
+}
+
+export interface VersionInfo {
+  current_version: string
+  latest_version: string | null
+  update_available: boolean
+  release_url: string | null
+  auto_update_enabled: boolean
+  github_repo: string
 }

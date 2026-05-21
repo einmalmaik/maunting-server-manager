@@ -12,6 +12,7 @@ import {
   FileText,
   Package,
   HardDrive,
+  Network,
 } from 'lucide-react'
 
 export function ServerDetail() {
@@ -201,6 +202,36 @@ export function ServerDetail() {
           <span className="font-body-md text-base text-on-surface">{t('servers.backups')}</span>
         </div>
       </div>
+
+      {/* Ports */}
+      {(server.game_port || server.query_port || server.rcon_port) && (
+        <div className="msm-card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Network className="w-4 h-4 text-on-surface-variant" />
+            <h3 className="font-headline text-body-md text-on-surface">Netzwerk</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {server.game_port && (
+              <div>
+                <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">Game Port</p>
+                <p className="font-headline text-display-sm text-primary">{server.game_port} <span className="text-sm font-body-md text-on-surface-variant">UDP</span></p>
+              </div>
+            )}
+            {server.query_port && (
+              <div>
+                <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">Query Port</p>
+                <p className="font-headline text-display-sm text-primary">{server.query_port} <span className="text-sm font-body-md text-on-surface-variant">UDP</span></p>
+              </div>
+            )}
+            {server.rcon_port && (
+              <div>
+                <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">RCON Port</p>
+                <p className="font-headline text-display-sm text-primary">{server.rcon_port} <span className="text-sm font-body-md text-on-surface-variant">TCP</span></p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Logs */}
       <div className="msm-card">

@@ -299,7 +299,7 @@ REDIS_URL="$REDIS_URL"
 
 # Auto-Update (GitHub Releases)
 MSM_GITHUB_OWNER="einmalmaik"
-MSM_GITHUB_REPO="mauntingservermanager"
+MSM_GITHUB_REPO="maunting-server-manager"
 MSM_AUTO_UPDATE=false
 MSM_AUTO_UPDATE_INTERVAL_HOURS=24
 EOF

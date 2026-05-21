@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # Auto-Update (GitHub Releases)
     github_owner: str = "einmalmaik"
-    github_repo: str = "mauntingservermanager"
+    github_repo: str = "maunting-server-manager"
     auto_update: bool = False  # true = systemd-Timer installiert Updates automatisch
     auto_update_interval_hours: int = 24  # Prüfintervall
 
