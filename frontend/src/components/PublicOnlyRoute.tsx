@@ -1,8 +1,15 @@
+import { useEffect } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 
 export function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuthStore()
+  const { isAuthenticated, isLoading, checkAuth } = useAuthStore()
+
+  useEffect(() => {
+    if (!isAuthenticated && isLoading) {
+      checkAuth()
+    }
+  }, [isAuthenticated, isLoading, checkAuth])
 
   if (isLoading) {
     return (

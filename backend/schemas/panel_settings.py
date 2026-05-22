@@ -27,3 +27,7 @@ class PanelSettingsUpdate(BaseModel):
 
 class TestEmailRequest(BaseModel):
     to: str
+
+
+class ResendKeyRequest(BaseModel):
+    resend_api_key: str

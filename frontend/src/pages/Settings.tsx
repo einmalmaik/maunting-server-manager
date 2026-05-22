@@ -89,7 +89,42 @@ export function Settings() {
     }
   }
 
-  const provider = settings.resend_api_key ? 'resend' : 'smtp'
+  // Explicit provider toggle, independent of field contents
+  const [provider, setProvider] = useState<'smtp' | 'resend'>('smtp')
+  const [newResendKey, setNewResendKey] = useState('')
+  const [savingResend, setSavingResend] = useState(false)
+  const [resendMsg, setResendMsg] = useState('')
+
+  useEffect(() => {
+    // Derive initial provider from fetched data
+    if (settings.resend_api_key) {
+      setProvider('resend')
+    } else {
+      setProvider('smtp')
+    }
+  }, [settings.resend_api_key])
+
+  const handleSaveResendKey = async () => {
+    if (!newResendKey.trim()) return
+    setSavingResend(true)
+    setError('')
+    setResendMsg('')
+    try {
+      await api('/settings/resend-key', {
+        method: 'POST',
+        body: JSON.stringify({ resend_api_key: newResendKey.trim() }),
+      })
+      setResendMsg('Resend API-Key gespeichert')
+      setNewResendKey('')
+      // Refresh settings to pick up the masked key status
+      await fetchSettings()
+      setTimeout(() => setResendMsg(''), 3000)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSavingResend(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -128,11 +163,13 @@ export function Settings() {
               </label>
               <input
                 type="url"
-                value={settings.panel_url}
-                onChange={(e) => setSettings({ ...settings, panel_url: e.target.value })}
-                className="msm-input"
-                placeholder="https://panel.example.com"
+                value={settings.panel_url || window.location.origin}
+                readOnly
+                className="msm-input opacity-60 cursor-not-allowed"
               />
+              <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+                Wird automatisch aus der aktuellen Adresse ermittelt.
+              </p>
             </div>
             <div>
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
@@ -167,7 +204,7 @@ export function Settings() {
           <div className="flex gap-2 mb-6">
             <button
               type="button"
-              onClick={() => setSettings({ ...settings, resend_api_key: '' })}
+              onClick={() => setProvider('smtp')}
               className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
                 provider === 'smtp'
                   ? 'bg-secondary-container text-on-secondary-container'
@@ -178,7 +215,7 @@ export function Settings() {
             </button>
             <button
               type="button"
-              onClick={() => setSettings({ ...settings, smtp_host: '', smtp_user: '', smtp_password: '' })}
+              onClick={() => setProvider('resend')}
               className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
                 provider === 'resend'
                   ? 'bg-secondary-container text-on-secondary-container'
@@ -264,20 +301,64 @@ export function Settings() {
               </div>
             </div>
           ) : (
-            <div>
-              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                {t('settings.resendApiKey')}
-              </label>
-              <input
-                type="password"
-                value={settings.resend_api_key}
-                onChange={(e) => setSettings({ ...settings, resend_api_key: e.target.value })}
-                className="msm-input"
-                placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              />
-              <p className="font-body-md text-xs text-on-surface-variant mt-2">
-                Resend API-Key von <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="text-secondary hover:underline">resend.com</a>
-              </p>
+            <div className="space-y-4">
+              {/* Status indicator */}
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${settings.resend_api_key ? 'bg-status-success' : 'bg-on-surface-variant'}`} />
+                <span className="font-body-md text-sm text-on-surface">
+                  {settings.resend_api_key ? 'Resend konfiguriert' : 'Resend nicht konfiguriert'}
+                </span>
+              </div>
+
+              {/* Masked key display */}
+              {settings.resend_api_key && (
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    Aktueller Key
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.resend_api_key}
+                    readOnly
+                    className="msm-input opacity-60 cursor-not-allowed font-mono text-sm"
+                  />
+                </div>
+              )}
+
+              {/* New key input */}
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  Neuer Resend API-Key
+                </label>
+                <input
+                  type="password"
+                  value={newResendKey}
+                  onChange={(e) => setNewResendKey(e.target.value)}
+                  className="msm-input"
+                  placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                />
+                <p className="font-body-md text-xs text-on-surface-variant mt-2">
+                  Resend API-Key von <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="text-secondary hover:underline">resend.com</a>
+                </p>
+              </div>
+
+              {resendMsg && <p className="text-sm text-status-success">{resendMsg}</p>}
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSaveResendKey}
+                  disabled={savingResend || !newResendKey.trim()}
+                  className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+                >
+                  {savingResend ? (
+                    <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  API-Key speichern
+                </button>
+              </div>
             </div>
           )}
 

@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
+import { Logo } from '@/components/Logo'
 import {
   LayoutDashboard,
   Server,
@@ -35,9 +36,7 @@ export function Sidebar() {
     <aside className="msm-sidebar hidden md:flex flex-col h-screen fixed left-0 top-0 w-64 z-40">
       {/* Brand */}
       <div className="px-6 pt-6 pb-8 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-md bg-primary flex items-center justify-center text-on-primary font-headline text-headline-md font-extrabold">
-          M
-        </div>
+        <Logo size="md" />
         <div>
           <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
             MauntingStudios

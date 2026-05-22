@@ -1,9 +1,14 @@
+import os
+import re
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from config import settings
 from database import get_db
 from dependencies import get_current_owner, verify_csrf
-from schemas.panel_settings import PanelSettingsResponse, PanelSettingsUpdate, TestEmailRequest
+from schemas.panel_settings import PanelSettingsResponse, PanelSettingsUpdate, TestEmailRequest, ResendKeyRequest
 from services.panel_settings_service import PanelSettingsService
 from services.email_service import EmailService
 
@@ -87,3 +92,68 @@ async def test_email(
     if not ok:
         raise HTTPException(status_code=503, detail="E-Mail konnte nicht versendet werden")
     return {"message": "Test-E-Mail gesendet"}
+
+
+# ------------------------------------------------------------------
+# Secure .env update for Resend API key
+# ------------------------------------------------------------------
+
+_ENV_PATH = Path(".env")
+
+
+def _update_env_file(key: str, value: str) -> None:
+    """Safely updates a single key in .env without destroying other variables.
+
+    Raises OSError if the file is not writable.
+    """
+    if not _ENV_PATH.exists():
+        raise OSError(".env file not found")
+
+    content = _ENV_PATH.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    pattern = re.compile(rf'^{re.escape(key)}\s*=\s*')
+
+    updated = False
+    new_lines = []
+    for line in lines:
+        if pattern.match(line):
+            new_lines.append(f'{key}="{value}"')
+            updated = True
+        else:
+            new_lines.append(line)
+
+    if not updated:
+        new_lines.append(f'{key}="{value}"')
+
+    # Ensure trailing newline
+    final = "\n".join(new_lines) + "\n"
+    _ENV_PATH.write_text(final, encoding="utf-8")
+
+
+@router.post("/resend-key", status_code=200)
+def update_resend_key(
+    req: ResendKeyRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_owner),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Stores the Resend API key securely in .env instead of the database.
+
+    Deletes any DB override so the .env value takes effect immediately.
+    """
+    if not req.resend_api_key.startswith("re_"):
+        raise HTTPException(status_code=400, detail="Ungueltiger Resend API-Key")
+
+    try:
+        _update_env_file("MSM_RESEND_API_KEY", req.resend_api_key)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
+
+    # Remove DB override so .env takes precedence
+    PanelSettingsService.set("resend_api_key", "")
+
+    # Update in-memory settings for immediate effect (no restart required)
+    settings.__dict__["resend_api_key"] = req.resend_api_key
+    os.environ["MSM_RESEND_API_KEY"] = req.resend_api_key
+
+    return {"message": "Resend API-Key gespeichert"}

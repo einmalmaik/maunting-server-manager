@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { useNavigate } from 'react-router-dom'
-import { Globe, Bell, Menu, Settings, User, LogOut } from 'lucide-react'
+import { Logo } from '@/components/Logo'
+import { Globe, Bell, Menu, User, LogOut } from 'lucide-react'
 
 export function Topbar() {
   const { t, i18n } = useTranslation()
@@ -39,9 +40,7 @@ export function Topbar() {
           <Menu className="w-5 h-5" />
         </button>
         <div className="md:hidden">
-          <span className="font-headline text-headline-md font-bold text-primary">
-            MSM
-          </span>
+          <Logo size="sm" />
         </div>
         <div className="hidden md:flex items-center font-mono-sm text-mono-sm text-on-surface-variant gap-2">
           <span className="text-primary font-medium">{t('panel.title')}</span>
@@ -104,15 +103,6 @@ export function Topbar() {
                   <User className="w-4 h-4 text-on-surface-variant" />
                   {t('profile.title')}
                 </button>
-                {user?.is_owner && (
-                  <button
-                    onClick={() => { setMenuOpen(false); navigate('/settings') }}
-                    className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm text-on-surface hover:bg-surface-container-highest transition-colors"
-                  >
-                    <Settings className="w-4 h-4 text-on-surface-variant" />
-                    {t('nav.settings')}
-                  </button>
-                )}
               </div>
               <div className="border-t border-outline-variant/30 py-1">
                 <button

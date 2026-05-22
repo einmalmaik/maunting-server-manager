@@ -25,6 +25,28 @@ class EmailService:
     CYAN_ACCENT = "#22d3ee"        # cyan-400
     MUTED_COLOR = "#6e7681"
 
+    @classmethod
+    def _get_logo_url(cls) -> str:
+        """Absolute URL to the logo used in HTML emails."""
+        return settings.logo_url or f"{settings.panel_url.rstrip('/')}/logo.svg"
+
+    @classmethod
+    def _logo_html(cls) -> str:
+        """Renders the logo for email templates.
+
+        Uses an <img> when a logo_url is configured; otherwise falls back
+        to the green square placeholder with the letter 'M'.
+        """
+        url = cls._get_logo_url()
+        if url:
+            return f'<img src="{url}" alt="M" width="40" height="40" style="border-radius:8px;display:block;" />'
+        # Fallback placeholder (same dimensions, green background)
+        return (
+            f'<div style="width:40px;height:40px;background-color:{cls.ACCENT_COLOR};'
+            f'border-radius:8px;text-align:center;line-height:40px;font-size:22px;'
+            f'font-weight:800;color:{cls.BG_COLOR};">M</div>'
+        )
+
     @staticmethod
     def _get_setting(key: str) -> str:
         """Liest Setting aus DB (Vorrang) oder Umgebungsvariable."""
@@ -136,8 +158,8 @@ class EmailService:
             <td style="padding:32px 32px 24px 32px;text-align:center;border-bottom:1px solid {cls.BORDER_COLOR};">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
                 <tr>
-                  <td style="width:40px;height:40px;background-color:{cls.ACCENT_COLOR};border-radius:8px;text-align:center;vertical-align:middle;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:22px;font-weight:800;color:{cls.BG_COLOR};line-height:40px;">
-                    M
+                  <td style="width:40px;height:40px;vertical-align:middle;">
+                    {cls._logo_html()}
                   </td>
                   <td style="padding-left:12px;vertical-align:middle;">
                     <span style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:18px;font-weight:700;color:{cls.PRIMARY_TEXT};line-height:1.2;">MauntingStudios</span><br>

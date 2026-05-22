@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Shield, Server, ChevronRight, Check, Mail } from 'lucide-react'
+import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { api } from '@/api/client'
 
@@ -113,9 +114,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       <div className="relative z-10 w-full max-w-lg">
         {/* Brand Header */}
         <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-md bg-primary flex items-center justify-center text-on-primary font-headline text-headline-md font-extrabold">
-            M
-          </div>
+          <Logo size="md" />
           <div>
             <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
               MauntingStudios
