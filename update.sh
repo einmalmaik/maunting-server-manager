@@ -205,11 +205,14 @@ su - msm -c "
 
 # ── Frontend bauen ──
 log "Baue Frontend..."
-su - msm -c "
+if ! su - msm -c "
+    set -e
     cd $MSM_DIR/frontend
     npm install -q
     npm run build
-" 2>&1 | tee -a "$LOG_FILE"
+" 2>&1 | tee -a "$LOG_FILE"; then
+    err "Frontend-Build fehlgeschlagen. Update abgebrochen."
+fi
 
 # ── Service neustarten ──
 log "Starte Services neu..."

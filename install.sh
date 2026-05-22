@@ -17,10 +17,7 @@ set -euo pipefail
 #    - systemd Service mit Auto-Restart
 #    - Frontend-Build + Datenbank-Initialisierung
 #  ─────────────────────────────────────────────────────────────
-#  Du musst nur 3 Fragen beantworten:
-#    1. Domain (oder IP-Modus)
-#    2. SMTP-Daten (oder "später")
-#    3. Redis (ja/nein)
+#  Unterstützt Frisch-Installation UND Re-Install / Config-Change
 # ═══════════════════════════════════════════════════════════════
 
 MSM_USER="msm"
@@ -50,6 +47,144 @@ ask_yesno() {
         esac
     done
 }
+ask_yesno_default() {
+    local question="$1"
+    local default="$2"
+    local ans
+    while true; do
+        if [[ "$default" == "Y" ]]; then
+            read -rp "$(echo -e "${BOLD}[?]${NC} $question [Y/n]: ")" ans
+            case "${ans:-Y}" in
+                [Yy]*) return 0 ;;
+                [Nn]*) return 1 ;;
+            esac
+        else
+            read -rp "$(echo -e "${BOLD}[?]${NC} $question [y/N]: ")" ans
+            case "${ans:-N}" in
+                [Yy]*) return 0 ;;
+                [Nn]*) return 1 ;;
+            esac
+        fi
+    done
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Re-Install Hilfsfunktionen
+# ═══════════════════════════════════════════════════════════════
+
+load_current_env() {
+    local env_file="$MSM_DIR/backend/.env"
+
+    CURRENT_DOMAIN=""
+    CURRENT_EMAIL_PROVIDER="smtp"
+    CURRENT_SMTP_HOST=""
+    CURRENT_SMTP_PORT="587"
+    CURRENT_SMTP_USER=""
+    CURRENT_SMTP_PASS=""
+    CURRENT_SMTP_FROM=""
+    CURRENT_RESEND_API_KEY=""
+    CURRENT_USE_POSTGRES=false
+    CURRENT_REDIS_URL=""
+    CURRENT_AUTO_UPDATE="false"
+    CURRENT_SECRET_KEY=""
+    CURRENT_DB_URL=""
+    CURRENT_DB_URL_ASYNC=""
+
+    [[ -f "$env_file" ]] || return
+
+    local val
+
+    val=$(grep -E '^MSM_PANEL_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    if [[ -n "$val" ]]; then
+        CURRENT_DOMAIN="$val"
+        CURRENT_DOMAIN="${CURRENT_DOMAIN#http://}"
+        CURRENT_DOMAIN="${CURRENT_DOMAIN#https://}"
+    fi
+
+    val=$(grep -E '^MSM_EMAIL_PROVIDER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_EMAIL_PROVIDER="$val"
+
+    val=$(grep -E '^MSM_SMTP_HOST=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_SMTP_HOST="$val"
+
+    val=$(grep -E '^MSM_SMTP_PORT=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_SMTP_PORT="$val"
+
+    val=$(grep -E '^MSM_SMTP_USER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_SMTP_USER="$val"
+
+    val=$(grep -E '^MSM_SMTP_PASSWORD=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_SMTP_PASS="$val"
+
+    val=$(grep -E '^MSM_SMTP_FROM=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_SMTP_FROM="$val"
+
+    val=$(grep -E '^MSM_RESEND_API_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_RESEND_API_KEY="$val"
+
+    val=$(grep -E '^MSM_DATABASE_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    if [[ "$val" == postgresql* ]]; then
+        CURRENT_USE_POSTGRES=true
+    else
+        CURRENT_USE_POSTGRES=false
+    fi
+    [[ -n "$val" ]] && CURRENT_DB_URL="$val"
+
+    val=$(grep -E '^MSM_DATABASE_URL_ASYNC=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_DB_URL_ASYNC="$val"
+
+    val=$(grep -E '^MSM_REDIS_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_REDIS_URL="$val"
+
+    val=$(grep -E '^MSM_AUTO_UPDATE=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_AUTO_UPDATE="$val"
+
+    val=$(grep -E '^MSM_SECRET_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_SECRET_KEY="$val"
+}
+
+show_current_config() {
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  Aktuelle Konfiguration gefunden${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${BOLD}Domain:${NC}          ${CURRENT_DOMAIN:-<nicht gesetzt>}"
+    echo -e "  ${BOLD}Email-Provider:${NC}  ${CURRENT_EMAIL_PROVIDER}"
+    if [[ "$CURRENT_EMAIL_PROVIDER" == "resend" ]]; then
+        if [[ -n "$CURRENT_RESEND_API_KEY" ]]; then
+            echo -e "  ${BOLD}Resend API-Key:${NC}  ${CURRENT_RESEND_API_KEY:0:8}..."
+        else
+            echo -e "  ${BOLD}Resend API-Key:${NC}  <nicht gesetzt>"
+        fi
+    else
+        echo -e "  ${BOLD}SMTP-Host:${NC}       ${CURRENT_SMTP_HOST:-<nicht gesetzt>}"
+        echo -e "  ${BOLD}SMTP-Port:${NC}       ${CURRENT_SMTP_PORT:-587}"
+        echo -e "  ${BOLD}SMTP-User:${NC}       ${CURRENT_SMTP_USER:-<nicht gesetzt>}"
+        if [[ -n "$CURRENT_SMTP_PASS" ]]; then
+            echo -e "  ${BOLD}SMTP-Passwort:${NC}   *** konfiguriert ***"
+        else
+            echo -e "  ${BOLD}SMTP-Passwort:${NC}   <nicht gesetzt>"
+        fi
+    fi
+    echo -e "  ${BOLD}SMTP-From:${NC}       ${CURRENT_SMTP_FROM:-<nicht gesetzt>}"
+    if $CURRENT_USE_POSTGRES; then
+        echo -e "  ${BOLD}Datenbank:${NC}       PostgreSQL"
+    else
+        echo -e "  ${BOLD}Datenbank:${NC}       SQLite"
+    fi
+    if [[ -n "$CURRENT_REDIS_URL" ]]; then
+        echo -e "  ${BOLD}Redis:${NC}           Aktiviert"
+    else
+        echo -e "  ${BOLD}Redis:${NC}           Deaktiviert"
+    fi
+    if [[ "$CURRENT_AUTO_UPDATE" == "true" ]]; then
+        echo -e "  ${BOLD}Auto-Update:${NC}     Aktiviert"
+    else
+        echo -e "  ${BOLD}Auto-Update:${NC}     Deaktiviert"
+    fi
+    echo ""
+}
 
 # ═══════════════════════════════════════════════════════════════
 # 0. Prüfungen
@@ -70,6 +205,45 @@ fi
 log "=== Maunting Server Manager Installation ==="
 log "Log: $LOG_FILE"
 log ""
+
+# ═══════════════════════════════════════════════════════════════
+# 0b. Existierende Installation erkennen & laden
+# ═══════════════════════════════════════════════════════════════
+REINSTALL_MODE=false
+KEEP_SETTINGS=false
+CHANGED_DOMAIN=false
+CHANGED_EMAIL=false
+CHANGED_DB=false
+CHANGED_REDIS=false
+CHANGED_AUTO_UPDATE=false
+NEED_FULL_REBUILD=false
+CODE_CHANGED=false
+
+if [[ "$SCRIPT_DIR" != "$MSM_DIR" ]]; then
+    CODE_CHANGED=true
+fi
+
+if [[ -f "$MSM_DIR/backend/.env" ]]; then
+    REINSTALL_MODE=true
+    load_current_env
+    show_current_config
+
+    echo -e "${BOLD}[?]${NC} Einstellungen beibehalten oder ändern?"
+    echo "    1) Beibehalten — nur Code aktualisieren, Frontend neu bauen, Services neustarten"
+    echo "    2) Ändern — Konfiguration anpassen (Domain, Email, DB, Redis, Auto-Update)"
+    ask "[1/2]: " choice
+
+    if [[ "$choice" == "1" ]]; then
+        KEEP_SETTINGS=true
+        NEED_FULL_REBUILD=true
+        log "Re-Install Modus: Einstellungen beibehalten, Code aktualisieren..."
+    else
+        KEEP_SETTINGS=false
+        log "Re-Install Modus: Konfiguration wird angepasst..."
+    fi
+else
+    log "Frische Installation erkannt..."
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 1. System-Abhängigkeiten
@@ -126,19 +300,79 @@ ok "System-Abhängigkeiten installiert"
 # 2. Redis (optional, empfohlen für Rate-Limiting)
 # ═══════════════════════════════════════════════════════════════
 INSTALL_REDIS=false
-if ask_yesno "Redis für verteiltes Rate-Limiting installieren? (empfohlen für Produktion)"; then
-    log "Installiere Redis..."
-    apt-get install -y -qq redis-server 2>&1 | tee -a "$LOG_FILE"
+MSM_REDIS_URL=""
+
+if $REINSTALL_MODE && $KEEP_SETTINGS; then
+    # Keep mode: aktuellen Redis-Status beibehalten
+    if [[ -n "$CURRENT_REDIS_URL" ]]; then
+        INSTALL_REDIS=true
+        MSM_REDIS_URL="$CURRENT_REDIS_URL"
+        log "Redis bleibt aktiviert..."
+    else
+        INSTALL_REDIS=false
+        MSM_REDIS_URL=""
+        log "Redis bleibt deaktiviert..."
+    fi
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
+    # Change mode: frage Toggle
+    if [[ -n "$CURRENT_REDIS_URL" ]]; then
+        echo ""
+        echo -e "${BOLD}Redis ist aktuell aktiviert.${NC}"
+        if ask_yesno "Redis deaktivieren?"; then
+            INSTALL_REDIS=false
+            MSM_REDIS_URL=""
+            CHANGED_REDIS=true
+            if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+                systemctl stop redis-server 2>/dev/null || true
+            else
+                service redis-server stop 2>/dev/null || true
+            fi
+        else
+            INSTALL_REDIS=true
+            MSM_REDIS_URL="$CURRENT_REDIS_URL"
+        fi
+    else
+        echo ""
+        echo -e "${BOLD}Redis ist aktuell deaktiviert.${NC}"
+        if ask_yesno "Redis für verteiltes Rate-Limiting aktivieren?"; then
+            INSTALL_REDIS=true
+            MSM_REDIS_URL="redis://localhost:6379"
+            CHANGED_REDIS=true
+        else
+            INSTALL_REDIS=false
+            MSM_REDIS_URL=""
+        fi
+    fi
+else
+    # Fresh install
+    if ask_yesno "Redis für verteiltes Rate-Limiting installieren? (empfohlen für Produktion)"; then
+        INSTALL_REDIS=true
+        MSM_REDIS_URL="redis://localhost:6379"
+    else
+        INSTALL_REDIS=false
+        MSM_REDIS_URL=""
+    fi
+fi
+
+# Redis installieren/Starten wenn nötig
+if $INSTALL_REDIS; then
+    if ! command -v redis-server &>/dev/null; then
+        log "Installiere Redis..."
+        apt-get install -y -qq redis-server 2>&1 | tee -a "$LOG_FILE"
+    fi
     if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
         systemctl enable redis-server >/dev/null 2>&1 || true
         systemctl start redis-server >/dev/null 2>&1 || true
     else
         service redis-server start 2>/dev/null || true
     fi
-    INSTALL_REDIS=true
-    ok "Redis installiert"
+    if ! $REINSTALL_MODE || ($REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_REDIS); then
+        ok "Redis installiert und gestartet"
+    fi
 else
-    log "Redis wird übersprungen (Rate-Limiting nutzt in-memory Fallback)."
+    if ! $REINSTALL_MODE; then
+        log "Redis wird übersprungen (Rate-Limiting nutzt in-memory Fallback)."
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -153,54 +387,48 @@ ok "User '$MSM_USER' bereit"
 # ═══════════════════════════════════════════════════════════════
 # 4. Dateien kopieren
 # ═══════════════════════════════════════════════════════════════
-log "Kopiere Panel-Dateien nach $MSM_DIR..."
-
-if [[ "$SCRIPT_DIR" == "$MSM_DIR" ]]; then
-    # Install.sh läuft direkt im Zielverzeichnis → nicht löschen, nicht kopieren!
-    # Nur alte Build-Artefakte und Konfigurationen aufräumen
-    rm -rf "$MSM_DIR/frontend/dist" 2>/dev/null || true
-    rm -rf "$MSM_DIR/frontend/node_modules" 2>/dev/null || true
-    rm -rf "$MSM_DIR/backend/venv" 2>/dev/null || true
-else
-    # Install.sh läuft außerhalb des Zielverzeichnisses → sauberes Verzeichnis anlegen
-    rm -rf "$MSM_DIR" 2>/dev/null || true
-    mkdir -p "$MSM_DIR"
-
-    cp -r "$SCRIPT_DIR/backend" "$MSM_DIR/"
-    cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
-    cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/update.sh" "$MSM_DIR/" 2>/dev/null || true
-    chmod +x "$MSM_DIR/update.sh" 2>/dev/null || true
+SHOULD_COPY_FILES=false
+if ! $REINSTALL_MODE; then
+    SHOULD_COPY_FILES=true
+elif $KEEP_SETTINGS; then
+    SHOULD_COPY_FILES=true
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CODE_CHANGED; then
+    SHOULD_COPY_FILES=true
 fi
 
-chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR"
-ok "Dateien bereit"
+if $SHOULD_COPY_FILES; then
+    log "Kopiere Panel-Dateien nach $MSM_DIR..."
+    if [[ "$SCRIPT_DIR" == "$MSM_DIR" ]]; then
+        # Install.sh läuft direkt im Zielverzeichnis → nicht löschen, nicht kopieren!
+        # Nur alte Build-Artefakte und Konfigurationen aufräumen
+        rm -rf "$MSM_DIR/frontend/dist" 2>/dev/null || true
+        rm -rf "$MSM_DIR/frontend/node_modules" 2>/dev/null || true
+        rm -rf "$MSM_DIR/backend/venv" 2>/dev/null || true
+    else
+        # Install.sh läuft außerhalb des Zielverzeichnisses → sauberes Verzeichnis anlegen
+        rm -rf "$MSM_DIR" 2>/dev/null || true
+        mkdir -p "$MSM_DIR"
+
+        cp -r "$SCRIPT_DIR/backend" "$MSM_DIR/"
+        cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
+        cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
+        cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
+        cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
+        cp "$SCRIPT_DIR/update.sh" "$MSM_DIR/" 2>/dev/null || true
+        chmod +x "$MSM_DIR/update.sh" 2>/dev/null || true
+    fi
+    chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR"
+    ok "Dateien bereit"
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ! $CODE_CHANGED; then
+    log "Quellverzeichnis identisch mit Ziel — keine Datei-Kopie nötig."
+fi
 
 # ═══════════════════════════════════════════════════════════════
-# 5. Interaktive Konfiguration (nur 3 Fragen!)
+# 5. Interaktive Konfiguration
 # ═══════════════════════════════════════════════════════════════
 
-# ── 5a. Domain ──
-echo ""
-echo -e "${BOLD}Schritt 1/3: Domain${NC}"
-echo "  Gib eine Domain an, damit Caddy automatisch ein SSL-Zertifikat erstellt."
-echo "  Ohne Domain wird das Panel über HTTP (nur IP) erreichbar — nicht empfohlen."
-echo ""
-ask "Domain (z.B. panel.deinserver.de) oder leer lassen für IP-Modus: " DOMAIN
-DOMAIN="${DOMAIN:-}"
-
-# ── 5b. Email (SMTP oder Resend) ──
-echo ""
-echo -e "${BOLD}Schritt 2/3: Email-Versand${NC}"
-echo "  Wird für Setup-Verifikation, 2FA-Setup und Backup-Codes benötigt."
-echo "  Optionen:"
-echo "    1. Resend (resend.com) — API-Key, kein SMTP nötig, empfohlen"
-echo "    2. SMTP (eigener Server, Strato, Gmail, etc.)"
-echo "  Du kannst das später in /opt/msm/backend/.env nachholen."
-echo ""
-
+# Defaults
+DOMAIN=""
 EMAIL_PROVIDER="smtp"
 SMTP_HOST=""
 SMTP_PORT=587
@@ -208,55 +436,238 @@ SMTP_USER=""
 SMTP_PASS=""
 SMTP_FROM=""
 RESEND_API_KEY=""
-
-if ask_yesno "Email jetzt konfigurieren?"; then
-    echo ""
-    echo -e "  ${BOLD}Provider wählen:${NC}"
-    echo "    1) Resend (API-Key, einfach)"
-    echo "    2) SMTP (Server-Daten)"
-    ask "[1/2]: " EMAIL_CHOICE
-
-    if [[ "$EMAIL_CHOICE" == "1" ]]; then
-        EMAIL_PROVIDER="resend"
-        ask "Resend API-Key (re_...): " RESEND_API_KEY
-        ask "Absender-Adresse [noreply@mauntingstudios.de]: " SMTP_FROM_INPUT
-        SMTP_FROM="${SMTP_FROM_INPUT:-noreply@mauntingstudios.de}"
-        ok "Resend konfiguriert"
-    else
-        EMAIL_PROVIDER="smtp"
-        ask "SMTP-Host (z.B. smtp.strato.de): " SMTP_HOST
-        ask "SMTP-Port [587]: " SMTP_PORT_INPUT
-        SMTP_PORT="${SMTP_PORT_INPUT:-587}"
-        ask "SMTP-Benutzername: " SMTP_USER
-        ask "SMTP-Passwort: " SMTP_PASS
-        ask "Absender-Adresse [noreply@mauntingstudios.de]: " SMTP_FROM_INPUT
-        SMTP_FROM="${SMTP_FROM_INPUT:-noreply@mauntingstudios.de}"
-        ok "SMTP konfiguriert"
-    fi
-else
-    warn "Email übersprungen. Setup-Verifikation und 2FA stehen erst nach Konfiguration zur Verfügung."
-fi
-
-# ── 5c. Redis Confirmation ──
-MSM_REDIS_URL=""
-if $INSTALL_REDIS; then
-    MSM_REDIS_URL="redis://localhost:6379"
-fi
-
-# ── 5d. PostgreSQL (empfohlen für Produktion) ──
 USE_POSTGRES=false
 PG_PASSWORD=""
-if ask_yesno "PostgreSQL für die Datenbank nutzen? (empfohlen für Produktion, sonst SQLite)"; then
-    log "Installiere PostgreSQL..."
-    apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev 2>&1 | tee -a "$LOG_FILE"
+MSM_AUTO_UPDATE="false"
 
-    # URL-sicheres Passwort generieren (nur a-zA-Z0-9_-)
-    PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
+if $REINSTALL_MODE && $KEEP_SETTINGS; then
+    # Keep mode: alle aktuellen Werte übernehmen
+    DOMAIN="$CURRENT_DOMAIN"
+    EMAIL_PROVIDER="$CURRENT_EMAIL_PROVIDER"
+    SMTP_HOST="$CURRENT_SMTP_HOST"
+    SMTP_PORT="${CURRENT_SMTP_PORT:-587}"
+    SMTP_USER="$CURRENT_SMTP_USER"
+    SMTP_PASS="$CURRENT_SMTP_PASS"
+    SMTP_FROM="$CURRENT_SMTP_FROM"
+    RESEND_API_KEY="$CURRENT_RESEND_API_KEY"
+    if $CURRENT_USE_POSTGRES; then
+        USE_POSTGRES=true
+    else
+        USE_POSTGRES=false
+    fi
+    MSM_AUTO_UPDATE="$CURRENT_AUTO_UPDATE"
 
-    # User und DB sicher erstellen/aktualisieren via temporärer SQL-Datei
-    # (heredoc + su + tee funktioniert nicht korrekt, daher SQL-Datei)
-    log "Richte PostgreSQL-User und Datenbank ein..."
-    cat > /tmp/msm_pg_setup.sql <<EOF
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
+    # ═══════════════════════════════════════════════════════════════
+    # Change mode: 4 Fragen mit aktuellen Werten als Default
+    # ═══════════════════════════════════════════════════════════════
+
+    # ── 1/4 Domain ──
+    echo ""
+    echo -e "${BOLD}Schritt 1/4: Domain${NC}"
+    echo "  Gib eine Domain an, damit Caddy automatisch ein SSL-Zertifikat erstellt."
+    echo "  Ohne Domain wird das Panel über HTTP (nur IP) erreichbar — nicht empfohlen."
+    echo "  Leer lassen um aktuellen Wert zu behalten: ${CURRENT_DOMAIN:-<nicht gesetzt>}"
+    echo ""
+    ask "Domain [${CURRENT_DOMAIN:-}]: " DOMAIN_INPUT
+    DOMAIN="${DOMAIN_INPUT:-$CURRENT_DOMAIN}"
+    if [[ "$DOMAIN" != "$CURRENT_DOMAIN" ]]; then
+        CHANGED_DOMAIN=true
+    fi
+
+    # ── 2/4 Email ──
+    echo ""
+    echo -e "${BOLD}Schritt 2/4: Email-Versand${NC}"
+    echo "  Aktueller Provider: ${CURRENT_EMAIL_PROVIDER}"
+    echo "  'Ändern' wählen um Provider oder Details zu ändern."
+    echo ""
+
+    EMAIL_PROVIDER="$CURRENT_EMAIL_PROVIDER"
+    SMTP_HOST="$CURRENT_SMTP_HOST"
+    SMTP_PORT="${CURRENT_SMTP_PORT:-587}"
+    SMTP_USER="$CURRENT_SMTP_USER"
+    SMTP_PASS="$CURRENT_SMTP_PASS"
+    SMTP_FROM="${CURRENT_SMTP_FROM:-noreply@mauntingstudios.de}"
+    RESEND_API_KEY="$CURRENT_RESEND_API_KEY"
+
+    if ask_yesno "Email-Einstellungen ändern?"; then
+        echo ""
+        echo -e "  ${BOLD}Provider wählen:${NC}"
+        echo "    1) Resend (API-Key, einfach)"
+        echo "    2) SMTP (Server-Daten)"
+        ask "[1/2]: " EMAIL_CHOICE
+
+        if [[ "$EMAIL_CHOICE" == "1" ]]; then
+            EMAIL_PROVIDER="resend"
+            ask "Resend API-Key [${CURRENT_RESEND_API_KEY:-re_...}]: " RESEND_API_KEY
+            RESEND_API_KEY="${RESEND_API_KEY:-$CURRENT_RESEND_API_KEY}"
+            ask "Absender-Adresse [${CURRENT_SMTP_FROM:-noreply@mauntingstudios.de}]: " SMTP_FROM_INPUT
+            SMTP_FROM="${SMTP_FROM_INPUT:-${CURRENT_SMTP_FROM:-noreply@mauntingstudios.de}}"
+            ok "Resend konfiguriert"
+        else
+            EMAIL_PROVIDER="smtp"
+            ask "SMTP-Host [${CURRENT_SMTP_HOST:-smtp.strato.de}]: " SMTP_HOST
+            SMTP_HOST="${SMTP_HOST:-$CURRENT_SMTP_HOST}"
+            ask "SMTP-Port [${CURRENT_SMTP_PORT:-587}]: " SMTP_PORT_INPUT
+            SMTP_PORT="${SMTP_PORT_INPUT:-${CURRENT_SMTP_PORT:-587}}"
+            ask "SMTP-Benutzername [${CURRENT_SMTP_USER:-}]: " SMTP_USER
+            SMTP_USER="${SMTP_USER:-$CURRENT_SMTP_USER}"
+            ask "SMTP-Passwort [leer = bestehendes behalten]: " SMTP_PASS
+            if [[ -z "$SMTP_PASS" ]]; then
+                SMTP_PASS="$CURRENT_SMTP_PASS"
+            fi
+            ask "Absender-Adresse [${CURRENT_SMTP_FROM:-noreply@mauntingstudios.de}]: " SMTP_FROM_INPUT
+            SMTP_FROM="${SMTP_FROM_INPUT:-${CURRENT_SMTP_FROM:-noreply@mauntingstudios.de}}"
+            ok "SMTP konfiguriert"
+        fi
+
+        # Prüfe ob Email wirklich geändert wurde
+        if [[ "$EMAIL_PROVIDER" != "$CURRENT_EMAIL_PROVIDER" ]]; then
+            CHANGED_EMAIL=true
+        elif [[ "$EMAIL_PROVIDER" == "resend" && "$RESEND_API_KEY" != "$CURRENT_RESEND_API_KEY" ]]; then
+            CHANGED_EMAIL=true
+        elif [[ "$EMAIL_PROVIDER" == "smtp" && ( "$SMTP_HOST" != "$CURRENT_SMTP_HOST" || "$SMTP_PORT" != "$CURRENT_SMTP_PORT" || "$SMTP_USER" != "$CURRENT_SMTP_USER" || "$SMTP_PASS" != "$CURRENT_SMTP_PASS" || "$SMTP_FROM" != "$CURRENT_SMTP_FROM" ) ]]; then
+            CHANGED_EMAIL=true
+        fi
+    else
+        log "Email-Einstellungen bleiben unverändert."
+    fi
+
+    # ── 3/4 PostgreSQL ──
+    echo ""
+    echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
+    if $CURRENT_USE_POSTGRES; then
+        echo "  Aktuell: PostgreSQL"
+    else
+        echo "  Aktuell: SQLite"
+    fi
+    echo "  'Ja' wählen um zu wechseln (mit Warnung)."
+    echo ""
+
+    USE_POSTGRES=$CURRENT_USE_POSTGRES
+
+    if ask_yesno "Datenbank-Typ wechseln?"; then
+        if $CURRENT_USE_POSTGRES; then
+            warn "WARNUNG: Wechsel von PostgreSQL zu SQLite!"
+            warn "Existierende PostgreSQL-Daten werden NICHT automatisch migriert."
+            if ask_yesno "Wirklich zu SQLite wechseln?"; then
+                USE_POSTGRES=false
+                CHANGED_DB=true
+            fi
+        else
+            warn "WARNUNG: Wechsel von SQLite zu PostgreSQL!"
+            warn "Existierende SQLite-Daten werden NICHT automatisch migriert."
+            if ask_yesno "Wirklich zu PostgreSQL wechseln?"; then
+                USE_POSTGRES=true
+                CHANGED_DB=true
+            fi
+        fi
+    fi
+
+    # ── 4/4 Auto-Update ──
+    echo ""
+    echo -e "${BOLD}Schritt 4/4: Automatische Updates${NC}"
+    if [[ "$CURRENT_AUTO_UPDATE" == "true" ]]; then
+        echo "  Aktuell: Aktiviert"
+        if ask_yesno_default "Automatische Updates beibehalten?" "Y"; then
+            MSM_AUTO_UPDATE="true"
+        else
+            MSM_AUTO_UPDATE="false"
+            CHANGED_AUTO_UPDATE=true
+        fi
+    else
+        echo "  Aktuell: Deaktiviert"
+        if ask_yesno_default "Automatische Updates aktivieren?" "N"; then
+            MSM_AUTO_UPDATE="true"
+            CHANGED_AUTO_UPDATE=true
+        else
+            MSM_AUTO_UPDATE="false"
+        fi
+    fi
+
+    # Bestimme ob Full Rebuild nötig
+    if $CODE_CHANGED || $CHANGED_DB; then
+        NEED_FULL_REBUILD=true
+    fi
+
+else
+    # ═══════════════════════════════════════════════════════════════
+    # Fresh install flow (Original)
+    # ═══════════════════════════════════════════════════════════════
+
+    # ── 5a. Domain ──
+    echo ""
+    echo -e "${BOLD}Schritt 1/3: Domain${NC}"
+    echo "  Gib eine Domain an, damit Caddy automatisch ein SSL-Zertifikat erstellt."
+    echo "  Ohne Domain wird das Panel über HTTP (nur IP) erreichbar — nicht empfohlen."
+    echo ""
+    ask "Domain (z.B. panel.deinserver.de) oder leer lassen für IP-Modus: " DOMAIN
+    DOMAIN="${DOMAIN:-}"
+
+    # ── 5b. Email ──
+    echo ""
+    echo -e "${BOLD}Schritt 2/3: Email-Versand${NC}"
+    echo "  Wird für Setup-Verifikation, 2FA-Setup und Backup-Codes benötigt."
+    echo "  Optionen:"
+    echo "    1. Resend (resend.com) — API-Key, kein SMTP nötig, empfohlen"
+    echo "    2. SMTP (eigener Server, Strato, Gmail, etc.)"
+    echo "  Du kannst das später in /opt/msm/backend/.env nachholen."
+    echo ""
+
+    if ask_yesno "Email jetzt konfigurieren?"; then
+        echo ""
+        echo -e "  ${BOLD}Provider wählen:${NC}"
+        echo "    1) Resend (API-Key, einfach)"
+        echo "    2) SMTP (Server-Daten)"
+        ask "[1/2]: " EMAIL_CHOICE
+
+        if [[ "$EMAIL_CHOICE" == "1" ]]; then
+            EMAIL_PROVIDER="resend"
+            ask "Resend API-Key (re_...): " RESEND_API_KEY
+            ask "Absender-Adresse [noreply@mauntingstudios.de]: " SMTP_FROM_INPUT
+            SMTP_FROM="${SMTP_FROM_INPUT:-noreply@mauntingstudios.de}"
+            ok "Resend konfiguriert"
+        else
+            EMAIL_PROVIDER="smtp"
+            ask "SMTP-Host (z.B. smtp.strato.de): " SMTP_HOST
+            ask "SMTP-Port [587]: " SMTP_PORT_INPUT
+            SMTP_PORT="${SMTP_PORT_INPUT:-587}"
+            ask "SMTP-Benutzername: " SMTP_USER
+            ask "SMTP-Passwort: " SMTP_PASS
+            ask "Absender-Adresse [noreply@mauntingstudios.de]: " SMTP_FROM_INPUT
+            SMTP_FROM="${SMTP_FROM_INPUT:-noreply@mauntingstudios.de}"
+            ok "SMTP konfiguriert"
+        fi
+    else
+        warn "Email übersprungen. Setup-Verifikation und 2FA stehen erst nach Konfiguration zur Verfügung."
+    fi
+
+    # ── 5c. PostgreSQL ──
+    if ask_yesno "PostgreSQL für die Datenbank nutzen? (empfohlen für Produktion, sonst SQLite)"; then
+        USE_POSTGRES=true
+    else
+        USE_POSTGRES=false
+    fi
+
+    # Fresh install: auto-update default ist false
+    MSM_AUTO_UPDATE="false"
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# 5b. PostgreSQL Setup (falls nötig)
+# ═══════════════════════════════════════════════════════════════
+if $USE_POSTGRES; then
+    if ! command -v psql &>/dev/null; then
+        log "Installiere PostgreSQL..."
+        apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev 2>&1 | tee -a "$LOG_FILE"
+    fi
+
+    # Nur bei frischer Installation oder Wechsel zu PostgreSQL: Passwort + User/DB erstellen
+    if ! $REINSTALL_MODE || $CHANGED_DB; then
+        PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
+
+        log "Richte PostgreSQL-User und Datenbank ein..."
+        cat > /tmp/msm_pg_setup.sql <<EOF
 DO \$\$
 BEGIN
   IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'msm') THEN
@@ -266,30 +677,30 @@ BEGIN
   END IF;
 END \$\$;
 EOF
-    su - postgres -c "psql -f /tmp/msm_pg_setup.sql" 2>&1 | tee -a "$LOG_FILE"
-    rm -f /tmp/msm_pg_setup.sql
+        su - postgres -c "psql -f /tmp/msm_pg_setup.sql" 2>&1 | tee -a "$LOG_FILE"
+        rm -f /tmp/msm_pg_setup.sql
 
-    # CREATE DATABASE darf NICHT in einem DO/Transaktions-Block laufen
-    su - postgres -c "psql -c \"CREATE DATABASE msm OWNER msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
+        # CREATE DATABASE darf NICHT in einem DO/Transaktions-Block laufen
+        su - postgres -c "psql -c \"CREATE DATABASE msm OWNER msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
 
-    su - postgres -c "psql -d msm -c \"GRANT ALL ON SCHEMA public TO msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
+        su - postgres -c "psql -d msm -c \"GRANT ALL ON SCHEMA public TO msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
 
-    # pg_hba.conf: nur host/localhost auf scram-sha-256 sicherstellen,
-    # local peer für postgres beibehalten (damit su - postgres -c psql funktioniert)
+        ok "PostgreSQL eingerichtet (DB: msm, User: msm)"
+    else
+        log "PostgreSQL bleibt bestehend — User/DB nicht neu angelegt."
+    fi
+
+    # pg_hba.conf sicherstellen (auch bei Re-Install)
     PG_HBA=$(find /etc/postgresql -name pg_hba.conf | head -1)
     if [[ -n "$PG_HBA" ]]; then
-        # Host-Einträge für IPv4/IPv6: auf scram-sha-256 setzen (egal vorher md5/trust/peer/ident)
         sed -i -E 's/^(host\s+all\s+all\s+127\.0\.0\.1\/32)\s+.*/\1            scram-sha-256/' "$PG_HBA"
         sed -i -E 's/^(host\s+all\s+all\s+::1\/128)\s+.*/\1                 scram-sha-256/' "$PG_HBA"
-        # Falls IPv4-Eintrag gar nicht existiert -> anhängen
         if ! grep -qE '^host\s+all\s+all\s+127\.0\.0\.1/32' "$PG_HBA"; then
             echo "host    all             all             127.0.0.1/32            scram-sha-256" >> "$PG_HBA"
         fi
-        # Falls IPv6-Eintrag gar nicht existiert -> anhängen
         if ! grep -qE '^host\s+all\s+all\s+::1/128' "$PG_HBA"; then
             echo "host    all             all             ::1/128                 scram-sha-256" >> "$PG_HBA"
         fi
-        # PostgreSQL neu laden (WSL-kompatibel)
         if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
             systemctl restart postgresql
         else
@@ -297,17 +708,25 @@ EOF
         fi
     fi
 
-    USE_POSTGRES=true
-    ok "PostgreSQL installiert (DB: msm, User: msm)"
+    if ! $REINSTALL_MODE || $CHANGED_DB; then
+        ok "PostgreSQL installiert (DB: msm, User: msm)"
+    fi
 else
-    log "SQLite wird als Datenbank genutzt (einfach, aber nicht für hohe Last)."
+    if ! $REINSTALL_MODE; then
+        log "SQLite wird als Datenbank genutzt (einfach, aber nicht für hohe Last)."
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
 # 6. SECRET_KEY generieren & .env schreiben
 # ═══════════════════════════════════════════════════════════════
 log "Generiere kryptographischen Secret-Key..."
-SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
+if $REINSTALL_MODE && [[ -n "$CURRENT_SECRET_KEY" ]]; then
+    SECRET_KEY="$CURRENT_SECRET_KEY"
+    log "Bestehender SECRET_KEY wird beibehalten."
+else
+    SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
+fi
 
 PANEL_URL="http://localhost"
 if [[ -n "$DOMAIN" ]]; then
@@ -316,14 +735,33 @@ fi
 
 ENV_FILE="$MSM_DIR/backend/.env"
 
-# Datenbank-URL wählen (Passwort URL-encoden, falls doch mal Sonderzeichen vorkommen)
-if $USE_POSTGRES; then
-    PG_PASSWORD_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$PG_PASSWORD''', safe=''))")
-    DB_URL="postgresql+psycopg2://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
-    DB_URL_ASYNC="postgresql+asyncpg://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
+# Datenbank-URL bestimmen
+if ! $REINSTALL_MODE || $CHANGED_DB; then
+    # Frische URL generieren
+    if $USE_POSTGRES; then
+        PG_PASSWORD_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$PG_PASSWORD''', safe=''))")
+        DB_URL="postgresql+psycopg2://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
+        DB_URL_ASYNC="postgresql+asyncpg://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
+    else
+        DB_URL="sqlite:///./msm.db"
+        DB_URL_ASYNC="sqlite+aiosqlite:///./msm.db"
+    fi
 else
-    DB_URL="sqlite:///./msm.db"
-    DB_URL_ASYNC="sqlite+aiosqlite:///./msm.db"
+    # Bestehende URLs beibehalten
+    if [[ -n "${CURRENT_DB_URL:-}" && -n "${CURRENT_DB_URL_ASYNC:-}" ]]; then
+        DB_URL="$CURRENT_DB_URL"
+        DB_URL_ASYNC="$CURRENT_DB_URL_ASYNC"
+    else
+        # Fallback (sollte bei gültigem .env nie passieren)
+        if $USE_POSTGRES; then
+            DB_URL="postgresql+psycopg2://msm:@localhost:5432/msm"
+            DB_URL_ASYNC="postgresql+asyncpg://msm:@localhost:5432/msm"
+        else
+            DB_URL="sqlite:///./msm.db"
+            DB_URL_ASYNC="sqlite+aiosqlite:///./msm.db"
+        fi
+        warn "Bestehende DB-URL nicht gefunden — Fallback generiert."
+    fi
 fi
 
 cat > "$ENV_FILE" <<EOF
@@ -350,75 +788,126 @@ MSM_RESEND_API_KEY="$RESEND_API_KEY"
 MSM_PANEL_URL="$PANEL_URL"
 MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
 MSM_STEAMCMD_PATH="/usr/games/steamcmd"
+# Redis-URL Fallback (sicherstellen, dass sie nie leer ist wenn Redis aktiv sein soll)
+if $INSTALL_REDIS && [[ -z "$MSM_REDIS_URL" ]]; then
+    MSM_REDIS_URL="redis://localhost:6379"
+fi
 MSM_REDIS_URL="$MSM_REDIS_URL"
 
 # Auto-Update (GitHub Releases)
 MSM_GITHUB_OWNER="einmalmaik"
 MSM_GITHUB_REPO="maunting-server-manager"
-MSM_AUTO_UPDATE=false
+MSM_AUTO_UPDATE=$MSM_AUTO_UPDATE
 MSM_AUTO_UPDATE_INTERVAL_HOURS=24
 EOF
 
 chmod 600 "$ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$ENV_FILE"
-ok ".env mit sicherem SECRET_KEY erstellt (chmod 600)"
+ok ".env geschrieben (chmod 600)"
 
 # ═══════════════════════════════════════════════════════════════
 # 7. Python-Backend einrichten
 # ═══════════════════════════════════════════════════════════════
-log "Installiere Python-Abhängigkeiten..."
-su - "$MSM_USER" -c "
-    cd $MSM_DIR/backend
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install --upgrade pip -q
-    pip install -r requirements.txt -q
-" 2>&1 | tee -a "$LOG_FILE"
-ok "Python-Backend bereit"
+RUN_BACKEND_SETUP=false
+if ! $REINSTALL_MODE; then
+    RUN_BACKEND_SETUP=true
+elif $KEEP_SETTINGS; then
+    RUN_BACKEND_SETUP=true
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ($CODE_CHANGED || $CHANGED_DB); then
+    RUN_BACKEND_SETUP=true
+fi
+
+if $RUN_BACKEND_SETUP; then
+    log "Installiere Python-Abhängigkeiten..."
+    su - "$MSM_USER" -c "
+        cd $MSM_DIR/backend
+        python3 -m venv venv
+        source venv/bin/activate
+        pip install --upgrade pip -q
+        pip install -r requirements.txt -q
+    " 2>&1 | tee -a "$LOG_FILE"
+    ok "Python-Backend bereit"
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 8. Datenbank initialisieren
 # ═══════════════════════════════════════════════════════════════
-log "Initialisiere Datenbank..."
-
-# Bei SQLite: alte DB entfernen, damit create_all ein sauberes Schema erzeugt
-# (Base.metadata.create_all fügt keine fehlenden Spalten zu existierenden Tabellen hinzu)
-if [[ "$DB_URL" == sqlite* ]]; then
-    rm -f "$MSM_DIR/backend/msm.db"
+RUN_DB_INIT=false
+if ! $REINSTALL_MODE; then
+    RUN_DB_INIT=true
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_DB; then
+    RUN_DB_INIT=true
 fi
 
-su - "$MSM_USER" -c "
-    cd $MSM_DIR/backend
-    source venv/bin/activate
-    python3 -c \"from database import engine, Base; from models import *; Base.metadata.create_all(engine)\"
-" 2>&1 | tee -a "$LOG_FILE"
-ok "Datenbank initialisiert"
+if $RUN_DB_INIT; then
+    log "Initialisiere Datenbank..."
+
+    # Bei SQLite: alte DB entfernen, damit create_all ein sauberes Schema erzeugt
+    # (außer Re-Install mit unveränderter SQLite-DB)
+    if [[ "$DB_URL" == sqlite* ]]; then
+        SHOULD_DELETE_DB=true
+        if $REINSTALL_MODE && ! $CHANGED_DB; then
+            SHOULD_DELETE_DB=false
+        fi
+        if $SHOULD_DELETE_DB; then
+            rm -f "$MSM_DIR/backend/msm.db"
+        fi
+    fi
+
+    su - "$MSM_USER" -c "
+        cd $MSM_DIR/backend
+        source venv/bin/activate
+        python3 -c \"from database import engine, Base; from models import *; Base.metadata.create_all(engine)\"
+    " 2>&1 | tee -a "$LOG_FILE"
+    ok "Datenbank initialisiert"
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 9. Frontend bauen
 # ═══════════════════════════════════════════════════════════════
-log "Baue Frontend..."
-if ! su - "$MSM_USER" -c "
-    set -e
-    cd $MSM_DIR/frontend
-    npm install -q
-    npm run build
-" 2>&1 | tee -a "$LOG_FILE"; then
-    err "Frontend-Build fehlgeschlagen. Prüfe npm-Log und package.json."
+RUN_FRONTEND_BUILD=false
+if ! $REINSTALL_MODE; then
+    RUN_FRONTEND_BUILD=true
+elif $KEEP_SETTINGS; then
+    RUN_FRONTEND_BUILD=true
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CODE_CHANGED; then
+    RUN_FRONTEND_BUILD=true
 fi
-ok "Frontend gebaut"
+
+if $RUN_FRONTEND_BUILD; then
+    log "Baue Frontend..."
+    if ! su - "$MSM_USER" -c "
+        set -e
+        cd $MSM_DIR/frontend
+        npm install -q
+        npm run build
+    " 2>&1 | tee -a "$LOG_FILE"; then
+        err "Frontend-Build fehlgeschlagen. Prüfe npm-Log und package.json."
+    fi
+    ok "Frontend gebaut"
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 10. Caddy konfigurieren
 # ═══════════════════════════════════════════════════════════════
-log "Konfiguriere Caddy..."
+RUN_CADDY_SETUP=false
+if ! $REINSTALL_MODE; then
+    RUN_CADDY_SETUP=true
+elif $KEEP_SETTINGS; then
+    RUN_CADDY_SETUP=true
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ($CODE_CHANGED || $CHANGED_DOMAIN); then
+    RUN_CADDY_SETUP=true
+fi
 
-CADDY_CONFIG="/etc/caddy/Caddyfile"
-mkdir -p /etc/caddy
+if $RUN_CADDY_SETUP; then
+    log "Konfiguriere Caddy..."
 
-if [[ -n "$DOMAIN" ]]; then
-    # Produktion: Domain + TLS
-    cat > "$CADDY_CONFIG" <<EOF
+    CADDY_CONFIG="/etc/caddy/Caddyfile"
+    mkdir -p /etc/caddy
+
+    if [[ -n "$DOMAIN" ]]; then
+        # Produktion: Domain + TLS
+        cat > "$CADDY_CONFIG" <<EOF
 $DOMAIN {
     root * /opt/msm/frontend/dist
 
@@ -445,9 +934,9 @@ $DOMAIN {
     }
 }
 EOF
-else
-    # IP-Modus: HTTP only (nicht empfohlen für Produktion)
-    cat > "$CADDY_CONFIG" <<EOF
+    else
+        # IP-Modus: HTTP only (nicht empfohlen für Produktion)
+        cat > "$CADDY_CONFIG" <<EOF
 :80 {
     root * /opt/msm/frontend/dist
 
@@ -473,21 +962,34 @@ else
     }
 }
 EOF
-    warn "Keine Domain angegeben — Panel läuft über HTTP (nicht empfohlen für Produktion)."
-fi
+        if ! $REINSTALL_MODE; then
+            warn "Keine Domain angegeben — Panel läuft über HTTP (nicht empfohlen für Produktion)."
+        fi
+    fi
 
-if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
-    systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
-else
-    service caddy restart 2>/dev/null || caddy reload --config "$CADDY_CONFIG" 2>/dev/null || true
+    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+        systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
+    else
+        service caddy restart 2>/dev/null || caddy reload --config "$CADDY_CONFIG" 2>/dev/null || true
+    fi
+    ok "Caddy konfiguriert"
 fi
-ok "Caddy konfiguriert"
 
 # ═══════════════════════════════════════════════════════════════
 # 11. systemd Service
 # ═══════════════════════════════════════════════════════════════
-log "Registriere systemd Service..."
-cat > /etc/systemd/system/msm-panel.service <<EOF
+RUN_SYSTEMD_SETUP=false
+if ! $REINSTALL_MODE; then
+    RUN_SYSTEMD_SETUP=true
+elif $KEEP_SETTINGS; then
+    RUN_SYSTEMD_SETUP=true
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ($CODE_CHANGED || $CHANGED_DOMAIN || $CHANGED_EMAIL || $CHANGED_REDIS); then
+    RUN_SYSTEMD_SETUP=true
+fi
+
+if $RUN_SYSTEMD_SETUP; then
+    log "Registriere systemd Service..."
+    cat > /etc/systemd/system/msm-panel.service <<EOF
 [Unit]
 Description=Maunting Server Manager Panel
 After=network.target redis-server.service
@@ -516,26 +1018,48 @@ ReadWritePaths=/opt/msm/backend
 WantedBy=multi-user.target
 EOF
 
-if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
-    systemctl daemon-reload
-    systemctl enable msm-panel.service
+    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+        systemctl daemon-reload
+        systemctl enable msm-panel.service
 
-    # Update-Timer (optional — deaktiviert per Default)
-    cp "$SCRIPT_DIR/msm-update.service" /etc/systemd/system/msm-update.service 2>/dev/null || true
-    cp "$SCRIPT_DIR/msm-update.timer" /etc/systemd/system/msm-update.timer 2>/dev/null || true
-    systemctl daemon-reload
-    systemctl enable msm-update.timer 2>/dev/null || true
-    # Timer starten nur, wenn AUTO_UPDATE=true
-    if [[ "${MSM_AUTO_UPDATE:-false}" == "true" ]]; then
-        systemctl start msm-update.timer 2>/dev/null || true
-        ok "Auto-Update Timer aktiviert (24h Intervall)"
+        # Update-Timer (optional — deaktiviert per Default)
+        cp "$SCRIPT_DIR/msm-update.service" /etc/systemd/system/msm-update.service 2>/dev/null || true
+        cp "$SCRIPT_DIR/msm-update.timer" /etc/systemd/system/msm-update.timer 2>/dev/null || true
+        systemctl daemon-reload
+        systemctl enable msm-update.timer 2>/dev/null || true
+        # Timer starten nur, wenn AUTO_UPDATE=true
+        if [[ "${MSM_AUTO_UPDATE:-false}" == "true" ]]; then
+            systemctl start msm-update.timer 2>/dev/null || true
+            ok "Auto-Update Timer aktiviert (24h Intervall)"
+        else
+            systemctl stop msm-update.timer 2>/dev/null || true
+            systemctl disable msm-update.timer 2>/dev/null || true
+            ok "Auto-Update Timer registriert (deaktiviert — setze MSM_AUTO_UPDATE=true)"
+        fi
+        ok "Service registriert"
     else
-        ok "Auto-Update Timer registriert (deaktiviert — setze MSM_AUTO_UPDATE=true)"
+        warn "systemd nicht verfügbar (typisch für WSL). msm-panel.service wird geschrieben, aber nicht aktiviert."
+        warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"
     fi
-    ok "Service registriert"
-else
-    warn "systemd nicht verfügbar (typisch für WSL). msm-panel.service wird geschrieben, aber nicht aktiviert."
-    warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"
+fi
+
+# Minimal-Apply: nur Auto-Update wurde geändert
+if $REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_AUTO_UPDATE && ! $RUN_SYSTEMD_SETUP; then
+    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+        log "Aktualisiere Auto-Update Timer..."
+        cp "$SCRIPT_DIR/msm-update.service" /etc/systemd/system/msm-update.service 2>/dev/null || true
+        cp "$SCRIPT_DIR/msm-update.timer" /etc/systemd/system/msm-update.timer 2>/dev/null || true
+        systemctl daemon-reload
+        if [[ "$MSM_AUTO_UPDATE" == "true" ]]; then
+            systemctl enable msm-update.timer 2>/dev/null || true
+            systemctl start msm-update.timer 2>/dev/null || true
+            ok "Auto-Update Timer aktiviert"
+        else
+            systemctl stop msm-update.timer 2>/dev/null || true
+            systemctl disable msm-update.timer 2>/dev/null || true
+            ok "Auto-Update Timer deaktiviert"
+        fi
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -602,11 +1126,11 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# 14. Service starten
+# 14. Service starten / neustarten
 # ═══════════════════════════════════════════════════════════════
 log "Starte Panel-Service..."
 if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
-    systemctl start msm-panel.service
+    systemctl restart msm-panel.service 2>/dev/null || systemctl start msm-panel.service 2>/dev/null || true
     sleep 2
     if systemctl is-active --quiet msm-panel.service; then
         ok "Panel-Service läuft"
@@ -623,7 +1147,11 @@ fi
 # ═══════════════════════════════════════════════════════════════
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Maunting Server Manager erfolgreich installiert!${NC}"
+if $REINSTALL_MODE; then
+    echo -e "${GREEN}  Maunting Server Manager erfolgreich aktualisiert!${NC}"
+else
+    echo -e "${GREEN}  Maunting Server Manager erfolgreich installiert!${NC}"
+fi
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -632,7 +1160,9 @@ if [[ -n "$DOMAIN" ]]; then
 else
     PUBLIC_IP=$(curl -s -4 ifconfig.me 2>/dev/null || echo "<DEINE-IP>")
     echo -e "  ${BOLD}Panel-URL:${NC}     ${CYAN}http://$PUBLIC_IP${NC}"
-    echo -e "  ${YELLOW}Hinweis:${NC}      Für HTTPS eine Domain einrichten und install.sh erneut laufen lassen."
+    if ! $REINSTALL_MODE; then
+        echo -e "  ${YELLOW}Hinweis:${NC}      Für HTTPS eine Domain einrichten und install.sh erneut laufen lassen."
+    fi
 fi
 
 echo ""
@@ -660,6 +1190,12 @@ if $INSTALL_REDIS; then
     echo -e "  ${GREEN}Redis aktiv:${NC}       Verteiltes Rate-Limiting einsatzbereit"
 else
     echo -e "  ${YELLOW}Redis nicht aktiv:${NC}  Rate-Limiting nutzt in-memory (verliert State bei Neustart)"
+fi
+
+if [[ "$MSM_AUTO_UPDATE" == "true" ]]; then
+    echo -e "  ${GREEN}Auto-Update:${NC}      Aktiviert (24h Intervall)"
+else
+    echo -e "  ${YELLOW}Auto-Update:${NC}      Deaktiviert"
 fi
 
 echo ""
