@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import { VersionFooter } from '@/components/VersionFooter'
 import { Shield, Check, X, ArrowRight } from 'lucide-react'
 
 export function ResetPassword() {
@@ -171,9 +172,7 @@ export function ResetPassword() {
           )}
         </div>
 
-        <p className="text-center font-mono-sm text-mono-sm text-on-surface-variant mt-6 opacity-60">
-          Maunting Server Manager v1.0.0
-        </p>
+        <VersionFooter />
       </div>
     </div>
   )

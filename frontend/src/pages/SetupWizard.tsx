@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Shield, Server, ChevronRight, Check, Mail } from 'lucide-react'
+import { VersionFooter } from '@/components/VersionFooter'
 import { api } from '@/api/client'
 
 interface SetupWizardProps {
@@ -376,9 +377,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
 
         {/* Footer */}
-        <p className="text-center font-mono-sm text-mono-sm text-on-surface-variant mt-6 opacity-60">
-          Maunting Server Manager v1.0.0
-        </p>
+        <VersionFooter />
       </div>
     </div>
   )
