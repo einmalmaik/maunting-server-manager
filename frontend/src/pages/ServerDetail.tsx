@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
+import { toast } from '@/stores/toastStore'
 import type { Server, GameInfo } from '@/types'
 import {
   Play,
@@ -60,7 +61,7 @@ export function ServerDetail() {
       await api(`/servers/${serverId}/${action}`, { method: 'POST' })
       fetchAll()
     } catch (err: any) {
-      alert(err.message || 'Fehler')
+      toast.error(err.message || 'Fehler')
     } finally {
       setActionLoading(null)
     }

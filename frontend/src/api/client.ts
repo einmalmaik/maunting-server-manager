@@ -5,6 +5,20 @@ function getCsrfToken(): string | null {
   return match ? decodeURIComponent(match[2]) : null
 }
 
+function extractErrorMessage(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map((d: any) => d.msg || String(d)).join(', ')
+  }
+  if (detail && typeof detail === 'object') {
+    const obj = detail as Record<string, unknown>
+    if (typeof obj.message === 'string') return obj.message
+    if (typeof obj.error === 'string') return obj.error
+    return JSON.stringify(detail)
+  }
+  return String(detail)
+}
+
 let refreshPromise: Promise<void> | null = null
 
 async function doRefresh(): Promise<void> {
@@ -83,7 +97,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       throw new Error('RATE_LIMITED')
     }
     const err = await res.json().catch(() => ({ detail: 'Unbekannter Fehler' }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
+    throw new Error(extractErrorMessage(err.detail) || `HTTP ${res.status}`)
   }
 
   if (res.status === 204) {

@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom'
 import { Shell } from './components/layout/Shell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { PublicOnlyRoute } from './components/PublicOnlyRoute'
+import { ToastContainer } from './components/ui/ToastContainer'
 import { SetupWizard } from './pages/SetupWizard'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
@@ -42,7 +43,8 @@ function App() {
   }
 
   return (
-    <Routes>
+    <>
+      <Routes>
       {/* Oeffentliche Auth-Routen — nur fuer nicht-eingeloggte User */}
       <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
       <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
@@ -63,6 +65,8 @@ function App() {
         <Route path="profile" element={<Profile />} />
       </Route>
     </Routes>
+      <ToastContainer />
+    </>
   )
 }
 

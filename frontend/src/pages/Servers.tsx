@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
+import { toast } from '@/stores/toastStore'
 import type { Server, GameInfo } from '@/types'
 import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive } from 'lucide-react'
 
@@ -60,7 +61,7 @@ export function Servers() {
       setForm({ name: '', game_type: 'conan_exiles_ue5', cpu_limit_percent: '', ram_limit_mb: '', disk_limit_gb: '' })
       fetchServers()
     } catch (err: any) {
-      alert(err.message || 'Fehler')
+      toast.error(err.message || 'Fehler')
     } finally {
       setCreating(false)
     }
