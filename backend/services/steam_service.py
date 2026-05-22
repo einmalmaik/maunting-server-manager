@@ -8,7 +8,7 @@ Caches responses to respect rate limits.
 import httpx
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 
 
@@ -54,17 +54,17 @@ class SteamService:
         if key not in self._cache:
             return False
         cached_time = self._cache[key]['timestamp']
-        return datetime.now() - cached_time < self._cache_ttl
-    
+        return datetime.now(timezone.utc) - cached_time < self._cache_ttl
+
     def _get_cache(self, key: str) -> Optional[Any]:
         if self._is_cache_valid(key):
             return self._cache[key]['data']
         return None
-    
+
     def _set_cache(self, key: str, data: Any):
         self._cache[key] = {
             'data': data,
-            'timestamp': datetime.now()
+            'timestamp': datetime.now(timezone.utc)
         }
     
     async def search_workshop_mods(

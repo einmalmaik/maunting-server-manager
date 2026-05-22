@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 
 import httpx
@@ -32,11 +33,11 @@ def _get_current_version() -> str:
 
 
 @router.get("/resources")
-def system_resources(user: User = Depends(get_current_user)) -> dict:
+async def system_resources(user: User = Depends(get_current_user)) -> dict:
     if not user.is_owner:
         raise HTTPException(status_code=403, detail="Nur Owner")
 
-    cpu = psutil.cpu_percent(interval=1)
+    cpu = await asyncio.to_thread(psutil.cpu_percent, interval=1)
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
 

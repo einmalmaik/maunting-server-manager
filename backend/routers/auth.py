@@ -10,7 +10,7 @@ from config import settings
 from cookies import _set_auth_cookies, _clear_auth_cookies
 from database import get_db
 from dependencies import get_current_user, get_current_owner, verify_csrf
-from models import User
+from models import User, EmailVerification
 from schemas import LoginRequest, TokenResponse, PasswordResetRequest, PasswordResetConfirm
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest
 from services import AuthService, EmailService
@@ -45,13 +45,15 @@ async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> 
     if EmailService.is_configured():
         await EmailService.send_verification_code_email(req.email, req.username, code)
     else:
-        # Fallback: In der Entwicklung ohne SMTP den Code in der Response zurueckgeben
-        db.rollback()
+        import logging
+        logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", req.email, code)
+        # Setup-User und Verifikationseintrag wieder entfernen
+        db.query(EmailVerification).filter(EmailVerification.email == req.email).delete()
         db.delete(user)
         db.commit()
         raise HTTPException(
             status_code=503,
-            detail=f"SMTP nicht konfiguriert. Verifikations-Code (Entwicklung): {code}"
+            detail="SMTP nicht konfiguriert. Verifikation nicht moeglich."
         )
 
     return {"message": "Verifikations-Code gesendet", "requires_verification": True}
@@ -84,9 +86,11 @@ async def setup_resend(req: OwnerSetupRequest, db: Session = Depends(get_db)) ->
     if EmailService.is_configured():
         await EmailService.send_verification_code_email(req.email, user.username, code)
     else:
+        import logging
+        logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", req.email, code)
         raise HTTPException(
             status_code=503,
-            detail=f"SMTP nicht konfiguriert. Verifikations-Code (Entwicklung): {code}"
+            detail="SMTP nicht konfiguriert. Verifikation nicht moeglich."
         )
 
     return {"message": "Code erneut gesendet"}
@@ -157,16 +161,29 @@ def logout(
         rt = AuthService.validate_refresh_token(db, refresh_cookie)
         if rt:
             AuthService.revoke_refresh_token(db, rt)
+
     access_cookie = request.cookies.get("__Secure-access_token")
+    user_id_to_revoke: int | None = None
     if access_cookie:
         payload = AuthService.decode_token(access_cookie)
-        if payload and "user_id" in payload:
-            AuthService.revoke_all_user_refresh_tokens(db, payload["user_id"])
-        if payload and payload.get("jti"):
-            expires = payload.get("exp")
-            from datetime import datetime
-            expires_dt = datetime.fromtimestamp(expires, tz=timezone.utc) if expires else None
-            blacklist_jwt(db, payload["jti"], payload.get("user_id"), expires_dt)
+        if payload:
+            user_id_to_revoke = payload.get("user_id")
+            if payload.get("jti"):
+                expires = payload.get("exp")
+                from datetime import datetime
+                expires_dt = datetime.fromtimestamp(expires, tz=timezone.utc) if expires else None
+                blacklist_jwt(db, payload["jti"], user_id_to_revoke, expires_dt)
+
+    # Wenn Access-Token abgelaufen/ungueltig ist, versuche den User ueber den
+    # Refresh-Token zu identifizieren, damit alle Sessions beendet werden.
+    if user_id_to_revoke is None and refresh_cookie:
+        rt_fallback = AuthService.validate_refresh_token(db, refresh_cookie)
+        if rt_fallback:
+            user_id_to_revoke = rt_fallback.user_id
+
+    if user_id_to_revoke is not None:
+        AuthService.revoke_all_user_refresh_tokens(db, user_id_to_revoke)
+
     _clear_auth_cookies(response)
     return {"message": "Abgemeldet"}
 

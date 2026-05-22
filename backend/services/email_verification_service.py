@@ -24,7 +24,7 @@ class EmailVerificationService:
         db.query(EmailVerification).filter(
             EmailVerification.email == email,
             EmailVerification.purpose == purpose,
-        ).delete()
+        ).delete(synchronize_session=False)
 
         plain_code = str(EmailVerificationService.generate_code())
         code_hash = EmailVerificationService._hash_code(plain_code)
