@@ -11,6 +11,8 @@ class PanelSettingsResponse(BaseModel):
     smtp_tls: str = "true"
     resend_api_key: str = ""
     default_language: str = "de"
+    email_configured: bool = False
+    email_provider: str = "none"
 
 
 class PanelSettingsUpdate(BaseModel):

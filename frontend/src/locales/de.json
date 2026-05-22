@@ -42,7 +42,8 @@
     "emailVerified": "Verifiziert",
     "emailNotVerified": "Nicht verifiziert",
     "active": "Aktiv",
-    "inactive": "Inaktiv"
+    "inactive": "Inaktiv",
+    "actions": "Aktionen"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -162,6 +163,10 @@
     "updateSettingFailed": "Update-Einstellung fehlgeschlagen",
     "reorderFailed": "Neusortierung fehlgeschlagen"
   },
+  "backups": {
+    "subtitle": "Backup-Verwaltung",
+    "comingSoon": "Backup-Funktionen werden hier verfügbar sein."
+  },
   "config": {
     "title": "Config-Editor",
     "subtitle": "Server-Konfiguration bearbeiten",
@@ -191,6 +196,7 @@
     "title": "Einstellungen",
     "subtitle": "Panel-Einstellungen",
     "panelUrl": "Panel-URL",
+    "panelUrlHint": "Wird automatisch aus der aktuellen Adresse ermittelt.",
     "smtpHost": "SMTP-Host",
     "smtpPort": "SMTP-Port",
     "smtpUser": "SMTP-Benutzer",

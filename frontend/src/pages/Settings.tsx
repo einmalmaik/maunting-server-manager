@@ -13,6 +13,8 @@ interface PanelSettings {
   smtp_tls: string
   resend_api_key: string
   default_language: string
+  email_configured: boolean
+  email_provider: string
 }
 
 export function Settings() {
@@ -27,6 +29,8 @@ export function Settings() {
     smtp_tls: 'true',
     resend_api_key: '',
     default_language: 'de',
+    email_configured: false,
+    email_provider: 'none',
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -96,13 +100,13 @@ export function Settings() {
   const [resendMsg, setResendMsg] = useState('')
 
   useEffect(() => {
-    // Derive initial provider from fetched data
-    if (settings.resend_api_key) {
+    // Derive initial provider from the backend's actual active provider
+    if (settings.email_provider === 'resend') {
       setProvider('resend')
     } else {
       setProvider('smtp')
     }
-  }, [settings.resend_api_key])
+  }, [settings.email_provider])
 
   const handleSaveResendKey = async () => {
     if (!newResendKey.trim()) return
@@ -168,7 +172,7 @@ export function Settings() {
                 className="msm-input opacity-60 cursor-not-allowed"
               />
               <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
-                Wird automatisch aus der aktuellen Adresse ermittelt.
+                {t('settings.panelUrlHint')}
               </p>
             </div>
             <div>
@@ -304,9 +308,9 @@ export function Settings() {
             <div className="space-y-4">
               {/* Status indicator */}
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${settings.resend_api_key ? 'bg-status-success' : 'bg-on-surface-variant'}`} />
+                <span className={`w-2 h-2 rounded-full ${settings.email_configured ? 'bg-status-success' : 'bg-on-surface-variant'}`} />
                 <span className="font-body-md text-sm text-on-surface">
-                  {settings.resend_api_key ? 'Resend konfiguriert' : 'Resend nicht konfiguriert'}
+                  {settings.email_configured ? 'Resend konfiguriert' : 'Resend nicht konfiguriert'}
                 </span>
               </div>
 

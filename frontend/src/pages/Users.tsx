@@ -200,7 +200,7 @@ export function Users() {
                 Status
               </th>
               <th className="text-right font-label-md text-label-md text-on-surface-variant p-4 uppercase tracking-wider">
-                Aktionen
+                {t('users.actions')}
               </th>
             </tr>
           </thead>

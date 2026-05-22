@@ -20,7 +20,7 @@ _COOKIE_CONFIG = {
         "httponly": False,  # JS muss lesen koennen fuer Double-Submit
         "secure": not settings.debug,
         "samesite": "strict",
-        "path": "/api",
+        "path": "/",
     },
 }
 

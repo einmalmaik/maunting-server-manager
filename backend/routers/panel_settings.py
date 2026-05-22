@@ -41,6 +41,8 @@ def get_settings(db: Session = Depends(get_db), _=Depends(get_current_owner)) ->
         "smtp_tls": all_db.get("smtp_tls", "true"),
         "resend_api_key": _mask_secret(all_db.get("resend_api_key", "")),
         "default_language": all_db.get("default_language", "de"),
+        "email_configured": EmailService.is_configured(),
+        "email_provider": EmailService._get_provider(),
     }
 
 
