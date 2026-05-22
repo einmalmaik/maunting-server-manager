@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     panel_url: str = "http://localhost"
     setup_completed_file: Path = Path("/opt/msm/.setup_completed")
 
+    # Redis (fuer verteiltes Rate-Limiting via slowapi)
+    redis_url: str = ""
+
     # Steam
     steamcmd_path: str = "/usr/games/steamcmd"
 

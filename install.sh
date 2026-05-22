@@ -234,9 +234,9 @@ else
 fi
 
 # ── 5c. Redis Confirmation ──
-REDIS_URL=""
+MSM_REDIS_URL=""
 if $INSTALL_REDIS; then
-    REDIS_URL="redis://localhost:6379"
+    MSM_REDIS_URL="redis://localhost:6379"
 fi
 
 # ── 5d. PostgreSQL (empfohlen für Produktion) ──
@@ -307,7 +307,7 @@ MSM_RESEND_API_KEY="$RESEND_API_KEY"
 MSM_PANEL_URL="$PANEL_URL"
 MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
 MSM_STEAMCMD_PATH="/usr/games/steamcmd"
-REDIS_URL="$REDIS_URL"
+MSM_REDIS_URL="$MSM_REDIS_URL"
 
 # Auto-Update (GitHub Releases)
 MSM_GITHUB_OWNER="einmalmaik"
