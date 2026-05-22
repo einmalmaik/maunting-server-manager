@@ -129,8 +129,12 @@ INSTALL_REDIS=false
 if ask_yesno "Redis für verteiltes Rate-Limiting installieren? (empfohlen für Produktion)"; then
     log "Installiere Redis..."
     apt-get install -y -qq redis-server 2>&1 | tee -a "$LOG_FILE"
-    systemctl enable redis-server >/dev/null 2>&1 || true
-    systemctl start redis-server >/dev/null 2>&1 || true
+    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+        systemctl enable redis-server >/dev/null 2>&1 || true
+        systemctl start redis-server >/dev/null 2>&1 || true
+    else
+        service redis-server start 2>/dev/null || true
+    fi
     INSTALL_REDIS=true
     ok "Redis installiert"
 else
@@ -246,14 +250,52 @@ if ask_yesno "PostgreSQL für die Datenbank nutzen? (empfohlen für Produktion, 
     log "Installiere PostgreSQL..."
     apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev 2>&1 | tee -a "$LOG_FILE"
 
-    PG_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
-    su - postgres -c "psql -c \"CREATE USER msm WITH PASSWORD '$PG_PASSWORD';\"" 2>&1 | tee -a "$LOG_FILE" || true
-    su - postgres -c "psql -c \"CREATE DATABASE msm OWNER msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
-    su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE msm TO msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
+    # URL-sicheres Passwort generieren (nur a-zA-Z0-9_-)
+    PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
 
-    # pg_hba.conf: msm-User darf lokal mit Passwort verbinden
-    sed -i 's/^local\s\+all\s\+all\s\+peer/local   all   all   scram-sha-256/' /etc/postgresql/*/main/pg_hba.conf 2>/dev/null || true
-    systemctl restart postgresql 2>/dev/null || true
+    # User und DB sicher erstellen/aktualisieren via temporärer SQL-Datei
+    # (heredoc + su + tee funktioniert nicht korrekt, daher SQL-Datei)
+    log "Richte PostgreSQL-User und Datenbank ein..."
+    cat > /tmp/msm_pg_setup.sql <<EOF
+DO \$\$
+BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'msm') THEN
+    ALTER USER msm WITH PASSWORD '${PG_PASSWORD}';
+  ELSE
+    CREATE USER msm WITH PASSWORD '${PG_PASSWORD}';
+  END IF;
+END \$\$;
+EOF
+    su - postgres -c "psql -f /tmp/msm_pg_setup.sql" 2>&1 | tee -a "$LOG_FILE"
+    rm -f /tmp/msm_pg_setup.sql
+
+    # CREATE DATABASE darf NICHT in einem DO/Transaktions-Block laufen
+    su - postgres -c "psql -c \"CREATE DATABASE msm OWNER msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
+
+    su - postgres -c "psql -d msm -c \"GRANT ALL ON SCHEMA public TO msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
+
+    # pg_hba.conf: nur host/localhost auf scram-sha-256 sicherstellen,
+    # local peer für postgres beibehalten (damit su - postgres -c psql funktioniert)
+    PG_HBA=$(find /etc/postgresql -name pg_hba.conf | head -1)
+    if [[ -n "$PG_HBA" ]]; then
+        # Host-Einträge für IPv4/IPv6: auf scram-sha-256 setzen (egal vorher md5/trust/peer/ident)
+        sed -i -E 's/^(host\s+all\s+all\s+127\.0\.0\.1\/32)\s+.*/\1            scram-sha-256/' "$PG_HBA"
+        sed -i -E 's/^(host\s+all\s+all\s+::1\/128)\s+.*/\1                 scram-sha-256/' "$PG_HBA"
+        # Falls IPv4-Eintrag gar nicht existiert -> anhängen
+        if ! grep -qE '^host\s+all\s+all\s+127\.0\.0\.1/32' "$PG_HBA"; then
+            echo "host    all             all             127.0.0.1/32            scram-sha-256" >> "$PG_HBA"
+        fi
+        # Falls IPv6-Eintrag gar nicht existiert -> anhängen
+        if ! grep -qE '^host\s+all\s+all\s+::1/128' "$PG_HBA"; then
+            echo "host    all             all             ::1/128                 scram-sha-256" >> "$PG_HBA"
+        fi
+        # PostgreSQL neu laden (WSL-kompatibel)
+        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+            systemctl restart postgresql
+        else
+            service postgresql restart 2>/dev/null || pg_ctlcluster $(pg_lsclusters | tail -1 | awk '{print $1}') main restart 2>/dev/null || true
+        fi
+    fi
 
     USE_POSTGRES=true
     ok "PostgreSQL installiert (DB: msm, User: msm)"
@@ -274,10 +316,11 @@ fi
 
 ENV_FILE="$MSM_DIR/backend/.env"
 
-# Datenbank-URL wählen
+# Datenbank-URL wählen (Passwort URL-encoden, falls doch mal Sonderzeichen vorkommen)
 if $USE_POSTGRES; then
-    DB_URL="postgresql+psycopg2://msm:$PG_PASSWORD@localhost:5432/msm"
-    DB_URL_ASYNC="postgresql+asyncpg://msm:$PG_PASSWORD@localhost:5432/msm"
+    PG_PASSWORD_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$PG_PASSWORD''', safe=''))")
+    DB_URL="postgresql+psycopg2://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
+    DB_URL_ASYNC="postgresql+asyncpg://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
 else
     DB_URL="sqlite:///./msm.db"
     DB_URL_ASYNC="sqlite+aiosqlite:///./msm.db"
@@ -337,10 +380,17 @@ ok "Python-Backend bereit"
 # 8. Datenbank initialisieren
 # ═══════════════════════════════════════════════════════════════
 log "Initialisiere Datenbank..."
+
+# Bei SQLite: alte DB entfernen, damit create_all ein sauberes Schema erzeugt
+# (Base.metadata.create_all fügt keine fehlenden Spalten zu existierenden Tabellen hinzu)
+if [[ "$DB_URL" == sqlite* ]]; then
+    rm -f "$MSM_DIR/backend/msm.db"
+fi
+
 su - "$MSM_USER" -c "
     cd $MSM_DIR/backend
     source venv/bin/activate
-    alembic upgrade head 2>/dev/null || python3 -c \"from database import engine, Base; from models import *; Base.metadata.create_all(engine)\"
+    python3 -c \"from database import engine, Base; from models import *; Base.metadata.create_all(engine)\"
 " 2>&1 | tee -a "$LOG_FILE"
 ok "Datenbank initialisiert"
 
@@ -348,11 +398,14 @@ ok "Datenbank initialisiert"
 # 9. Frontend bauen
 # ═══════════════════════════════════════════════════════════════
 log "Baue Frontend..."
-su - "$MSM_USER" -c "
+if ! su - "$MSM_USER" -c "
+    set -e
     cd $MSM_DIR/frontend
     npm install -q
     npm run build
-" 2>&1 | tee -a "$LOG_FILE"
+" 2>&1 | tee -a "$LOG_FILE"; then
+    err "Frontend-Build fehlgeschlagen. Prüfe npm-Log und package.json."
+fi
 ok "Frontend gebaut"
 
 # ═══════════════════════════════════════════════════════════════
@@ -417,7 +470,11 @@ EOF
     warn "Keine Domain angegeben — Panel läuft über HTTP (nicht empfohlen für Produktion)."
 fi
 
-systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
+if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+    systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
+else
+    service caddy restart 2>/dev/null || caddy reload --config "$CADDY_CONFIG" 2>/dev/null || true
+fi
 ok "Caddy konfiguriert"
 
 # ═══════════════════════════════════════════════════════════════
@@ -453,22 +510,27 @@ ReadWritePaths=/opt/msm/backend
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable msm-panel.service
+if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+    systemctl daemon-reload
+    systemctl enable msm-panel.service
 
-# Update-Timer (optional — deaktiviert per Default)
-cp "$SCRIPT_DIR/msm-update.service" /etc/systemd/system/msm-update.service 2>/dev/null || true
-cp "$SCRIPT_DIR/msm-update.timer" /etc/systemd/system/msm-update.timer 2>/dev/null || true
-systemctl daemon-reload
-systemctl enable msm-update.timer 2>/dev/null || true
-# Timer starten nur, wenn AUTO_UPDATE=true
-if [[ "$MSM_AUTO_UPDATE" == "true" ]]; then
-    systemctl start msm-update.timer 2>/dev/null || true
-    ok "Auto-Update Timer aktiviert (24h Intervall)"
+    # Update-Timer (optional — deaktiviert per Default)
+    cp "$SCRIPT_DIR/msm-update.service" /etc/systemd/system/msm-update.service 2>/dev/null || true
+    cp "$SCRIPT_DIR/msm-update.timer" /etc/systemd/system/msm-update.timer 2>/dev/null || true
+    systemctl daemon-reload
+    systemctl enable msm-update.timer 2>/dev/null || true
+    # Timer starten nur, wenn AUTO_UPDATE=true
+    if [[ "${MSM_AUTO_UPDATE:-false}" == "true" ]]; then
+        systemctl start msm-update.timer 2>/dev/null || true
+        ok "Auto-Update Timer aktiviert (24h Intervall)"
+    else
+        ok "Auto-Update Timer registriert (deaktiviert — setze MSM_AUTO_UPDATE=true)"
+    fi
+    ok "Service registriert"
 else
-    ok "Auto-Update Timer registriert (deaktiviert — setze MSM_AUTO_UPDATE=true)"
+    warn "systemd nicht verfügbar (typisch für WSL). msm-panel.service wird geschrieben, aber nicht aktiviert."
+    warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"
 fi
-ok "Service registriert"
 
 # ═══════════════════════════════════════════════════════════════
 # 12. Firewall (UFW)
@@ -525,21 +587,29 @@ logpath = /var/log/syslog
 backend = systemd
 EOF
 
-systemctl enable fail2ban >/dev/null 2>&1 || true
-systemctl restart fail2ban >/dev/null 2>&1 || true
-ok "Fail2ban aktiviert (SSH + Panel Brute-Force-Schutz)"
+if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+    systemctl enable fail2ban >/dev/null 2>&1 || true
+    systemctl restart fail2ban >/dev/null 2>&1 || true
+    ok "Fail2ban aktiviert (SSH + Panel Brute-Force-Schutz)"
+else
+    warn "systemd nicht verfügbar — Fail2ban-Konfiguration geschrieben, aber nicht gestartet."
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 14. Service starten
 # ═══════════════════════════════════════════════════════════════
 log "Starte Panel-Service..."
-systemctl start msm-panel.service
-sleep 2
-
-if systemctl is-active --quiet msm-panel.service; then
-    ok "Panel-Service läuft"
+if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+    systemctl start msm-panel.service
+    sleep 2
+    if systemctl is-active --quiet msm-panel.service; then
+        ok "Panel-Service läuft"
+    else
+        warn "Panel-Service startet nicht automatisch. Prüfe: journalctl -u msm-panel -n 50"
+    fi
 else
-    warn "Panel-Service startet nicht automatisch. Prüfe: journalctl -u msm-panel -n 50"
+    warn "systemd nicht verfügbar — Service muss manuell gestartet werden."
+    warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"
 fi
 
 # ═══════════════════════════════════════════════════════════════
