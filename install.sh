@@ -202,6 +202,13 @@ if [[ ! -d "$SCRIPT_DIR/backend" || ! -d "$SCRIPT_DIR/frontend" ]]; then
     err "Backend/Frontend nicht gefunden. Bitte aus dem Repository-Root ausführen."
 fi
 
+# Prüfe ob systemd verfügbar ist (einmalig, damit die Prüfung nicht wiederholt werden muss)
+if command -v systemctl &>/dev/null; then
+    SYSTEMD_AVAILABLE=true
+else
+    SYSTEMD_AVAILABLE=false
+fi
+
 log "=== Maunting Server Manager Installation ==="
 log "Log: $LOG_FILE"
 log ""
@@ -322,7 +329,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
             INSTALL_REDIS=false
             MSM_REDIS_URL=""
             CHANGED_REDIS=true
-            if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+            if $SYSTEMD_AVAILABLE; then
                 systemctl stop redis-server 2>/dev/null || true
             else
                 service redis-server stop 2>/dev/null || true
@@ -360,7 +367,7 @@ if $INSTALL_REDIS; then
         log "Installiere Redis..."
         apt-get install -y -qq redis-server 2>&1 | tee -a "$LOG_FILE"
     fi
-    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+    if $SYSTEMD_AVAILABLE; then
         systemctl enable redis-server >/dev/null 2>&1 || true
         systemctl start redis-server >/dev/null 2>&1 || true
     else
@@ -597,7 +604,7 @@ else
 
     # ── 5a. Domain ──
     echo ""
-    echo -e "${BOLD}Schritt 1/3: Domain${NC}"
+    echo -e "${BOLD}Schritt 1/4: Domain${NC}"
     echo "  Gib eine Domain an, damit Caddy automatisch ein SSL-Zertifikat erstellt."
     echo "  Ohne Domain wird das Panel über HTTP (nur IP) erreichbar — nicht empfohlen."
     echo ""
@@ -606,7 +613,7 @@ else
 
     # ── 5b. Email ──
     echo ""
-    echo -e "${BOLD}Schritt 2/3: Email-Versand${NC}"
+    echo -e "${BOLD}Schritt 2/4: Email-Versand${NC}"
     echo "  Wird für Setup-Verifikation, 2FA-Setup und Backup-Codes benötigt."
     echo "  Optionen:"
     echo "    1. Resend (resend.com) — API-Key, kein SMTP nötig, empfohlen"
@@ -643,14 +650,25 @@ else
     fi
 
     # ── 5c. PostgreSQL ──
+    echo ""
+    echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
     if ask_yesno "PostgreSQL für die Datenbank nutzen? (empfohlen für Produktion, sonst SQLite)"; then
         USE_POSTGRES=true
     else
         USE_POSTGRES=false
     fi
 
-    # Fresh install: auto-update default ist false
-    MSM_AUTO_UPDATE="false"
+    # ── 5d. Auto-Update ──
+    echo ""
+    echo -e "${BOLD}Schritt 4/4: Automatische Updates${NC}"
+    echo "  Prüft täglich auf neue GitHub-Releases und installiert sie automatisch."
+    echo "  Empfohlen für Produktion, aber Updates sollten vorher getestet werden."
+    echo ""
+    if ask_yesno "Automatische Updates aktivieren?"; then
+        MSM_AUTO_UPDATE="true"
+    else
+        MSM_AUTO_UPDATE="false"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -701,7 +719,7 @@ EOF
         if ! grep -qE '^host\s+all\s+all\s+::1/128' "$PG_HBA"; then
             echo "host    all             all             ::1/128                 scram-sha-256" >> "$PG_HBA"
         fi
-        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+        if $SYSTEMD_AVAILABLE; then
             systemctl restart postgresql
         else
             service postgresql restart 2>/dev/null || pg_ctlcluster $(pg_lsclusters | tail -1 | awk '{print $1}') main restart 2>/dev/null || true
@@ -967,7 +985,7 @@ EOF
         fi
     fi
 
-    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+    if $SYSTEMD_AVAILABLE; then
         systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
     else
         service caddy restart 2>/dev/null || caddy reload --config "$CADDY_CONFIG" 2>/dev/null || true
@@ -1018,7 +1036,7 @@ ReadWritePaths=/opt/msm/backend
 WantedBy=multi-user.target
 EOF
 
-    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+    if $SYSTEMD_AVAILABLE; then
         systemctl daemon-reload
         systemctl enable msm-panel.service
 
@@ -1045,7 +1063,7 @@ fi
 
 # Minimal-Apply: nur Auto-Update wurde geändert
 if $REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_AUTO_UPDATE && ! $RUN_SYSTEMD_SETUP; then
-    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+    if $SYSTEMD_AVAILABLE; then
         log "Aktualisiere Auto-Update Timer..."
         cp "$SCRIPT_DIR/msm-update.service" /etc/systemd/system/msm-update.service 2>/dev/null || true
         cp "$SCRIPT_DIR/msm-update.timer" /etc/systemd/system/msm-update.timer 2>/dev/null || true
@@ -1084,8 +1102,12 @@ fi
 # ═══════════════════════════════════════════════════════════════
 # 13. Fail2ban (Brute-Force-Schutz)
 # ═══════════════════════════════════════════════════════════════
-log "Installiere Fail2ban..."
-apt-get install -y -qq fail2ban 2>&1 | tee -a "$LOG_FILE"
+if ! command -v fail2ban-server &>/dev/null; then
+    log "Installiere Fail2ban..."
+    apt-get install -y -qq fail2ban 2>&1 | tee -a "$LOG_FILE"
+else
+    log "Fail2ban ist bereits installiert. Konfiguration wird aktualisiert..."
+fi
 
 # Eigene Filterregel für das Panel-Auth
 mkdir -p /etc/fail2ban/filter.d
@@ -1117,7 +1139,7 @@ logpath = /var/log/syslog
 backend = systemd
 EOF
 
-if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+if $SYSTEMD_AVAILABLE; then
     systemctl enable fail2ban >/dev/null 2>&1 || true
     systemctl restart fail2ban >/dev/null 2>&1 || true
     ok "Fail2ban aktiviert (SSH + Panel Brute-Force-Schutz)"
@@ -1129,7 +1151,7 @@ fi
 # 14. Service starten / neustarten
 # ═══════════════════════════════════════════════════════════════
 log "Starte Panel-Service..."
-if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+if $SYSTEMD_AVAILABLE; then
     systemctl restart msm-panel.service 2>/dev/null || systemctl start msm-panel.service 2>/dev/null || true
     sleep 2
     if systemctl is-active --quiet msm-panel.service; then
@@ -1153,6 +1175,25 @@ else
     echo -e "${GREEN}  Maunting Server Manager erfolgreich installiert!${NC}"
 fi
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+
+# Transparenz: Was wurde geändert?
+if $REINSTALL_MODE; then
+    echo ""
+    echo -e "  ${BOLD}Durchgeführte Änderungen:${NC}"
+    if $KEEP_SETTINGS; then
+        echo -e "    ${GREEN}•${NC} Quellcode aktualisiert"
+        echo -e "    ${GREEN}•${NC} Frontend neu gebaut"
+        echo -e "    ${GREEN}•${NC} Services neugestartet"
+        echo -e "    ${CYAN}•${NC} Konfiguration unverändert"
+    else
+        if $CHANGED_DOMAIN; then     echo -e "    ${YELLOW}•${NC} Domain geändert";       else echo -e "    ${CYAN}•${NC} Domain unverändert"; fi
+        if $CHANGED_EMAIL; then       echo -e "    ${YELLOW}•${NC} Email geändert";         else echo -e "    ${CYAN}•${NC} Email unverändert"; fi
+        if $CHANGED_DB; then         echo -e "    ${YELLOW}•${NC} Datenbank geändert";     else echo -e "    ${CYAN}•${NC} Datenbank unverändert"; fi
+        if $CHANGED_REDIS; then      echo -e "    ${YELLOW}•${NC} Redis geändert";          else echo -e "    ${CYAN}•${NC} Redis unverändert"; fi
+        if $CHANGED_AUTO_UPDATE; then echo -e "    ${YELLOW}•${NC} Auto-Update geändert";   else echo -e "    ${CYAN}•${NC} Auto-Update unverändert"; fi
+        if $CODE_CHANGED; then       echo -e "    ${GREEN}•${NC} Quellcode aktualisiert";  else echo -e "    ${CYAN}•${NC} Quellcode unverändert"; fi
+    fi
+fi
 echo ""
 
 if [[ -n "$DOMAIN" ]]; then
