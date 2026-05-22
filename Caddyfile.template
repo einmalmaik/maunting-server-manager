@@ -3,8 +3,6 @@
 
 {{DOMAIN}} {
     root * /opt/msm/frontend/dist
-    file_server
-    try_files {path} /index.html
 
     encode gzip
 
@@ -15,12 +13,17 @@
         Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
     }
 
-    handle_path /api/* {
+    handle /api/* {
         reverse_proxy localhost:8000
     }
 
-    handle_path /ws/* {
+    handle /ws/* {
         reverse_proxy localhost:8000
+    }
+
+    handle {
+        try_files {path} /index.html
+        file_server
     }
 
     tls internal

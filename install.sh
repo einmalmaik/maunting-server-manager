@@ -421,8 +421,6 @@ if [[ -n "$DOMAIN" ]]; then
     cat > "$CADDY_CONFIG" <<EOF
 $DOMAIN {
     root * /opt/msm/frontend/dist
-    file_server
-    try_files {path} /index.html
 
     encode gzip
 
@@ -433,12 +431,17 @@ $DOMAIN {
         Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
     }
 
-    handle_path /api/* {
+    handle /api/* {
         reverse_proxy localhost:8000
     }
 
-    handle_path /ws/* {
+    handle /ws/* {
         reverse_proxy localhost:8000
+    }
+
+    handle {
+        try_files {path} /index.html
+        file_server
     }
 }
 EOF
@@ -447,8 +450,6 @@ else
     cat > "$CADDY_CONFIG" <<EOF
 :80 {
     root * /opt/msm/frontend/dist
-    file_server
-    try_files {path} /index.html
 
     encode gzip
 
@@ -458,12 +459,17 @@ else
         Referrer-Policy strict-origin-when-cross-origin
     }
 
-    handle_path /api/* {
+    handle /api/* {
         reverse_proxy localhost:8000
     }
 
-    handle_path /ws/* {
+    handle /ws/* {
         reverse_proxy localhost:8000
+    }
+
+    handle {
+        try_files {path} /index.html
+        file_server
     }
 }
 EOF
