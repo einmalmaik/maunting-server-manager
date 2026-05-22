@@ -926,10 +926,13 @@ if $RUN_CADDY_SETUP; then
 
     mkdir -p /etc/caddy "$CADDY_CONFD"
 
-    # Sicherstellen, dass conf.d importiert wird — andere Caddyfile-Einträge bleiben unangetastet
+    # ═══════════════════════════════════════════════════════════════
+    # Caddyfile-Strategie: Niemals eine existierende Caddyfile
+    # überschreiben. MSM schreibt nur in seine eigene conf.d-Datei.
+    # ═══════════════════════════════════════════════════════════════
     if ! grep -qE "^import\s+${CADDY_CONFD}/\*\.conf" "$CADDY_CONFIG" 2>/dev/null; then
-        if [[ -s "$CADDY_CONFIG" ]] && ! grep -q "^\s*#\|^\s*{" "$CADDY_CONFIG" 2>/dev/null; then
-            # Caddyfile hat nur Kommentare/Default-Text → überschreiben
+        if [[ ! -s "$CADDY_CONFIG" ]]; then
+            # Caddyfile leer oder nicht vorhanden → Default schreiben
             cat > "$CADDY_CONFIG" <<EOF
 # Caddyfile
 # Weitere Sites können hier direkt oder unter $CADDY_CONFD/ konfiguriert werden.
@@ -937,7 +940,7 @@ if $RUN_CADDY_SETUP; then
 import $CADDY_CONFD/*.conf
 EOF
         else
-            # Caddyfile hat bereits Sites → import am Ende anhängen
+            # Caddyfile hat bereits Inhalt → import sicher am Ende anhängen
             echo "" >> "$CADDY_CONFIG"
             echo "# MSM Panel — additional site configurations" >> "$CADDY_CONFIG"
             echo "import $CADDY_CONFD/*.conf" >> "$CADDY_CONFIG"
