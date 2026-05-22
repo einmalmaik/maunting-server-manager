@@ -15,6 +15,7 @@ export function Users() {
     email: '',
     password: '',
     is_owner: false,
+    auto_verify: false,
   })
   const [creating, setCreating] = useState(false)
 
@@ -42,7 +43,7 @@ export function Users() {
         body: JSON.stringify(createForm),
       })
       setShowCreate(false)
-      setCreateForm({ username: '', email: '', password: '', is_owner: false })
+      setCreateForm({ username: '', email: '', password: '', is_owner: false, auto_verify: false })
       await fetchUsers()
     } catch (err: any) {
       setError(err.message)
@@ -52,7 +53,7 @@ export function Users() {
   }
 
   const handleDelete = async (userId: number) => {
-    if (!window.confirm(t('users.confirmDelete', 'User wirklich löschen?'))) return
+    if (!window.confirm(t('users.confirmDelete'))) return
     try {
       await api(`/admin/users/${userId}`, { method: 'DELETE' })
       await fetchUsers()
@@ -75,7 +76,7 @@ export function Users() {
         <div>
           <h1 className="font-headline text-headline-sm text-primary">{t('nav.users')}</h1>
           <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-            Benutzer und Berechtigungen verwalten
+            {t('users.subtitle')}
           </p>
         </div>
         <button
@@ -83,7 +84,7 @@ export function Users() {
           className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
         >
           <Plus className="w-4 h-4" />
-          {t('users.createUser', 'User erstellen')}
+          {t('users.createUser')}
         </button>
       </div>
 
@@ -94,7 +95,7 @@ export function Users() {
       {showCreate && (
         <div className="msm-card p-6">
           <h3 className="font-headline text-body-lg text-primary mb-4">
-            {t('users.createUser', 'User erstellen')}
+            {t('users.createUser')}
           </h3>
           <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -135,16 +136,33 @@ export function Users() {
                 minLength={8}
               />
             </div>
-            <div className="flex items-end">
+            <div className="flex items-end gap-6">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={createForm.is_owner}
-                  onChange={(e) => setCreateForm({ ...createForm, is_owner: e.target.checked })}
-                  className="w-4 h-4 rounded border-outline bg-surface-container-high"
-                />
+                <div className={`relative w-10 h-6 rounded-full transition-colors ${createForm.is_owner ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
+                  <input
+                    type="checkbox"
+                    checked={createForm.is_owner}
+                    onChange={(e) => setCreateForm({ ...createForm, is_owner: e.target.checked })}
+                    className="sr-only"
+                  />
+                  <span className={`absolute top-1 left-1 w-4 h-4 bg-on-surface rounded-full transition-transform ${createForm.is_owner ? 'translate-x-4 bg-on-secondary' : ''}`} />
+                </div>
                 <span className="font-body-md text-sm text-on-surface-variant">
-                  {t('users.isOwner', 'Owner-Rechte')}
+                  {t('users.isOwner')}
+                </span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <div className={`relative w-10 h-6 rounded-full transition-colors ${createForm.auto_verify ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
+                  <input
+                    type="checkbox"
+                    checked={createForm.auto_verify}
+                    onChange={(e) => setCreateForm({ ...createForm, auto_verify: e.target.checked })}
+                    className="sr-only"
+                  />
+                  <span className={`absolute top-1 left-1 w-4 h-4 bg-on-surface rounded-full transition-transform ${createForm.auto_verify ? 'translate-x-4 bg-on-secondary' : ''}`} />
+                </div>
+                <span className="font-body-md text-sm text-on-surface-variant">
+                  {t('users.autoVerify')}
                 </span>
               </label>
             </div>
@@ -154,7 +172,7 @@ export function Users() {
                 onClick={() => setShowCreate(false)}
                 className="msm-btn-secondary px-4 py-2"
               >
-                {t('common.cancel', 'Abbrechen')}
+                {t('common.cancel')}
               </button>
               <button
                 type="submit"
@@ -200,9 +218,13 @@ export function Users() {
                     <Mail className="w-3.5 h-3.5 text-on-surface-variant" />
                     <span className="font-body-md text-sm text-on-surface-variant">{user.email}</span>
                     {user.email_verified ? (
-                      <CheckCircle className="w-3.5 h-3.5 text-status-success" />
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-success/10 text-status-success border border-status-success/30" title={t('users.emailVerified')}>
+                        <CheckCircle className="w-3 h-3" />
+                      </span>
                     ) : (
-                      <XCircle className="w-3.5 h-3.5 text-status-error" />
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30" title={t('users.emailNotVerified')}>
+                        <XCircle className="w-3 h-3" />
+                      </span>
                     )}
                   </div>
                 </td>
@@ -212,7 +234,7 @@ export function Users() {
                       ? 'bg-status-success/10 text-status-success border border-status-success/30'
                       : 'bg-status-error/10 text-status-error border border-status-error/30'
                   }`}>
-                    {user.is_active ? 'Aktiv' : 'Inaktiv'}
+                    {user.is_active ? t('users.active') : t('users.inactive')}
                   </span>
                 </td>
                 <td className="p-4 text-right">
@@ -220,7 +242,7 @@ export function Users() {
                     <button
                       onClick={() => handleDelete(user.id)}
                       className="text-status-error hover:text-status-error/80 transition-colors"
-                      title={t('users.delete', 'Löschen')}
+                      title={t('users.delete')}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

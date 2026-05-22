@@ -1,14 +1,34 @@
+import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
-import { Globe, Bell, Menu } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Globe, Bell, Menu, Settings, User, LogOut } from 'lucide-react'
 
 export function Topbar() {
   const { t, i18n } = useTranslation()
-  const { user } = useAuthStore()
+  const navigate = useNavigate()
+  const { user, logout } = useAuthStore()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   const toggleLang = () => {
     const next = i18n.language === 'de' ? 'en' : 'de'
     i18n.changeLanguage(next)
+  }
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login', { replace: true })
   }
 
   return (
@@ -39,33 +59,72 @@ export function Topbar() {
           {i18n.language.toUpperCase()}
         </button>
 
-        {/* Settings */}
-        <button className="hidden sm:block text-on-surface-variant hover:text-primary hover:bg-surface-variant/50 p-2 rounded-full transition-colors active:scale-95">
-          <span className="sr-only">Settings</span>
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-        </button>
-
         {/* Notifications */}
         <button className="text-on-surface-variant hover:text-primary hover:bg-surface-variant/50 p-2 rounded-full transition-colors active:scale-95 relative">
           <Bell className="w-[18px] h-[18px]" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-secondary rounded-full" />
         </button>
 
-        {/* User Avatar */}
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary border border-outline-variant">
-            {user?.username.charAt(0).toUpperCase() || '?'}
-          </div>
-          <div className="hidden sm:block">
-            <p className="font-label-md text-sm text-on-surface leading-tight">
-              {user?.username}
-            </p>
-            {user?.is_owner && (
-              <span className="msm-badge-info text-[10px] px-1.5 py-0">
-                Owner
-              </span>
-            )}
-          </div>
+        {/* User Menu */}
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="flex items-center gap-2 hover:bg-surface-variant/50 p-1.5 rounded-lg transition-colors"
+          >
+            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary border border-outline-variant">
+              {user?.username.charAt(0).toUpperCase() || '?'}
+            </div>
+            <div className="hidden sm:block text-left">
+              <p className="font-label-md text-sm text-on-surface leading-tight">
+                {user?.username}
+              </p>
+              {user?.is_owner && (
+                <span className="msm-badge-info text-[10px] px-1.5 py-0">
+                  Owner
+                </span>
+              )}
+            </div>
+          </button>
+
+          {menuOpen && (
+            <div className="absolute right-0 top-full mt-2 w-56 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg z-50 overflow-hidden">
+              <div className="p-3 border-b border-outline-variant/30">
+                <p className="font-label-md text-sm text-on-surface font-medium truncate">
+                  {user?.username}
+                </p>
+                <p className="font-mono-sm text-mono-sm text-on-surface-variant truncate">
+                  {user?.email}
+                </p>
+              </div>
+              <div className="py-1">
+                <button
+                  onClick={() => { setMenuOpen(false); navigate('/profile') }}
+                  className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm text-on-surface hover:bg-surface-container-highest transition-colors"
+                >
+                  <User className="w-4 h-4 text-on-surface-variant" />
+                  {t('profile.title')}
+                </button>
+                {user?.is_owner && (
+                  <button
+                    onClick={() => { setMenuOpen(false); navigate('/settings') }}
+                    className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm text-on-surface hover:bg-surface-container-highest transition-colors"
+                  >
+                    <Settings className="w-4 h-4 text-on-surface-variant" />
+                    {t('nav.settings')}
+                  </button>
+                )}
+              </div>
+              <div className="border-t border-outline-variant/30 py-1">
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm text-status-error hover:bg-error-container/20 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  {t('nav.logout')}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>

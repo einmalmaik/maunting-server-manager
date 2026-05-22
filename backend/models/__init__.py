@@ -8,5 +8,6 @@ from .refresh_token import RefreshToken
 from .jwt_blacklist import JwtBlacklist
 from .email_verification import EmailVerification
 from .backup_code import BackupCode
+from .panel_setting import PanelSetting
 
-__all__ = ["User", "Server", "Permission", "Backup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist", "EmailVerification", "BackupCode"]
+__all__ = ["User", "Server", "Permission", "Backup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist", "EmailVerification", "BackupCode", "PanelSetting"]

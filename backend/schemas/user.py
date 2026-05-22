@@ -44,3 +44,4 @@ class AdminUserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     is_owner: bool = False
+    auto_verify: bool = False

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import type { User } from '@/types'
-import { Shield, ArrowRight, Globe, KeyRound } from 'lucide-react'
+import { Shield, ArrowRight, Globe, KeyRound, Mail, Check } from 'lucide-react'
 
 export function Login() {
   const { t, i18n } = useTranslation()
@@ -15,6 +15,10 @@ export function Login() {
   const [requires2FA, setRequires2FA] = useState(false)
   const [useBackupCode, setUseBackupCode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [requiresVerification, setRequiresVerification] = useState(false)
+  const [verifyEmail, setVerifyEmail] = useState('')
+  const [verifyCode, setVerifyCode] = useState('')
+  const [verifiedSuccess, setVerifiedSuccess] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -22,7 +26,7 @@ export function Login() {
     setSubmitting(true)
 
     try {
-      const res = await api<{ access_token: string; requires_2fa: boolean }>('/auth/login', {
+      const res = await api<{ access_token: string; requires_2fa: boolean; requires_verification: boolean; email: string }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({
           username: form.username,
@@ -30,6 +34,13 @@ export function Login() {
           otp_code: form.otp || null,
         }),
       })
+
+      if (res.requires_verification) {
+        setRequiresVerification(true)
+        setVerifyEmail(res.email)
+        setSubmitting(false)
+        return
+      }
 
       if (res.requires_2fa) {
         setRequires2FA(true)
@@ -43,6 +54,40 @@ export function Login() {
       navigate('/')
     } catch (err: any) {
       setError(err.message || t('auth.loginFailed'))
+      setSubmitting(false)
+    }
+  }
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setSubmitting(true)
+    try {
+      await api('/auth/setup-verify', {
+        method: 'POST',
+        body: JSON.stringify({ email: verifyEmail, code: verifyCode }),
+      })
+      setVerifiedSuccess(true)
+      setRequiresVerification(false)
+      setVerifyCode('')
+    } catch (err: any) {
+      setError(err.message || t('setup.verificationFailed'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleResendCode = async () => {
+    setError('')
+    setSubmitting(true)
+    try {
+      await api('/auth/resend-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email: verifyEmail }),
+      })
+    } catch (err: any) {
+      setError(err.message || t('auth.resendFailed', 'Code konnte nicht erneut gesendet werden'))
+    } finally {
       setSubmitting(false)
     }
   }
@@ -84,19 +129,123 @@ export function Login() {
         </div>
 
         <div className="msm-card p-8">
-          <div className="text-center mb-6">
-            <div className="w-12 h-12 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-4">
-              <Shield className="w-6 h-6 text-secondary" />
+          {/* Verification success screen */}
+          {verifiedSuccess && (
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-status-success/10 border border-status-success/30 flex items-center justify-center mx-auto mb-6">
+                <Check className="w-8 h-8 text-status-success" />
+              </div>
+              <h2 className="font-headline text-headline-md text-primary mb-3">
+                {t('auth.emailNotVerified')}
+              </h2>
+              <p className="font-body-md text-body-md text-on-surface-variant mb-8">
+                {t('auth.verifiedSuccess')}
+              </p>
+              <button
+                onClick={() => setVerifiedSuccess(false)}
+                className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
+              >
+                {t('auth.signIn')}
+                <ArrowRight className="w-4 h-4" />
+              </button>
             </div>
-            <h2 className="font-headline text-headline-md text-primary mb-1">
-              {t('auth.login')}
-            </h2>
-            <p className="font-body-md text-sm text-on-surface-variant">
-              {t('auth.loginDescription')}
-            </p>
-          </div>
+          )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Verification dialog */}
+          {requiresVerification && !verifiedSuccess && (
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-6">
+                <Mail className="w-8 h-8 text-secondary" />
+              </div>
+              <h2 className="font-headline text-headline-md text-primary mb-3">
+                {t('auth.emailNotVerified')}
+              </h2>
+              <p className="font-body-md text-body-md text-on-surface-variant mb-2 max-w-sm mx-auto">
+                {t('setup.verifyEmailDesc', { email: verifyEmail })}
+              </p>
+              <p className="font-mono-sm text-mono-sm text-on-surface-variant mb-8">
+                {t('setup.codeExpires')}
+              </p>
+
+              <form onSubmit={handleVerify} className="space-y-4 max-w-xs mx-auto">
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('auth.verificationCode')}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\d{6}"
+                    maxLength={6}
+                    value={verifyCode}
+                    onChange={(e) => setVerifyCode(e.target.value)}
+                    className="msm-input text-center text-2xl tracking-[0.5em] font-mono"
+                    placeholder="000000"
+                    required
+                  />
+                </div>
+
+                {error && (
+                  <div className="msm-alert-error text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={submitting || verifyCode.length !== 6}
+                  className="msm-btn-primary w-full py-3 disabled:opacity-50"
+                >
+                  {submitting ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      {t('common.loading')}
+                    </span>
+                  ) : (
+                    t('auth.verifyNow')
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResendCode}
+                  disabled={submitting}
+                  className="text-sm text-secondary hover:text-mint-accent transition-colors disabled:opacity-50"
+                >
+                  {t('auth.resendCode')}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRequiresVerification(false)
+                    setVerifyCode('')
+                    setError('')
+                  }}
+                  className="text-sm text-on-surface-variant hover:text-on-surface transition-colors disabled:opacity-50 block mx-auto"
+                >
+                  {t('auth.goToLogin')}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* Normal login form */}
+          {!requiresVerification && !verifiedSuccess && (
+            <>
+              <div className="text-center mb-6">
+                <div className="w-12 h-12 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-4">
+                  <Shield className="w-6 h-6 text-secondary" />
+                </div>
+                <h2 className="font-headline text-headline-md text-primary mb-1">
+                  {t('auth.login')}
+                </h2>
+                <p className="font-body-md text-sm text-on-surface-variant">
+                  {t('auth.loginDescription')}
+                </p>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                 {t('auth.username')}
@@ -186,20 +335,22 @@ export function Login() {
             </button>
           </form>
 
-          <div className="mt-6 pt-6 border-t border-outline-variant/30 flex justify-between font-body-md text-sm">
-            <Link
-              to="/register"
-              className="text-secondary hover:text-mint-accent transition-colors"
-            >
-              {t('auth.noAccount')}
-            </Link>
-            <Link
-              to="/forgot-password"
-              className="text-on-surface-variant hover:text-on-surface transition-colors"
-            >
-              {t('auth.forgotPassword')}
-            </Link>
-          </div>
+              <div className="mt-6 pt-6 border-t border-outline-variant/30 flex justify-between font-body-md text-sm">
+                <Link
+                  to="/register"
+                  className="text-secondary hover:text-mint-accent transition-colors"
+                >
+                  {t('auth.noAccount')}
+                </Link>
+                <Link
+                  to="/forgot-password"
+                  className="text-on-surface-variant hover:text-on-surface transition-colors"
+                >
+                  {t('auth.forgotPassword')}
+                </Link>
+              </div>
+            </>
+          )}
         </div>
 
         <p className="text-center font-mono-sm text-mono-sm text-on-surface-variant mt-6 opacity-60">

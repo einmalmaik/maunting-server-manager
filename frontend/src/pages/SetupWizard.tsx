@@ -25,11 +25,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setError('')
 
     if (form.password !== form.confirm) {
-      setError(t('auth.passwordMismatch', 'Passwörter stimmen nicht überein'))
+      setError(t('auth.passwordMismatch'))
       return
     }
     if (form.password.length < 8) {
-      setError(t('auth.passwordTooShort', 'Passwort muss mindestens 8 Zeichen haben'))
+      setError(t('auth.passwordTooShort'))
       return
     }
 
@@ -51,7 +51,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         setTimeout(onComplete, 2000)
       }
     } catch (err: any) {
-      setError(err.message || t('setup.error', 'Einrichtung fehlgeschlagen'))
+      setError(err.message || t('setup.error'))
     } finally {
       setSubmitting(false)
     }
@@ -72,7 +72,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setStep(4)
       setTimeout(onComplete, 2000)
     } catch (err: any) {
-      setError(err.message || t('setup.verificationFailed', 'Verifizierung fehlgeschlagen'))
+      setError(err.message || t('setup.verificationFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -87,7 +87,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         body: JSON.stringify({ email: form.email }),
       })
     } catch (err: any) {
-      setError(err.message || t('setup.resendFailed', 'Code konnte nicht erneut gesendet werden'))
+      setError(err.message || t('setup.resendFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -165,19 +165,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <Server className="w-8 h-8 text-secondary" />
               </div>
               <h2 className="font-headline text-headline-md text-primary mb-3">
-                {t('setup.welcome', 'Willkommen beim MSM')}
+                {t('setup.welcome')}
               </h2>
               <p className="font-body-md text-body-md text-on-surface-variant mb-8 max-w-sm mx-auto">
-                {t(
-                  'setup.welcomeDesc',
-                  'Der Maunting Server Manager ist bereit. Erstelle jetzt den Owner-Account, um deine Game-Server zu verwalten.'
-                )}
+                {t('setup.welcomeDesc')}
               </p>
               <button
                 onClick={() => setStep(2)}
                 className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
               >
-                {t('setup.start', 'Loslegen')}
+                {t('setup.start')}
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -192,10 +189,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 </div>
                 <div>
                   <h2 className="font-headline text-headline-md text-primary">
-                    {t('setup.title', 'Ersteinrichtung')}
+                    {t('setup.title')}
                   </h2>
                   <p className="font-body-md text-sm text-on-surface-variant">
-                    {t('setup.description', 'Erstelle den Owner-Account')}
+                    {t('setup.description')}
                   </p>
                 </div>
               </div>
@@ -271,7 +268,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     onClick={() => setStep(1)}
                     className="msm-btn-secondary flex-1 py-3"
                   >
-                    {t('common.back', 'Zurück')}
+                    {t('common.back')}
                   </button>
                   <button
                     type="submit"
@@ -281,10 +278,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     {submitting ? (
                       <span className="inline-flex items-center gap-2">
                         <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
-                        {t('common.loading', 'Laden...')}
+                        {t('common.loading')}
                       </span>
                     ) : (
-                      t('setup.createOwner', 'Owner erstellen')
+                      t('setup.createOwner')
                     )}
                   </button>
                 </div>
@@ -299,19 +296,19 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <Mail className="w-8 h-8 text-secondary" />
               </div>
               <h2 className="font-headline text-headline-md text-primary mb-3">
-                {t('setup.verifyEmail', 'E-Mail verifizieren')}
+                {t('setup.verifyEmail')}
               </h2>
               <p className="font-body-md text-body-md text-on-surface-variant mb-2 max-w-sm mx-auto">
-                {t('setup.verifyEmailDesc', 'Wir haben einen 6-stelligen Code an {email} gesendet. Gib ihn ein, um fortzufahren.', { email: form.email })}
+                {t('setup.verifyEmailDesc', { email: form.email })}
               </p>
               <p className="font-mono-sm text-mono-sm text-on-surface-variant mb-8">
-                {t('setup.codeExpires', 'Code gültig für 10 Minuten')}
+                {t('setup.codeExpires')}
               </p>
 
               <form onSubmit={handleVerify} className="space-y-4 max-w-xs mx-auto">
                 <div>
                   <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('setup.verificationCode', 'Verifizierungscode')}
+                    {t('setup.verificationCode')}
                   </label>
                   <input
                     type="text"
@@ -340,10 +337,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   {submitting ? (
                     <span className="inline-flex items-center gap-2">
                       <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
-                      {t('common.loading', 'Laden...')}
+                      {t('common.loading')}
                     </span>
                   ) : (
-                    t('setup.verify', 'Verifizieren')
+                    t('setup.verify')
                   )}
                 </button>
 
@@ -353,7 +350,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   disabled={submitting}
                   className="text-sm text-secondary hover:text-mint-accent transition-colors disabled:opacity-50"
                 >
-                  {t('setup.resendCode', 'Code erneut senden')}
+                  {t('setup.resendCode')}
                 </button>
               </form>
             </div>
@@ -366,13 +363,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <Check className="w-8 h-8 text-status-success" />
               </div>
               <h2 className="font-headline text-headline-md text-primary mb-3">
-                {t('setup.success', 'Einrichtung abgeschlossen')}
+                {t('setup.success')}
               </h2>
               <p className="font-body-md text-body-md text-on-surface-variant mb-2">
-                {t('setup.successDesc', 'Der Owner-Account wurde erfolgreich erstellt und verifiziert.')}
+                {t('setup.successDesc')}
               </p>
               <p className="font-mono-sm text-mono-sm text-on-surface-variant">
-                {t('setup.redirecting', 'Weiterleitung zum Login...')}
+                {t('setup.redirecting')}
               </p>
             </div>
           )}

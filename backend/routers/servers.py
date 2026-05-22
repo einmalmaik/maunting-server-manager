@@ -11,6 +11,7 @@ from dependencies import get_current_user, verify_csrf, require_server_permissio
 from games import get_plugin
 from services.port_allocation_service import allocate_ports
 from services.firewall_service import open_ports, close_ports
+from services import EmailService
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
@@ -27,7 +28,7 @@ def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current
 
 
 @router.post("", response_model=ServerResponse, status_code=201)
-def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> Server:
+async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> Server:
     if not user.is_owner:
         raise HTTPException(status_code=403, detail="Nur Owner kann Server erstellen")
 
@@ -84,6 +85,9 @@ def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User =
 
     # Firewall-Regeln anlegen (nur auf Linux mit UFW)
     open_ports(server.name, game_port, query_port, rcon_port)
+
+    if EmailService.is_configured():
+        await EmailService.send_server_installed_notification(user.email, user.username, server.name)
 
     return server
 
@@ -216,7 +220,7 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
 
 
 @router.post("/{server_id}/start")
-def start_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+async def start_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     require_server_permission(user, server_id, db, "can_start")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -229,11 +233,13 @@ def start_server(server_id: int, db: Session = Depends(get_db), user: User = Dep
         raise HTTPException(status_code=500, detail=result["error"])
     server.status = "running"
     db.commit()
+    if EmailService.is_configured():
+        await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestartet")
     return {"message": "Start-Befehl gesendet", "status": server.status, **result}
 
 
 @router.post("/{server_id}/stop")
-def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+async def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     require_server_permission(user, server_id, db, "can_stop")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -246,11 +252,13 @@ def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depe
         raise HTTPException(status_code=500, detail=result["error"])
     server.status = "stopped"
     db.commit()
+    if EmailService.is_configured():
+        await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestoppt")
     return {"message": "Stop-Befehl gesendet", "status": server.status, **result}
 
 
 @router.post("/{server_id}/restart")
-def restart_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+async def restart_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     require_server_permission(user, server_id, db, "can_restart")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -266,6 +274,8 @@ def restart_server(server_id: int, db: Session = Depends(get_db), user: User = D
         raise HTTPException(status_code=500, detail=start_result["error"])
     server.status = "running"
     db.commit()
+    if EmailService.is_configured():
+        await EmailService.send_server_status_notification(user.email, user.username, server.name, "neugestartet")
     return {"message": "Restart-Befehl gesendet", "status": server.status, "stop": stop_result, "start": start_result}
 
 

@@ -11,7 +11,8 @@ from cookies import _set_auth_cookies, _clear_auth_cookies
 from database import get_db
 from dependencies import get_current_user, get_current_owner, verify_csrf
 from models import User, EmailVerification
-from schemas import LoginRequest, TokenResponse, PasswordResetRequest, PasswordResetConfirm
+from schemas import LoginRequest, TokenResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest
+from schemas import ResendVerificationRequest
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest
 from services import AuthService, EmailService
 from services.email_verification_service import EmailVerificationService
@@ -96,6 +97,27 @@ async def setup_resend(req: OwnerSetupRequest, db: Session = Depends(get_db)) ->
     return {"message": "Code erneut gesendet"}
 
 
+@router.post("/resend-verification")
+async def resend_verification(req: ResendVerificationRequest, db: Session = Depends(get_db)) -> dict:
+    """Neuen Verifizierungscode fuer einen unverifizierten User senden."""
+    user = AuthService.get_user_by_email(db, req.email)
+    if not user or user.email_verified:
+        raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
+
+    code = EmailVerificationService.create_verification(db, req.email, "setup")
+    if EmailService.is_configured():
+        await EmailService.send_verification_code_email(req.email, user.username, code)
+    else:
+        import logging
+        logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", req.email, code)
+        raise HTTPException(
+            status_code=503,
+            detail="SMTP nicht konfiguriert. Verifikation nicht moeglich."
+        )
+
+    return {"message": "Code erneut gesendet"}
+
+
 @router.post("/register", response_model=UserResponse, status_code=201)
 async def register(req: UserCreate, db: Session = Depends(get_db)) -> User:
     if AuthService.get_user_by_username(db, req.username):
@@ -112,9 +134,10 @@ async def register(req: UserCreate, db: Session = Depends(get_db)) -> User:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(
+async def login(
     req: LoginRequest,
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
     user = AuthService.get_user_by_username(db, req.username)
@@ -124,9 +147,19 @@ def login(
     if not user.is_active:
         raise HTTPException(status_code=401, detail="Account deaktiviert")
 
+    if not user.email_verified:
+        # Neuen Verifizierungscode generieren und senden
+        code = EmailVerificationService.create_verification(db, user.email, "setup")
+        if EmailService.is_configured():
+            await EmailService.send_verification_code_email(user.email, user.username, code)
+        else:
+            import logging
+            logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", user.email, code)
+        return {"access_token": "", "token_type": "", "requires_2fa": False, "requires_verification": True, "email": user.email}
+
     if user.two_factor_enabled:
         if not req.otp_code:
-            return {"requires_2fa": True, "access_token": "", "token_type": ""}
+            return {"requires_2fa": True, "access_token": "", "token_type": "", "requires_verification": False, "email": user.email}
         secret = None
         if user.two_factor_secret_encrypted:
             secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted)
@@ -144,6 +177,12 @@ def login(
     csrf_token = AuthService.create_csrf_token()
 
     _set_auth_cookies(response, access_token, refresh_token, csrf_token)
+
+    # Sicherheitsbenachrichtigung bei Login
+    if EmailService.is_configured():
+        client_ip = request.client.host if request.client else "unbekannt"
+        user_agent = request.headers.get("user-agent", "unbekannt")
+        await EmailService.send_new_device_login_notification(user.email, user.username, client_ip, user_agent)
 
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False}
 
@@ -218,6 +257,64 @@ def me(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+@router.post("/change-password")
+async def change_password(
+    req: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Eigenes Passwort aendern. Erfordert aktuelles Passwort + 2FA-Code wenn 2FA aktiv."""
+    if not AuthService.verify_password(req.current_password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Aktuelles Passwort falsch")
+
+    if user.two_factor_enabled:
+        if not req.otp_code:
+            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
+        secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted) if user.two_factor_secret_encrypted else None
+        if not secret:
+            raise HTTPException(status_code=401, detail="2FA-Secret nicht gefunden")
+        totp = pyotp.TOTP(secret)
+        if not totp.verify(req.otp_code):
+            raise HTTPException(status_code=401, detail="Ungueltiger 2FA-Code")
+
+    AuthService.reset_password(db, user, req.new_password)
+    if EmailService.is_configured():
+        await EmailService.send_password_changed_notification(user.email, user.username)
+    return {"message": "Passwort geaendert"}
+
+
+@router.post("/change-email")
+async def change_email(
+    req: ChangeEmailRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """E-Mail-Adresse aendern. Erfordert 2FA-Code wenn 2FA aktiv."""
+    if AuthService.get_user_by_email(db, req.email):
+        raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
+
+    if user.two_factor_enabled:
+        if not req.otp_code:
+            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
+        secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted) if user.two_factor_secret_encrypted else None
+        if not secret:
+            raise HTTPException(status_code=401, detail="2FA-Secret nicht gefunden")
+        totp = pyotp.TOTP(secret)
+        if not totp.verify(req.otp_code):
+            raise HTTPException(status_code=401, detail="Ungueltiger 2FA-Code")
+
+    user.email = req.email
+    user.email_verified = False
+    db.commit()
+    # Verifizierungscode fuer neue E-Mail senden
+    if EmailService.is_configured():
+        code = EmailVerificationService.create_verification(db, req.email, "setup")
+        await EmailService.send_verification_code_email(req.email, user.username, code)
+    return {"message": "E-Mail geaendert. Bitte neue E-Mail verifizieren."}
+
+
 @router.post("/forgot-password")
 async def forgot_password(req: PasswordResetRequest, db: Session = Depends(get_db)) -> dict:
     user = AuthService.get_user_by_email(db, req.email)
@@ -274,7 +371,7 @@ def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_
 
 
 @router.post("/2fa/enable")
-def enable_2fa(otp_code: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+async def enable_2fa(otp_code: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     if not user.two_factor_secret_encrypted:
         raise HTTPException(status_code=400, detail="2FA nicht eingerichtet")
     secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted)
@@ -283,11 +380,13 @@ def enable_2fa(otp_code: str, user: User = Depends(get_current_user), db: Sessio
         raise HTTPException(status_code=400, detail="Ungueltiger Code")
     user.two_factor_enabled = True
     db.commit()
+    if EmailService.is_configured():
+        await EmailService.send_2fa_status_notification(user.email, user.username, enabled=True)
     return {"message": "2FA aktiviert"}
 
 
 @router.post("/2fa/disable")
-def disable_2fa(
+async def disable_2fa(
     otp_code: str,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -304,6 +403,8 @@ def disable_2fa(
     user.two_factor_secret_encrypted = None
     BackupCodeService.clear_all_backup_codes(db, user.id)
     db.commit()
+    if EmailService.is_configured():
+        await EmailService.send_2fa_status_notification(user.email, user.username, enabled=False)
     return {"message": "2FA deaktiviert"}
 
 

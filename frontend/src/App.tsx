@@ -17,6 +17,7 @@ import { ModManager } from './pages/ModManager'
 import { Backups } from './pages/Backups'
 import { Users } from './pages/Users'
 import { Settings } from './pages/Settings'
+import { Profile } from './pages/Profile'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
@@ -59,6 +60,7 @@ function App() {
         <Route path="backups" element={<Backups />} />
         <Route path="users" element={<Users />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="profile" element={<Profile />} />
       </Route>
     </Routes>
   )
