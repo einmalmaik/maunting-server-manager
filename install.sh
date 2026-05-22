@@ -152,7 +152,7 @@ ok "User '$MSM_USER' bereit"
 log "Kopiere Panel-Dateien nach $MSM_DIR..."
 
 if [[ "$SCRIPT_DIR" == "$MSM_DIR" ]]; then
-    # Install.sh läuft direkt im Zielverzeichnis → nicht löschen!
+    # Install.sh läuft direkt im Zielverzeichnis → nicht löschen, nicht kopieren!
     # Nur alte Build-Artefakte und Konfigurationen aufräumen
     rm -rf "$MSM_DIR/frontend/dist" 2>/dev/null || true
     rm -rf "$MSM_DIR/frontend/node_modules" 2>/dev/null || true
@@ -161,17 +161,18 @@ else
     # Install.sh läuft außerhalb des Zielverzeichnisses → sauberes Verzeichnis anlegen
     rm -rf "$MSM_DIR" 2>/dev/null || true
     mkdir -p "$MSM_DIR"
+
+    cp -r "$SCRIPT_DIR/backend" "$MSM_DIR/"
+    cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
+    cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/update.sh" "$MSM_DIR/" 2>/dev/null || true
+    chmod +x "$MSM_DIR/update.sh" 2>/dev/null || true
 fi
 
-cp -r "$SCRIPT_DIR/backend" "$MSM_DIR/"
-cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
-cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
-cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
-cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
-cp "$SCRIPT_DIR/update.sh" "$MSM_DIR/" 2>/dev/null || true
-chmod +x "$MSM_DIR/update.sh" 2>/dev/null || true
 chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR"
-ok "Dateien kopiert"
+ok "Dateien bereit"
 
 # ═══════════════════════════════════════════════════════════════
 # 5. Interaktive Konfiguration (nur 3 Fragen!)
