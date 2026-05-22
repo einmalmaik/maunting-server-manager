@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════════
-#  Maunting Server Manager — GitHub-Release Updater
+#  Maunting Server Manager — Updater
 #
 #  Usage:  sudo bash update.sh [--check-only] [--force]
 #
-#  Prüft GitHub Releases auf neue Versionen und installiert
-#  sie automatisch (mit Backup + Rollback bei Fehler).
+#  Prüft zuerst GitHub-Releases, falls keine existieren
+#  wird der neueste main-Branch-Commit verwendet.
 #
 #  Für Tauri: derselbe Release-Feed (latest.json auf GitHub).
 # ═══════════════════════════════════════════════════════════════
@@ -62,6 +62,10 @@ fi
 
 # ── Aktuelle Version ermitteln ──
 CURRENT_VERSION="unknown"
+UPDATE_MODE="release"   # "release" oder "git"
+LATEST_TAG=""
+RELEASE_JSON=""
+
 if [[ -d "$MSM_DIR/.git" ]]; then
     cd "$MSM_DIR"
     CURRENT_VERSION=$(git describe --tags --always 2>/dev/null || echo "unknown")
@@ -69,33 +73,55 @@ fi
 
 log "Aktuelle Version: $CURRENT_VERSION"
 
-# ── GitHub Release prüfen ──
+# ═══════════════════════════════════════════════════════════════
+# 1) Zuerst: GitHub Release prüfen
+# ═══════════════════════════════════════════════════════════════
 log "Prüfe GitHub Releases..."
 RELEASE_JSON=$(curl -s -L \
     -H "Accept: application/vnd.github+json" \
     "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest" 2>/dev/null) || true
 
-if [[ -z "$RELEASE_JSON" ]] || [[ "$RELEASE_JSON" == *"Not Found"* ]]; then
-    warn "Kein GitHub-Release gefunden oder API-Limit erreicht."
-    if ! $FORCE; then
-        exit 0
-    fi
+if [[ -n "$RELEASE_JSON" ]] && [[ "$RELEASE_JSON" != *"Not Found"* ]]; then
+    LATEST_TAG=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo "")
 fi
 
-LATEST_TAG=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo "")
-
+# ═══════════════════════════════════════════════════════════════
+# 2) Kein Release? → Git main-Branch als Fallback
+# ═══════════════════════════════════════════════════════════════
 if [[ -z "$LATEST_TAG" ]]; then
-    warn "Konnte neueste Version nicht ermitteln."
-    if ! $FORCE; then
-        exit 0
+    if [[ -d "$MSM_DIR/.git" ]]; then
+        UPDATE_MODE="git"
+        log "Kein GitHub-Release gefunden. Prüfe Git main-Branch..."
+        cd "$MSM_DIR"
+        git fetch origin main 2>/dev/null || {
+            warn "Konnte origin/main nicht fetchen. Prüfe Internet-Verbindung."
+            if ! $FORCE; then exit 0; fi
+        }
+        LOCAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+        REMOTE_SHA=$(git rev-parse origin/main 2>/dev/null || echo "")
+
+        if [[ -z "$LOCAL_SHA" ]] || [[ -z "$REMOTE_SHA" ]]; then
+            warn "Konnte Git-Commits nicht ermitteln."
+            if ! $FORCE; then exit 0; fi
+            LATEST_TAG="unknown"
+        elif [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
+            ok "Panel ist bereits auf dem neuesten Stand (main: ${LOCAL_SHA:0:8})."
+            exit 0
+        else
+            LATEST_TAG="main-${REMOTE_SHA:0:8}"
+            log "Neuer Commit auf main: ${REMOTE_SHA:0:8}"
+        fi
+    else
+        warn "Kein GitHub-Release und kein Git-Repo gefunden."
+        if ! $FORCE; then exit 0; fi
+        LATEST_TAG="unknown"
     fi
-    LATEST_TAG="unknown"
+else
+    log "Neueste Release: $LATEST_TAG"
 fi
 
-log "Neueste Release: $LATEST_TAG"
-
-# ── Vergleich ──
-if [[ "$CURRENT_VERSION" == "$LATEST_TAG" ]]; then
+# ── Vergleich (nur bei Release-Mode) ──
+if [[ "$UPDATE_MODE" == "release" ]] && [[ "$CURRENT_VERSION" == "$LATEST_TAG" ]]; then
     ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_VERSION)."
     exit 0
 fi
@@ -103,9 +129,15 @@ fi
 # ── Nur prüfen? ──
 if $CHECK_ONLY; then
     echo ""
-    echo -e "${YELLOW}Update verfügbar!${NC}"
-    echo -e "  Aktuell: ${CYAN}$CURRENT_VERSION${NC}"
-    echo -e "  Neu:     ${CYAN}$LATEST_TAG${NC}"
+    if [[ "$UPDATE_MODE" == "git" ]]; then
+        echo -e "${YELLOW}Update verfügbar auf main!${NC}"
+        echo -e "  Aktuell: ${CYAN}${LOCAL_SHA:0:8}${NC}"
+        echo -e "  Neu:     ${CYAN}${REMOTE_SHA:0:8}${NC}"
+    else
+        echo -e "${YELLOW}Update verfügbar!${NC}"
+        echo -e "  Aktuell: ${CYAN}$CURRENT_VERSION${NC}"
+        echo -e "  Neu:     ${CYAN}$LATEST_TAG${NC}"
+    fi
     echo -e "  Installieren: ${BOLD}sudo bash update.sh${NC}"
     echo ""
     exit 0
@@ -124,7 +156,11 @@ fi
 # ═══════════════════════════════════════════════════════════════
 
 echo ""
-echo -e "${YELLOW}Update wird installiert:${NC} $CURRENT_VERSION → $LATEST_TAG"
+if [[ "$UPDATE_MODE" == "git" ]]; then
+    echo -e "${YELLOW}Update wird installiert:${NC} main ${LOCAL_SHA:0:8} → ${REMOTE_SHA:0:8}"
+else
+    echo -e "${YELLOW}Update wird installiert:${NC} $CURRENT_VERSION → $LATEST_TAG"
+fi
 echo ""
 
 # ── Backup ──
@@ -150,8 +186,19 @@ ok "Backup erstellt: $BACKUP_FILE"
 # ── Git Pull oder Tarball ──
 cd "$MSM_DIR"
 
-if [[ -d ".git" ]]; then
-    log "Aktualisiere via Git..."
+if [[ "$UPDATE_MODE" == "git" ]]; then
+    log "Aktualisiere via Git pull..."
+    # Backup des aktuellen HEAD für Rollback
+    ROLLBACK_SHA="$LOCAL_SHA"
+    git pull origin main || {
+        err "Git pull fehlgeschlagen. Versuche Rollback..."
+        git reset --hard "$ROLLBACK_SHA" 2>/dev/null || true
+        exit 1
+    }
+    # Schmutzige Dateien entfernen (z.B. generierte dist/)
+    git clean -fd -e backend/venv -e frontend/node_modules 2>/dev/null || true
+elif [[ -d ".git" ]]; then
+    log "Aktualisiere via Git checkout..."
     git fetch origin --tags
     git checkout "$LATEST_TAG" || {
         err "Konnte nicht auf $LATEST_TAG wechseln. Rollback..."
