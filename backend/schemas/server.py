@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 class ServerCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
-    game_type: str = Field(..., pattern=r"^[a-z_]+$")
+    game_type: str = Field(..., pattern=r"^[a-z0-9_]+$")
     auto_restart: bool = False
     restart_interval_hours: int | None = Field(None, ge=1, le=168)
     restart_time_utc: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")

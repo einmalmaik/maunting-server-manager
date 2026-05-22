@@ -11,21 +11,21 @@ export function ToastContainer() {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className={`pointer-events-auto flex items-start gap-3 p-4 rounded-lg shadow-lg border ${
+          className={`pointer-events-auto flex items-start gap-3 p-4 rounded-lg shadow-lg border font-body-md text-sm ${
             t.type === 'error'
-              ? 'bg-error-container/95 border-status-error/40 text-on-error-container'
+              ? 'bg-status-destructive/10 border-status-destructive/30 text-status-destructive'
               : 'bg-status-success/10 border-status-success/30 text-status-success'
           }`}
         >
           {t.type === 'error' ? (
-            <AlertCircle className="w-5 h-5 text-status-error shrink-0 mt-0.5" />
+            <AlertCircle className="w-5 h-5 text-status-destructive shrink-0 mt-0.5" />
           ) : (
             <CheckCircle className="w-5 h-5 text-status-success shrink-0 mt-0.5" />
           )}
-          <p className="text-sm flex-1">{t.message}</p>
+          <p className="flex-1">{t.message}</p>
           <button
             onClick={() => removeToast(t.id)}
-            className="text-current opacity-60 hover:opacity-100 transition-opacity shrink-0"
+            className="opacity-60 hover:opacity-100 transition-opacity shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
