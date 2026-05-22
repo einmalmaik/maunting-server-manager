@@ -150,8 +150,19 @@ ok "User '$MSM_USER' bereit"
 # 4. Dateien kopieren
 # ═══════════════════════════════════════════════════════════════
 log "Kopiere Panel-Dateien nach $MSM_DIR..."
-rm -rf "$MSM_DIR" 2>/dev/null || true
-mkdir -p "$MSM_DIR"
+
+if [[ "$SCRIPT_DIR" == "$MSM_DIR" ]]; then
+    # Install.sh läuft direkt im Zielverzeichnis → nicht löschen!
+    # Nur alte Build-Artefakte und Konfigurationen aufräumen
+    rm -rf "$MSM_DIR/frontend/dist" 2>/dev/null || true
+    rm -rf "$MSM_DIR/frontend/node_modules" 2>/dev/null || true
+    rm -rf "$MSM_DIR/backend/venv" 2>/dev/null || true
+else
+    # Install.sh läuft außerhalb des Zielverzeichnisses → sauberes Verzeichnis anlegen
+    rm -rf "$MSM_DIR" 2>/dev/null || true
+    mkdir -p "$MSM_DIR"
+fi
+
 cp -r "$SCRIPT_DIR/backend" "$MSM_DIR/"
 cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
 cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
