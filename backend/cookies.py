@@ -40,7 +40,13 @@ def _set_cookie(response: Response, key: str, value: str, max_age: int | None = 
 
 def _clear_auth_cookies(response: Response) -> None:
     for key in ("__Secure-access_token", "__Secure-refresh_token", "__Secure-csrf_token"):
-        response.delete_cookie(key=key, path=_COOKIE_CONFIG[key]["path"])
+        cfg = _COOKIE_CONFIG[key]
+        response.delete_cookie(
+            key=key,
+            path=cfg["path"],
+            secure=cfg["secure"],
+            samesite=cfg["samesite"],
+        )
 
 
 def _set_auth_cookies(response: Response, access_token: str, refresh_token: str, csrf_token: str) -> None:
