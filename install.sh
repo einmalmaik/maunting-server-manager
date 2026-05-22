@@ -921,11 +921,34 @@ if $RUN_CADDY_SETUP; then
     log "Konfiguriere Caddy..."
 
     CADDY_CONFIG="/etc/caddy/Caddyfile"
-    mkdir -p /etc/caddy
+    CADDY_CONFD="/etc/caddy/conf.d"
+    MSM_CADDY_FILE="$CADDY_CONFD/msm.conf"
 
+    mkdir -p /etc/caddy "$CADDY_CONFD"
+
+    # Sicherstellen, dass conf.d importiert wird — andere Caddyfile-Einträge bleiben unangetastet
+    if ! grep -qE "^import\s+${CADDY_CONFD}/\*\.conf" "$CADDY_CONFIG" 2>/dev/null; then
+        if [[ -s "$CADDY_CONFIG" ]] && ! grep -q "^\s*#\|^\s*{" "$CADDY_CONFIG" 2>/dev/null; then
+            # Caddyfile hat nur Kommentare/Default-Text → überschreiben
+            cat > "$CADDY_CONFIG" <<EOF
+# Caddyfile
+# Weitere Sites können hier direkt oder unter $CADDY_CONFD/ konfiguriert werden.
+
+import $CADDY_CONFD/*.conf
+EOF
+        else
+            # Caddyfile hat bereits Sites → import am Ende anhängen
+            echo "" >> "$CADDY_CONFIG"
+            echo "# MSM Panel — additional site configurations" >> "$CADDY_CONFIG"
+            echo "import $CADDY_CONFD/*.conf" >> "$CADDY_CONFIG"
+        fi
+    fi
+
+    # MSM-Config in separate Datei schreiben (andere Sites bleiben erhalten)
     if [[ -n "$DOMAIN" ]]; then
-        # Produktion: Domain + TLS
-        cat > "$CADDY_CONFIG" <<EOF
+        cat > "$MSM_CADDY_FILE" <<EOF
+# MSM Panel — managed by install.sh
+# Nicht manuell bearbeiten. Änderungen via install.sh vornehmen.
 $DOMAIN {
     root * /opt/msm/frontend/dist
 
@@ -953,8 +976,11 @@ $DOMAIN {
 }
 EOF
     else
-        # IP-Modus: HTTP only (nicht empfohlen für Produktion)
-        cat > "$CADDY_CONFIG" <<EOF
+        cat > "$MSM_CADDY_FILE" <<EOF
+# MSM Panel — managed by install.sh
+# Nicht manuell bearbeiten. Änderungen via install.sh vornehmen.
+# HINWEIS: :80 ist ein Catch-All. Falls andere :80-Sites existieren,
+#          sollte MSM mit einer Domain konfiguriert werden.
 :80 {
     root * /opt/msm/frontend/dist
 
@@ -982,6 +1008,7 @@ EOF
 EOF
         if ! $REINSTALL_MODE; then
             warn "Keine Domain angegeben — Panel läuft über HTTP (nicht empfohlen für Produktion)."
+            warn "Falls andere :80-Sites in Caddy konfiguriert sind, konfiguriere MSM mit einer Domain."
         fi
     fi
 
