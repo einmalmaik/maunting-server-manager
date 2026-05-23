@@ -1128,7 +1128,8 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 # /opt/msm existiert immer (Home des msm-Users) → kein NAMESPACE-Crash
-ReadWritePaths=/opt/msm
+# /etc/systemd/system für Game-Server-Units
+ReadWritePaths=/opt/msm /etc/systemd/system
 
 [Install]
 WantedBy=multi-user.target
@@ -1153,6 +1154,26 @@ EOF
             ok "Auto-Update Timer registriert (deaktiviert — setze MSM_AUTO_UPDATE=true)"
         fi
         ok "Service registriert"
+
+        # ── sudoers: msm-User darf Game-Server systemd-Units verwalten ──
+        cat > /etc/sudoers.d/msm-panel <<'SUDOEOF'
+# MSM Panel — Game-Server systemd-Unit-Verwaltung
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
+msm ALL=(root) NOPASSWD: /bin/rm /etc/systemd/system/msm-*.service
+msm ALL=(root) NOPASSWD: /usr/sbin/useradd -r -m -s /usr/sbin/nologin -d * msm_srv_*
+msm ALL=(root) NOPASSWD: /usr/sbin/usermod -s /usr/sbin/nologin msm_srv_*
+msm ALL=(root) NOPASSWD: /usr/sbin/userdel -r msm_srv_*
+msm ALL=(root) NOPASSWD: /bin/chown msm_srv_*:msm_srv_* *
+msm ALL=(root) NOPASSWD: /bin/chmod 750 *
+SUDOEOF
+        chmod 440 /etc/sudoers.d/msm-panel
+        ok "sudoers für msm-User konfiguriert"
     else
         warn "systemd nicht verfügbar (typisch für WSL). msm-panel.service wird geschrieben, aber nicht aktiviert."
         warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"

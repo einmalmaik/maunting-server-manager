@@ -41,21 +41,21 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     # Linux-User erstellen (isoliert, keine Login-Shell)
     try:
         subprocess.run(
-            ["useradd", "-r", "-m", "-s", "/usr/sbin/nologin", "-d", install_dir, linux_user],
+            ["sudo", "useradd", "-r", "-m", "-s", "/usr/sbin/nologin", "-d", install_dir, linux_user],
             check=True, capture_output=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         # User existiert vielleicht schon — sicherstellen dass er nologin hat
         try:
-            subprocess.run(["usermod", "-s", "/usr/sbin/nologin", linux_user], check=False, capture_output=True)
+            subprocess.run(["sudo", "usermod", "-s", "/usr/sbin/nologin", linux_user], check=False, capture_output=True)
         except FileNotFoundError:
             pass
 
     # Verzeichnis anlegen und Rechte setzen
     try:
         os.makedirs(install_dir, exist_ok=True)
-        subprocess.run(["chown", f"{linux_user}:{linux_user}", install_dir], check=False, capture_output=True)
-        subprocess.run(["chmod", "750", install_dir], check=False, capture_output=True)
+        subprocess.run(["sudo", "chown", f"{linux_user}:{linux_user}", install_dir], check=False, capture_output=True)
+        subprocess.run(["sudo", "chmod", "750", install_dir], check=False, capture_output=True)
     except OSError:
         pass
 
@@ -176,7 +176,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             was_running = False
             try:
                 result = subprocess.run(
-                    ["systemctl", "is-active", f"msm-{server.linux_user}.service"],
+                    ["sudo", "systemctl", "is-active", f"msm-{server.linux_user}.service"],
                     capture_output=True, text=True, timeout=5,
                 )
                 was_running = result.stdout.strip() == "active"
@@ -201,12 +201,11 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     # systemd-Unit stoppen und entfernen (nur auf Linux)
     unit_name = f"msm-{server.linux_user}.service"
     try:
-        subprocess.run(["systemctl", "stop", unit_name], check=False, capture_output=True)
-        subprocess.run(["systemctl", "disable", unit_name], check=False, capture_output=True)
+        subprocess.run(["sudo", "systemctl", "stop", unit_name], check=False, capture_output=True)
+        subprocess.run(["sudo", "systemctl", "disable", unit_name], check=False, capture_output=True)
         unit_path = f"/etc/systemd/system/{unit_name}"
-        if os.path.exists(unit_path):
-            os.remove(unit_path)
-        subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True)
+        subprocess.run(["sudo", "rm", "-f", unit_path], check=False, capture_output=True)
+        subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True)
     except (FileNotFoundError, OSError):
         pass
 
@@ -219,7 +218,7 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
 
     # Linux-User und Home-Verzeichnis entfernen (nur auf Linux)
     try:
-        subprocess.run(["userdel", "-r", server.linux_user], check=False, capture_output=True)
+        subprocess.run(["sudo", "userdel", "-r", server.linux_user], check=False, capture_output=True)
     except (FileNotFoundError, OSError):
         pass
 

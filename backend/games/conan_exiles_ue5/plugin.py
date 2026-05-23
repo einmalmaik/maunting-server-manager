@@ -87,26 +87,28 @@ class ConanExilesUE5Plugin(GamePlugin):
             disk_limit_gb=server.disk_limit_gb,
         )
         try:
-            with open(unit_path, "w", encoding="utf-8") as f:
-                f.write(unit_content)
-        except OSError as e:
+            subprocess.run(
+                ["sudo", "tee", unit_path],
+                input=unit_content, capture_output=True, text=True, check=True
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
             return {"error": f"Konnte systemd-Unit nicht schreiben: {e}"}
 
-        subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True)
-        subprocess.run(["systemctl", "enable", unit_name], check=False, capture_output=True)
-        subprocess.run(["systemctl", "start", unit_name], check=False, capture_output=True)
+        subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True)
+        subprocess.run(["sudo", "systemctl", "enable", unit_name], check=False, capture_output=True)
+        subprocess.run(["sudo", "systemctl", "start", unit_name], check=False, capture_output=True)
         return {"message": "Server gestartet", "unit": unit_name}
 
     def stop(self, server) -> dict:
         unit_name = f"msm-{server.linux_user}.service"
-        subprocess.run(["systemctl", "stop", unit_name], check=False, capture_output=True)
+        subprocess.run(["sudo", "systemctl", "stop", unit_name], check=False, capture_output=True)
         return {"message": "Server gestoppt", "unit": unit_name}
 
     def get_status(self, server) -> ServerStatus:
         unit_name = f"msm-{server.linux_user}.service"
         try:
             result = subprocess.run(
-                ["systemctl", "is-active", unit_name],
+                ["sudo", "systemctl", "is-active", unit_name],
                 capture_output=True, text=True, timeout=5
             )
             active = result.stdout.strip() == "active"

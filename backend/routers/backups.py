@@ -41,7 +41,8 @@ def create_backup(server_id: int, db: Session = Depends(get_db), user: User = De
     try:
         subprocess.run(
             ["tar", "-czf", filepath, "-C", server.install_dir, "."],
-            check=True, capture_output=True, timeout=300
+            check=True, capture_output=True, timeout=300,
+            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
         )
         size_mb = os.path.getsize(filepath) // (1024 * 1024)
     except Exception as e:
@@ -71,7 +72,8 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
         os.makedirs(server.install_dir, exist_ok=True)
         subprocess.run(
             ["tar", "-xzf", backup.filename, "-C", server.install_dir],
-            check=True, capture_output=True, timeout=300
+            check=True, capture_output=True, timeout=300,
+            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Wiederherstellung fehlgeschlagen: {e}")
