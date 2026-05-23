@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ── Global PATH: verhindert "mkdir: not found" in steamcmd-Wrapper ──
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 # ═══════════════════════════════════════════════════════════════
 #  Maunting Server Manager — Zero-Config One-Line Installer
 #  Supports: Ubuntu 22.04+, Debian 12+, WSL2
@@ -277,13 +280,27 @@ if ! command -v node &>/dev/null || [[ "$(node -v | cut -d'v' -f2 | cut -d'.' -f
 fi
 
 # ── Caddy (offizielles Repo für aktuelle Version) ──
+# Nur installieren, wenn Caddy noch nicht vorhanden ist.
+# Bestehende Caddyfile wird niemals überschrieben.
 if ! command -v caddy &>/dev/null; then
-    log "Installiere Caddy..."
+    log "Installiere Caddy (erstmalige Installation)..."
     apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https 2>&1 | tee -a "$LOG_FILE"
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' 2>/dev/null | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>&1 | tee -a "$LOG_FILE"
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' 2>/dev/null | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
     apt-get update -qq | tee -a "$LOG_FILE"
     apt-get install -y -qq caddy 2>&1 | tee -a "$LOG_FILE"
+else
+    if [[ -f /etc/caddy/Caddyfile ]]; then
+        ok "Caddy bereits vorhanden — bestehende Caddyfile wird erhalten."
+    else
+        # Caddy ist installiert, aber keine Caddyfile → Minimal-Datei anlegen
+        log "Erstelle minimale Caddyfile (bestehende fehlt)..."
+        mkdir -p /etc/caddy
+        cat > /etc/caddy/Caddyfile <<'CADDYEOF'
+import /etc/caddy/conf.d/*.conf
+CADDYEOF
+        ok "Minimal-Caddyfile angelegt."
+    fi
 fi
 
 # ── steamcmd (direktes Binary, apt-Wrapper ist fehleranfällig) ──
@@ -398,6 +415,10 @@ if ! id "$MSM_USER" &>/dev/null; then
     useradd -r -m -s /bin/bash -d "$MSM_DIR" "$MSM_USER"
 fi
 ok "User '$MSM_USER' bereit"
+
+# ── Servers directory (muss existieren, sonst scheitert steamcmd +force_install_dir) ──
+mkdir -p /opt/msm/servers
+chown "$MSM_USER:$MSM_USER" /opt/msm/servers
 
 # ═══════════════════════════════════════════════════════════════
 # 4. Dateien kopieren
@@ -955,8 +976,37 @@ EOF
         fi
     fi
 
-    # MSM-Config in separate Datei schreiben (andere Sites bleiben erhalten)
+    # ═══════════════════════════════════════════════════════════════
+    # Domain-Conflict-Check: Domain darf nicht doppelt vergeben sein.
+    # Caddy crasht bei zwei Site-Blöcken mit derselben Domain.
+    # ═══════════════════════════════════════════════════════════════
+    DOMAIN_CONFLICT=false
     if [[ -n "$DOMAIN" ]]; then
+        # Prüfe alle conf.d/*.conf Dateien (außer msm.conf) auf die Domain
+        for conf_file in "$CADDY_CONFD"/*.conf; do
+            [[ -f "$conf_file" ]] || continue
+            [[ "$(basename "$conf_file")" == "msm.conf" ]] && continue
+            if grep -qE "(^|\s)${DOMAIN}(\s|\{)" "$conf_file" 2>/dev/null; then
+                warn "Domain '$DOMAIN' wird bereits in $(basename "$conf_file") verwendet!"
+                warn "Bitte eine andere Domain wählen oder die bestehende Config bereinigen."
+                DOMAIN_CONFLICT=true
+                break
+            fi
+        done
+        # Auch die Haupt-Caddyfile prüfen (ohne import-/Kommentarzeilen)
+        if ! $DOMAIN_CONFLICT && [[ -f "$CADDY_CONFIG" ]]; then
+            if grep -vE '^\s*(import|#|$)' "$CADDY_CONFIG" | grep -qE "(^|\s)${DOMAIN}(\s|\{)" 2>/dev/null; then
+                warn "Domain '$DOMAIN' wird bereits in der Haupt-Caddyfile verwendet!"
+                warn "Bitte eine andere Domain wählen oder die bestehende Config bereinigen."
+                DOMAIN_CONFLICT=true
+            fi
+        fi
+    fi
+
+    # MSM-Config nur schreiben, wenn kein Domain-Conflict besteht
+    if $DOMAIN_CONFLICT; then
+        warn "MSM-Caddy-Config wurde NICHT geschrieben (Domain-Konflikt)."
+    elif [[ -n "$DOMAIN" ]]; then
         cat > "$MSM_CADDY_FILE" <<EOF
 # MSM Panel — managed by install.sh
 # Nicht manuell bearbeiten. Änderungen via install.sh vornehmen.
@@ -1023,10 +1073,14 @@ EOF
         fi
     fi
 
-    if $SYSTEMD_AVAILABLE; then
-        systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
+    if ! $DOMAIN_CONFLICT; then
+        if $SYSTEMD_AVAILABLE; then
+            systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
+        else
+            service caddy restart 2>/dev/null || caddy reload --config "$CADDY_CONFIG" 2>/dev/null || true
+        fi
     else
-        service caddy restart 2>/dev/null || caddy reload --config "$CADDY_CONFIG" 2>/dev/null || true
+        warn "Caddy wurde NICHT neugestartet (Domain-Konflikt). Bitte Konflikt lösen und install.sh erneut ausführen."
     fi
     ok "Caddy konfiguriert"
 fi
