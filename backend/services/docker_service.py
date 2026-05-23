@@ -271,6 +271,7 @@ def run_ephemeral(
     user: str | None = None,
     workdir: str | None = None,
     entrypoint: str | None = None,
+    cap_adds: list[str] | None = None,
     timeout: int = 1800,
 ) -> dict:
     """Führt ein einmaliges `docker run --rm`-Kommando aus (für SteamCMD-Installs etc.).
@@ -280,9 +281,19 @@ def run_ephemeral(
     `entrypoint` setzt `--entrypoint <path>`, wenn das Image keinen passenden
     Default-Entrypoint hat (z. B. `cm2network/steamcmd:root` startet bash und
     erwartet ein Skript-Argument).
+
+    `cap_adds` reaktiviert nach `--cap-drop=ALL` einzelne Kernel-Capabilities
+    für diesen Lauf. Sinnvoll nur, wenn der Container-Prozess (selbst als root)
+    sonst nicht auf gemountete Verzeichnisse zugreifen kann — z. B. um eine
+    mode-700 Image-Directory zu traversieren (`DAC_OVERRIDE`) oder Dateien im
+    Bind-Mount auf die Host-UID zu chown'en (`CHOWN`, `FOWNER`). KEIN Risiko
+    für Host-Escape, weil userns-/no-new-privileges-Schutz unverändert greift.
     """
     args: list[str] = ["run", "--rm"]
     args.extend(_HARDENING_FLAGS)
+    if cap_adds:
+        for cap in cap_adds:
+            args.extend(["--cap-add", cap])
 
     if user:
         args.extend(["--user", user])

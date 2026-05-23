@@ -190,7 +190,7 @@ class TestSteamCMDHelpers:
     weiterarbeiten kann."""
 
     def test_steamcmd_install_runs_as_root_and_chowns(self, tmp_path):
-        from games.base import STEAMCMD_BIN, run_steamcmd_install
+        from games.base import STEAMCMD_BIN, STEAMCMD_CAPS, run_steamcmd_install
 
         with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
              patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
@@ -208,13 +208,15 @@ class TestSteamCMDHelpers:
         assert "chown -R 1001:1001 /data" in script
         # rc bleibt erhalten
         assert "exit $rc" in script
-        # KEIN --user-Override (l\u00e4uft als root im Container)
-        assert kwargs.get("user") is None
+        # Explizit Container-Root, sonst greift userns-remap auf das Image
+        assert kwargs.get("user") == "0:0"
+        # Caps wiederhergestellt, sonst blockt DAC schon root am Traversieren
+        assert kwargs.get("cap_adds") == STEAMCMD_CAPS
         # HOME wandert ins Volume f\u00fcr persistenten Cache
         assert kwargs["env"].get("HOME") == "/data"
 
     def test_workshop_download_runs_as_root_and_chowns(self, tmp_path):
-        from games.base import run_steamcmd_workshop_download
+        from games.base import STEAMCMD_CAPS, run_steamcmd_workshop_download
 
         with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
              patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
@@ -228,8 +230,35 @@ class TestSteamCMDHelpers:
         script = kwargs["command"][1]
         assert "+workshop_download_item" in script and "221100" in script and "12345" in script
         assert "chown -R 1001:1001 /data" in script
-        assert kwargs.get("user") is None
+        assert kwargs.get("user") == "0:0"
+        assert kwargs.get("cap_adds") == STEAMCMD_CAPS
         assert kwargs["env"].get("HOME") == "/data"
+
+    def test_cap_adds_appear_after_cap_drop_in_args(self):
+        """`--cap-add` muss in den Docker-Args **nach** `--cap-drop=ALL` stehen,
+        sonst werden die Caps wieder weggedroppt. Auch der Wert muss korrekt
+        als `--cap-add CHOWN` (zwei Args) gerendert sein."""
+        with patch.object(docker_service, "_check_docker", return_value=True), \
+             patch.object(docker_service, "_run_docker") as mock_run:
+            mock_run.return_value = {"ok": True, "stdout": "", "stderr": ""}
+            docker_service.run_ephemeral(
+                image="cm2network/steamcmd:root",
+                command=["-c", "true"],
+                volumes=[],
+                env={},
+                user="0:0",
+                entrypoint="bash",
+                cap_adds=["DAC_OVERRIDE", "CHOWN", "FOWNER"],
+            )
+        args = mock_run.call_args.args[0]
+        drop_idx = args.index("--cap-drop=ALL")
+        # Jede angegebene Cap muss als getrennte --cap-add <CAP>-Sequenz vorkommen
+        for cap in ("DAC_OVERRIDE", "CHOWN", "FOWNER"):
+            # Index des Flags, dahinter muss der Cap-Name stehen
+            flag_positions = [i for i, a in enumerate(args) if a == "--cap-add" and i + 1 < len(args) and args[i + 1] == cap]
+            assert flag_positions, f"--cap-add {cap} fehlt in den Docker-Args"
+            # Reihenfolge: nach --cap-drop=ALL
+            assert all(pos > drop_idx for pos in flag_positions)
 
     def test_bash_script_is_safely_quoted(self, tmp_path):
         """Wenn jemand extra_args mit Shell-Metazeichen reinreicht (z. B. ' oder ;),
