@@ -416,9 +416,11 @@ if ! id "$MSM_USER" &>/dev/null; then
 fi
 ok "User '$MSM_USER' bereit"
 
-# ── Servers directory (muss existieren, sonst scheitert steamcmd +force_install_dir) ──
+# ── Servers- und Backups-Verzeichnis anlegen ──
 mkdir -p /opt/msm/servers
 chown "$MSM_USER:$MSM_USER" /opt/msm/servers
+mkdir -p /opt/msm/backups
+chown "$MSM_USER:$MSM_USER" /opt/msm/backups
 
 # ═══════════════════════════════════════════════════════════════
 # 4. Dateien kopieren
@@ -1165,12 +1167,12 @@ msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
 msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
 msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
 msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
-msm ALL=(root) NOPASSWD: /bin/rm /etc/systemd/system/msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
 msm ALL=(root) NOPASSWD: /usr/sbin/useradd -r -m -s /usr/sbin/nologin -d * msm_srv_*
 msm ALL=(root) NOPASSWD: /usr/sbin/usermod -s /usr/sbin/nologin msm_srv_*
 msm ALL=(root) NOPASSWD: /usr/sbin/userdel -r msm_srv_*
-msm ALL=(root) NOPASSWD: /bin/chown msm_srv_*:msm_srv_* *
-msm ALL=(root) NOPASSWD: /bin/chmod 750 *
+msm ALL=(root) NOPASSWD: /usr/bin/chown msm_srv_*:msm_srv_* *
+msm ALL=(root) NOPASSWD: /usr/bin/chmod 750 *
 SUDOEOF
         chmod 440 /etc/sudoers.d/msm-panel
         ok "sudoers für msm-User konfiguriert"

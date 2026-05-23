@@ -49,6 +49,7 @@ def auth_rate_limit(request: Request) -> None:
 async def lifespan(app: FastAPI):
     # Startup
     os.makedirs(settings.servers_dir, exist_ok=True)
+    os.makedirs("/opt/msm/backups", exist_ok=True)
     Base.metadata.create_all(bind=engine)
 
     # Migration: fehlende Spalten nachträglich hinzufügen

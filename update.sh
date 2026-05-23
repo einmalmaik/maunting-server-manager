@@ -233,6 +233,33 @@ for asset in data.get('assets', []):
     fi
 fi
 
+# ── sudoers aktualisieren (immer, damit neue Regeln sofort gelten) ──
+if [[ -d /etc/sudoers.d ]]; then
+    log "Aktualisiere sudoers-Regeln..."
+    cat > /etc/sudoers.d/msm-panel <<'SUDOEOF'
+# MSM Panel — Game-Server systemd-Unit-Verwaltung
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
+msm ALL=(root) NOPASSWD: /usr/sbin/useradd -r -m -s /usr/sbin/nologin -d * msm_srv_*
+msm ALL=(root) NOPASSWD: /usr/sbin/usermod -s /usr/sbin/nologin msm_srv_*
+msm ALL=(root) NOPASSWD: /usr/sbin/userdel -r msm_srv_*
+msm ALL=(root) NOPASSWD: /usr/bin/chown msm_srv_*:msm_srv_* *
+msm ALL=(root) NOPASSWD: /usr/bin/chmod 750 *
+SUDOEOF
+    chmod 440 /etc/sudoers.d/msm-panel
+    ok "sudoers aktualisiert"
+fi
+
+# ── Backups-Verzeichnis sicherstellen ──
+mkdir -p /opt/msm/backups
+chown msm:msm /opt/msm/backups 2>/dev/null || true
+
 # ── Backend aktualisieren ──
 log "Aktualisiere Python-Abhängigkeiten..."
 su - msm -c "
