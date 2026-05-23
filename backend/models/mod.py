@@ -17,6 +17,7 @@ class Mod(Base):
     installed_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     load_order: Mapped[int | None] = mapped_column(Integer, default=0)
     auto_update: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     dependencies_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of workshop IDs
 
     server: Mapped["Server"] = relationship("Server", back_populates="mods")

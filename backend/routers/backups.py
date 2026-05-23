@@ -4,12 +4,29 @@ import subprocess
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Backup, Server, Permission, User
 from schemas import BackupResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
+
+
+class CreateBackupRequest(BaseModel):
+    name: str | None = None
+
+
+class BackupSettingsRequest(BaseModel):
+    backup_on_start: bool | None = None
+    backup_interval_hours: int | None = None
+    backup_retention_count: int | None = None
+
+
+class BackupSettingsResponse(BaseModel):
+    backup_on_start: bool
+    backup_interval_hours: int | None
+    backup_retention_count: int
 
 router = APIRouter(prefix="/api/backups", tags=["backups"])
 
@@ -28,7 +45,7 @@ def _cleanup_old_backups(server_id: int, keep: int, db: Session) -> None:
     db.commit()
 
 
-def _run_backup(server_id: int, db: Session) -> Backup | None:
+def _run_backup(server_id: int, db: Session, name: str | None = None) -> Backup | None:
     """Führt ein Backup aus und cleaned up alte Backups."""
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server or not os.path.isdir(server.install_dir):
@@ -50,7 +67,7 @@ def _run_backup(server_id: int, db: Session) -> Backup | None:
     except Exception:
         return None
 
-    backup = Backup(server_id=server_id, filename=filepath, size_mb=size_mb)
+    backup = Backup(server_id=server_id, filename=filepath, size_mb=size_mb, name=name or None)
     db.add(backup)
     db.commit()
     db.refresh(backup)
@@ -88,7 +105,7 @@ def list_backups(server_id: int, db: Session = Depends(get_db), user: User = Dep
 
 
 @router.post("/{server_id}")
-def create_backup(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+def create_backup(server_id: int, body: CreateBackupRequest | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     require_server_permission(user, server_id, db, "can_backup")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -96,10 +113,39 @@ def create_backup(server_id: int, db: Session = Depends(get_db), user: User = De
     if not os.path.isdir(server.install_dir):
         raise HTTPException(status_code=400, detail="Server-Verzeichnis existiert nicht. Ist der Server installiert?")
 
-    backup = _run_backup(server_id, db)
+    backup = _run_backup(server_id, db, name=body.name if body else None)
     if not backup:
         raise HTTPException(status_code=500, detail="Backup fehlgeschlagen")
     return {"message": "Backup erstellt", "backup_id": backup.id, "size_mb": backup.size_mb}
+
+
+@router.get("/{server_id}/settings", response_model=BackupSettingsResponse)
+def get_backup_settings(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    require_server_permission(user, server_id, db, "can_backup")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    return BackupSettingsResponse(
+        backup_on_start=server.backup_on_start,
+        backup_interval_hours=server.backup_interval_hours,
+        backup_retention_count=server.backup_retention_count,
+    )
+
+
+@router.patch("/{server_id}/settings")
+def update_backup_settings(server_id: int, body: BackupSettingsRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+    require_server_permission(user, server_id, db, "can_backup")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    if body.backup_on_start is not None:
+        server.backup_on_start = body.backup_on_start
+    if body.backup_interval_hours is not None:
+        server.backup_interval_hours = body.backup_interval_hours if body.backup_interval_hours > 0 else None
+    if body.backup_retention_count is not None:
+        server.backup_retention_count = max(1, body.backup_retention_count)
+    db.commit()
+    return {"message": "Einstellungen gespeichert"}
 
 
 @router.post("/{server_id}/auto")

@@ -167,7 +167,15 @@
     "addFailed": "Adding failed",
     "removeFailed": "Removal failed",
     "updateSettingFailed": "Update setting failed",
-    "reorderFailed": "Reordering failed"
+    "reorderFailed": "Reordering failed",
+    "removed": "Mod removed",
+    "tabTrending": "Trending",
+    "tabPopular": "Popular",
+    "tabNewest": "Newest",
+    "tabUpdated": "Recently Updated",
+    "tagFilterPlaceholder": "Tag filter (optional)",
+    "enable": "Enable",
+    "disable": "Disable"
   },
   "files": {
     "title": "File Manager",
@@ -197,7 +205,17 @@
     "deletedBackup": "Backup deleted",
     "noBackups": "No backups yet",
     "createHint": "Create your first backup.",
-    "selectServer": "Select a server to manage backups."
+    "selectServer": "Select a server to manage backups.",
+    "settingsSaved": "Settings saved",
+    "scheduling": "Schedule",
+    "schedulingTitle": "Backup Schedule & Settings",
+    "backupOnStart": "Backup on start",
+    "interval": "Interval",
+    "retention": "Retention (count)",
+    "backupName": "Name (optional)",
+    "backupNamePlaceholder": "e.g. Before update v1.5",
+    "createModalHint": "Creates a compressed archive of the server directory.",
+    "createNow": "Create Backup"
   },
   "config": {
     "title": "Config Editor",

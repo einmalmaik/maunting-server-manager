@@ -11,6 +11,7 @@ class Backup(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     server_id: Mapped[int] = mapped_column(Integer, ForeignKey("servers.id"), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     size_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

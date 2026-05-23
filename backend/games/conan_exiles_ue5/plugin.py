@@ -248,13 +248,13 @@ class ConanExilesUE5Plugin(GamePlugin):
             from models import Mod
             db = SessionLocal()
             try:
-                mods = db.query(Mod).filter(Mod.server_id == server.id).order_by(Mod.load_order.asc()).all()
+                mods = db.query(Mod).filter(Mod.server_id == server.id, Mod.enabled == True).order_by(Mod.load_order.asc()).all()
             finally:
                 db.close()
         except Exception:
             return
 
-        # For each mod, find .pak files in its workshop dir
+        # For each enabled mod, find .pak files in its workshop dir
         lines = []
         for mod in mods:
             workshop_dir = os.path.join(install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, mod.workshop_id)

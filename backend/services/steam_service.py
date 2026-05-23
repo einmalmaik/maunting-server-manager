@@ -200,27 +200,47 @@ class SteamService:
             direct_url=f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod_data.get('publishedfileid', '')}"
         )
     
-    async def get_popular_mods(self, appid: str, limit: int = 20, required_tags: list[str] | None = None) -> List[SteamModInfo]:
-        """Get popular mods for an app."""
+    # query_type constants for Steam QueryFiles
+    SORT_TRENDING = 3     # RankedByTrend (last N days)
+    SORT_POPULAR = 0      # RankedByVote (all-time most subscribed)
+    SORT_NEWEST = 1       # RankedByPublicationDate
+    SORT_UPDATED = 12     # RankedByLastUpdatedDate
+
+    async def get_popular_mods(self, appid: str, limit: int = 20, required_tags: list[str] | None = None, sort: str = "trending") -> List[SteamModInfo]:
+        """Get mods for an app sorted by the given criteria.
+
+        sort: 'trending' | 'popular' | 'newest' | 'updated'
+        """
         if not self.api_key:
             return []
-        
-        cache_key = f"popular_{appid}_{limit}"
+
+        sort_map = {
+            "trending": self.SORT_TRENDING,
+            "popular": self.SORT_POPULAR,
+            "newest": self.SORT_NEWEST,
+            "updated": self.SORT_UPDATED,
+        }
+        query_type = sort_map.get(sort, self.SORT_TRENDING)
+
+        cache_key = f"popular_{appid}_{limit}_{sort}"
+        if required_tags:
+            cache_key += "_" + "_".join(required_tags)
         cached = self._get_cache(cache_key)
         if cached:
             return cached
         
         try:
-            query_data = {
-                'query_type': 1,  # k_PublishedFileQueryType_RankedByTrend
+            query_data: dict = {
+                'query_type': query_type,
                 'page': 1,
                 'numperpage': limit,
                 'appid': int(appid),
                 'return_short_description': True,
                 'return_tags': True,
                 'return_previews': True,
-                'days': 7,
             }
+            if sort == "trending":
+                query_data['days'] = 7
             if required_tags:
                 query_data['requiredtags'] = ','.join(required_tags)
 

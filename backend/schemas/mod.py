@@ -11,6 +11,7 @@ class ModResponse(BaseModel):
     installed_version: int | None
     load_order: int | None
     auto_update: bool
+    enabled: bool
     dependencies_json: str | None
 
     class Config:

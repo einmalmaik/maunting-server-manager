@@ -72,6 +72,20 @@ async def lifespan(app: FastAPI):
             if 'backup_retention_count' not in cols:
                 conn.execute(text("ALTER TABLE servers ADD COLUMN backup_retention_count INTEGER DEFAULT 5"))
 
+    # Migration: Mod enabled-Spalte
+    if 'mods' in inspector.get_table_names():
+        cols = [c['name'] for c in inspector.get_columns('mods')]
+        if 'enabled' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN enabled BOOLEAN DEFAULT true"))
+
+    # Migration: Backup name-Spalte
+    if 'backups' in inspector.get_table_names():
+        cols = [c['name'] for c in inspector.get_columns('backups')]
+        if 'name' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backups ADD COLUMN name VARCHAR(256)"))
+
     # Initialize scheduler and load existing schedules
     start_scheduler()
     from database import SessionLocal

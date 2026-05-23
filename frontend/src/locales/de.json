@@ -167,7 +167,15 @@
     "addFailed": "Hinzufügen fehlgeschlagen",
     "removeFailed": "Entfernen fehlgeschlagen",
     "updateSettingFailed": "Update-Einstellung fehlgeschlagen",
-    "reorderFailed": "Neusortierung fehlgeschlagen"
+    "reorderFailed": "Neusortierung fehlgeschlagen",
+    "removed": "Mod entfernt",
+    "tabTrending": "Trending",
+    "tabPopular": "Beliebt",
+    "tabNewest": "Neueste",
+    "tabUpdated": "Aktualisiert",
+    "tagFilterPlaceholder": "Tag-Filter (optional)",
+    "enable": "Aktivieren",
+    "disable": "Deaktivieren"
   },
   "files": {
     "title": "Datei-Manager",
@@ -197,7 +205,17 @@
     "deletedBackup": "Backup gelöscht",
     "noBackups": "Keine Backups vorhanden",
     "createHint": "Erstelle dein erstes Backup.",
-    "selectServer": "Wähle einen Server, um Backups zu verwalten."
+    "selectServer": "Wähle einen Server, um Backups zu verwalten.",
+    "settingsSaved": "Einstellungen gespeichert",
+    "scheduling": "Zeitplan",
+    "schedulingTitle": "Backup-Zeitplan & Einstellungen",
+    "backupOnStart": "Backup beim Start",
+    "interval": "Intervall",
+    "retention": "Aufbewahrung (Anzahl)",
+    "backupName": "Name (optional)",
+    "backupNamePlaceholder": "z.B. Vor Update v1.5",
+    "createModalHint": "Erstellt ein komprimiertes Archiv des Server-Verzeichnisses.",
+    "createNow": "Backup erstellen"
   },
   "config": {
     "title": "Config-Editor",

@@ -68,10 +68,11 @@ async def search_workshop_mods(
 async def get_popular_mods(
     server_id: int,
     limit: int = Query(20, ge=1, le=50, description="Anzahl der Mods"),
+    sort: str = Query("trending", description="Sortierung: trending | popular | newest | updated"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ) -> List[dict]:
-    """Get popular workshop mods for server's game."""
+    """Get workshop mods for server's game, sorted by the given criteria."""
     require_server_permission(user, server_id, db, "can_manage_mods")
     
     server = db.query(Server).filter(Server.id == server_id).first()
@@ -89,12 +90,16 @@ async def get_popular_mods(
     workshop_id = mod_support["workshop_id"]
     required_tags = mod_support.get("required_tags", [])
     
+    if sort not in ("trending", "popular", "newest", "updated"):
+        sort = "trending"
+
     try:
         steam_service = await get_steam_service()
         mods = await steam_service.get_popular_mods(
             appid=workshop_id,
             limit=limit,
-            required_tags=required_tags if required_tags else None
+            required_tags=required_tags if required_tags else None,
+            sort=sort,
         )
         
         return [_mod_to_dict(mod) for mod in mods]

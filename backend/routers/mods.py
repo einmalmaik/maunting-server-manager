@@ -51,7 +51,7 @@ def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db:
 
 
 @router.patch("/{server_id}/{mod_id}", response_model=ModResponse)
-def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_update: bool | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
+def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_update: bool | None = None, enabled: bool | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
     require_server_permission(user, server_id, db, "can_manage_mods")
     mod = db.query(Mod).filter(Mod.id == mod_id, Mod.server_id == server_id).first()
     if not mod:
@@ -60,8 +60,16 @@ def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_
         mod.load_order = load_order
     if auto_update is not None:
         mod.auto_update = auto_update
+    if enabled is not None:
+        mod.enabled = enabled
     db.commit()
     db.refresh(mod)
+    # Write updated modlist to game config
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if server:
+        plugin = get_plugin(server.game_type)
+        if plugin and plugin.supports_mods and hasattr(plugin, '_update_modlist'):
+            plugin._update_modlist(server)
     return mod
 
 
@@ -85,4 +93,10 @@ def reorder_mods(server_id: int, order: list[int], db: Session = Depends(get_db)
         if mod_id in mod_map:
             mod_map[mod_id].load_order = idx
     db.commit()
+    # Write updated modlist to game config
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if server:
+        plugin = get_plugin(server.game_type)
+        if plugin and plugin.supports_mods and hasattr(plugin, '_update_modlist'):
+            plugin._update_modlist(server)
     return db.query(Mod).filter(Mod.server_id == server_id).order_by(Mod.load_order.asc()).all()

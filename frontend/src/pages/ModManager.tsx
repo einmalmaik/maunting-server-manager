@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ChevronLeft, Plus, Search, Trash2, ArrowUp, ArrowDown, ExternalLink, Package, Globe, Star, Users, HardDrive } from 'lucide-react'
+import { ChevronLeft, Plus, Search, Trash2, ExternalLink, Package, Globe, Star, Users, HardDrive, GripVertical, ToggleLeft, ToggleRight } from 'lucide-react'
 
 interface Mod {
   id: number
@@ -12,6 +12,7 @@ interface Mod {
   installed_version: number | null
   load_order: number | null
   auto_update: boolean
+  enabled: boolean
   dependencies_json: string | null
 }
 
@@ -28,6 +29,8 @@ interface SteamMod {
   last_updated: string
 }
 
+type BrowserTab = 'trending' | 'popular' | 'newest' | 'updated'
+
 export function ModManager() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -42,17 +45,28 @@ export function ModManager() {
   const [adding, setAdding] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
+  // Steam Workshop Browser state
   const [steamQuery, setSteamQuery] = useState('')
   const [steamResults, setSteamResults] = useState<SteamMod[]>([])
   const [steamLoading, setSteamLoading] = useState(false)
-  const [popularMods, setPopularMods] = useState<SteamMod[]>([])
-  const [popularLoading, setPopularLoading] = useState(false)
+  const [browserTab, setBrowserTab] = useState<BrowserTab>('trending')
+  const [browserMods, setBrowserMods] = useState<SteamMod[]>([])
+  const [browserLoading, setBrowserLoading] = useState(false)
+  const [tagFilter, setTagFilter] = useState('')
+  const loadedTabs = useRef<Set<BrowserTab>>(new Set())
+
+  // Drag & drop state
+  const dragId = useRef<number | null>(null)
 
   useEffect(() => {
     if (!id) return
     loadMods()
-    loadPopularMods()
   }, [id])
+
+  useEffect(() => {
+    if (!showSteamSearch) return
+    loadBrowserTab(browserTab)
+  }, [showSteamSearch, browserTab])
 
   const loadMods = async () => {
     try {
@@ -66,24 +80,34 @@ export function ModManager() {
     }
   }
 
-  const loadPopularMods = async () => {
-    setPopularLoading(true)
+  const loadBrowserTab = async (tab: BrowserTab, forceReload = false) => {
+    if (loadedTabs.current.has(tab) && !forceReload) return
+    setBrowserLoading(true)
     try {
-      const res = await fetch(`/api/steam/workshop/popular?server_id=${id}&limit=10`)
+      const res = await fetch(`/api/steam/workshop/popular?server_id=${id}&sort=${tab}&limit=20`)
       if (!res.ok) throw new Error()
-      setPopularMods(await res.json())
+      setBrowserMods(await res.json())
+      loadedTabs.current.add(tab)
     } catch {
-      // Silent fail
+      setBrowserMods([])
     } finally {
-      setPopularLoading(false)
+      setBrowserLoading(false)
     }
+  }
+
+  const switchTab = (tab: BrowserTab) => {
+    setBrowserTab(tab)
+    loadedTabs.current.delete(tab) // always reload on tab switch
+    setBrowserMods([])
   }
 
   const searchSteam = async () => {
     if (!steamQuery.trim()) return
     setSteamLoading(true)
     try {
-      const res = await fetch(`/api/steam/workshop/search?server_id=${id}&query=${encodeURIComponent(steamQuery)}&per_page=20`)
+      const q = encodeURIComponent(steamQuery)
+      const tag = tagFilter.trim() ? `&tag=${encodeURIComponent(tagFilter.trim())}` : ''
+      const res = await fetch(`/api/steam/workshop/search?server_id=${id}&query=${q}&per_page=20${tag}`)
       if (!res.ok) throw new Error()
       setSteamResults(await res.json())
     } catch {
@@ -100,10 +124,7 @@ export function ModManager() {
       const res = await fetch(`/api/mods/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workshop_id: newWorkshopId.trim(),
-          name: newModName.trim() || undefined,
-        }),
+        body: JSON.stringify({ workshop_id: newWorkshopId.trim(), name: newModName.trim() || undefined }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -113,9 +134,9 @@ export function ModManager() {
       setShowAddModal(false)
       setNewWorkshopId('')
       setNewModName('')
-      setMessage({ type: 'success', text: t('mods.added', 'Mod hinzugef&uuml;gt') })
+      setMessage({ type: 'success', text: t('mods.added', 'Hinzugefügt') })
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.message || t('mods.addFailed', 'Hinzuf&uuml;gen fehlgeschlagen') })
+      setMessage({ type: 'error', text: e.message || t('mods.addFailed', 'Hinzufügen fehlgeschlagen') })
     } finally {
       setAdding(false)
     }
@@ -127,19 +148,16 @@ export function ModManager() {
       const res = await fetch(`/api/mods/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workshop_id: workshopId,
-          name: name || undefined,
-        }),
+        body: JSON.stringify({ workshop_id: workshopId, name: name || undefined }),
       })
       if (!res.ok) {
         const err = await res.json()
         throw new Error(err.detail || 'Fehler')
       }
       await loadMods()
-      setMessage({ type: 'success', text: t('mods.added', 'Mod hinzugef&uuml;gt') })
+      setMessage({ type: 'success', text: t('mods.added', 'Hinzugefügt') })
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.message || t('mods.addFailed', 'Hinzuf&uuml;gen fehlgeschlagen') })
+      setMessage({ type: 'error', text: e.message || t('mods.addFailed', 'Hinzufügen fehlgeschlagen') })
     } finally {
       setAdding(false)
     }
@@ -171,16 +189,43 @@ export function ModManager() {
     }
   }
 
-  const moveMod = async (modId: number, direction: 'up' | 'down') => {
-    const currentIndex = mods.findIndex(m => m.id === modId)
-    if (
-      (direction === 'up' && currentIndex === 0) ||
-      (direction === 'down' && currentIndex === mods.length - 1)
-    ) return
+  const toggleEnabled = async (modId: number, current: boolean) => {
+    try {
+      const res = await fetch(`/api/mods/${id}/${modId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !current }),
+      })
+      if (!res.ok) throw new Error()
+      await loadMods()
+    } catch {
+      setMessage({ type: 'error', text: t('mods.updateSettingFailed', 'Einstellung fehlgeschlagen') })
+    }
+  }
+
+  // Drag & drop handlers
+  const onDragStart = (e: React.DragEvent, modId: number) => {
+    dragId.current = modId
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+
+  const onDrop = async (e: React.DragEvent, targetId: number) => {
+    e.preventDefault()
+    if (dragId.current === null || dragId.current === targetId) return
+
+    const from = mods.findIndex(m => m.id === dragId.current)
+    const to = mods.findIndex(m => m.id === targetId)
+    if (from === -1 || to === -1) return
 
     const newOrder = [...mods]
-    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-    ;[newOrder[currentIndex], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[currentIndex]]
+    const [moved] = newOrder.splice(from, 1)
+    newOrder.splice(to, 0, moved)
+    setMods(newOrder) // optimistic update
 
     try {
       const res = await fetch(`/api/mods/${id}/reorder`, {
@@ -189,62 +234,69 @@ export function ModManager() {
         body: JSON.stringify({ order: newOrder.map(m => m.id) }),
       })
       if (!res.ok) throw new Error()
-      setMods(newOrder)
+      setMods(await res.json())
     } catch {
       setMessage({ type: 'error', text: t('mods.reorderFailed', 'Neusortierung fehlgeschlagen') })
+      await loadMods()
     }
+    dragId.current = null
   }
 
   const filteredMods = mods.filter(mod =>
-    (mod.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-     mod.workshop_id.includes(searchTerm))
+    mod.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    mod.workshop_id.includes(searchTerm)
   )
 
-  const renderSteamModCard = (mod: SteamMod) => (
-    <div key={mod.publishedfileid} className="msm-card p-4 flex items-start gap-4">
-      {mod.preview_url ? (
-        <img
-          src={mod.preview_url}
-          alt={mod.title}
-          className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-          loading="lazy"
-        />
-      ) : (
-        <div className="w-16 h-16 rounded-lg bg-surface-container-highest flex items-center justify-center flex-shrink-0">
-          <Package className="w-6 h-6 text-on-surface-variant" />
+  const renderSteamModCard = (mod: SteamMod) => {
+    const isAdded = mods.some(m => m.workshop_id === mod.publishedfileid)
+    return (
+      <div key={mod.publishedfileid} className="msm-card p-4 flex items-start gap-4">
+        {mod.preview_url ? (
+          <img src={mod.preview_url} alt={mod.title} className="w-16 h-16 rounded-lg object-cover flex-shrink-0" loading="lazy" />
+        ) : (
+          <div className="w-16 h-16 rounded-lg bg-surface-container-highest flex items-center justify-center flex-shrink-0">
+            <Package className="w-6 h-6 text-on-surface-variant" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <h4 className="font-headline text-sm text-on-surface truncate">{mod.title}</h4>
+          <p className="font-body-md text-xs text-on-surface-variant mt-1 line-clamp-2">{mod.description}</p>
+          <div className="flex items-center gap-3 mt-2 text-xs text-on-surface-variant font-mono-sm">
+            <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {mod.subscriptions}</span>
+            <span className="flex items-center gap-1"><Star className="w-3 h-3" /> {mod.favorites}</span>
+            {mod.file_size_mb > 0 && (
+              <span className="flex items-center gap-1"><HardDrive className="w-3 h-3" /> {mod.file_size_mb} MB</span>
+            )}
+          </div>
         </div>
-      )}
-      <div className="flex-1 min-w-0">
-        <h4 className="font-headline text-sm text-on-surface truncate">{mod.title}</h4>
-        <p className="font-body-md text-xs text-on-surface-variant mt-1 line-clamp-2">{mod.description}</p>
-        <div className="flex items-center gap-3 mt-2 text-xs text-on-surface-variant font-mono-sm">
-          <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {mod.subscriptions}</span>
-          <span className="flex items-center gap-1"><Star className="w-3 h-3" /> {mod.favorites}</span>
-          {mod.file_size_mb > 0 && (
-            <span className="flex items-center gap-1"><HardDrive className="w-3 h-3" /> {mod.file_size_mb} MB</span>
-          )}
+        <div className="flex flex-col gap-2 flex-shrink-0">
+          <button
+            onClick={() => addSteamMod(mod.publishedfileid, mod.title)}
+            disabled={adding || isAdded}
+            className="px-3 py-1.5 bg-primary hover:bg-primary/80 disabled:bg-surface-container-highest disabled:text-on-surface-variant text-on-primary rounded-md text-sm font-body-md transition-colors"
+          >
+            {isAdded ? t('mods.added', 'Hinzugefügt') : t('mods.add', 'Hinzufügen')}
+          </button>
+          <a
+            href={mod.direct_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-1 px-3 py-1.5 border border-outline hover:bg-surface-container text-on-surface-variant rounded-md text-sm transition-colors"
+          >
+            <ExternalLink className="w-3 h-3" />
+            {t('mods.viewInWorkshop', 'Workshop')}
+          </a>
         </div>
       </div>
-      <div className="flex flex-col gap-2">
-        <button
-          onClick={() => addSteamMod(mod.publishedfileid, mod.title)}
-          disabled={adding || mods.some(m => m.workshop_id === mod.publishedfileid)}
-          className="px-3 py-1.5 bg-primary hover:bg-primary/80 disabled:bg-surface-container-highest disabled:text-on-surface-variant text-on-primary rounded-md text-sm font-body-md transition-colors"
-        >
-          {mods.some(m => m.workshop_id === mod.publishedfileid) ? t('mods.added', 'Hinzugef&uuml;gt') : t('mods.add', 'Hinzuf&uuml;gen')}
-        </button>
-        <a
-          href={mod.direct_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center gap-1 px-3 py-1.5 border border-outline hover:bg-surface-container text-on-surface-variant rounded-md text-sm transition-colors"
-        >
-          <ExternalLink className="w-3 h-3" />
-          {t('mods.viewInWorkshop', 'Workshop')}
-        </a>
-      </div>
-    </div>
-  )
+    )
+  }
+
+  const BROWSER_TABS: { key: BrowserTab; label: string }[] = [
+    { key: 'trending', label: t('mods.tabTrending', 'Trending') },
+    { key: 'popular', label: t('mods.tabPopular', 'Beliebt') },
+    { key: 'newest', label: t('mods.tabNewest', 'Neueste') },
+    { key: 'updated', label: t('mods.tabUpdated', 'Aktualisiert') },
+  ]
 
   return (
     <div className="space-y-6">
@@ -264,7 +316,7 @@ export function ModManager() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setShowSteamSearch(true)}
+            onClick={() => { loadedTabs.current.clear(); setShowSteamSearch(true) }}
             className="msm-btn-secondary flex items-center gap-2 px-4 py-2"
           >
             <Globe className="w-4 h-4" />
@@ -281,7 +333,7 @@ export function ModManager() {
       </div>
 
       {message && (
-        <div className={`mb-4 p-3 rounded-md border text-sm font-body-md ${
+        <div className={`p-3 rounded-md border text-sm font-body-md ${
           message.type === 'success'
             ? 'bg-status-success/10 border-status-success/30 text-status-success'
             : 'bg-status-error/10 border-status-error/30 text-status-error'
@@ -291,21 +343,19 @@ export function ModManager() {
       )}
 
       {/* Local Search */}
-      <div className="mb-6">
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
-          <input
-            type="text"
-            placeholder={t('mods.searchPlaceholder')}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="msm-input pl-10"
-          />
-        </div>
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
+        <input
+          type="text"
+          placeholder={t('mods.searchPlaceholder')}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="msm-input pl-10"
+        />
       </div>
 
       {/* Installed Mods List */}
-      <div className="space-y-3 mb-8">
+      <div className="space-y-2">
         {loading ? (
           <div className="text-center py-12 text-on-surface-variant font-body-md">{t('common.loading')}</div>
         ) : filteredMods.length === 0 ? (
@@ -319,7 +369,7 @@ export function ModManager() {
             </p>
             {!searchTerm && (
               <button
-                onClick={() => setShowSteamSearch(true)}
+                onClick={() => { loadedTabs.current.clear(); setShowSteamSearch(true) }}
                 className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
               >
                 <Globe className="w-4 h-4" />
@@ -328,55 +378,66 @@ export function ModManager() {
             )}
           </div>
         ) : (
-          filteredMods.map((mod, index) => (
-            <div key={mod.id} className="msm-card p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="flex flex-col gap-1">
-                    <button
-                      onClick={() => moveMod(mod.id, 'up')}
-                      disabled={index === 0}
-                      className="p-1 rounded hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <ArrowUp className="w-3 h-3 text-on-surface-variant" />
-                    </button>
-                    <button
-                      onClick={() => moveMod(mod.id, 'down')}
-                      disabled={index === filteredMods.length - 1}
-                      className="p-1 rounded hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <ArrowDown className="w-3 h-3 text-on-surface-variant" />
-                    </button>
-                  </div>
+          filteredMods.map((mod) => (
+            <div
+              key={mod.id}
+              className={`msm-card p-4 transition-opacity ${mod.enabled ? '' : 'opacity-60'}`}
+              onDragOver={onDragOver}
+              onDrop={(e) => onDrop(e, mod.id)}
+            >
+              <div className="flex items-center justify-between gap-3">
+                {/* Drag handle */}
+                <div
+                  className="cursor-grab active:cursor-grabbing p-1 text-on-surface-variant hover:text-on-surface flex-shrink-0"
+                  draggable
+                  onDragStart={(e) => onDragStart(e, mod.id)}
+                >
+                  <GripVertical className="w-4 h-4" />
+                </div>
 
-                  <div>
-                    <h3 className="font-headline text-body-md text-on-surface">
-                      {mod.name || `Workshop Mod ${mod.workshop_id}`}
-                    </h3>
-                    <div className="flex items-center gap-4 mt-1 text-sm text-on-surface-variant font-body-md">
-                      <span>ID: {mod.workshop_id}</span>
-                      {mod.last_updated && (
-                        <span>{new Date(mod.last_updated).toLocaleDateString()}</span>
-                      )}
-                      {mod.load_order !== null && (
-                        <span>{t('mods.loadOrder')}: {mod.load_order}</span>
-                      )}
-                    </div>
+                {/* Mod info */}
+                <div className="flex-1 min-w-0">
+                  <h3 className={`font-headline text-body-md ${mod.enabled ? 'text-on-surface' : 'text-on-surface-variant line-through'}`}>
+                    {mod.name || `Workshop Mod ${mod.workshop_id}`}
+                  </h3>
+                  <div className="flex items-center gap-4 mt-1 text-sm text-on-surface-variant font-body-md">
+                    <span>ID: {mod.workshop_id}</span>
+                    {mod.last_updated && (
+                      <span>{new Date(mod.last_updated).toLocaleDateString()}</span>
+                    )}
+                    {mod.load_order !== null && (
+                      <span>{t('mods.loadOrder')}: {mod.load_order}</span>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                {/* Actions */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* Enable / Disable toggle */}
+                  <button
+                    onClick={() => toggleEnabled(mod.id, mod.enabled)}
+                    title={mod.enabled ? t('mods.disable', 'Deaktivieren') : t('mods.enable', 'Aktivieren')}
+                    className="p-1.5 rounded-md hover:bg-surface-container transition-colors"
+                  >
+                    {mod.enabled
+                      ? <ToggleRight className="w-5 h-5 text-primary" />
+                      : <ToggleLeft className="w-5 h-5 text-on-surface-variant" />
+                    }
+                  </button>
+
+                  {/* Link to Workshop */}
                   <a
                     href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.workshop_id}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-2 rounded-md hover:bg-surface-container transition-colors"
+                    className="p-1.5 rounded-md hover:bg-surface-container transition-colors"
                     title={t('mods.viewInWorkshop')}
                   >
                     <ExternalLink className="w-4 h-4 text-on-surface-variant" />
                   </a>
 
-                  <label className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-outline cursor-pointer hover:bg-surface-container transition-colors">
+                  {/* Auto-update */}
+                  <label className="flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-outline cursor-pointer hover:bg-surface-container transition-colors">
                     <input
                       type="checkbox"
                       checked={mod.auto_update}
@@ -386,9 +447,10 @@ export function ModManager() {
                     <span className="text-sm text-on-surface font-body-md">{t('mods.autoUpdate')}</span>
                   </label>
 
+                  {/* Remove */}
                   <button
                     onClick={() => removeMod(mod.id)}
-                    className="p-2 rounded-md hover:bg-status-error/10 transition-colors"
+                    className="p-1.5 rounded-md hover:bg-status-error/10 transition-colors"
                     title={t('mods.remove')}
                   >
                     <Trash2 className="w-4 h-4 text-status-error" />
@@ -400,12 +462,11 @@ export function ModManager() {
         )}
       </div>
 
-      {/* Add Modal */}
+      {/* Add by ID Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="msm-card w-full max-w-md p-6">
             <h2 className="font-headline text-headline-md text-primary mb-4">{t('mods.addMod')}</h2>
-
             <div className="space-y-4">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
@@ -419,7 +480,6 @@ export function ModManager() {
                   className="msm-input"
                 />
               </div>
-
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('mods.modName')}
@@ -433,12 +493,8 @@ export function ModManager() {
                 />
               </div>
             </div>
-
             <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="msm-btn-secondary flex-1 px-4 py-2"
-              >
+              <button onClick={() => setShowAddModal(false)} className="msm-btn-secondary flex-1 px-4 py-2">
                 {t('common.cancel')}
               </button>
               <button
@@ -453,25 +509,23 @@ export function ModManager() {
         </div>
       )}
 
-      {/* Steam Search Modal */}
+      {/* Steam Workshop Browser Modal */}
       {showSteamSearch && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="msm-card max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
+          <div className="msm-card max-w-2xl w-full p-6 max-h-[90vh] flex flex-col">
+            {/* Modal header */}
+            <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="font-headline text-headline-md text-primary">{t('mods.steamSearch')}</h2>
                 <p className="font-body-md text-sm text-on-surface-variant">{t('mods.steamSearchHint')}</p>
               </div>
-              <button
-                onClick={() => setShowSteamSearch(false)}
-                className="msm-btn-secondary p-2"
-              >
+              <button onClick={() => setShowSteamSearch(false)} className="msm-btn-secondary p-2">
                 {t('common.close')}
               </button>
             </div>
 
-            {/* Steam Search Input */}
-            <div className="flex gap-2 mb-6">
+            {/* Search bar + optional tag filter */}
+            <div className="flex gap-2 mb-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
                 <input
@@ -479,7 +533,7 @@ export function ModManager() {
                   placeholder={t('mods.searchPlaceholder')}
                   value={steamQuery}
                   onChange={(e) => setSteamQuery(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && searchSteam()}
+                  onKeyDown={(e) => e.key === 'Enter' && searchSteam()}
                   className="msm-input pl-10"
                 />
               </div>
@@ -492,32 +546,62 @@ export function ModManager() {
               </button>
             </div>
 
-            {/* Search Results */}
-            {steamResults.length > 0 && (
-              <div className="mb-6">
-                <h3 className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-3">
-                  {t('mods.searchResults')}
-                </h3>
-                <div className="space-y-3">
-                  {steamResults.map(mod => renderSteamModCard(mod))}
-                </div>
-              </div>
-            )}
+            {/* Tag filter */}
+            <div className="mb-4">
+              <input
+                type="text"
+                placeholder={t('mods.tagFilterPlaceholder', 'Tag-Filter (optional)')}
+                value={tagFilter}
+                onChange={(e) => setTagFilter(e.target.value)}
+                className="msm-input text-sm"
+              />
+            </div>
 
-            {/* Popular Mods */}
-            <div>
-              <h3 className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-3">
-                {t('mods.popularMods')}
-              </h3>
-              {popularLoading ? (
-                <div className="text-center py-8 text-on-surface-variant font-body-md">{t('common.loading')}</div>
-              ) : popularMods.length > 0 ? (
-                <div className="space-y-3">
-                  {popularMods.map(mod => renderSteamModCard(mod))}
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {/* Search Results */}
+              {steamResults.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-3">
+                    {t('mods.searchResults')}
+                  </h3>
+                  <div className="space-y-3">
+                    {steamResults.map(mod => renderSteamModCard(mod))}
+                  </div>
                 </div>
-              ) : (
-                <div className="text-center py-8 text-on-surface-variant font-body-md">
-                  {t('mods.noSearchResults')}
+              )}
+
+              {/* Browser Tabs */}
+              {steamResults.length === 0 && (
+                <div>
+                  {/* Tab bar */}
+                  <div className="flex gap-1 mb-4 bg-surface-container rounded-lg p-1">
+                    {BROWSER_TABS.map(tab => (
+                      <button
+                        key={tab.key}
+                        onClick={() => switchTab(tab.key)}
+                        className={`flex-1 px-3 py-1.5 rounded-md text-sm font-body-md transition-colors ${
+                          browserTab === tab.key
+                            ? 'bg-surface text-primary shadow-sm'
+                            : 'text-on-surface-variant hover:text-on-surface'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {browserLoading ? (
+                    <div className="text-center py-8 text-on-surface-variant font-body-md">{t('common.loading')}</div>
+                  ) : browserMods.length > 0 ? (
+                    <div className="space-y-3">
+                      {browserMods.map(mod => renderSteamModCard(mod))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-on-surface-variant font-body-md">
+                      {t('mods.noSearchResults')}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
