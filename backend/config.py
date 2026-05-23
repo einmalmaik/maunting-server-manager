@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Redis (fuer verteiltes Rate-Limiting via slowapi)
     redis_url: str = ""
 
+    # Server-Verzeichnis (Install-Dir pro Server)
+    # Produktion: /opt/msm/servers  |  Dev: ./servers
+    servers_dir: str = "/opt/msm/servers"
+
     # Steam
     steamcmd_path: str = "/usr/games/steamcmd"
     steam_api_key: str = ""

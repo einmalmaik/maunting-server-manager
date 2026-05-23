@@ -4,6 +4,7 @@ import subprocess
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from config import settings
 from database import get_db
 from models import Server, Permission, User
 from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
@@ -32,8 +33,10 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     if not user.is_owner:
         raise HTTPException(status_code=403, detail="Nur Owner kann Server erstellen")
 
-    install_dir = f"/opt/msm/servers/{req.game_type}_{db.query(Server).count() + 1}"
-    linux_user = f"msm_srv_{db.query(Server).count() + 1}"
+    base_dir = os.path.abspath(settings.servers_dir)
+    count = db.query(Server).count() + 1
+    install_dir = os.path.join(base_dir, f"{req.game_type}_{count}")
+    linux_user = f"msm_srv_{count}"
 
     # Linux-User erstellen (isoliert, keine Login-Shell)
     try:

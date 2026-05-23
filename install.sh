@@ -1060,7 +1060,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/msm/backend
+ReadWritePaths=/opt/msm/backend /opt/msm/servers
 
 [Install]
 WantedBy=multi-user.target
