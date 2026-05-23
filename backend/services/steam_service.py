@@ -103,9 +103,9 @@ class SteamService:
                 for i, tag in enumerate(required_tags):
                     params[f'requiredtags[{i}]'] = tag
             
-            response = await self.client.post(
+            response = await self.client.get(
                 f"{self.API_BASE}/IPublishedFileService/QueryFiles/v1/",
-                data=params
+                params=params
             )
             response.raise_for_status()
             
@@ -141,9 +141,9 @@ class SteamService:
                 'includevotes': True,
             }
             
-            response = await self.client.post(
+            response = await self.client.get(
                 f"{self.API_BASE}/IPublishedFileService/GetDetails/v1/",
-                data=params
+                params=params
             )
             response.raise_for_status()
             
@@ -216,9 +216,9 @@ class SteamService:
                 for i, tag in enumerate(required_tags):
                     params[f'requiredtags[{i}]'] = tag
             
-            response = await self.client.post(
+            response = await self.client.get(
                 f"{self.API_BASE}/IPublishedFileService/QueryFiles/v1/",
-                data=params
+                params=params
             )
             response.raise_for_status()
             
