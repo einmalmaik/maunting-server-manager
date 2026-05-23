@@ -261,7 +261,7 @@ class GamePlugin(ABC):
     def get_mod_support(self) -> dict | None:
         """Liefert Mod-Metadaten, falls unterstützt."""
         if self.supports_mods:
-            return {"workshop_id": None, "dependency_resolution": False}
+            return {"workshop_id": None, "dependency_resolution": False, "required_tags": []}
         return None
 
 

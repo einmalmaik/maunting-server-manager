@@ -8,7 +8,6 @@ import {
   Users,
   Settings,
   LogOut,
-  HardDrive,
   Plus,
 } from 'lucide-react'
 
@@ -25,7 +24,6 @@ export function Sidebar() {
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: t('nav.dashboard') },
     { to: '/servers', icon: Server, label: t('nav.servers') },
-    { to: '/backups', icon: HardDrive, label: t('nav.backups') },
     ...(user?.is_owner ? [
       { to: '/users', icon: Users, label: t('nav.users') },
     ] : []),

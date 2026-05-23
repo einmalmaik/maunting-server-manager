@@ -71,13 +71,17 @@ def browse_directory(
     entries = []
     try:
         for item in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-            stat = item.stat()
-            entries.append({
-                "name": item.name,
-                "is_dir": item.is_dir(),
-                "size": stat.st_size if item.is_file() else 0,
-                "modified": stat.st_mtime,
-            })
+            try:
+                stat = item.stat()
+                entries.append({
+                    "name": item.name,
+                    "is_dir": item.is_dir(),
+                    "size": stat.st_size if item.is_file() else 0,
+                    "modified": stat.st_mtime,
+                })
+            except (PermissionError, OSError):
+                # Einzelne Einträge ohne Leserechte überspringen, Rest anzeigen
+                continue
     except PermissionError:
         raise HTTPException(status_code=403, detail="Keine Berechtigung für dieses Verzeichnis")
 

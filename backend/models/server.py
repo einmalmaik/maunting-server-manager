@@ -24,6 +24,11 @@ class Server(Base):
     restart_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     restart_time_utc: Mapped[str | None] = mapped_column(String(8), nullable=True)  # HH:MM
 
+    # Backup-Scheduling
+    backup_on_start: Mapped[bool] = mapped_column(Boolean, default=False)
+    backup_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 24=daily, 168=weekly, 720=monthly
+    backup_retention_count: Mapped[int] = mapped_column(Integer, default=5)
+
     # Ressourcen
     cpu_limit_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ram_limit_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)

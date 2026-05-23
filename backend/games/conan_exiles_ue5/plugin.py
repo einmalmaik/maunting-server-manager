@@ -97,6 +97,19 @@ class ConanExilesUE5Plugin(GamePlugin):
         subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True)
         subprocess.run(["sudo", "systemctl", "enable", unit_name], check=False, capture_output=True)
         subprocess.run(["sudo", "systemctl", "start", unit_name], check=False, capture_output=True)
+
+        # Auto-Backup nach Start auslösen (fire-and-forget)
+        try:
+            from database import SessionLocal
+            import requests
+            db2 = SessionLocal()
+            try:
+                requests.post(f"http://localhost:8000/api/backups/{server.id}/auto", timeout=5)
+            finally:
+                db2.close()
+        except Exception:
+            pass
+
         return {"message": "Server gestartet", "unit": unit_name}
 
     def stop(self, server) -> dict:
@@ -152,6 +165,14 @@ class ConanExilesUE5Plugin(GamePlugin):
             ConfigField("NetServerMaxTickRate", "Tick Rate", "number", default=30),
             ConfigField("MaxTransferDistance", "Max Transfer Distance", "number", default=100000),
         ]
+
+    def get_mod_support(self) -> dict | None:
+        """Conan Exiles UE5: Filtert nach 'Enhanced'-Tag (UE4-Mods teilen Workshop)."""
+        return {
+            "workshop_id": self.WORKSHOP_ID,
+            "dependency_resolution": False,
+            "required_tags": ["Enhanced"],
+        }
 
     def get_config_files(self) -> list[dict]:
         return [

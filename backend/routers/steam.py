@@ -46,6 +46,7 @@ async def search_workshop_mods(
         raise HTTPException(status_code=400, detail="Mod-Informationen nicht verfügbar")
     
     workshop_id = mod_support["workshop_id"]
+    required_tags = mod_support.get("required_tags", [])
     
     try:
         steam_service = await get_steam_service()
@@ -53,7 +54,8 @@ async def search_workshop_mods(
             appid=workshop_id,
             query=query,
             page=page,
-            per_page=per_page
+            per_page=per_page,
+            required_tags=required_tags if required_tags else None
         )
         
         return [_mod_to_dict(mod) for mod in mods]
@@ -85,12 +87,14 @@ async def get_popular_mods(
         raise HTTPException(status_code=400, detail="Mod-Informationen nicht verfügbar")
     
     workshop_id = mod_support["workshop_id"]
+    required_tags = mod_support.get("required_tags", [])
     
     try:
         steam_service = await get_steam_service()
         mods = await steam_service.get_popular_mods(
             appid=workshop_id,
-            limit=limit
+            limit=limit,
+            required_tags=required_tags if required_tags else None
         )
         
         return [_mod_to_dict(mod) for mod in mods]

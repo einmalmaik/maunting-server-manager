@@ -100,6 +100,7 @@ async def _backup_server_task(server_id: int) -> None:
         subprocess.run(
             ["tar", "-czf", filepath, "-C", server.install_dir, "."],
             check=True, capture_output=True, timeout=300,
+            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
         )
         size_mb = os.path.getsize(filepath) // (1024 * 1024)
 
@@ -224,22 +225,24 @@ def get_jobs(server_id: Optional[int] = None) -> list:
 
 
 def cleanup_old_backups(server_id: int, db):
-    """Keep only the last 10 backups for a server."""
-    from models import Backup
+    """Keep only the configured number of backups per server."""
+    from models import Backup, Server
+
+    server = db.query(Server).filter(Server.id == server_id).first()
+    keep = server.backup_retention_count if server else 5
 
     backups = db.query(Backup).filter(
         Backup.server_id == server_id
     ).order_by(Backup.created_at.desc()).all()
 
-    if len(backups) > 10:
-        for old_backup in backups[10:]:
-            if old_backup.path and os.path.exists(old_backup.path):
+    if len(backups) > keep:
+        for old_backup in backups[keep:]:
+            if os.path.exists(old_backup.filename):
                 try:
-                    os.remove(old_backup.path)
+                    os.remove(old_backup.filename)
                 except Exception:
                     pass
             db.delete(old_backup)
-
         db.commit()
 
 
@@ -270,3 +273,14 @@ def init_server_schedules(db):
             except Exception as e:
                 import logging
                 logging.warning("Failed to schedule cron restart for server %s: %s", server.id, e)
+
+        if server.backup_interval_hours and server.backup_interval_hours > 0:
+            try:
+                schedule_backup(
+                    server.id,
+                    interval_hours=server.backup_interval_hours,
+                    job_id=f"backup_server_{server.id}"
+                )
+            except Exception as e:
+                import logging
+                logging.warning("Failed to schedule backup for server %s: %s", server.id, e)

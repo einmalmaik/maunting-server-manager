@@ -73,7 +73,8 @@ class SteamService:
         appid: str, 
         query: str = "", 
         page: int = 1,
-        per_page: int = 50
+        per_page: int = 50,
+        required_tags: list[str] | None = None,
     ) -> List[SteamModInfo]:
         """Search workshop mods via Steam Web API QueryFiles."""
         if not self.api_key:
@@ -91,13 +92,16 @@ class SteamService:
                 'search_text': query,
                 'page': page,
                 'numperpage': per_page,
-                'query_type': 3,  # k_PublishedFileQueryType_RankedByTextSearch
+                'query_type': 3 if query else 0,  # text search or ranked by vote
                 'return_short_description': True,
                 'return_tags': True,
                 'return_previews': True,
                 'return_details': True,
                 'return_metadata': True,
             }
+            if required_tags:
+                for i, tag in enumerate(required_tags):
+                    params[f'requiredtags[{i}]'] = tag
             
             response = await self.client.post(
                 f"{self.API_BASE}/IPublishedFileService/QueryFiles/v1/",
@@ -188,7 +192,7 @@ class SteamService:
             direct_url=f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod_data.get('publishedfileid', '')}"
         )
     
-    async def get_popular_mods(self, appid: str, limit: int = 20) -> List[SteamModInfo]:
+    async def get_popular_mods(self, appid: str, limit: int = 20, required_tags: list[str] | None = None) -> List[SteamModInfo]:
         """Get popular mods for an app."""
         if not self.api_key:
             return []
@@ -208,6 +212,9 @@ class SteamService:
                 'return_tags': True,
                 'return_previews': True,
             }
+            if required_tags:
+                for i, tag in enumerate(required_tags):
+                    params[f'requiredtags[{i}]'] = tag
             
             response = await self.client.post(
                 f"{self.API_BASE}/IPublishedFileService/QueryFiles/v1/",

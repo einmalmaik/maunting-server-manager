@@ -62,7 +62,6 @@ function App() {
         <Route path="servers/:id/files" element={<FileManager />} />
         <Route path="servers/:id/mods" element={<ModManager />} />
         <Route path="servers/:id/backups" element={<Backups />} />
-        <Route path="backups" element={<Backups />} />
         <Route path="users" element={<Users />} />
         <Route path="settings" element={<Settings />} />
         <Route path="profile" element={<Profile />} />

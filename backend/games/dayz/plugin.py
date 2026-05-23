@@ -106,6 +106,14 @@ class DayZPlugin(GamePlugin):
         subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True)
         subprocess.run(["sudo", "systemctl", "enable", unit_name], check=False, capture_output=True)
         subprocess.run(["sudo", "systemctl", "start", unit_name], check=False, capture_output=True)
+
+        # Auto-Backup nach Start auslösen (fire-and-forget)
+        try:
+            import requests
+            requests.post(f"http://localhost:8000/api/backups/{server.id}/auto", timeout=5)
+        except Exception:
+            pass
+
         return {"message": "Server gestartet", "unit": unit_name}
 
     def stop(self, server) -> dict:
@@ -171,6 +179,14 @@ class DayZPlugin(GamePlugin):
             ConfigField("logPlayers", "Spieler loggen", "bool", default=False),
             ConfigField("logFile", "Log-Datei", "text", default="server.log"),
         ]
+
+    def get_mod_support(self) -> dict | None:
+        """DayZ: Keine Tag-Filter nötig, nur ein Workshop."""
+        return {
+            "workshop_id": self.WORKSHOP_ID,
+            "dependency_resolution": False,
+            "required_tags": [],
+        }
 
     def get_config_files(self) -> list[dict]:
         return [

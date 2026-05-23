@@ -1,9 +1,9 @@
 import os
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -12,6 +12,70 @@ from schemas import BackupResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 
 router = APIRouter(prefix="/api/backups", tags=["backups"])
+
+
+def _cleanup_old_backups(server_id: int, keep: int, db: Session) -> None:
+    """Entfernt alte Backups über dem Retention-Limit."""
+    old = db.query(Backup).filter(Backup.server_id == server_id)\
+        .order_by(Backup.created_at.desc()).offset(keep).all()
+    for b in old:
+        if os.path.exists(b.filename):
+            try:
+                os.remove(b.filename)
+            except OSError:
+                pass
+        db.delete(b)
+    db.commit()
+
+
+def _run_backup(server_id: int, db: Session) -> Backup | None:
+    """Führt ein Backup aus und cleaned up alte Backups."""
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server or not os.path.isdir(server.install_dir):
+        return None
+
+    backup_dir = f"/opt/msm/backups/{server_id}"
+    os.makedirs(backup_dir, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"{server.name}_{timestamp}.tar.gz"
+    filepath = os.path.join(backup_dir, filename)
+
+    try:
+        subprocess.run(
+            ["tar", "-czf", filepath, "-C", server.install_dir, "."],
+            check=True, capture_output=True, timeout=600,
+            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+        )
+        size_mb = os.path.getsize(filepath) // (1024 * 1024)
+    except Exception:
+        return None
+
+    backup = Backup(server_id=server_id, filename=filepath, size_mb=size_mb)
+    db.add(backup)
+    db.commit()
+    db.refresh(backup)
+
+    # Retention: alte Backups löschen
+    _cleanup_old_backups(server_id, server.backup_retention_count, db)
+    return backup
+
+
+def run_scheduled_backups(db: Session) -> None:
+    """Führt fällige geplante Backups aus (wird vom Scheduler aufgerufen)."""
+    servers = db.query(Server).filter(
+        Server.backup_interval_hours.isnot(None),
+        Server.backup_interval_hours > 0
+    ).all()
+
+    for server in servers:
+        # Prüfe ob letztes Backup älter als das Intervall ist
+        last = db.query(Backup).filter(Backup.server_id == server.id)\
+            .order_by(Backup.created_at.desc()).first()
+        if last and server.backup_interval_hours:
+            next_due = last.created_at + timedelta(hours=server.backup_interval_hours)
+            if datetime.now(timezone.utc) < next_due:
+                continue
+        _run_backup(server.id, db)
 
 
 
@@ -32,27 +96,22 @@ def create_backup(server_id: int, db: Session = Depends(get_db), user: User = De
     if not os.path.isdir(server.install_dir):
         raise HTTPException(status_code=400, detail="Server-Verzeichnis existiert nicht. Ist der Server installiert?")
 
-    backup_dir = f"/opt/msm/backups/{server_id}"
-    os.makedirs(backup_dir, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"{server.name}_{timestamp}.tar.gz"
-    filepath = os.path.join(backup_dir, filename)
+    backup = _run_backup(server_id, db)
+    if not backup:
+        raise HTTPException(status_code=500, detail="Backup fehlgeschlagen")
+    return {"message": "Backup erstellt", "backup_id": backup.id, "size_mb": backup.size_mb}
 
-    try:
-        subprocess.run(
-            ["tar", "-czf", filepath, "-C", server.install_dir, "."],
-            check=True, capture_output=True, timeout=300,
-            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
-        )
-        size_mb = os.path.getsize(filepath) // (1024 * 1024)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Backup fehlgeschlagen: {e}")
 
-    backup = Backup(server_id=server_id, filename=filepath, size_mb=size_mb)
-    db.add(backup)
-    db.commit()
-    db.refresh(backup)
-    return {"message": "Backup erstellt", "backup_id": backup.id, "size_mb": size_mb}
+@router.post("/{server_id}/auto")
+def auto_backup(server_id: int, db: Session = Depends(get_db)) -> dict:
+    """Interner Endpoint: Auto-Backup bei Server-Start (kein Auth-Check)."""
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server or not server.backup_on_start:
+        return {"message": "Auto-Backup deaktiviert"}
+    backup = _run_backup(server_id, db)
+    if backup:
+        return {"message": "Auto-Backup erstellt", "backup_id": backup.id}
+    return {"message": "Auto-Backup fehlgeschlagen"}
 
 
 @router.post("/{server_id}/restore/{backup_id}")
