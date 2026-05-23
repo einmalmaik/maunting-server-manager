@@ -82,6 +82,8 @@ def owner_user(db: Session) -> User:
 @pytest.fixture
 def regular_user(db: Session) -> User:
     user = AuthService.create_user(db, "user1", "user1@test.de", "UserPass123!")
+    user.email_verified = True
+    db.commit()
     db.refresh(user)
     return user
 

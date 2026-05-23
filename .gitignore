@@ -12,7 +12,6 @@ panel/frontend/node_modules/
 panel/frontend/dist/
 panel/frontend/tsconfig.app.tsbuildinfo
 *.pyc
-AGENTS.md
 CLAUDE.md
 GEMINI.md
 cloud.md
@@ -32,7 +31,6 @@ CLOUD.md
 .claude/settings.local.json
 *.kiro
 /.pytest-panel-add-config-262
-/docs/agent-rules
 /Design idee für mssm
 /frontend/node_modules
 /frontend/dist

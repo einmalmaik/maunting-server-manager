@@ -1,0 +1,361 @@
+# Agenten-Regeln: Architektur
+
+Stand: 2026-05-06  
+Ergänzt die Root-`AGENTS.md`. Diese Datei ist zu lesen, wenn UI-Struktur, Contexts, Hooks, Services, Orchestratoren, Routing, Tauri/Web-Pfade, Modulidentität, Refactoring oder größere Dateischnitte betroffen sind.
+
+---
+
+## 1. Architekturziel
+
+Das Projekt braucht eine Architektur, die auch in mehreren Jahren noch verständlich, prüfbar und sicher erweiterbar ist.
+
+Architektur ist gut, wenn:
+
+- Verantwortlichkeiten klar sind
+- Datenflüsse nachvollziehbar sind
+- Security-Entscheidungen zentral und testbar sind
+- UI und Fachlogik getrennt bleiben
+- Laufzeitunterschiede zwischen Web und Tauri explizit sind
+- Dateien klein genug bleiben, um Fehler zu sehen
+- Abstraktion ein reales Problem löst
+- Tests echte Invarianten prüfen
+
+Architektur ist schlecht, wenn:
+
+- ein Quickfix eine Sicherheitsregel versteckt
+- UI-Code Fachlogik übernimmt
+- Contexts zu Monolithen werden
+- globale Zustände ohne zwingenden Grund entstehen
+- Web/Tauri-Unterschiede wegabstrahiert werden, obwohl sie sicherheitsrelevant sind
+- neue Framework-Schichten nur gebaut werden, weil sie sauber wirken
+- Importpfade doppelte Modulidentität erzeugen
+
+---
+
+## 2. Schichten
+
+Erlaubte Verantwortlichkeiten:
+
+### UI-Komponenten
+
+- Anzeige
+- Nutzerinteraktion
+- einfache UI-Zustände
+- Texte und Layout
+- Aufruf öffentlicher Hooks/Fassaden
+
+UI-Komponenten dürfen keine Vault-, Device-Key-, Recovery-, Integrity- oder Crypto-Policy definieren.
+
+### Hooks
+
+- UI-nahe Orchestrierung
+- Lifecycle
+- stabile Callback-Bindings
+- Mapping von UI-Ereignissen auf Services oder Orchestratoren
+
+Hooks dürfen Fachlogik koordinieren, aber nicht selbst zum Policy-Monolithen werden.
+
+### Contexts
+
+- öffentliche Fassade
+- State-Gateway
+- Provider
+- Hook-Exports
+- stabile öffentliche API
+
+Contexts dürfen keine wachsenden Fachlogik-Monolithen werden.
+
+### Services
+
+- fachliche Operationen
+- Storage-Zugriff
+- Crypto-Aufrufe über Adapter/Fassaden
+- Validierung
+- Policy-Entscheidungen
+- typsichere Fehler
+
+Services müssen testbar sein und dürfen keine UI-Annahmen enthalten.
+
+### Orchestratoren
+
+- mehrstufige Flows
+- Setup
+- Unlock
+- Recovery
+- Device-Key-Aktivierung
+- Passkey-Flows
+- Quarantäne- und Integrity-Abläufe
+- Cleanup
+
+Orchestratoren machen die Reihenfolge sichtbar. Sie verstecken Security-Schritte nicht in generischen Pipelines.
+
+### Tests
+
+- Invarianten
+- Regressionen
+- negative Pfade
+- Runtime-kritische Pfade
+- Web/Tauri-Unterschiede
+- Modulidentitätsprobleme
+
+---
+
+## 3. VaultContext-Regel
+
+`src/contexts/VaultContext.tsx` bleibt Gateway/Fassade.
+
+Erlaubt:
+
+- Context erstellen
+- Provider exportieren
+- Hook exportieren
+- öffentliche API stabil halten
+- Komposition vorhandener Provider-/Action-Hooks
+
+Verboten:
+
+- neue Unlock-Fachlogik
+- neue Device-Key-Fachlogik
+- neue Passkey-Fachlogik
+- neue Recovery-Fachlogik
+- neue Integrity- oder Quarantäne-Fachlogik
+- neue Cleanup-Fachlogik
+- komplexe Storage- oder Crypto-Aufrufe
+- wachsende lokale Hilfsfunktionen mit Security-Policy
+
+Grenzen:
+
+- `src/contexts/VaultContext.tsx` bleibt unter 150 Zeilen.
+- `src/contexts/vault/useVaultProviderActions.tsx` bleibt unter 700 Zeilen.
+- Wenn diese Grenzen nicht reichen, ist der Schnitt falsch.
+- Neue Fachlogik gehört in Services, Orchestratoren oder fokussierte Hooks unter `src/contexts/vault/`.
+
+---
+
+## 4. Scope-Regeln
+
+Wähle den kleinsten sinnvollen Scope.
+
+Lokaler Scope ist richtig, wenn:
+
+- die Logik nur in einer Komponente gebraucht wird
+- keine Security-Policy betroffen ist
+- keine Wiederverwendung absehbar ist
+- kein zentraler Vertrag nötig ist
+
+Globaler oder zentraler Scope ist richtig, wenn:
+
+- eine Security-Policy betroffen ist
+- Web und Tauri dieselbe Regel brauchen
+- mehrere Flows dieselbe Entscheidung treffen müssen
+- ein Test die Invariante zentral absichern soll
+- eine öffentliche API stabil bleiben muss
+
+Schlecht: lokale Security-Policy in UI-Code.
+
+```ts
+function UnlockPanel() {
+  const canUnlock = state.hasMasterPassword;
+  return <button disabled={!canUnlock}>Entsperren</button>;
+}
+```
+
+Gut: zentrale Policy.
+
+```ts
+const canUnlock = canUseMasterPasswordUnlock(unlockPolicy);
+return <button disabled={!canUnlock}>Entsperren</button>;
+```
+
+---
+
+## 5. Abstraktionsregeln
+
+Abstraktion ist nur erlaubt, wenn sie ein reales Projektproblem löst.
+
+Gute Abstraktion:
+
+- reduziert echte Duplikation
+- macht Security-Regeln zentral testbar
+- kapselt eine riskante Bibliothek
+- schützt Fachlogik vor Plattformdetails
+- hält öffentliche APIs klein
+- macht Datenflüsse klarer
+
+Schlechte Abstraktion:
+
+- erzeugt Manager-, Pipeline- oder Framework-Klassen ohne Bedarf
+- versteckt die fachliche Reihenfolge
+- macht Debugging schwerer
+- erhöht Importfläche
+- verschleiert Security-Entscheidungen
+- generalisiert für hypothetische zukünftige Anforderungen
+
+Schlecht:
+
+```ts
+class VaultFlowPipeline<T> {
+  constructor(private steps: Array<(input: T) => Promise<T>>) {}
+
+  async run(input: T): Promise<T> {
+    let current = input;
+    for (const step of this.steps) {
+      current = await step(current);
+    }
+    return current;
+  }
+}
+```
+
+Warum schlecht, wenn der Flow wenige stabile Schritte hat: Die Reihenfolge ist nicht fachlich sichtbar und Security-Schritte verschwinden in einer generischen Mechanik.
+
+Gut:
+
+```ts
+export async function unlockVault(input: UnlockInput): Promise<UnlockResult> {
+  const policy = await unlockPolicyService.load(input.accountId);
+  assertUnlockAllowed(policy, input);
+
+  const key = await vaultKeyService.deriveForUnlock(input, policy);
+  return vaultOpenService.openWithKey({ accountId: input.accountId, key });
+}
+```
+
+Warum gut: Reihenfolge, Security-Prüfung und Schlüsselverwendung sind sichtbar und testbar.
+
+---
+
+## 6. Refactoring-Regeln
+
+Erlaubt:
+
+- Verantwortlichkeiten trennen
+- monolithische Dateien entlang echter Fachgrenzen schneiden
+- doppelte Security-Policies zentralisieren
+- Typen stärken
+- Tests ergänzen
+- Side Effects sichtbar machen
+- Dependencies kapseln
+- Runtime-Unterschiede explizit machen
+
+Verboten:
+
+- große Umbenennungen ohne Nutzen
+- generische Framework-Schichten ohne aktuellen Bedarf
+- Security-Code "vereinfachen", indem Prüfungen entfernt werden
+- mehrere Flows gleichzeitig umbauen, obwohl nur einer betroffen ist
+- Tests löschen oder abschwächen
+- Public APIs ohne Migrationsplan brechen
+- Web/Tauri-Spezifika in gemeinsame Logik mischen
+- temporäre Fallbacks in Security-Pfaden hinterlassen
+
+---
+
+## 7. Monolithen vermeiden
+
+Schlecht:
+
+```ts
+class VaultManager {
+  setup() {}
+  unlock() {}
+  recover() {}
+  sync() {}
+  quarantine() {}
+  cleanup() {}
+  renderToast() {}
+}
+```
+
+Warum schlecht: vermischt UI und Fachlogik, wird zum Monolithen, ist schwer testbar und versteckt Security-Grenzen.
+
+Gut:
+
+```ts
+setupOrchestrator.startSetup();
+unlockOrchestrator.unlock();
+recoveryOrchestrator.recover();
+quarantineService.applyIntegrityResult();
+vaultCleanupService.clearRuntimeSecrets();
+```
+
+Warum gut: klare Zuständigkeiten, gezielte Tests, verständliche Datenflüsse.
+
+---
+
+## 8. Tauri/Web
+
+Web und Tauri sind nicht dieselbe Sicherheitsumgebung.
+
+Regeln:
+
+- Plattformunterschiede gehören in explizite Adapter oder Services.
+- Gemeinsame Fachlogik darf keine Tauri-only APIs direkt importieren.
+- Tauri-spezifische Pfade dürfen keine Web-Fallbacks erzeugen, die Security schwächen.
+- Web-spezifische Storage- oder Origin-Annahmen dürfen nicht in Tauri übernommen werden.
+- Passkey/WebAuthn immer pro RP-ID/Origin bewerten.
+- Runtime-Tests müssen die betroffene Oberfläche wirklich öffnen.
+- Plattformadapter müssen klein und gezielt testbar bleiben.
+
+Schlecht:
+
+```ts
+const storage = window.localStorage;
+```
+
+Warum schlecht, wenn der Code in gemeinsamer Fachlogik liegt: Web-Annahme sickert in Tauri- oder Service-Code.
+
+Gut:
+
+```ts
+const storage = secureStorageAdapter.forRuntime(runtime);
+```
+
+Warum gut: Laufzeitunterschiede sind explizit und können je Plattform abgesichert werden.
+
+---
+
+## 9. Import- und Modulidentität
+
+Regeln:
+
+- Keine doppelten Importpfade für dieselbe Core-Datei.
+- Keine Mischung aus `/@fs/` und `/src/` für Core-Module.
+- Keine relativen Tiefimporte, wenn ein stabiler Public Entry existiert.
+- Keine neuen Barrels, wenn sie Modulidentität, Tree-Shaking oder Laufzeitpfade unklar machen.
+- Premium/Core-Importe müssen so bleiben, dass Contexts und Hooks nur eine Modulinstanz sehen.
+
+Runtime-Probleme, auf die geprüft werden muss:
+
+- `must be used within a ...Provider`
+- `Invalid hook call`
+- doppelte Context-Instanzen
+- unterschiedliche Modulpfade für dieselbe Datei
+- doppelte `/@fs/` vs `/src/` Pfade
+
+---
+
+## 10. Deutsche UI-Texte
+
+Regeln:
+
+- Deutsche UI-Texte immer mit korrekten Umlauten und ß schreiben.
+- Keine ASCII-Umschreibungen wie `ae`, `oe`, `ue`, `ss`, wenn der Text für Nutzer sichtbar ist.
+- Neue deutsche Texte im Browser oder in Tauri kurz gegenprüfen.
+- Nutzertexte dürfen keine internen Security-Details, Secrets oder kryptografischen Rohwerte zeigen.
+- Security-relevante Fehlermeldungen müssen Handlungsoptionen geben, aber keine Angriffsoberfläche erklären.
+
+---
+
+## 11. Architektur-Review-Checkliste
+
+- [ ] Verantwortung der geänderten Dateien klar?
+- [ ] Datenfluss nachvollziehbar?
+- [ ] Security-Policy zentral statt lokal versteckt?
+- [ ] `VaultContext.tsx` nicht aufgebläht?
+- [ ] Services/Orchestratoren passend geschnitten?
+- [ ] Web/Tauri-Unterschiede explizit?
+- [ ] Keine unnötige Abstraktion?
+- [ ] Kein neuer Manager-/Pipeline-Monolith?
+- [ ] Keine doppelten Core-Importpfade?
+- [ ] Runtime-Pfade wirklich geöffnet, wenn betroffen?
