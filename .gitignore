@@ -35,3 +35,4 @@ CLOUD.md
 /frontend/node_modules
 /frontend/dist
 *.tar
+/backend/venv-wsl
