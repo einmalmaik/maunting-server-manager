@@ -175,6 +175,11 @@ def default_volume_binds(server) -> list[VolumeBind]:
 STEAMCMD_IMAGE = "cm2network/steamcmd:root"
 # Pfad des steamcmd-Wrappers im Image. Wird in den bash-Aufruf eingesetzt.
 STEAMCMD_BIN = "/home/steam/steamcmd/steamcmd.sh"
+# Caps, die wir nach `--cap-drop=ALL` für den SteamCMD-Lauf wieder brauchen:
+# - DAC_OVERRIDE: /home/steam (mode 700, steam-User-only) traversieren
+# - DAC_READ_SEARCH: idem, für Read-Operationen ohne Owner-Match
+# - CHOWN + FOWNER: am Ende `chown -R uid:gid /data`
+STEAMCMD_CAPS = ["DAC_OVERRIDE", "DAC_READ_SEARCH", "CHOWN", "FOWNER"]
 
 
 def _build_steamcmd_bash_command(steam_args: list[str], chown_uid: int, chown_gid: int) -> list[str]:
@@ -229,10 +234,14 @@ def run_steamcmd_install(
         image=STEAMCMD_IMAGE,
         command=_build_steamcmd_bash_command(steam_args, uid, gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
-        # KEIN --user-Override: SteamCMD muss im Container als root laufen, weil
-        # /home/steam im :root-Image Mode 750 hat. Files werden im bash-Wrapper
-        # nach dem Run auf {uid}:{gid} ge-chown't.
-        user=None,
+        # Explizit Container-Root: das `:root`-Image hat /home/steam Mode 700
+        # für den steam-User. Files werden im bash-Wrapper nach dem Run auf
+        # {uid}:{gid} ge-chown't, damit der Panel-User sie danach lesen kann.
+        user="0:0",
+        # Nach --cap-drop=ALL die minimal nötigen Caps wiederherstellen, damit
+        # Container-Root nicht von Linux-DAC eingeschränkt wird (sonst greift
+        # Mode-700 auch für root, weil CAP_DAC_OVERRIDE fehlt).
+        cap_adds=STEAMCMD_CAPS,
         entrypoint="bash",
         # SteamCMD legt Cache/Auth in $HOME ab. Auf /data umleiten, damit der
         # Cache zwischen Runs persistent im Bind-Mount landet (kein Vollredownload).
@@ -278,7 +287,8 @@ def run_steamcmd_workshop_download(
         image=STEAMCMD_IMAGE,
         command=_build_steamcmd_bash_command(steam_args, uid, gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
-        user=None,
+        user="0:0",
+        cap_adds=STEAMCMD_CAPS,
         entrypoint="bash",
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
