@@ -126,6 +126,8 @@ class SteamService:
             
         except Exception as e:
             print(f"Steam API search error: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     async def get_mod_details(self, appid: str, publishedfileid: str) -> Optional[SteamModInfo]:
@@ -168,6 +170,8 @@ class SteamService:
             
         except Exception as e:
             print(f"Steam API details error: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _parse_mod_data(self, mod_data: Dict[str, Any]) -> SteamModInfo:
@@ -268,6 +272,8 @@ class SteamService:
             
         except Exception as e:
             print(f"Steam API popular mods error: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
 
