@@ -184,35 +184,73 @@ class TestEphemeralRun:
 
 
 class TestSteamCMDHelpers:
-    """Stellt sicher, dass run_steamcmd_install/workshop_download den Entrypoint
-    explizit setzen — sonst krachen die Calls beim Bug, den der User gesehen hat
-    (`exec: \"+force_install_dir\": executable file not found`)."""
+    """SteamCMD muss im :root-Image als root laufen (sonst `permission denied`
+    auf /home/steam/steamcmd/steamcmd.sh, Mode 750), und wir m\u00fcssen /data
+    nach dem Lauf auf die Host-UID zur\u00fcck-chown'en, damit der Panel-User
+    weiterarbeiten kann."""
 
-    def test_steamcmd_install_uses_entrypoint_and_home(self, tmp_path):
-        from games.base import STEAMCMD_ENTRYPOINT, STEAMCMD_WORKDIR, run_steamcmd_install
+    def test_steamcmd_install_runs_as_root_and_chowns(self, tmp_path):
+        from games.base import STEAMCMD_BIN, run_steamcmd_install
 
-        with patch("games.base.docker_service.run_ephemeral") as mock_eph:
+        with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
             mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
             run_steamcmd_install(server_id=1, install_dir=str(tmp_path), app_id="223350")
 
         kwargs = mock_eph.call_args.kwargs
-        assert kwargs["entrypoint"] == STEAMCMD_ENTRYPOINT
-        assert kwargs["workdir"] == STEAMCMD_WORKDIR
+        # bash -c "<script>"
+        assert kwargs["entrypoint"] == "bash"
+        assert kwargs["command"][0] == "-c"
+        script = kwargs["command"][1]
+        assert STEAMCMD_BIN in script
+        assert "+app_update" in script and "223350" in script
+        # chown auf Host-UID nach SteamCMD
+        assert "chown -R 1001:1001 /data" in script
+        # rc bleibt erhalten
+        assert "exit $rc" in script
+        # KEIN --user-Override (l\u00e4uft als root im Container)
+        assert kwargs.get("user") is None
+        # HOME wandert ins Volume f\u00fcr persistenten Cache
         assert kwargs["env"].get("HOME") == "/data"
-        # Command beginnt mit den Steam-Args, nicht mit dem Entrypoint
-        assert kwargs["command"][0] == "+force_install_dir"
 
-    def test_workshop_download_uses_entrypoint_and_home(self, tmp_path):
-        from games.base import STEAMCMD_ENTRYPOINT, STEAMCMD_WORKDIR, run_steamcmd_workshop_download
+    def test_workshop_download_runs_as_root_and_chowns(self, tmp_path):
+        from games.base import run_steamcmd_workshop_download
 
-        with patch("games.base.docker_service.run_ephemeral") as mock_eph:
+        with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
             mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
             run_steamcmd_workshop_download(
                 server_id=1, install_dir=str(tmp_path), workshop_app_id="221100", workshop_item_id="12345"
             )
 
         kwargs = mock_eph.call_args.kwargs
-        assert kwargs["entrypoint"] == STEAMCMD_ENTRYPOINT
-        assert kwargs["workdir"] == STEAMCMD_WORKDIR
+        assert kwargs["entrypoint"] == "bash"
+        script = kwargs["command"][1]
+        assert "+workshop_download_item" in script and "221100" in script and "12345" in script
+        assert "chown -R 1001:1001 /data" in script
+        assert kwargs.get("user") is None
         assert kwargs["env"].get("HOME") == "/data"
-        assert "+workshop_download_item" in kwargs["command"]
+
+    def test_bash_script_is_safely_quoted(self, tmp_path):
+        """Wenn jemand extra_args mit Shell-Metazeichen reinreicht (z. B. ' oder ;),
+        darf das Script nicht aus dem SteamCMD-Kontext ausbrechen."""
+        from games.base import run_steamcmd_install
+
+        with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
+            mock_eph.return_value = {"ok": True, "stdout": "", "stderr": ""}
+            run_steamcmd_install(
+                server_id=1,
+                install_dir=str(tmp_path),
+                app_id="223350",
+                extra_args=["+app_set_config", "value with spaces; rm -rf /"],
+            )
+
+        script = mock_eph.call_args.kwargs["command"][1]
+        # Der Injection-Versuch muss als gequotetes Argument enden, NICHT als
+        # eigenst\u00e4ndiges Shell-Kommando vor dem chown.
+        assert "rm -rf /" in script  # als Argument-String enthalten
+        # Aber NICHT als eigener Shell-Befehl ausf\u00fchrbar — chown kommt nach
+        # dem +quit-Argument und vor exit $rc, also der gefakte 'rm -rf /'
+        # ist in shlex.quote eingeschlossen.
+        assert script.count("chown -R 1001:1001 /data") == 1

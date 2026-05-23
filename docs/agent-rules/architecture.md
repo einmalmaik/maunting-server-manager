@@ -397,6 +397,13 @@ Hartes Disk-Quota (XFS-Projekt-Quota oder Overlay-Quota) ist explizit Phase-2-Ma
 
 Es gibt kein Host-`steamcmd` mehr. Installs und Workshop-Downloads laufen in ephemeren Containern (`cm2network/steamcmd:root`), die in `games/base.run_steamcmd_install()` und `run_steamcmd_workshop_download()` gekapselt sind. Das nutzt das gleiche Bind-Mount-Layout (`<install_dir>` → `/data`).
 
+**Ausführungsmodell:**
+- Container läuft als **root im Container** (nicht via `--user`-Override), weil das `:root`-Image `/home/steam` mit Mode 750 hat und SteamCMD sonst nicht mal seinen eigenen Wrapper ausführen kann.
+- Entrypoint ist `bash`, der eigentliche SteamCMD-Aufruf läuft als `bash -c '<steamcmd> <args>; rc=$?; chown -R <uid>:<gid> /data; exit $rc'`. Damit landen Dateien am Ende auf der msm-Host-UID, nicht auf 0:0.
+- `HOME=/data` lenkt SteamCMDs Auth-/Cache-Verzeichnis (`~/Steam/`) in den Bind-Mount um. Persistent zwischen Runs, kein Schreibversuch auf `/home/steam` (root-owned).
+- Hardening bleibt aktiv (`--cap-drop=ALL`, `--security-opt=no-new-privileges`, `--rm`). Container-Root hat damit kein Kernel-CAP außer dem Default-Set, kann nicht eskalieren, und das einzige Schreibziel ist der Bind-Mount.
+- Alle SteamCMD-Argumente werden mit `shlex.quote()` escaped, bevor sie in den `bash -c`-String eingesetzt werden — Shell-Injection über `extra_args` ist nicht möglich.
+
 Intelligentes Mod-Update bleibt erhalten: SteamCMD selbst entscheidet, ob ein `workshop_download_item` einen Refresh braucht — wir starten den Container einfach jedes Mal, und SteamCMD validiert die lokalen Dateien gegen das Manifest. Kein Voll-Redownload, wenn nichts geändert hat.
 
 ### 12.5 TODO: Rootless Docker
