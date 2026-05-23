@@ -1171,8 +1171,8 @@ msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
 msm ALL=(root) NOPASSWD: /usr/sbin/useradd -r -m -s /usr/sbin/nologin -d * msm_srv_*
 msm ALL=(root) NOPASSWD: /usr/sbin/usermod -s /usr/sbin/nologin msm_srv_*
 msm ALL=(root) NOPASSWD: /usr/sbin/userdel -r msm_srv_*
-msm ALL=(root) NOPASSWD: /usr/bin/chown msm_srv_*:msm_srv_* *
-msm ALL=(root) NOPASSWD: /usr/bin/chmod 750 *
+msm ALL=(root) NOPASSWD: /usr/bin/chown msm_srv_*:msm_srv_* /opt/msm/servers/*
+msm ALL=(root) NOPASSWD: /usr/bin/chmod 750 /opt/msm/servers/*
 SUDOEOF
         chmod 440 /etc/sudoers.d/msm-panel
         ok "sudoers für msm-User konfiguriert"
