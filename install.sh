@@ -1125,7 +1125,8 @@ StandardOutput=journal
 StandardError=journal
 
 # Security Hardening
-NoNewPrivileges=true
+# NoNewPrivileges darf hier NICHT gesetzt werden — das Panel
+# benoetigt sudo fuer systemd-Unit-Verwaltung der Game-Server.
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
