@@ -60,6 +60,17 @@ async def lifespan(app: FastAPI):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_notifications BOOLEAN DEFAULT true"))
 
+    # Migration: Backup-Scheduling-Spalten
+    if 'servers' in inspector.get_table_names():
+        cols = [c['name'] for c in inspector.get_columns('servers')]
+        with engine.begin() as conn:
+            if 'backup_on_start' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN backup_on_start BOOLEAN DEFAULT false"))
+            if 'backup_interval_hours' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN backup_interval_hours INTEGER"))
+            if 'backup_retention_count' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN backup_retention_count INTEGER DEFAULT 5"))
+
     # Initialize scheduler and load existing schedules
     start_scheduler()
     from database import SessionLocal
