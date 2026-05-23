@@ -270,11 +270,16 @@ def run_ephemeral(
     env: dict[str, str] | None = None,
     user: str | None = None,
     workdir: str | None = None,
+    entrypoint: str | None = None,
     timeout: int = 1800,
 ) -> dict:
     """Führt ein einmaliges `docker run --rm`-Kommando aus (für SteamCMD-Installs etc.).
 
     Blockiert bis der Container beendet ist (oder Timeout).
+
+    `entrypoint` setzt `--entrypoint <path>`, wenn das Image keinen passenden
+    Default-Entrypoint hat (z. B. `cm2network/steamcmd:root` startet bash und
+    erwartet ein Skript-Argument).
     """
     args: list[str] = ["run", "--rm"]
     args.extend(_HARDENING_FLAGS)
@@ -283,6 +288,10 @@ def run_ephemeral(
         args.extend(["--user", user])
     if workdir:
         args.extend(["--workdir", workdir])
+    if entrypoint:
+        # --entrypoint MUSS vor dem Image stehen, sonst macht Docker daraus
+        # einen CMD-Override.
+        args.extend(["--entrypoint", entrypoint])
     if env:
         for key, value in env.items():
             args.extend(["-e", f"{key}={value}"])

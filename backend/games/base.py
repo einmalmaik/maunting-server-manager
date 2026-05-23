@@ -172,6 +172,10 @@ def default_volume_binds(server) -> list[VolumeBind]:
 # Kuratiertes, gepflegtes SteamCMD-Image. Eine Pin auf einen festen Tag erfolgt
 # in einer Folge-Phase (Phase 5 wird Image+Tag pro Plugin-Egg konfigurierbar).
 STEAMCMD_IMAGE = "cm2network/steamcmd:root"
+# Pfad des steamcmd-Wrappers im Image. Explizit setzen, damit unsere Pipeline
+# nicht vom Image-Default-Entrypoint abhängt (manche Tags haben keinen).
+STEAMCMD_ENTRYPOINT = "/home/steam/steamcmd/steamcmd.sh"
+STEAMCMD_WORKDIR = "/home/steam/steamcmd"
 
 
 def run_steamcmd_install(
@@ -205,6 +209,12 @@ def run_steamcmd_install(
         command=cmd,
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         user=f"{uid}:{gid}",
+        entrypoint=STEAMCMD_ENTRYPOINT,
+        workdir=STEAMCMD_WORKDIR,
+        # SteamCMD legt Cache/Auth in $HOME ab. Auf /data umleiten, damit der
+        # Cache zwischen Runs erhalten bleibt und keine Permission-Probleme
+        # mit /home/steam (root-owned) entstehen.
+        env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
     )
 
@@ -247,6 +257,9 @@ def run_steamcmd_workshop_download(
         command=cmd,
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         user=f"{uid}:{gid}",
+        entrypoint=STEAMCMD_ENTRYPOINT,
+        workdir=STEAMCMD_WORKDIR,
+        env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
     )
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
