@@ -272,8 +272,4 @@ class ConanExilesUE5Plugin(GamePlugin):
         except OSError as e:
             _append_console_log(server.id, f"[MSM] Fehler beim Schreiben der modlist.txt: {e}\n")
 
-    def get_mod_support(self) -> dict | None:
-        return {
-            "workshop_id": self.WORKSHOP_ID,
-            "dependency_resolution": True,
-        }
+

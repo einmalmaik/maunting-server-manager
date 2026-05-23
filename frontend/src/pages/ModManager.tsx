@@ -52,7 +52,6 @@ export function ModManager() {
   const [browserTab, setBrowserTab] = useState<BrowserTab>('trending')
   const [browserMods, setBrowserMods] = useState<SteamMod[]>([])
   const [browserLoading, setBrowserLoading] = useState(false)
-  const [tagFilter, setTagFilter] = useState('')
   const loadedTabs = useRef<Set<BrowserTab>>(new Set())
 
   // Drag & drop state
@@ -106,8 +105,7 @@ export function ModManager() {
     setSteamLoading(true)
     try {
       const q = encodeURIComponent(steamQuery)
-      const tag = tagFilter.trim() ? `&tag=${encodeURIComponent(tagFilter.trim())}` : ''
-      const res = await fetch(`/api/steam/workshop/search?server_id=${id}&query=${q}&per_page=20${tag}`)
+      const res = await fetch(`/api/steam/workshop/search?server_id=${id}&query=${q}&per_page=20`)
       if (!res.ok) throw new Error()
       setSteamResults(await res.json())
     } catch {
@@ -544,17 +542,6 @@ export function ModManager() {
               >
                 {steamLoading ? t('common.loading') : t('common.search')}
               </button>
-            </div>
-
-            {/* Tag filter */}
-            <div className="mb-4">
-              <input
-                type="text"
-                placeholder={t('mods.tagFilterPlaceholder', 'Tag-Filter (optional)')}
-                value={tagFilter}
-                onChange={(e) => setTagFilter(e.target.value)}
-                className="msm-input text-sm"
-              />
             </div>
 
             {/* Scrollable content */}

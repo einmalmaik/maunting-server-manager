@@ -203,14 +203,17 @@ export function Backups() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Backup on start */}
-            <label className="flex items-center gap-3 p-3 rounded-md border border-outline hover:bg-surface-container cursor-pointer transition-colors">
-              <input
-                type="checkbox"
-                checked={settings.backup_on_start}
-                onChange={(e) => setSettings({ ...settings, backup_on_start: e.target.checked })}
-                className="rounded border-outline bg-surface-container-highest text-secondary focus:ring-secondary"
-              />
-              <span className="font-body-md text-sm text-on-surface">{t('backups.backupOnStart', 'Backup beim Start')}</span>
+            <label className="flex items-center gap-2 cursor-pointer self-end pb-1">
+              <div className={`relative w-10 h-6 rounded-full transition-colors ${settings.backup_on_start ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
+                <input
+                  type="checkbox"
+                  checked={settings.backup_on_start}
+                  onChange={(e) => setSettings({ ...settings, backup_on_start: e.target.checked })}
+                  className="sr-only"
+                />
+                <span className={`absolute top-1 left-1 w-4 h-4 rounded-full transition-transform ${settings.backup_on_start ? 'translate-x-4 bg-on-secondary' : 'bg-on-surface'}`} />
+              </div>
+              <span className="font-body-md text-sm text-on-surface-variant">{t('backups.backupOnStart', 'Backup beim Start')}</span>
             </label>
 
             {/* Interval */}
