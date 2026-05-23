@@ -1,21 +1,33 @@
+"""Conan Exiles (UE5 Enhanced) — Docker-basiertes Plugin.
+
+Lifecycle läuft komplett über GamePlugin-Defaults (docker_service). Spezifisch
+sind: SteamCMD-Args, Workshop-Pfade, .pak-Kopier-Logik, modlist.txt-Generierung.
+"""
+
+from __future__ import annotations
+
 import glob
 import os
 import shutil
-import subprocess
 import threading
 
-from config import settings
-from games.base import GamePlugin, ServerStatus, ConfigField, build_systemd_unit, _run_install_with_logging, _append_console_log, query_a2s_info
-
-_SYSTEM_ENV = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+from games.base import (
+    CONTAINER_DATA_DIR,
+    ConfigField,
+    GamePlugin,
+    PortPublish,
+    VolumeBind,
+    _append_console_log,
+    run_steamcmd_install,
+    run_steamcmd_workshop_download,
+)
 
 
 class ConanExilesUE5Plugin(GamePlugin):
-    """Conan Exiles Enhanced (UE5) Dedicated Server Plugin — Linux native.
+    """Conan Exiles Enhanced (UE5) Dedicated Server — Linux native, in Docker.
 
     Offizielle Doku: https://exiles-enhanced.inflexion.io/servers/linux/
-    App ID: 443030. Es wird ausschließlich die native Linux-Version genutzt.
-    Wine/UE4-Fallback ist nicht vorgesehen (dazu wäre ein separates Plugin nötig).
+    App ID: 443030 (Server), Workshop App ID: 440900 (Mods).
     """
 
     game_id = "conan_exiles_ue5"
@@ -25,136 +37,61 @@ class ConanExilesUE5Plugin(GamePlugin):
     APP_ID = "443030"
     WORKSHOP_ID = "440900"
 
-    def _resolve_executable(self, server) -> str | None:
-        """Nur native Linux-Binaries — kein Wine-Fallback."""
-        candidates = [
-            os.path.join(server.install_dir, "ConanSandboxServer.sh"),
-            os.path.join(server.install_dir, "ConanSandboxServer"),
-        ]
-        for candidate in candidates:
-            if os.path.exists(candidate):
-                return candidate
-        return None
+    # SteamCMD-Image enthält bereits glibc + Steam-Runtime; Conan-Binaries
+    # laufen im selben Image, weil sie nur die Steam-Runtime brauchen.
+    docker_image = "cm2network/steamcmd:root"
+    container_needs_tmpfs = False  # UE legt mehrere temporäre Verzeichnisse in CWD an
+    container_read_only_rootfs = False
 
-    def _build_exec_start(self, server, exe: str) -> str:
-        """Build the ExecStart line für systemd (nur native Linux).
-        Fügt Port-Parameter hinzu (Game, Query, RCon)."""
-        args = "-log"
-        if server.game_port:
-            args += f" -Port={server.game_port}"
-        if server.query_port:
-            args += f" -QueryPort={server.query_port}"
-        if server.rcon_port:
-            args += f" -RconPort={server.rcon_port}"
-
-        if exe.endswith(".sh"):
-            return f"/bin/bash {exe} {args}"
-        return f"{exe} {args}"
+    # ─ Setup ─────────────────────────────────────────────────────────────
 
     def install(self, server) -> dict:
-        cmd = [
-            settings.steamcmd_path,
-            "+force_install_dir", server.install_dir,
-            "+login", "anonymous",
-            "+app_update", self.APP_ID,
-            "+quit",
-        ]
-        thread = threading.Thread(
-            target=_run_install_with_logging,
-            args=(cmd, server.id, server.install_dir),
-            daemon=True,
-        )
+        def _install():
+            run_steamcmd_install(
+                server_id=server.id,
+                install_dir=server.install_dir,
+                app_id=self.APP_ID,
+            )
+        thread = threading.Thread(target=_install, daemon=True)
         thread.start()
         return {"message": "Installation gestartet"}
 
-    def update(self, server) -> dict:
-        return self.install(server)
+    # ─ Container-Config ──────────────────────────────────────────────────
 
-    def start(self, server) -> dict:
-        exe = self._resolve_executable(server)
-        if not exe:
-            return {"error": "Server-Executable nicht gefunden. Bitte zuerst installieren."}
+    def _container_executable(self, server) -> str:
+        """Pfad zum Conan-Start-Script INNERHALB des Containers."""
+        return f"{CONTAINER_DATA_DIR}/ConanSandboxServer.sh"
 
-        unit_name = f"msm-{server.linux_user}.service"
-        unit_path = f"/etc/systemd/system/{unit_name}"
-        exec_start = self._build_exec_start(server, exe)
+    def build_container_command(self, server) -> list[str]:
+        cmd = ["/bin/bash", self._container_executable(server), "-log"]
+        if server.game_port:
+            cmd.append(f"-Port={server.game_port}")
+        if server.query_port:
+            cmd.append(f"-QueryPort={server.query_port}")
+        if server.rcon_port:
+            cmd.append(f"-RconPort={server.rcon_port}")
+        return cmd
 
-        unit_content = build_systemd_unit(
-            name=server.name,
-            linux_user=server.linux_user,
-            working_dir=server.install_dir,
-            exec_start=exec_start,
-            cpu_limit_percent=server.cpu_limit_percent,
-            ram_limit_mb=server.ram_limit_mb,
-            disk_limit_gb=server.disk_limit_gb,
-        )
-        try:
-            subprocess.run(
-                ["sudo", "-n", "/usr/bin/tee", unit_path],
-                input=unit_content, capture_output=True, text=True, check=True,
-                env=_SYSTEM_ENV
-            )
-        except subprocess.CalledProcessError as e:
-            detail = e.stderr.strip() if e.stderr else str(e)
-            return {"error": f"Konnte systemd-Unit nicht schreiben: {detail}"}
-        except FileNotFoundError as e:
-            return {"error": f"Konnte systemd-Unit nicht schreiben: {e}"}
+    def build_port_publishes(self, server) -> list[PortPublish]:
+        ports: list[PortPublish] = []
+        host_ip = getattr(server, "public_bind_ip", None) or None
+        if server.game_port:
+            ports.append(PortPublish(server.game_port, server.game_port, "udp", host_ip))
+        if server.query_port:
+            ports.append(PortPublish(server.query_port, server.query_port, "udp", host_ip))
+        if server.rcon_port:
+            ports.append(PortPublish(server.rcon_port, server.rcon_port, "tcp", host_ip))
+        return ports
 
-        try:
-            subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True, env=_SYSTEM_ENV)
-            subprocess.run(["sudo", "systemctl", "enable", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
-            subprocess.run(["sudo", "systemctl", "start", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
-        except FileNotFoundError as e:
-            return {"error": f"sudo nicht gefunden: {e}"}
+    def build_volume_binds(self, server) -> list[VolumeBind]:
+        return [VolumeBind(server.install_dir, CONTAINER_DATA_DIR, read_only=False)]
 
-        # Auto-Backup nach Start auslösen (fire-and-forget)
-        try:
-            from database import SessionLocal
-            import requests
-            db2 = SessionLocal()
-            try:
-                requests.post(f"http://localhost:8000/api/backups/{server.id}/auto", timeout=5)
-            finally:
-                db2.close()
-        except Exception:
-            pass
-
-        return {"message": "Server gestartet", "unit": unit_name}
-
-    def stop(self, server) -> dict:
-        unit_name = f"msm-{server.linux_user}.service"
-        subprocess.run(["sudo", "systemctl", "stop", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
-        return {"message": "Server gestoppt", "unit": unit_name}
-
-    def get_status(self, server) -> ServerStatus:
-        unit_name = f"msm-{server.linux_user}.service"
-        try:
-            result = subprocess.run(
-                ["sudo", "systemctl", "is-active", unit_name],
-                capture_output=True, text=True, timeout=5,
-                env=_SYSTEM_ENV
-            )
-            active = result.stdout.strip() == "active"
-        except Exception:
-            active = False
-
-        players_online = None
-        if active and server.query_port:
-            a2s = query_a2s_info("127.0.0.1", server.query_port)
-            if a2s:
-                players_online = a2s["players"]
-
-        return ServerStatus(
-            status="running" if active else "stopped",
-            cpu_percent=None,
-            ram_mb=None,
-            disk_mb=None,
-            uptime_seconds=None,
-            players_online=players_online,
-        )
+    # ─ Logs ──────────────────────────────────────────────────────────────
 
     def get_logs(self, server, lines: int = 100) -> str:
-        log_path = os.path.join(server.install_dir, "ConanSandbox", "Saved", "Logs", "ConanSandbox.log")
+        log_path = os.path.join(
+            server.install_dir, "ConanSandbox", "Saved", "Logs", "ConanSandbox.log"
+        )
         if not os.path.exists(log_path):
             return ""
         try:
@@ -163,6 +100,8 @@ class ConanExilesUE5Plugin(GamePlugin):
             return "".join(all_lines[-lines:])
         except Exception:
             return ""
+
+    # ─ Config-Schema ─────────────────────────────────────────────────────
 
     def get_config_schema(self) -> list[ConfigField]:
         return [
@@ -196,42 +135,40 @@ class ConanExilesUE5Plugin(GamePlugin):
             os.path.join(server.install_dir, "ConanSandbox", "Saved"),
         ]
 
+    # ─ Mods ──────────────────────────────────────────────────────────────
+
     def install_mod(self, server, workshop_id: str) -> dict:
-        """Conan Exiles mod install: SteamCMD download → copy .pak to Mods/ → update modlist.txt."""
+        """Lädt Mod via SteamCMD-Container, kopiert .pak nach Mods/, aktualisiert modlist.txt."""
         def _install():
             install_dir = server.install_dir
-            workshop_dir = os.path.join(install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, workshop_id)
+            workshop_dir = os.path.join(
+                install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, workshop_id
+            )
             mods_dir = os.path.join(install_dir, "ConanSandbox", "Mods")
 
-            # 1) Download via SteamCMD
-            cmd = [
-                settings.steamcmd_path,
-                "+force_install_dir", install_dir,
-                "+login", "anonymous",
-                "+workshop_download_item", self.WORKSHOP_ID, workshop_id,
-                "+quit",
-            ]
-            _run_install_with_logging(cmd, server.id, install_dir)
+            run_steamcmd_workshop_download(
+                server_id=server.id,
+                install_dir=install_dir,
+                workshop_app_id=self.WORKSHOP_ID,
+                workshop_item_id=workshop_id,
+            )
 
-            # 2) Find .pak files and copy to ConanSandbox/Mods/
             os.makedirs(mods_dir, exist_ok=True)
             pak_files = glob.glob(os.path.join(workshop_dir, "**", "*.pak"), recursive=True)
 
             if not pak_files:
-                _append_console_log(server.id, f"[MSM] Warnung: Keine .pak-Dateien für Mod {workshop_id} gefunden\n")
+                _append_console_log(
+                    server.id, f"[MSM] Warnung: Keine .pak-Dateien für Mod {workshop_id} gefunden\n"
+                )
                 return
 
-            copied_paks = []
             for pak_path in pak_files:
                 pak_name = os.path.basename(pak_path)
                 dest = os.path.join(mods_dir, pak_name)
                 shutil.copy2(pak_path, dest)
-                copied_paks.append(pak_name)
                 _append_console_log(server.id, f"[MSM] Mod-Datei kopiert: {pak_name}\n")
 
-            # 3) Update modlist.txt
             self._update_modlist(server)
-
             _append_console_log(server.id, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
 
         thread = threading.Thread(target=_install, daemon=True)
@@ -239,32 +176,36 @@ class ConanExilesUE5Plugin(GamePlugin):
         return {"message": f"Mod {workshop_id} wird installiert"}
 
     def _update_modlist(self, server) -> None:
-        """Rebuilds modlist.txt from all installed mods in load order."""
+        """Rebuildet modlist.txt aus aktivierten Mods in Lade-Reihenfolge."""
         install_dir = server.install_dir
         mods_dir = os.path.join(install_dir, "ConanSandbox", "Mods")
         modlist_path = os.path.join(mods_dir, "modlist.txt")
         os.makedirs(mods_dir, exist_ok=True)
 
-        # Get ordered mod list from DB
         try:
             from database import SessionLocal
             from models import Mod
             db = SessionLocal()
             try:
-                mods = db.query(Mod).filter(Mod.server_id == server.id, Mod.enabled == True).order_by(Mod.load_order.asc()).all()
+                mods = (
+                    db.query(Mod)
+                    .filter(Mod.server_id == server.id, Mod.enabled == True)  # noqa: E712
+                    .order_by(Mod.load_order.asc())
+                    .all()
+                )
             finally:
                 db.close()
         except Exception:
             return
 
-        # For each enabled mod, find .pak files in its workshop dir
-        lines = []
+        lines: list[str] = []
         for mod in mods:
-            workshop_dir = os.path.join(install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, mod.workshop_id)
+            workshop_dir = os.path.join(
+                install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, mod.workshop_id
+            )
             pak_files = glob.glob(os.path.join(workshop_dir, "**", "*.pak"), recursive=True)
             for pak_path in pak_files:
                 pak_name = os.path.basename(pak_path)
-                # Also check if .pak exists in Mods/ dir
                 if os.path.exists(os.path.join(mods_dir, pak_name)):
                     lines.append(pak_name)
 
@@ -274,5 +215,3 @@ class ConanExilesUE5Plugin(GamePlugin):
                     f.write(f"{line}\n")
         except OSError as e:
             _append_console_log(server.id, f"[MSM] Fehler beim Schreiben der modlist.txt: {e}\n")
-
-

@@ -13,7 +13,11 @@ class Server(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     game_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     install_dir: Mapped[str] = mapped_column(String(512), nullable=False)
-    linux_user: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Docker-Runtime: stabiler Container-Name (msm-srv-<id>) wird zur Laufzeit
+    # vom Plugin via `container_name_for(server.id)` generiert. Hier wird der
+    # konkret zuletzt verwendete Name gecached für Debug-/Audit-Zwecke.
+    container_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Status
     status: Mapped[str] = mapped_column(String(32), default="stopped")  # stopped, running, installing, updating, error
@@ -38,6 +42,14 @@ class Server(Base):
     game_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     query_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rcon_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Optional: bestimmte Host-IP, an die Container-Ports gebunden werden.
+    # None = alle Interfaces (Docker-Default 0.0.0.0). Empfehlung im UI:
+    # NUR setzen, wenn der Host mehrere externe IPs hat.
+    public_bind_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Soft-Disk-Limit-Tracking (in MB, wird vom Scheduler aktualisiert)
+    disk_usage_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

@@ -303,28 +303,37 @@ CADDYEOF
     fi
 fi
 
-# ── steamcmd (direktes Binary, apt-Wrapper ist fehleranfällig) ──
-if ! command -v steamcmd &>/dev/null || ! steamcmd +login anonymous +quit &>/dev/null; then
-    log "Installiere steamcmd (direkte Binary-Installation)..."
-    # i386 Architektur für 32-bit SteamCMD Libs
-    dpkg --add-architecture i386 2>/dev/null || true
-    apt-get update -qq | tee -a "$LOG_FILE"
-    apt-get install -y -qq lib32gcc-s1 lib32stdc++6 curl tar 2>&1 | tee -a "$LOG_FILE"
-
-    mkdir -p /usr/games
-    rm -f /tmp/steamcmd.tar.gz
-    wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz -O /tmp/steamcmd.tar.gz
-    tar -xzf /tmp/steamcmd.tar.gz -C /usr/games/
-    chmod +x /usr/games/steamcmd
-    rm -f /usr/local/bin/steamcmd 2>/dev/null || true
-    ln -s /usr/games/steamcmd /usr/local/bin/steamcmd
-
-    # Verifizierung: smoke-test
-    if ! steamcmd +login anonymous +quit &>/dev/null; then
-        err "steamcmd Installation fehlgeschlagen. Prüfe 32-bit Bibliotheken (lib32gcc-s1, lib32stdc++6)."
-    fi
-    ok "steamcmd installiert und getestet"
+# ── Docker (Game-Server-Runtime — Phase 1) ──
+# Game-Server laufen ausschließlich in Docker-Containern. SteamCMD wird in
+# einem ephemeren Container (cm2network/steamcmd) genutzt, nicht auf dem Host.
+if ! command -v docker &>/dev/null; then
+    log "Installiere Docker (offizieller Installer von docker.com)..."
+    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+    sh /tmp/get-docker.sh 2>&1 | tee -a "$LOG_FILE"
+    rm -f /tmp/get-docker.sh
+    ok "Docker installiert"
+else
+    log "Docker bereits installiert ($(docker --version 2>/dev/null || echo unbekannt))"
 fi
+
+if $SYSTEMD_AVAILABLE; then
+    systemctl enable docker 2>&1 | tee -a "$LOG_FILE" || true
+    systemctl start docker 2>&1 | tee -a "$LOG_FILE" || true
+fi
+
+# msm-User in docker-Gruppe → kann Container ohne sudo verwalten.
+# HINWEIS: docker-Gruppe ≈ lokale Root-Privilegien. Rootless-Docker ist als
+# nächster Sicherheits-TODO eingeplant (siehe docs/agent-rules/architecture.md).
+if ! id -nG "$MSM_USER" 2>/dev/null | grep -qw docker; then
+    log "Füge $MSM_USER der docker-Gruppe hinzu (rootless folgt in späterer Phase)..."
+    usermod -aG docker "$MSM_USER" 2>&1 | tee -a "$LOG_FILE" || true
+fi
+ok "Docker bereit (User '$MSM_USER' in docker-Gruppe)"
+
+# SteamCMD-Image vorziehen (idempotent, blockiert nicht harten Abbruch).
+log "Lade SteamCMD-Container-Image vor (cm2network/steamcmd:root)..."
+docker pull cm2network/steamcmd:root 2>&1 | tee -a "$LOG_FILE" || \
+    warn "Konnte SteamCMD-Image nicht vorziehen — wird beim ersten Server-Install nachgeholt."
 
 ok "System-Abhängigkeiten installiert"
 
@@ -1158,25 +1167,13 @@ EOF
         fi
         ok "Service registriert"
 
-        # ── sudoers: msm-User darf Game-Server systemd-Units verwalten ──
-        cat > /etc/sudoers.d/msm-panel <<'SUDOEOF'
-# MSM Panel — Game-Server systemd-Unit-Verwaltung
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
-msm ALL=(root) NOPASSWD: /usr/sbin/useradd -r -m -s /usr/sbin/nologin -d * msm_srv_*
-msm ALL=(root) NOPASSWD: /usr/sbin/usermod -s /usr/sbin/nologin msm_srv_*
-msm ALL=(root) NOPASSWD: /usr/sbin/userdel -r msm_srv_*
-msm ALL=(root) NOPASSWD: /usr/bin/chown msm_srv_*:msm_srv_* /opt/msm/servers/*
-msm ALL=(root) NOPASSWD: /usr/bin/chmod 750 /opt/msm/servers/*
-SUDOEOF
-        chmod 440 /etc/sudoers.d/msm-panel
-        ok "sudoers für msm-User konfiguriert"
+        # ── Legacy-sudoers entfernen: Game-Server laufen jetzt in Docker, der
+        # msm-User braucht keine root-Privilegien für systemd/useradd mehr. ──
+        if [[ -f /etc/sudoers.d/msm-panel ]]; then
+            log "Entferne legacy /etc/sudoers.d/msm-panel (Game-Server laufen jetzt in Docker)..."
+            rm -f /etc/sudoers.d/msm-panel
+            ok "Legacy-sudoers entfernt"
+        fi
     else
         warn "systemd nicht verfügbar (typisch für WSL). msm-panel.service wird geschrieben, aber nicht aktiviert."
         warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"

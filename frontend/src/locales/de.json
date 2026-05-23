@@ -36,7 +36,15 @@
     "deleted": "Server gelöscht",
     "confirmDelete": "Server wirklich löschen? Alle Daten werden unwiderruflich entfernt.",
     "createDescription": "Erstelle einen neuen Game-Server.",
-    "fileManager": "Datei-Manager"
+    "fileManager": "Datei-Manager",
+    "containerName": "Container-Name",
+    "publicBindIp": "Öffentliche Host-IP",
+    "publicBindIpHint": "Optional. Leer = Docker bindet an alle Interfaces. Nur setzen, wenn der Host mehrere externe IPs hat.",
+    "disk": {
+      "usage": "Disk-Verbrauch",
+      "softLimitWarning": "Disk-Verbrauch erreicht {percent} % des Soft-Limits ({usedMb} MB / {limitMb} MB). Bereinige alte Daten, sonst wird der Server bei 100 % automatisch gestoppt.",
+      "softLimitStopped": "Server wurde wegen Disk-Soft-Limit gestoppt ({usedMb} MB / {limitMb} MB)."
+    }
   },
   "users": {
     "subtitle": "Benutzer und Berechtigungen verwalten",

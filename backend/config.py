@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     # Produktion: /opt/msm/servers  |  Dev: ./servers
     servers_dir: str = "/opt/msm/servers"
 
-    # Steam
+    # Steam — SteamCMD läuft in einem ephemeren Container (cm2network/steamcmd:root),
+    # nicht mehr auf dem Host. steamcmd_path bleibt nur für Backward-Compat-Tests
+    # (sollte nirgendwo im Code mehr verwendet werden).
     steamcmd_path: str = "/usr/games/steamcmd"
     steam_api_key: str = ""
 

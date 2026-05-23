@@ -36,7 +36,15 @@
     "deleted": "Server deleted",
     "confirmDelete": "Really delete this server? All data will be permanently removed.",
     "createDescription": "Create a new game server.",
-    "fileManager": "File Manager"
+    "fileManager": "File Manager",
+    "containerName": "Container name",
+    "publicBindIp": "Public host IP",
+    "publicBindIpHint": "Optional. Empty = Docker binds to all interfaces. Only set this if the host has multiple external IPs.",
+    "disk": {
+      "usage": "Disk usage",
+      "softLimitWarning": "Disk usage hit {percent}% of the soft limit ({usedMb} MB / {limitMb} MB). Clean up old data — at 100% the server will be stopped automatically.",
+      "softLimitStopped": "Server was stopped due to disk soft limit ({usedMb} MB / {limitMb} MB)."
+    }
   },
   "users": {
     "subtitle": "Manage users and permissions",

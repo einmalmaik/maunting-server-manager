@@ -45,8 +45,13 @@ class TestGetServer:
 
 class TestCreateServer:
     def test_owner_can_create(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str):
-        with patch("routers.servers.subprocess.run") as mock_run:
-            mock_run.return_value = type("obj", (object,), {"returncode": 0})()
+        # docker_service.is_available() darf False sein — der Endpunkt lebt
+        # auch ohne lokales Docker (install() schl\u00e4gt nur fehl). Wir mocken
+        # nichts; install_dir landet unter /tmp/msm-test/.
+        with patch("routers.servers.os.makedirs"), \
+             patch("routers.servers.os.chmod"), \
+             patch("routers.servers.open_ports"), \
+             patch("routers.servers.get_plugin", return_value=None):
             response = client.post(
                 "/api/servers",
                 json={"name": "New Server", "game_type": "dayz"},

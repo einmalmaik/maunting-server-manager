@@ -142,7 +142,7 @@ def test_server(db: Session, owner_user: User) -> Server:
         name="Test Server",
         game_type="dayz",
         install_dir="/tmp/test_server",
-        linux_user="test_user",
+        container_name="msm-srv-test",
         status="stopped",
     )
     db.add(server)

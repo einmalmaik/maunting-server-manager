@@ -5,6 +5,7 @@ Manages scheduled tasks using APScheduler.
 Simple, reliable, and extensible.
 """
 
+import logging
 import os
 import subprocess
 from datetime import datetime, timezone
@@ -16,6 +17,16 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from database import SessionLocal
 from games import get_plugin
+from services import docker_service
+
+logger = logging.getLogger(__name__)
+
+# Schwelle, ab der wir eine Warnung schreiben (Server läuft weiter).
+DISK_WARN_THRESHOLD_PERCENT = 80
+# Schwelle, ab der wir den Container hart stoppen (Soft-Limit-Enforcement).
+DISK_STOP_THRESHOLD_PERCENT = 100
+# Wie oft Disk-Usage geprüft wird (Minuten).
+DISK_CHECK_INTERVAL_MINUTES = 15
 
 _scheduler: Optional[AsyncIOScheduler] = None
 
@@ -246,9 +257,80 @@ def cleanup_old_backups(server_id: int, db):
         db.commit()
 
 
+async def _disk_soft_limit_task() -> None:
+    """Globaler periodischer Job: prüft Disk-Usage aller Server gegen ihr
+    Soft-Limit. Bei >= 80 % schreibt eine Warnung in status_message. Bei
+    >= 100 % stoppt der Job den Container und setzt status='error'.
+
+    Dies ist KEIN hartes Quota — nur ein KISS Monitoring + Auto-Stop.
+    """
+    from models import AuditLog, Server
+
+    db = SessionLocal()
+    try:
+        servers = db.query(Server).filter(Server.disk_limit_gb.is_not(None)).all()
+        for server in servers:
+            usage_mb = docker_service.disk_usage_mb(server.install_dir)
+            if usage_mb is None:
+                continue
+            server.disk_usage_mb = usage_mb
+            limit_mb = (server.disk_limit_gb or 0) * 1024
+            if limit_mb <= 0:
+                continue
+            percent = (usage_mb * 100) // limit_mb
+
+            if percent >= DISK_STOP_THRESHOLD_PERCENT:
+                plugin = get_plugin(server.game_type)
+                if plugin and server.status == "running":
+                    try:
+                        plugin.stop(server)
+                    except Exception as e:
+                        logger.warning("disk-limit stop failed for %s: %s", server.id, e)
+                server.status = "error"
+                server.status_message = (
+                    f"Disk-Soft-Limit erreicht ({usage_mb} MB / {limit_mb} MB). Container gestoppt."
+                )
+                db.add(AuditLog(
+                    user_id=None,
+                    action="disk_limit_stop",
+                    target_type="server",
+                    target_id=server.id,
+                    details=f"Disk usage {usage_mb} MB hit limit {limit_mb} MB",
+                ))
+            elif percent >= DISK_WARN_THRESHOLD_PERCENT:
+                server.status_message = (
+                    f"Warnung: Disk-Verbrauch bei {percent} % von {limit_mb} MB."
+                )
+        db.commit()
+    except Exception as e:
+        logger.warning("disk soft-limit task crashed: %s", e)
+    finally:
+        db.close()
+
+
+def _ensure_disk_check_job() -> None:
+    scheduler = get_scheduler()
+    job_id = "global_disk_soft_limit_check"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_disk_soft_limit_task,
+        trigger=IntervalTrigger(minutes=DISK_CHECK_INTERVAL_MINUTES),
+        id=job_id,
+        name="Disk Soft-Limit Check",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def init_server_schedules(db):
     """Initialize schedules for all servers on startup."""
     from models import Server
+
+    _ensure_disk_check_job()
 
     servers = db.query(Server).all()
     for server in servers:

@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_notifications BOOLEAN DEFAULT true"))
 
-    # Migration: Backup-Scheduling-Spalten
+    # Migration: Backup-Scheduling-Spalten + Phase-1 Docker-Spalten
     if 'servers' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('servers')]
         with engine.begin() as conn:
@@ -71,6 +71,13 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE servers ADD COLUMN backup_interval_hours INTEGER"))
             if 'backup_retention_count' not in cols:
                 conn.execute(text("ALTER TABLE servers ADD COLUMN backup_retention_count INTEGER DEFAULT 5"))
+            # Phase 1 — Docker-Runtime: container_name + public_bind_ip + disk_usage_mb
+            if 'container_name' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN container_name VARCHAR(64)"))
+            if 'public_bind_ip' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN public_bind_ip VARCHAR(64)"))
+            if 'disk_usage_mb' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN disk_usage_mb INTEGER"))
 
     # Migration: Mod enabled-Spalte
     if 'mods' in inspector.get_table_names():

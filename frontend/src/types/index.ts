@@ -15,7 +15,7 @@ export interface Server {
   name: string
   game_type: string
   install_dir: string
-  linux_user: string
+  container_name: string | null
   status: string
   status_message: string | null
   auto_restart: boolean
@@ -24,9 +24,11 @@ export interface Server {
   cpu_limit_percent: number | null
   ram_limit_mb: number | null
   disk_limit_gb: number | null
+  disk_usage_mb: number | null
   game_port: number | null
   query_port: number | null
   rcon_port: number | null
+  public_bind_ip: string | null
   created_at: string
 }
 
