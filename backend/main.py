@@ -78,6 +78,10 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE servers ADD COLUMN public_bind_ip VARCHAR(64)"))
             if 'disk_usage_mb' not in cols:
                 conn.execute(text("ALTER TABLE servers ADD COLUMN disk_usage_mb INTEGER"))
+            # Phase 1 — Legacy-Spalte linux_user entfernen (Server laufen jetzt
+            # in Docker-Containern, kein POSIX-User-pro-Server mehr).
+            if 'linux_user' in cols:
+                conn.execute(text("ALTER TABLE servers DROP COLUMN linux_user"))
 
     # Migration: Mod enabled-Spalte
     if 'mods' in inspector.get_table_names():
