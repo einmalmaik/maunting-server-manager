@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import socket
 import subprocess
 from abc import ABC, abstractmethod
@@ -172,10 +173,30 @@ def default_volume_binds(server) -> list[VolumeBind]:
 # Kuratiertes, gepflegtes SteamCMD-Image. Eine Pin auf einen festen Tag erfolgt
 # in einer Folge-Phase (Phase 5 wird Image+Tag pro Plugin-Egg konfigurierbar).
 STEAMCMD_IMAGE = "cm2network/steamcmd:root"
-# Pfad des steamcmd-Wrappers im Image. Explizit setzen, damit unsere Pipeline
-# nicht vom Image-Default-Entrypoint abhängt (manche Tags haben keinen).
-STEAMCMD_ENTRYPOINT = "/home/steam/steamcmd/steamcmd.sh"
-STEAMCMD_WORKDIR = "/home/steam/steamcmd"
+# Pfad des steamcmd-Wrappers im Image. Wird in den bash-Aufruf eingesetzt.
+STEAMCMD_BIN = "/home/steam/steamcmd/steamcmd.sh"
+
+
+def _build_steamcmd_bash_command(steam_args: list[str], chown_uid: int, chown_gid: int) -> list[str]:
+    """Verpackt SteamCMD-Args in ein `bash -c`-Kommando, das nach Abschluss /data
+    auf die Host-UID umownt.
+
+    Hintergrund: Das `:root`-Image hat `/home/steam` mit Mode 750 (steam-User-
+    only). Wir müssen SteamCMD als root im Container laufen lassen, sonst
+    schlägt schon das `stat`/`exec` auf den Wrapper mit `permission denied`
+    fehl. Container-Root ist durch `--cap-drop=ALL --security-opt=no-new-
+    privileges` und einen Bind-Mount-only-Schreibpfad genügend abgeschottet.
+    Nach dem Lauf chown'en wir /data zurück auf die msm-Host-UID, damit das
+    Panel als unprivilegierter User weiterarbeiten kann.
+    """
+    quoted = " ".join(shlex.quote(a) for a in steam_args)
+    script = (
+        f"{shlex.quote(STEAMCMD_BIN)} {quoted}; "
+        "rc=$?; "
+        f"chown -R {int(chown_uid)}:{int(chown_gid)} {shlex.quote(CONTAINER_DATA_DIR)}; "
+        "exit $rc"
+    )
+    return ["-c", script]
 
 
 def run_steamcmd_install(
@@ -192,28 +213,29 @@ def run_steamcmd_install(
     """
     os.makedirs(install_dir, exist_ok=True)
 
-    cmd: list[str] = [
+    steam_args: list[str] = [
         "+force_install_dir", CONTAINER_DATA_DIR,
         "+login", "anonymous",
         "+app_update", app_id, "validate",
     ]
     if extra_args:
-        cmd.extend(extra_args)
-    cmd.extend(["+quit"])
+        steam_args.extend(extra_args)
+    steam_args.append("+quit")
 
     _append_console_log(server_id, f"[MSM] SteamCMD startet für App {app_id} (Docker)\n")
 
     uid, gid = docker_service.host_uid_gid()
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
-        command=cmd,
+        command=_build_steamcmd_bash_command(steam_args, uid, gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
-        user=f"{uid}:{gid}",
-        entrypoint=STEAMCMD_ENTRYPOINT,
-        workdir=STEAMCMD_WORKDIR,
+        # KEIN --user-Override: SteamCMD muss im Container als root laufen, weil
+        # /home/steam im :root-Image Mode 750 hat. Files werden im bash-Wrapper
+        # nach dem Run auf {uid}:{gid} ge-chown't.
+        user=None,
+        entrypoint="bash",
         # SteamCMD legt Cache/Auth in $HOME ab. Auf /data umleiten, damit der
-        # Cache zwischen Runs erhalten bleibt und keine Permission-Probleme
-        # mit /home/steam (root-owned) entstehen.
+        # Cache zwischen Runs persistent im Bind-Mount landet (kein Vollredownload).
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
     )
@@ -242,7 +264,7 @@ def run_steamcmd_workshop_download(
     Vollredownload — das übernimmt SteamCMD selbst, sofern lokale Files
     existieren.
     """
-    cmd: list[str] = [
+    steam_args: list[str] = [
         "+force_install_dir", CONTAINER_DATA_DIR,
         "+login", "anonymous",
         "+workshop_download_item", workshop_app_id, workshop_item_id,
@@ -254,11 +276,10 @@ def run_steamcmd_workshop_download(
     uid, gid = docker_service.host_uid_gid()
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
-        command=cmd,
+        command=_build_steamcmd_bash_command(steam_args, uid, gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
-        user=f"{uid}:{gid}",
-        entrypoint=STEAMCMD_ENTRYPOINT,
-        workdir=STEAMCMD_WORKDIR,
+        user=None,
+        entrypoint="bash",
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
     )
