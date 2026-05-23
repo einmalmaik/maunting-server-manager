@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Mail, Globe, Save, Send } from 'lucide-react'
+import { Mail, Globe, Save, Send, Gamepad2 } from 'lucide-react'
 import { api } from '@/api/client'
 
 interface PanelSettings {
@@ -15,6 +15,8 @@ interface PanelSettings {
   default_language: string
   email_configured: boolean
   email_provider: string
+  steam_api_key: string
+  steam_api_configured: boolean
 }
 
 export function Settings() {
@@ -31,6 +33,8 @@ export function Settings() {
     default_language: 'de',
     email_configured: false,
     email_provider: 'none',
+    steam_api_key: '',
+    steam_api_configured: false,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -98,6 +102,10 @@ export function Settings() {
   const [newResendKey, setNewResendKey] = useState('')
   const [savingResend, setSavingResend] = useState(false)
   const [resendMsg, setResendMsg] = useState('')
+  const [newSteamKey, setNewSteamKey] = useState('')
+  const [savingSteam, setSavingSteam] = useState(false)
+  const [steamMsg, setSteamMsg] = useState('')
+  const [testingSteam, setTestingSteam] = useState(false)
 
   useEffect(() => {
     // Derive initial provider from the backend's actual active provider
@@ -398,6 +406,121 @@ export function Settings() {
             {testMsg && (
               <p className="text-sm text-status-success mt-2">{testMsg}</p>
             )}
+          </div>
+        </div>
+
+        {/* Steam API */}
+        <div className="msm-card p-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
+              <Gamepad2 className="w-5 h-5 text-secondary" />
+            </div>
+            <h2 className="font-headline text-headline-sm text-primary">{t('settings.steamApiKey')}</h2>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${settings.steam_api_configured ? 'bg-status-success' : 'bg-on-surface-variant'}`} />
+              <span className="font-body-md text-sm text-on-surface">
+                {settings.steam_api_configured ? t('settings.steamConfigured') : t('settings.steamNotConfigured')}
+              </span>
+            </div>
+
+            {settings.steam_api_key && (
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  {t('settings.steamCurrentKey')}
+                </label>
+                <input
+                  type="text"
+                  value={settings.steam_api_key}
+                  readOnly
+                  className="msm-input opacity-60 cursor-not-allowed font-mono text-sm"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                {t('settings.steamNewKey')}
+              </label>
+              <input
+                type="password"
+                value={newSteamKey}
+                onChange={(e) => setNewSteamKey(e.target.value)}
+                className="msm-input"
+                placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+              />
+              <p className="font-body-md text-xs text-on-surface-variant mt-2">
+                {t('settings.steamKeyHint')}{' '}
+                <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer" className="text-secondary hover:underline">
+                  steamcommunity.com/dev/apikey
+                </a>
+              </p>
+            </div>
+
+            {steamMsg && <p className="text-sm text-status-success">{steamMsg}</p>}
+
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={async () => {
+                  setTestingSteam(true)
+                  setSteamMsg('')
+                  setError('')
+                  try {
+                    const res = await api<{message: string; valid: boolean}>('/settings/steam-key/test')
+                    setSteamMsg(res.message)
+                    setTimeout(() => setSteamMsg(''), 3000)
+                  } catch (err: any) {
+                    setError(err.message)
+                  } finally {
+                    setTestingSteam(false)
+                  }
+                }}
+                disabled={testingSteam || !settings.steam_api_configured}
+                className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                {testingSteam ? (
+                  <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                {t('settings.steamTest')}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!newSteamKey.trim()) return
+                  setSavingSteam(true)
+                  setError('')
+                  setSteamMsg('')
+                  try {
+                    await api('/settings/steam-key', {
+                      method: 'POST',
+                      body: JSON.stringify({ steam_api_key: newSteamKey.trim() }),
+                    })
+                    setSteamMsg(t('settings.steamSaved'))
+                    setNewSteamKey('')
+                    await fetchSettings()
+                    setTimeout(() => setSteamMsg(''), 3000)
+                  } catch (err: any) {
+                    setError(err.message)
+                  } finally {
+                    setSavingSteam(false)
+                  }
+                }}
+                disabled={savingSteam || !newSteamKey.trim()}
+                className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                {savingSteam ? (
+                  <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                {t('settings.steamSaveKey')}
+              </button>
+            </div>
           </div>
         </div>
 

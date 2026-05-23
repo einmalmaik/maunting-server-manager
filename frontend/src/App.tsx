@@ -59,6 +59,7 @@ function App() {
         <Route path="servers/:id" element={<ServerDetail />} />
         <Route path="servers/:id/config" element={<ConfigEditor />} />
         <Route path="servers/:id/mods" element={<ModManager />} />
+        <Route path="servers/:id/backups" element={<Backups />} />
         <Route path="backups" element={<Backups />} />
         <Route path="users" element={<Users />} />
         <Route path="settings" element={<Settings />} />

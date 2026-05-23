@@ -92,6 +92,14 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     # Firewall-Regeln anlegen (nur auf Linux mit UFW)
     open_ports(server.name, game_port, query_port, rcon_port)
 
+    # Auto-Install: Plugin startet Installation im Hintergrund
+    plugin = get_plugin(req.game_type)
+    if plugin:
+        server.status = "installing"
+        server.status_message = "Installation gestartet"
+        db.commit()
+        plugin.install(server)
+
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_installed_notification(user.email, user.username, server.name)
 
@@ -317,6 +325,38 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
         "uptime_seconds": plugin_status.uptime_seconds,
         "players_online": plugin_status.players_online,
     }
+
+
+@router.post("/{server_id}/install")
+def install_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+    if not user.is_owner:
+        raise HTTPException(status_code=403, detail="Nur Owner kann Server installieren")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    if not plugin:
+        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    server.status = "installing"
+    server.status_message = "Installation gestartet"
+    db.commit()
+    result = plugin.install(server)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+    return {"message": "Installation gestartet", **result}
+
+
+@router.get("/{server_id}/console")
+def server_console(server_id: int, lines: int = 200, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    require_server_permission(user, server_id, db, "can_view_console")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    console_log = ""
+    if plugin:
+        console_log = plugin.get_console_log(server, lines=lines)
+    return {"logs": console_log}
 
 
 @router.get("/{server_id}/logs")

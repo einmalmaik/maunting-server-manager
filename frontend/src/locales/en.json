@@ -30,6 +30,11 @@
     "backups": "Backups",
     "logs": "Logs",
     "noLogs": "No logs available yet.",
+    "console": "Console",
+    "gameLogs": "Game Logs",
+    "install": "Install",
+    "deleted": "Server deleted",
+    "confirmDelete": "Really delete this server? All data will be permanently removed.",
     "createDescription": "Create a new game server."
   },
   "users": {
@@ -165,7 +170,17 @@
   },
   "backups": {
     "subtitle": "Backup Management",
-    "comingSoon": "Backup features will be available here."
+    "comingSoon": "Backup features will be available here.",
+    "create": "Create Backup",
+    "created": "Backup created",
+    "restore": "Restore",
+    "restored": "Backup restored",
+    "confirmRestore": "Really restore this backup? Current data will be overwritten.",
+    "confirmDelete": "Really delete this backup?",
+    "deletedBackup": "Backup deleted",
+    "noBackups": "No backups yet",
+    "createHint": "Create your first backup.",
+    "selectServer": "Select a server to manage backups."
   },
   "config": {
     "title": "Config Editor",
@@ -205,6 +220,15 @@
     "smtpTls": "Use TLS",
     "resendApiKey": "Resend API Key",
     "defaultLanguage": "Default Language",
+    "steamApiKey": "Steam Web API",
+    "steamConfigured": "Steam API configured",
+    "steamNotConfigured": "Steam API not configured",
+    "steamCurrentKey": "Current Key",
+    "steamNewKey": "New Steam API Key",
+    "steamKeyHint": "Steam Web API Key from",
+    "steamSaveKey": "Save API Key",
+    "steamSaved": "Steam API Key saved",
+    "steamTest": "Test API Key",
     "save": "Save",
     "saved": "Settings saved",
     "testEmail": "Send test email",
