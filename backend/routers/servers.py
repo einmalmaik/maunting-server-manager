@@ -312,11 +312,11 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
             "players_online": None,
         }
     plugin_status = plugin.get_status(server)
-    # installing/updating nicht ueberschreiben — Background-Thread setzt den Status
-    # selbst zurueck, wenn die Operation abgeschlossen ist
-    if server.status not in ("installing", "updating"):
+    # installing/updating/error nicht ueberschreiben — Background-Thread oder
+    # Admin setzen den Status selbst zurueck, wenn die Operation abgeschlossen ist
+    if server.status not in ("installing", "updating", "error"):
         server.status = plugin_status.status
-    server.status_message = plugin_status.message or ""
+        server.status_message = plugin_status.message or ""
     db.commit()
     return {
         "id": server.id,

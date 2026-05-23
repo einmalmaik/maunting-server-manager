@@ -127,9 +127,10 @@ def _run_install_with_logging(cmd: list[str], server_id: int, install_dir: str) 
     """Runs an install command in background, writes output to msm_console.log,
     and updates server status on completion."""
     log_path = os.path.join(install_dir, "msm_console.log")
-    os.makedirs(install_dir, exist_ok=True)
     returncode = -1
+    error_msg: str | None = None
     try:
+        os.makedirs(install_dir, exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as log_file:
             log_file.write(f"[MSM] Installation gestartet...\n")
             log_file.write(f"[MSM] Befehl: {' '.join(cmd)}\n")
@@ -149,6 +150,7 @@ def _run_install_with_logging(cmd: list[str], server_id: int, install_dir: str) 
                 log_file.write(f"\n[MSM] Installation fehlgeschlagen (exit code {returncode}).\n")
             log_file.flush()
     except Exception as e:
+        error_msg = str(e)
         logger.warning("Install failed for server %s: %s", server_id, e)
         try:
             with open(log_path, "a", encoding="utf-8") as log_file:
@@ -164,8 +166,15 @@ def _run_install_with_logging(cmd: list[str], server_id: int, install_dir: str) 
         try:
             srv = db.query(Server).filter(Server.id == server_id).first()
             if srv:
-                srv.status = "stopped" if returncode == 0 else "error"
-                srv.status_message = "Installation abgeschlossen" if returncode == 0 else f"Installation fehlgeschlagen (exit {returncode})"
+                if returncode == 0:
+                    srv.status = "stopped"
+                    srv.status_message = "Installation abgeschlossen"
+                elif error_msg:
+                    srv.status = "error"
+                    srv.status_message = f"Installation fehlgeschlagen: {error_msg}"
+                else:
+                    srv.status = "error"
+                    srv.status_message = f"Installation fehlgeschlagen (exit {returncode})"
                 db.commit()
         finally:
             db.close()
