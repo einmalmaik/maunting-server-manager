@@ -1,5 +1,5 @@
 import os
-import subprocess
+import shutil
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -10,11 +10,10 @@ from models import Server, Permission, User
 from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from games import get_plugin
+from games.base import container_name_for
+from services import EmailService, docker_service
+from services.firewall_service import close_ports, open_ports
 from services.port_allocation_service import allocate_ports
-from services.firewall_service import open_ports, close_ports
-from services import EmailService
-
-_SYSTEM_ENV = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
@@ -38,28 +37,15 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     base_dir = os.path.abspath(settings.servers_dir)
     count = db.query(Server).count() + 1
     install_dir = os.path.join(base_dir, f"{req.game_type}_{count}")
-    linux_user = f"msm_srv_{count}"
 
-    # Linux-User erstellen (isoliert, keine Login-Shell)
-    try:
-        subprocess.run(
-            ["sudo", "useradd", "-r", "-m", "-s", "/usr/sbin/nologin", "-d", install_dir, linux_user],
-            check=True, capture_output=True, env=_SYSTEM_ENV
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # User existiert vielleicht schon — sicherstellen dass er nologin hat
-        try:
-            subprocess.run(["sudo", "usermod", "-s", "/usr/sbin/nologin", linux_user], check=False, capture_output=True, env=_SYSTEM_ENV)
-        except FileNotFoundError:
-            pass
-
-    # Verzeichnis anlegen und Rechte setzen
+    # Verzeichnis anlegen — wird vom Panel-User (`msm`) angelegt und ist von dort
+    # rw, während der Container das Volume mit derselben UID/GID mountet (siehe
+    # docker_service.host_uid_gid()). Kein useradd, kein chown via sudo nötig.
     try:
         os.makedirs(install_dir, exist_ok=True)
-        subprocess.run(["sudo", "chown", f"{linux_user}:{linux_user}", install_dir], check=False, capture_output=True, env=_SYSTEM_ENV)
-        subprocess.run(["sudo", "chmod", "750", install_dir], check=False, capture_output=True, env=_SYSTEM_ENV)
-    except OSError:
-        pass
+        os.chmod(install_dir, 0o750)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
 
     # Ports automatisch vergeben (oder vom Nutzer übernehmen)
     try:
@@ -78,7 +64,6 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         name=req.name,
         game_type=req.game_type,
         install_dir=install_dir,
-        linux_user=linux_user,
         status="stopped",
         auto_restart=req.auto_restart,
         restart_interval_hours=req.restart_interval_hours,
@@ -89,8 +74,14 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         game_port=game_port,
         query_port=query_port,
         rcon_port=rcon_port,
+        public_bind_ip=req.public_bind_ip,
     )
     db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    # Stabilen Container-Namen cachen (Debug/Audit).
+    server.container_name = container_name_for(server.id)
     db.commit()
     db.refresh(server)
 
@@ -171,23 +162,13 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         )
         open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
 
-        # systemd-Unit neu schreiben (damit Ports im ExecStart greifen)
+        # Container neu starten, damit neue Ports/Limits greifen — nur, wenn er
+        # gerade läuft. Der Plugin-Default-Start zieht den Container ohnehin mit
+        # frischen Flags hoch.
         plugin = get_plugin(server.game_type)
-        if plugin:
-            # Server kurz stoppen, Unit neu schreiben, wieder starten
-            was_running = False
-            try:
-                result = subprocess.run(
-                    ["sudo", "systemctl", "is-active", f"msm-{server.linux_user}.service"],
-                    capture_output=True, text=True, timeout=5, env=_SYSTEM_ENV
-                )
-                was_running = result.stdout.strip() == "active"
-            except Exception:
-                pass
-
-            if was_running:
-                plugin.stop(server)
-                plugin.start(server)
+        if plugin and docker_service.is_running(container_name_for(server.id)):
+            plugin.stop(server)
+            plugin.start(server)
 
     return server
 
@@ -200,16 +181,9 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
-    # systemd-Unit stoppen und entfernen (nur auf Linux)
-    unit_name = f"msm-{server.linux_user}.service"
-    try:
-        subprocess.run(["sudo", "systemctl", "stop", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
-        subprocess.run(["sudo", "systemctl", "disable", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
-        unit_path = f"/etc/systemd/system/{unit_name}"
-        subprocess.run(["sudo", "rm", "-f", unit_path], check=False, capture_output=True, env=_SYSTEM_ENV)
-        subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True, env=_SYSTEM_ENV)
-    except (FileNotFoundError, OSError):
-        pass
+    # Container stoppen + entfernen (idempotent — kein Fehler, wenn nicht da)
+    container = container_name_for(server.id)
+    docker_service.remove(container, force=True)
 
     # Firewall-Regeln schließen
     close_ports(
@@ -218,23 +192,20 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
         rcon_port=server.rcon_port,
     )
 
-    # Linux-User und Home-Verzeichnis entfernen (nur auf Linux)
-    try:
-        subprocess.run(["sudo", "userdel", "-r", server.linux_user], check=False, capture_output=True, env=_SYSTEM_ENV)
-    except (FileNotFoundError, OSError):
-        pass
-
-    # Verzeichnis aufräumen (falls userdel es nicht gelöscht hat)
-    if os.path.exists(server.install_dir):
-        import shutil
+    # Install-Verzeichnis aufräumen
+    install_dir = server.install_dir
+    if os.path.exists(install_dir):
         try:
-            shutil.rmtree(server.install_dir)
+            shutil.rmtree(install_dir)
         except OSError:
             pass
 
     db.delete(server)
     db.commit()
-    return {"message": "Server gelöscht", "cleanup": {"user_removed": server.linux_user, "dir_removed": server.install_dir}}
+    return {
+        "message": "Server gelöscht",
+        "cleanup": {"container_removed": container, "dir_removed": install_dir},
+    }
 
 
 @router.post("/{server_id}/start")

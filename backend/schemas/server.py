@@ -2,13 +2,17 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+# cpu_limit_percent erlaubt Werte > 100 (200 % = 2 Cores). Limit 3200 % = 32 Cores
+# als pragmatische Obergrenze.
+
+
 class ServerCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     game_type: str = Field(..., pattern=r"^[a-z0-9_]+$")
     auto_restart: bool = False
     restart_interval_hours: int | None = Field(None, ge=1, le=168)
     restart_time_utc: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
-    cpu_limit_percent: int | None = Field(None, ge=10, le=100)
+    cpu_limit_percent: int | None = Field(None, ge=10, le=3200)
     ram_limit_mb: int | None = Field(None, ge=512)
     disk_limit_gb: int | None = Field(None, ge=1)
 
@@ -17,18 +21,23 @@ class ServerCreate(BaseModel):
     query_port: int | None = Field(None, ge=1024, le=65535)
     rcon_port: int | None = Field(None, ge=1024, le=65535)
 
+    # Optional: Host-IP, an die die Container-Ports gebunden werden.
+    # None = Docker-Default (alle Interfaces). Nur setzen, wenn nötig.
+    public_bind_ip: str | None = Field(None, max_length=64)
+
 
 class ServerUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=128)
     auto_restart: bool | None = None
     restart_interval_hours: int | None = Field(None, ge=1, le=168)
     restart_time_utc: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
-    cpu_limit_percent: int | None = Field(None, ge=10, le=100)
+    cpu_limit_percent: int | None = Field(None, ge=10, le=3200)
     ram_limit_mb: int | None = Field(None, ge=512)
     disk_limit_gb: int | None = Field(None, ge=1)
     game_port: int | None = Field(None, ge=1024, le=65535)
     query_port: int | None = Field(None, ge=1024, le=65535)
     rcon_port: int | None = Field(None, ge=1024, le=65535)
+    public_bind_ip: str | None = Field(None, max_length=64)
 
 
 class ServerResponse(BaseModel):
@@ -36,7 +45,7 @@ class ServerResponse(BaseModel):
     name: str
     game_type: str
     install_dir: str
-    linux_user: str
+    container_name: str | None
     status: str
     status_message: str | None
     auto_restart: bool
@@ -45,9 +54,11 @@ class ServerResponse(BaseModel):
     cpu_limit_percent: int | None
     ram_limit_mb: int | None
     disk_limit_gb: int | None
+    disk_usage_mb: int | None
     game_port: int | None
     query_port: int | None
     rcon_port: int | None
+    public_bind_ip: str | None
     created_at: datetime
 
     class Config:

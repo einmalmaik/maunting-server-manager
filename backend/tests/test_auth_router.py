@@ -334,8 +334,13 @@ class TestCsrfProtectionOnEndpoints:
 
     def test_post_with_csrf_succeeds(self, client: TestClient, owner_cookies: dict):
         from unittest.mock import patch
-        with patch("routers.servers.subprocess.run") as mock_run:
-            mock_run.return_value = type("obj", (object,), {"returncode": 0})()
+        # Routers nutzen kein subprocess mehr (Docker-Runtime). Wir patchen
+        # nur Filesystem/Firewall/Plugin, damit der Create-Pfad ohne Side-Effects
+        # gegen den Docker-Daemon laufen kann.
+        with patch("routers.servers.os.makedirs"), \
+             patch("routers.servers.os.chmod"), \
+             patch("routers.servers.open_ports"), \
+             patch("routers.servers.get_plugin", return_value=None):
             csrf = owner_cookies.get("__Secure-csrf_token")
             response = client.post(
                 "/api/servers",

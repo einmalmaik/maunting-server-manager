@@ -359,3 +359,56 @@ Regeln:
 - [ ] Kein neuer Manager-/Pipeline-Monolith?
 - [ ] Keine doppelten Core-Importpfade?
 - [ ] Runtime-Pfade wirklich geöffnet, wenn betroffen?
+
+---
+
+## 12. Game-Server-Runtime (Phase 1 — Docker)
+
+Stand: 2026-05-23. Diese Sektion ist MSM-spezifisch und gilt für alle Game-/Voice-Server, die das Panel verwaltet.
+
+### 12.1 Invarianten
+
+- Game-Server laufen ausschließlich in Docker-Containern. Kein systemd-pro-Server, kein POSIX-User-pro-Server, kein direktes Binary auf dem Host.
+- Das Panel selbst (FastAPI) bindet weiterhin an `127.0.0.1:8000` und wird ausschließlich über Caddy nach außen gereicht. Container-Ports werden direkt von Docker auf der Host-Schnittstelle gepublisht (Option: spezifische `public_bind_ip`).
+- Container-Lifecycle wird über `services/docker_service.py` abgewickelt — ein dünner `subprocess`-Wrapper um `docker`. Kein Python-SDK, keine REST-API zum Docker-Daemon.
+- Jeder Server erhält einen stabilen Container-Namen `msm-srv-<server_id>`. Das ist auch `server.container_name` in der DB.
+- Container starten mit `--cap-drop=ALL --security-opt=no-new-privileges --restart=on-failure:5 --log-driver=json-file --log-opt max-size=10m --log-opt max-file=3`.
+- Bind-Mounts: Host `<install_dir>` → Container `/data`. Der Container läuft mit derselben UID/GID wie der Panel-User (`msm`), damit Schreibrechte konsistent sind.
+
+### 12.2 Pflichtmethoden für Game-Plugins
+
+Jedes Plugin (`backend/games/<game>/plugin.py`) erbt von `GamePlugin` und implementiert mindestens:
+
+- `build_container_command(server) -> list[str]` — argv des Containers (Pfade INNERHALB des Containers, z. B. `/data/DayZServer`).
+- `build_port_publishes(server) -> list[PortPublish]` — Welche Ports nach außen.
+- `docker_image: str` — Container-Image (Default: `cm2network/steamcmd:root`).
+
+Standard-Implementationen für `start/stop/get_status/install` in `games/base.py`. Override nur, wenn das Spiel etwas Game-spezifisches braucht.
+
+### 12.3 Resource-Limits (CPU, RAM, Disk)
+
+- `cpu_limit_percent` → `--cpus=<percent/100>` (200 = 2 Cores).
+- `ram_limit_mb` → `--memory=<mb>m --memory-swap=<mb>m` (swap=RAM verhindert Thrashing).
+- `disk_limit_gb` → **Soft-Limit**. Kein Docker-natives Quota; stattdessen prüft der globale Scheduler-Job (`services/scheduler_service._disk_soft_limit_task`) alle 15 Minuten den Verbrauch via `du -sb`. Bei ≥ 80 % schreibt er eine Warnung in `server.status_message`. Bei ≥ 100 % stoppt er den Container hart und setzt `status="error"`.
+
+Hartes Disk-Quota (XFS-Projekt-Quota oder Overlay-Quota) ist explizit Phase-2-Material.
+
+### 12.4 SteamCMD
+
+Es gibt kein Host-`steamcmd` mehr. Installs und Workshop-Downloads laufen in ephemeren Containern (`cm2network/steamcmd:root`), die in `games/base.run_steamcmd_install()` und `run_steamcmd_workshop_download()` gekapselt sind. Das nutzt das gleiche Bind-Mount-Layout (`<install_dir>` → `/data`).
+
+Intelligentes Mod-Update bleibt erhalten: SteamCMD selbst entscheidet, ob ein `workshop_download_item` einen Refresh braucht — wir starten den Container einfach jedes Mal, und SteamCMD validiert die lokalen Dateien gegen das Manifest. Kein Voll-Redownload, wenn nichts geändert hat.
+
+### 12.5 TODO: Rootless Docker
+
+Aktuell ist `msm` Mitglied der `docker`-Gruppe. Das ist effektiv lokales Root. Akzeptiert für Phase 1, ABER:
+
+- Vor Phase 3 (RBAC) muss auf [rootless Docker](https://docs.docker.com/engine/security/rootless/) umgestellt werden. Dann läuft der Docker-Daemon als unprivilegierter `msm`-User, und ein Bruch im Container kompromittiert nur diesen User, nicht den Host.
+- Migrationspfad: `dockerd-rootless-setuptool.sh install` als `msm`, `DOCKER_HOST=unix:///run/user/<uid>/docker.sock`. Plus Anpassung der Bind-Mount-Pfade auf user-namespaced UIDs.
+- Bis dahin: Keine externen, nicht vertrauenswürdigen Images. Wir pinnen `cm2network/steamcmd:root` und prüfen Updates manuell.
+
+### 12.6 Keine 0.0.0.0-Bindings im Panel
+
+Die Panel-API darf nur an `127.0.0.1` binden. Container-Port-Publishes dürfen `0.0.0.0` nutzen (Docker-Default), wenn die Game-Spielebene das benötigt. Optional pro Server: `server.public_bind_ip` setzt einen explizit gebundenen Host-Interface — empfohlen bei Multi-IP-Hosts.
+
+Phase-2-Port-Manager wird das absichern (UFW-Regeln nur öffnen, wenn Container läuft).

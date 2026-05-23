@@ -1,20 +1,32 @@
+"""DayZ — Docker-basiertes Plugin.
+
+Lifecycle läuft komplett über GamePlugin-Defaults (docker_service). Spezifisch
+sind: Mod-Symlink-Logik, Start-Argumente (-mod=…;), Workshop-Pfade.
+"""
+
+from __future__ import annotations
+
 import glob
 import os
-import subprocess
 import threading
 
-from config import settings
-from games.base import GamePlugin, ServerStatus, ConfigField, build_systemd_unit, _run_install_with_logging, _append_console_log, query_a2s_info
-
-_SYSTEM_ENV = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+from games.base import (
+    CONTAINER_DATA_DIR,
+    ConfigField,
+    GamePlugin,
+    PortPublish,
+    VolumeBind,
+    _append_console_log,
+    run_steamcmd_install,
+    run_steamcmd_workshop_download,
+)
 
 
 class DayZPlugin(GamePlugin):
-    """DayZ Linux Dedicated Server Plugin — Linux native.
+    """DayZ Linux Dedicated Server — Linux native, in Docker.
 
     Offizielle Doku: https://community.bohemia.net/wiki/DayZ:Hosting_a_Linux_Server
-    App ID: 223350. Es wird ausschließlich die native Linux-Version genutzt.
-    Wine-Fallback ist nicht vorgesehen.
+    App ID: 223350 (Server), Workshop App ID: 221100 (Mods).
     """
 
     game_id = "dayz"
@@ -24,151 +36,97 @@ class DayZPlugin(GamePlugin):
     APP_ID = "223350"
     WORKSHOP_ID = "221100"
 
-    def _resolve_executable(self, server) -> str | None:
-        """Nur native Linux-Binaries — kein Wine-Fallback."""
-        candidates = [
-            os.path.join(server.install_dir, "DayZServer"),
-            os.path.join(server.install_dir, "DayZServer_x64"),
-        ]
-        for candidate in candidates:
-            if os.path.exists(candidate):
-                return candidate
-        return None
+    docker_image = "cm2network/steamcmd:root"
+    container_needs_tmpfs = False
+    container_read_only_rootfs = False
+
+    # ─ Setup ─────────────────────────────────────────────────────────────
 
     def install(self, server) -> dict:
-        cmd = [
-            settings.steamcmd_path,
-            "+force_install_dir", server.install_dir,
-            "+login", "anonymous",
-            "+app_update", self.APP_ID,
-            "+quit",
-        ]
-        thread = threading.Thread(
-            target=_run_install_with_logging,
-            args=(cmd, server.id, server.install_dir),
-            daemon=True,
-        )
+        def _install():
+            run_steamcmd_install(
+                server_id=server.id,
+                install_dir=server.install_dir,
+                app_id=self.APP_ID,
+            )
+        thread = threading.Thread(target=_install, daemon=True)
         thread.start()
         return {"message": "Installation gestartet"}
 
-    def update(self, server) -> dict:
-        return self.install(server)
+    # ─ Mods → Start-Argument ─────────────────────────────────────────────
 
-    def _get_mod_ids(self, server) -> list[str]:
-        """Reads installed mod IDs from DB."""
+    def _get_active_mod_ids(self, server) -> list[str]:
+        """Liest aktivierte (`enabled=True`) Mods in Lade-Reihenfolge.
+
+        Inaktive Mods bleiben im DB-State, werden aber NICHT in die
+        Startargumente geschrieben.
+        """
         try:
             from database import SessionLocal
             from models import Mod
             db = SessionLocal()
             try:
-                mods = db.query(Mod).filter(Mod.server_id == server.id).order_by(Mod.load_order.asc()).all()
+                mods = (
+                    db.query(Mod)
+                    .filter(Mod.server_id == server.id, Mod.enabled == True)  # noqa: E712
+                    .order_by(Mod.load_order.asc())
+                    .all()
+                )
                 return [m.workshop_id for m in mods]
             finally:
                 db.close()
         except Exception:
             return []
 
-    def start(self, server) -> dict:
-        exe = self._resolve_executable(server)
-        if not exe:
-            return {"error": "Server-Executable nicht gefunden. Bitte zuerst installieren."}
+    # ─ Container-Config ──────────────────────────────────────────────────
 
-        unit_name = f"msm-{server.linux_user}.service"
-        unit_path = f"/etc/systemd/system/{unit_name}"
+    def _container_executable(self) -> str:
+        """Pfad zum DayZ-Server-Binary INNERHALB des Containers (Bind-Mount)."""
+        return f"{CONTAINER_DATA_DIR}/DayZServer"
 
-        port_args = ""
+    def build_container_command(self, server) -> list[str]:
+        cmd: list[str] = [self._container_executable()]
         if server.game_port:
-            port_args += f" -port={server.game_port}"
-
-        # Build -mod= parameter from installed mods
-        mod_ids = self._get_mod_ids(server)
-        mod_arg = ""
+            cmd.append(f"-port={server.game_port}")
+        mod_ids = self._get_active_mod_ids(server)
         if mod_ids:
-            mod_arg = f' "-mod={";".join(mod_ids)};"'
+            # DayZ erwartet ein einzelnes Argument mit semikolon-separierten Mod-IDs.
+            cmd.append(f"-mod={';'.join(mod_ids)};")
+        return cmd
 
-        exec_start = f"{exe}{port_args}{mod_arg}"
+    def build_port_publishes(self, server) -> list[PortPublish]:
+        ports: list[PortPublish] = []
+        host_ip = getattr(server, "public_bind_ip", None) or None
+        if server.game_port:
+            ports.append(PortPublish(server.game_port, server.game_port, "udp", host_ip))
+        if server.query_port:
+            ports.append(PortPublish(server.query_port, server.query_port, "udp", host_ip))
+        if server.rcon_port:
+            ports.append(PortPublish(server.rcon_port, server.rcon_port, "tcp", host_ip))
+        return ports
 
-        unit_content = build_systemd_unit(
-            name=server.name,
-            linux_user=server.linux_user,
-            working_dir=server.install_dir,
-            exec_start=exec_start,
-            cpu_limit_percent=server.cpu_limit_percent,
-            ram_limit_mb=server.ram_limit_mb,
-            disk_limit_gb=server.disk_limit_gb,
-        )
-        try:
-            subprocess.run(
-                ["sudo", "-n", "/usr/bin/tee", unit_path],
-                input=unit_content, capture_output=True, text=True, check=True,
-                env=_SYSTEM_ENV
-            )
-        except subprocess.CalledProcessError as e:
-            detail = e.stderr.strip() if e.stderr else str(e)
-            return {"error": f"Konnte systemd-Unit nicht schreiben: {detail}"}
-        except FileNotFoundError as e:
-            return {"error": f"Konnte systemd-Unit nicht schreiben: {e}"}
+    def build_volume_binds(self, server) -> list[VolumeBind]:
+        return [VolumeBind(server.install_dir, CONTAINER_DATA_DIR, read_only=False)]
 
-        try:
-            subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True, env=_SYSTEM_ENV)
-            subprocess.run(["sudo", "systemctl", "enable", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
-            subprocess.run(["sudo", "systemctl", "start", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
-        except FileNotFoundError as e:
-            return {"error": f"sudo nicht gefunden: {e}"}
-
-        # Auto-Backup nach Start auslösen (fire-and-forget)
-        try:
-            import requests
-            requests.post(f"http://localhost:8000/api/backups/{server.id}/auto", timeout=5)
-        except Exception:
-            pass
-
-        return {"message": "Server gestartet", "unit": unit_name}
-
-    def stop(self, server) -> dict:
-        unit_name = f"msm-{server.linux_user}.service"
-        subprocess.run(["sudo", "systemctl", "stop", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
-        return {"message": "Server gestoppt", "unit": unit_name}
-
-    def get_status(self, server) -> ServerStatus:
-        unit_name = f"msm-{server.linux_user}.service"
-        try:
-            result = subprocess.run(
-                ["sudo", "systemctl", "is-active", unit_name],
-                capture_output=True, text=True, timeout=5,
-                env=_SYSTEM_ENV
-            )
-            active = result.stdout.strip() == "active"
-        except Exception:
-            active = False
-
-        players_online = None
-        if active and server.query_port:
-            a2s = query_a2s_info("127.0.0.1", server.query_port)
-            if a2s:
-                players_online = a2s["players"]
-
-        return ServerStatus(
-            status="running" if active else "stopped",
-            cpu_percent=None,
-            ram_mb=None,
-            disk_mb=None,
-            uptime_seconds=None,
-            players_online=players_online,
-        )
+    # ─ Logs ──────────────────────────────────────────────────────────────
 
     def get_logs(self, server, lines: int = 100) -> str:
-        log_path = os.path.join(server.install_dir, "log", "script_1.log")
-        if not os.path.exists(log_path):
-            log_path = os.path.join(server.install_dir, "log_1.txt")
-        if not os.path.exists(log_path):
-            return ""
-        try:
-            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                all_lines = f.readlines()
-            return "".join(all_lines[-lines:])
-        except Exception:
-            return ""
+        # DayZ schreibt rotierende Logs unter log/ und log_*.txt
+        candidates = [
+            os.path.join(server.install_dir, "log", "script_1.log"),
+            os.path.join(server.install_dir, "log_1.txt"),
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                        all_lines = f.readlines()
+                    return "".join(all_lines[-lines:])
+                except Exception:
+                    continue
+        return ""
+
+    # ─ Config-Schema ─────────────────────────────────────────────────────
 
     def get_config_schema(self) -> list[ConfigField]:
         return [
@@ -191,7 +149,6 @@ class DayZPlugin(GamePlugin):
         ]
 
     def get_mod_support(self) -> dict | None:
-        """DayZ: Keine Tag-Filter nötig, nur ein Workshop."""
         return {
             "workshop_id": self.WORKSHOP_ID,
             "dependency_resolution": False,
@@ -216,35 +173,40 @@ class DayZPlugin(GamePlugin):
             os.path.join(server.install_dir, "storage"),
         ]
 
+    # ─ Mods ──────────────────────────────────────────────────────────────
+
     def install_mod(self, server, workshop_id: str) -> dict:
         """DayZ mod install: SteamCMD download → symlink to server root → copy keys."""
         def _install():
             install_dir = server.install_dir
-            workshop_dir = os.path.join(install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, workshop_id)
+            workshop_dir = os.path.join(
+                install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, workshop_id
+            )
 
-            # 1) Download via SteamCMD
-            cmd = [
-                settings.steamcmd_path,
-                "+force_install_dir", install_dir,
-                "+login", "anonymous",
-                "+workshop_download_item", self.WORKSHOP_ID, workshop_id,
-                "+quit",
-            ]
-            _run_install_with_logging(cmd, server.id, install_dir)
+            run_steamcmd_workshop_download(
+                server_id=server.id,
+                install_dir=install_dir,
+                workshop_app_id=self.WORKSHOP_ID,
+                workshop_item_id=workshop_id,
+            )
 
-            # 2) Symlink mod folder to server root
             link_path = os.path.join(install_dir, workshop_id)
             if os.path.isdir(workshop_dir):
                 if os.path.exists(link_path):
                     if os.path.islink(link_path):
                         os.unlink(link_path)
                     else:
-                        _append_console_log(server.id, f"[MSM] Warnung: {link_path} existiert bereits und ist kein Symlink\n")
+                        _append_console_log(
+                            server.id,
+                            f"[MSM] Warnung: {link_path} existiert bereits und ist kein Symlink\n",
+                        )
                         return
                 os.symlink(workshop_dir, link_path)
-                _append_console_log(server.id, f"[MSM] Mod {workshop_id} verlinkt: {link_path} → {workshop_dir}\n")
+                _append_console_log(
+                    server.id, f"[MSM] Mod {workshop_id} verlinkt: {link_path} → {workshop_dir}\n"
+                )
 
-                # 3) Symlink keys
+                # Bikey-Files in keys/ verlinken
                 keys_dir = os.path.join(install_dir, "keys")
                 os.makedirs(keys_dir, exist_ok=True)
                 mod_keys = os.path.join(workshop_dir, "keys")
@@ -254,19 +216,16 @@ class DayZPlugin(GamePlugin):
                         if os.path.exists(key_link):
                             os.unlink(key_link)
                         os.symlink(key_file, key_link)
-                        _append_console_log(server.id, f"[MSM] Key verlinkt: {os.path.basename(key_file)}\n")
+                        _append_console_log(
+                            server.id, f"[MSM] Key verlinkt: {os.path.basename(key_file)}\n"
+                        )
             else:
-                _append_console_log(server.id, f"[MSM] Warnung: Workshop-Verzeichnis nicht gefunden: {workshop_dir}\n")
+                _append_console_log(
+                    server.id, f"[MSM] Warnung: Workshop-Verzeichnis nicht gefunden: {workshop_dir}\n"
+                )
 
             _append_console_log(server.id, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
 
         thread = threading.Thread(target=_install, daemon=True)
         thread.start()
         return {"message": f"Mod {workshop_id} wird installiert"}
-
-    def get_mod_support(self) -> dict | None:
-        return {
-            "workshop_id": self.WORKSHOP_ID,
-            "dependency_resolution": True,
-            "symlink_mods": True,
-        }

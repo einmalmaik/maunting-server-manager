@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# MSM console logs (per-server, runtime)
+backend/logs/
+
 # Virtual environments (anywhere in the repository)
 .venv/
 venv/

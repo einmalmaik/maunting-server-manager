@@ -1,20 +1,41 @@
+"""Game-Plugin-Basis — Docker-only Lifecycle.
+
+Jeder GamePlugin liefert minimale, Docker-spezifische Bausteine:
+  - build_container_command(server)  → cmd-Args im Container
+  - build_container_env(server)      → ENV-Vars im Container
+  - build_port_publishes(server)     → Liste von PortPublish (host↔container)
+  - build_volume_binds(server)       → Liste von VolumeBind (host↔container)
+
+`start/stop/get_status/get_logs` haben Default-Implementierungen in der Basis,
+die alle Container-Operationen über `docker_service` ausführen. Plugins
+überschreiben nur, was wirklich game-spezifisch ist (z. B. Custom-Workshop-
+Pfade beim install_mod).
+
+Es gibt KEINE systemd-/linux-user-Pfade mehr. Game-Server laufen ausschließlich
+in Docker-Containern. Isolation kommt von Docker, nicht von POSIX-Usern.
+"""
+
+from __future__ import annotations
+
+import logging
 import os
 import socket
-import threading
 import subprocess
-import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
+
+from services import docker_service
+from services.docker_service import PortPublish, VolumeBind
 
 logger = logging.getLogger(__name__)
 
 
 def query_a2s_info(host: str, port: int, timeout: float = 3.0) -> dict | None:
-    """Sends a Steam A2S_INFO query and returns player count + server info.
+    """Sendet eine Steam A2S_INFO-Query und liest Spielerzahlen/Servername.
 
-    Returns dict with 'players', 'max_players', 'server_name', 'map' or None on failure.
-    Protocol: https://developer.valvesoftware.com/wiki/Server_queries#A2S_INFO
+    Returns dict {'players', 'max_players', 'server_name', 'map'} or None.
+    Protokoll: https://developer.valvesoftware.com/wiki/Server_queries#A2S_INFO
     """
     request = b"\xFF\xFF\xFF\xFF\x54Source Engine Query\x00"
     try:
@@ -27,13 +48,12 @@ def query_a2s_info(host: str, port: int, timeout: float = 3.0) -> dict | None:
         if len(data) < 6:
             return None
 
-        # Skip 4-byte header (0xFFFFFFFF)
         idx = 4
         header = data[idx]
         idx += 1
 
         if header == 0x41:
-            # Challenge response — resend with challenge
+            # Challenge-Response — erneut mit Challenge senden
             challenge = data[5:9]
             request2 = b"\xFF\xFF\xFF\xFF\x54Source Engine Query\x00" + challenge
             sock2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -50,31 +70,21 @@ def query_a2s_info(host: str, port: int, timeout: float = 3.0) -> dict | None:
         if header != 0x49:
             return None
 
-        # Protocol version
-        idx += 1
-
-        # Server name (null-terminated string)
+        idx += 1  # protocol version
         end = data.index(b"\x00", idx)
         server_name = data[idx:end].decode("utf-8", errors="replace")
         idx = end + 1
 
-        # Map
         end = data.index(b"\x00", idx)
         map_name = data[idx:end].decode("utf-8", errors="replace")
         idx = end + 1
 
-        # Folder
-        end = data.index(b"\x00", idx)
+        end = data.index(b"\x00", idx)  # folder
         idx = end + 1
-
-        # Game
-        end = data.index(b"\x00", idx)
+        end = data.index(b"\x00", idx)  # game
         idx = end + 1
+        idx += 2  # id (short)
 
-        # ID (short)
-        idx += 2
-
-        # Players, Max Players
         players = data[idx]
         idx += 1
         max_players = data[idx]
@@ -111,9 +121,13 @@ class ServerStatus:
     message: str | None = None
 
 
+# ── Console-Logging (MSM-eigene Log-Datei pro Server) ──────────────────────
+
+
 def _console_log_path(server_id: int) -> str:
-    """Gibt den Pfad zur MSM Console-Log-Datei zurueck.
-    Liegt zentral unter backend/logs/<id>/console.log — unabhaengig vom install_dir.
+    """Pfad zur MSM Console-Log-Datei. Liegt zentral unter backend/logs/<id>/console.log
+    — unabhängig vom install_dir, damit der Pfad auch dann existiert, wenn der
+    Bind-Mount geleert wird.
     """
     base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
     srv_dir = os.path.join(base_dir, str(server_id))
@@ -122,7 +136,6 @@ def _console_log_path(server_id: int) -> str:
 
 
 def _append_console_log(server_id: int, text: str) -> None:
-    """Appends text to the server console log."""
     try:
         log_path = _console_log_path(server_id)
         with open(log_path, "a", encoding="utf-8") as f:
@@ -132,207 +145,315 @@ def _append_console_log(server_id: int, text: str) -> None:
         logger.warning("Could not write console log for server %s: %s", server_id, e)
 
 
-def _run_install_with_logging(cmd: list[str], server_id: int, install_dir: str) -> None:
-    """Runs an install command in background, writes output to console log,
-    and updates server status on completion."""
-    log_path = _console_log_path(server_id)
-    returncode = -1
-    error_msg: str | None = None
-    try:
-        os.makedirs(install_dir, exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as log_file:
-            log_file.write(f"[MSM] Installation gestartet...\n")
-            log_file.write(f"[MSM] Befehl: {' '.join(cmd)}\n")
-            log_file.flush()
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
-            )
-            # Stream output line by line to log file (live)
-            for line in proc.stdout:
-                log_file.write(line)
-                log_file.flush()
-            proc.wait()
-            returncode = proc.returncode
-            if returncode == 0:
-                log_file.write(f"\n[MSM] Installation abgeschlossen.\n")
-            else:
-                log_file.write(f"\n[MSM] Installation fehlgeschlagen (exit code {returncode}).\n")
-            log_file.flush()
-    except Exception as e:
-        error_msg = str(e)
-        logger.warning("Install failed for server %s: %s", server_id, e)
-        try:
-            with open(log_path, "a", encoding="utf-8") as log_file:
-                log_file.write(f"\n[MSM] Installation Fehler: {e}\n")
-        except OSError:
-            pass
+# ── Container-Name ─────────────────────────────────────────────────────────
 
-    # Update server status in DB
-    try:
-        from database import SessionLocal
-        from models import Server
-        db = SessionLocal()
-        try:
-            srv = db.query(Server).filter(Server.id == server_id).first()
-            if srv:
-                if returncode == 0:
-                    srv.status = "stopped"
-                    srv.status_message = "Installation abgeschlossen"
-                elif error_msg:
-                    srv.status = "error"
-                    srv.status_message = f"Installation fehlgeschlagen: {error_msg}"
-                else:
-                    srv.status = "error"
-                    srv.status_message = f"Installation fehlgeschlagen (exit {returncode})"
-                db.commit()
-        finally:
-            db.close()
-    except Exception as e:
-        logger.warning("Could not update server status after install: %s", e)
+
+def container_name_for(server_id: int) -> str:
+    """Stabile, vorhersagbare Container-Bezeichnung pro Server."""
+    return f"msm-srv-{server_id}"
+
+
+# ── Bind-Mount-Layout ──────────────────────────────────────────────────────
+
+
+# Im Container wird das Server-Verzeichnis IMMER unter /data eingehängt.
+# Plugins bauen ihre Kommandos relativ zu /data.
+CONTAINER_DATA_DIR = "/data"
+
+
+def default_volume_binds(server) -> list[VolumeBind]:
+    """Standard-Bind: install_dir (Host) → /data (Container, RW)."""
+    return [VolumeBind(host_path=server.install_dir, container_path=CONTAINER_DATA_DIR, read_only=False)]
+
+
+# ── SteamCMD-Installer im ephemeren Container ──────────────────────────────
+
+
+# Kuratiertes, gepflegtes SteamCMD-Image. Eine Pin auf einen festen Tag erfolgt
+# in einer Folge-Phase (Phase 5 wird Image+Tag pro Plugin-Egg konfigurierbar).
+STEAMCMD_IMAGE = "cm2network/steamcmd:root"
+
+
+def run_steamcmd_install(
+    *,
+    server_id: int,
+    install_dir: str,
+    app_id: str,
+    extra_args: list[str] | None = None,
+) -> dict:
+    """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
+    SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
+
+    Schreibt strukturiertes Console-Log und gibt strukturiertes dict zurück.
+    """
+    os.makedirs(install_dir, exist_ok=True)
+
+    cmd: list[str] = [
+        "+force_install_dir", CONTAINER_DATA_DIR,
+        "+login", "anonymous",
+        "+app_update", app_id, "validate",
+    ]
+    if extra_args:
+        cmd.extend(extra_args)
+    cmd.extend(["+quit"])
+
+    _append_console_log(server_id, f"[MSM] SteamCMD startet für App {app_id} (Docker)\n")
+
+    uid, gid = docker_service.host_uid_gid()
+    result = docker_service.run_ephemeral(
+        image=STEAMCMD_IMAGE,
+        command=cmd,
+        volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
+        user=f"{uid}:{gid}",
+        timeout=3600,
+    )
+
+    if result["ok"]:
+        # SteamCMD-Output ins Console-Log spiegeln (ohne Stderr separat zu loggen — wir
+        # kombinieren bewusst, damit das UI eine vollständige Sicht hat)
+        out = (result.get("stdout") or "") + (result.get("stderr") or "")
+        _append_console_log(server_id, out)
+        _append_console_log(server_id, f"\n[MSM] SteamCMD abgeschlossen (App {app_id}).\n")
+    else:
+        _append_console_log(server_id, f"\n[MSM] SteamCMD fehlgeschlagen: {result['error']}\n")
+    return result
+
+
+def run_steamcmd_workshop_download(
+    *,
+    server_id: int,
+    install_dir: str,
+    workshop_app_id: str,
+    workshop_item_id: str,
+) -> dict:
+    """Lädt ein Workshop-Item via ephemerem SteamCMD-Container.
+
+    Intelligent: SteamCMD validiert und holt nur Deltas. Kein erzwungenes
+    Vollredownload — das übernimmt SteamCMD selbst, sofern lokale Files
+    existieren.
+    """
+    cmd: list[str] = [
+        "+force_install_dir", CONTAINER_DATA_DIR,
+        "+login", "anonymous",
+        "+workshop_download_item", workshop_app_id, workshop_item_id,
+        "+quit",
+    ]
+    _append_console_log(
+        server_id, f"[MSM] SteamCMD Workshop-Download: app={workshop_app_id} item={workshop_item_id}\n"
+    )
+    uid, gid = docker_service.host_uid_gid()
+    result = docker_service.run_ephemeral(
+        image=STEAMCMD_IMAGE,
+        command=cmd,
+        volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
+        user=f"{uid}:{gid}",
+        timeout=3600,
+    )
+    out = (result.get("stdout") or "") + (result.get("stderr") or "")
+    if out:
+        _append_console_log(server_id, out)
+    if not result["ok"]:
+        _append_console_log(
+            server_id, f"\n[MSM] Workshop-Download fehlgeschlagen: {result['error']}\n"
+        )
+    return result
+
+
+# ── Plugin-Basis ───────────────────────────────────────────────────────────
 
 
 class GamePlugin(ABC):
+    """Basisklasse für Game-Plugins.
+
+    Pflichtfelder:
+      - game_id, game_name, supports_mods
+      - docker_image: das Base-Image, in dem der Server läuft
+      - container_needs_tmpfs: wenn True, wird /tmp als tmpfs hinzugefügt
+
+    Pflichtmethoden:
+      - build_container_command, build_container_env, build_port_publishes,
+        get_config_schema, get_config_files, get_backup_paths, get_logs
+    """
+
     game_id: str = ""
     game_name: str = ""
     supports_mods: bool = False
 
+    # Docker-spezifisch — Pflicht für alle konkreten Plugins
+    docker_image: str = ""
+    container_needs_tmpfs: bool = True  # /tmp als tmpfs (read-only rootfs ist Default)
+    container_read_only_rootfs: bool = False  # Game-Binaries schreiben oft in WorkingDir → False
+
+    # ─ Setup / Lifecycle ─────────────────────────────────────────────────
+
     @abstractmethod
     def install(self, server) -> dict:
-        """Installiert den Server. Returns dict with 'message' key."""
+        """Installiert oder aktualisiert die Game-Binaries. Threading erlaubt."""
         ...
 
-    @abstractmethod
     def update(self, server) -> dict:
-        """Aktualisiert den Server."""
-        ...
+        """Standard-Update == frische Installation (SteamCMD validate macht es smart)."""
+        return self.install(server)
 
     @abstractmethod
+    def build_container_command(self, server) -> list[str]:
+        """Args, mit denen der Server im Container gestartet wird (ohne Image)."""
+        ...
+
+    def build_container_env(self, server) -> dict[str, str]:
+        """Default: keine zusätzlichen Env-Vars."""
+        return {}
+
+    @abstractmethod
+    def build_port_publishes(self, server) -> list[PortPublish]:
+        """Welche Ports werden veröffentlicht? (game/query/rcon)."""
+        ...
+
+    def build_volume_binds(self, server) -> list[VolumeBind]:
+        """Default: nur install_dir → /data."""
+        return default_volume_binds(server)
+
+    def container_workdir(self, server) -> str:
+        return CONTAINER_DATA_DIR
+
+    def container_tmpfs_paths(self, server) -> list[str]:
+        return ["/tmp"] if self.container_needs_tmpfs else []
+
+    # ─ Default Lifecycle (Docker) ────────────────────────────────────────
+
     def start(self, server) -> dict:
-        """Startet den Server-Prozess."""
-        ...
+        """Standard-Start: Container mit aktuellen Limits/Ports neu hochziehen."""
+        if not self.docker_image:
+            return {"error": "Plugin hat kein docker_image konfiguriert"}
+        if not docker_service.is_available():
+            return {"error": "Docker ist auf diesem Host nicht verfügbar"}
 
-    @abstractmethod
+        # Image bei Bedarf vorziehen — KISS, scheitert nicht hart bei Offline
+        pull_result = docker_service.pull(self.docker_image)
+        if not pull_result["ok"]:
+            _append_console_log(
+                server.id, f"[MSM] Hinweis: Pull für {self.docker_image} fehlgeschlagen, nutze lokales Image\n"
+            )
+
+        uid, gid = docker_service.host_uid_gid()
+        name = container_name_for(server.id)
+
+        result = docker_service.run_container(
+            name=name,
+            image=self.docker_image,
+            command=self.build_container_command(server),
+            env=self.build_container_env(server),
+            ports=self.build_port_publishes(server),
+            volumes=self.build_volume_binds(server),
+            cpu_limit_percent=server.cpu_limit_percent,
+            ram_limit_mb=server.ram_limit_mb,
+            user=f"{uid}:{gid}",
+            workdir=self.container_workdir(server),
+            read_only_rootfs=self.container_read_only_rootfs,
+            tmpfs_paths=self.container_tmpfs_paths(server),
+        )
+        if not result["ok"]:
+            _append_console_log(server.id, f"[MSM] Container-Start fehlgeschlagen: {result['error']}\n")
+            return {"error": result["error"]}
+
+        _append_console_log(server.id, f"[MSM] Container {name} gestartet\n")
+
+        # Optionaler Auto-Backup-Trigger (Fire-and-forget, lokaler Loopback)
+        try:
+            import requests
+            requests.post(f"http://127.0.0.1:8000/api/backups/{server.id}/auto", timeout=5)
+        except Exception:
+            pass
+
+        return {"message": "Server gestartet", "container": name}
+
     def stop(self, server) -> dict:
-        """Stoppt den Server-Prozess."""
-        ...
+        """Standard-Stop: Container graceful stoppen (30 s)."""
+        name = container_name_for(server.id)
+        result = docker_service.stop(name, timeout=30)
+        if not result["ok"]:
+            return {"error": result["error"]}
+        _append_console_log(server.id, f"[MSM] Container {name} gestoppt\n")
+        return {"message": "Server gestoppt", "container": name}
 
-    @abstractmethod
     def get_status(self, server) -> ServerStatus:
-        """Liefert aktuellen Server-Status."""
-        ...
+        """Liefert Live-Status aus Docker (Container-State + CPU/RAM via stats).
+        Players via A2S, sofern Query-Port gesetzt.
+        """
+        name = container_name_for(server.id)
+        state = docker_service.inspect_state(name)
+        if state is None:
+            return ServerStatus(status="stopped")
+
+        is_running = state["status"] == "running"
+        live_stats = docker_service.stats(name) if is_running else None
+
+        players_online: int | None = None
+        if is_running and server.query_port:
+            a2s = query_a2s_info("127.0.0.1", server.query_port)
+            if a2s:
+                players_online = a2s["players"]
+
+        msg = None
+        if state.get("oom_killed"):
+            msg = "Container wurde wegen RAM-Limit beendet (OOM)"
+
+        return ServerStatus(
+            status="running" if is_running else state["status"],
+            cpu_percent=(live_stats or {}).get("cpu_percent"),
+            ram_mb=(live_stats or {}).get("ram_mb"),
+            disk_mb=None,  # Disk wird zentral im Scheduler-Job ermittelt
+            uptime_seconds=None,
+            players_online=players_online,
+            message=msg,
+        )
+
+    # ─ Logs ──────────────────────────────────────────────────────────────
 
     @abstractmethod
     def get_logs(self, server, lines: int = 100) -> str:
-        """Liest die letzten N Zeilen aus dem Log."""
+        """Liest die game-spezifischen Logs (z. B. UE-/DayZ-Logfile im install_dir)."""
         ...
+
+    def get_console_log(self, server, lines: int = 200) -> str:
+        """MSM-Console-Log (Install-Output, MSM-Events) + Docker-Container-Logs."""
+        log_path = _console_log_path(server.id)
+        msm_part = ""
+        if os.path.exists(log_path):
+            try:
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    all_lines = f.readlines()
+                msm_part = "".join(all_lines[-lines:])
+            except Exception:
+                msm_part = ""
+        docker_part = docker_service.logs(container_name_for(server.id), lines=lines)
+        if not docker_part:
+            return msm_part
+        return msm_part + "\n--- container logs ---\n" + docker_part
+
+    # ─ Config ────────────────────────────────────────────────────────────
 
     @abstractmethod
     def get_config_schema(self) -> list[ConfigField]:
-        """Liefert die Config-Schema-Felder für dieses Spiel."""
         ...
 
     @abstractmethod
     def get_config_files(self) -> list[dict]:
-        """Liefert die editierbaren Config-Dateien."""
         ...
 
     @abstractmethod
     def get_backup_paths(self, server) -> list[str]:
-        """Liefert Pfade, die in Backups eingeschlossen werden sollen."""
         ...
 
-    def get_console_log(self, server, lines: int = 200) -> str:
-        """Reads the MSM console log (install output, system events)."""
-        log_path = _console_log_path(server.id)
-        if not os.path.exists(log_path):
-            return ""
-        try:
-            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                all_lines = f.readlines()
-            return "".join(all_lines[-lines:])
-        except Exception:
-            return ""
+    # ─ Mods ──────────────────────────────────────────────────────────────
 
     def install_mod(self, server, workshop_id: str) -> dict:
-        """Installs a single mod. Override in game-specific plugins."""
+        """Default: Plugins ohne Mod-Support liefern einen Fehler."""
+        if not self.supports_mods:
+            return {"error": "Mod-Installation nicht unterstützt"}
         return {"error": "Mod-Installation nicht implementiert"}
 
     def get_mod_support(self) -> dict | None:
-        """Liefert Mod-Metadaten, falls unterstützt."""
         if self.supports_mods:
             return {"workshop_id": None, "dependency_resolution": False, "required_tags": []}
         return None
-
-
-def build_systemd_unit(
-    name: str,
-    linux_user: str,
-    working_dir: str,
-    exec_start: str,
-    cpu_limit_percent: int | None = None,
-    ram_limit_mb: int | None = None,
-    disk_limit_gb: int | None = None,
-) -> str:
-    """Erzeugt eine systemd-Unit mit Resource-Limits und Security-Hardening.
-
-    Args:
-        name: Anzeigename des Servers
-        linux_user: Linux-User unter dem der Server läuft
-        working_dir: Arbeitsverzeichnis
-        exec_start: ExecStart-Kommando
-        cpu_limit_percent: Max CPU-Usage (10-100). None = kein Limit.
-        ram_limit_mb: Max RAM in MB. None = kein Limit.
-        disk_limit_gb: Max Disk in GB. None = kein Limit.
-          Hinweis: systemd kann kein hartes Disk-Limit. Wir nutzen
-          ReadWritePaths + LimitNOFILE als Defense-in-Depth.
-    """
-    lines: list[str] = [
-        "[Unit]",
-        f"Description=MSM Server {name}",
-        "After=network.target",
-        "",
-        "[Service]",
-        "Type=simple",
-        f"User={linux_user}",
-        f"WorkingDirectory={working_dir}",
-        f"ExecStart={exec_start}",
-        "Restart=on-failure",
-        "RestartSec=10",
-        "StandardOutput=journal",
-        "StandardError=journal",
-        "",
-        "# Security Hardening",
-        "PrivateTmp=true",
-        "ProtectSystem=strict",
-        "ProtectHome=true",
-        f"ReadWritePaths={working_dir}",
-        "TasksMax=100",
-        "LimitNOFILE=4096",
-    ]
-
-    if cpu_limit_percent:
-        lines.append(f"CPUQuota={cpu_limit_percent}%")
-
-    if ram_limit_mb:
-        lines.append(f"MemoryMax={ram_limit_mb}M")
-        lines.append("MemorySwapMax=0")
-        # OOM-Killer priorisiert den Game-Server niedriger, damit der Host stabil bleibt
-        lines.append("OOMScoreAdjust=500")
-
-    if disk_limit_gb:
-        # systemd kann kein hartes Disk-Limit. Wir dokumentieren es
-        # und setzen zusätzliche Einschränkungen.
-        lines.append(f"# Disk-Limit: {disk_limit_gb}GB (Monitoring via Panel)")
-        # Verhindert, dass der Prozess Dateien außerhalb seines Verzeichnisses anlegt
-        lines.append("ProtectKernelTunables=true")
-        lines.append("ProtectKernelModules=true")
-        lines.append("ProtectControlGroups=true")
-
-    lines.extend([
-        "",
-        "[Install]",
-        "WantedBy=multi-user.target",
-    ])
-
-    return "\n".join(lines)
