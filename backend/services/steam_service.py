@@ -5,6 +5,7 @@ Uses Steam Web API with optional key. Falls back to community search if no key.
 Caches responses to respect rate limits.
 """
 
+import json
 import httpx
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -86,13 +87,12 @@ class SteamService:
             return cached
         
         try:
-            params = {
-                'key': self.api_key,
-                'appid': appid,
-                'search_text': query,
+            query_data = {
+                'query_type': 3 if query else 0,
                 'page': page,
                 'numperpage': per_page,
-                'query_type': 3 if query else 0,  # text search or ranked by vote
+                'appid': int(appid),
+                'search_text': query,
                 'return_short_description': True,
                 'return_tags': True,
                 'return_previews': True,
@@ -100,9 +100,13 @@ class SteamService:
                 'return_metadata': True,
             }
             if required_tags:
-                for i, tag in enumerate(required_tags):
-                    params[f'requiredtags[{i}]'] = tag
-            
+                query_data['requiredtags'] = ','.join(required_tags)
+
+            params = {
+                'key': self.api_key,
+                'input_json': json.dumps(query_data, separators=(',', ':')),
+            }
+
             response = await self.client.get(
                 f"{self.API_BASE}/IPublishedFileService/QueryFiles/v1/",
                 params=params
@@ -135,12 +139,16 @@ class SteamService:
             return cached
         
         try:
-            params = {
-                'key': self.api_key,
-                'publishedfileids[0]': publishedfileid,
+            query_data = {
+                'publishedfileids[0]': int(publishedfileid),
                 'includevotes': True,
             }
-            
+
+            params = {
+                'key': self.api_key,
+                'input_json': json.dumps(query_data, separators=(',', ':')),
+            }
+
             response = await self.client.get(
                 f"{self.API_BASE}/IPublishedFileService/GetDetails/v1/",
                 params=params
@@ -203,19 +211,24 @@ class SteamService:
             return cached
         
         try:
-            params = {
-                'key': self.api_key,
-                'appid': appid,
-                'numperpage': limit,
+            query_data = {
                 'query_type': 1,  # k_PublishedFileQueryType_RankedByTrend
+                'page': 1,
+                'numperpage': limit,
+                'appid': int(appid),
                 'return_short_description': True,
                 'return_tags': True,
                 'return_previews': True,
+                'days': 7,
             }
             if required_tags:
-                for i, tag in enumerate(required_tags):
-                    params[f'requiredtags[{i}]'] = tag
-            
+                query_data['requiredtags'] = ','.join(required_tags)
+
+            params = {
+                'key': self.api_key,
+                'input_json': json.dumps(query_data, separators=(',', ':')),
+            }
+
             response = await self.client.get(
                 f"{self.API_BASE}/IPublishedFileService/QueryFiles/v1/",
                 params=params
