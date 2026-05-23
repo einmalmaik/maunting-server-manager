@@ -157,3 +157,62 @@ class TestEphemeralRun:
         assert "--rm" in args
         assert "--cap-drop=ALL" in args
         assert "+app_update" in args[-1] or any("+app_update" in a for a in args)
+
+    def test_entrypoint_override_lands_before_image(self):
+        """--entrypoint MUSS vor dem Image stehen, sonst override't Docker den CMD."""
+        with patch.object(docker_service, "_check_docker", return_value=True), \
+             patch.object(docker_service, "_run_docker") as mock_run:
+            mock_run.return_value = {"ok": True, "stdout": "", "stderr": ""}
+            docker_service.run_ephemeral(
+                image="cm2network/steamcmd:root",
+                command=["+quit"],
+                volumes=[],
+                env={"HOME": "/data"},
+                user="1000:1000",
+                workdir="/home/steam/steamcmd",
+                entrypoint="/home/steam/steamcmd/steamcmd.sh",
+            )
+        args = mock_run.call_args.args[0]
+        # --entrypoint <path> als getrennte Argumente (Docker-Syntax)
+        entry_idx = args.index("--entrypoint")
+        assert args[entry_idx + 1] == "/home/steam/steamcmd/steamcmd.sh"
+        # MUSS vor dem Image stehen
+        image_idx = args.index("cm2network/steamcmd:root")
+        assert entry_idx < image_idx
+        # HOME-Env ist drin
+        assert any(a == "HOME=/data" for a in args)
+
+
+class TestSteamCMDHelpers:
+    """Stellt sicher, dass run_steamcmd_install/workshop_download den Entrypoint
+    explizit setzen — sonst krachen die Calls beim Bug, den der User gesehen hat
+    (`exec: \"+force_install_dir\": executable file not found`)."""
+
+    def test_steamcmd_install_uses_entrypoint_and_home(self, tmp_path):
+        from games.base import STEAMCMD_ENTRYPOINT, STEAMCMD_WORKDIR, run_steamcmd_install
+
+        with patch("games.base.docker_service.run_ephemeral") as mock_eph:
+            mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
+            run_steamcmd_install(server_id=1, install_dir=str(tmp_path), app_id="223350")
+
+        kwargs = mock_eph.call_args.kwargs
+        assert kwargs["entrypoint"] == STEAMCMD_ENTRYPOINT
+        assert kwargs["workdir"] == STEAMCMD_WORKDIR
+        assert kwargs["env"].get("HOME") == "/data"
+        # Command beginnt mit den Steam-Args, nicht mit dem Entrypoint
+        assert kwargs["command"][0] == "+force_install_dir"
+
+    def test_workshop_download_uses_entrypoint_and_home(self, tmp_path):
+        from games.base import STEAMCMD_ENTRYPOINT, STEAMCMD_WORKDIR, run_steamcmd_workshop_download
+
+        with patch("games.base.docker_service.run_ephemeral") as mock_eph:
+            mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
+            run_steamcmd_workshop_download(
+                server_id=1, install_dir=str(tmp_path), workshop_app_id="221100", workshop_item_id="12345"
+            )
+
+        kwargs = mock_eph.call_args.kwargs
+        assert kwargs["entrypoint"] == STEAMCMD_ENTRYPOINT
+        assert kwargs["workdir"] == STEAMCMD_WORKDIR
+        assert kwargs["env"].get("HOME") == "/data"
+        assert "+workshop_download_item" in kwargs["command"]
