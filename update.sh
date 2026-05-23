@@ -288,6 +288,15 @@ if ! su - msm -c "
     err "Frontend-Build fehlgeschlagen. Update abgebrochen."
 fi
 
+# ── Panel-Service reparieren: NoNewPrivileges entfernen (blockiert sudo) ──
+PANEL_UNIT="/etc/systemd/system/msm-panel.service"
+if [[ -f "$PANEL_UNIT" ]] && grep -q 'NoNewPrivileges=true' "$PANEL_UNIT"; then
+    log "Entferne NoNewPrivileges aus Panel-Service (inkompatibel mit sudo)..."
+    sed -i '/^NoNewPrivileges=true$/d' "$PANEL_UNIT"
+    systemctl daemon-reload
+    ok "Panel-Service aktualisiert"
+fi
+
 # ── Service neustarten ──
 log "Starte Services neu..."
 systemctl restart msm-panel.service
