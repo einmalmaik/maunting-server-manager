@@ -303,7 +303,6 @@ def build_systemd_unit(
         "StandardError=journal",
         "",
         "# Security Hardening",
-        "NoNewPrivileges=true",
         "PrivateTmp=true",
         "ProtectSystem=strict",
         "ProtectHome=true",
