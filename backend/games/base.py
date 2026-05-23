@@ -1,4 +1,5 @@
 import os
+import socket
 import threading
 import subprocess
 import logging
@@ -7,6 +8,85 @@ from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def query_a2s_info(host: str, port: int, timeout: float = 3.0) -> dict | None:
+    """Sends a Steam A2S_INFO query and returns player count + server info.
+
+    Returns dict with 'players', 'max_players', 'server_name', 'map' or None on failure.
+    Protocol: https://developer.valvesoftware.com/wiki/Server_queries#A2S_INFO
+    """
+    request = b"\xFF\xFF\xFF\xFF\x54Source Engine Query\x00"
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        sock.sendto(request, (host, port))
+        data, _ = sock.recvfrom(4096)
+        sock.close()
+
+        if len(data) < 6:
+            return None
+
+        # Skip 4-byte header (0xFFFFFFFF)
+        idx = 4
+        header = data[idx]
+        idx += 1
+
+        if header == 0x41:
+            # Challenge response — resend with challenge
+            challenge = data[5:9]
+            request2 = b"\xFF\xFF\xFF\xFF\x54Source Engine Query\x00" + challenge
+            sock2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock2.settimeout(timeout)
+            sock2.sendto(request2, (host, port))
+            data, _ = sock2.recvfrom(4096)
+            sock2.close()
+            if len(data) < 6:
+                return None
+            idx = 4
+            header = data[idx]
+            idx += 1
+
+        if header != 0x49:
+            return None
+
+        # Protocol version
+        idx += 1
+
+        # Server name (null-terminated string)
+        end = data.index(b"\x00", idx)
+        server_name = data[idx:end].decode("utf-8", errors="replace")
+        idx = end + 1
+
+        # Map
+        end = data.index(b"\x00", idx)
+        map_name = data[idx:end].decode("utf-8", errors="replace")
+        idx = end + 1
+
+        # Folder
+        end = data.index(b"\x00", idx)
+        idx = end + 1
+
+        # Game
+        end = data.index(b"\x00", idx)
+        idx = end + 1
+
+        # ID (short)
+        idx += 2
+
+        # Players, Max Players
+        players = data[idx]
+        idx += 1
+        max_players = data[idx]
+
+        return {
+            "players": players,
+            "max_players": max_players,
+            "server_name": server_name,
+            "map": map_name,
+        }
+    except Exception:
+        return None
 
 
 @dataclass
@@ -31,23 +111,42 @@ class ServerStatus:
     message: str | None = None
 
 
+def _append_console_log(install_dir: str, text: str) -> None:
+    """Appends text to msm_console.log. Creates dir and file if needed."""
+    try:
+        os.makedirs(install_dir, exist_ok=True)
+        log_path = os.path.join(install_dir, "msm_console.log")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+    except OSError as e:
+        logger.warning("Could not write console log at %s: %s", install_dir, e)
+
+
 def _run_install_with_logging(cmd: list[str], server_id: int, install_dir: str) -> None:
     """Runs an install command in background, writes output to msm_console.log,
     and updates server status on completion."""
     log_path = os.path.join(install_dir, "msm_console.log")
     os.makedirs(install_dir, exist_ok=True)
+    returncode = -1
     try:
         with open(log_path, "a", encoding="utf-8") as log_file:
             log_file.write(f"[MSM] Installation gestartet...\n")
+            log_file.write(f"[MSM] Befehl: {' '.join(cmd)}\n")
             log_file.flush()
             proc = subprocess.Popen(
-                cmd, stdout=log_file, stderr=subprocess.STDOUT, text=True
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
             )
+            # Stream output line by line to log file (live)
+            for line in proc.stdout:
+                log_file.write(line)
+                log_file.flush()
             proc.wait()
-            if proc.returncode == 0:
+            returncode = proc.returncode
+            if returncode == 0:
                 log_file.write(f"\n[MSM] Installation abgeschlossen.\n")
             else:
-                log_file.write(f"\n[MSM] Installation fehlgeschlagen (exit code {proc.returncode}).\n")
+                log_file.write(f"\n[MSM] Installation fehlgeschlagen (exit code {returncode}).\n")
             log_file.flush()
     except Exception as e:
         logger.warning("Install failed for server %s: %s", server_id, e)
@@ -65,8 +164,8 @@ def _run_install_with_logging(cmd: list[str], server_id: int, install_dir: str) 
         try:
             srv = db.query(Server).filter(Server.id == server_id).first()
             if srv:
-                srv.status = "stopped" if proc.returncode == 0 else "error"
-                srv.status_message = "Installation abgeschlossen" if proc.returncode == 0 else f"Installation fehlgeschlagen (exit {proc.returncode})"
+                srv.status = "stopped" if returncode == 0 else "error"
+                srv.status_message = "Installation abgeschlossen" if returncode == 0 else f"Installation fehlgeschlagen (exit {returncode})"
                 db.commit()
         finally:
             db.close()

@@ -35,7 +35,8 @@
     "install": "Install",
     "deleted": "Server deleted",
     "confirmDelete": "Really delete this server? All data will be permanently removed.",
-    "createDescription": "Create a new game server."
+    "createDescription": "Create a new game server.",
+    "fileManager": "File Manager"
   },
   "users": {
     "subtitle": "Manage users and permissions",
@@ -167,6 +168,22 @@
     "removeFailed": "Removal failed",
     "updateSettingFailed": "Update setting failed",
     "reorderFailed": "Reordering failed"
+  },
+  "files": {
+    "title": "File Manager",
+    "subtitle": "Browse and edit server files",
+    "upload": "Upload",
+    "uploaded": "uploaded",
+    "newFolder": "New Folder",
+    "folderName": "Folder name",
+    "saved": "File saved",
+    "deleted": "Deleted",
+    "extracted": "Archive extracted",
+    "empty": "Directory is empty",
+    "selectFile": "Select a file to edit",
+    "dropHere": "Drop files here to upload",
+    "confirmDeleteFile": "Really delete this file?",
+    "confirmDeleteDir": "Really delete this directory and all contents?"
   },
   "backups": {
     "subtitle": "Backup Management",

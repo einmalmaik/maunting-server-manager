@@ -1,4 +1,4 @@
-from .base import GamePlugin, ServerStatus, ConfigField, _run_install_with_logging
+from .base import GamePlugin, ServerStatus, ConfigField, _run_install_with_logging, _append_console_log, query_a2s_info
 from .conan_exiles_ue5.plugin import ConanExilesUE5Plugin
 from .dayz.plugin import DayZPlugin
 
