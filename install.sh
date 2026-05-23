@@ -951,41 +951,46 @@ if $RUN_CADDY_SETUP; then
 
     CADDY_CONFIG="/etc/caddy/Caddyfile"
     CADDY_CONFD="/etc/caddy/conf.d"
-    MSM_CADDY_FILE="$CADDY_CONFD/msm.conf"
-
     mkdir -p /etc/caddy "$CADDY_CONFD"
 
+    # ── Extension erkennen: .caddy oder .conf? ──
+    # Prüfe ob existierende Caddyfile bereits conf.d importiert
+    if grep -qE "^import\s+${CADDY_CONFD}/\*\.[a-z]+" "$CADDY_CONFIG" 2>/dev/null; then
+        # Bestehende Extension auslesen (z.B. *.caddy → caddy, *.conf → conf)
+        CADDY_EXT=$(grep -E "^import\s+${CADDY_CONFD}/\*\.[a-z]+" "$CADDY_CONFIG" | head -1 | sed -E 's/.*\*\.([a-z]+).*/\1/')
+    else
+        CADDY_EXT="conf"  # Default
+    fi
+    MSM_CADDY_FILE="$CADDY_CONFD/msm.$CADDY_EXT"
+
     # ═══════════════════════════════════════════════════════════════
-    # Caddyfile-Strategie: Niemals eine existierende Caddyfile
-    # überschreiben. MSM schreibt nur in seine eigene conf.d-Datei.
+    # Caddyfile: import-Zeile nur hinzufügen, wenn noch kein conf.d-Import existiert
     # ═══════════════════════════════════════════════════════════════
-    if ! grep -qE "^import\s+${CADDY_CONFD}/\*\.conf" "$CADDY_CONFIG" 2>/dev/null; then
+    if ! grep -qE "^import\s+${CADDY_CONFD}/\*\.[a-z]+" "$CADDY_CONFIG" 2>/dev/null; then
         if [[ ! -s "$CADDY_CONFIG" ]]; then
-            # Caddyfile leer oder nicht vorhanden → Default schreiben
             cat > "$CADDY_CONFIG" <<EOF
 # Caddyfile
 # Weitere Sites können hier direkt oder unter $CADDY_CONFD/ konfiguriert werden.
 
-import $CADDY_CONFD/*.conf
+import $CADDY_CONFD/*.${CADDY_EXT}
 EOF
         else
-            # Caddyfile hat bereits Inhalt → import sicher am Ende anhängen
             echo "" >> "$CADDY_CONFIG"
             echo "# MSM Panel — additional site configurations" >> "$CADDY_CONFIG"
-            echo "import $CADDY_CONFD/*.conf" >> "$CADDY_CONFIG"
+            echo "import $CADDY_CONFD/*.${CADDY_EXT}" >> "$CADDY_CONFIG"
         fi
     fi
 
     # ═══════════════════════════════════════════════════════════════
-    # Domain-Conflict-Check: Domain darf nicht doppelt vergeben sein.
-    # Caddy crasht bei zwei Site-Blöcken mit derselben Domain.
+    # Domain-Conflict-Check: scannt ALLE Dateien in conf.d
+    # (egal ob .caddy, .conf, .txt — Caddy lädt alles via import *)
     # ═══════════════════════════════════════════════════════════════
     DOMAIN_CONFLICT=false
     if [[ -n "$DOMAIN" ]]; then
-        # Prüfe alle conf.d/*.conf Dateien (außer msm.conf) auf die Domain
-        for conf_file in "$CADDY_CONFD"/*.conf; do
+        for conf_file in "$CADDY_CONFD"/*; do
             [[ -f "$conf_file" ]] || continue
-            [[ "$(basename "$conf_file")" == "msm.conf" ]] && continue
+            # MSM-eigene Datei darf überschrieben werden
+            [[ "$(basename "$conf_file")" == "msm.$CADDY_EXT" ]] && continue
             if grep -qE "(^|\s)${DOMAIN}(\s|\{)" "$conf_file" 2>/dev/null; then
                 warn "Domain '$DOMAIN' wird bereits in $(basename "$conf_file") verwendet!"
                 warn "Bitte eine andere Domain wählen oder die bestehende Config bereinigen."
