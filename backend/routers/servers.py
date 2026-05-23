@@ -14,6 +14,8 @@ from services.port_allocation_service import allocate_ports
 from services.firewall_service import open_ports, close_ports
 from services import EmailService
 
+_SYSTEM_ENV = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
 
@@ -42,20 +44,20 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     try:
         subprocess.run(
             ["sudo", "useradd", "-r", "-m", "-s", "/usr/sbin/nologin", "-d", install_dir, linux_user],
-            check=True, capture_output=True,
+            check=True, capture_output=True, env=_SYSTEM_ENV
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         # User existiert vielleicht schon — sicherstellen dass er nologin hat
         try:
-            subprocess.run(["sudo", "usermod", "-s", "/usr/sbin/nologin", linux_user], check=False, capture_output=True)
+            subprocess.run(["sudo", "usermod", "-s", "/usr/sbin/nologin", linux_user], check=False, capture_output=True, env=_SYSTEM_ENV)
         except FileNotFoundError:
             pass
 
     # Verzeichnis anlegen und Rechte setzen
     try:
         os.makedirs(install_dir, exist_ok=True)
-        subprocess.run(["sudo", "chown", f"{linux_user}:{linux_user}", install_dir], check=False, capture_output=True)
-        subprocess.run(["sudo", "chmod", "750", install_dir], check=False, capture_output=True)
+        subprocess.run(["sudo", "chown", f"{linux_user}:{linux_user}", install_dir], check=False, capture_output=True, env=_SYSTEM_ENV)
+        subprocess.run(["sudo", "chmod", "750", install_dir], check=False, capture_output=True, env=_SYSTEM_ENV)
     except OSError:
         pass
 
@@ -177,7 +179,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             try:
                 result = subprocess.run(
                     ["sudo", "systemctl", "is-active", f"msm-{server.linux_user}.service"],
-                    capture_output=True, text=True, timeout=5,
+                    capture_output=True, text=True, timeout=5, env=_SYSTEM_ENV
                 )
                 was_running = result.stdout.strip() == "active"
             except Exception:
@@ -201,11 +203,11 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     # systemd-Unit stoppen und entfernen (nur auf Linux)
     unit_name = f"msm-{server.linux_user}.service"
     try:
-        subprocess.run(["sudo", "systemctl", "stop", unit_name], check=False, capture_output=True)
-        subprocess.run(["sudo", "systemctl", "disable", unit_name], check=False, capture_output=True)
+        subprocess.run(["sudo", "systemctl", "stop", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
+        subprocess.run(["sudo", "systemctl", "disable", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
         unit_path = f"/etc/systemd/system/{unit_name}"
-        subprocess.run(["sudo", "rm", "-f", unit_path], check=False, capture_output=True)
-        subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True)
+        subprocess.run(["sudo", "rm", "-f", unit_path], check=False, capture_output=True, env=_SYSTEM_ENV)
+        subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True, env=_SYSTEM_ENV)
     except (FileNotFoundError, OSError):
         pass
 
@@ -218,7 +220,7 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
 
     # Linux-User und Home-Verzeichnis entfernen (nur auf Linux)
     try:
-        subprocess.run(["sudo", "userdel", "-r", server.linux_user], check=False, capture_output=True)
+        subprocess.run(["sudo", "userdel", "-r", server.linux_user], check=False, capture_output=True, env=_SYSTEM_ENV)
     except (FileNotFoundError, OSError):
         pass
 

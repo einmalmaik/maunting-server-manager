@@ -6,6 +6,8 @@ import threading
 from config import settings
 from games.base import GamePlugin, ServerStatus, ConfigField, build_systemd_unit, _run_install_with_logging, _append_console_log, query_a2s_info
 
+_SYSTEM_ENV = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+
 
 class DayZPlugin(GamePlugin):
     """DayZ Linux Dedicated Server Plugin — Linux native.
@@ -98,14 +100,18 @@ class DayZPlugin(GamePlugin):
         try:
             subprocess.run(
                 ["sudo", "tee", unit_path],
-                input=unit_content, capture_output=True, text=True, check=True
+                input=unit_content, capture_output=True, text=True, check=True,
+                env=_SYSTEM_ENV
             )
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             return {"error": f"Konnte systemd-Unit nicht schreiben: {e}"}
 
-        subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True)
-        subprocess.run(["sudo", "systemctl", "enable", unit_name], check=False, capture_output=True)
-        subprocess.run(["sudo", "systemctl", "start", unit_name], check=False, capture_output=True)
+        try:
+            subprocess.run(["sudo", "systemctl", "daemon-reload"], check=False, capture_output=True, env=_SYSTEM_ENV)
+            subprocess.run(["sudo", "systemctl", "enable", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
+            subprocess.run(["sudo", "systemctl", "start", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
+        except FileNotFoundError as e:
+            return {"error": f"sudo nicht gefunden: {e}"}
 
         # Auto-Backup nach Start auslösen (fire-and-forget)
         try:
@@ -118,7 +124,7 @@ class DayZPlugin(GamePlugin):
 
     def stop(self, server) -> dict:
         unit_name = f"msm-{server.linux_user}.service"
-        subprocess.run(["sudo", "systemctl", "stop", unit_name], check=False, capture_output=True)
+        subprocess.run(["sudo", "systemctl", "stop", unit_name], check=False, capture_output=True, env=_SYSTEM_ENV)
         return {"message": "Server gestoppt", "unit": unit_name}
 
     def get_status(self, server) -> ServerStatus:
@@ -126,7 +132,8 @@ class DayZPlugin(GamePlugin):
         try:
             result = subprocess.run(
                 ["sudo", "systemctl", "is-active", unit_name],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=5,
+                env=_SYSTEM_ENV
             )
             active = result.stdout.strip() == "active"
         except Exception:
