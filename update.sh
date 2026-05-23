@@ -195,8 +195,8 @@ if [[ "$UPDATE_MODE" == "git" ]]; then
         git reset --hard "$ROLLBACK_SHA" 2>/dev/null || true
         exit 1
     }
-    # Schmutzige Dateien entfernen (z.B. generierte dist/)
-    git clean -fd -e backend/venv -e frontend/node_modules 2>/dev/null || true
+    # Alte Build-Artefakte entfernen (nur dist/, keine Server-Daten!)
+    rm -rf frontend/dist 2>/dev/null || true
 elif [[ -d ".git" ]]; then
     log "Aktualisiere via Git checkout..."
     git fetch origin --tags
