@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import get_db
 from dependencies import get_current_owner, verify_csrf
-from schemas.panel_settings import PanelSettingsResponse, PanelSettingsUpdate, TestEmailRequest, ResendKeyRequest
+from schemas.panel_settings import PanelSettingsResponse, PanelSettingsUpdate, TestEmailRequest, ResendKeyRequest, SteamApiKeyRequest
 from services.panel_settings_service import PanelSettingsService
 from services.email_service import EmailService
 
@@ -31,6 +31,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(get_current_owner)) ->
     Passwoerter und API-Keys werden maskiert zurueckgegeben.
     """
     all_db = PanelSettingsService.get_all()
+    steam_key = settings.steam_api_key or os.getenv("STEAM_API_KEY", "")
     return {
         "panel_url": all_db.get("panel_url", ""),
         "smtp_host": all_db.get("smtp_host", ""),
@@ -43,6 +44,8 @@ def get_settings(db: Session = Depends(get_db), _=Depends(get_current_owner)) ->
         "default_language": all_db.get("default_language", "de"),
         "email_configured": EmailService.is_configured(),
         "email_provider": EmailService._get_provider(),
+        "steam_api_key": _mask_secret(steam_key),
+        "steam_api_configured": bool(steam_key),
     }
 
 
@@ -159,3 +162,53 @@ def update_resend_key(
     os.environ["MSM_RESEND_API_KEY"] = req.resend_api_key
 
     return {"message": "Resend API-Key gespeichert"}
+
+
+@router.post("/steam-key", status_code=200)
+def update_steam_key(
+    req: SteamApiKeyRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_owner),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Stores the Steam Web API key securely in .env."""
+    key = req.steam_api_key.strip()
+    if not key or len(key) < 10:
+        raise HTTPException(status_code=400, detail="Ungueltiger Steam API-Key")
+
+    try:
+        _update_env_file("STEAM_API_KEY", key)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
+
+    # Update in-memory for immediate effect
+    settings.__dict__["steam_api_key"] = key
+    os.environ["STEAM_API_KEY"] = key
+
+    return {"message": "Steam API-Key gespeichert"}
+
+
+@router.post("/steam-key/test", status_code=200)
+async def test_steam_key(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_owner),
+) -> dict:
+    """Tests whether the configured Steam API key is valid."""
+    import httpx
+
+    key = settings.steam_api_key or os.getenv("STEAM_API_KEY", "")
+    if not key:
+        raise HTTPException(status_code=400, detail="Kein Steam API-Key konfiguriert")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.steampowered.com/ISteamWebAPIUtil/GetSupportedAPIList/v1/",
+                params={"key": key},
+            )
+            if resp.status_code == 200:
+                return {"message": "Steam API-Key ist gueltig", "valid": True}
+            else:
+                return {"message": "Steam API-Key ist ungueltig", "valid": False}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Test fehlgeschlagen: {e}")

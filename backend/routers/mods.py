@@ -5,6 +5,7 @@ from database import get_db
 from models import Mod, Server, Permission, User
 from schemas import ModResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
+from games import get_plugin
 
 router = APIRouter(prefix="/api/mods", tags=["mods"])
 
@@ -25,6 +26,10 @@ def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db:
     if existing:
         raise HTTPException(status_code=400, detail="Mod bereits abonniert")
 
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
     max_order = db.query(Mod).filter(Mod.server_id == server_id).count()
     mod = Mod(
         server_id=server_id,
@@ -36,6 +41,12 @@ def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db:
     db.add(mod)
     db.commit()
     db.refresh(mod)
+
+    # Mod via SteamCMD im Hintergrund installieren
+    plugin = get_plugin(server.game_type)
+    if plugin and plugin.supports_mods:
+        plugin.install_mod(server, workshop_id)
+
     return mod
 
 

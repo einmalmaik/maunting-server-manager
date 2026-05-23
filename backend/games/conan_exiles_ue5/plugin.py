@@ -1,8 +1,9 @@
 import os
 import subprocess
+import threading
 
 from config import settings
-from games.base import GamePlugin, ServerStatus, ConfigField, build_systemd_unit
+from games.base import GamePlugin, ServerStatus, ConfigField, build_systemd_unit, _run_install_with_logging
 
 
 class ConanExilesUE5Plugin(GamePlugin):
@@ -54,8 +55,13 @@ class ConanExilesUE5Plugin(GamePlugin):
             "+app_update", self.APP_ID,
             "+quit",
         ]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        return {"pid": proc.pid, "message": "Installation gestartet"}
+        thread = threading.Thread(
+            target=_run_install_with_logging,
+            args=(cmd, server.id, server.install_dir),
+            daemon=True,
+        )
+        thread.start()
+        return {"message": "Installation gestartet"}
 
     def update(self, server) -> dict:
         return self.install(server)
@@ -148,6 +154,22 @@ class ConanExilesUE5Plugin(GamePlugin):
         return [
             os.path.join(server.install_dir, "ConanSandbox", "Saved"),
         ]
+
+    def install_mod(self, server, workshop_id: str) -> dict:
+        cmd = [
+            settings.steamcmd_path,
+            "+force_install_dir", server.install_dir,
+            "+login", "anonymous",
+            "+workshop_download_item", self.WORKSHOP_ID, workshop_id,
+            "+quit",
+        ]
+        thread = threading.Thread(
+            target=_run_install_with_logging,
+            args=(cmd, server.id, server.install_dir),
+            daemon=True,
+        )
+        thread.start()
+        return {"message": f"Mod {workshop_id} wird installiert"}
 
     def get_mod_support(self) -> dict | None:
         return {

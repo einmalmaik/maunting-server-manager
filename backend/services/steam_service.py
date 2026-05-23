@@ -35,7 +35,8 @@ class SteamService:
     COMMUNITY_BASE = "https://steamcommunity.com"
     
     def __init__(self):
-        self.api_key = os.getenv("STEAM_API_KEY", "")
+        from config import settings as app_settings
+        self.api_key = app_settings.steam_api_key or os.getenv("STEAM_API_KEY", "")
         self.client = httpx.AsyncClient(
             timeout=30.0,
             headers={
@@ -235,9 +236,13 @@ _steam_service: Optional[SteamService] = None
 
 
 async def get_steam_service() -> SteamService:
-    """Get or create Steam service instance."""
+    """Get or create Steam service instance. Recreates if API key changed."""
     global _steam_service
-    if _steam_service is None:
+    from config import settings as app_settings
+    current_key = app_settings.steam_api_key or os.getenv("STEAM_API_KEY", "")
+    if _steam_service is None or _steam_service.api_key != current_key:
+        if _steam_service:
+            await _steam_service.close()
         _steam_service = SteamService()
     return _steam_service
 

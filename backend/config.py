@@ -42,6 +42,7 @@ class Settings(BaseSettings):
 
     # Steam
     steamcmd_path: str = "/usr/games/steamcmd"
+    steam_api_key: str = ""
 
     # Auto-Update (GitHub Releases)
     github_owner: str = "einmalmaik"

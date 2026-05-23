@@ -1,4 +1,4 @@
-from .base import GamePlugin, ServerStatus, ConfigField
+from .base import GamePlugin, ServerStatus, ConfigField, _run_install_with_logging
 from .conan_exiles_ue5.plugin import ConanExilesUE5Plugin
 from .dayz.plugin import DayZPlugin
 
@@ -15,4 +15,4 @@ def get_plugin(game_type: str) -> GamePlugin | None:
     return None
 
 
-__all__ = ["GamePlugin", "ServerStatus", "ConfigField", "get_plugin", "PLUGINS"]
+__all__ = ["GamePlugin", "ServerStatus", "ConfigField", "get_plugin", "PLUGINS", "_run_install_with_logging"]

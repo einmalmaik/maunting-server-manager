@@ -13,6 +13,8 @@ class PanelSettingsResponse(BaseModel):
     default_language: str = "de"
     email_configured: bool = False
     email_provider: str = "none"
+    steam_api_key: str = ""
+    steam_api_configured: bool = False
 
 
 class PanelSettingsUpdate(BaseModel):
@@ -33,3 +35,7 @@ class TestEmailRequest(BaseModel):
 
 class ResendKeyRequest(BaseModel):
     resend_api_key: str
+
+
+class SteamApiKeyRequest(BaseModel):
+    steam_api_key: str
