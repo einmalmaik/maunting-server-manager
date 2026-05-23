@@ -1122,7 +1122,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/msm/backend /opt/msm/servers
+# /opt/msm existiert immer (Home des msm-Users) → kein NAMESPACE-Crash
+ReadWritePaths=/opt/msm
 
 [Install]
 WantedBy=multi-user.target

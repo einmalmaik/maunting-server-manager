@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +48,7 @@ def auth_rate_limit(request: Request) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    os.makedirs(settings.servers_dir, exist_ok=True)
     Base.metadata.create_all(bind=engine)
 
     # Migration: fehlende Spalten nachträglich hinzufügen
