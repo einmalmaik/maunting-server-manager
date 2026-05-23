@@ -100,7 +100,7 @@ class SteamService:
                 'return_metadata': True,
             }
             if required_tags:
-                query_data['requiredtags'] = ','.join(required_tags)
+                query_data['requiredtags'] = required_tags
 
             params = {
                 'key': self.api_key,
@@ -242,7 +242,7 @@ class SteamService:
             if sort == "trending":
                 query_data['days'] = 7
             if required_tags:
-                query_data['requiredtags'] = ','.join(required_tags)
+                query_data['requiredtags'] = required_tags
 
             params = {
                 'key': self.api_key,
