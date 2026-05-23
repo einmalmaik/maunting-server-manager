@@ -185,7 +185,7 @@ class ConanExilesUE5Plugin(GamePlugin):
             pak_files = glob.glob(os.path.join(workshop_dir, "**", "*.pak"), recursive=True)
 
             if not pak_files:
-                _append_console_log(install_dir, f"[MSM] Warnung: Keine .pak-Dateien für Mod {workshop_id} gefunden\n")
+                _append_console_log(server.id, f"[MSM] Warnung: Keine .pak-Dateien für Mod {workshop_id} gefunden\n")
                 return
 
             copied_paks = []
@@ -194,12 +194,12 @@ class ConanExilesUE5Plugin(GamePlugin):
                 dest = os.path.join(mods_dir, pak_name)
                 shutil.copy2(pak_path, dest)
                 copied_paks.append(pak_name)
-                _append_console_log(install_dir, f"[MSM] Mod-Datei kopiert: {pak_name}\n")
+                _append_console_log(server.id, f"[MSM] Mod-Datei kopiert: {pak_name}\n")
 
             # 3) Update modlist.txt
             self._update_modlist(server)
 
-            _append_console_log(install_dir, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
+            _append_console_log(server.id, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
 
         thread = threading.Thread(target=_install, daemon=True)
         thread.start()
@@ -240,7 +240,7 @@ class ConanExilesUE5Plugin(GamePlugin):
                 for line in lines:
                     f.write(f"{line}\n")
         except OSError as e:
-            _append_console_log(install_dir, f"[MSM] Fehler beim Schreiben der modlist.txt: {e}\n")
+            _append_console_log(server.id, f"[MSM] Fehler beim Schreiben der modlist.txt: {e}\n")
 
     def get_mod_support(self) -> dict | None:
         return {

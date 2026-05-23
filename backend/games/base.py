@@ -111,22 +111,31 @@ class ServerStatus:
     message: str | None = None
 
 
-def _append_console_log(install_dir: str, text: str) -> None:
-    """Appends text to msm_console.log. Creates dir and file if needed."""
+def _console_log_path(server_id: int) -> str:
+    """Gibt den Pfad zur MSM Console-Log-Datei zurueck.
+    Liegt zentral unter backend/logs/<id>/console.log — unabhaengig vom install_dir.
+    """
+    base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+    srv_dir = os.path.join(base_dir, str(server_id))
+    os.makedirs(srv_dir, exist_ok=True)
+    return os.path.join(srv_dir, "console.log")
+
+
+def _append_console_log(server_id: int, text: str) -> None:
+    """Appends text to the server console log."""
     try:
-        os.makedirs(install_dir, exist_ok=True)
-        log_path = os.path.join(install_dir, "msm_console.log")
+        log_path = _console_log_path(server_id)
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(text)
             f.flush()
     except OSError as e:
-        logger.warning("Could not write console log at %s: %s", install_dir, e)
+        logger.warning("Could not write console log for server %s: %s", server_id, e)
 
 
 def _run_install_with_logging(cmd: list[str], server_id: int, install_dir: str) -> None:
-    """Runs an install command in background, writes output to msm_console.log,
+    """Runs an install command in background, writes output to console log,
     and updates server status on completion."""
-    log_path = os.path.join(install_dir, "msm_console.log")
+    log_path = _console_log_path(server_id)
     returncode = -1
     error_msg: str | None = None
     try:
@@ -234,7 +243,7 @@ class GamePlugin(ABC):
 
     def get_console_log(self, server, lines: int = 200) -> str:
         """Reads the MSM console log (install output, system events)."""
-        log_path = os.path.join(server.install_dir, "msm_console.log")
+        log_path = _console_log_path(server.id)
         if not os.path.exists(log_path):
             return ""
         try:

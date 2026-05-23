@@ -211,10 +211,10 @@ class DayZPlugin(GamePlugin):
                     if os.path.islink(link_path):
                         os.unlink(link_path)
                     else:
-                        _append_console_log(install_dir, f"[MSM] Warnung: {link_path} existiert bereits und ist kein Symlink\n")
+                        _append_console_log(server.id, f"[MSM] Warnung: {link_path} existiert bereits und ist kein Symlink\n")
                         return
                 os.symlink(workshop_dir, link_path)
-                _append_console_log(install_dir, f"[MSM] Mod {workshop_id} verlinkt: {link_path} → {workshop_dir}\n")
+                _append_console_log(server.id, f"[MSM] Mod {workshop_id} verlinkt: {link_path} → {workshop_dir}\n")
 
                 # 3) Symlink keys
                 keys_dir = os.path.join(install_dir, "keys")
@@ -226,11 +226,11 @@ class DayZPlugin(GamePlugin):
                         if os.path.exists(key_link):
                             os.unlink(key_link)
                         os.symlink(key_file, key_link)
-                        _append_console_log(install_dir, f"[MSM] Key verlinkt: {os.path.basename(key_file)}\n")
+                        _append_console_log(server.id, f"[MSM] Key verlinkt: {os.path.basename(key_file)}\n")
             else:
-                _append_console_log(install_dir, f"[MSM] Warnung: Workshop-Verzeichnis nicht gefunden: {workshop_dir}\n")
+                _append_console_log(server.id, f"[MSM] Warnung: Workshop-Verzeichnis nicht gefunden: {workshop_dir}\n")
 
-            _append_console_log(install_dir, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
+            _append_console_log(server.id, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
 
         thread = threading.Thread(target=_install, daemon=True)
         thread.start()
