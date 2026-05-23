@@ -90,11 +90,14 @@ class ConanExilesUE5Plugin(GamePlugin):
         )
         try:
             subprocess.run(
-                ["sudo", "tee", unit_path],
+                ["sudo", "-n", "/usr/bin/tee", unit_path],
                 input=unit_content, capture_output=True, text=True, check=True,
                 env=_SYSTEM_ENV
             )
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        except subprocess.CalledProcessError as e:
+            detail = e.stderr.strip() if e.stderr else str(e)
+            return {"error": f"Konnte systemd-Unit nicht schreiben: {detail}"}
+        except FileNotFoundError as e:
             return {"error": f"Konnte systemd-Unit nicht schreiben: {e}"}
 
         try:
