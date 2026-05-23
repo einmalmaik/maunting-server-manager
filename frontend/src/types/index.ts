@@ -6,6 +6,7 @@ export interface User {
   is_active: boolean
   email_verified: boolean
   two_factor_enabled: boolean
+  email_notifications: boolean
   created_at: string
 }
 

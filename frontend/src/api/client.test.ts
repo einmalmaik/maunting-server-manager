@@ -171,8 +171,20 @@ describe('api client', () => {
         text: () => Promise.resolve('bad gateway'),
       } as Response)
 
-      // client.ts falls back to { detail: 'Unbekannter Fehler' } when json fails
-      await expect(api('/test')).rejects.toThrow('Unbekannter Fehler')
+      // client.ts uses response text when json fails, then falls back to statusText
+      await expect(api('/test')).rejects.toThrow('bad gateway')
+    })
+
+    it('should fallback to statusText when body is empty', async () => {
+      fetchSpy.mockReturnValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: () => Promise.reject(new Error('bad json')),
+        text: () => Promise.resolve(''),
+      } as Response)
+
+      await expect(api('/test')).rejects.toThrow('Internal Server Error')
     })
   })
 })

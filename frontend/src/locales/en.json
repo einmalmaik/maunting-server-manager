@@ -238,6 +238,16 @@
     "backupCodesWarning": "Save these codes securely. They cannot replace 2FA, only serve as emergency login.",
     "otpRequired": "2FA code required"
   },
+  "errors": {
+    "RATE_LIMITED": "Too many requests. Please wait a moment.",
+    "SESSION_EXPIRED": "Session expired. Please sign in again."
+  },
+  "notifications": {
+    "disable": "Disable email notifications",
+    "enable": "Enable email notifications",
+    "disableConfirm": "Are you sure you want to stop receiving email notifications?",
+    "enableConfirm": "Enable email notifications again?"
+  },
   "common": {
     "unlimited": "unlimited",
     "save": "Save",

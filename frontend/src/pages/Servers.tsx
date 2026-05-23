@@ -61,7 +61,8 @@ export function Servers() {
       setForm({ name: '', game_type: 'conan_exiles_ue5', cpu_limit_percent: '', ram_limit_mb: '', disk_limit_gb: '' })
       fetchServers()
     } catch (err: any) {
-      toast.error(err.message || 'Fehler')
+      const msg = t(err.message) || err.message || t('common.error')
+      toast.error(msg)
     } finally {
       setCreating(false)
     }

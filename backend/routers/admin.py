@@ -106,7 +106,7 @@ async def create_permission(req: PermissionCreate, db: Session = Depends(get_db)
     if is_new and EmailService.is_configured():
         target_user = db.query(User).filter(User.id == req.user_id).first()
         server = db.query(Server).filter(Server.id == req.server_id).first()
-        if target_user and server:
+        if target_user and server and target_user.email_notifications:
             await EmailService.send_user_added_to_server_notification(
                 target_user.email, target_user.username, server.name, owner.username
             )

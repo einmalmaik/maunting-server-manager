@@ -24,6 +24,8 @@ class User(Base):
     two_factor_secret_encrypted: Mapped[str | None] = mapped_column(String(255), nullable=True)
     two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    email_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
+
     password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_reset_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

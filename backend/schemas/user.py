@@ -12,6 +12,7 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
     is_active: bool | None = None
     two_factor_enabled: bool | None = None
+    email_notifications: bool | None = None
 
 
 class UserResponse(BaseModel):
@@ -22,6 +23,7 @@ class UserResponse(BaseModel):
     is_active: bool
     email_verified: bool
     two_factor_enabled: bool
+    email_notifications: bool
     created_at: datetime
 
     class Config:

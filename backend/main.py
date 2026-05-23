@@ -48,6 +48,15 @@ async def lifespan(app: FastAPI):
     # Startup
     Base.metadata.create_all(bind=engine)
 
+    # SQLite-Migration: fehlende Spalten nachträglich hinzufügen
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    if 'users' in inspector.get_table_names():
+        cols = [c['name'] for c in inspector.get_columns('users')]
+        if 'email_notifications' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_notifications BOOLEAN DEFAULT 1"))
+
     # Initialize scheduler and load existing schedules
     start_scheduler()
     from database import SessionLocal

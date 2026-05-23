@@ -5,16 +5,19 @@ function getCsrfToken(): string | null {
   return match ? decodeURIComponent(match[2]) : null
 }
 
-function extractErrorMessage(detail: unknown): string {
+function extractErrorMessage(detail: unknown): string | null {
+  if (detail == null) return null
   if (typeof detail === 'string') return detail
   if (Array.isArray(detail)) {
-    return detail.map((d: any) => d.msg || String(d)).join(', ')
+    const parts = detail.map((d: any) => d.msg || String(d)).filter(Boolean)
+    return parts.length ? parts.join(', ') : null
   }
-  if (detail && typeof detail === 'object') {
+  if (typeof detail === 'object') {
     const obj = detail as Record<string, unknown>
-    if (typeof obj.message === 'string') return obj.message
-    if (typeof obj.error === 'string') return obj.error
-    return JSON.stringify(detail)
+    if (typeof obj.message === 'string' && obj.message) return obj.message
+    if (typeof obj.error === 'string' && obj.error) return obj.error
+    if (typeof obj.detail === 'string' && obj.detail) return obj.detail
+    return null
   }
   return String(detail)
 }
@@ -96,8 +99,17 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     if (res.status === 429) {
       throw new Error('RATE_LIMITED')
     }
-    const err = await res.json().catch(() => ({ detail: 'Unbekannter Fehler' }))
-    throw new Error(extractErrorMessage(err.detail) || `HTTP ${res.status}`)
+    const text = await res.text()
+    let message: string | null = null
+    if (text) {
+      try {
+        const parsed = JSON.parse(text)
+        message = extractErrorMessage(parsed.detail ?? parsed.message ?? parsed.error ?? parsed)
+      } catch {
+        message = text
+      }
+    }
+    throw new Error(message || res.statusText || `HTTP ${res.status}`)
   }
 
   if (res.status === 204) {

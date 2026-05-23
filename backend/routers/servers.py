@@ -86,7 +86,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     # Firewall-Regeln anlegen (nur auf Linux mit UFW)
     open_ports(server.name, game_port, query_port, rcon_port)
 
-    if EmailService.is_configured():
+    if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_installed_notification(user.email, user.username, server.name)
 
     return server
@@ -233,7 +233,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
         raise HTTPException(status_code=500, detail=result["error"])
     server.status = "running"
     db.commit()
-    if EmailService.is_configured():
+    if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestartet")
     return {"message": "Start-Befehl gesendet", "status": server.status, **result}
 
@@ -252,7 +252,7 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
         raise HTTPException(status_code=500, detail=result["error"])
     server.status = "stopped"
     db.commit()
-    if EmailService.is_configured():
+    if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestoppt")
     return {"message": "Stop-Befehl gesendet", "status": server.status, **result}
 
@@ -274,7 +274,7 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
         raise HTTPException(status_code=500, detail=start_result["error"])
     server.status = "running"
     db.commit()
-    if EmailService.is_configured():
+    if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_status_notification(user.email, user.username, server.name, "neugestartet")
     return {"message": "Restart-Befehl gesendet", "status": server.status, "stop": stop_result, "start": start_result}
 

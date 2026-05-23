@@ -179,7 +179,7 @@ async def login(
     _set_auth_cookies(response, access_token, refresh_token, csrf_token)
 
     # Sicherheitsbenachrichtigung bei Login
-    if EmailService.is_configured():
+    if EmailService.is_configured() and user.email_notifications:
         client_ip = request.client.host if request.client else "unbekannt"
         user_agent = request.headers.get("user-agent", "unbekannt")
         await EmailService.send_new_device_login_notification(user.email, user.username, client_ip, user_agent)
@@ -257,6 +257,18 @@ def me(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+@router.patch("/me/notifications")
+def update_notifications(
+    enabled: bool,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    user.email_notifications = enabled
+    db.commit()
+    return {"email_notifications": user.email_notifications}
+
+
 @router.post("/change-password")
 async def change_password(
     req: ChangePasswordRequest,
@@ -279,7 +291,7 @@ async def change_password(
             raise HTTPException(status_code=401, detail="Ungueltiger 2FA-Code")
 
     AuthService.reset_password(db, user, req.new_password)
-    if EmailService.is_configured():
+    if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_password_changed_notification(user.email, user.username)
     return {"message": "Passwort geaendert"}
 
@@ -380,7 +392,7 @@ async def enable_2fa(otp_code: str, user: User = Depends(get_current_user), db: 
         raise HTTPException(status_code=400, detail="Ungueltiger Code")
     user.two_factor_enabled = True
     db.commit()
-    if EmailService.is_configured():
+    if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_2fa_status_notification(user.email, user.username, enabled=True)
     return {"message": "2FA aktiviert"}
 
@@ -403,7 +415,7 @@ async def disable_2fa(
     user.two_factor_secret_encrypted = None
     BackupCodeService.clear_all_backup_codes(db, user.id)
     db.commit()
-    if EmailService.is_configured():
+    if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_2fa_status_notification(user.email, user.username, enabled=False)
     return {"message": "2FA deaktiviert"}
 

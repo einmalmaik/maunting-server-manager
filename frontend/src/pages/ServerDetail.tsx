@@ -61,7 +61,8 @@ export function ServerDetail() {
       await api(`/servers/${serverId}/${action}`, { method: 'POST' })
       fetchAll()
     } catch (err: any) {
-      toast.error(err.message || 'Fehler')
+      const msg = t(err.message) || err.message || t('common.error')
+      toast.error(msg)
     } finally {
       setActionLoading(null)
     }
