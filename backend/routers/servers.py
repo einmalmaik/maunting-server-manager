@@ -41,14 +41,20 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
             ["useradd", "-r", "-m", "-s", "/usr/sbin/nologin", "-d", install_dir, linux_user],
             check=True, capture_output=True,
         )
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         # User existiert vielleicht schon — sicherstellen dass er nologin hat
-        subprocess.run(["usermod", "-s", "/usr/sbin/nologin", linux_user], check=False, capture_output=True)
+        try:
+            subprocess.run(["usermod", "-s", "/usr/sbin/nologin", linux_user], check=False, capture_output=True)
+        except FileNotFoundError:
+            pass
 
     # Verzeichnis anlegen und Rechte setzen
-    os.makedirs(install_dir, exist_ok=True)
-    subprocess.run(["chown", f"{linux_user}:{linux_user}", install_dir], check=False, capture_output=True)
-    subprocess.run(["chmod", "750", install_dir], check=False, capture_output=True)
+    try:
+        os.makedirs(install_dir, exist_ok=True)
+        subprocess.run(["chown", f"{linux_user}:{linux_user}", install_dir], check=False, capture_output=True)
+        subprocess.run(["chmod", "750", install_dir], check=False, capture_output=True)
+    except OSError:
+        pass
 
     # Ports automatisch vergeben (oder vom Nutzer übernehmen)
     try:
