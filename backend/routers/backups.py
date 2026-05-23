@@ -29,6 +29,8 @@ def create_backup(server_id: int, db: Session = Depends(get_db), user: User = De
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    if not os.path.isdir(server.install_dir):
+        raise HTTPException(status_code=400, detail="Server-Verzeichnis existiert nicht. Ist der Server installiert?")
 
     backup_dir = f"/opt/msm/backups/{server_id}"
     os.makedirs(backup_dir, exist_ok=True)

@@ -313,12 +313,12 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
         }
     plugin_status = plugin.get_status(server)
     server.status = plugin_status.status
-    server.status_message = plugin_status.status_message or ""
+    server.status_message = plugin_status.message or ""
     db.commit()
     return {
         "id": server.id,
         "status": plugin_status.status,
-        "status_message": plugin_status.status_message,
+        "status_message": plugin_status.message,
         "cpu_percent": plugin_status.cpu_percent,
         "ram_mb": plugin_status.ram_mb,
         "disk_mb": plugin_status.disk_mb,

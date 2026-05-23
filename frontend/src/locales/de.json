@@ -35,7 +35,8 @@
     "install": "Installieren",
     "deleted": "Server gelöscht",
     "confirmDelete": "Server wirklich löschen? Alle Daten werden unwiderruflich entfernt.",
-    "createDescription": "Erstelle einen neuen Game-Server."
+    "createDescription": "Erstelle einen neuen Game-Server.",
+    "fileManager": "Datei-Manager"
   },
   "users": {
     "subtitle": "Benutzer und Berechtigungen verwalten",
@@ -167,6 +168,22 @@
     "removeFailed": "Entfernen fehlgeschlagen",
     "updateSettingFailed": "Update-Einstellung fehlgeschlagen",
     "reorderFailed": "Neusortierung fehlgeschlagen"
+  },
+  "files": {
+    "title": "Datei-Manager",
+    "subtitle": "Server-Dateien durchsuchen und bearbeiten",
+    "upload": "Hochladen",
+    "uploaded": "hochgeladen",
+    "newFolder": "Neuer Ordner",
+    "folderName": "Ordnername",
+    "saved": "Datei gespeichert",
+    "deleted": "Gelöscht",
+    "extracted": "Archiv entpackt",
+    "empty": "Verzeichnis ist leer",
+    "selectFile": "Datei auswählen zum Bearbeiten",
+    "dropHere": "Dateien hier ablegen zum Hochladen",
+    "confirmDeleteFile": "Datei wirklich löschen?",
+    "confirmDeleteDir": "Verzeichnis und alle Inhalte wirklich löschen?"
   },
   "backups": {
     "subtitle": "Backup-Verwaltung",

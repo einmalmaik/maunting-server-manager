@@ -24,12 +24,11 @@ export function ServerDetail() {
   const navigate = useNavigate()
   const [server, setServer] = useState<Server | null>(null)
   const [status, setStatus] = useState<any>(null)
-  const [logs, setLogs] = useState('')
   const [consoleLogs, setConsoleLogs] = useState('')
   const [games, setGames] = useState<GameInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'console' | 'game'>('console')
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const consoleRef = useRef<HTMLPreElement>(null)
 
@@ -38,16 +37,14 @@ export function ServerDetail() {
   const fetchAll = async () => {
     if (!serverId) return
     try {
-      const [srv, st, lg, cl, gms] = await Promise.all([
+      const [srv, st, cl, gms] = await Promise.all([
         api<Server>(`/servers/${serverId}`),
         api<any>(`/servers/${serverId}/status`).catch(() => null),
-        api<any>(`/servers/${serverId}/logs?lines=50`).catch(() => ({ logs: '' })),
         api<any>(`/servers/${serverId}/console?lines=200`).catch(() => ({ logs: '' })),
         api<GameInfo[]>('/system/games'),
       ])
       setServer(srv)
       setStatus(st)
-      setLogs(lg.logs || '')
       setConsoleLogs(cl.logs || '')
       setGames(gms)
     } catch {
@@ -64,10 +61,10 @@ export function ServerDetail() {
   }, [serverId])
 
   useEffect(() => {
-    if (consoleRef.current && activeTab === 'console') {
+    if (consoleRef.current) {
       consoleRef.current.scrollTop = consoleRef.current.scrollHeight
     }
-  }, [consoleLogs, activeTab])
+  }, [consoleLogs])
 
   const doAction = async (action: string) => {
     setActionLoading(action)
@@ -253,10 +250,10 @@ export function ServerDetail() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div
           className="msm-card p-5 cursor-pointer hover:border-mint-accent/40 transition-all flex items-center gap-3"
-          onClick={() => navigate(`/servers/${serverId}/config`)}
+          onClick={() => navigate(`/servers/${serverId}/files`)}
         >
           <FileText className="w-5 h-5 text-secondary" />
-          <span className="font-body-md text-base text-on-surface">{t('servers.configEditor')}</span>
+          <span className="font-body-md text-base text-on-surface">{t('servers.fileManager')}</span>
         </div>
         <div
           className="msm-card p-5 cursor-pointer hover:border-mint-accent/40 transition-all flex items-center gap-3"
@@ -304,42 +301,18 @@ export function ServerDetail() {
         </div>
       )}
 
-      {/* Console / Logs */}
+      {/* Console */}
       <div className="msm-card">
-        <div className="p-5 border-b border-outline flex items-center gap-4">
+        <div className="p-5 border-b border-outline flex items-center gap-3">
           <Terminal className="w-4 h-4 text-on-surface-variant" />
-          <div className="flex gap-2">
-            <button
-              onClick={() => setActiveTab('console')}
-              className={`px-3 py-1 rounded-md text-sm font-body-md transition-colors ${
-                activeTab === 'console'
-                  ? 'bg-secondary/20 text-secondary'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-            >
-              {t('servers.console')}
-            </button>
-            <button
-              onClick={() => setActiveTab('game')}
-              className={`px-3 py-1 rounded-md text-sm font-body-md transition-colors ${
-                activeTab === 'game'
-                  ? 'bg-secondary/20 text-secondary'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-            >
-              {t('servers.gameLogs')}
-            </button>
-          </div>
+          <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
         </div>
         <div className="p-5">
           <pre
             ref={consoleRef}
             className="bg-surface-darkest border border-outline rounded-md p-4 h-80 overflow-auto font-mono text-xs text-on-surface-variant whitespace-pre-wrap"
           >
-            {activeTab === 'console'
-              ? (consoleLogs || t('servers.noLogs'))
-              : (logs || t('servers.noLogs'))
-            }
+            {consoleLogs || t('servers.noLogs')}
           </pre>
         </div>
       </div>

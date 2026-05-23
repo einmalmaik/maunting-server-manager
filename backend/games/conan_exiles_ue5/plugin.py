@@ -1,9 +1,11 @@
+import glob
 import os
+import shutil
 import subprocess
 import threading
 
 from config import settings
-from games.base import GamePlugin, ServerStatus, ConfigField, build_systemd_unit, _run_install_with_logging
+from games.base import GamePlugin, ServerStatus, ConfigField, build_systemd_unit, _run_install_with_logging, _append_console_log, query_a2s_info
 
 
 class ConanExilesUE5Plugin(GamePlugin):
@@ -111,13 +113,19 @@ class ConanExilesUE5Plugin(GamePlugin):
         except Exception:
             active = False
 
+        players_online = None
+        if active and server.query_port:
+            a2s = query_a2s_info("127.0.0.1", server.query_port)
+            if a2s:
+                players_online = a2s["players"]
+
         return ServerStatus(
             status="running" if active else "stopped",
             cpu_percent=None,
             ram_mb=None,
             disk_mb=None,
             uptime_seconds=None,
-            players_online=None,
+            players_online=players_online,
         )
 
     def get_logs(self, server, lines: int = 100) -> str:
@@ -156,20 +164,83 @@ class ConanExilesUE5Plugin(GamePlugin):
         ]
 
     def install_mod(self, server, workshop_id: str) -> dict:
-        cmd = [
-            settings.steamcmd_path,
-            "+force_install_dir", server.install_dir,
-            "+login", "anonymous",
-            "+workshop_download_item", self.WORKSHOP_ID, workshop_id,
-            "+quit",
-        ]
-        thread = threading.Thread(
-            target=_run_install_with_logging,
-            args=(cmd, server.id, server.install_dir),
-            daemon=True,
-        )
+        """Conan Exiles mod install: SteamCMD download → copy .pak to Mods/ → update modlist.txt."""
+        def _install():
+            install_dir = server.install_dir
+            workshop_dir = os.path.join(install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, workshop_id)
+            mods_dir = os.path.join(install_dir, "ConanSandbox", "Mods")
+
+            # 1) Download via SteamCMD
+            cmd = [
+                settings.steamcmd_path,
+                "+force_install_dir", install_dir,
+                "+login", "anonymous",
+                "+workshop_download_item", self.WORKSHOP_ID, workshop_id,
+                "+quit",
+            ]
+            _run_install_with_logging(cmd, server.id, install_dir)
+
+            # 2) Find .pak files and copy to ConanSandbox/Mods/
+            os.makedirs(mods_dir, exist_ok=True)
+            pak_files = glob.glob(os.path.join(workshop_dir, "**", "*.pak"), recursive=True)
+
+            if not pak_files:
+                _append_console_log(install_dir, f"[MSM] Warnung: Keine .pak-Dateien für Mod {workshop_id} gefunden\n")
+                return
+
+            copied_paks = []
+            for pak_path in pak_files:
+                pak_name = os.path.basename(pak_path)
+                dest = os.path.join(mods_dir, pak_name)
+                shutil.copy2(pak_path, dest)
+                copied_paks.append(pak_name)
+                _append_console_log(install_dir, f"[MSM] Mod-Datei kopiert: {pak_name}\n")
+
+            # 3) Update modlist.txt
+            self._update_modlist(server)
+
+            _append_console_log(install_dir, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
+
+        thread = threading.Thread(target=_install, daemon=True)
         thread.start()
         return {"message": f"Mod {workshop_id} wird installiert"}
+
+    def _update_modlist(self, server) -> None:
+        """Rebuilds modlist.txt from all installed mods in load order."""
+        install_dir = server.install_dir
+        mods_dir = os.path.join(install_dir, "ConanSandbox", "Mods")
+        modlist_path = os.path.join(mods_dir, "modlist.txt")
+        os.makedirs(mods_dir, exist_ok=True)
+
+        # Get ordered mod list from DB
+        try:
+            from database import SessionLocal
+            from models import Mod
+            db = SessionLocal()
+            try:
+                mods = db.query(Mod).filter(Mod.server_id == server.id).order_by(Mod.load_order.asc()).all()
+            finally:
+                db.close()
+        except Exception:
+            return
+
+        # For each mod, find .pak files in its workshop dir
+        lines = []
+        for mod in mods:
+            workshop_dir = os.path.join(install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, mod.workshop_id)
+            pak_files = glob.glob(os.path.join(workshop_dir, "**", "*.pak"), recursive=True)
+            for pak_path in pak_files:
+                pak_name = os.path.basename(pak_path)
+                # Also check if .pak exists in Mods/ dir
+                if os.path.exists(os.path.join(mods_dir, pak_name)):
+                    lines.append(pak_name)
+
+        try:
+            with open(modlist_path, "w", encoding="utf-8") as f:
+                for line in lines:
+                    f.write(f"{line}\n")
+        except OSError as e:
+            _append_console_log(install_dir, f"[MSM] Fehler beim Schreiben der modlist.txt: {e}\n")
 
     def get_mod_support(self) -> dict | None:
         return {
