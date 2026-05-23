@@ -145,7 +145,8 @@ def _run_install_with_logging(cmd: list[str], server_id: int, install_dir: str) 
             log_file.write(f"[MSM] Befehl: {' '.join(cmd)}\n")
             log_file.flush()
             proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
             )
             # Stream output line by line to log file (live)
             for line in proc.stdout:
