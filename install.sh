@@ -286,19 +286,27 @@ if ! command -v caddy &>/dev/null; then
     apt-get install -y -qq caddy 2>&1 | tee -a "$LOG_FILE"
 fi
 
-# ── steamcmd ──
-if ! command -v steamcmd &>/dev/null; then
-    log "Installiere steamcmd..."
+# ── steamcmd (direktes Binary, apt-Wrapper ist fehleranfällig) ──
+if ! command -v steamcmd &>/dev/null || ! steamcmd +login anonymous +quit &>/dev/null; then
+    log "Installiere steamcmd (direkte Binary-Installation)..."
+    # i386 Architektur für 32-bit SteamCMD Libs
     dpkg --add-architecture i386 2>/dev/null || true
     apt-get update -qq | tee -a "$LOG_FILE"
-    apt-get install -y -qq steamcmd 2>&1 | tee -a "$LOG_FILE" || {
-        warn "steamcmd nicht über apt verfügbar. Versuche manuelle Installation..."
-        mkdir -p /usr/games
-        wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz -O /tmp/steamcmd.tar.gz
-        tar -xzf /tmp/steamcmd.tar.gz -C /usr/games/
-        chmod +x /usr/games/steamcmd.sh
-        ln -sf /usr/games/steamcmd.sh /usr/local/bin/steamcmd 2>/dev/null || true
-    }
+    apt-get install -y -qq lib32gcc-s1 lib32stdc++6 curl tar 2>&1 | tee -a "$LOG_FILE"
+
+    mkdir -p /usr/games
+    rm -f /tmp/steamcmd.tar.gz
+    wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz -O /tmp/steamcmd.tar.gz
+    tar -xzf /tmp/steamcmd.tar.gz -C /usr/games/
+    chmod +x /usr/games/steamcmd
+    rm -f /usr/local/bin/steamcmd 2>/dev/null || true
+    ln -s /usr/games/steamcmd /usr/local/bin/steamcmd
+
+    # Verifizierung: smoke-test
+    if ! steamcmd +login anonymous +quit &>/dev/null; then
+        err "steamcmd Installation fehlgeschlagen. Prüfe 32-bit Bibliotheken (lib32gcc-s1, lib32stdc++6)."
+    fi
+    ok "steamcmd installiert und getestet"
 fi
 
 ok "System-Abhängigkeiten installiert"
