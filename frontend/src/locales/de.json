@@ -329,5 +329,9 @@
     "close": "Schließen",
     "confirm": "Bestätigen",
     "back": "Zurück"
+  },
+  "serverDetail": {
+    "limit": "Limit",
+    "free": "frei"
   }
 }

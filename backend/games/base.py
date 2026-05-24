@@ -399,6 +399,20 @@ class GamePlugin(ABC):
     def container_tmpfs_paths(self, server) -> list[str]:
         return ["/tmp"] if self.container_needs_tmpfs else []
 
+    def prepare_runtime(self, server) -> None:
+        """Hook: vor jedem Container-Start aufgerufen.
+
+        Plugins können hier game-spezifische Config-Files (INIs, .cfg, JSON)
+        vorbereiten — z. B. Ports in `Engine.ini`/`Game.ini` schreiben,
+        damit das Spiel die vom Port-Manager zugewiesenen Werte tatsächlich
+        nutzt. CLI-Argumente reichen bei vielen UE-Spielen NICHT.
+
+        Default ist no-op. Side-effects sind erlaubt (Dateischreiben in
+        install_dir), aber bewusst KEIN Container-Code, kein Logging
+        sensibler Werte und keine Network-Calls.
+        """
+        return None
+
     # ─ Default Lifecycle (Docker) ────────────────────────────────────────
 
     def start(self, server) -> dict:
@@ -407,6 +421,14 @@ class GamePlugin(ABC):
             return {"error": "Plugin hat kein docker_image konfiguriert"}
         if not docker_service.is_available():
             return {"error": "Docker ist auf diesem Host nicht verfügbar"}
+
+        # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
+        try:
+            self.prepare_runtime(server)
+        except Exception as e:
+            _append_console_log(
+                server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
+            )
 
         # Image bei Bedarf vorziehen — KISS, scheitert nicht hart bei Offline
         pull_result = docker_service.pull(self.docker_image)

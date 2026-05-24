@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ChevronLeft, Plus, Search, Trash2, ExternalLink, Package, Globe, Star, Users, HardDrive, GripVertical, ToggleLeft, ToggleRight } from 'lucide-react'
+import { api } from '../api/client'
 
 interface Mod {
   id: number
@@ -69,9 +70,8 @@ export function ModManager() {
 
   const loadMods = async () => {
     try {
-      const res = await fetch(`/api/mods/${id}`)
-      if (!res.ok) throw new Error()
-      setMods(await res.json())
+      const data = await api<Mod[]>(`/mods/${id}`)
+      setMods(data)
     } catch {
       setMessage({ type: 'error', text: t('mods.loadError', 'Konnte Mods nicht laden') })
     } finally {
@@ -83,9 +83,8 @@ export function ModManager() {
     if (loadedTabs.current.has(tab) && !forceReload) return
     setBrowserLoading(true)
     try {
-      const res = await fetch(`/api/steam/workshop/popular?server_id=${id}&sort=${tab}&limit=20`)
-      if (!res.ok) throw new Error()
-      setBrowserMods(await res.json())
+      const data = await api<SteamMod[]>(`/steam/workshop/popular?server_id=${id}&sort=${tab}&limit=20`)
+      setBrowserMods(data)
       loadedTabs.current.add(tab)
     } catch {
       setBrowserMods([])
@@ -105,9 +104,8 @@ export function ModManager() {
     setSteamLoading(true)
     try {
       const q = encodeURIComponent(steamQuery)
-      const res = await fetch(`/api/steam/workshop/search?server_id=${id}&query=${q}&per_page=20`)
-      if (!res.ok) throw new Error()
-      setSteamResults(await res.json())
+      const data = await api<SteamMod[]>(`/steam/workshop/search?server_id=${id}&query=${q}&per_page=20`)
+      setSteamResults(data)
     } catch {
       setMessage({ type: 'error', text: t('mods.steamSearchError', 'Steam-Suche fehlgeschlagen') })
     } finally {
@@ -115,19 +113,19 @@ export function ModManager() {
     }
   }
 
+  const subscribeMod = async (workshopId: string, name?: string) => {
+    // Backend nimmt workshop_id/name als Query-Params. Body bleibt leer; api()
+    // injiziert X-CSRF-Token automatisch.
+    const params = new URLSearchParams({ workshop_id: workshopId })
+    if (name) params.set('name', name)
+    await api<Mod>(`/mods/${id}?${params.toString()}`, { method: 'POST' })
+  }
+
   const addMod = async () => {
     if (!newWorkshopId.trim()) return
     setAdding(true)
     try {
-      const res = await fetch(`/api/mods/${id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workshop_id: newWorkshopId.trim(), name: newModName.trim() || undefined }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Fehler')
-      }
+      await subscribeMod(newWorkshopId.trim(), newModName.trim() || undefined)
       await loadMods()
       setShowAddModal(false)
       setNewWorkshopId('')
@@ -143,15 +141,7 @@ export function ModManager() {
   const addSteamMod = async (workshopId: string, name?: string) => {
     setAdding(true)
     try {
-      const res = await fetch(`/api/mods/${id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workshop_id: workshopId, name: name || undefined }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Fehler')
-      }
+      await subscribeMod(workshopId, name)
       await loadMods()
       setMessage({ type: 'success', text: t('mods.added', 'Hinzugefügt') })
     } catch (e: any) {
@@ -164,8 +154,7 @@ export function ModManager() {
   const removeMod = async (modId: number) => {
     if (!confirm(t('mods.confirmRemove', 'Mod wirklich entfernen?'))) return
     try {
-      const res = await fetch(`/api/mods/${id}/${modId}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
+      await api(`/mods/${id}/${modId}`, { method: 'DELETE' })
       await loadMods()
       setMessage({ type: 'success', text: t('mods.removed', 'Mod entfernt') })
     } catch {
@@ -173,14 +162,15 @@ export function ModManager() {
     }
   }
 
+  const patchModFlag = async (modId: number, flag: 'auto_update' | 'enabled', value: boolean) => {
+    // Backend nimmt Flags als Query-Param; api() injiziert CSRF.
+    const params = new URLSearchParams({ [flag]: value ? 'true' : 'false' })
+    await api<Mod>(`/mods/${id}/${modId}?${params.toString()}`, { method: 'PATCH' })
+  }
+
   const toggleAutoUpdate = async (modId: number, current: boolean) => {
     try {
-      const res = await fetch(`/api/mods/${id}/${modId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ auto_update: !current }),
-      })
-      if (!res.ok) throw new Error()
+      await patchModFlag(modId, 'auto_update', !current)
       await loadMods()
     } catch {
       setMessage({ type: 'error', text: t('mods.updateSettingFailed', 'Update-Einstellung fehlgeschlagen') })
@@ -189,12 +179,7 @@ export function ModManager() {
 
   const toggleEnabled = async (modId: number, current: boolean) => {
     try {
-      const res = await fetch(`/api/mods/${id}/${modId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !current }),
-      })
-      if (!res.ok) throw new Error()
+      await patchModFlag(modId, 'enabled', !current)
       await loadMods()
     } catch {
       setMessage({ type: 'error', text: t('mods.updateSettingFailed', 'Einstellung fehlgeschlagen') })
@@ -226,13 +211,12 @@ export function ModManager() {
     setMods(newOrder) // optimistic update
 
     try {
-      const res = await fetch(`/api/mods/${id}/reorder`, {
+      // Backend erwartet eine reine list[int] als Body, kein Wrapper-Objekt.
+      const data = await api<Mod[]>(`/mods/${id}/reorder`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order: newOrder.map(m => m.id) }),
+        body: JSON.stringify(newOrder.map(m => m.id)),
       })
-      if (!res.ok) throw new Error()
-      setMods(await res.json())
+      setMods(data)
     } catch {
       setMessage({ type: 'error', text: t('mods.reorderFailed', 'Neusortierung fehlgeschlagen') })
       await loadMods()

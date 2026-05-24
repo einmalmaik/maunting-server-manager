@@ -258,17 +258,19 @@ def cleanup_old_backups(server_id: int, db):
 
 
 async def _disk_soft_limit_task() -> None:
-    """Globaler periodischer Job: prüft Disk-Usage aller Server gegen ihr
-    Soft-Limit. Bei >= 80 % schreibt eine Warnung in status_message. Bei
-    >= 100 % stoppt der Job den Container und setzt status='error'.
+    """Globaler periodischer Job: aktualisiert `disk_usage_mb` für ALLE Server,
+    und prüft zusätzlich das Soft-Limit (falls gesetzt).
 
-    Dies ist KEIN hartes Quota — nur ein KISS Monitoring + Auto-Stop.
+    - Usage-Tracking: immer (auch ohne Limit) — Frontend zeigt sonst keinen
+      Belegt-Wert für Server ohne Limit.
+    - Warnung bei >= 80 % belegt: `status_message` enthält Warntext.
+    - Auto-Stop bei >= 100 % belegt: Container gestoppt, `status='error'`.
     """
     from models import AuditLog, Server
 
     db = SessionLocal()
     try:
-        servers = db.query(Server).filter(Server.disk_limit_gb.is_not(None)).all()
+        servers = db.query(Server).all()
         for server in servers:
             usage_mb = docker_service.disk_usage_mb(server.install_dir)
             if usage_mb is None:
