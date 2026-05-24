@@ -1,5 +1,33 @@
+"""Pydantic-Schemas fuer Server-CRUD.
+
+Phase-2-Validierung:
+- ``public_bind_ip`` muss eine echte IPv4-Adresse sein und darf NICHT
+  ``0.0.0.0`` sein (verhindert die Docker-UFW-Falle bei unkontrollierten
+  Bindings). ``127.0.0.1`` bleibt erlaubt, aber das Frontend bietet ihn
+  bewusst nur als "lokal/Test"-Option an.
+"""
+
+from __future__ import annotations
+
+import ipaddress
 from datetime import datetime
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, Field, field_validator
+
+
+def _validate_bind_ip(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    try:
+        addr = ipaddress.IPv4Address(value)
+    except ValueError as exc:
+        raise ValueError(f"'{value}' ist keine gueltige IPv4-Adresse.") from exc
+    if str(addr) == "0.0.0.0":
+        raise ValueError(
+            "0.0.0.0 ist als public_bind_ip nicht erlaubt — bitte eine konkrete "
+            "Host-IP aus dem Interfaces-Dropdown waehlen (Anti-Docker-UFW-Leak)."
+        )
+    return str(addr)
 
 
 # cpu_limit_percent erlaubt Werte > 100 (200 % = 2 Cores). Limit 3200 % = 32 Cores
@@ -21,9 +49,15 @@ class ServerCreate(BaseModel):
     query_port: int | None = Field(None, ge=1024, le=65535)
     rcon_port: int | None = Field(None, ge=1024, le=65535)
 
-    # Optional: Host-IP, an die die Container-Ports gebunden werden.
-    # None = Docker-Default (alle Interfaces). Nur setzen, wenn nötig.
+    # Host-IP, an die die Container-Ports gebunden werden. Wenn leer, vergibt
+    # der Router automatisch die erste Public-IP des Hosts (siehe
+    # network_interfaces_service.default_bind_ip).
     public_bind_ip: str | None = Field(None, max_length=64)
+
+    @field_validator("public_bind_ip")
+    @classmethod
+    def _check_bind_ip(cls, v: str | None) -> str | None:
+        return _validate_bind_ip(v)
 
 
 class ServerUpdate(BaseModel):
@@ -38,6 +72,11 @@ class ServerUpdate(BaseModel):
     query_port: int | None = Field(None, ge=1024, le=65535)
     rcon_port: int | None = Field(None, ge=1024, le=65535)
     public_bind_ip: str | None = Field(None, max_length=64)
+
+    @field_validator("public_bind_ip")
+    @classmethod
+    def _check_bind_ip(cls, v: str | None) -> str | None:
+        return _validate_bind_ip(v)
 
 
 class ServerResponse(BaseModel):

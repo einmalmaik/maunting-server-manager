@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from config import settings
 from dependencies import get_current_user
 from models import User
+from services import network_interfaces_service
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -72,6 +73,22 @@ def supported_games(user: User = Depends(get_current_user)) -> list[dict]:
             "mod_support": True,
         },
     ]
+
+
+@router.get("/interfaces")
+def host_interfaces(user: User = Depends(get_current_user)) -> dict:
+    """Liefert alle IPv4-Host-Interfaces fuer die Bind-IP-Auswahl im UI.
+
+    Owner-only — die Liste enthaelt Topologie-Information (LAN-Layout) und
+    soll nicht an Standard-Benutzer geraten.
+    """
+    if not user.is_owner:
+        raise HTTPException(status_code=403, detail="Nur Owner")
+    interfaces = [h.to_dict() for h in network_interfaces_service.list_host_interfaces()]
+    return {
+        "interfaces": interfaces,
+        "default_bind_ip": network_interfaces_service.default_bind_ip(),
+    }
 
 
 @router.get("/version")

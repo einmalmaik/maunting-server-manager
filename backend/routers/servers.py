@@ -13,8 +13,11 @@ from dependencies import get_current_user, verify_csrf, require_server_permissio
 from games import get_plugin
 from games.base import container_name_for
 from services import EmailService, docker_service
+from services.docker_iptables_service import accept_server as iptables_accept_server
+from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
-from services.port_allocation_service import allocate_ports
+from services.network_interfaces_service import default_bind_ip, list_host_interfaces
+from services.port_allocation_service import PortConflictError, allocate_ports
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
@@ -48,16 +51,25 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
 
-    # Ports automatisch vergeben (oder vom Nutzer übernehmen)
+    # Bind-IP bestimmen: User-Vorgabe > Default = erste Public-IP des Hosts.
+    # 127.0.0.1 oder 0.0.0.0 sind im Validator (schemas/server.py) verboten.
+    bind_ip = req.public_bind_ip or default_bind_ip()
+
+    # Ports automatisch vergeben (oder vom Nutzer übernehmen) — TCP/UDP-Check
+    # gegen DB UND Host (ss + bind probe).
     try:
         game_port, query_port, rcon_port = allocate_ports(
             db,
             requested_game_port=req.game_port,
             requested_query_port=req.query_port,
             requested_rcon_port=req.rcon_port,
+            bind_ip=bind_ip or "0.0.0.0",
         )
+    except PortConflictError as e:
+        # Konflikt mit Host (SSH/Caddy) oder anderem MSM-Server.
+        raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -75,7 +87,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         game_port=game_port,
         query_port=query_port,
         rcon_port=rcon_port,
-        public_bind_ip=req.public_bind_ip,
+        public_bind_ip=bind_ip,
     )
     db.add(server)
     db.commit()
@@ -86,10 +98,8 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     db.commit()
     db.refresh(server)
 
-    # Firewall-Regeln anlegen (nur auf Linux mit UFW)
-    open_ports(server.name, game_port, query_port, rcon_port)
-
-    # Auto-Install: Plugin startet Installation im Hintergrund
+    # Auto-Install: Plugin startet Installation im Hintergrund.
+    # Firewall-Regeln werden ERST beim Start angelegt (Lifecycle-Kopplung).
     plugin = get_plugin(req.game_type)
     if plugin:
         server.status = "installing"
@@ -120,13 +130,18 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
     old_ports = (server.game_port, server.query_port, server.rcon_port)
+    old_bind_ip = server.public_bind_ip
 
-    # ── Port-Änderung: validieren + Firewall aktualisieren ──
+    payload = req.model_dump(exclude_unset=True)
     port_fields = {"game_port", "query_port", "rcon_port"}
-    changed_ports = port_fields & set(req.model_dump(exclude_unset=True).keys())
+    changed_ports = port_fields & set(payload.keys())
+    bind_ip_changed = "public_bind_ip" in payload and payload["public_bind_ip"] != old_bind_ip
+    network_change = bool(changed_ports) or bind_ip_changed
 
+    # ── Port-/Bind-Aenderung: validieren ──
     if changed_ports:
-        # Validierung: keine Konflikte mit anderen Servern
+        # Bind-IP fuer den Host-Check: neue Vorgabe (falls mitgegeben) oder Bestand.
+        bind_ip_for_check = payload.get("public_bind_ip", old_bind_ip) or "0.0.0.0"
         try:
             new_game, new_query, new_rcon = allocate_ports(
                 db,
@@ -134,9 +149,12 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                 requested_query_port=req.query_port if req.query_port is not None else server.query_port,
                 requested_rcon_port=req.rcon_port if req.rcon_port is not None else server.rcon_port,
                 exclude_server_id=server.id,
+                bind_ip=bind_ip_for_check,
             )
+        except PortConflictError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         except ValueError as e:
-            raise HTTPException(status_code=409, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e))
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -149,26 +167,38 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             req.rcon_port = new_rcon
 
     # Standard-Update
-    for key, val in req.model_dump(exclude_unset=True).items():
+    for key, val in payload.items():
         setattr(server, key, val)
     db.commit()
     db.refresh(server)
 
-    if changed_ports:
-        # Alte Firewall-Regeln schließen, neue öffnen
-        close_ports(
-            game_port=old_ports[0] or 0,
-            query_port=old_ports[1],
-            rcon_port=old_ports[2],
-        )
-        open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
-
-        # Container neu starten, damit neue Ports/Limits greifen — nur, wenn er
-        # gerade läuft. Der Plugin-Default-Start zieht den Container ohnehin mit
-        # frischen Flags hoch.
+    if network_change:
+        # Alte Firewall- und iptables-Regeln entfernen, neue anlegen — ABER
+        # nur, wenn der Server gerade laeuft. Fuer gestoppte Server bleiben die
+        # Regeln zu (Lifecycle-Kopplung).
         plugin = get_plugin(server.game_type)
-        if plugin and docker_service.is_running(container_name_for(server.id)):
+        was_running = plugin is not None and docker_service.is_running(container_name_for(server.id))
+
+        if was_running:
+            close_ports(
+                game_port=old_ports[0] or 0,
+                query_port=old_ports[1],
+                rcon_port=old_ports[2],
+            )
+            iptables_revoke_server(
+                server.name,
+                old_bind_ip or "",
+                old_ports[0] or 0, old_ports[1], old_ports[2],
+            )
+            # Container stoppen — Plugin.start() legt ihn mit den neuen Ports/
+            # Bind-Werten frisch an.
             plugin.stop(server)
+            open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+            iptables_accept_server(
+                server.name,
+                server.public_bind_ip or "",
+                server.game_port, server.query_port, server.rcon_port,
+            )
             plugin.start(server)
 
     return server
@@ -197,11 +227,16 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     container = container_name_for(server.id)
     docker_service.remove(container, force=True)
 
-    # 2. Firewall-Regeln schließen
+    # 2. Firewall- und iptables-Regeln schließen
     close_ports(
         game_port=server.game_port or 0,
         query_port=server.query_port,
         rcon_port=server.rcon_port,
+    )
+    iptables_revoke_server(
+        server.name,
+        server.public_bind_ip or "",
+        server.game_port, server.query_port, server.rcon_port,
     )
 
     # 3. Install-Verzeichnis physisch löschen
@@ -258,11 +293,38 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+
+    # Sicherheits-Vorprüfung: Server ohne explizite public_bind_ip darf nicht
+    # starten — sonst würde Docker auf 0.0.0.0 binden und die UFW-Falle auslösen.
+    if not server.public_bind_ip:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Server hat keine Bind-IP konfiguriert. Bitte im Server-Detail "
+                "eine Public-IP zuweisen, bevor er gestartet wird."
+            ),
+        )
+
+    # Firewall-Regeln öffnen vor Container-Start.
+    open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+    iptables_accept_server(
+        server.name,
+        server.public_bind_ip,
+        server.game_port, server.query_port, server.rcon_port,
+    )
+
     # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
     # async-Route blockieren sie den gesamten Uvicorn-Event-Loop — alle anderen
     # Requests hängen mit. Daher in einen Threadpool auslagern.
     result = await asyncio.to_thread(plugin.start, server)
     if "error" in result:
+        # Container-Start fehlgeschlagen — Firewall-Regeln wieder schließen.
+        close_ports(server.game_port, server.query_port, server.rcon_port)
+        iptables_revoke_server(
+            server.name,
+            server.public_bind_ip,
+            server.game_port, server.query_port, server.rcon_port,
+        )
         raise HTTPException(status_code=500, detail=result["error"])
     server.status = "running"
     db.commit()
@@ -287,6 +349,15 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
         raise HTTPException(status_code=500, detail=result["error"])
     server.status = "stopped"
     db.commit()
+
+    # Firewall- und iptables-Regeln nach Container-Stop schließen.
+    close_ports(server.game_port, server.query_port, server.rcon_port)
+    iptables_revoke_server(
+        server.name,
+        server.public_bind_ip or "",
+        server.game_port, server.query_port, server.rcon_port,
+    )
+
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestoppt")
     return {"message": "Stop-Befehl gesendet", "status": server.status, **result}

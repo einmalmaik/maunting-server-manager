@@ -1209,11 +1209,12 @@ if command -v ufw &>/dev/null; then
     ufw allow 22/tcp comment 'SSH' 2>/dev/null || true
     ufw allow 80/tcp comment 'HTTP' 2>/dev/null || true
     ufw allow 443/tcp comment 'HTTPS' 2>/dev/null || true
-    # Game-Server Port-Range (UDP für Game + Query, TCP für RCon)
-    ufw allow 27015:27999/udp comment 'MSM Game-Server UDP' 2>/dev/null || true
-    ufw allow 27015:27999/tcp comment 'MSM Game-Server TCP (RCon)' 2>/dev/null || true
+    # Spiel-Ports werden ab Phase 2 NICHT mehr als Range freigegeben.
+    # Der Port-Manager des Panels öffnet je Server nur die konkret
+    # zugewiesenen Einzelports (game/udp, query/udp, rcon/tcp) und schließt
+    # sie beim Stop wieder. Siehe backend/services/firewall_service.py.
     ufw --force enable 2>/dev/null || true
-    ok "Firewall aktiviert (UFW) — Ports 22, 80, 443 + Game-Range 27015-27999 offen"
+    ok "Firewall aktiviert (UFW) — Ports 22, 80, 443 offen. Spiel-Ports werden zur Laufzeit vom Panel verwaltet."
 else
     warn "UFW nicht verfügbar. Firewall manuell konfigurieren."
 fi

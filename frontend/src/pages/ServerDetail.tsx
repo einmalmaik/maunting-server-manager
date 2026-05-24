@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import type { Server, GameInfo } from '@/types'
 import {
   Play,
@@ -16,6 +17,7 @@ import {
   Network,
   Download,
   Trash2,
+  AlertTriangle,
 } from 'lucide-react'
 
 /** Formatiert MB als kompakte Angabe (MB / GB). */
@@ -39,6 +41,15 @@ export function ServerDetail() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showEditNetwork, setShowEditNetwork] = useState(false)
+  const [savingNetwork, setSavingNetwork] = useState(false)
+  const [networkForm, setNetworkForm] = useState({
+    public_bind_ip: '',
+    game_port: '',
+    query_port: '',
+    rcon_port: '',
+  })
+  const { interfaces } = useHostInterfaces()
   const consoleRef = useRef<HTMLPreElement>(null)
 
   const serverId = parseInt(id || '0')
@@ -75,6 +86,18 @@ export function ServerDetail() {
     }
   }, [consoleLogs])
 
+  // Edit-Form vorbefüllen, sobald Server geladen ist oder das Modal geöffnet wird.
+  useEffect(() => {
+    if (server && showEditNetwork) {
+      setNetworkForm({
+        public_bind_ip: server.public_bind_ip || '',
+        game_port: server.game_port ? String(server.game_port) : '',
+        query_port: server.query_port ? String(server.query_port) : '',
+        rcon_port: server.rcon_port ? String(server.rcon_port) : '',
+      })
+    }
+  }, [server, showEditNetwork])
+
   const doAction = async (action: string) => {
     setActionLoading(action)
     try {
@@ -85,6 +108,48 @@ export function ServerDetail() {
       toast.error(msg)
     } finally {
       setActionLoading(null)
+    }
+  }
+
+  const handleSaveNetwork = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingNetwork(true)
+    try {
+      // Nur geänderte Felder mitschicken, sonst löst jedes PATCH Container-
+      // Recreate aus.
+      const body: Record<string, unknown> = {}
+      if (networkForm.public_bind_ip !== (server?.public_bind_ip || '')) {
+        body.public_bind_ip = networkForm.public_bind_ip || null
+      }
+      const portChanged = (field: 'game_port' | 'query_port' | 'rcon_port') => {
+        const current = server?.[field] ? String(server[field]) : ''
+        return networkForm[field] !== current
+      }
+      if (portChanged('game_port')) {
+        body.game_port = networkForm.game_port ? parseInt(networkForm.game_port) : null
+      }
+      if (portChanged('query_port')) {
+        body.query_port = networkForm.query_port ? parseInt(networkForm.query_port) : null
+      }
+      if (portChanged('rcon_port')) {
+        body.rcon_port = networkForm.rcon_port ? parseInt(networkForm.rcon_port) : null
+      }
+      if (Object.keys(body).length === 0) {
+        setShowEditNetwork(false)
+        return
+      }
+      await api<Server>(`/servers/${serverId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      })
+      toast.success(t('servers.networkSaved'))
+      setShowEditNetwork(false)
+      fetchAll()
+    } catch (err: any) {
+      const msg = t(err.message) || err.message || t('common.error')
+      toast.error(msg)
+    } finally {
+      setSavingNetwork(false)
     }
   }
 
@@ -163,13 +228,35 @@ export function ServerDetail() {
         </span>
       </div>
 
+      {/* Start-Block Warnung: kein public_bind_ip gesetzt */}
+      {!server.public_bind_ip && server.status !== 'running' && (
+        <div className="msm-card p-4 border-status-warning/40 bg-status-warning/5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-status-warning flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-headline text-body-md text-on-surface mb-1">
+              {t('servers.bindIp.startBlockedTitle')}
+            </p>
+            <p className="font-body-md text-sm text-on-surface-variant">
+              {t('servers.bindIp.startBlockedBody')}
+            </p>
+          </div>
+          <button
+            onClick={() => setShowEditNetwork(true)}
+            className="msm-btn-primary px-3 py-1.5 text-sm"
+          >
+            {t('servers.bindIp.assignNow')}
+          </button>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
         {server.status !== 'running' && server.status !== 'installing' && (
           <button
             onClick={() => doAction('start')}
-            disabled={!!actionLoading}
+            disabled={!!actionLoading || !server.public_bind_ip}
             className="msm-btn-primary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            title={!server.public_bind_ip ? t('servers.bindIp.startBlockedTitle') : undefined}
           >
             <Play className="w-4 h-4" />
             {actionLoading === 'start' ? t('common.loading') : t('servers.start')}
@@ -299,32 +386,126 @@ export function ServerDetail() {
         </div>
       </div>
 
-      {/* Ports */}
-      {(server.game_port || server.query_port || server.rcon_port) && (
-        <div className="msm-card p-5">
-          <div className="flex items-center gap-2 mb-4">
+      {/* Netzwerk: Bind-IP + Ports + Edit */}
+      <div className="msm-card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
             <Network className="w-4 h-4 text-on-surface-variant" />
-            <h3 className="font-headline text-body-md text-on-surface">Netzwerk</h3>
+            <h3 className="font-headline text-body-md text-on-surface">{t('servers.network')}</h3>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {server.game_port && (
+          <button
+            onClick={() => setShowEditNetwork(true)}
+            className="msm-btn-secondary px-3 py-1.5 text-sm"
+          >
+            {t('common.edit')}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div>
+            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">{t('servers.publicBindIp')}</p>
+            <p className="font-headline text-body-md text-primary break-all">
+              {server.public_bind_ip || <span className="text-status-warning">{t('servers.bindIp.unset')}</span>}
+            </p>
+          </div>
+          <div>
+            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">{t('servers.gamePort')}</p>
+            <p className="font-headline text-display-sm text-primary">{server.game_port ?? '-'} <span className="text-sm font-body-md text-on-surface-variant">UDP</span></p>
+          </div>
+          <div>
+            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">{t('servers.queryPort')}</p>
+            <p className="font-headline text-display-sm text-primary">{server.query_port ?? '-'} <span className="text-sm font-body-md text-on-surface-variant">UDP</span></p>
+          </div>
+          <div>
+            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">{t('servers.rconPort')}</p>
+            <p className="font-headline text-display-sm text-primary">{server.rcon_port ?? '-'} <span className="text-sm font-body-md text-on-surface-variant">TCP</span></p>
+          </div>
+        </div>
+      </div>
+
+      {/* Edit-Network Modal */}
+      {showEditNetwork && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="msm-card w-full max-w-lg p-6 my-8">
+            <h2 className="font-headline text-headline-md text-primary mb-1">
+              {t('servers.editNetworkTitle')}
+            </h2>
+            <p className="font-body-md text-sm text-on-surface-variant mb-6">
+              {t('servers.editNetworkDescription')}
+            </p>
+            <form onSubmit={handleSaveNetwork} className="space-y-4">
               <div>
-                <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">Game Port</p>
-                <p className="font-headline text-display-sm text-primary">{server.game_port} <span className="text-sm font-body-md text-on-surface-variant">UDP</span></p>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  {t('servers.publicBindIp')}
+                </label>
+                <select
+                  className="msm-input"
+                  value={networkForm.public_bind_ip}
+                  onChange={(e) => setNetworkForm({ ...networkForm, public_bind_ip: e.target.value })}
+                  required
+                >
+                  <option value="">{t('servers.bindIp.choose')}</option>
+                  {interfaces.map((iface) => (
+                    <option key={`${iface.interface}-${iface.ip}`} value={iface.ip}>
+                      {iface.ip} · {iface.interface}
+                      {iface.is_loopback ? ` (${t('servers.bindIp.loopback')})` : ''}
+                      {iface.is_private && !iface.is_loopback ? ` (${t('servers.bindIp.private')})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="font-body-md text-xs text-on-surface-variant mt-1">{t('servers.bindIp.hint')}</p>
               </div>
-            )}
-            {server.query_port && (
-              <div>
-                <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">Query Port</p>
-                <p className="font-headline text-display-sm text-primary">{server.query_port} <span className="text-sm font-body-md text-on-surface-variant">UDP</span></p>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('servers.gamePort')}
+                  </label>
+                  <input
+                    type="number" min={1024} max={65535}
+                    value={networkForm.game_port}
+                    onChange={(e) => setNetworkForm({ ...networkForm, game_port: e.target.value })}
+                    className="msm-input"
+                  />
+                </div>
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('servers.queryPort')}
+                  </label>
+                  <input
+                    type="number" min={1024} max={65535}
+                    value={networkForm.query_port}
+                    onChange={(e) => setNetworkForm({ ...networkForm, query_port: e.target.value })}
+                    className="msm-input"
+                  />
+                </div>
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('servers.rconPort')}
+                  </label>
+                  <input
+                    type="number" min={1024} max={65535}
+                    value={networkForm.rcon_port}
+                    onChange={(e) => setNetworkForm({ ...networkForm, rcon_port: e.target.value })}
+                    className="msm-input"
+                  />
+                </div>
               </div>
-            )}
-            {server.rcon_port && (
-              <div>
-                <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">RCON Port</p>
-                <p className="font-headline text-display-sm text-primary">{server.rcon_port} <span className="text-sm font-body-md text-on-surface-variant">TCP</span></p>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  className="msm-btn-secondary flex-1 py-2"
+                  onClick={() => setShowEditNetwork(false)}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="submit"
+                  className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
+                  disabled={savingNetwork}
+                >
+                  {savingNetwork ? t('common.loading') : t('common.save')}
+                </button>
               </div>
-            )}
+            </form>
           </div>
         </div>
       )}

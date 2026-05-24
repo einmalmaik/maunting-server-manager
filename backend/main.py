@@ -97,6 +97,28 @@ async def lifespan(app: FastAPI):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backups ADD COLUMN name VARCHAR(256)"))
 
+    # Phase 2 — Port-Manager-Initialisierung:
+    # 1. Legacy-MSM-Port-Ranges (z. B. 27015:27999/udp) aus UFW entfernen.
+    #    Wir loeschen NUR Eintraege mit MSM-Comment-Praefix; SSH/Caddy/Custom
+    #    Regeln bleiben unangetastet (siehe firewall_service.cleanup_legacy_msm_ranges).
+    # 2. DOCKER-USER iptables Baseline-DROP fuer die MSM-Port-Range setzen
+    #    (Defense-in-Depth gegen Docker-UFW-Bypass). Idempotent.
+    try:
+        from services.firewall_service import cleanup_legacy_msm_ranges
+        from services.docker_iptables_service import ensure_baseline_drop
+        removed = cleanup_legacy_msm_ranges()
+        if removed:
+            import logging
+            logging.getLogger(__name__).info(
+                "Port-Manager: %d Legacy-MSM-Range(s) aus UFW entfernt.", removed,
+            )
+        ensure_baseline_drop()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Phase-2 Port-Manager-Init partiell fehlgeschlagen: %s", exc,
+        )
+
     # Initialize scheduler and load existing schedules
     start_scheduler()
     from database import SessionLocal
