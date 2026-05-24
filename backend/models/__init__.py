@@ -1,6 +1,8 @@
 from .user import User
 from .server import Server
-from .permission import Permission
+from .role import Role
+from .role_permission import RolePermission
+from .server_permission import ServerPermission
 from .backup import Backup
 from .mod import Mod
 from .audit_log import AuditLog
@@ -10,4 +12,8 @@ from .email_verification import EmailVerification
 from .backup_code import BackupCode
 from .panel_setting import PanelSetting
 
-__all__ = ["User", "Server", "Permission", "Backup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist", "EmailVerification", "BackupCode", "PanelSetting"]
+__all__ = [
+    "User", "Server", "Role", "RolePermission", "ServerPermission",
+    "Backup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
+    "EmailVerification", "BackupCode", "PanelSetting",
+]

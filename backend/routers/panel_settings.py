@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db
-from dependencies import get_current_owner, verify_csrf
+from dependencies import require_global, verify_csrf
 from schemas.panel_settings import PanelSettingsResponse, PanelSettingsUpdate, TestEmailRequest, ResendKeyRequest, SteamApiKeyRequest
 from services.panel_settings_service import PanelSettingsService
 from services.email_service import EmailService
@@ -25,7 +25,7 @@ def _mask_secret(value: str) -> str:
 
 
 @router.get("", response_model=PanelSettingsResponse)
-def get_settings(db: Session = Depends(get_db), _=Depends(get_current_owner)) -> dict:
+def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.settings.read"))) -> dict:
     """Liest alle Panel-Einstellungen (DB-Werte mit Fallback auf Defaults).
 
     Passwoerter und API-Keys werden maskiert zurueckgegeben.
@@ -58,7 +58,7 @@ def _is_masked(value: str) -> bool:
 def update_settings(
     req: PanelSettingsUpdate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_owner),
+    _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
     """Speichert Panel-Einstellungen in der Datenbank.
@@ -78,7 +78,7 @@ def update_settings(
 async def test_email(
     req: TestEmailRequest,
     db: Session = Depends(get_db),
-    _=Depends(get_current_owner),
+    _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
     """Sendet eine Test-E-Mail mit den aktuellen Einstellungen."""
@@ -139,7 +139,7 @@ def _update_env_file(key: str, value: str) -> None:
 def update_resend_key(
     req: ResendKeyRequest,
     db: Session = Depends(get_db),
-    _=Depends(get_current_owner),
+    _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
     """Stores the Resend API key securely in .env instead of the database.
@@ -168,7 +168,7 @@ def update_resend_key(
 def update_steam_key(
     req: SteamApiKeyRequest,
     db: Session = Depends(get_db),
-    _=Depends(get_current_owner),
+    _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
     """Stores the Steam Web API key securely in .env."""
@@ -191,7 +191,7 @@ def update_steam_key(
 @router.post("/steam-key/test", status_code=200)
 async def test_steam_key(
     db: Session = Depends(get_db),
-    _=Depends(get_current_owner),
+    _=Depends(require_global("panel.settings.read")),
 ) -> dict:
     """Tests whether the configured Steam API key is valid."""
     import httpx

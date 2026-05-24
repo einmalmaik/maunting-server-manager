@@ -4,6 +4,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHostInterfaces } from '@/hooks/useHostInterfaces'
+import { useHasPermission } from '@/hooks/useHasPermission'
+import { ServerPermissionsPanel } from '@/components/ServerPermissionsPanel'
 import type { Server, GameInfo } from '@/types'
 import {
   Play,
@@ -53,6 +55,7 @@ export function ServerDetail() {
   const consoleRef = useRef<HTMLPreElement>(null)
 
   const serverId = parseInt(id || '0')
+  const canManageServerPermissions = useHasPermission('users.permissions.manage')
 
   const fetchAll = async () => {
     if (!serverId) return
@@ -525,6 +528,13 @@ export function ServerDetail() {
           </pre>
         </div>
       </div>
+
+      {/* Server-Permissions (Sub-User-Delegation) */}
+      {canManageServerPermissions && (
+        <div className="msm-card p-5">
+          <ServerPermissionsPanel serverId={serverId} />
+        </div>
+      )}
     </div>
   )
 }

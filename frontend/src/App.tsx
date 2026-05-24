@@ -18,6 +18,7 @@ import { FileManager } from './pages/FileManager'
 import { ModManager } from './pages/ModManager'
 import { Backups } from './pages/Backups'
 import { Users } from './pages/Users'
+import { Roles } from './pages/Roles'
 import { Settings } from './pages/Settings'
 import { Profile } from './pages/Profile'
 
@@ -63,6 +64,7 @@ function App() {
         <Route path="servers/:id/mods" element={<ModManager />} />
         <Route path="servers/:id/backups" element={<Backups />} />
         <Route path="users" element={<Users />} />
+        <Route path="roles" element={<Roles />} />
         <Route path="settings" element={<Settings />} />
         <Route path="profile" element={<Profile />} />
       </Route>

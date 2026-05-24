@@ -31,8 +31,10 @@ db_module.SessionLocal = db_module.sessionmaker(
     autocommit=False, autoflush=False, bind=db_module.engine
 )
 from main import app
-from models import User, RefreshToken, Server, Permission
+from models import User, RefreshToken, Server, Role, ServerPermission
 from services.auth_service import AuthService
+from services.role_service import ensure_system_roles
+from services.permission_catalog import SERVER_KEYS
 
 # Create tables AFTER models are imported and registered in Base.metadata
 db_module.Base.metadata.create_all(bind=db_module.engine)
@@ -47,6 +49,12 @@ def clean_db():
     # Reset slowapi in-memory storage between tests
     from middleware.rate_limit import limiter
     limiter.reset()
+    # Built-in Rollen (admin/user) bei jedem Test bereitstellen.
+    session = db_module.SessionLocal()
+    try:
+        ensure_system_roles(session)
+    finally:
+        session.close()
     yield
 
 
@@ -152,21 +160,23 @@ def test_server(db: Session, owner_user: User) -> Server:
 
 
 @pytest.fixture
-def user_permission(db: Session, regular_user: User, test_server: Server) -> Permission:
-    perm = Permission(
-        user_id=regular_user.id,
-        server_id=test_server.id,
-        can_view_console=True,
-        can_view_logs=True,
-        can_start=True,
-        can_stop=True,
-        can_restart=True,
-        can_backup=True,
-        can_restore=True,
-        can_edit_config=True,
-        can_manage_mods=True,
-    )
-    db.add(perm)
+def user_permission(db: Session, regular_user: User, test_server: Server) -> list[ServerPermission]:
+    """Delegiert dem regular_user alle server-scoped Permissions auf test_server.
+
+    Bewusst breit, damit bestehende Tests ("User mit Permission darf X")
+    weiterhin funktionieren — wir geben einfach den vollen server.*-Satz.
+    """
+    perms = [
+        ServerPermission(
+            user_id=regular_user.id,
+            server_id=test_server.id,
+            permission_key=key,
+        )
+        for key in sorted(SERVER_KEYS)
+    ]
+    for p in perms:
+        db.add(p)
     db.commit()
-    db.refresh(perm)
-    return perm
+    for p in perms:
+        db.refresh(p)
+    return perms

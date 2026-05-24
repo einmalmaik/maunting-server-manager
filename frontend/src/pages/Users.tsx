@@ -2,11 +2,15 @@ import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, Shield, Mail, CheckCircle, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
+import { rbacApi } from '@/api/rbac'
+import { toast } from '@/stores/toastStore'
 import type { User } from '@/types'
+import type { Role } from '@/types/permissions'
 
 export function Users() {
   const { t } = useTranslation()
   const [users, setUsers] = useState<User[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
@@ -19,20 +23,34 @@ export function Users() {
   })
   const [creating, setCreating] = useState(false)
 
-  const fetchUsers = async () => {
+  const fetchAll = async () => {
     try {
-      const data = await api<User[]>('/admin/users')
-      setUsers(data)
-    } catch (err: any) {
-      setError(err.message)
+      const [u, r] = await Promise.all([
+        api<User[]>('/admin/users'),
+        rbacApi.listRoles().catch(() => [] as Role[]),
+      ])
+      setUsers(u)
+      setRoles(r)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    fetchUsers()
+    void fetchAll()
   }, [])
+
+  const assignRole = async (user: User, roleId: number | null) => {
+    try {
+      await rbacApi.assignRole(user.id, roleId)
+      toast.success(t('users.roleSaved'))
+      await fetchAll()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -44,9 +62,9 @@ export function Users() {
       })
       setShowCreate(false)
       setCreateForm({ username: '', email: '', password: '', is_owner: false, auto_verify: false })
-      await fetchUsers()
-    } catch (err: any) {
-      setError(err.message)
+      await fetchAll()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setCreating(false)
     }
@@ -56,9 +74,9 @@ export function Users() {
     if (!window.confirm(t('users.confirmDelete'))) return
     try {
       await api(`/admin/users/${userId}`, { method: 'DELETE' })
-      await fetchUsers()
-    } catch (err: any) {
-      setError(err.message)
+      await fetchAll()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -199,6 +217,9 @@ export function Users() {
               <th className="text-left font-label-md text-label-md text-on-surface-variant p-4 uppercase tracking-wider">
                 Status
               </th>
+              <th className="text-left font-label-md text-label-md text-on-surface-variant p-4 uppercase tracking-wider">
+                {t('users.role')}
+              </th>
               <th className="text-right font-label-md text-label-md text-on-surface-variant p-4 uppercase tracking-wider">
                 {t('users.actions')}
               </th>
@@ -236,6 +257,23 @@ export function Users() {
                   }`}>
                     {user.is_active ? t('users.active') : t('users.inactive')}
                   </span>
+                </td>
+                <td className="p-4">
+                  {user.is_owner ? (
+                    <span className="font-mono-sm text-mono-sm text-on-surface-variant">owner</span>
+                  ) : (
+                    <select
+                      value={user.role_id ?? ''}
+                      onChange={(e) => assignRole(user, e.target.value ? Number(e.target.value) : null)}
+                      className="msm-input text-sm py-1"
+                      aria-label={t('users.assignRole')}
+                    >
+                      <option value="">{t('users.noRole')}</option>
+                      {roles.map((r) => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </td>
                 <td className="p-4 text-right">
                   {!user.is_owner && (

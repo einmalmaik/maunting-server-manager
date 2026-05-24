@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from database import get_db
-from models import Server, Permission, User
+from models import Server, User
 from dependencies import get_current_user, require_server_permission
 from services.steam_service import get_steam_service, SteamModInfo
 from games import get_plugin
@@ -31,7 +31,7 @@ async def search_workshop_mods(
     user: User = Depends(get_current_user)
 ) -> List[dict]:
     """Search workshop mods for server's game."""
-    require_server_permission(user, server_id, db, "can_manage_mods")
+    require_server_permission(user, server_id, db, "server.mods.read")
     
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -73,7 +73,7 @@ async def get_popular_mods(
     user: User = Depends(get_current_user)
 ) -> List[dict]:
     """Get workshop mods for server's game, sorted by the given criteria."""
-    require_server_permission(user, server_id, db, "can_manage_mods")
+    require_server_permission(user, server_id, db, "server.mods.read")
     
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -116,7 +116,7 @@ async def get_mod_details(
     user: User = Depends(get_current_user)
 ) -> dict:
     """Get detailed information for a specific workshop mod."""
-    require_server_permission(user, server_id, db, "can_manage_mods")
+    require_server_permission(user, server_id, db, "server.mods.read")
     
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:

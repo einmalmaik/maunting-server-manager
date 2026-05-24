@@ -25,6 +25,8 @@ from routers import (
     steam_router,
     panel_settings_router,
     files_router,
+    roles_router,
+    permissions_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -96,6 +98,87 @@ async def lifespan(app: FastAPI):
         if 'name' not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backups ADD COLUMN name VARCHAR(256)"))
+
+    # Phase 3 — RBAC: users.role_id-Spalte (Tabellen `roles`/`role_permissions`/
+    # `server_permissions` werden von `Base.metadata.create_all` angelegt) und
+    # einmalige Migration der alten `permissions`-Tabelle in `server_permissions`.
+    if 'users' in inspector.get_table_names():
+        user_cols = [c['name'] for c in inspector.get_columns('users')]
+        if 'role_id' not in user_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN role_id INTEGER"))
+
+    # Built-in Rollen seeden + admin-Rolle auf aktuellen Katalog syncen.
+    from database import SessionLocal as _SessionLocal
+    from services.role_service import ensure_system_roles, get_role_by_name
+    from services.permission_catalog import (
+        LEGACY_PERMISSION_MAPPING,
+        SYSTEM_ROLE_USER,
+    )
+    _seed_db = _SessionLocal()
+    try:
+        ensure_system_roles(_seed_db)
+        user_role = get_role_by_name(_seed_db, SYSTEM_ROLE_USER)
+        # Bestehende Nicht-Owner ohne Rolle bekommen `user` als sicheren Default.
+        if user_role is not None:
+            _seed_db.execute(
+                text(
+                    "UPDATE users SET role_id = :rid "
+                    "WHERE role_id IS NULL AND is_owner = :is_owner"
+                ),
+                {"rid": user_role.id, "is_owner": False},
+            )
+            _seed_db.commit()
+    finally:
+        _seed_db.close()
+
+    # Datenmigration: alte `permissions`-Tabelle -> `server_permissions`.
+    # Idempotent: prueft jeweils, ob Ziel-Rows bereits existieren. Danach wird
+    # die Legacy-Tabelle gedroppt (nur, wenn sie existiert).
+    inspector = inspect(engine)
+    if 'permissions' in inspector.get_table_names():
+        import logging as _logging
+        _log_mig = _logging.getLogger(__name__)
+        legacy_cols = {c['name'] for c in inspector.get_columns('permissions')}
+        select_cols = [c for c in LEGACY_PERMISSION_MAPPING.keys() if c in legacy_cols]
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT id, user_id, server_id, "
+                    + ", ".join(select_cols)
+                    + " FROM permissions"
+                )
+            ).fetchall()
+            migrated = 0
+            for row in rows:
+                user_id = row.user_id
+                server_id = row.server_id
+                desired_keys: set[str] = set()
+                for col in select_cols:
+                    if getattr(row, col):
+                        desired_keys.update(LEGACY_PERMISSION_MAPPING[col])
+                for key in desired_keys:
+                    exists = conn.execute(
+                        text(
+                            "SELECT id FROM server_permissions "
+                            "WHERE user_id = :uid AND server_id = :sid "
+                            "AND permission_key = :key"
+                        ),
+                        {"uid": user_id, "sid": server_id, "key": key},
+                    ).first()
+                    if exists is None:
+                        conn.execute(
+                            text(
+                                "INSERT INTO server_permissions "
+                                "(user_id, server_id, permission_key) "
+                                "VALUES (:uid, :sid, :key)"
+                            ),
+                            {"uid": user_id, "sid": server_id, "key": key},
+                        )
+                        migrated += 1
+            conn.execute(text("DROP TABLE permissions"))
+        if migrated:
+            _log_mig.info("Phase-3 RBAC-Migration: %d Permission-Eintraege migriert.", migrated)
 
     # Phase 2 — Port-Manager-Initialisierung:
     # 1. Legacy-MSM-Port-Ranges (z. B. 27015:27999/udp) aus UFW entfernen.
@@ -195,6 +278,8 @@ app.include_router(system_router)
 app.include_router(steam_router)
 app.include_router(panel_settings_router)
 app.include_router(files_router)
+app.include_router(roles_router)
+app.include_router(permissions_router)
 
 # Static Frontend (nur in Produktion)
 import os
