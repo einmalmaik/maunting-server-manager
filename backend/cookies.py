@@ -24,6 +24,12 @@ _COOKIE_CONFIG = {
     },
 }
 
+# Pfade, an denen frühere Releases das CSRF-Cookie gesetzt haben. Wenn ein
+# Browser von einer früheren Version noch ein Cookie unter einem dieser Pfade
+# hat, wird es bei jedem Request auf /api/* mitgeschickt und kann das aktuelle
+# Cookie unter Path=/ verdrängen. Daher beim Setzen/Löschen explizit räumen.
+_LEGACY_CSRF_PATHS = ("/api",)
+
 
 def _set_cookie(response: Response, key: str, value: str, max_age: int | None = None) -> None:
     cfg = _COOKIE_CONFIG[key]
@@ -38,6 +44,25 @@ def _set_cookie(response: Response, key: str, value: str, max_age: int | None = 
     )
 
 
+def _clear_legacy_csrf_cookies(response: Response) -> None:
+    """Löscht CSRF-Cookies, die unter alten Pfaden im Browser liegen können.
+
+    Hintergrund: in einem früheren Release lag das CSRF-Cookie unter Path=/api.
+    Browser, die damals eingeloggt waren, haben es noch — und schicken es bei
+    jedem Request auf /api/* zusammen mit dem aktuellen Cookie unter Path=/.
+    Wenn der Server beim Parsen den falschen Wert sieht, schlägt die
+    Double-Submit-Prüfung mit "CSRF-Token ungueltig" fehl.
+    """
+    cfg = _COOKIE_CONFIG["__Secure-csrf_token"]
+    for legacy_path in _LEGACY_CSRF_PATHS:
+        response.delete_cookie(
+            key="__Secure-csrf_token",
+            path=legacy_path,
+            secure=cfg["secure"],
+            samesite=cfg["samesite"],
+        )
+
+
 def _clear_auth_cookies(response: Response) -> None:
     for key in ("__Secure-access_token", "__Secure-refresh_token", "__Secure-csrf_token"):
         cfg = _COOKIE_CONFIG[key]
@@ -47,9 +72,13 @@ def _clear_auth_cookies(response: Response) -> None:
             secure=cfg["secure"],
             samesite=cfg["samesite"],
         )
+    _clear_legacy_csrf_cookies(response)
 
 
 def _set_auth_cookies(response: Response, access_token: str, refresh_token: str, csrf_token: str) -> None:
+    # Legacy-CSRF-Cookies zuerst räumen, damit der Browser nach Login/Refresh
+    # nur noch das aktuelle Cookie unter Path=/ hat.
+    _clear_legacy_csrf_cookies(response)
     _set_cookie(response, "__Secure-access_token", access_token, max_age=settings.access_token_expire_minutes * 60)
     _set_cookie(response, "__Secure-refresh_token", refresh_token, max_age=settings.refresh_token_expire_days * 24 * 60 * 60)
     _set_cookie(response, "__Secure-csrf_token", csrf_token, max_age=settings.csrf_token_expire_minutes * 60)

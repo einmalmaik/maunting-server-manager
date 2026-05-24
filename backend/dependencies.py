@@ -29,11 +29,40 @@ def get_current_owner(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def _all_cookie_values(request: Request, name: str) -> list[str]:
+    """Liefert alle Werte unter `name` aus dem Cookie-Header.
+
+    Starlette gibt ueber `request.cookies` nur einen Wert pro Name zurueck. Wenn
+    ein Browser nach einer Pfad-Migration noch ein zweites Cookie mit demselben
+    Namen unter einem anderen Pfad mitschickt (z. B. Path=/api aus einem
+    frueheren Release zusaetzlich zu Path=/), geht der jeweils andere Wert
+    verloren. Fuer die CSRF-Pruefung wollen wir alle Werte sehen.
+    """
+    raw = request.headers.get("cookie", "")
+    values: list[str] = []
+    for chunk in raw.split(";"):
+        if "=" not in chunk:
+            continue
+        key, val = chunk.split("=", 1)
+        if key.strip() == name:
+            values.append(val.strip())
+    return values
+
+
 def verify_csrf(request: Request) -> None:
-    """Double-Submit-Cookie CSRF-Schutz. Nur fuer state-changing Requests."""
-    csrf_cookie = request.cookies.get("__Secure-csrf_token")
+    """Double-Submit-Cookie CSRF-Schutz. Nur fuer state-changing Requests.
+
+    Akzeptiert den Header-Wert, wenn er zu einem der vom Browser gesendeten
+    CSRF-Cookies passt. Das ist noetig, weil nach einer Cookie-Pfad-Migration
+    Browser zeitweise zwei Cookies mit demselben Namen unter verschiedenen
+    Pfaden halten koennen — und Angreifer in beiden Faellen den Header-Wert
+    nicht raten koennen (cross-origin kein Cookie-Zugriff).
+    """
     csrf_header = request.headers.get("x-csrf-token")
-    if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+    if not csrf_header:
+        raise HTTPException(status_code=403, detail="CSRF-Token ungueltig")
+    cookie_values = _all_cookie_values(request, "__Secure-csrf_token")
+    if not cookie_values or csrf_header not in cookie_values:
         raise HTTPException(status_code=403, detail="CSRF-Token ungueltig")
 
 

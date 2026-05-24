@@ -113,13 +113,29 @@ class ConfigField:
 
 @dataclass
 class ServerStatus:
-    status: str  # stopped, running, installing, updating, error
+    status: str  # stopped, running, installing, updating, starting, error
     cpu_percent: float | None = None
     ram_mb: int | None = None
     disk_mb: int | None = None
     uptime_seconds: int | None = None
     players_online: int | None = None
     message: str | None = None
+
+
+def _map_container_status(docker_status: str) -> str:
+    """Mapped Docker-Container-States auf MSM-Status-Codes.
+
+    Docker liefert u. a. "exited", "dead", "created", "removing", "paused",
+    "restarting", "running". Diese Strings landen sonst 1:1 im Frontend und
+    sind dort nicht uebersetzbar. Wir reduzieren auf das kleine Set, das die
+    UI versteht und i18n-Schluessel hat.
+    """
+    if docker_status == "running":
+        return "running"
+    if docker_status == "restarting":
+        return "starting"
+    # exited, dead, created, removing, paused -> stopped
+    return "stopped"
 
 
 # ── Console-Logging (MSM-eigene Log-Datei pro Server) ──────────────────────
@@ -501,7 +517,7 @@ class GamePlugin(ABC):
             msg = "Container wurde wegen RAM-Limit beendet (OOM)"
 
         return ServerStatus(
-            status="running" if is_running else state["status"],
+            status=_map_container_status(state["status"]),
             cpu_percent=(live_stats or {}).get("cpu_percent"),
             ram_mb=(live_stats or {}).get("ram_mb"),
             disk_mb=None,  # Disk wird zentral im Scheduler-Job ermittelt
