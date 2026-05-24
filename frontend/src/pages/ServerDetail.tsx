@@ -159,7 +159,7 @@ export function ServerDetail() {
           </div>
         </div>
         <span className={`font-mono-sm text-mono-sm px-3 py-1 rounded-full border ${statusClasses(server.status)}`}>
-          {server.status}
+          {t(`servers.status.${server.status}`, { defaultValue: server.status })}
         </span>
       </div>
 

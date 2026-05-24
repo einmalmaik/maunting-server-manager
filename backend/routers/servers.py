@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 
@@ -257,7 +258,10 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    result = plugin.start(server)
+    # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
+    # async-Route blockieren sie den gesamten Uvicorn-Event-Loop — alle anderen
+    # Requests hängen mit. Daher in einen Threadpool auslagern.
+    result = await asyncio.to_thread(plugin.start, server)
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
     server.status = "running"
@@ -276,7 +280,9 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    result = plugin.stop(server)
+    # Siehe start_server: docker stop ist synchron und kann bis zum
+    # Graceful-Timeout dauern. Threadpool hält den Event-Loop frei.
+    result = await asyncio.to_thread(plugin.stop, server)
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
     server.status = "stopped"
@@ -295,10 +301,10 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    stop_result = plugin.stop(server)
+    stop_result = await asyncio.to_thread(plugin.stop, server)
     if "error" in stop_result:
         raise HTTPException(status_code=500, detail=stop_result["error"])
-    start_result = plugin.start(server)
+    start_result = await asyncio.to_thread(plugin.start, server)
     if "error" in start_result:
         raise HTTPException(status_code=500, detail=start_result["error"])
     server.status = "running"

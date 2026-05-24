@@ -44,6 +44,14 @@
       "usage": "Disk usage",
       "softLimitWarning": "Disk usage hit {percent}% of the soft limit ({usedMb} MB / {limitMb} MB). Clean up old data — at 100% the server will be stopped automatically.",
       "softLimitStopped": "Server was stopped due to disk soft limit ({usedMb} MB / {limitMb} MB)."
+    },
+    "status": {
+      "running": "running",
+      "stopped": "stopped",
+      "starting": "starting",
+      "installing": "installing",
+      "updating": "updating",
+      "error": "error"
     }
   },
   "users": {

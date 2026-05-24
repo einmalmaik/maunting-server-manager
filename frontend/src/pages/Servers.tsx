@@ -135,7 +135,7 @@ export function Servers() {
                 <h3 className="font-headline text-body-md text-on-surface">{server.name}</h3>
               </div>
               <span className={`font-mono-sm text-mono-sm px-2 py-0.5 rounded-full border ${statusClasses(server.status)}`}>
-                {server.status}
+                {t(`servers.status.${server.status}`, { defaultValue: server.status })}
               </span>
             </div>
             <p className="font-body-md text-sm text-on-surface-variant mb-4">

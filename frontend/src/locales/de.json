@@ -44,6 +44,14 @@
       "usage": "Disk-Verbrauch",
       "softLimitWarning": "Disk-Verbrauch erreicht {percent} % des Soft-Limits ({usedMb} MB / {limitMb} MB). Bereinige alte Daten, sonst wird der Server bei 100 % automatisch gestoppt.",
       "softLimitStopped": "Server wurde wegen Disk-Soft-Limit gestoppt ({usedMb} MB / {limitMb} MB)."
+    },
+    "status": {
+      "running": "läuft",
+      "stopped": "gestoppt",
+      "starting": "startet",
+      "installing": "wird installiert",
+      "updating": "wird aktualisiert",
+      "error": "Fehler"
     }
   },
   "users": {

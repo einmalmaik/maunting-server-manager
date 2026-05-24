@@ -127,7 +127,7 @@ export function Dashboard() {
                     ? 'bg-surface-container-highest border-outline text-on-surface-variant'
                     : 'bg-status-warning/10 border-status-warning/30 text-status-warning'
                 }`}>
-                  {server.status}
+                  {t(`servers.status.${server.status}`, { defaultValue: server.status })}
                 </span>
               </div>
               <p className="font-body-md text-sm text-on-surface-variant mb-4">
