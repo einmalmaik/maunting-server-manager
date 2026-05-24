@@ -1,10 +1,15 @@
 # Maunting Server Manager
 
+# Warning! 
+
+This panel is a work in progress. Production use is not recommended.
+Release planned for June 10, 2026.
+
 > Ein Panel, um Conan Exiles und DayZ Server auf deinem eigenen Linux-Server zu verwalten — ganz ohne Kommandozeile.
 
 ---
 
-## Was ist das?
+## Was ist das? 
 
 Der **Maunting Server Manager** ist ein Web-Panel. Du öffnest es im Browser und kannst damit:
 
