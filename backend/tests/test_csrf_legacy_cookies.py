@@ -85,7 +85,8 @@ class TestVerifyCsrfWithStaleLegacyCookie:
             headers={"X-CSRF-Token": "totally_different_value", "Cookie": cookie_header},
         )
         assert response.status_code == 403
-        assert "CSRF" in response.json()["detail"]
+        # Detail unterscheidet den Mismatch-Fall vom Missing-Fall.
+        assert response.json()["detail"] == "CSRF-Token ungueltig"
 
     def test_rejects_when_no_csrf_header(
         self, client: TestClient, owner_user: User, owner_cookies: dict
@@ -97,7 +98,22 @@ class TestVerifyCsrfWithStaleLegacyCookie:
             # kein X-CSRF-Token Header
         )
         assert response.status_code == 403
-        assert "CSRF" in response.json()["detail"]
+        # Eigener Fehlercode fuer Header-fehlt — hilft beim Frontend-Debugging.
+        assert response.json()["detail"] == "CSRF-Header fehlt"
+
+    def test_rejects_when_no_csrf_cookie_but_header_present(
+        self, client: TestClient, owner_user: User, owner_cookies: dict
+    ):
+        # Header da, aber Cookie-Header enthaelt KEIN __Secure-csrf_token.
+        access = owner_cookies["__Secure-access_token"]
+        response = client.post(
+            "/api/servers",
+            json={"name": "x", "game_type": "dayz"},
+            cookies={"__Secure-access_token": access},
+            headers={"X-CSRF-Token": "some_value", "Cookie": f"__Secure-access_token={access}"},
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "CSRF-Cookie fehlt"
 
 
 class TestLoginClearsLegacyCsrfCookie:
