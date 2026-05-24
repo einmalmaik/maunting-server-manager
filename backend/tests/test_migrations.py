@@ -118,3 +118,177 @@ def test_migration_idempotent_on_clean_schema():
     new_cols = {c["name"] for c in inspector.get_columns("servers")}
     assert "linux_user" not in new_cols
     engine.dispose()
+
+
+# ── Phase 3 — RBAC: Legacy `permissions` → `server_permissions` ───────────────
+
+
+def _simulate_legacy_permissions_migration(db_url: str) -> int:
+    """Spiegelt 1:1 die Migrations-Logik aus backend/main.py (Phase-3-Block).
+
+    Verwendet Raw-SQL gegen die uebergebene DB-URL und liefert die Anzahl
+    migrierter Rows zurueck.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import create_engine, inspect, text
+
+    from services.permission_catalog import LEGACY_PERMISSION_MAPPING
+
+    engine = create_engine(db_url)
+    inspector = inspect(engine)
+    assert "permissions" in inspector.get_table_names()
+    legacy_cols = {c["name"] for c in inspector.get_columns("permissions")}
+    select_cols = [c for c in LEGACY_PERMISSION_MAPPING.keys() if c in legacy_cols]
+    migrated = 0
+    if not select_cols:
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE permissions"))
+    else:
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT id, user_id, server_id, "
+                    + ", ".join(select_cols)
+                    + " FROM permissions"
+                )
+            ).fetchall()
+            for row in rows:
+                desired_keys: set[str] = set()
+                for col in select_cols:
+                    if getattr(row, col):
+                        desired_keys.update(LEGACY_PERMISSION_MAPPING[col])
+                for key in desired_keys:
+                    exists = conn.execute(
+                        text(
+                            "SELECT id FROM server_permissions "
+                            "WHERE user_id = :uid AND server_id = :sid "
+                            "AND permission_key = :key"
+                        ),
+                        {"uid": row.user_id, "sid": row.server_id, "key": key},
+                    ).first()
+                    if exists is None:
+                        conn.execute(
+                            text(
+                                "INSERT INTO server_permissions "
+                                "(user_id, server_id, permission_key, granted_at) "
+                                "VALUES (:uid, :sid, :key, :ts)"
+                            ),
+                            {
+                                "uid": row.user_id,
+                                "sid": row.server_id,
+                                "key": key,
+                                "ts": datetime.now(timezone.utc),
+                            },
+                        )
+                        migrated += 1
+            conn.execute(text("DROP TABLE permissions"))
+    engine.dispose()
+    return migrated
+
+
+def _make_target_table(db_url: str) -> None:
+    """Legt `server_permissions` mit derselben NOT-NULL-Geometrie wie die ORM-DDL an."""
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE server_permissions ("
+                "  id INTEGER PRIMARY KEY,"
+                "  user_id INTEGER NOT NULL,"
+                "  server_id INTEGER NOT NULL,"
+                "  permission_key VARCHAR(64) NOT NULL,"
+                "  granted_at DATETIME NOT NULL,"
+                "  granted_by INTEGER"
+                ")"
+            )
+        )
+    engine.dispose()
+
+
+def test_phase3_legacy_permissions_migration_inserts_granted_at():
+    """Migration muss `granted_at` setzen (NOT NULL) — kein Crash beim INSERT."""
+    from sqlalchemy import create_engine, inspect, text
+
+    tmpdir = tempfile.mkdtemp(prefix="msm-rbac-mig-")
+    db_path = os.path.join(tmpdir, "msm.db")
+    db_url = f"sqlite:///{db_path}"
+
+    # Ziel-Tabelle (wie nach Base.metadata.create_all)
+    _make_target_table(db_url)
+    # Legacy-Tabelle mit min. einem can_*-Eintrag.
+    legacy_engine = create_engine(db_url)
+    with legacy_engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE permissions ("
+                "  id INTEGER PRIMARY KEY,"
+                "  user_id INTEGER NOT NULL,"
+                "  server_id INTEGER NOT NULL,"
+                "  can_start BOOLEAN NOT NULL DEFAULT 0,"
+                "  can_stop BOOLEAN NOT NULL DEFAULT 0,"
+                "  can_view_console BOOLEAN NOT NULL DEFAULT 0"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO permissions (user_id, server_id, can_start, can_stop, can_view_console) "
+                "VALUES (7, 42, 1, 1, 1)"
+            )
+        )
+    legacy_engine.dispose()
+
+    migrated = _simulate_legacy_permissions_migration(db_url)
+    assert migrated >= 2  # mindestens 'server.view' + 'server.start'/'server.stop'
+
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT user_id, server_id, permission_key, granted_at "
+                "FROM server_permissions ORDER BY permission_key"
+            )
+        ).fetchall()
+    inspector = inspect(engine)
+    assert "permissions" not in inspector.get_table_names()
+    assert rows, "Migration hat keine Rows angelegt"
+    for r in rows:
+        assert r.user_id == 7
+        assert r.server_id == 42
+        assert r.granted_at is not None
+    engine.dispose()
+
+
+def test_phase3_legacy_permissions_migration_handles_no_known_columns():
+    """Legacy-Tabelle ohne bekannte can_*-Spalten: einfach droppen, kein Crash."""
+    from sqlalchemy import create_engine, inspect, text
+
+    tmpdir = tempfile.mkdtemp(prefix="msm-rbac-mig-empty-")
+    db_path = os.path.join(tmpdir, "msm.db")
+    db_url = f"sqlite:///{db_path}"
+
+    _make_target_table(db_url)
+    legacy_engine = create_engine(db_url)
+    with legacy_engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE permissions ("
+                "  id INTEGER PRIMARY KEY,"
+                "  user_id INTEGER NOT NULL,"
+                "  server_id INTEGER NOT NULL,"
+                "  some_other_col VARCHAR(32)"
+                ")"
+            )
+        )
+    legacy_engine.dispose()
+
+    migrated = _simulate_legacy_permissions_migration(db_url)
+    assert migrated == 0
+
+    engine = create_engine(db_url)
+    inspector = inspect(engine)
+    assert "permissions" not in inspector.get_table_names()
+    engine.dispose()

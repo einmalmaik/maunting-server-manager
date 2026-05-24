@@ -16,7 +16,7 @@ from services.permission_service import (
     list_user_server_permission_keys,
     set_user_server_permissions,
 )
-from services.permission_catalog import SYSTEM_ROLE_USER
+from services.permission_catalog import SYSTEM_ROLE_ADMIN, SYSTEM_ROLE_USER
 from services.role_service import get_role, get_role_by_name
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -123,7 +123,7 @@ def assign_role(
     user_id: int,
     req: AssignRoleRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(require_global("users.permissions.manage")),
+    actor: User = Depends(require_global("users.permissions.manage")),
     __: None = Depends(verify_csrf),
 ) -> User:
     user = db.query(User).filter(User.id == user_id).first()
@@ -135,6 +135,13 @@ def assign_role(
         role = get_role(db, req.role_id)
         if not role:
             raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
+        # Zuweisung der `admin`-System-Rolle ist nur dem Owner erlaubt
+        # (verhindert Privilege-Escalation ueber `users.permissions.manage`).
+        if role.is_system and role.name == SYSTEM_ROLE_ADMIN and not actor.is_owner:
+            raise HTTPException(
+                status_code=403,
+                detail="Nur Owner kann die admin-Rolle zuweisen",
+            )
     user.role_id = req.role_id
     db.commit()
     db.refresh(user)

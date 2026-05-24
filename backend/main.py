@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import os
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -174,13 +175,20 @@ async def lifespan(app: FastAPI):
                             {"uid": user_id, "sid": server_id, "key": key},
                         ).first()
                         if exists is None:
+                            # `granted_at` ist NOT NULL und der Model-Default ist
+                            # Python-seitig (greift bei Raw-SQL nicht) -> explizit setzen.
                             conn.execute(
                                 text(
                                     "INSERT INTO server_permissions "
-                                    "(user_id, server_id, permission_key) "
-                                    "VALUES (:uid, :sid, :key)"
+                                    "(user_id, server_id, permission_key, granted_at) "
+                                    "VALUES (:uid, :sid, :key, :ts)"
                                 ),
-                                {"uid": user_id, "sid": server_id, "key": key},
+                                {
+                                    "uid": user_id,
+                                    "sid": server_id,
+                                    "key": key,
+                                    "ts": datetime.now(timezone.utc),
+                                },
                             )
                             migrated += 1
                 conn.execute(text("DROP TABLE permissions"))

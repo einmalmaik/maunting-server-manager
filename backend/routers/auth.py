@@ -18,6 +18,8 @@ from services import AuthService, EmailService
 from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
 from services.backup_code_service import BackupCodeService
+from services.permission_catalog import SYSTEM_ROLE_USER
+from services.role_service import get_role_by_name
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -125,6 +127,11 @@ async def register(req: UserCreate, db: Session = Depends(get_db)) -> User:
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
     user = AuthService.create_user(db, req.username, req.email, req.password)
+    # Sicherer Default: System-Rolle `user`. Konsistent mit der Lifespan-
+    # Migration und dem Admin-Create-Pfad. Verhindert Accounts mit role_id=NULL.
+    default_role = get_role_by_name(db, SYSTEM_ROLE_USER)
+    if default_role is not None:
+        user.role_id = default_role.id
     token = AuthService.generate_token()
     user.email_verification_token = token
     user.email_verification_expires = datetime.now(timezone.utc) + timedelta(hours=24)
