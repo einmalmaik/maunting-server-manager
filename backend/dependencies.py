@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -5,6 +7,8 @@ from database import get_db
 from models import User, Permission
 from services.auth_service import AuthService
 from services.jwt_blacklist_service import is_jwt_blacklisted
+
+_log = logging.getLogger("msm.csrf")
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -57,12 +61,27 @@ def verify_csrf(request: Request) -> None:
     Browser zeitweise zwei Cookies mit demselben Namen unter verschiedenen
     Pfaden halten koennen — und Angreifer in beiden Faellen den Header-Wert
     nicht raten koennen (cross-origin kein Cookie-Zugriff).
+
+    Loggt ohne Token-Werte, welche Komponente fehlt — sonst sieht im Log nur
+    "403" und man weiss nicht, ob der Header oder das Cookie fehlt.
     """
     csrf_header = request.headers.get("x-csrf-token")
-    if not csrf_header:
-        raise HTTPException(status_code=403, detail="CSRF-Token ungueltig")
     cookie_values = _all_cookie_values(request, "__Secure-csrf_token")
-    if not cookie_values or csrf_header not in cookie_values:
+    path = request.url.path
+    if not csrf_header and not cookie_values:
+        _log.warning("CSRF check failed on %s: header and cookie both missing", path)
+        raise HTTPException(status_code=403, detail="CSRF-Header und -Cookie fehlen")
+    if not csrf_header:
+        _log.warning("CSRF check failed on %s: X-CSRF-Token header missing (cookie present)", path)
+        raise HTTPException(status_code=403, detail="CSRF-Header fehlt")
+    if not cookie_values:
+        _log.warning("CSRF check failed on %s: __Secure-csrf_token cookie missing (header present)", path)
+        raise HTTPException(status_code=403, detail="CSRF-Cookie fehlt")
+    if csrf_header not in cookie_values:
+        _log.warning(
+            "CSRF check failed on %s: header does not match any of %d cookie value(s)",
+            path, len(cookie_values),
+        )
         raise HTTPException(status_code=403, detail="CSRF-Token ungueltig")
 
 
