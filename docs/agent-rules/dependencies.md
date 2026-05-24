@@ -1,11 +1,10 @@
-# SAgenten-Regeln: Dependencies
+Agenten-Regeln: Dependencies
 
-Stand: 2026-05-06  
-Ergänzt die Root-`AGENTS.md`. Diese Datei ist zu lesen, wenn neue Libraries, Major-Updates, Crypto/Auth/Storage/Logging/Telemetry-Abhängigkeiten, Build-Tooling oder transitive Dependency-Flächen betroffen sind.
+Stand: 2026-05-24
 
----
+Ergänzt die Root-AGENTS.md. Diese Datei ist zu lesen, wenn neue Libraries, Major-Updates, SSH/Auth/Storage/Logging/Telemetry-Abhängigkeiten, Build-Tooling oder transitive Dependency-Flächen betroffen sind.
 
-## 1. Grundsatz
+1. Grundsatz
 
 Jede Dependency ist ein Supply-Chain-Risiko.
 
@@ -13,255 +12,325 @@ Eine neue Bibliothek ist nur erlaubt, wenn sie einen klaren Sicherheits-, Wartba
 
 Neue Dependencies sind besonders kritisch, wenn sie berühren:
 
-- Plaintext
-- Vault Keys
-- Device Keys
-- Masterpasswort
-- Auth Tokens
-- Storage
-- Sync
-- Backup
-- Recovery
-- Passkeys/WebAuthn
-- Crypto
-- Logging
-- Telemetrie
-- Error Reporting
-- Build- und Packaging-Prozess
+SSH-Keys (Public/Private)
 
----
+Server-Passwörter
 
-## 2. Harte Verbote
+API- und Auth-Tokens
+
+Storage (Datenbank für Server-Konfigurationen)
+
+Remote-Command-Execution (Terminal/SSH-Clients)
+
+Webhook Secrets
+
+Logging
+
+Telemetrie
+
+Error Reporting
+
+Build- und Packaging-Prozess
+
+2. Harte Verbote
 
 Verboten:
 
-- unmaintained Crypto-, Auth-, Storage- oder Secret-Libraries
-- Libraries mit unklarem Sicherheitsmodell
-- Libraries, die sensible Daten an externe Dienste senden
-- Telemetrie-, Analytics- oder Error-Reporting-Libraries im Vault-Pfad ohne Datenschutzentscheidung
-- Dependencies, die Web/Tauri-Pfade durch Polyfills oder globale Side Effects unklar machen
-- Komfort-Libraries für triviale Logik
-- neue Crypto/Auth/Storage/Secret-Libraries ohne ADR oder Security-Doku
-- Major-Updates in Security-Pfaden ohne Changelog-, Test- und Runtime-Prüfung
-- direkte Nutzung von Crypto-Libraries aus Fachlogik heraus
-- Pakete, die globale Prototypen, globale Error-Handler oder globale Storage-Verhalten verändern
+unmaintained SSH-, Auth-, Storage- oder Secret-Libraries
 
----
+Libraries mit unklarem Sicherheitsmodell oder mangelhafter Dokumentation
 
-## 3. Pflichtprüfung vor neuer Dependency
+Libraries, die sensible Server-Daten (IPs, Ports, Metadaten) an externe Dienste senden
+
+Telemetrie-, Analytics- oder Error-Reporting-Libraries im Server-Management-Kontext ohne explizite Datenschutzentscheidung
+
+Dependencies, die Frontend-/Backend-Pfade durch globale Side Effects unklar machen
+
+Komfort-Libraries für triviale Logik (KISS-Verstoß)
+
+neue SSH/Auth/Storage-Libraries ohne ADR (Architecture Decision Record) oder Security-Doku
+
+Major-Updates in Security-Pfaden ohne Changelog-, Test- und Runtime-Prüfung
+
+direkte Nutzung von SSH/Terminal-Libraries aus fachfremder UI-Logik heraus
+
+Pakete, die globale Prototypen, globale Error-Handler oder das globale Storage-Verhalten verändern
+
+3. Pflichtprüfung vor neuer Dependency
 
 Vor jeder neuen Dependency dokumentieren:
 
-| Kriterium | Muss beantwortet werden |
-|---|---|
-| Zweck | Welches konkrete Projektproblem löst sie? |
-| Notwendigkeit | Warum reicht vorhandener Code oder eine Plattform-API nicht? |
-| Security | Berührt sie Plaintext, Keys, Auth, Storage, Sync oder Recovery? |
-| Wartung | Wie aktiv wird sie gepflegt? |
-| Advisories | Gibt es Security Advisories oder offene CVEs? |
-| Transitive Fläche | Wie groß ist die transitive Dependency-Fläche? |
-| API | Ist die API klein, verständlich und schwer falsch zu benutzen? |
-| Plattform | Läuft sie in Web und Tauri zuverlässig? |
-| Bundle | Ist Größe und Angriffsfläche vertretbar? |
-| Lizenz | Ist die Lizenz kompatibel mit Projekt und Distribution? |
-| Kapselung | Wird sie hinter Adapter/Fassade isoliert? |
-| Entfernbarkeit | Wie kann sie wieder entfernt oder ersetzt werden? |
-| Alternativen | Welche bessere oder sicherere Alternative wurde geprüft? |
+Kriterium
+
+Muss beantwortet werden
+
+Zweck
+
+Welches konkrete Projektproblem löst sie?
+
+Notwendigkeit
+
+Warum reicht vorhandener Code oder eine Plattform-API nicht?
+
+Security
+
+Berührt sie Server-Credentials, Keys, Auth, Storage oder Remote-Commands?
+
+Wartung
+
+Wie aktiv wird sie gepflegt?
+
+Advisories
+
+Gibt es Security Advisories oder offene CVEs?
+
+Transitive Fläche
+
+Wie groß ist die transitive Dependency-Fläche?
+
+API
+
+Ist die API klein, verständlich und schwer falsch zu benutzen?
+
+Bundle
+
+Ist die Größe und Angriffsfläche vertretbar?
+
+Lizenz
+
+Ist die Lizenz kompatibel mit Projekt und Distribution?
+
+Kapselung
+
+Wird sie hinter einem Adapter/einer Fassade isoliert?
+
+Entfernbarkeit
+
+Wie kann sie wieder entfernt oder ersetzt werden?
+
+Alternativen
+
+Welche bessere oder sicherere Alternative wurde geprüft?
 
 Eine Dependency ohne beantwortete Prüfung darf nicht eingeführt werden.
 
----
-
-## 4. Bewertungsschema
+4. Bewertungsschema
 
 Einstufung:
 
-### Niedriges Risiko
+Niedriges Risiko
 
-- reine Dev-Dependency
-- kein Zugriff auf Runtime-Daten
-- keine Netzwerk-, Storage-, Crypto- oder Auth-Berührung
-- kleine transitive Fläche
-- gut wartbar
-- leicht entfernbar
+reine Dev-Dependency
+
+kein Zugriff auf Runtime-Daten
+
+keine Netzwerk-, Storage-, SSH- oder Auth-Berührung
+
+kleine transitive Fläche
+
+gut wartbar
+
+leicht entfernbar
 
 Trotzdem: dokumentieren, warum sie gebraucht wird.
 
-### Mittleres Risiko
+Mittleres Risiko
 
-- Runtime-Dependency
-- UI-nahe Nutzung
-- keine sensiblen Daten
-- begrenzte transitive Fläche
-- kleine API
+Runtime-Dependency
+
+UI-nahe Nutzung (z. B. UI-Komponenten-Bibliotheken)
+
+keine sensiblen Server-Daten
+
+begrenzte transitive Fläche
+
+kleine API
 
 Erforderlich: gezielte Tests und Bundle-/Runtime-Prüfung.
 
-### Hohes Risiko
+Hohes Risiko
 
-- Crypto
-- Auth
-- Storage
-- Secret Handling
-- Telemetrie
-- Error Reporting
-- Sync
-- Recovery
-- Build-/Packaging-Supply-Chain
-- globale Polyfills oder Side Effects
+SSH / Remote Execution
+
+Auth (RBAC, Session Management)
+
+Storage
+
+Secret Handling (Key Management)
+
+Telemetrie
+
+Error Reporting
+
+Build-/Packaging-Supply-Chain
+
+globale Polyfills oder Side Effects
 
 Erforderlich: ADR oder Security-Doku, Alternativenvergleich, Adapter, Tests, Runtime-Prüfung.
 
----
-
-## 5. Dependency-Kapselung
+5. Dependency-Kapselung
 
 Regeln:
 
-- Fachlogik importiert riskante Libraries nicht direkt.
-- Crypto-, Storage-, Auth-, Telemetry- und Error-Reporting-Libraries werden hinter einer Fassade oder einem Adapter gekapselt.
-- Adapter haben kleine APIs.
-- Adapter haben Tests für Erfolg, Fehler und Missbrauch.
-- Migration muss möglich bleiben.
-- Die restliche Codebasis soll nicht von Library-spezifischen Typen abhängig werden, wenn diese Typen nicht Teil des fachlichen Modells sind.
+Fachlogik importiert riskante Libraries (wie z.B. ssh2) nicht direkt.
+
+SSH-, Storage-, Auth-, Telemetry- und Error-Reporting-Libraries werden hinter einer Fassade oder einem Adapter gekapselt.
+
+Adapter haben kleine APIs.
+
+Adapter haben Tests für Erfolg, Fehler und Missbrauch (z.B. Timeout-Verhalten).
+
+Migration auf eine andere Library muss möglich bleiben.
+
+Die restliche Codebasis soll nicht von Library-spezifischen Typen abhängig werden, wenn diese Typen nicht Teil des fachlichen Modells sind.
 
 Schlecht:
 
-```ts
-import { encrypt } from "random-crypto-helper";
+import { Client } from "ssh2";
 
-export async function saveItem(item: VaultItem) {
-  return encrypt(JSON.stringify(item), item.password);
+export async function executeScript(serverIp: string, key: string, script: string) {
+  const conn = new Client();
+  // ... direkte SSH-Logik überall im Projekt verstreut
+  conn.connect({ host: serverIp, privateKey: key });
 }
-```
 
-Warum schlecht: Fachlogik hängt direkt an unklarer Crypto-Library, Sicherheitsmodell unbekannt, Migration schwer.
+
+Warum schlecht: Fachlogik hängt direkt an einer spezifischen SSH-Library, Key-Management findet unkontrolliert statt, Migration auf ein anderes Protokoll/Library ist enorm aufwendig.
 
 Gut:
 
-```ts
-export async function saveItem(item: PlainVaultItem, key: VaultContentKey) {
-  const sealed = await vaultCryptoService.sealItem({
-    plaintext: encodeVaultItem(item),
-    key,
-    context: { itemId: item.id, version: item.version },
+export async function executeScript(server: Server, script: string) {
+  // SSH-Logik ist sicher im serverConnectionService gekapselt
+  return serverConnectionService.execute({
+    serverId: server.id,
+    script,
+    context: { executedBy: "admin-user" }
   });
-
-  return vaultStorageService.saveSealedItem(sealed);
 }
-```
 
-Warum gut: Fachlogik nutzt Projekt-Services, Crypto ist gekapselt, Kontext ist explizit.
 
----
+Warum gut: Fachlogik nutzt Projekt-Services, SSH/Connection-Details sind gekapselt, Logging und Kontext sind explizit steuerbar.
 
-## 6. Komfort-Libraries
+6. Komfort-Libraries
 
 Keine Bibliothek für triviale Logik.
 
 Schlecht:
 
-```ts
 import leftPad from "left-pad";
 
-export function normalizeCode(code: string) {
-  return leftPad(code, 6, "0");
+export function formatServerId(id: string) {
+  return leftPad(id, 6, "0");
 }
-```
+
 
 Warum schlecht: externe Supply-Chain für triviale Logik, unnötige Auditfläche, kein Sicherheitsnutzen.
 
 Gut:
 
-```ts
-export function normalizeRecoveryCode(code: string): string {
-  return code.trim().padStart(6, "0");
+export function formatServerId(id: string): string {
+  return id.trim().padStart(6, "0");
 }
-```
 
-Warum gut: verständlich, testbar, keine zusätzliche Angriffsfläche.
 
----
+Warum gut: nativ, verständlich, testbar, keine zusätzliche Angriffsfläche.
 
-## 7. Bestehende Dependencies
+7. Bestehende Dependencies
 
 Eine bestehende Dependency darf nicht blind weitergetragen werden, nur weil sie schon im Projekt ist.
 
 Wenn eine bestehende Bibliothek berührt wird, prüfen:
 
-- Wird sie noch benötigt?
-- Gibt es eine sicherere Plattform-API?
-- Gibt es eine kleinere Alternative?
-- Gibt es offene CVEs oder Advisories?
-- Ist die Nutzung korrekt gekapselt?
-- Wird sie an mehr Stellen importiert als nötig?
-- Ist sie noch kompatibel mit Web und Tauri?
-- Hat sich die API unsicher verändert?
-- Gibt es neue transitive Abhängigkeiten?
-- Muss ein Adapter angepasst werden?
+Wird sie noch benötigt?
 
----
+Gibt es eine sicherere Plattform-API?
 
-## 8. Updates
+Gibt es eine kleinere Alternative?
+
+Gibt es offene CVEs oder Advisories?
+
+Ist die Nutzung korrekt gekapselt?
+
+Wird sie an mehr Stellen importiert als nötig?
+
+Hat sich die API unsicher verändert?
+
+Gibt es neue transitive Abhängigkeiten?
+
+Muss ein Adapter angepasst werden?
+
+8. Updates
 
 Vor Minor-/Patch-Updates in normalen Pfaden:
 
-- Changelog prüfen
-- Tests ausführen
-- Runtime öffnen, wenn UI/Build/Runtime betroffen ist
+Changelog prüfen
 
-Vor Major-Updates oder Updates in Security-Pfaden:
+Tests ausführen
 
-- Changelog prüfen
-- Breaking Changes prüfen
-- Security Advisories prüfen
-- Migrationshinweise prüfen
-- betroffene Adapter prüfen
-- gezielte Tests ergänzen
-- `npm run test` vollständig ausführen
-- Runtime-Prüfung durchführen
-- Risiko und Restrisiko dokumentieren
+Runtime öffnen, wenn UI/Build/Runtime betroffen ist
+
+Vor Major-Updates oder Updates in Security-Pfaden (z.B. SSH-Clients, Auth-Middleware):
+
+Changelog prüfen
+
+Breaking Changes prüfen
+
+Security Advisories prüfen
+
+Migrationshinweise prüfen
+
+betroffene Adapter prüfen
+
+gezielte Tests ergänzen
+
+npm run test vollständig ausführen
+
+Runtime-Prüfung durchführen
+
+Risiko und Restrisiko dokumentieren
 
 Keine Massenupdates, wenn nur eine gezielte Änderung nötig ist.
 
----
+9. Telemetrie, Analytics und Error Reporting
 
-## 9. Telemetrie, Analytics und Error Reporting
-
-Besonders kritisch.
+Besonders kritisch in einem Server Manager.
 
 Regeln:
 
-- Keine Telemetrie im Vault-Pfad ohne Datenschutzentscheidung.
-- Keine entschlüsselten Items, Kategorien, Keys, Tokens oder Recovery-Daten an externe Dienste.
-- Keine vollständigen URLs, wenn sie Tokens oder State enthalten könnten.
-- Keine produktiven Stacktraces, wenn sie Secrets enthalten könnten.
-- Keine Session-Replay- oder Screen-Recording-Library im Vault-Kontext.
-- Error-Reporting nur mit Sanitizing-Fassade und Tests.
-- Opt-out/Opt-in-Regeln müssen dokumentiert sein, falls Telemetrie existiert.
+Keine Telemetrie im Server-Management-Pfad ohne explizite Datenschutzentscheidung.
 
----
+Keine SSH-Keys, Passwörter, IP-Adressen, Hostnamen, Server-Metadaten oder Command-Outputs an externe Dienste (wie Sentry, LogRocket etc.) senden.
 
-## 10. Build- und Tooling-Dependencies
+Keine vollständigen URLs tracken, wenn sie Tokens oder sensiblen State enthalten könnten.
+
+Keine produktiven Stacktraces an externe Tools senden, wenn sie API-Schlüssel oder interne Pfade leaken könnten.
+
+Error-Reporting nur mit einer strikten Sanitizing-Fassade (die IPs und Keys vor dem Senden zensiert) und dazugehörigen Tests.
+
+Opt-out/Opt-in-Regeln müssen dokumentiert sein, falls Telemetrie existiert.
+
+10. Build- und Tooling-Dependencies
 
 Build-Tools können Supply-Chain- und Runtime-Risiken erzeugen.
 
 Prüfen:
 
-- Verändert das Tool Importpfade?
-- Erzeugt es doppelte Modulidentität?
-- Verändert es Tree-Shaking?
-- Fügt es globale Polyfills ein?
-- Läuft es in Web und Tauri?
-- Leakt es Env-Variablen in Client-Bundles?
-- Greift es auf Netzwerk, Dateisystem oder Secrets zu?
-- Schreibt es generierte Dateien mit sensiblen Daten?
+Verändert das Tool Importpfade?
 
----
+Erzeugt es doppelte Modulidentität?
 
-## 11. ADR-Vorlage für riskante Dependencies
+Verändert es Tree-Shaking?
 
-```md
+Fügt es globale Polyfills ein?
+
+Leakt es Env-Variablen in Client-Bundles (z.B. Datenbank-Passwörter in das Frontend)?
+
+Greift es auf Netzwerk, Dateisystem oder Secrets zu?
+
+Schreibt es generierte Dateien mit sensiblen Daten?
+
+11. ADR-Vorlage für riskante Dependencies
+
 # ADR: <Dependency-Name>
 
 ## Problem
@@ -281,11 +350,10 @@ Prüfen:
 
 ## Security-Bewertung
 
-- Berührt Plaintext/Keys/Auth/Storage/Sync/Recovery?
+- Berührt Server-Credentials/SSH-Keys/Auth/Storage/Remote-Commands?
 - Advisories/CVEs geprüft?
 - Maintainer-Aktivität geprüft?
 - Transitive Dependencies geprüft?
-- Web/Tauri-Kompatibilität geprüft?
 
 ## Nutzung im Projekt
 
@@ -296,23 +364,32 @@ Prüfen:
 ## Exit-Plan
 
 <Wie wird die Dependency ersetzt oder entfernt?>
-```
 
----
 
-## 12. Dependency-Review-Checkliste
+12. Dependency-Review-Checkliste
 
-- [ ] Löst die Dependency ein echtes Projektproblem?
-- [ ] Reicht vorhandener Code oder Plattform-API wirklich nicht?
-- [ ] Berührt sie Plaintext, Keys, Auth, Storage, Sync oder Recovery?
-- [ ] Security Advisories/CVEs geprüft?
-- [ ] Maintainer-Aktivität geprüft?
-- [ ] Transitive Dependency-Fläche geprüft?
-- [ ] Web/Tauri-Kompatibilität geprüft?
-- [ ] Lizenz geprüft?
-- [ ] API klein und schwer falsch zu nutzen?
-- [ ] Hinter Adapter/Fassade gekapselt?
-- [ ] Tests ergänzt?
-- [ ] Runtime geprüft, wenn betroffen?
-- [ ] Alternative dokumentiert?
-- [ ] Exit-Plan vorhanden?
+[ ] Löst die Dependency ein echtes Projektproblem?
+
+[ ] Reicht vorhandener Code oder Plattform-API wirklich nicht?
+
+[ ] Berührt sie Server-Credentials, Keys, Auth, Storage oder Remote-Commands?
+
+[ ] Security Advisories/CVEs geprüft?
+
+[ ] Maintainer-Aktivität geprüft?
+
+[ ] Transitive Dependency-Fläche geprüft?
+
+[ ] Lizenz geprüft?
+
+[ ] API klein und schwer falsch zu nutzen?
+
+[ ] Hinter Adapter/Fassade gekapselt?
+
+[ ] Tests ergänzt?
+
+[ ] Runtime geprüft, wenn betroffen?
+
+[ ] Alternative dokumentiert?
+
+[ ] Exit-Plan vorhanden?
