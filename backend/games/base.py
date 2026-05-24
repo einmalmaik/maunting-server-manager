@@ -146,6 +146,42 @@ def _append_console_log(server_id: int, text: str) -> None:
         logger.warning("Could not write console log for server %s: %s", server_id, e)
 
 
+def finish_install(server_id: int, result: dict) -> None:
+    """Background-Thread-Callback: setzt Server-Status nach SteamCMD-Lauf.
+
+    Wird aus dem Hintergrund-Thread aufgerufen, der die Installation/Update
+    ausführt. Muss eine FRISCHE DB-Session öffnen, weil die Request-Session
+    längst geschlossen ist (Request endete mit "Installation gestartet").
+
+    Bei Erfolg → status="stopped" (bereit zum Starten).
+    Bei Fehler → status="error" + Fehlertext (gekürzt).
+    """
+    # Inline-Imports, weil base.py beim Modul-Load noch keine Modelle kennen darf
+    # (zirkulärer Import via games.__init__).
+    from database import SessionLocal
+    from models import Server
+
+    db = SessionLocal()
+    try:
+        server = db.query(Server).filter(Server.id == server_id).first()
+        if not server:
+            return
+        if result.get("ok"):
+            server.status = "stopped"
+            server.status_message = None
+        else:
+            err = result.get("error") or "Installation fehlgeschlagen"
+            server.status = "error"
+            server.status_message = err[:500]
+        db.commit()
+    except Exception as e:
+        # Kein Re-Raise — Thread soll nicht crashen, nur loggen
+        logger.warning("finish_install failed for server %s: %s", server_id, e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # ── Container-Name ─────────────────────────────────────────────────────────
 
 

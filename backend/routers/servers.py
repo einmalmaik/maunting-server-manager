@@ -175,36 +175,76 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
 @router.delete("/{server_id}")
 def delete_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+    """Löscht einen Server vollständig:
+
+    1. Docker-Container stoppen + entfernen (idempotent, force=True killt auch
+       laufende Container).
+    2. UFW-Regeln für Ports schließen.
+    3. Install-Verzeichnis (Bind-Mount-Quelle) vom Host entfernen.
+    4. Backup-Verzeichnis (alle TAR-Archive) vom Host entfernen — DB-Cascade
+       räumt die Backup-Records selbst.
+    5. MSM-Console-Log-Verzeichnis entfernen.
+    6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups).
+    """
     if not user.is_owner:
         raise HTTPException(status_code=403, detail="Nur Owner kann Server löschen")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
-    # Container stoppen + entfernen (idempotent — kein Fehler, wenn nicht da)
+    # 1. Container stoppen + entfernen (idempotent — force killt running)
     container = container_name_for(server.id)
     docker_service.remove(container, force=True)
 
-    # Firewall-Regeln schließen
+    # 2. Firewall-Regeln schließen
     close_ports(
         game_port=server.game_port or 0,
         query_port=server.query_port,
         rcon_port=server.rcon_port,
     )
 
-    # Install-Verzeichnis aufräumen
+    # 3. Install-Verzeichnis physisch löschen
     install_dir = server.install_dir
-    if os.path.exists(install_dir):
+    dir_removed = False
+    if install_dir and os.path.exists(install_dir):
         try:
             shutil.rmtree(install_dir)
+            dir_removed = True
         except OSError:
             pass
 
+    # 4. Backup-Verzeichnis (Files) löschen — DB-Cascade räumt Records
+    backup_dir = f"/opt/msm/backups/{server.id}"
+    backups_removed = False
+    if os.path.exists(backup_dir):
+        try:
+            shutil.rmtree(backup_dir)
+            backups_removed = True
+        except OSError:
+            pass
+
+    # 5. MSM-Console-Log-Verzeichnis räumen
+    console_log_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "logs",
+        str(server.id),
+    )
+    if os.path.exists(console_log_dir):
+        try:
+            shutil.rmtree(console_log_dir)
+        except OSError:
+            pass
+
+    # 6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
     db.delete(server)
     db.commit()
     return {
         "message": "Server gelöscht",
-        "cleanup": {"container_removed": container, "dir_removed": install_dir},
+        "cleanup": {
+            "container_removed": container,
+            "dir_removed": install_dir if dir_removed else None,
+            "backups_removed": backup_dir if backups_removed else None,
+        },
     }
 
 
