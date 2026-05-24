@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import type { Server, GameInfo } from '@/types'
 import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive } from 'lucide-react'
 
@@ -14,13 +15,26 @@ export function Servers() {
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
+  const { interfaces, defaultBindIp } = useHostInterfaces()
   const [form, setForm] = useState({
     name: '',
     game_type: 'conan_exiles_ue5',
     cpu_limit_percent: '',
     ram_limit_mb: '',
     disk_limit_gb: '',
+    game_port: '',
+    query_port: '',
+    rcon_port: '',
+    public_bind_ip: '',
   })
+
+  // Default-Bind-IP setzen, sobald sie vom Backend kommt.
+  useEffect(() => {
+    if (defaultBindIp && !form.public_bind_ip) {
+      setForm((prev) => ({ ...prev, public_bind_ip: defaultBindIp }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultBindIp])
 
   const fetchServers = async () => {
     try {
@@ -55,10 +69,24 @@ export function Servers() {
           cpu_limit_percent: form.cpu_limit_percent ? parseInt(form.cpu_limit_percent) : null,
           ram_limit_mb: form.ram_limit_mb ? parseInt(form.ram_limit_mb) : null,
           disk_limit_gb: form.disk_limit_gb ? parseInt(form.disk_limit_gb) : null,
+          game_port: form.game_port ? parseInt(form.game_port) : null,
+          query_port: form.query_port ? parseInt(form.query_port) : null,
+          rcon_port: form.rcon_port ? parseInt(form.rcon_port) : null,
+          public_bind_ip: form.public_bind_ip || null,
         }),
       })
       setShowCreate(false)
-      setForm({ name: '', game_type: 'conan_exiles_ue5', cpu_limit_percent: '', ram_limit_mb: '', disk_limit_gb: '' })
+      setForm({
+        name: '',
+        game_type: 'conan_exiles_ue5',
+        cpu_limit_percent: '',
+        ram_limit_mb: '',
+        disk_limit_gb: '',
+        game_port: '',
+        query_port: '',
+        rcon_port: '',
+        public_bind_ip: defaultBindIp || '',
+      })
       fetchServers()
     } catch (err: any) {
       const msg = t(err.message) || err.message || t('common.error')
@@ -167,8 +195,8 @@ export function Servers() {
 
       {/* Create Modal */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="msm-card w-full max-w-md p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="msm-card w-full max-w-lg p-6 my-8">
             <h2 className="font-headline text-headline-md text-primary mb-1">
               {t('servers.create')}
             </h2>
@@ -241,6 +269,77 @@ export function Servers() {
                     onChange={(e) => setForm({ ...form, disk_limit_gb: e.target.value })}
                     className="msm-input"
                     placeholder="GB"
+                  />
+                </div>
+              </div>
+
+              {/* Phase 2: Bind-IP + Ports */}
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  {t('servers.publicBindIp')}
+                </label>
+                <select
+                  className="msm-input"
+                  value={form.public_bind_ip}
+                  onChange={(e) => setForm({ ...form, public_bind_ip: e.target.value })}
+                >
+                  {interfaces.length === 0 && (
+                    <option value="">{t('servers.bindIp.noneAvailable')}</option>
+                  )}
+                  {interfaces.map((iface) => (
+                    <option key={`${iface.interface}-${iface.ip}`} value={iface.ip}>
+                      {iface.ip} · {iface.interface}
+                      {iface.is_loopback ? ` (${t('servers.bindIp.loopback')})` : ''}
+                      {iface.is_private && !iface.is_loopback ? ` (${t('servers.bindIp.private')})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="font-body-md text-xs text-on-surface-variant mt-1">
+                  {t('servers.bindIp.hint')}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('servers.gamePort')}
+                  </label>
+                  <input
+                    type="number"
+                    min={1024}
+                    max={65535}
+                    value={form.game_port}
+                    onChange={(e) => setForm({ ...form, game_port: e.target.value })}
+                    className="msm-input"
+                    placeholder={t('servers.portAuto')}
+                  />
+                </div>
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('servers.queryPort')}
+                  </label>
+                  <input
+                    type="number"
+                    min={1024}
+                    max={65535}
+                    value={form.query_port}
+                    onChange={(e) => setForm({ ...form, query_port: e.target.value })}
+                    className="msm-input"
+                    placeholder={t('servers.portAuto')}
+                  />
+                </div>
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('servers.rconPort')}
+                  </label>
+                  <input
+                    type="number"
+                    min={1024}
+                    max={65535}
+                    value={form.rcon_port}
+                    onChange={(e) => setForm({ ...form, rcon_port: e.target.value })}
+                    className="msm-input"
+                    placeholder={t('servers.portAuto')}
                   />
                 </div>
               </div>

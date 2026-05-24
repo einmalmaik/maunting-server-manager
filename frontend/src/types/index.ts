@@ -47,3 +47,16 @@ export interface VersionInfo {
   auto_update_enabled: boolean
   github_repo: string
 }
+
+export interface HostInterface {
+  ip: string
+  interface: string
+  is_loopback: boolean
+  is_private: boolean
+  is_link_local: boolean
+}
+
+export interface HostInterfacesResponse {
+  interfaces: HostInterface[]
+  default_bind_ip: string | null
+}

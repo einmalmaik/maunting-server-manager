@@ -29,6 +29,34 @@ from typing import Any
 from services import docker_service
 from services.docker_service import PortPublish, VolumeBind
 
+
+def _require_bind_ip(server) -> str:
+    """Liefert ``server.public_bind_ip`` oder wirft RuntimeError.
+
+    Wird vor jedem Container-Start aufgerufen — ohne explizite Bind-IP würde
+    Docker auf 0.0.0.0 binden und die UFW-Regeln umgehen.
+    """
+    bind_ip = getattr(server, "public_bind_ip", None) or None
+    if not bind_ip or bind_ip == "0.0.0.0":
+        raise RuntimeError(
+            "public_bind_ip fehlt oder ist 0.0.0.0 — bitte im Server-Detail "
+            "eine konkrete Host-IP zuweisen, bevor der Server gestartet wird."
+        )
+    return bind_ip
+
+
+def default_port_publishes(server) -> list[PortPublish]:
+    """Standard-Port-Mapping: game/query UDP, rcon TCP — immer an Bind-IP."""
+    bind_ip = _require_bind_ip(server)
+    ports: list[PortPublish] = []
+    if server.game_port:
+        ports.append(PortPublish(server.game_port, server.game_port, "udp", bind_ip))
+    if server.query_port:
+        ports.append(PortPublish(server.query_port, server.query_port, "udp", bind_ip))
+    if server.rcon_port:
+        ports.append(PortPublish(server.rcon_port, server.rcon_port, "tcp", bind_ip))
+    return ports
+
 logger = logging.getLogger(__name__)
 
 
@@ -400,10 +428,17 @@ class GamePlugin(ABC):
         """Default: keine zusätzlichen Env-Vars."""
         return {}
 
-    @abstractmethod
     def build_port_publishes(self, server) -> list[PortPublish]:
-        """Welche Ports werden veröffentlicht? (game/query/rcon)."""
-        ...
+        """Welche Ports werden veröffentlicht? (game/query/rcon).
+
+        Default-Implementierung: bindet game_port/query_port als UDP und
+        rcon_port als TCP an ``server.public_bind_ip``. Diese darf NIE
+        ``None`` oder ``0.0.0.0`` sein — sonst publiziert Docker auf allen
+        Interfaces und hängt die UFW-Falle aus. Plugins, die andere Ports
+        brauchen, können überschreiben — die Bind-IP-Pflicht bleibt aber
+        bestehen.
+        """
+        return default_port_publishes(server)
 
     def build_volume_binds(self, server) -> list[VolumeBind]:
         """Default: nur install_dir → /data."""
@@ -438,6 +473,13 @@ class GamePlugin(ABC):
         if not docker_service.is_available():
             return {"error": "Docker ist auf diesem Host nicht verfügbar"}
 
+        # Pflicht-Bind-IP früh validieren — sonst riskieren wir 0.0.0.0.
+        try:
+            port_publishes = self.build_port_publishes(server)
+        except RuntimeError as e:
+            _append_console_log(server.id, f"[MSM] Start abgelehnt: {e}\n")
+            return {"error": str(e)}
+
         # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
         try:
             self.prepare_runtime(server)
@@ -461,7 +503,7 @@ class GamePlugin(ABC):
             image=self.docker_image,
             command=self.build_container_command(server),
             env=self.build_container_env(server),
-            ports=self.build_port_publishes(server),
+            ports=port_publishes,
             volumes=self.build_volume_binds(server),
             cpu_limit_percent=server.cpu_limit_percent,
             ram_limit_mb=server.ram_limit_mb,

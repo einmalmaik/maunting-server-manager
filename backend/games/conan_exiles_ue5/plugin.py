@@ -15,7 +15,6 @@ from games.base import (
     CONTAINER_DATA_DIR,
     ConfigField,
     GamePlugin,
-    PortPublish,
     VolumeBind,
     _append_console_log,
     finish_install,
@@ -108,16 +107,8 @@ class ConanExilesUE5Plugin(GamePlugin):
             set_ini_value(game_ini, "RconPlugin", "RconPort", str(server.rcon_port))
             set_ini_value(game_ini, "RconPlugin", "RconEnabled", "True")
 
-    def build_port_publishes(self, server) -> list[PortPublish]:
-        ports: list[PortPublish] = []
-        host_ip = getattr(server, "public_bind_ip", None) or None
-        if server.game_port:
-            ports.append(PortPublish(server.game_port, server.game_port, "udp", host_ip))
-        if server.query_port:
-            ports.append(PortPublish(server.query_port, server.query_port, "udp", host_ip))
-        if server.rcon_port:
-            ports.append(PortPublish(server.rcon_port, server.rcon_port, "tcp", host_ip))
-        return ports
+    # build_port_publishes erbt vom Base-Plugin (Phase 2):
+    # game/query UDP + rcon TCP an public_bind_ip. Kein 0.0.0.0 erlaubt.
 
     def build_volume_binds(self, server) -> list[VolumeBind]:
         return [VolumeBind(server.install_dir, CONTAINER_DATA_DIR, read_only=False)]
