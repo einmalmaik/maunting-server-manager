@@ -53,10 +53,13 @@ def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db:
 @router.patch("/{server_id}/{mod_id}", response_model=ModResponse)
 def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_update: bool | None = None, enabled: bool | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
     # Reorder/auto_update gehoeren zu server.mods.write; enable/disable zu server.mods.toggle.
+    # Wenn alle Felder None sind, ist es effektiv ein Read -> server.mods.read.
     if enabled is not None:
         require_server_permission(user, server_id, db, "server.mods.toggle")
     if load_order is not None or auto_update is not None:
         require_server_permission(user, server_id, db, "server.mods.write")
+    if enabled is None and load_order is None and auto_update is None:
+        require_server_permission(user, server_id, db, "server.mods.read")
     mod = db.query(Mod).filter(Mod.id == mod_id, Mod.server_id == server_id).first()
     if not mod:
         raise HTTPException(status_code=404, detail="Mod nicht gefunden")

@@ -393,7 +393,7 @@ export function Roles() {
           <RoleForm
             catalog={catalog}
             initial={editing}
-            onSubmit={(_n, d, p) => handleUpdate(editing, editing.name, d, p)}
+            onSubmit={(n, d, p) => handleUpdate(editing, n, d, p)}
             onCancel={() => setEditing(null)}
           />
         </div>

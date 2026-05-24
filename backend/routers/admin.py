@@ -16,7 +16,8 @@ from services.permission_service import (
     list_user_server_permission_keys,
     set_user_server_permissions,
 )
-from services.role_service import get_role
+from services.permission_catalog import SYSTEM_ROLE_USER
+from services.role_service import get_role, get_role_by_name
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -97,6 +98,12 @@ async def create_user_admin(
         if not actor.is_owner:
             raise HTTPException(status_code=403, detail="Nur Owner kann is_owner setzen")
         user.is_owner = True
+    else:
+        # Sicherer Default: System-Rolle `user` (entspricht der Lifespan-Migration
+        # fuer bestehende Accounts; verhindert Accounts mit role_id=NULL).
+        default_role = get_role_by_name(db, SYSTEM_ROLE_USER)
+        if default_role is not None:
+            user.role_id = default_role.id
     if req.auto_verify:
         user.email_verified = True
     else:

@@ -103,6 +103,23 @@ class TestListVisibleServers:
         result = permission_service.list_visible_servers(db, regular_user)
         assert result == []
 
+    def test_non_view_delegation_does_not_grant_visibility(
+        self, db: Session, regular_user: User, test_server: Server
+    ):
+        """Eine Delegation ohne `server.view` darf den Server NICHT in der Liste zeigen
+        (Konsistenz mit dem Detail-Endpoint, der ebenfalls `server.view` prueft)."""
+        regular_user.role_id = None
+        db.add(
+            ServerPermission(
+                user_id=regular_user.id,
+                server_id=test_server.id,
+                permission_key="server.start",
+            )
+        )
+        db.commit()
+        result = permission_service.list_visible_servers(db, regular_user)
+        assert result == []
+
 
 class TestSetUserServerPermissions:
     def test_creates_delegations(self, db: Session, regular_user: User, test_server: Server, owner_user: User):

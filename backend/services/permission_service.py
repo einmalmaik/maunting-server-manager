@@ -65,9 +65,15 @@ def list_visible_server_ids(db: Session, user: User) -> list[int] | None:
         )
         if pauschal is not None:
             return None
+    # Nur Server, fuer die explizit `server.view` delegiert wurde, sind sichtbar.
+    # So bleibt die Liste konsistent mit dem Detail-Endpoint (der ebenfalls
+    # `server.view` prueft) — kein "sehe Server im Listing, kriege aber 403 im Detail".
     rows = (
         db.query(ServerPermission.server_id)
-        .filter(ServerPermission.user_id == user.id)
+        .filter(
+            ServerPermission.user_id == user.id,
+            ServerPermission.permission_key == "server.view",
+        )
         .distinct()
         .all()
     )

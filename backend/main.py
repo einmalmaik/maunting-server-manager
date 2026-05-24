@@ -141,42 +141,49 @@ async def lifespan(app: FastAPI):
         _log_mig = _logging.getLogger(__name__)
         legacy_cols = {c['name'] for c in inspector.get_columns('permissions')}
         select_cols = [c for c in LEGACY_PERMISSION_MAPPING.keys() if c in legacy_cols]
-        with engine.begin() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT id, user_id, server_id, "
-                    + ", ".join(select_cols)
-                    + " FROM permissions"
-                )
-            ).fetchall()
+        if not select_cols:
+            # Keine bekannten can_*-Spalten in der Legacy-Tabelle vorhanden.
+            # Nichts zu migrieren -> Tabelle einfach droppen.
+            with engine.begin() as conn:
+                conn.execute(text("DROP TABLE permissions"))
             migrated = 0
-            for row in rows:
-                user_id = row.user_id
-                server_id = row.server_id
-                desired_keys: set[str] = set()
-                for col in select_cols:
-                    if getattr(row, col):
-                        desired_keys.update(LEGACY_PERMISSION_MAPPING[col])
-                for key in desired_keys:
-                    exists = conn.execute(
-                        text(
-                            "SELECT id FROM server_permissions "
-                            "WHERE user_id = :uid AND server_id = :sid "
-                            "AND permission_key = :key"
-                        ),
-                        {"uid": user_id, "sid": server_id, "key": key},
-                    ).first()
-                    if exists is None:
-                        conn.execute(
+        else:
+            with engine.begin() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT id, user_id, server_id, "
+                        + ", ".join(select_cols)
+                        + " FROM permissions"
+                    )
+                ).fetchall()
+                migrated = 0
+                for row in rows:
+                    user_id = row.user_id
+                    server_id = row.server_id
+                    desired_keys: set[str] = set()
+                    for col in select_cols:
+                        if getattr(row, col):
+                            desired_keys.update(LEGACY_PERMISSION_MAPPING[col])
+                    for key in desired_keys:
+                        exists = conn.execute(
                             text(
-                                "INSERT INTO server_permissions "
-                                "(user_id, server_id, permission_key) "
-                                "VALUES (:uid, :sid, :key)"
+                                "SELECT id FROM server_permissions "
+                                "WHERE user_id = :uid AND server_id = :sid "
+                                "AND permission_key = :key"
                             ),
                             {"uid": user_id, "sid": server_id, "key": key},
-                        )
-                        migrated += 1
-            conn.execute(text("DROP TABLE permissions"))
+                        ).first()
+                        if exists is None:
+                            conn.execute(
+                                text(
+                                    "INSERT INTO server_permissions "
+                                    "(user_id, server_id, permission_key) "
+                                    "VALUES (:uid, :sid, :key)"
+                                ),
+                                {"uid": user_id, "sid": server_id, "key": key},
+                            )
+                            migrated += 1
+                conn.execute(text("DROP TABLE permissions"))
         if migrated:
             _log_mig.info("Phase-3 RBAC-Migration: %d Permission-Eintraege migriert.", migrated)
 
