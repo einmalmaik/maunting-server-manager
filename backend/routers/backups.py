@@ -162,6 +162,13 @@ def auto_backup(server_id: int, db: Session = Depends(get_db)) -> dict:
 
 @router.post("/{server_id}/restore/{backup_id}")
 def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+    """Stellt ein Backup wieder her.
+
+    Stoppt den Docker-Container VOR dem Extrahieren — sonst greift der laufende
+    Server-Prozess auf Dateien zu, die wir gerade ersetzen, und das install_dir
+    kann nicht atomar ersetzt werden. Container wird NICHT automatisch wieder
+    gestartet; das übernimmt der Nutzer (UI bietet Start-Button).
+    """
     require_server_permission(user, server_id, db, "can_restore")
     server = db.query(Server).filter(Server.id == server_id).first()
     backup = db.query(Backup).filter(Backup.id == backup_id, Backup.server_id == server_id).first()
@@ -170,8 +177,18 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
     if not os.path.exists(backup.filename):
         raise HTTPException(status_code=404, detail="Backup-Datei nicht gefunden")
 
+    # Container stoppen, falls er läuft — Bind-Mount-Konsistenz
+    from games.base import container_name_for
+    from services import docker_service
+    container = container_name_for(server.id)
+    if docker_service.is_running(container):
+        docker_service.stop(container, timeout=30)
+    # Force-Remove, damit das install_dir nicht von einem (gestoppten) Container
+    # beansprucht bleibt und der Container beim nächsten Start frisch kommt
+    docker_service.remove(container, force=True)
+
     try:
-        # Alte Daten sichern
+        # Alte Daten sichern (rollback path)
         old_backup = f"{server.install_dir}_pre_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         shutil.move(server.install_dir, old_backup)
         os.makedirs(server.install_dir, exist_ok=True)
@@ -182,6 +199,11 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Wiederherstellung fehlgeschlagen: {e}")
+
+    # Status zurücksetzen — Server ist jetzt installiert/stopped, nicht running
+    server.status = "stopped"
+    server.status_message = None
+    db.commit()
 
     return {"message": "Backup wiederhergestellt"}
 

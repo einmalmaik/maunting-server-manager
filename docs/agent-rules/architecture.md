@@ -406,7 +406,30 @@ Es gibt kein Host-`steamcmd` mehr. Installs und Workshop-Downloads laufen in eph
 
 Intelligentes Mod-Update bleibt erhalten: SteamCMD selbst entscheidet, ob ein `workshop_download_item` einen Refresh braucht — wir starten den Container einfach jedes Mal, und SteamCMD validiert die lokalen Dateien gegen das Manifest. Kein Voll-Redownload, wenn nichts geändert hat.
 
-### 12.5 TODO: Rootless Docker
+### 12.5 Install-Status-Callback (Background-Thread → DB)
+
+`Plugin.install()` startet SteamCMD in einem Daemon-Thread und kehrt sofort mit `"Installation gestartet"` zurück. Der Request-Endpoint setzt `server.status = "installing"`. Nach Abschluss des SteamCMD-Containers MUSS der Thread `games.base.finish_install(server_id, result)` aufrufen — sonst bleibt der Server für immer auf `"installing"` und die Frontend-UI lässt Start/Stop/Restart-Buttons gesperrt.
+
+`finish_install()` öffnet eine FRISCHE `SessionLocal()` (die Request-Session ist längst geschlossen) und setzt:
+- `status="stopped"` + `status_message=None` bei `result["ok"]`
+- `status="error"` + gekürzten Fehlertext bei Fehler
+
+Der `/status`-Endpoint überschreibt `"installing"`/`"updating"`/`"error"` bewusst NICHT mit dem Plugin-Live-Status — diese Werte sind reserviert für Background-Operationen, die ihren eigenen Zustand selbst zurücksetzen.
+
+### 12.6 Server-Delete (Cleanup-Reihenfolge)
+
+`DELETE /api/servers/{id}` ist die zentrale, vollständige Lösch-Funktion. Reihenfolge ist verbindlich:
+
+1. `docker_service.remove(name, force=True)` — stoppt + entfernt Container (idempotent, force killt auch laufende).
+2. `close_ports(...)` — UFW-Regeln entfernen.
+3. `shutil.rmtree(install_dir)` — Bind-Mount-Quelle vom Host löschen.
+4. `shutil.rmtree("/opt/msm/backups/<id>")` — alle Backup-TARs entfernen (DB-Cascade räumt die Backup-Records).
+5. `shutil.rmtree("backend/logs/<id>")` — MSM-Console-Logs entfernen.
+6. `db.delete(server) + commit` — Cascade löscht `Permissions`, `Mods`, `Backups`.
+
+Restore (`POST /api/backups/{id}/restore/{backup_id}`) stoppt + entfernt den Container VOR `tar -xzf`, damit der laufende Server keine Files mehr offen hält. Server-Status nach Restore: `"stopped"` (Nutzer startet manuell neu).
+
+### 12.7 TODO: Rootless Docker
 
 Aktuell ist `msm` Mitglied der `docker`-Gruppe. Das ist effektiv lokales Root. Akzeptiert für Phase 1, ABER:
 
@@ -414,7 +437,7 @@ Aktuell ist `msm` Mitglied der `docker`-Gruppe. Das ist effektiv lokales Root. A
 - Migrationspfad: `dockerd-rootless-setuptool.sh install` als `msm`, `DOCKER_HOST=unix:///run/user/<uid>/docker.sock`. Plus Anpassung der Bind-Mount-Pfade auf user-namespaced UIDs.
 - Bis dahin: Keine externen, nicht vertrauenswürdigen Images. Wir pinnen `cm2network/steamcmd:root` und prüfen Updates manuell.
 
-### 12.6 Keine 0.0.0.0-Bindings im Panel
+### 12.8 Keine 0.0.0.0-Bindings im Panel
 
 Die Panel-API darf nur an `127.0.0.1` binden. Container-Port-Publishes dürfen `0.0.0.0` nutzen (Docker-Default), wenn die Game-Spielebene das benötigt. Optional pro Server: `server.public_bind_ip` setzt einen explizit gebundenen Host-Interface — empfohlen bei Multi-IP-Hosts.
 

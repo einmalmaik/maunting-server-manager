@@ -17,6 +17,7 @@ from games.base import (
     PortPublish,
     VolumeBind,
     _append_console_log,
+    finish_install,
     run_steamcmd_install,
     run_steamcmd_workshop_download,
 )
@@ -43,12 +44,18 @@ class DayZPlugin(GamePlugin):
     # ─ Setup ─────────────────────────────────────────────────────────────
 
     def install(self, server) -> dict:
+        server_id = server.id
+        install_dir = server.install_dir
+        app_id = self.APP_ID
+
         def _install():
-            run_steamcmd_install(
-                server_id=server.id,
-                install_dir=server.install_dir,
-                app_id=self.APP_ID,
+            result = run_steamcmd_install(
+                server_id=server_id,
+                install_dir=install_dir,
+                app_id=app_id,
             )
+            finish_install(server_id, result)
+
         thread = threading.Thread(target=_install, daemon=True)
         thread.start()
         return {"message": "Installation gestartet"}
