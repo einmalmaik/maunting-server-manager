@@ -416,7 +416,20 @@ Intelligentes Mod-Update bleibt erhalten: SteamCMD selbst entscheidet, ob ein `w
 
 Der `/status`-Endpoint überschreibt `"installing"`/`"updating"`/`"error"` bewusst NICHT mit dem Plugin-Live-Status — diese Werte sind reserviert für Background-Operationen, die ihren eigenen Zustand selbst zurücksetzen.
 
-### 12.6 Server-Delete (Cleanup-Reihenfolge)
+### 12.6 Pre-Start-Config-Patch (prepare_runtime)
+
+Bei vielen Unreal-Engine-/Bohemia-Spielen werden CLI-Argumente wie `-Port=` / `-QueryPort=` IGNORIERT, weil das Game seine Ports aus INI-/CFG-Files liest. Damit der vom MSM-Port-Manager zugewiesene Port wirklich genutzt wird, hat `GamePlugin.prepare_runtime(server)` als Hook vor jedem Container-Start die Pflicht, die nötigen Config-Files zu patchen.
+
+Beispiele:
+
+- **Conan Exiles UE5**: `Engine.ini [URL] Port=`, `Engine.ini [OnlineSubsystemNull] GameServerQueryPort=`, `Game.ini [RconPlugin] RconPort=`/`RconEnabled=True`.
+- Pterodactyl-Egg-Startscript dient als Referenz-Implementierung für das Mapping.
+
+Werkzeug: `games.ini_utils.set_ini_value(path, section, key, value)`. KISS, zeilenorientiert — User-Edits an anderen Keys/Sektionen werden NIE überschrieben. Nur die exakten Port-Werte vom MSM-Modell werden bei jedem Start neu gesetzt (idempotent).
+
+KEIN `configparser`, weil UE-INIs Duplikat-Keys und multi-line-Werte erlauben, die `configparser` zerstören würde.
+
+### 12.7 Server-Delete (Cleanup-Reihenfolge)
 
 `DELETE /api/servers/{id}` ist die zentrale, vollständige Lösch-Funktion. Reihenfolge ist verbindlich:
 
@@ -429,7 +442,7 @@ Der `/status`-Endpoint überschreibt `"installing"`/`"updating"`/`"error"` bewus
 
 Restore (`POST /api/backups/{id}/restore/{backup_id}`) stoppt + entfernt den Container VOR `tar -xzf`, damit der laufende Server keine Files mehr offen hält. Server-Status nach Restore: `"stopped"` (Nutzer startet manuell neu).
 
-### 12.7 TODO: Rootless Docker
+### 12.8 TODO: Rootless Docker
 
 Aktuell ist `msm` Mitglied der `docker`-Gruppe. Das ist effektiv lokales Root. Akzeptiert für Phase 1, ABER:
 
@@ -437,7 +450,7 @@ Aktuell ist `msm` Mitglied der `docker`-Gruppe. Das ist effektiv lokales Root. A
 - Migrationspfad: `dockerd-rootless-setuptool.sh install` als `msm`, `DOCKER_HOST=unix:///run/user/<uid>/docker.sock`. Plus Anpassung der Bind-Mount-Pfade auf user-namespaced UIDs.
 - Bis dahin: Keine externen, nicht vertrauenswürdigen Images. Wir pinnen `cm2network/steamcmd:root` und prüfen Updates manuell.
 
-### 12.8 Keine 0.0.0.0-Bindings im Panel
+### 12.9 Keine 0.0.0.0-Bindings im Panel
 
 Die Panel-API darf nur an `127.0.0.1` binden. Container-Port-Publishes dürfen `0.0.0.0` nutzen (Docker-Default), wenn die Game-Spielebene das benötigt. Optional pro Server: `server.public_bind_ip` setzt einen explizit gebundenen Host-Interface — empfohlen bei Multi-IP-Hosts.
 

@@ -128,3 +128,44 @@ class TestStartServer:
             cookies=owner_cookies,
         )
         assert response.status_code == 403
+
+
+class TestServerStatusDiskFields:
+    """Status-Endpoint liefert Disk-Used/Free auch ohne disk_limit."""
+
+    def test_status_includes_disk_used_and_free(
+        self,
+        client: TestClient,
+        owner_user: User,
+        owner_cookies: dict,
+        test_server: Server,
+        db: Session,
+    ):
+        # Simuliere, dass der Disk-Scheduler bereits einen Wert geschrieben hat
+        test_server.disk_usage_mb = 456
+        db.commit()
+
+        # Plugin-Status mocken (kein echter Docker im Test)
+        with patch("routers.servers.get_plugin") as mock_get_plugin:
+            from games.base import ServerStatus
+            mock_plugin = mock_get_plugin.return_value
+            mock_plugin.get_status.return_value = ServerStatus(
+                status="stopped", cpu_percent=None, ram_mb=None, disk_mb=None,
+            )
+            response = client.get(
+                f"/api/servers/{test_server.id}/status",
+                cookies=owner_cookies,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        # Limits (immer mitgesendet)
+        assert "cpu_limit_percent" in data
+        assert "ram_limit_mb" in data
+        assert "disk_limit_gb" in data
+        # Disk-Used kommt aus server.disk_usage_mb
+        assert data["disk_used_mb"] == 456
+        # Disk-Free ist ein Integer oder None (je nach Host-Filesystem)
+        assert data["disk_free_mb"] is None or isinstance(data["disk_free_mb"], int)
+        # Disk-MB fällt auf den DB-Wert zurück, wenn das Plugin None liefert
+        assert data["disk_mb"] == 456

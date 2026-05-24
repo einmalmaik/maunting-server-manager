@@ -18,6 +18,15 @@ import {
   Trash2,
 } from 'lucide-react'
 
+/** Formatiert MB als kompakte Angabe (MB / GB). */
+function formatMb(mb: number | null | undefined): string {
+  if (mb == null) return '-'
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(1)} GB`
+  }
+  return `${Math.round(mb)} MB`
+}
+
 export function ServerDetail() {
   const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
@@ -230,15 +239,34 @@ export function ServerDetail() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="msm-card p-5">
           <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">CPU</p>
-          <p className="font-headline text-display-sm text-primary">{status?.cpu_percent ?? '-'}</p>
+          <p className="font-headline text-display-sm text-primary">
+            {status?.cpu_percent != null ? `${status.cpu_percent.toFixed(1)}%` : '-'}
+          </p>
+          <p className="font-body-md text-xs text-on-surface-variant mt-1">
+            Limit: {status?.cpu_limit_percent ? `${status.cpu_limit_percent}%` : t('common.unlimited')}
+          </p>
         </div>
         <div className="msm-card p-5">
-          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">RAM (MB)</p>
-          <p className="font-headline text-display-sm text-primary">{status?.ram_mb ?? '-'}</p>
+          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">RAM</p>
+          <p className="font-headline text-display-sm text-primary">
+            {status?.ram_mb != null ? formatMb(status.ram_mb) : '-'}
+          </p>
+          <p className="font-body-md text-xs text-on-surface-variant mt-1">
+            Limit: {status?.ram_limit_mb ? formatMb(status.ram_limit_mb) : t('common.unlimited')}
+          </p>
         </div>
         <div className="msm-card p-5">
-          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">Disk (MB)</p>
-          <p className="font-headline text-display-sm text-primary">{status?.disk_mb ?? '-'}</p>
+          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">Disk</p>
+          <p className="font-headline text-display-sm text-primary">
+            {status?.disk_used_mb != null ? formatMb(status.disk_used_mb) : '-'}
+          </p>
+          <p className="font-body-md text-xs text-on-surface-variant mt-1">
+            {status?.disk_limit_gb
+              ? `${t('serverDetail.limit', 'Limit')}: ${status.disk_limit_gb} GB`
+              : status?.disk_free_mb != null
+                ? `${formatMb(status.disk_free_mb)} ${t('serverDetail.free', 'frei')}`
+                : t('common.unlimited')}
+          </p>
         </div>
         <div className="msm-card p-5">
           <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">Players</p>

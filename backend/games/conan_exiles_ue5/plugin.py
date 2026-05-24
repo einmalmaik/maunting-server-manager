@@ -22,6 +22,7 @@ from games.base import (
     run_steamcmd_install,
     run_steamcmd_workshop_download,
 )
+from games.ini_utils import set_ini_value
 
 
 class ConanExilesUE5Plugin(GamePlugin):
@@ -79,6 +80,33 @@ class ConanExilesUE5Plugin(GamePlugin):
         if server.rcon_port:
             cmd.append(f"-RconPort={server.rcon_port}")
         return cmd
+
+    def prepare_runtime(self, server) -> None:
+        """Schreibt Ports + RCON-Flag in Engine.ini/Game.ini.
+
+        Conan ignoriert CLI-`-Port=`/`-QueryPort=`-Werte teilweise und liest
+        stattdessen aus den INIs. Wir setzen die Werte aus dem MSM-Port-Modell
+        bei jedem Start neu — User-Edits via File-Manager an anderen Keys
+        bleiben unverändert (zeilen-orientierter Setter).
+
+        Vgl. Pterodactyl-Egg-Startscript (Conan Enhanced UE5): identische
+        Mapping-Logik.
+        """
+        config_dir = os.path.join(
+            server.install_dir, "ConanSandbox", "Saved", "Config", "LinuxServer"
+        )
+        engine_ini = os.path.join(config_dir, "Engine.ini")
+        game_ini = os.path.join(config_dir, "Game.ini")
+
+        if server.game_port:
+            set_ini_value(engine_ini, "URL", "Port", str(server.game_port))
+        if server.query_port:
+            set_ini_value(
+                engine_ini, "OnlineSubsystemNull", "GameServerQueryPort", str(server.query_port)
+            )
+        if server.rcon_port:
+            set_ini_value(game_ini, "RconPlugin", "RconPort", str(server.rcon_port))
+            set_ini_value(game_ini, "RconPlugin", "RconEnabled", "True")
 
     def build_port_publishes(self, server) -> list[PortPublish]:
         ports: list[PortPublish] = []

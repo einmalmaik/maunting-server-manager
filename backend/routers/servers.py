@@ -308,6 +308,23 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     return {"message": "Restart-Befehl gesendet", "status": server.status, "stop": stop_result, "start": start_result}
 
 
+def _disk_free_mb(path: str) -> int | None:
+    """Liefert freien Speicher auf dem Filesystem von `path` in MB.
+
+    Wir nutzen os.statvfs (Linux/Unix). Bei Fehler None — der Frontend zeigt
+    dann '-' an, statt zu crashen.
+    """
+    try:
+        if not path:
+            return None
+        # Falls install_dir noch nicht existiert, das Eltern-Verzeichnis nehmen
+        target = path if os.path.exists(path) else os.path.dirname(path) or "/"
+        st = os.statvfs(target)
+        return int((st.f_bavail * st.f_frsize) // (1024 * 1024))
+    except OSError:
+        return None
+
+
 @router.get("/{server_id}/status", response_model=ServerStatusResponse)
 def server_status(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     require_server_permission(user, server_id, db, "can_view_console")
@@ -315,6 +332,8 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
     plugin = get_plugin(server.game_type)
+    disk_used = server.disk_usage_mb
+    disk_free = _disk_free_mb(server.install_dir) if server.install_dir else None
     if not plugin:
         return {
             "id": server.id,
@@ -322,9 +341,14 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
             "status_message": server.status_message,
             "cpu_percent": None,
             "ram_mb": None,
-            "disk_mb": None,
+            "disk_mb": disk_used,
             "uptime_seconds": None,
             "players_online": None,
+            "cpu_limit_percent": server.cpu_limit_percent,
+            "ram_limit_mb": server.ram_limit_mb,
+            "disk_limit_gb": server.disk_limit_gb,
+            "disk_used_mb": disk_used,
+            "disk_free_mb": disk_free,
         }
     plugin_status = plugin.get_status(server)
     # installing/updating/error nicht ueberschreiben — Background-Thread oder
@@ -339,9 +363,16 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
         "status_message": server.status_message,
         "cpu_percent": plugin_status.cpu_percent,
         "ram_mb": plugin_status.ram_mb,
-        "disk_mb": plugin_status.disk_mb,
+        # Disk-MB im Status: auf den DB-Wert zurueckfallen, damit auch ohne
+        # gesetztes disk_limit ein Used-Wert angezeigt wird.
+        "disk_mb": plugin_status.disk_mb if plugin_status.disk_mb is not None else disk_used,
         "uptime_seconds": plugin_status.uptime_seconds,
         "players_online": plugin_status.players_online,
+        "cpu_limit_percent": server.cpu_limit_percent,
+        "ram_limit_mb": server.ram_limit_mb,
+        "disk_limit_gb": server.disk_limit_gb,
+        "disk_used_mb": disk_used,
+        "disk_free_mb": disk_free,
     }
 
 
