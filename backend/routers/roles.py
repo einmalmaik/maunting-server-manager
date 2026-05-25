@@ -7,8 +7,33 @@ from models import User
 from schemas import RoleCreate, RoleResponse, RoleUpdate
 from services import role_service
 from services.permission_catalog import SYSTEM_ROLE_ADMIN
+from services.permission_service import has_global_permission
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
+
+
+def _ensure_no_escalation(
+    db: Session, actor: User, requested_keys: list[str] | None
+) -> None:
+    """Verhindert Privilege-Escalation via Rollen-Mutation.
+
+    Ein Non-Owner darf nur Permission-Keys vergeben, die er selbst bereits
+    besitzt. Sonst koennte z. B. ein User mit nur `roles.manage` seiner
+    eigenen Rolle `users.manage` oder `servers.delete` hinzufuegen.
+    """
+    if requested_keys is None or actor.is_owner:
+        return
+    missing = sorted(
+        {k for k in requested_keys if not has_global_permission(db, actor, k)}
+    )
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Du kannst nur Permissions vergeben, die du selbst besitzt. "
+                f"Fehlend: {missing}"
+            ),
+        )
 
 
 def _to_response(db: Session, role) -> RoleResponse:
@@ -52,11 +77,12 @@ def get_role(
 def create_role(
     req: RoleCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_global("roles.manage")),
+    actor: User = Depends(require_global("roles.manage")),
     __: None = Depends(verify_csrf),
 ) -> RoleResponse:
     if role_service.get_role_by_name(db, req.name):
         raise HTTPException(status_code=400, detail="Name bereits vergeben")
+    _ensure_no_escalation(db, actor, req.permissions)
     try:
         role = role_service.create_role(db, req.name, req.description, req.permissions)
     except ValueError as e:
@@ -69,7 +95,7 @@ def update_role(
     role_id: int,
     req: RoleUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_global("roles.manage")),
+    actor: User = Depends(require_global("roles.manage")),
     __: None = Depends(verify_csrf),
 ) -> RoleResponse:
     role = role_service.get_role(db, role_id)
@@ -79,6 +105,7 @@ def update_role(
         existing = role_service.get_role_by_name(db, req.name)
         if existing and existing.id != role.id:
             raise HTTPException(status_code=400, detail="Name bereits vergeben")
+    _ensure_no_escalation(db, actor, req.permissions)
     try:
         role = role_service.update_role(db, role, req.name, req.description, req.permissions)
     except ValueError as e:

@@ -80,3 +80,21 @@ class TestUpdateUserOwnerProtection:
         assert r.status_code == 200
         db.refresh(regular_user)
         assert regular_user.is_active is False
+
+    def test_owner_cannot_deactivate_self(
+        self,
+        client: TestClient,
+        owner_user: User,
+        owner_cookies: dict,
+        db: Session,
+    ):
+        """Owner darf den eigenen Account NICHT deaktivieren — sperrt sich sonst aus."""
+        r = client.patch(
+            f"/api/admin/users/{owner_user.id}",
+            json={"is_active": False},
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 400
+        db.refresh(owner_user)
+        assert owner_user.is_active is True

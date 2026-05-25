@@ -165,6 +165,14 @@ async def lifespan(app: FastAPI):
                     for col in select_cols:
                         if getattr(row, col):
                             desired_keys.update(LEGACY_PERMISSION_MAPPING[col])
+                    # In der alten Welt konnte jeder User mit irgendeiner
+                    # `Permission`-Row den Server in der Liste sehen. Ohne
+                    # explizites `server.view` waere er nach Migration aber aus
+                    # `list_visible_servers` / `get_server` ausgesperrt → wir
+                    # ziehen die Sichtbarkeit immer mit, sobald irgendeine
+                    # Permission migriert wird.
+                    if desired_keys:
+                        desired_keys.add("server.view")
                     for key in desired_keys:
                         exists = conn.execute(
                             text(

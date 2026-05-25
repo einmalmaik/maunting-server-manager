@@ -158,6 +158,11 @@ def _simulate_legacy_permissions_migration(db_url: str) -> int:
                 for col in select_cols:
                     if getattr(row, col):
                         desired_keys.update(LEGACY_PERMISSION_MAPPING[col])
+                # Sichtbarkeit immer mit-migrieren, damit Users mit nur
+                # `can_start`/`can_stop` (ohne can_view_*) nicht aus
+                # `list_visible_servers` / `get_server` fliegen.
+                if desired_keys:
+                    desired_keys.add("server.view")
                 for key in desired_keys:
                     exists = conn.execute(
                         text(
@@ -292,3 +297,59 @@ def test_phase3_legacy_permissions_migration_handles_no_known_columns():
     inspector = inspect(engine)
     assert "permissions" not in inspector.get_table_names()
     engine.dispose()
+
+
+def test_phase3_legacy_permissions_migration_always_adds_server_view():
+    """User mit `can_start=1` (ohne can_view_*) muss nach Migration trotzdem
+    `server.view` haben — sonst Totalverlust des Server-Zugriffs."""
+    from sqlalchemy import create_engine, text
+
+    tmpdir = tempfile.mkdtemp(prefix="msm-rbac-mig-view-")
+    db_path = os.path.join(tmpdir, "msm.db")
+    db_url = f"sqlite:///{db_path}"
+
+    _make_target_table(db_url)
+    legacy_engine = create_engine(db_url)
+    with legacy_engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE permissions ("
+                "  id INTEGER PRIMARY KEY,"
+                "  user_id INTEGER NOT NULL,"
+                "  server_id INTEGER NOT NULL,"
+                "  can_start BOOLEAN NOT NULL DEFAULT 0,"
+                "  can_stop BOOLEAN NOT NULL DEFAULT 0,"
+                "  can_view_console BOOLEAN NOT NULL DEFAULT 0,"
+                "  can_view_logs BOOLEAN NOT NULL DEFAULT 0"
+                ")"
+            )
+        )
+        # User 9 hatte NUR can_start — in der alten Welt sah er den Server
+        # trotzdem im Listing. Ohne `server.view` waere er nach Migration raus.
+        conn.execute(
+            text(
+                "INSERT INTO permissions "
+                "(user_id, server_id, can_start, can_stop, can_view_console, can_view_logs) "
+                "VALUES (9, 11, 1, 0, 0, 0)"
+            )
+        )
+    legacy_engine.dispose()
+
+    _simulate_legacy_permissions_migration(db_url)
+
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        keys = {
+            r.permission_key
+            for r in conn.execute(
+                text(
+                    "SELECT permission_key FROM server_permissions "
+                    "WHERE user_id = 9 AND server_id = 11"
+                )
+            ).fetchall()
+        }
+    engine.dispose()
+    assert "server.start" in keys
+    assert "server.view" in keys, (
+        "Migration ohne server.view sperrt den User aus list_visible_servers aus"
+    )

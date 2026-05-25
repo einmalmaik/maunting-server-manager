@@ -57,6 +57,11 @@ def update_user(
     # darf is_active, email oder 2FA des Owners aendern.
     if user.is_owner and not actor.is_owner:
         raise HTTPException(status_code=403, detail="Owner-Account kann nur vom Owner geaendert werden")
+    # Selbst der Owner darf den Owner-Account nicht deaktivieren — sonst
+    # waere das Panel nach dem Logout dauerhaft ausgesperrt (kein
+    # Super-Admin-Recovery vorhanden).
+    if user.is_owner and req.is_active is False:
+        raise HTTPException(status_code=400, detail="Owner-Account darf nicht deaktiviert werden")
     if req.email is not None:
         user.email = req.email
     if req.is_active is not None:
