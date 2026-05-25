@@ -209,3 +209,85 @@ class TestRolePermissionEscalation:
             headers=_csrf(owner_cookies),
         )
         assert r.status_code == 201
+
+    def test_cannot_strip_powerful_permissions_via_update(
+        self,
+        client: TestClient,
+        db: Session,
+        regular_user: User,
+        user_cookies: dict,
+        owner_cookies: dict,
+    ):
+        """De-Eskalations-Schutz: Non-Owner mit `roles.manage` darf eine
+        Custom-Rolle mit Keys, die er selbst nicht hat, nicht stripppen."""
+        _assign_role_with_keys(
+            db, regular_user, "rolemgr-strip", ["roles.manage"]
+        )
+        # Owner legt maechtige Custom-Rolle an
+        r = client.post(
+            "/api/roles",
+            json={
+                "name": "power-admin",
+                "description": None,
+                "permissions": ["roles.manage", "servers.delete", "panel.settings.write"],
+            },
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 201
+        target_role_id = r.json()["id"]
+        # Non-Owner versucht, alle Keys ausser `roles.manage` zu strippen
+        r2 = client.patch(
+            f"/api/roles/{target_role_id}",
+            json={
+                "name": None,
+                "description": None,
+                "permissions": ["roles.manage"],
+            },
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert r2.status_code == 403
+        # Sanity: Rolle unveraendert
+        keys_after = {
+            rp.permission_key
+            for rp in db.query(RolePermission)
+            .filter(RolePermission.role_id == target_role_id)
+            .all()
+        }
+        assert keys_after == {"roles.manage", "servers.delete", "panel.settings.write"}
+
+    def test_can_rename_role_without_owning_all_keys(
+        self,
+        client: TestClient,
+        db: Session,
+        regular_user: User,
+        user_cookies: dict,
+        owner_cookies: dict,
+    ):
+        """Name/Description-only-Update (permissions=None) erfordert KEINEN
+        Subset-Check auf bestehende Keys (sonst waere `roles.manage` faktisch
+        unbrauchbar)."""
+        _assign_role_with_keys(
+            db, regular_user, "rolemgr-rename", ["roles.manage"]
+        )
+        r = client.post(
+            "/api/roles",
+            json={
+                "name": "to-rename",
+                "description": None,
+                "permissions": ["servers.delete"],
+            },
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 201
+        rid = r.json()["id"]
+        r2 = client.patch(
+            f"/api/roles/{rid}",
+            json={"name": "renamed", "description": "neue Desc", "permissions": None},
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert r2.status_code == 200
+        assert r2.json()["name"] == "renamed"

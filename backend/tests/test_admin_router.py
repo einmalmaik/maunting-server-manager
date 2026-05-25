@@ -288,6 +288,91 @@ class TestSetServerPermissionsEscalation:
         )
         assert r.status_code == 403
 
+    def test_non_owner_cannot_strip_server_keys_via_empty_set(
+        self,
+        client: TestClient,
+        db: Session,
+        owner_user: User,
+        regular_user: User,
+        user_cookies: dict,
+    ):
+        """De-Eskalation: leeres permissions-Set darf nicht ungeprueft
+        bestehende Keys entziehen."""
+        _attach_role_with_keys(
+            db, regular_user, "permmgr-strip", ["users.permissions.manage"]
+        )
+        srv = Server(
+            name="strip-srv", game_type="csgo", install_dir="/tmp/strip",
+            container_name="strip", public_bind_ip="0.0.0.0",
+        )
+        db.add(srv)
+        db.commit()
+        db.refresh(srv)
+        from services import AuthService
+        victim = AuthService.create_user(db, "victim-srv", "vs@test.de", "VictimP123!")
+        victim.email_verified = True
+        db.commit()
+        db.refresh(victim)
+        # Owner gibt Opfer per-Server-Rechte
+        db.add(ServerPermission(user_id=victim.id, server_id=srv.id, permission_key="server.start"))
+        db.add(ServerPermission(user_id=victim.id, server_id=srv.id, permission_key="server.stop"))
+        db.commit()
+        # Attacker versucht via leerem Set zu entziehen — Actor hat selbst keine Server-Keys
+        r = client.put(
+            f"/api/admin/users/{victim.id}/server-permissions/{srv.id}",
+            json={"permissions": []},
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert r.status_code == 403
+        # Sanity: Keys unveraendert
+        remaining = {
+            rp.permission_key
+            for rp in db.query(ServerPermission)
+            .filter(ServerPermission.user_id == victim.id, ServerPermission.server_id == srv.id)
+            .all()
+        }
+        assert remaining == {"server.start", "server.stop"}
+
+    def test_non_owner_cannot_revoke_server_keys_they_lack(
+        self,
+        client: TestClient,
+        db: Session,
+        owner_user: User,
+        regular_user: User,
+        user_cookies: dict,
+    ):
+        """De-Eskalation: DELETE-Revoke prueft ebenfalls die bestehenden Keys."""
+        _attach_role_with_keys(
+            db, regular_user, "permmgr-revoke", ["users.permissions.manage"]
+        )
+        srv = Server(
+            name="rev-srv", game_type="csgo", install_dir="/tmp/rev",
+            container_name="rev", public_bind_ip="0.0.0.0",
+        )
+        db.add(srv)
+        db.commit()
+        db.refresh(srv)
+        from services import AuthService
+        victim = AuthService.create_user(db, "victim-rev", "vr@test.de", "VictimP123!")
+        victim.email_verified = True
+        db.commit()
+        db.refresh(victim)
+        db.add(ServerPermission(user_id=victim.id, server_id=srv.id, permission_key="server.start"))
+        db.commit()
+        r = client.delete(
+            f"/api/admin/users/{victim.id}/server-permissions/{srv.id}",
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert r.status_code == 403
+        remaining = (
+            db.query(ServerPermission)
+            .filter(ServerPermission.user_id == victim.id, ServerPermission.server_id == srv.id)
+            .count()
+        )
+        assert remaining == 1
+
     def test_owner_can_delegate_any_server_key(
         self,
         client: TestClient,

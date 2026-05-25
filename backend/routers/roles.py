@@ -105,6 +105,15 @@ def update_role(
         existing = role_service.get_role_by_name(db, req.name)
         if existing and existing.id != role.id:
             raise HTTPException(status_code=400, detail="Name bereits vergeben")
+    # De-Eskalations-Schutz: wer Permissions einer Rolle mutiert, muss alle
+    # AKTUELLEN Keys der Rolle selbst besitzen — sonst koennte ein
+    # `roles.manage`-User durch das Stripping einer maechtigen Custom-Rolle
+    # andere User effektiv entwaffnen. Name/Description-only-Updates
+    # (permissions=None) sind davon nicht betroffen.
+    if req.permissions is not None:
+        _ensure_no_escalation(
+            db, actor, role_service.role_permission_keys(db, role.id)
+        )
     _ensure_no_escalation(db, actor, req.permissions)
     try:
         role = role_service.update_role(db, role, req.name, req.description, req.permissions)

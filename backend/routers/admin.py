@@ -276,13 +276,15 @@ async def set_server_permissions(
     # `users.permissions.manage` (ohne eigene Server-Rechte) beliebige
     # Server-Aktionen an andere weiterreichen.
     _ensure_no_server_escalation(db, actor, server_id, req.permissions)
+    # De-Eskalations-Schutz: Keys, die durch das Set entfernt werden,
+    # zaehlen ebenfalls als Mutation. Sonst koennte ein User ohne eigene
+    # Server-Rechte einem anderen User per leerem Set die Rechte entziehen.
+    existing_keys = list_user_server_permission_keys(db, user_id, server_id)
+    removed = [k for k in existing_keys if k not in set(req.permissions)]
+    if removed:
+        _ensure_no_server_escalation(db, actor, server_id, removed)
 
-    had_any = (
-        db.query(ServerPermission.id)
-        .filter(ServerPermission.user_id == user_id, ServerPermission.server_id == server_id)
-        .first()
-        is not None
-    )
+    had_any = bool(existing_keys)
 
     keys = set_user_server_permissions(
         db, user_id, server_id, req.permissions, granted_by=actor.id
@@ -304,9 +306,15 @@ def revoke_server_permissions(
     user_id: int,
     server_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_global("users.permissions.manage")),
+    actor: User = Depends(require_global("users.permissions.manage")),
     __: None = Depends(verify_csrf),
 ) -> None:
+    # Spiegelt set_server_permissions(permissions=[]): Actor muss die
+    # bestehenden Keys auf diesem Server selbst besitzen, sonst kann er
+    # nicht entwaffnen.
+    existing_keys = list_user_server_permission_keys(db, user_id, server_id)
+    if existing_keys:
+        _ensure_no_server_escalation(db, actor, server_id, list(existing_keys))
     db.query(ServerPermission).filter(
         ServerPermission.user_id == user_id,
         ServerPermission.server_id == server_id,
