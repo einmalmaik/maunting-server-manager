@@ -158,15 +158,18 @@ async def create_user_admin(
     actor: User = Depends(require_global("users.manage")),
     _: None = Depends(verify_csrf),
 ) -> User:
+    # Autorisierung VOR jeder DB-Aenderung: ein Non-Owner darf keinen
+    # Owner-Account anlegen. Frueher hat create_user() den User bereits
+    # committet, bevor die 403 geprueft wurde — das hinterliess phantom
+    # Accounts mit dem gewuenschten Username.
+    if req.is_owner and not actor.is_owner:
+        raise HTTPException(status_code=403, detail="Nur Owner kann is_owner setzen")
     if AuthService.get_user_by_username(db, req.username):
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
     user = AuthService.create_user(db, req.username, req.email, req.password)
-    # is_owner setzen nur durch Owner selbst (Bootstrap-Override).
     if req.is_owner:
-        if not actor.is_owner:
-            raise HTTPException(status_code=403, detail="Nur Owner kann is_owner setzen")
         user.is_owner = True
     else:
         # Sicherer Default: System-Rolle `user` (entspricht der Lifespan-Migration
