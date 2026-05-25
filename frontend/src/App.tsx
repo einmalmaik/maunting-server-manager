@@ -5,6 +5,7 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import { PublicOnlyRoute } from './components/PublicOnlyRoute'
 import { RequirePermission } from './components/RequirePermission'
 import { ToastContainer } from './components/ui/ToastContainer'
+import { ConfirmDialog } from './components/ui/ConfirmDialog'
 import { SetupWizard } from './pages/SetupWizard'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
@@ -95,6 +96,7 @@ function App() {
       </Route>
     </Routes>
       <ToastContainer />
+      <ConfirmDialog />
     </>
   )
 }

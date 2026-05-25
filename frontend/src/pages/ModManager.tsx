@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ChevronLeft, Plus, Search, Trash2, ExternalLink, Package, Globe, Star, Users, HardDrive, GripVertical, ToggleLeft, ToggleRight } from 'lucide-react'
 import { api } from '../api/client'
+import { confirm } from '@/stores/confirmStore'
 
 interface Mod {
   id: number
@@ -152,7 +153,7 @@ export function ModManager() {
   }
 
   const removeMod = async (modId: number) => {
-    if (!confirm(t('mods.confirmRemove', 'Mod wirklich entfernen?'))) return
+    if (!(await confirm({ message: t('mods.confirmRemove', 'Mod wirklich entfernen?'), danger: true, confirmText: t('common.delete') }))) return
     try {
       await api(`/mods/${id}/${modId}`, { method: 'DELETE' })
       await loadMods()

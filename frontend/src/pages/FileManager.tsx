@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
 import {
   ChevronLeft,
   Folder,
@@ -122,7 +123,7 @@ export function FileManager() {
 
   const handleDelete = async (name: string, isDir: boolean) => {
     const filePath = currentPath ? `${currentPath}/${name}` : name
-    if (!confirm(isDir ? t('files.confirmDeleteDir') : t('files.confirmDeleteFile'))) return
+    if (!(await confirm({ message: isDir ? t('files.confirmDeleteDir') : t('files.confirmDeleteFile'), danger: true, confirmText: t('common.delete') }))) return
     try {
       await api(`/files/${serverId}/delete?path=${encodeURIComponent(filePath)}`, { method: 'DELETE' })
       toast.success(t('files.deleted'))
