@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  ChevronDown,
   ExternalLink,
   Globe,
   GripVertical,
@@ -46,9 +47,14 @@ interface SteamMod {
 
 type BrowserTab = 'trending' | 'popular' | 'newest' | 'updated'
 
+const BROWSER_PAGE_SIZE = 24
+const INSTALLED_PAGE_SIZE = 25
+
 interface ModManagerProps {
   serverId: number
 }
+
+type BrowserCache = Partial<Record<BrowserTab, { mods: SteamMod[]; page: number; hasMore: boolean }>>
 
 export function ModManager({ serverId }: ModManagerProps) {
   const { t } = useTranslation()
@@ -63,11 +69,15 @@ export function ModManager({ serverId }: ModManagerProps) {
   // Steam Workshop Browser (inline section)
   const [steamQuery, setSteamQuery] = useState('')
   const [steamResults, setSteamResults] = useState<SteamMod[]>([])
+  const [steamPage, setSteamPage] = useState(1)
+  const [steamHasMore, setSteamHasMore] = useState(false)
   const [steamLoading, setSteamLoading] = useState(false)
   const [browserTab, setBrowserTab] = useState<BrowserTab>('trending')
-  const [browserMods, setBrowserMods] = useState<SteamMod[]>([])
+  // Cache pro Tab — verhindert Re-Fetch + Layout-Shift beim Tab-Wechsel,
+  // dadurch bleibt die Scroll-Position erhalten.
+  const [browserCache, setBrowserCache] = useState<BrowserCache>({})
   const [browserLoading, setBrowserLoading] = useState(false)
-  const loadedTabs = useRef<Set<BrowserTab>>(new Set())
+  const [installedShown, setInstalledShown] = useState(INSTALLED_PAGE_SIZE)
 
   // Drag & drop fuer Load-Order
   const dragId = useRef<number | null>(null)
@@ -77,7 +87,9 @@ export function ModManager({ serverId }: ModManagerProps) {
   }, [serverId])
 
   useEffect(() => {
-    void loadBrowserTab(browserTab)
+    if (browserCache[browserTab]) return // schon geladen — nicht neu fetchen
+    void loadBrowserTab(browserTab, 1, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [browserTab])
 
   const loadMods = async () => {
@@ -91,43 +103,71 @@ export function ModManager({ serverId }: ModManagerProps) {
     }
   }
 
-  const loadBrowserTab = async (tab: BrowserTab) => {
-    if (loadedTabs.current.has(tab) && browserMods.length > 0) return
+  const loadBrowserTab = async (tab: BrowserTab, page: number, append: boolean) => {
     setBrowserLoading(true)
     try {
       const data = await api<SteamMod[]>(
-        `/steam/workshop/popular?server_id=${serverId}&sort=${tab}&limit=24`,
+        `/steam/workshop/popular?server_id=${serverId}&sort=${tab}&limit=${BROWSER_PAGE_SIZE}&page=${page}`,
       )
-      setBrowserMods(data)
-      loadedTabs.current.add(tab)
+      setBrowserCache((prev) => {
+        const existing = prev[tab]?.mods ?? []
+        return {
+          ...prev,
+          [tab]: {
+            mods: append ? [...existing, ...data] : data,
+            page,
+            hasMore: data.length === BROWSER_PAGE_SIZE,
+          },
+        }
+      })
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : String(err))
-      setBrowserMods([])
+      if (!append) {
+        setBrowserCache((prev) => ({
+          ...prev,
+          [tab]: { mods: [], page: 1, hasMore: false },
+        }))
+      }
     } finally {
       setBrowserLoading(false)
     }
   }
 
   const switchTab = (tab: BrowserTab) => {
-    loadedTabs.current.delete(tab)
-    setBrowserMods([])
-    setBrowserTab(tab)
+    setBrowserTab(tab) // Cache bleibt erhalten → Scroll-Position stabil
   }
 
-  const searchSteam = async () => {
+  const loadMoreBrowser = () => {
+    const entry = browserCache[browserTab]
+    if (!entry || !entry.hasMore || browserLoading) return
+    void loadBrowserTab(browserTab, entry.page + 1, true)
+  }
+
+  const searchSteam = async (page: number, append: boolean) => {
     if (!steamQuery.trim()) return
     setSteamLoading(true)
     try {
       const q = encodeURIComponent(steamQuery)
       const data = await api<SteamMod[]>(
-        `/steam/workshop/search?server_id=${serverId}&query=${q}&per_page=24`,
+        `/steam/workshop/search?server_id=${serverId}&query=${q}&per_page=${BROWSER_PAGE_SIZE}&page=${page}`,
       )
-      setSteamResults(data)
+      setSteamResults((prev) => (append ? [...prev, ...data] : data))
+      setSteamPage(page)
+      setSteamHasMore(data.length === BROWSER_PAGE_SIZE)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : t('mods.steamSearchError'))
     } finally {
       setSteamLoading(false)
     }
+  }
+
+  const runSearch = () => {
+    void searchSteam(1, false)
+  }
+
+  const loadMoreSearch = () => {
+    if (!steamHasMore || steamLoading) return
+    void searchSteam(steamPage + 1, true)
   }
 
   const subscribeMod = async (workshopId: string, name?: string) => {
@@ -242,6 +282,15 @@ export function ModManager({ serverId }: ModManagerProps) {
       mod.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       mod.workshop_id.includes(searchTerm),
   )
+  const visibleInstalled = filteredMods.slice(0, installedShown)
+  const hasMoreInstalled = filteredMods.length > visibleInstalled.length
+
+  // Suche zeigt Suchtreffer-Grid, sonst das gewaehlte Browser-Tab-Grid.
+  const isSearchMode = steamResults.length > 0
+  const browserEntry = browserCache[browserTab]
+  const displayedMods = isSearchMode ? steamResults : browserEntry?.mods ?? []
+  const showLoadMoreBrowser = !isSearchMode && !!browserEntry?.hasMore
+  const showLoadMoreSearch = isSearchMode && steamHasMore
 
   const renderSteamModCard = (mod: SteamMod) => {
     const isAdded = mods.some((m) => m.workshop_id === mod.publishedfileid)
@@ -362,7 +411,7 @@ export function ModManager({ serverId }: ModManagerProps) {
               </p>
             </div>
           ) : (
-            filteredMods.map((mod) => (
+            visibleInstalled.map((mod) => (
               <div
                 key={mod.id}
                 className={`msm-card p-4 transition-opacity ${mod.enabled ? '' : 'opacity-60'}`}
@@ -434,15 +483,24 @@ export function ModManager({ serverId }: ModManagerProps) {
 
                     <button
                       onClick={() => removeMod(mod.id)}
-                      className="p-1.5 rounded-md hover:bg-status-error/10 transition-colors"
+                      className="p-1.5 rounded-md hover:bg-status-destructive/10 transition-colors"
                       title={t('mods.remove')}
                     >
-                      <Trash2 className="w-4 h-4 text-status-error" />
+                      <Trash2 className="w-4 h-4 text-status-destructive" />
                     </button>
                   </div>
                 </div>
               </div>
             ))
+          )}
+          {hasMoreInstalled && (
+            <button
+              onClick={() => setInstalledShown((n) => n + INSTALLED_PAGE_SIZE)}
+              className="msm-btn-secondary w-full px-4 py-2 text-sm inline-flex items-center justify-center gap-2"
+            >
+              <ChevronDown className="w-4 h-4" />
+              {t('mods.loadMore')} ({filteredMods.length - visibleInstalled.length})
+            </button>
           )}
         </div>
       </section>
@@ -464,22 +522,24 @@ export function ModManager({ serverId }: ModManagerProps) {
               placeholder={t('mods.searchPlaceholder')}
               value={steamQuery}
               onChange={(e) => setSteamQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && searchSteam()}
+              onKeyDown={(e) => e.key === 'Enter' && runSearch()}
               className="msm-input pl-10"
             />
           </div>
           <button
-            onClick={searchSteam}
+            onClick={runSearch}
             disabled={steamLoading || !steamQuery.trim()}
             className="msm-btn-primary px-4 py-2 disabled:opacity-50"
           >
-            {steamLoading ? t('common.loading') : t('common.search')}
+            {steamLoading && steamPage === 1 ? t('common.loading') : t('common.search')}
           </button>
-          {steamResults.length > 0 && (
+          {isSearchMode && (
             <button
               onClick={() => {
                 setSteamResults([])
                 setSteamQuery('')
+                setSteamPage(1)
+                setSteamHasMore(false)
               }}
               className="msm-btn-secondary px-3 py-2 text-sm"
             >
@@ -488,38 +548,54 @@ export function ModManager({ serverId }: ModManagerProps) {
           )}
         </div>
 
-        {/* Tabs (sticky beim langen Browser-Grid) */}
-        {steamResults.length === 0 && (
-          <div className="sticky top-0 z-10 bg-background pt-1 pb-2">
-            <div className="flex gap-1 bg-surface-container rounded-lg p-1 overflow-x-auto">
-              {BROWSER_TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => switchTab(tab.key)}
-                  className={`flex-1 min-w-[110px] px-3 py-1.5 rounded-md text-sm font-body-md transition-colors ${
-                    browserTab === tab.key
-                      ? 'bg-surface text-primary shadow-sm'
-                      : 'text-on-surface-variant hover:text-on-surface'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+        {/* Tabs nur ausserhalb des Suchmodus. Nicht sticky, damit der Scroll-
+            Anker (das Tab-Element) seine Position behaelt und der Browser beim
+            Wechsel zwischen Tabs nicht nach oben springt. */}
+        {!isSearchMode && (
+          <div className="flex gap-1 bg-surface-container rounded-lg p-1 overflow-x-auto">
+            {BROWSER_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => switchTab(tab.key)}
+                className={`flex-1 min-w-[110px] px-3 py-1.5 rounded-md text-sm font-body-md transition-colors ${
+                  browserTab === tab.key
+                    ? 'bg-surface text-primary shadow-sm'
+                    : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         )}
 
-        {steamResults.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {steamResults.map((mod) => renderSteamModCard(mod))}
-          </div>
-        ) : browserLoading ? (
+        {displayedMods.length > 0 ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {displayedMods.map((mod) => renderSteamModCard(mod))}
+            </div>
+            {(showLoadMoreBrowser || showLoadMoreSearch) && (
+              <div className="flex justify-center pt-2">
+                <button
+                  onClick={isSearchMode ? loadMoreSearch : loadMoreBrowser}
+                  disabled={browserLoading || steamLoading}
+                  className="msm-btn-secondary px-4 py-2 text-sm inline-flex items-center gap-2 disabled:opacity-50"
+                >
+                  <ChevronDown className="w-4 h-4" />
+                  {isSearchMode
+                    ? steamLoading
+                      ? t('common.loading')
+                      : t('mods.loadMore')
+                    : browserLoading
+                      ? t('common.loading')
+                      : t('mods.loadMore')}
+                </button>
+              </div>
+            )}
+          </>
+        ) : browserLoading || steamLoading ? (
           <div className="text-center py-12 text-on-surface-variant font-body-md">
             {t('common.loading')}
-          </div>
-        ) : browserMods.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {browserMods.map((mod) => renderSteamModCard(mod))}
           </div>
         ) : (
           <div className="text-center py-12 text-on-surface-variant font-body-md">

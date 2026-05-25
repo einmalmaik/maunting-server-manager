@@ -183,11 +183,19 @@ class SteamService:
             elif isinstance(tag, str):
                 tags.append(tag)
         
-        preview_url = None
-        previews = mod_data.get('previews', [])
-        if previews:
-            preview = previews[0]
-            preview_url = preview.get('url') or preview.get('youtubevideoid')
+        # Bevorzugt das top-level preview_url Feld der QueryFiles-Antwort
+        # (kommt mit return_previews=true zuverlaessig zurueck). Fallback auf
+        # das erste Bild im previews-Array; YouTube-Vorschauen werden
+        # uebersprungen (keine gueltige <img>-URL).
+        preview_url = mod_data.get('preview_url') or None
+        if not preview_url:
+            for preview in mod_data.get('previews') or []:
+                if not isinstance(preview, dict):
+                    continue
+                url = preview.get('url')
+                if url:
+                    preview_url = url
+                    break
         
         return SteamModInfo(
             publishedfileid=str(mod_data.get('publishedfileid', '')),
@@ -210,10 +218,11 @@ class SteamService:
     SORT_NEWEST = 1       # RankedByPublicationDate
     SORT_UPDATED = 12     # RankedByLastUpdatedDate
 
-    async def get_popular_mods(self, appid: str, limit: int = 20, required_tags: list[str] | None = None, sort: str = "trending") -> List[SteamModInfo]:
+    async def get_popular_mods(self, appid: str, limit: int = 20, required_tags: list[str] | None = None, sort: str = "trending", page: int = 1) -> List[SteamModInfo]:
         """Get mods for an app sorted by the given criteria.
 
         sort: 'trending' | 'popular' | 'newest' | 'updated'
+        page: 1-basierte Seitennummer fuer Pagination ("Mehr anzeigen").
         """
         if not self.api_key:
             return []
@@ -225,8 +234,9 @@ class SteamService:
             "updated": self.SORT_UPDATED,
         }
         query_type = sort_map.get(sort, self.SORT_TRENDING)
+        page = max(1, page)
 
-        cache_key = f"popular_{appid}_{limit}_{sort}"
+        cache_key = f"popular_{appid}_{limit}_{sort}_p{page}"
         if required_tags:
             cache_key += "_" + "_".join(required_tags)
         cached = self._get_cache(cache_key)
@@ -236,7 +246,7 @@ class SteamService:
         try:
             query_data: dict = {
                 'query_type': query_type,
-                'page': 1,
+                'page': page,
                 'numperpage': limit,
                 'appid': int(appid),
                 'return_short_description': True,
