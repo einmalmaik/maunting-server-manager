@@ -1,9 +1,17 @@
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { BookOpen, Download } from 'lucide-react'
+import { BookOpen, Download, Upload } from 'lucide-react'
+import { api } from '@/api/client'
+import { toast } from '@/stores/toastStore'
+import { useHasPermission } from '@/hooks/useHasPermission'
 
 // Reihenfolge der Doku-Sections — i18n-Keys liegen unter ``docs.sections.<key>``.
 const SECTION_KEYS = [
   'intro',
+  'workflow',
+  'addServer',
+  'addBlueprintSteam',
+  'addBlueprintCustom',
   'location',
   'schema',
   'runtime',
@@ -16,6 +24,39 @@ const SECTION_KEYS = [
 
 export function Docs() {
   const { t } = useTranslation()
+  const canImport = useHasPermission('panel.settings.write')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [uploading, setUploading] = useState(false)
+
+  const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    // Input nach Auswahl wieder leeren, damit dieselbe Datei erneut hochgeladen
+    // werden kann (z. B. nach Korrektur).
+    event.target.value = ''
+    if (!file) return
+
+    setUploading(true)
+    try {
+      const text = await file.text()
+      let body: unknown
+      try {
+        body = JSON.parse(text)
+      } catch {
+        toast.error(t('docs.uploadInvalidJson'))
+        return
+      }
+      const res = await api<{ id: string }>('/blueprints/import', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+      toast.success(t('docs.uploadSuccess', { id: res.id }))
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t('docs.uploadFailed')
+      toast.error(message)
+    } finally {
+      setUploading(false)
+    }
+  }
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -29,7 +70,7 @@ export function Docs() {
         {t('docs.pageSubtitle')}
       </p>
 
-      <div className="mb-8">
+      <div className="mb-8 flex flex-wrap items-center gap-3">
         <a
           href="/api/blueprints/template"
           download
@@ -39,6 +80,36 @@ export function Docs() {
           <Download className="w-4 h-4" />
           {t('docs.downloadTemplate')}
         </a>
+
+        {canImport && (
+          <>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+              data-testid="docs-blueprint-upload"
+            >
+              {uploading ? (
+                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              {t('docs.uploadBlueprint')}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={handleFileSelected}
+              data-testid="docs-blueprint-upload-input"
+            />
+            <span className="font-body-md text-xs text-on-surface-variant basis-full">
+              {t('docs.uploadHint')}
+            </span>
+          </>
+        )}
       </div>
 
       <div className="space-y-6">
