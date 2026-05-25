@@ -13,6 +13,7 @@ set -euo pipefail
 # ═══════════════════════════════════════════════════════════════
 
 MSM_DIR="/opt/msm"
+MSM_USER="msm"
 LOG_FILE="/tmp/msm-update.log"
 BACKUP_DIR="/opt/msm/backups"
 ENV_FILE="$MSM_DIR/backend/.env"
@@ -28,6 +29,29 @@ log()  { echo -e "${CYAN}[UPDATE]${NC} $1" | tee -a "$LOG_FILE"; }
 ok()   { echo -e "${GREEN}[OK]${NC}   $1" | tee -a "$LOG_FILE"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1" | tee -a "$LOG_FILE"; }
 err()  { echo -e "${RED}[ERR]${NC}  $1" | tee -a "$LOG_FILE"; exit 1; }
+
+# Setzt Besitz der Panel-Dateien zurueck auf $MSM_USER.
+# WICHTIG: /opt/msm/servers (per-Game-Server-User) und /opt/msm/backups
+# (eigene Backup-Daten) NICHT anfassen, sonst kippen Datei-Rechte fuer
+# laufende Game-Server-Container. Wir chownen nur die Panel-Code-Pfade,
+# die `git pull` als root ueberschrieben hat.
+restore_panel_ownership() {
+    [[ -d "$MSM_DIR" ]] || return 0
+    # .git muss msm geschrieben werden koennen (sonst kann msm spaeter nicht
+    # `git describe` o.ae. ausfuehren).
+    if [[ -d "$MSM_DIR/.git" ]]; then
+        chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/.git" 2>/dev/null || true
+    fi
+    for sub in backend frontend docs; do
+        if [[ -d "$MSM_DIR/$sub" ]]; then
+            chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" 2>/dev/null || true
+        fi
+    done
+    # Top-Level-Dateien (Scripts, Templates, README, etc.).
+    # `find -maxdepth 1` haelt /opt/msm/servers und /opt/msm/backups raus.
+    find "$MSM_DIR" -maxdepth 1 -type f \
+        -exec chown "$MSM_USER:$MSM_USER" {} + 2>/dev/null || true
+}
 
 CHECK_ONLY=false
 FORCE=false
@@ -197,6 +221,10 @@ if [[ "$UPDATE_MODE" == "git" ]]; then
     }
     # Alte Build-Artefakte entfernen (nur dist/, keine Server-Daten!)
     rm -rf frontend/dist 2>/dev/null || true
+    # git pull lief als root -> neue/geaenderte Dateien sind jetzt root-owned.
+    # Ohne den folgenden Chown scheitert `su - msm -c 'npm install'` mit EACCES
+    # auf z.B. frontend/package-lock.json.
+    restore_panel_ownership
 elif [[ -d ".git" ]]; then
     log "Aktualisiere via Git checkout..."
     git fetch origin --tags
@@ -205,6 +233,7 @@ elif [[ -d ".git" ]]; then
         git checkout "$CURRENT_VERSION" 2>/dev/null || true
         exit 1
     }
+    restore_panel_ownership
 else
     log "Lade Release-Tarball..."
     TARBALL_URL=$(echo "$RELEASE_JSON" | python3 -c "
@@ -231,6 +260,7 @@ for asset in data.get('assets', []):
             rm -rf "$EXTRACTED"
         fi
     fi
+    restore_panel_ownership
 fi
 
 # ── sudoers aktualisieren (immer, damit neue Regeln sofort gelten) ──
