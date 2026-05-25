@@ -5,7 +5,6 @@
   "nav": {
     "dashboard": "Dashboard",
     "servers": "Servers",
-    "backups": "Backups",
     "users": "Users",
     "roles": "Roles",
     "settings": "Settings",
@@ -26,12 +25,12 @@
     "start": "Start",
     "stop": "Stop",
     "restart": "Restart",
-    "configEditor": "Config Editor",
     "modManager": "Mod Manager",
     "backups": "Backups",
     "logs": "Logs",
     "noLogs": "No logs available yet.",
     "console": "Console",
+    "consolePlaceholder": "Type command…",
     "gameLogs": "Game Logs",
     "install": "Install",
     "deleted": "Server deleted",
@@ -158,7 +157,11 @@
     "revoke": "Remove completely",
     "revokeConfirm": "Remove all permissions for this user on this server?",
     "saved": "Permissions saved.",
-    "ownerHint": "Owner always has all permissions. Admin role has all permissions blanket."
+    "ownerHint": "Owner always has all permissions. Admin role has all permissions blanket.",
+    "adminTitle": "Manage server permissions",
+    "adminSubtitle": "Delegate server permissions to individual sub-users. Pick a server first.",
+    "selectServer": "Server",
+    "selectServerPlaceholder": "-- choose server --"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -284,7 +287,16 @@
     "tabUpdated": "Recently Updated",
     "tagFilterPlaceholder": "Tag filter (optional)",
     "enable": "Enable",
-    "disable": "Disable"
+    "disable": "Disable",
+    "installedTitle": "Installed Mods",
+    "addById": "Add by Workshop ID",
+    "clearSearch": "Clear search"
+  },
+  "tabs": {
+    "files": "Files",
+    "console": "Console",
+    "mods": "Mods",
+    "backups": "Backups"
   },
   "files": {
     "title": "File Manager",
@@ -292,7 +304,10 @@
     "upload": "Upload",
     "uploaded": "uploaded",
     "newFolder": "New Folder",
+    "newFile": "New File",
     "folderName": "Folder name",
+    "fileName": "File name",
+    "folderCreated": "Folder created",
     "saved": "File saved",
     "deleted": "Deleted",
     "extracted": "Archive extracted",
@@ -300,7 +315,23 @@
     "selectFile": "Select a file to edit",
     "dropHere": "Drop files here to upload",
     "confirmDeleteFile": "Really delete this file?",
-    "confirmDeleteDir": "Really delete this directory and all contents?"
+    "confirmDeleteDir": "Really delete this directory and all contents?",
+    "rename": "Rename",
+    "renameTitle": "Rename",
+    "newName": "New name",
+    "renamed": "Renamed",
+    "move": "Move",
+    "moved": "Moved",
+    "moveHint": "Move entry \"{{name}}\" to another folder.",
+    "moveSelfError": "Target lies inside the source.",
+    "targetFolder": "Target folder (relative to server root)",
+    "moveTargetHint": "Leave blank for the root directory.",
+    "download": "Download",
+    "searchPlaceholder": "Search files & folders…",
+    "searchEmpty": "No matches",
+    "searchTruncated": "Too many matches — refine your search.",
+    "hideTree": "Hide file tree",
+    "showTree": "Show file tree"
   },
   "backups": {
     "subtitle": "Backup Management",
@@ -325,22 +356,6 @@
     "backupNamePlaceholder": "e.g. Before update v1.5",
     "createModalHint": "Creates a compressed archive of the server directory.",
     "createNow": "Create Backup"
-  },
-  "config": {
-    "title": "Config Editor",
-    "subtitle": "Edit server configuration",
-    "configFiles": "Config Files",
-    "quickConfig": "Quick Config",
-    "noFileSelected": "No file selected",
-    "selectFile": "Select a config file from the left list to edit",
-    "save": "Save",
-    "saved": "Config saved",
-    "saveFailed": "Save failed",
-    "fileNotFound": "File not found",
-    "fileContent": "Edit file content",
-    "filePlaceholder": "Config content will be displayed here...",
-    "loadError": "Could not load config files",
-    "fileLoadError": "Could not load file"
   },
   "scheduler": {
     "title": "Scheduler",
@@ -429,7 +444,9 @@
     "success": "Success",
     "close": "Close",
     "confirm": "Confirm",
-    "back": "Back"
+    "back": "Back",
+    "refresh": "Refresh",
+    "send": "Send"
   },
   "serverDetail": {
     "limit": "Limit",

@@ -21,7 +21,6 @@ from routers import (
     servers_router,
     backups_router,
     mods_router,
-    config_editor_router,
     system_router,
     steam_router,
     panel_settings_router,
@@ -296,7 +295,6 @@ app.include_router(admin_router)
 app.include_router(servers_router)
 app.include_router(backups_router)
 app.include_router(mods_router)
-app.include_router(config_editor_router)
 app.include_router(system_router)
 app.include_router(steam_router)
 app.include_router(panel_settings_router)

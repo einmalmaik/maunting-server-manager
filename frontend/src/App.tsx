@@ -15,10 +15,6 @@ import { ResetPassword } from './pages/ResetPassword'
 import { Dashboard } from './pages/Dashboard'
 import { Servers } from './pages/Servers'
 import { ServerDetail } from './pages/ServerDetail'
-import { ConfigEditor } from './pages/ConfigEditor'
-import { FileManager } from './pages/FileManager'
-import { ModManager } from './pages/ModManager'
-import { Backups } from './pages/Backups'
 import { Users } from './pages/Users'
 import { Roles } from './pages/Roles'
 import { Settings } from './pages/Settings'
@@ -61,10 +57,6 @@ function App() {
         <Route index element={<Dashboard />} />
         <Route path="servers" element={<Servers />} />
         <Route path="servers/:id" element={<ServerDetail />} />
-        <Route path="servers/:id/config" element={<ConfigEditor />} />
-        <Route path="servers/:id/files" element={<FileManager />} />
-        <Route path="servers/:id/mods" element={<ModManager />} />
-        <Route path="servers/:id/backups" element={<Backups />} />
         <Route
           path="users"
           element={

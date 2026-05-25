@@ -112,7 +112,6 @@ class ServerStatusResponse(BaseModel):
     ram_mb: int | None
     disk_mb: int | None
     uptime_seconds: int | None
-    players_online: int | None
     # Soft-Limits (auch wenn ohne Limit-Wert anzeigen) — Frontend kann
     # belegt/limit-Verhältnis darstellen und Frei-Speicher des Hosts zeigen.
     cpu_limit_percent: int | None = None

@@ -1,48 +1,77 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams, useNavigate } from 'react-router-dom'
-import { api } from '@/api/client'
-import { toast } from '@/stores/toastStore'
-import { useHostInterfaces } from '@/hooks/useHostInterfaces'
-import { useHasPermission } from '@/hooks/useHasPermission'
-import { ServerPermissionsPanel } from '@/components/ServerPermissionsPanel'
-import type { Server, GameInfo } from '@/types'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Play,
-  Square,
-  RefreshCw,
-  Terminal,
+  AlertTriangle,
   ArrowLeft,
+  Download,
   FileText,
-  Package,
   HardDrive,
   Network,
-  Download,
+  Package,
+  Play,
+  RefreshCw,
+  Square,
+  Terminal,
   Trash2,
-  AlertTriangle,
 } from 'lucide-react'
+import { api } from '@/api/client'
+import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
+import { useHostInterfaces } from '@/hooks/useHostInterfaces'
+import { FileManager } from './FileManager'
+import { ModManager } from './ModManager'
+import { Backups } from './Backups'
+import { ServerConsolePanel } from '@/components/server/ServerConsolePanel'
+import type { GameInfo, Server } from '@/types'
+
+type TabKey = 'files' | 'console' | 'mods' | 'backups'
+const VALID_TABS: TabKey[] = ['files', 'console', 'mods', 'backups']
+
+interface ServerStatus {
+  status?: string
+  cpu_percent?: number | null
+  ram_mb?: number | null
+  disk_used_mb?: number | null
+  disk_free_mb?: number | null
+  cpu_limit_percent?: number | null
+  ram_limit_mb?: number | null
+  disk_limit_gb?: number | null
+  message?: string | null
+}
 
 /** Formatiert MB als kompakte Angabe (MB / GB). */
 function formatMb(mb: number | null | undefined): string {
   if (mb == null) return '-'
-  if (mb >= 1024) {
-    return `${(mb / 1024).toFixed(1)} GB`
-  }
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
   return `${Math.round(mb)} MB`
+}
+
+function statusClasses(s: string | undefined): string {
+  switch (s) {
+    case 'running':
+      return 'bg-status-success/10 border-status-success/30 text-status-success'
+    case 'stopped':
+      return 'bg-surface-container-highest border-outline text-on-surface-variant'
+    case 'installing':
+    case 'updating':
+      return 'bg-status-warning/10 border-status-warning/30 text-status-warning'
+    default:
+      return 'bg-status-error/10 border-status-error/30 text-status-error'
+  }
 }
 
 export function ServerDetail() {
   const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [server, setServer] = useState<Server | null>(null)
-  const [status, setStatus] = useState<any>(null)
-  const [consoleLogs, setConsoleLogs] = useState('')
+  const [status, setStatus] = useState<ServerStatus | null>(null)
   const [games, setGames] = useState<GameInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showEditNetwork, setShowEditNetwork] = useState(false)
   const [savingNetwork, setSavingNetwork] = useState(false)
   const [networkForm, setNetworkForm] = useState({
@@ -52,23 +81,19 @@ export function ServerDetail() {
     rcon_port: '',
   })
   const { interfaces } = useHostInterfaces()
-  const consoleRef = useRef<HTMLPreElement>(null)
 
   const serverId = parseInt(id || '0')
-  const canManageServerPermissions = useHasPermission('users.permissions.manage')
 
   const fetchAll = async () => {
     if (!serverId) return
     try {
-      const [srv, st, cl, gms] = await Promise.all([
+      const [srv, st, gms] = await Promise.all([
         api<Server>(`/servers/${serverId}`),
-        api<any>(`/servers/${serverId}/status`).catch(() => null),
-        api<any>(`/servers/${serverId}/console?lines=200`).catch(() => ({ logs: '' })),
+        api<ServerStatus>(`/servers/${serverId}/status`).catch(() => null),
         api<GameInfo[]>('/system/games'),
       ])
       setServer(srv)
       setStatus(st)
-      setConsoleLogs(cl.logs || '')
       setGames(gms)
     } catch {
       // silent
@@ -78,18 +103,11 @@ export function ServerDetail() {
   }
 
   useEffect(() => {
-    fetchAll()
-    const interval = setInterval(fetchAll, 5000)
-    return () => clearInterval(interval)
+    void fetchAll()
+    const handle = setInterval(fetchAll, 5000)
+    return () => clearInterval(handle)
   }, [serverId])
 
-  useEffect(() => {
-    if (consoleRef.current) {
-      consoleRef.current.scrollTop = consoleRef.current.scrollHeight
-    }
-  }, [consoleLogs])
-
-  // Edit-Form vorbefüllen, sobald Server geladen ist oder das Modal geöffnet wird.
   useEffect(() => {
     if (server && showEditNetwork) {
       setNetworkForm({
@@ -101,13 +119,45 @@ export function ServerDetail() {
     }
   }, [server, showEditNetwork])
 
+  // Capability-Flag: nur wenn das Plugin das Steam-Workshop unterstuetzt, wird
+  // der Tab gerendert. Die Quelle ist /api/system/games — dort steht jetzt
+  // `supports_steam_workshop`. UI-Filter ist NUR Convenience; Backend
+  // verweigert /api/mods/* ohnehin, wenn das Plugin keine Mods kann.
+  const gameInfo = useMemo(
+    () => games.find((g) => g.id === server?.game_type),
+    [games, server?.game_type],
+  )
+  const showModTab = !!gameInfo?.supports_steam_workshop
+
+  const tabs = useMemo(() => {
+    const list: { key: TabKey; label: string; icon: typeof FileText }[] = [
+      { key: 'files', label: t('tabs.files'), icon: FileText },
+      { key: 'console', label: t('tabs.console'), icon: Terminal },
+    ]
+    if (showModTab) list.push({ key: 'mods', label: t('tabs.mods'), icon: Package })
+    list.push({ key: 'backups', label: t('tabs.backups'), icon: HardDrive })
+    return list
+  }, [t, showModTab])
+
+  const rawTab = (searchParams.get('tab') || 'files') as TabKey
+  const activeTab: TabKey = VALID_TABS.includes(rawTab) && (rawTab !== 'mods' || showModTab)
+    ? rawTab
+    : 'files'
+
+  const setActiveTab = (next: TabKey) => {
+    const params = new URLSearchParams(searchParams)
+    params.set('tab', next)
+    setSearchParams(params, { replace: true })
+  }
+
   const doAction = async (action: string) => {
     setActionLoading(action)
     try {
       await api(`/servers/${serverId}/${action}`, { method: 'POST' })
-      fetchAll()
-    } catch (err: any) {
-      const msg = t(err.message) || err.message || t('common.error')
+      void fetchAll()
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : String(err)
+      const msg = t(raw, { defaultValue: raw }) || t('common.error')
       toast.error(msg)
     } finally {
       setActionLoading(null)
@@ -118,8 +168,6 @@ export function ServerDetail() {
     e.preventDefault()
     setSavingNetwork(true)
     try {
-      // Nur geänderte Felder mitschicken, sonst löst jedes PATCH Container-
-      // Recreate aus.
       const body: Record<string, unknown> = {}
       if (networkForm.public_bind_ip !== (server?.public_bind_ip || '')) {
         body.public_bind_ip = networkForm.public_bind_ip || null
@@ -147,45 +195,36 @@ export function ServerDetail() {
       })
       toast.success(t('servers.networkSaved'))
       setShowEditNetwork(false)
-      fetchAll()
-    } catch (err: any) {
-      const msg = t(err.message) || err.message || t('common.error')
-      toast.error(msg)
+      void fetchAll()
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : String(err)
+      toast.error(t(raw, { defaultValue: raw }) || t('common.error'))
     } finally {
       setSavingNetwork(false)
     }
   }
 
   const handleDelete = async () => {
+    const ok = await confirm({
+      message: t('servers.confirmDelete'),
+      danger: true,
+      confirmText: t('common.delete'),
+    })
+    if (!ok) return
     setActionLoading('delete')
     try {
       await api(`/servers/${serverId}`, { method: 'DELETE' })
       toast.success(t('servers.deleted'))
       navigate('/servers')
-    } catch (err: any) {
-      const msg = t(err.message) || err.message || t('common.error')
-      toast.error(msg)
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : String(err)
+      toast.error(t(raw, { defaultValue: raw }) || t('common.error'))
     } finally {
       setActionLoading(null)
-      setShowDeleteConfirm(false)
     }
   }
 
-  const statusClasses = (s: string) => {
-    switch (s) {
-      case 'running':
-        return 'bg-status-success/10 border-status-success/30 text-status-success'
-      case 'stopped':
-        return 'bg-surface-container-highest border-outline text-on-surface-variant'
-      case 'installing':
-      case 'updating':
-        return 'bg-status-warning/10 border-status-warning/30 text-status-warning'
-      default:
-        return 'bg-status-error/10 border-status-error/30 text-status-error'
-    }
-  }
-
-  const gameName = (id: string) => games.find((g) => g.id === id)?.name || id
+  const gameName = (gameId: string) => games.find((g) => g.id === gameId)?.name || gameId
 
   if (loading) {
     return (
@@ -213,7 +252,7 @@ export function ServerDetail() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-4">
           <button
             className="p-2 rounded-md border border-outline bg-surface-container-highest hover:bg-surface-container text-on-surface transition-colors"
@@ -231,7 +270,7 @@ export function ServerDetail() {
         </span>
       </div>
 
-      {/* Start-Block Warnung: kein public_bind_ip gesetzt */}
+      {/* Warnung: keine Bind-IP */}
       {!server.public_bind_ip && server.status !== 'running' && (
         <div className="msm-card p-4 border-status-warning/40 bg-status-warning/5 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-status-warning flex-shrink-0 mt-0.5" />
@@ -294,7 +333,7 @@ export function ServerDetail() {
           </button>
         )}
         <button
-          onClick={() => setShowDeleteConfirm(true)}
+          onClick={handleDelete}
           disabled={!!actionLoading}
           className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50 ml-auto"
         >
@@ -303,37 +342,15 @@ export function ServerDetail() {
         </button>
       </div>
 
-      {/* Delete Confirmation */}
-      {showDeleteConfirm && (
-        <div className="msm-card p-5 border-status-error/50">
-          <p className="font-body-md text-on-surface mb-4">{t('servers.confirmDelete')}</p>
-          <div className="flex gap-3">
-            <button
-              onClick={handleDelete}
-              disabled={!!actionLoading}
-              className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50"
-            >
-              {actionLoading === 'delete' ? t('common.loading') : t('common.confirm')}
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(false)}
-              className="msm-btn-secondary px-4 py-2"
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* Stats (CPU / RAM / Disk) — Player-Stat ist absichtlich entfernt (KISS, kein A2S) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="msm-card p-5">
           <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">CPU</p>
           <p className="font-headline text-display-sm text-primary">
             {status?.cpu_percent != null ? `${status.cpu_percent.toFixed(1)}%` : '-'}
           </p>
           <p className="font-body-md text-xs text-on-surface-variant mt-1">
-            Limit: {status?.cpu_limit_percent ? `${status.cpu_limit_percent}%` : t('common.unlimited')}
+            {t('serverDetail.limit')}: {status?.cpu_limit_percent ? `${status.cpu_limit_percent}%` : t('common.unlimited')}
           </p>
         </div>
         <div className="msm-card p-5">
@@ -342,7 +359,7 @@ export function ServerDetail() {
             {status?.ram_mb != null ? formatMb(status.ram_mb) : '-'}
           </p>
           <p className="font-body-md text-xs text-on-surface-variant mt-1">
-            Limit: {status?.ram_limit_mb ? formatMb(status.ram_limit_mb) : t('common.unlimited')}
+            {t('serverDetail.limit')}: {status?.ram_limit_mb ? formatMb(status.ram_limit_mb) : t('common.unlimited')}
           </p>
         </div>
         <div className="msm-card p-5">
@@ -352,44 +369,15 @@ export function ServerDetail() {
           </p>
           <p className="font-body-md text-xs text-on-surface-variant mt-1">
             {status?.disk_limit_gb
-              ? `${t('serverDetail.limit', 'Limit')}: ${status.disk_limit_gb} GB`
+              ? `${t('serverDetail.limit')}: ${status.disk_limit_gb} GB`
               : status?.disk_free_mb != null
-                ? `${formatMb(status.disk_free_mb)} ${t('serverDetail.free', 'frei')}`
+                ? `${formatMb(status.disk_free_mb)} ${t('serverDetail.free')}`
                 : t('common.unlimited')}
           </p>
         </div>
-        <div className="msm-card p-5">
-          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">Players</p>
-          <p className="font-headline text-display-sm text-primary">{status?.players_online ?? '-'}</p>
-        </div>
       </div>
 
-      {/* Links */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div
-          className="msm-card p-5 cursor-pointer hover:border-mint-accent/40 transition-all flex items-center gap-3"
-          onClick={() => navigate(`/servers/${serverId}/files`)}
-        >
-          <FileText className="w-5 h-5 text-secondary" />
-          <span className="font-body-md text-base text-on-surface">{t('servers.fileManager')}</span>
-        </div>
-        <div
-          className="msm-card p-5 cursor-pointer hover:border-mint-accent/40 transition-all flex items-center gap-3"
-          onClick={() => navigate(`/servers/${serverId}/mods`)}
-        >
-          <Package className="w-5 h-5 text-secondary" />
-          <span className="font-body-md text-base text-on-surface">{t('servers.modManager')}</span>
-        </div>
-        <div
-          className="msm-card p-5 cursor-pointer hover:border-mint-accent/40 transition-all flex items-center gap-3"
-          onClick={() => navigate(`/servers/${serverId}/backups`)}
-        >
-          <HardDrive className="w-5 h-5 text-secondary" />
-          <span className="font-body-md text-base text-on-surface">{t('servers.backups')}</span>
-        </div>
-      </div>
-
-      {/* Netzwerk: Bind-IP + Ports + Edit */}
+      {/* Network */}
       <div className="msm-card p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -423,6 +411,37 @@ export function ServerDetail() {
             <p className="font-headline text-display-sm text-primary">{server.rcon_port ?? '-'} <span className="text-sm font-body-md text-on-surface-variant">TCP</span></p>
           </div>
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-outline overflow-x-auto -mb-px">
+        <div className="flex gap-1 min-w-max">
+          {tabs.map((tab) => {
+            const Icon = tab.icon
+            const isActive = activeTab === tab.key
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-4 py-2.5 inline-flex items-center gap-2 border-b-2 text-sm font-body-md transition-colors ${
+                  isActive
+                    ? 'border-secondary text-primary'
+                    : 'border-transparent text-on-surface-variant hover:text-on-surface'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div>
+        {activeTab === 'files' && <FileManager serverId={serverId} />}
+        {activeTab === 'console' && <ServerConsolePanel serverId={serverId} />}
+        {activeTab === 'mods' && showModTab && <ModManager serverId={serverId} />}
+        {activeTab === 'backups' && <Backups serverId={serverId} />}
       </div>
 
       {/* Edit-Network Modal */}
@@ -463,7 +482,9 @@ export function ServerDetail() {
                     {t('servers.gamePort')}
                   </label>
                   <input
-                    type="number" min={1024} max={65535}
+                    type="number"
+                    min={1024}
+                    max={65535}
                     value={networkForm.game_port}
                     onChange={(e) => setNetworkForm({ ...networkForm, game_port: e.target.value })}
                     className="msm-input"
@@ -474,7 +495,9 @@ export function ServerDetail() {
                     {t('servers.queryPort')}
                   </label>
                   <input
-                    type="number" min={1024} max={65535}
+                    type="number"
+                    min={1024}
+                    max={65535}
                     value={networkForm.query_port}
                     onChange={(e) => setNetworkForm({ ...networkForm, query_port: e.target.value })}
                     className="msm-input"
@@ -485,7 +508,9 @@ export function ServerDetail() {
                     {t('servers.rconPort')}
                   </label>
                   <input
-                    type="number" min={1024} max={65535}
+                    type="number"
+                    min={1024}
+                    max={65535}
                     value={networkForm.rcon_port}
                     onChange={(e) => setNetworkForm({ ...networkForm, rcon_port: e.target.value })}
                     className="msm-input"
@@ -510,29 +535,6 @@ export function ServerDetail() {
               </div>
             </form>
           </div>
-        </div>
-      )}
-
-      {/* Console */}
-      <div className="msm-card">
-        <div className="p-5 border-b border-outline flex items-center gap-3">
-          <Terminal className="w-4 h-4 text-on-surface-variant" />
-          <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
-        </div>
-        <div className="p-5">
-          <pre
-            ref={consoleRef}
-            className="bg-surface-darkest border border-outline rounded-md p-4 h-80 overflow-auto font-mono text-xs text-on-surface-variant whitespace-pre-wrap"
-          >
-            {consoleLogs || t('servers.noLogs')}
-          </pre>
-        </div>
-      </div>
-
-      {/* Server-Permissions (Sub-User-Delegation) */}
-      {canManageServerPermissions && (
-        <div className="msm-card p-5">
-          <ServerPermissionsPanel serverId={serverId} />
         </div>
       )}
     </div>

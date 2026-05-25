@@ -20,7 +20,6 @@ from __future__ import annotations
 import logging
 import os
 import shlex
-import socket
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -60,74 +59,6 @@ def default_port_publishes(server) -> list[PortPublish]:
 logger = logging.getLogger(__name__)
 
 
-def query_a2s_info(host: str, port: int, timeout: float = 3.0) -> dict | None:
-    """Sendet eine Steam A2S_INFO-Query und liest Spielerzahlen/Servername.
-
-    Returns dict {'players', 'max_players', 'server_name', 'map'} or None.
-    Protokoll: https://developer.valvesoftware.com/wiki/Server_queries#A2S_INFO
-    """
-    request = b"\xFF\xFF\xFF\xFF\x54Source Engine Query\x00"
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(timeout)
-        sock.sendto(request, (host, port))
-        data, _ = sock.recvfrom(4096)
-        sock.close()
-
-        if len(data) < 6:
-            return None
-
-        idx = 4
-        header = data[idx]
-        idx += 1
-
-        if header == 0x41:
-            # Challenge-Response — erneut mit Challenge senden
-            challenge = data[5:9]
-            request2 = b"\xFF\xFF\xFF\xFF\x54Source Engine Query\x00" + challenge
-            sock2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock2.settimeout(timeout)
-            sock2.sendto(request2, (host, port))
-            data, _ = sock2.recvfrom(4096)
-            sock2.close()
-            if len(data) < 6:
-                return None
-            idx = 4
-            header = data[idx]
-            idx += 1
-
-        if header != 0x49:
-            return None
-
-        idx += 1  # protocol version
-        end = data.index(b"\x00", idx)
-        server_name = data[idx:end].decode("utf-8", errors="replace")
-        idx = end + 1
-
-        end = data.index(b"\x00", idx)
-        map_name = data[idx:end].decode("utf-8", errors="replace")
-        idx = end + 1
-
-        end = data.index(b"\x00", idx)  # folder
-        idx = end + 1
-        end = data.index(b"\x00", idx)  # game
-        idx = end + 1
-        idx += 2  # id (short)
-
-        players = data[idx]
-        idx += 1
-        max_players = data[idx]
-
-        return {
-            "players": players,
-            "max_players": max_players,
-            "server_name": server_name,
-            "map": map_name,
-        }
-    except Exception:
-        return None
-
-
 @dataclass
 class ConfigField:
     key: str
@@ -146,7 +77,6 @@ class ServerStatus:
     ram_mb: int | None = None
     disk_mb: int | None = None
     uptime_seconds: int | None = None
-    players_online: int | None = None
     message: str | None = None
 
 
@@ -390,7 +320,7 @@ class GamePlugin(ABC):
     """Basisklasse für Game-Plugins.
 
     Pflichtfelder:
-      - game_id, game_name, supports_mods
+      - game_id, game_name, supports_mods, supports_steam_workshop
       - docker_image: das Base-Image, in dem der Server läuft
       - container_needs_tmpfs: wenn True, wird /tmp als tmpfs hinzugefügt
 
@@ -402,6 +332,10 @@ class GamePlugin(ABC):
     game_id: str = ""
     game_name: str = ""
     supports_mods: bool = False
+    # Phase 4 — Capability-Flag: kommt der Mod-Manager-Tab im Frontend zum
+    # Einsatz? Wenn False, blendet die UI den Workshop-Browser aus und kann den
+    # Mod-Manager-Tab ausblenden (Backend bleibt zusaetzlich Defensiv-Layer).
+    supports_steam_workshop: bool = False
 
     # Docker-spezifisch — Pflicht für alle konkreten Plugins
     docker_image: str = ""
@@ -537,9 +471,7 @@ class GamePlugin(ABC):
         return {"message": "Server gestoppt", "container": name}
 
     def get_status(self, server) -> ServerStatus:
-        """Liefert Live-Status aus Docker (Container-State + CPU/RAM via stats).
-        Players via A2S, sofern Query-Port gesetzt.
-        """
+        """Liefert Live-Status aus Docker (Container-State + CPU/RAM via stats)."""
         name = container_name_for(server.id)
         state = docker_service.inspect_state(name)
         if state is None:
@@ -547,12 +479,6 @@ class GamePlugin(ABC):
 
         is_running = state["status"] == "running"
         live_stats = docker_service.stats(name) if is_running else None
-
-        players_online: int | None = None
-        if is_running and server.query_port:
-            a2s = query_a2s_info("127.0.0.1", server.query_port)
-            if a2s:
-                players_online = a2s["players"]
 
         msg = None
         if state.get("oom_killed"):
@@ -564,7 +490,6 @@ class GamePlugin(ABC):
             ram_mb=(live_stats or {}).get("ram_mb"),
             disk_mb=None,  # Disk wird zentral im Scheduler-Job ermittelt
             uptime_seconds=None,
-            players_online=players_online,
             message=msg,
         )
 

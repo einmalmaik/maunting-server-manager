@@ -34,6 +34,7 @@ class ConanExilesUE5Plugin(GamePlugin):
     game_id = "conan_exiles_ue5"
     game_name = "Conan Exiles (UE5)"
     supports_mods = True
+    supports_steam_workshop = True
 
     APP_ID = "443030"
     WORKSHOP_ID = "440900"

@@ -1,0 +1,430 @@
+"""Tests fuer den File-Manager-Router.
+
+Schwerpunkte:
+- Path-Traversal-Vektoren (`..`, absolute Pfade, Symlink-Escapes, `/foo` vs `/foobar`-Boundary).
+- Permission-Matrix (read/write/delete via Phase-2 RBAC).
+- Chunked-Upload-Lifecycle (init/chunk/status/finalize/abort).
+- Move + Search Endpoints.
+"""
+from __future__ import annotations
+
+import io
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from models import Server, ServerPermission, User
+
+
+@pytest.fixture
+def server_with_dir(db: Session, owner_user: User, tmp_path: Path) -> Server:
+    """Server, dessen ``install_dir`` ein echter, leerer Ordner ist."""
+    install_dir = tmp_path / "srv_root"
+    install_dir.mkdir(parents=True, exist_ok=True)
+    server = Server(
+        name="Files Test",
+        game_type="dayz",
+        install_dir=str(install_dir),
+        container_name="msm-srv-files",
+        status="stopped",
+    )
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+    return server
+
+
+def _grant(db: Session, user: User, server: Server, keys: list[str]) -> None:
+    for key in keys:
+        db.add(ServerPermission(user_id=user.id, server_id=server.id, permission_key=key))
+    db.commit()
+
+
+# ── _safe_path / Path-Traversal ──────────────────────────────────────────
+
+
+class TestPathTraversal:
+    def test_browse_rejects_double_dot(self, client: TestClient, owner_cookies: dict, server_with_dir: Server):
+        res = client.get(f"/api/files/{server_with_dir.id}/browse?path=../etc", cookies=owner_cookies)
+        assert res.status_code == 400
+
+    def test_browse_rejects_absolute_path(self, client: TestClient, owner_cookies: dict, server_with_dir: Server):
+        res = client.get(f"/api/files/{server_with_dir.id}/browse?path=/etc", cookies=owner_cookies)
+        assert res.status_code == 400
+
+    def test_browse_rejects_nested_traversal(self, client: TestClient, owner_cookies: dict, server_with_dir: Server):
+        res = client.get(f"/api/files/{server_with_dir.id}/browse?path=sub/../../etc", cookies=owner_cookies)
+        assert res.status_code == 400
+
+    def test_safe_path_no_boundary_bug(self, client: TestClient, owner_cookies: dict, server_with_dir: Server, tmp_path: Path):
+        """Sibling-Ordner mit gleichem Praefix darf nicht via Praefix-Trick erreichbar sein.
+
+        Wir legen neben ``srv_root`` einen Ordner ``srv_root_other`` an und
+        versuchen ihn ueber Backlinks zu erreichen. Mit dem alten
+        ``startswith``-Check waere ``../srv_root_other`` ein Bypass; mit
+        ``relative_to`` ist es korrekt verboten.
+        """
+        sibling = tmp_path / "srv_root_other"
+        sibling.mkdir()
+        (sibling / "secret.txt").write_text("nope")
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/browse?path=../srv_root_other",
+            cookies=owner_cookies,
+        )
+        # 400 wegen `..` (Defense-in-Depth) — ohne die `..`-Sperre waere es 403
+        # wegen `relative_to`. Beides ist sicher; KISS: wir blocken `..` frueh.
+        assert res.status_code in (400, 403)
+
+    def test_symlink_escape_blocked(self, client: TestClient, owner_cookies: dict, server_with_dir: Server, tmp_path: Path, csrf_token: str):
+        """Symlinks innerhalb des Roots, die nach AUSSEN zeigen, muessen gestoppt werden."""
+        outside = tmp_path / "outside_secret"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("you shall not see this")
+        # Symlink innerhalb des Server-Roots, der nach aussen zeigt.
+        link = Path(server_with_dir.install_dir) / "leak"
+        link.symlink_to(outside)
+
+        # Lesezugriff auf den Symlink-Inhalt schlaegt fehl, weil resolve den
+        # symlink dereferenziert und relative_to den Pfad ausserhalb sieht.
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/read?path=leak/secret.txt",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 403
+
+
+# ── Permission-Matrix ─────────────────────────────────────────────────────
+
+
+class TestFilesPermissions:
+    def test_user_without_perm_cannot_browse(
+        self, client: TestClient, regular_user: User, user_cookies: dict, server_with_dir: Server
+    ):
+        res = client.get(f"/api/files/{server_with_dir.id}/browse", cookies=user_cookies)
+        assert res.status_code == 403
+
+    def test_read_requires_files_read(
+        self, client: TestClient, regular_user: User, user_cookies: dict, server_with_dir: Server, db: Session
+    ):
+        (Path(server_with_dir.install_dir) / "a.txt").write_text("hi")
+        # Nur write-Permission → read soll trotzdem failen.
+        _grant(db, regular_user, server_with_dir, ["server.files.write"])
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/read?path=a.txt",
+            cookies=user_cookies,
+        )
+        assert res.status_code == 403
+
+    def test_delete_requires_files_delete(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        server_with_dir: Server, db: Session
+    ):
+        (Path(server_with_dir.install_dir) / "x.txt").write_text("hi")
+        _grant(db, regular_user, server_with_dir, ["server.files.read", "server.files.write"])
+        res = client.delete(
+            f"/api/files/{server_with_dir.id}/delete?path=x.txt",
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert res.status_code == 403
+
+    def test_csrf_required_on_write(self, client: TestClient, owner_cookies: dict, server_with_dir: Server):
+        res = client.put(
+            f"/api/files/{server_with_dir.id}/write?path=t.txt",
+            cookies=owner_cookies,
+            json={"content": "x"},
+        )
+        assert res.status_code == 403
+
+
+# ── Browse / Read / Write ──────────────────────────────────────────────────
+
+
+class TestBrowseReadWrite:
+    def test_browse_empty(self, client: TestClient, owner_cookies: dict, server_with_dir: Server):
+        res = client.get(f"/api/files/{server_with_dir.id}/browse", cookies=owner_cookies)
+        assert res.status_code == 200
+        assert res.json() == {"path": "", "entries": [], "exists": True}
+
+    def test_write_then_read(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
+        res = client.put(
+            f"/api/files/{server_with_dir.id}/write?path=config.json",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"content": '{"port": 1234}'},
+        )
+        assert res.status_code == 200
+
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/read?path=config.json",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        assert res.json()["content"] == '{"port": 1234}'
+
+    def test_read_oversized_file_rejected(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server
+    ):
+        from routers.files import MAX_EDIT_SIZE
+        big = Path(server_with_dir.install_dir) / "big.bin"
+        big.write_bytes(b"\0" * (MAX_EDIT_SIZE + 1))
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/read?path=big.bin",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 413
+
+
+# ── Upload (Single-Shot) + Blocked Extensions ─────────────────────────────
+
+
+class TestUpload:
+    def test_upload_creates_file(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/upload?path=",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            files={"file": ("hello.txt", io.BytesIO(b"hi"), "text/plain")},
+        )
+        assert res.status_code == 200
+        assert (Path(server_with_dir.install_dir) / "hello.txt").read_bytes() == b"hi"
+
+    def test_upload_blocked_extension(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/upload",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            files={"file": ("bad.exe", io.BytesIO(b"MZ"), "application/octet-stream")},
+        )
+        assert res.status_code == 400
+
+
+# ── Chunked Upload Lifecycle ──────────────────────────────────────────────
+
+
+class TestChunkedUpload:
+    def test_lifecycle_init_chunk_finalize(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server
+    ):
+        # 1. Init
+        body = {"path": "", "filename": "modpack.zip", "total_size": 16}
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/upload/init",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json=body,
+        )
+        assert res.status_code == 200
+        upload_id = res.json()["upload_id"]
+        assert len(upload_id) == 32
+
+        # 2. Zwei Chunks (8 + 8 bytes)
+        for chunk_bytes in (b"AAAAAAAA", b"BBBBBBBB"):
+            res = client.put(
+                f"/api/files/{server_with_dir.id}/upload/{upload_id}/chunk",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+                files={"chunk": ("chunk.bin", io.BytesIO(chunk_bytes), "application/octet-stream")},
+            )
+            assert res.status_code == 200
+
+        # 3. Status (Resume-Hilfe)
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/upload/{upload_id}/status",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        assert res.json()["received"] == 16
+
+        # 4. Finalize
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/upload/{upload_id}/finalize",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert res.status_code == 200
+        final = Path(server_with_dir.install_dir) / "modpack.zip"
+        assert final.exists()
+        assert final.read_bytes() == b"AAAAAAAABBBBBBBB"
+
+    def test_finalize_rejects_size_mismatch(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server
+    ):
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/upload/init",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"path": "", "filename": "x.bin", "total_size": 99},
+        )
+        upload_id = res.json()["upload_id"]
+        # Nur 4 von 99 bytes hochladen.
+        client.put(
+            f"/api/files/{server_with_dir.id}/upload/{upload_id}/chunk",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            files={"chunk": ("c.bin", io.BytesIO(b"abcd"), "application/octet-stream")},
+        )
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/upload/{upload_id}/finalize",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert res.status_code == 400
+
+    def test_init_rejects_blocked_extension(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server
+    ):
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/upload/init",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"path": "", "filename": "evil.exe", "total_size": 4},
+        )
+        assert res.status_code == 400
+
+    def test_init_rejects_path_in_filename(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server
+    ):
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/upload/init",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"path": "", "filename": "../escape.txt", "total_size": 4},
+        )
+        assert res.status_code == 400
+
+    def test_abort_removes_temp(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/upload/init",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"path": "", "filename": "to_abort.bin", "total_size": 4},
+        )
+        upload_id = res.json()["upload_id"]
+        res = client.delete(
+            f"/api/files/{server_with_dir.id}/upload/{upload_id}",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert res.status_code == 200
+        from routers.files import CHUNK_TMP_DIRNAME
+        leftover = Path(server_with_dir.install_dir) / CHUNK_TMP_DIRNAME / f"{upload_id}.part"
+        assert not leftover.exists()
+
+
+# ── Move / Rename / Mkdir / Delete ────────────────────────────────────────
+
+
+class TestMutations:
+    def test_mkdir_and_move(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
+        # mkdir mods
+        client.post(
+            f"/api/files/{server_with_dir.id}/mkdir",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"name": "mods"},
+        )
+        # write a file at root
+        client.put(
+            f"/api/files/{server_with_dir.id}/write?path=note.txt",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"content": "hi"},
+        )
+        # move note.txt into mods/
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/move",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"from_path": "note.txt", "to_dir": "mods"},
+        )
+        assert res.status_code == 200
+        assert (Path(server_with_dir.install_dir) / "mods" / "note.txt").exists()
+        assert not (Path(server_with_dir.install_dir) / "note.txt").exists()
+
+    def test_move_into_self_blocked(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
+        client.post(
+            f"/api/files/{server_with_dir.id}/mkdir",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"name": "outer"},
+        )
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/move",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"from_path": "outer", "to_dir": "outer", "new_name": "inner"},
+        )
+        assert res.status_code == 400
+
+    def test_rename(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
+        (Path(server_with_dir.install_dir) / "old.txt").write_text("hi")
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/rename?path=old.txt",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"new_name": "new.txt"},
+        )
+        assert res.status_code == 200
+        assert (Path(server_with_dir.install_dir) / "new.txt").exists()
+
+    def test_delete_install_dir_blocked(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
+        res = client.delete(
+            f"/api/files/{server_with_dir.id}/delete?path=",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert res.status_code in (403, 404)
+
+
+# ── Search ─────────────────────────────────────────────────────────────────
+
+
+class TestSearch:
+    def test_search_finds_files_and_dirs(self, client: TestClient, owner_cookies: dict, server_with_dir: Server):
+        root = Path(server_with_dir.install_dir)
+        (root / "mods").mkdir()
+        (root / "mods" / "ServerConfig.cfg").write_text("x")
+        (root / "logs").mkdir()
+        (root / "logs" / "server.log").write_text("x")
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search?q=server",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        names = {r["path"] for r in res.json()["results"]}
+        # match in Dateinamen (server.log) UND in mods/ServerConfig (Substring "Server").
+        assert "logs/server.log" in names
+        assert any(p.endswith("ServerConfig.cfg") for p in names)
+
+    def test_search_does_not_leak_outside(self, client: TestClient, owner_cookies: dict, server_with_dir: Server, tmp_path: Path):
+        # Datei mit gleichem Suchwort liegt NEBEN dem Server-Root.
+        sibling = tmp_path / "sibling_data"
+        sibling.mkdir()
+        (sibling / "match.bin").write_text("x")
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search?q=match",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        assert res.json()["results"] == []
+
+
+# ── Capability-Flag (system games) ────────────────────────────────────────
+
+
+class TestCapabilityFlag:
+    def test_games_response_exposes_capability(self, client: TestClient, owner_cookies: dict):
+        res = client.get("/api/system/games", cookies=owner_cookies)
+        assert res.status_code == 200
+        games = res.json()
+        assert all("supports_steam_workshop" in g for g in games)
+        # Conan und DayZ haben Steam Workshop, beide auf True.
+        by_id = {g["id"]: g for g in games}
+        assert by_id["conan_exiles_ue5"]["supports_steam_workshop"] is True
+        assert by_id["dayz"]["supports_steam_workshop"] is True

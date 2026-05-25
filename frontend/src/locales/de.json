@@ -5,7 +5,6 @@
   "nav": {
     "dashboard": "Dashboard",
     "servers": "Server",
-    "backups": "Backups",
     "users": "Benutzer",
     "roles": "Rollen",
     "settings": "Einstellungen",
@@ -26,12 +25,12 @@
     "start": "Starten",
     "stop": "Stoppen",
     "restart": "Neustarten",
-    "configEditor": "Config-Editor",
     "modManager": "Mod-Manager",
     "backups": "Backups",
     "logs": "Logs",
     "noLogs": "Noch keine Logs verfügbar.",
     "console": "Konsole",
+    "consolePlaceholder": "Befehl eingeben…",
     "gameLogs": "Game-Logs",
     "install": "Installieren",
     "deleted": "Server gelöscht",
@@ -158,7 +157,11 @@
     "revoke": "Komplett entfernen",
     "revokeConfirm": "Alle Berechtigungen dieses Users für diesen Server entfernen?",
     "saved": "Berechtigungen gespeichert.",
-    "ownerHint": "Owner hat immer alle Rechte. Admin-Rolle hat alle Rechte pauschal."
+    "ownerHint": "Owner hat immer alle Rechte. Admin-Rolle hat alle Rechte pauschal.",
+    "adminTitle": "Server-Berechtigungen verwalten",
+    "adminSubtitle": "Delegiere Server-Rechte an einzelne Sub-User. Wähle zuerst den Server.",
+    "selectServer": "Server",
+    "selectServerPlaceholder": "-- Server wählen --"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -271,12 +274,6 @@
     "fileSize": "Größe",
     "lastUpdated": "Letztes Update",
     "loadError": "Konnte Mods nicht laden",
-    "steamSearchError": "Steam-Suche fehlgeschlagen",
-    "confirmRemove": "Mod wirklich entfernen?",
-    "addFailed": "Hinzufügen fehlgeschlagen",
-    "removeFailed": "Entfernen fehlgeschlagen",
-    "updateSettingFailed": "Update-Einstellung fehlgeschlagen",
-    "reorderFailed": "Neusortierung fehlgeschlagen",
     "removed": "Mod entfernt",
     "tabTrending": "Trending",
     "tabPopular": "Beliebt",
@@ -284,7 +281,16 @@
     "tabUpdated": "Aktualisiert",
     "tagFilterPlaceholder": "Tag-Filter (optional)",
     "enable": "Aktivieren",
-    "disable": "Deaktivieren"
+    "disable": "Deaktivieren",
+    "installedTitle": "Installierte Mods",
+    "addById": "Per Workshop-ID",
+    "clearSearch": "Suche zurücksetzen",
+    "confirmRemove": "Mod wirklich entfernen?",
+    "addFailed": "Hinzufügen fehlgeschlagen",
+    "removeFailed": "Entfernen fehlgeschlagen",
+    "updateSettingFailed": "Einstellung fehlgeschlagen",
+    "reorderFailed": "Neusortierung fehlgeschlagen",
+    "steamSearchError": "Steam-Suche fehlgeschlagen"
   },
   "files": {
     "title": "Datei-Manager",
@@ -292,7 +298,10 @@
     "upload": "Hochladen",
     "uploaded": "hochgeladen",
     "newFolder": "Neuer Ordner",
+    "newFile": "Neue Datei",
     "folderName": "Ordnername",
+    "fileName": "Dateiname",
+    "folderCreated": "Ordner erstellt",
     "saved": "Datei gespeichert",
     "deleted": "Gelöscht",
     "extracted": "Archiv entpackt",
@@ -300,7 +309,23 @@
     "selectFile": "Datei auswählen zum Bearbeiten",
     "dropHere": "Dateien hier ablegen zum Hochladen",
     "confirmDeleteFile": "Datei wirklich löschen?",
-    "confirmDeleteDir": "Verzeichnis und alle Inhalte wirklich löschen?"
+    "confirmDeleteDir": "Verzeichnis und alle Inhalte wirklich löschen?",
+    "rename": "Umbenennen",
+    "renameTitle": "Umbenennen",
+    "newName": "Neuer Name",
+    "renamed": "Umbenannt",
+    "move": "Verschieben",
+    "moved": "Verschoben",
+    "moveHint": "Eintrag \"{{name}}\" in einen anderen Ordner verschieben.",
+    "moveSelfError": "Ziel liegt innerhalb der Quelle.",
+    "targetFolder": "Zielordner (relativ zum Server-Root)",
+    "moveTargetHint": "Leer lassen für das Wurzelverzeichnis.",
+    "download": "Herunterladen",
+    "searchPlaceholder": "Dateien & Ordner suchen…",
+    "searchEmpty": "Keine Treffer",
+    "searchTruncated": "Zu viele Treffer — bitte Suchbegriff verfeinern.",
+    "hideTree": "Datei-Baum ausblenden",
+    "showTree": "Datei-Baum anzeigen"
   },
   "backups": {
     "subtitle": "Backup-Verwaltung",
@@ -326,21 +351,11 @@
     "createModalHint": "Erstellt ein komprimiertes Archiv des Server-Verzeichnisses.",
     "createNow": "Backup erstellen"
   },
-  "config": {
-    "title": "Config-Editor",
-    "subtitle": "Server-Konfiguration bearbeiten",
-    "configFiles": "Config-Dateien",
-    "quickConfig": "Schnell-Config",
-    "noFileSelected": "Keine Datei ausgewählt",
-    "selectFile": "Wähle eine Config-Datei aus der linken Liste zum Bearbeiten",
-    "save": "Speichern",
-    "saved": "Config gespeichert",
-    "saveFailed": "Speichern fehlgeschlagen",
-    "fileNotFound": "Datei nicht gefunden",
-    "fileContent": "Dateiinhalt bearbeiten",
-    "filePlaceholder": "Config-Inhalt wird hier angezeigt...",
-    "loadError": "Konnte Config-Dateien nicht laden",
-    "fileLoadError": "Konnte Datei nicht laden"
+  "tabs": {
+    "files": "Dateimanager",
+    "console": "Konsole",
+    "mods": "Mod-Manager",
+    "backups": "Backups"
   },
   "scheduler": {
     "title": "Scheduler",
@@ -429,7 +444,9 @@
     "success": "Erfolg",
     "close": "Schließen",
     "confirm": "Bestätigen",
-    "back": "Zurück"
+    "back": "Zurück",
+    "refresh": "Aktualisieren",
+    "send": "Senden"
   },
   "serverDetail": {
     "limit": "Limit",
