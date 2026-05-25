@@ -59,7 +59,7 @@ def browse_directory(
     user: User = Depends(get_current_user),
 ) -> dict:
     """List files and directories at the given path."""
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.files.read")
     server = _get_server(server_id, db)
     target = _safe_path(server.install_dir, path)
 
@@ -96,7 +96,7 @@ def read_file(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Read a text file's content."""
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.files.read")
     server = _get_server(server_id, db)
     target = _safe_path(server.install_dir, path)
 
@@ -125,7 +125,7 @@ def write_file(
     _: None = Depends(verify_csrf),
 ) -> dict:
     """Write/create a text file."""
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
     target = _safe_path(server.install_dir, path)
 
@@ -148,7 +148,7 @@ async def upload_file(
     _: None = Depends(verify_csrf),
 ) -> dict:
     """Upload a file to the given directory."""
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
     target_dir = _safe_path(server.install_dir, path)
 
@@ -188,7 +188,7 @@ def download_file(
     user: User = Depends(get_current_user),
 ) -> FileResponse:
     """Download a file."""
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.files.read")
     server = _get_server(server_id, db)
     target = _safe_path(server.install_dir, path)
 
@@ -208,7 +208,7 @@ def make_directory(
     _: None = Depends(verify_csrf),
 ) -> dict:
     """Create a new directory."""
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
     target = _safe_path(server.install_dir, os.path.join(path, body.name))
 
@@ -232,7 +232,7 @@ def delete_path(
     _: None = Depends(verify_csrf),
 ) -> dict:
     """Delete a file or directory."""
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.files.delete")
     server = _get_server(server_id, db)
     target = _safe_path(server.install_dir, path)
 
@@ -264,7 +264,7 @@ def rename_path(
     _: None = Depends(verify_csrf),
 ) -> dict:
     """Rename a file or directory."""
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
     target = _safe_path(server.install_dir, path)
     new_target = _safe_path(server.install_dir, os.path.join(os.path.dirname(path), body.new_name))
@@ -291,7 +291,7 @@ def extract_zip(
     _: None = Depends(verify_csrf),
 ) -> dict:
     """Extract a zip archive in place."""
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
     target = _safe_path(server.install_dir, path)
 

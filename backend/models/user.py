@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, String, DateTime, Integer
+from sqlalchemy import Boolean, String, DateTime, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -16,6 +16,11 @@ class User(Base):
 
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Globale Rolle (Phase 3 RBAC). NULL fuer Owner-Bootstrap akzeptabel, da is_owner alles bypassed.
+    role_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("roles.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -33,6 +38,12 @@ class User(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    permissions: Mapped[list["Permission"]] = relationship("Permission", back_populates="user", cascade="all, delete-orphan")
+    role: Mapped["Role | None"] = relationship("Role", back_populates="users")
+    server_permissions: Mapped[list["ServerPermission"]] = relationship(
+        "ServerPermission",
+        foreign_keys="ServerPermission.user_id",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     backup_codes: Mapped[list["BackupCode"]] = relationship("BackupCode", back_populates="user", cascade="all, delete-orphan")

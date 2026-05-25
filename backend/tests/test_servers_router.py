@@ -4,7 +4,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from models import User, Server, Permission
+from models import User, Server, ServerPermission
 
 
 class TestListServers:
@@ -15,7 +15,7 @@ class TestListServers:
         assert len(data) >= 1
         assert any(s["id"] == test_server.id for s in data)
 
-    def test_regular_user_sees_only_allowed(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: Permission):
+    def test_regular_user_sees_only_allowed(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: list[ServerPermission]):
         response = client.get("/api/servers", cookies=user_cookies)
         assert response.status_code == 200
         data = response.json()
@@ -33,7 +33,7 @@ class TestGetServer:
         assert response.status_code == 200
         assert response.json()["id"] == test_server.id
 
-    def test_user_with_permission_can_view(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: Permission):
+    def test_user_with_permission_can_view(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: list[ServerPermission]):
         response = client.get(f"/api/servers/{test_server.id}", cookies=user_cookies)
         assert response.status_code == 200
 
@@ -106,7 +106,7 @@ class TestStartServer:
         # May fail because plugin isn't available in test env, but must not be 401/403
         assert response.status_code not in (401, 403)
 
-    def test_user_with_permission_can_start(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: Permission, user_csrf_token: str):
+    def test_user_with_permission_can_start(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: list[ServerPermission], user_csrf_token: str):
         response = client.post(
             f"/api/servers/{test_server.id}/start",
             cookies=user_cookies,

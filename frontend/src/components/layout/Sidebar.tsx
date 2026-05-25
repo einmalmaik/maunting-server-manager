@@ -1,11 +1,13 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
+import { useHasPermission } from '@/hooks/useHasPermission'
 import { Logo } from '@/components/Logo'
 import {
   LayoutDashboard,
   Server,
   Users,
+  Shield,
   Settings,
   LogOut,
   Plus,
@@ -15,6 +17,12 @@ export function Sidebar() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
+  // Hooks duerfen nicht hinter `||`-Short-Circuit verschwinden — daher beide
+  // Permissions getrennt aufrufen und erst danach booleisch verknuepfen.
+  const hasUsersRead = useHasPermission('users.read')
+  const hasUsersManage = useHasPermission('users.manage')
+  const canManageUsers = hasUsersRead || hasUsersManage
+  const canManageRoles = useHasPermission('roles.manage')
 
   const handleLogout = async () => {
     await logout()
@@ -24,8 +32,11 @@ export function Sidebar() {
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: t('nav.dashboard') },
     { to: '/servers', icon: Server, label: t('nav.servers') },
-    ...(user?.is_owner ? [
+    ...((user?.is_owner || canManageUsers) ? [
       { to: '/users', icon: Users, label: t('nav.users') },
+    ] : []),
+    ...((user?.is_owner || canManageRoles) ? [
+      { to: '/roles', icon: Shield, label: t('nav.roles') },
     ] : []),
     { to: '/settings', icon: Settings, label: t('nav.settings') },
   ]

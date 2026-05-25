@@ -1,12 +1,14 @@
 import logging
+from typing import Callable
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User, Permission
+from models import User
 from services.auth_service import AuthService
 from services.jwt_blacklist_service import is_jwt_blacklisted
+from services.permission_service import has_global_permission, has_server_permission
 
 _log = logging.getLogger("msm.csrf")
 
@@ -85,15 +87,29 @@ def verify_csrf(request: Request) -> None:
         raise HTTPException(status_code=403, detail="CSRF-Token ungueltig")
 
 
-def require_server_permission(user: User, server_id: int, db: Session, action: str | None = None) -> None:
-    """Prueft, ob ein User Berechtigung fuer einen Server hat."""
-    if user.is_owner:
-        return
-    perm = db.query(Permission).filter(
-        Permission.user_id == user.id,
-        Permission.server_id == server_id,
-    ).first()
-    if not perm:
+def require_server_permission(user: User, server_id: int, db: Session, key: str) -> None:
+    """Prueft eine server-scoped Permission. Wirft 403, wenn der User keinen Zugriff hat.
+
+    Owner werden ungeprueft durchgelassen (Bootstrap-Override). Sonst entscheidet
+    `services.permission_service.has_server_permission`: globale Rolle gewaehrt
+    pauschal oder per-Server-Delegation gewaehrt einzeln.
+    """
+    if not has_server_permission(db, user, server_id, key):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
-    if action is not None and not getattr(perm, action, False):
-        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
+
+def require_global(key: str) -> Callable[..., User]:
+    """Dependency-Factory: erzwingt eine globale Permission.
+
+    Beispiel: `user: User = Depends(require_global("servers.create"))`.
+    """
+
+    def _dep(
+        user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> User:
+        if not has_global_permission(db, user, key):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung")
+        return user
+
+    return _dep

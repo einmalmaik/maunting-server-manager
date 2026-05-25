@@ -24,6 +24,7 @@ class UserResponse(BaseModel):
     email_verified: bool
     two_factor_enabled: bool
     email_notifications: bool
+    role_id: int | None = None
     created_at: datetime
 
     class Config:

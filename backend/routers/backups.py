@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Backup, Server, Permission, User
+from models import Backup, Server, User
 from schemas import BackupResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 
@@ -100,13 +100,13 @@ def run_scheduled_backups(db: Session) -> None:
 
 @router.get("/{server_id}", response_model=list[BackupResponse])
 def list_backups(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    require_server_permission(user, server_id, db, "can_backup")
+    require_server_permission(user, server_id, db, "server.backups.read")
     return db.query(Backup).filter(Backup.server_id == server_id).order_by(Backup.created_at.desc()).all()
 
 
 @router.post("/{server_id}")
 def create_backup(server_id: int, body: CreateBackupRequest | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "can_backup")
+    require_server_permission(user, server_id, db, "server.backups.create")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -121,7 +121,7 @@ def create_backup(server_id: int, body: CreateBackupRequest | None = None, db: S
 
 @router.get("/{server_id}/settings", response_model=BackupSettingsResponse)
 def get_backup_settings(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    require_server_permission(user, server_id, db, "can_backup")
+    require_server_permission(user, server_id, db, "server.backups.read")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -134,7 +134,7 @@ def get_backup_settings(server_id: int, db: Session = Depends(get_db), user: Use
 
 @router.patch("/{server_id}/settings")
 def update_backup_settings(server_id: int, body: BackupSettingsRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "can_backup")
+    require_server_permission(user, server_id, db, "server.config.write")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -169,7 +169,7 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
     kann nicht atomar ersetzt werden. Container wird NICHT automatisch wieder
     gestartet; das übernimmt der Nutzer (UI bietet Start-Button).
     """
-    require_server_permission(user, server_id, db, "can_restore")
+    require_server_permission(user, server_id, db, "server.backups.restore")
     server = db.query(Server).filter(Server.id == server_id).first()
     backup = db.query(Backup).filter(Backup.id == backup_id, Backup.server_id == server_id).first()
     if not server or not backup:
@@ -210,7 +210,7 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
 
 @router.delete("/{server_id}/{backup_id}")
 def delete_backup(server_id: int, backup_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "can_backup")
+    require_server_permission(user, server_id, db, "server.backups.delete")
     backup = db.query(Backup).filter(Backup.id == backup_id, Backup.server_id == server_id).first()
     if not backup:
         raise HTTPException(status_code=404, detail="Backup nicht gefunden")

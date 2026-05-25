@@ -2,7 +2,7 @@
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from models import User, Server, Mod, Permission
+from models import User, Server, Mod, ServerPermission
 
 
 class TestListMods:
@@ -11,7 +11,7 @@ class TestListMods:
         assert response.status_code == 200
         assert isinstance(response.json(), list)
 
-    def test_user_with_permission_can_list(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: Permission):
+    def test_user_with_permission_can_list(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: list[ServerPermission]):
         response = client.get(f"/api/mods/{test_server.id}", cookies=user_cookies)
         assert response.status_code == 200
 

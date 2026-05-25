@@ -55,6 +55,8 @@ class Server(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    permissions: Mapped[list["Permission"]] = relationship("Permission", back_populates="server", cascade="all, delete-orphan")
+    server_permissions: Mapped[list["ServerPermission"]] = relationship(
+        "ServerPermission", back_populates="server", cascade="all, delete-orphan"
+    )
     backups: Mapped[list["Backup"]] = relationship("Backup", back_populates="server", cascade="all, delete-orphan")
     mods: Mapped[list["Mod"]] = relationship("Mod", back_populates="server", cascade="all, delete-orphan")

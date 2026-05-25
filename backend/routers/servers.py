@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db
-from models import Server, Permission, User
+from models import Server, User
 from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
-from dependencies import get_current_user, verify_csrf, require_server_permission
+from dependencies import get_current_user, require_global, require_server_permission, verify_csrf
+from services import permission_service
 from games import get_plugin
 from games.base import container_name_for
 from services import EmailService, docker_service
@@ -27,16 +28,11 @@ router = APIRouter(prefix="/api/servers", tags=["servers"])
 
 @router.get("", response_model=list[ServerResponse])
 def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Server]:
-    if user.is_owner:
-        return db.query(Server).all()
-    allowed_ids = [p.server_id for p in db.query(Permission).filter(Permission.user_id == user.id).all()]
-    return db.query(Server).filter(Server.id.in_(allowed_ids)).all()
+    return permission_service.list_visible_servers(db, user)
 
 
 @router.post("", response_model=ServerResponse, status_code=201)
-async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> Server:
-    if not user.is_owner:
-        raise HTTPException(status_code=403, detail="Nur Owner kann Server erstellen")
+async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(require_global("servers.create")), _: None = Depends(verify_csrf)) -> Server:
 
     base_dir = os.path.abspath(settings.servers_dir)
     count = db.query(Server).count() + 1
@@ -115,7 +111,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
 
 @router.get("/{server_id}", response_model=ServerResponse)
 def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Server:
-    require_server_permission(user, server_id, db, "can_view_console")
+    require_server_permission(user, server_id, db, "server.view")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -124,7 +120,7 @@ def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depen
 
 @router.patch("/{server_id}", response_model=ServerResponse)
 def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> Server:
-    require_server_permission(user, server_id, db, "can_edit_config")
+    require_server_permission(user, server_id, db, "server.config.write")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -134,9 +130,14 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
     payload = req.model_dump(exclude_unset=True)
     port_fields = {"game_port", "query_port", "rcon_port"}
+    resource_fields = {"cpu_limit_percent", "ram_limit_mb", "disk_limit_gb"}
     changed_ports = port_fields & set(payload.keys())
     bind_ip_changed = "public_bind_ip" in payload and payload["public_bind_ip"] != old_bind_ip
     network_change = bool(changed_ports) or bind_ip_changed
+    if network_change:
+        require_server_permission(user, server_id, db, "server.network.manage")
+    if resource_fields & set(payload.keys()):
+        require_server_permission(user, server_id, db, "server.resources.manage")
 
     # ── Port-/Bind-Aenderung: validieren ──
     if changed_ports:
@@ -217,8 +218,8 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     5. MSM-Console-Log-Verzeichnis entfernen.
     6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups).
     """
-    if not user.is_owner:
-        raise HTTPException(status_code=403, detail="Nur Owner kann Server löschen")
+    if not permission_service.has_global_permission(db, user, "servers.delete"):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -286,7 +287,7 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
 
 @router.post("/{server_id}/start")
 async def start_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "can_start")
+    require_server_permission(user, server_id, db, "server.start")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -335,7 +336,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
 
 @router.post("/{server_id}/stop")
 async def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "can_stop")
+    require_server_permission(user, server_id, db, "server.stop")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -365,7 +366,7 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
 
 @router.post("/{server_id}/restart")
 async def restart_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "can_restart")
+    require_server_permission(user, server_id, db, "server.restart")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -404,7 +405,7 @@ def _disk_free_mb(path: str) -> int | None:
 
 @router.get("/{server_id}/status", response_model=ServerStatusResponse)
 def server_status(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    require_server_permission(user, server_id, db, "can_view_console")
+    require_server_permission(user, server_id, db, "server.view")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -455,8 +456,7 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
 
 @router.post("/{server_id}/install")
 def install_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    if not user.is_owner:
-        raise HTTPException(status_code=403, detail="Nur Owner kann Server installieren")
+    require_server_permission(user, server_id, db, "server.install")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -474,7 +474,7 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
 
 @router.get("/{server_id}/console")
 def server_console(server_id: int, lines: int = 200, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    require_server_permission(user, server_id, db, "can_view_console")
+    require_server_permission(user, server_id, db, "server.console.read")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -487,7 +487,7 @@ def server_console(server_id: int, lines: int = 200, db: Session = Depends(get_d
 
 @router.get("/{server_id}/logs")
 def server_logs(server_id: int, lines: int = 100, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    require_server_permission(user, server_id, db, "can_view_logs")
+    require_server_permission(user, server_id, db, "server.console.read")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")

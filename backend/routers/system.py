@@ -7,7 +7,7 @@ import psutil
 from fastapi import APIRouter, Depends, HTTPException
 
 from config import settings
-from dependencies import get_current_user
+from dependencies import get_current_user, require_global
 from models import User
 from services import network_interfaces_service
 
@@ -34,9 +34,7 @@ def _get_current_version() -> str:
 
 
 @router.get("/resources")
-async def system_resources(user: User = Depends(get_current_user)) -> dict:
-    if not user.is_owner:
-        raise HTTPException(status_code=403, detail="Nur Owner")
+async def system_resources(user: User = Depends(require_global("system.view"))) -> dict:
 
     cpu = await asyncio.to_thread(psutil.cpu_percent, interval=1)
     memory = psutil.virtual_memory()
@@ -76,14 +74,12 @@ def supported_games(user: User = Depends(get_current_user)) -> list[dict]:
 
 
 @router.get("/interfaces")
-def host_interfaces(user: User = Depends(get_current_user)) -> dict:
+def host_interfaces(user: User = Depends(require_global("system.view"))) -> dict:
     """Liefert alle IPv4-Host-Interfaces fuer die Bind-IP-Auswahl im UI.
 
-    Owner-only — die Liste enthaelt Topologie-Information (LAN-Layout) und
-    soll nicht an Standard-Benutzer geraten.
+    Erfordert `system.view` — die Liste enthaelt Topologie-Information
+    (LAN-Layout) und soll nicht an Standard-Benutzer geraten.
     """
-    if not user.is_owner:
-        raise HTTPException(status_code=403, detail="Nur Owner")
     interfaces = [h.to_dict() for h in network_interfaces_service.list_host_interfaces()]
     return {
         "interfaces": interfaces,
