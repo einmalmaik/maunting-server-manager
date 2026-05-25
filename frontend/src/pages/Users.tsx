@@ -4,15 +4,19 @@ import { Plus, Trash2, Shield, Mail, CheckCircle, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { rbacApi } from '@/api/rbac'
 import { toast } from '@/stores/toastStore'
+import { useHasPermission } from '@/hooks/useHasPermission'
+import { useAuthStore } from '@/stores/authStore'
 import type { User } from '@/types'
 import type { Role } from '@/types/permissions'
 
 export function Users() {
   const { t } = useTranslation()
+  const currentUser = useAuthStore((s) => s.user)
+  const canManageUsers = useHasPermission('users.manage')
+  const canManagePermissions = useHasPermission('users.permissions.manage')
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [createForm, setCreateForm] = useState({
     username: '',
@@ -32,7 +36,7 @@ export function Users() {
       setUsers(u)
       setRoles(r)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
@@ -64,7 +68,7 @@ export function Users() {
       setCreateForm({ username: '', email: '', password: '', is_owner: false, auto_verify: false })
       await fetchAll()
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setCreating(false)
     }
@@ -76,7 +80,7 @@ export function Users() {
       await api(`/admin/users/${userId}`, { method: 'DELETE' })
       await fetchAll()
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -97,18 +101,16 @@ export function Users() {
             {t('users.subtitle')}
           </p>
         </div>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          {t('users.createUser')}
-        </button>
+        {canManageUsers && (
+          <button
+            onClick={() => setShowCreate(!showCreate)}
+            className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            {t('users.createUser')}
+          </button>
+        )}
       </div>
-
-      {error && (
-        <div className="msm-alert-error text-sm">{error}</div>
-      )}
 
       {showCreate && (
         <div className="msm-card p-6">
@@ -261,7 +263,7 @@ export function Users() {
                 <td className="p-4">
                   {user.is_owner ? (
                     <span className="font-mono-sm text-mono-sm text-on-surface-variant">owner</span>
-                  ) : (
+                  ) : canManagePermissions && user.id !== currentUser?.id ? (
                     <select
                       value={user.role_id ?? ''}
                       onChange={(e) => assignRole(user, e.target.value ? Number(e.target.value) : null)}
@@ -270,13 +272,27 @@ export function Users() {
                     >
                       <option value="">{t('users.noRole')}</option>
                       {roles.map((r) => (
-                        <option key={r.id} value={r.id}>{r.name}</option>
+                        <option key={r.id} value={r.id}>
+                          {r.is_system
+                            ? t(`roles.systemNames.${r.name}`, { defaultValue: r.name })
+                            : r.name}
+                        </option>
                       ))}
                     </select>
+                  ) : (
+                    <span className="font-mono-sm text-mono-sm text-on-surface-variant">
+                      {(() => {
+                        const role = roles.find((r) => r.id === user.role_id)
+                        if (!role) return t('users.noRole')
+                        return role.is_system
+                          ? t(`roles.systemNames.${role.name}`, { defaultValue: role.name })
+                          : role.name
+                      })()}
+                    </span>
                   )}
                 </td>
                 <td className="p-4 text-right">
-                  {!user.is_owner && (
+                  {canManageUsers && !user.is_owner && user.id !== currentUser?.id && (
                     <button
                       onClick={() => handleDelete(user.id)}
                       className="text-status-error hover:text-status-error/80 transition-colors"

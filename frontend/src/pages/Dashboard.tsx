@@ -3,10 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { Server, GameInfo } from '@/types'
 import { UpdateBanner } from '@/components/UpdateBanner'
+import { useHasPermission } from '@/hooks/useHasPermission'
 import { Server as ServerIcon, Activity, Users } from 'lucide-react'
 
 export function Dashboard() {
   const { t } = useTranslation()
+  const canCreateServer = useHasPermission('servers.create')
   const [servers, setServers] = useState<Server[]>([])
   const [games, setGames] = useState<GameInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -101,12 +103,14 @@ export function Dashboard() {
           <p className="font-body-md text-sm text-on-surface-variant mb-4">
             {t('dashboard.createFirstServer')}
           </p>
-          <a
-            href="/servers"
-            className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
-          >
-            {t('dashboard.createServer')}
-          </a>
+          {canCreateServer && (
+            <a
+              href="/servers"
+              className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
+            >
+              {t('dashboard.createServer')}
+            </a>
+          )}
         </div>
       )}
 

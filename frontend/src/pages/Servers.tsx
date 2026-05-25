@@ -4,12 +4,14 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHostInterfaces } from '@/hooks/useHostInterfaces'
+import { useHasPermission } from '@/hooks/useHasPermission'
 import type { Server, GameInfo } from '@/types'
 import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive } from 'lucide-react'
 
 export function Servers() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const canCreateServer = useHasPermission('servers.create')
   const [servers, setServers] = useState<Server[]>([])
   const [games, setGames] = useState<GameInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -129,13 +131,15 @@ export function Servers() {
             {t('servers.subtitle')}
           </p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="msm-btn-primary flex items-center gap-2 px-4 py-2"
-        >
-          <Plus className="w-4 h-4" />
-          {t('servers.create')}
-        </button>
+        {canCreateServer && (
+          <button
+            onClick={() => setShowCreate(true)}
+            className="msm-btn-primary flex items-center gap-2 px-4 py-2"
+          >
+            <Plus className="w-4 h-4" />
+            {t('servers.create')}
+          </button>
+        )}
       </div>
 
       {servers.length === 0 && (

@@ -237,7 +237,9 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                             className="mt-1"
                           />
                           <span className="flex flex-col">
-                            <span className="text-on-surface">{def.label}</span>
+                            <span className="text-on-surface">
+                              {t(`permissions.${def.key}`, { defaultValue: def.label })}
+                            </span>
                             <span className="font-mono-sm text-mono-sm text-on-surface-variant">{def.key}</span>
                           </span>
                         </label>

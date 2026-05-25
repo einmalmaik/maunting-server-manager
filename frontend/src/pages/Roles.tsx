@@ -15,6 +15,7 @@ interface PermissionGroupProps {
 }
 
 function PermissionGroup({ title, defs, selected, onToggle, disabled }: PermissionGroupProps) {
+  const { t } = useTranslation()
   return (
     <fieldset className="space-y-2">
       <legend className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
@@ -24,6 +25,10 @@ function PermissionGroup({ title, defs, selected, onToggle, disabled }: Permissi
         {defs.map((def) => {
           const id = `perm-${def.key}`
           const checked = selected.has(def.key)
+          // i18n: Backend liefert den Default-Label; Frontend uebersetzt ueber
+          // `permissions.<key>`. Fallback bleibt der Backend-Label, damit neue
+          // Permissions ohne i18n-Eintrag nicht leer erscheinen.
+          const label = t(`permissions.${def.key}`, { defaultValue: def.label })
           return (
             <label
               key={def.key}
@@ -41,7 +46,7 @@ function PermissionGroup({ title, defs, selected, onToggle, disabled }: Permissi
                 className="mt-1"
               />
               <span className="flex flex-col">
-                <span className="font-body-md text-sm text-on-surface">{def.label}</span>
+                <span className="font-body-md text-sm text-on-surface">{label}</span>
                 <span className="font-mono-sm text-mono-sm text-on-surface-variant">{def.key}</span>
               </span>
             </label>
@@ -333,7 +338,11 @@ export function Roles() {
                 <td className="p-4">
                   <div className="flex items-center gap-2">
                     {role.is_system && <Shield className="w-4 h-4 text-status-warning" />}
-                    <span className="font-body-md text-on-surface">{role.name}</span>
+                    <span className="font-body-md text-on-surface">
+                      {role.is_system
+                        ? t(`roles.systemNames.${role.name}`, { defaultValue: role.name })
+                        : role.name}
+                    </span>
                     {role.is_system ? (
                       <span className="text-xs px-1.5 py-0.5 rounded bg-status-warning/10 text-status-warning border border-status-warning/30">
                         {t('roles.system')}

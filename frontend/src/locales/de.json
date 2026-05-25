@@ -112,7 +112,42 @@
     "deselectAll": "Auswahl entfernen",
     "noPermissions": "Keine Permissions ausgewählt",
     "globalGroup": "Globale Rechte",
-    "serverGroup": "Server-Rechte (pauschal für alle Server)"
+    "serverGroup": "Server-Rechte (pauschal für alle Server)",
+    "systemNames": {
+      "admin": "Admin",
+      "user": "User"
+    }
+  },
+  "permissions": {
+    "users.read": "Userliste sehen",
+    "users.manage": "User anlegen, bearbeiten, löschen",
+    "users.permissions.manage": "User-Rollen und Server-Permissions verwalten",
+    "roles.manage": "Rollen anlegen, bearbeiten, löschen",
+    "panel.settings.read": "Panel-Einstellungen lesen",
+    "panel.settings.write": "Panel-Einstellungen ändern (Steam, E-Mail, ...)",
+    "servers.create": "Neuen Server anlegen",
+    "servers.delete": "Server löschen (global, nicht delegierbar)",
+    "system.view": "System-Ressourcen, Interfaces, Version",
+    "server.view": "Server in Liste und Detail sehen",
+    "server.start": "Server starten",
+    "server.stop": "Server stoppen",
+    "server.restart": "Server neustarten",
+    "server.install": "Server (re-)installieren",
+    "server.config.write": "Server-Einstellungen ändern (Name, Auto-Restart, Backup-Schedule)",
+    "server.network.manage": "Ports und Bind-IP ändern",
+    "server.resources.manage": "CPU-/RAM-/Disk-Limits ändern",
+    "server.console.read": "Konsole und Logs lesen",
+    "server.console.write": "Befehle an die Konsole senden",
+    "server.files.read": "Dateien lesen, herunterladen",
+    "server.files.write": "Dateien hochladen, anlegen, bearbeiten, entpacken",
+    "server.files.delete": "Dateien löschen",
+    "server.backups.read": "Backups auflisten",
+    "server.backups.create": "Backup erstellen",
+    "server.backups.restore": "Backup wiederherstellen",
+    "server.backups.delete": "Backup löschen",
+    "server.mods.read": "Mods auflisten, Workshop durchsuchen",
+    "server.mods.write": "Mods abonnieren, entfernen, sortieren",
+    "server.mods.toggle": "Mods aktivieren oder deaktivieren"
   },
   "serverPermissions": {
     "title": "Berechtigungen",
