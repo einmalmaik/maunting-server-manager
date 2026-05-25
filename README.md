@@ -1,5 +1,6 @@
-# Warning! 
-
+![Status](https://img.shields.io/badge/Status-WIP-orange)
+> [!IMPORTANT]
+>
 >This panel is a work in progress. Production use is not recommended.
 Release planned for June 10, 2026.
 
