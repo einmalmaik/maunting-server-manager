@@ -7,7 +7,7 @@ Release planned for June 10, 2026.
 
 # Maunting Server Manager
 
-> Ein Panel, um Conan Exiles und DayZ Server auf deinem eigenen Linux-Server zu verwalten — ganz ohne Kommandozeile.
+> Ein Panel, um Server jeder art auf deinem eigenen Linux-Server zu verwalten — ganz ohne Kommandozeile.
 
 ---
 
