@@ -13,44 +13,65 @@
   },
   "docs": {
     "pageTitle": "Blueprint-Dokumentation",
-    "pageSubtitle": "So definierst du eigene Server-Typen",
+    "pageSubtitle": "Server-Typen anlegen, hochladen und konfigurieren",
     "downloadTemplate": "Blueprint-Template herunterladen",
+    "uploadBlueprint": "Blueprint hochladen",
+    "uploadHint": "Wähle eine .blueprint.json. Datei wird gegen das offizielle Schema geprüft, bevor sie aktiv wird.",
+    "uploadSuccess": "Blueprint „{{id}}\" importiert.",
+    "uploadInvalidJson": "Die Datei ist kein gültiges JSON.",
+    "uploadFailed": "Upload fehlgeschlagen.",
     "sections": {
       "intro": {
         "title": "Was ist eine Blueprint?",
-        "body": "Eine Blueprint ist eine reine JSON-Definition fuer einen Server-Typ — keine einzelne Server-Instanz. Sie beschreibt das Docker-Image, Port-Rollen, das Startup-Template, die Source-Strategie (Steam/HTTP/Docker-only/custom) und optional Steam-Workshop-Support. Blueprints enthalten niemals Skripte oder Hooks. Sie werden strikt validiert, bevor sie einen Container beruehren."
+        "body": "Eine Blueprint ist eine reine JSON-Definition für einen Server-Typ — also z. B. „DayZ-Server\" oder „Minecraft-Server\", noch nicht der laufende Server selbst. Sie sagt dem Panel, welches Docker-Image genutzt wird, welche Ports der Server braucht, wie er startet und woher die Server-Dateien kommen (Steam, HTTPS-Download, fertiges Image oder manuell). Aus einer Blueprint können beliebig viele Server-Instanzen erstellt werden. Blueprints enthalten niemals Skripte oder Hooks — sie werden vor dem Start streng validiert."
+      },
+      "workflow": {
+        "title": "Der Ablauf in MSM",
+        "body": "So funktioniert MSM von oben nach unten:\n\n1. Server-Typ (Blueprint) auswählen oder selbst anlegen und hochladen.\n2. Auf der Server-Seite „Server erstellen\" klicken und die Blueprint im Spiel-Dropdown wählen.\n3. Name, Host-IP, Ports und Limits (CPU/RAM/Disk) eintragen.\n4. Server installieren (lädt die Spiel-Dateien über Steam oder HTTPS) und starten.\n\nDanach übernimmt MSM Konsole, Backups, Mods, Datei-Manager und Logs — die Blueprint ist nur die Vorlage."
+      },
+      "addServer": {
+        "title": "Einen Server (Instanz) hinzufügen",
+        "body": "Wenn die passende Blueprint schon vorhanden ist:\n\n1. „Server\" im Menü öffnen.\n2. Auf „Server erstellen\" klicken.\n3. Spiel wählen — die Auswahl basiert auf den registrierten Blueprints (native + community).\n4. Name vergeben und Host-IP wählen. Es muss ein konkretes Interface sein, nie 0.0.0.0 (sonst würde Docker die UFW-Regeln umgehen).\n5. Optional Game-/Query-/RCon-Port eintragen oder auf „auto\" lassen.\n6. CPU-/RAM-/Disk-Limits setzen (leer = unbegrenzt).\n7. Erstellen und im Detail auf „Installieren\" klicken.\n\nIst das Spiel nicht über Steam erhältlich, lädt MSM den Build über den in der Blueprint hinterlegten HTTPS-Link."
+      },
+      "addBlueprintSteam": {
+        "title": "Blueprint anlegen: Steam-Spiel",
+        "body": "Du brauchst die Steam-AppID des Dedicated-Servers (z. B. via SteamDB).\n\n1. Oben „Blueprint-Template herunterladen\" und die Datei öffnen.\n2. Felder ausfüllen:\n   • meta.id — kurzer Slug wie „my-rust\". Darf nicht mit einer nativen Blueprint kollidieren.\n   • meta.name / meta.description — Anzeigewerte im Spiel-Dropdown.\n   • runtime.image — passendes Docker-Image (z. B. ein steamcmd-basiertes).\n   • runtime.startup — argv-Template, z. B. \"./RustDedicated +server.port {GAME_PORT} +server.queryport {QUERY_PORT}\".\n   • ports — deklariere die Rollen, die der Server braucht (game/query/rcon, je tcp oder udp).\n   • source.type = „steam\"; setze source.steam.appId, platform (linux/windows) und compatibility (native/proton).\n   • Optional mods: supportsSteamWorkshop=true, workshopAppId und modInjection.\n3. Datei als <id>.blueprint.json speichern (Dateiname muss exakt zu meta.id passen).\n4. Unten „Blueprint hochladen\" klicken — die Blueprint erscheint sofort im Spiel-Dropdown."
+      },
+      "addBlueprintCustom": {
+        "title": "Blueprint anlegen: Nicht-Steam (HTTP / Docker / Custom)",
+        "body": "Für Spiele ohne Steam oder mit eigenem Build legt source.type fest, wie MSM den Server installiert:\n\n• HTTP-Quelle (Build liegt als ZIP/Tarball auf einem HTTPS-Server):\n  source.type = „http\", source.http.url = HTTPS-URL, optional source.http.sha256 zur Integritätsprüfung. MSM streamt das Archiv direkt ins Install-Verzeichnis (5 GiB Hard-Cap, Zip-Slip- und Zip-Bomb-Schutz).\n\n• Docker-only (alles ist schon im Image):\n  source.type = „dockerOnly\". Es gibt keinen Install-Schritt — das Image wird direkt gestartet.\n\n• Custom (manuelle Installation):\n  source.type = „custom\". Die Server-Dateien müssen vor dem Start manuell ins Install-Verzeichnis (z. B. per Datei-Manager).\n\nRuntime, ports und (optional) mods werden genauso ausgefüllt wie bei einer Steam-Blueprint. Anschließend wieder als <id>.blueprint.json speichern und „Blueprint hochladen\" klicken."
       },
       "location": {
         "title": "Wo liegen Blueprints?",
-        "body": "Native Blueprints werden mit dem Panel ausgeliefert (read-only, im Repository). Community-Blueprints liegen unter /opt/msm/blueprints/community/ und ueberleben Panel-Updates. Dateinamen folgen dem Schema <id>.blueprint.json und muessen exakt zu meta.id passen."
+        "body": "Native Blueprints werden mit dem Panel ausgeliefert (read-only, im Repository).\nCommunity-Blueprints liegen unter /opt/msm/blueprints/community/ und überleben Panel-Updates.\nDateinamen folgen dem Schema <id>.blueprint.json und müssen exakt zu meta.id passen."
       },
       "schema": {
-        "title": "JSON-Schema",
-        "body": "Jede Blueprint enthaelt dieselben vier Top-Level-Objekte: meta (id/name/category/author/description), runtime (Docker-Image + Startup-Template + env), ports (Liste aus Rolle/Protokoll) und source (steam/http/dockerOnly/custom). Das optionale mods-Objekt aktiviert die Workshop-UI und entscheidet, wie die Mods injiziert werden (none/startupArg/file)."
+        "title": "JSON-Schema im Überblick",
+        "body": "Jede Blueprint hat dieselben Top-Level-Objekte. Das tut jedes davon:\n\n• meta — id, name, category, author, description. Bestimmt Anzeige und Filter im Panel.\n• runtime — Docker-Image, Startup-Template (argv) und Umgebungsvariablen für den Container.\n• ports — Liste aus Rolle (game/query/rcon/voice/web/custom) und Protokoll (tcp/udp). Konkrete Portnummern kommen erst beim Server-Erstellen.\n• source — Woher die Server-Daten kommen: steam, http, dockerOnly oder custom.\n• mods (optional) — schaltet die Workshop-/Mod-UI frei und legt fest, wie Mods an den Server übergeben werden."
       },
       "runtime": {
-        "title": "Runtime & Startup-Template",
-        "body": "runtime.startup ist ein argv-Template. Der Renderer tokenisiert den String ZUERST (shlex.split) und substituiert dann nur whitelisted Tokens wie {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {INSTALL_DIR}, {MOD_ARG} und {ENV.MEINE_VAR}. Shell-Substitution ($, Backticks, $(...) und ${...}) wird bereits bei der Validierung abgelehnt. Mod-IDs mit Semikolon koennen niemals ein neues argv-Element erzeugen — sie bleiben literal."
+        "title": "runtime — Image, Startup, Env",
+        "body": "runtime.image: das Docker-Image, das MSM für den Container nutzt.\nruntime.env: zusätzliche Umgebungsvariablen, die als {ENV.NAME} in der Startup-Zeile verfügbar sind.\nruntime.startup: ein argv-Template. Der Renderer tokenisiert den String zuerst mit shlex.split und ersetzt dann nur erlaubte Platzhalter:\n\n• {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}\n• {INSTALL_DIR}, {MOD_ARG}\n• {ENV.MEINE_VAR} für eigene Variablen aus runtime.env\n\nShell-Substitution ($, Backticks, $(...), ${...}) wird bei der Validierung abgelehnt. Mod-IDs mit Semikolon können niemals ein neues argv-Element erzeugen — sie bleiben literal."
       },
       "ports": {
-        "title": "Ports",
-        "body": "Blueprints deklarieren nur Port-ROLLEN (game/query/rcon/voice/web/custom) und ein Protokoll (tcp/udp). Konkrete Portnummern werden beim Server-Erstellen gesetzt — die UI rendert pro deklarierter Rolle ein Eingabefeld."
+        "title": "ports — Rollen statt Nummern",
+        "body": "Blueprints deklarieren nur Port-Rollen, keine konkreten Nummern. Beim Server-Erstellen rendert die UI pro Rolle ein Eingabefeld, in dem die tatsächliche Portnummer gesetzt wird.\n\nRollen: game, query, rcon, voice, web, custom.\nProtokolle: tcp, udp."
       },
       "source": {
-        "title": "Source (woher kommen die Server-Daten?)",
-        "body": "Waehle eine Strategie: steam (mit appId, platform, compatibility), http (https-only URL plus optional sha256), dockerOnly (das Image bringt den Server schon mit) oder custom (manueller Install)."
+        "title": "source — Woher kommt der Server?",
+        "body": "Wähle genau eine Strategie:\n\n• steam — appId, platform (linux/windows), compatibility (native/proton). MSM lädt den Server über SteamCMD.\n• http — HTTPS-URL plus optional sha256 zur Integritätsprüfung. Das Archiv wird ins Install-Verzeichnis gestreamt.\n• dockerOnly — das Docker-Image enthält den Server bereits, kein separater Install-Schritt.\n• custom — manuelle Installation. Du musst die Server-Daten selbst ins Install-Verzeichnis legen, bevor du startest."
       },
       "httpSecurity": {
         "title": "HTTP-Source-Sicherheit",
-        "body": "HTTP-Downloads sind HTTPS-only und werden direkt ins Install-Dir gestreamt (5 GiB Hard-Cap). Der Downloader lehnt Redirects auf private/Loopback-IPs ab (SSRF-Schutz), verwirft Symlink/Hardlink-Members, validiert jeden Member-Pfad gegen das Install-Dir (Zip-Slip-Schutz) und erzwingt 10 GiB Decompressed-Cap mit 1:100-Ratio pro Member (Zip-/Tar-Bomb-Schutz). Setze source.http.sha256, um die Datei vor dem Entpacken auf Integritaet zu pruefen (empfohlen fuer jeden externen Download)."
+        "body": "HTTP-Downloads sind HTTPS-only und gehen direkt ins Install-Verzeichnis (5 GiB Hard-Cap). Der Downloader\n\n• lehnt Redirects auf private/Loopback-IPs ab (SSRF-Schutz),\n• verwirft Symlink-/Hardlink-Members im Archiv,\n• validiert jeden Member-Pfad gegen das Install-Verzeichnis (Zip-Slip-Schutz),\n• erzwingt 10 GiB Decompressed-Cap mit 1:100-Ratio pro Member (Zip-/Tar-Bomb-Schutz).\n\nsource.http.sha256 prüft die Datei vor dem Entpacken auf Integrität — empfohlen für jeden externen Download."
       },
       "mods": {
-        "title": "Mods & Steam Workshop",
-        "body": "supportsSteamWorkshop=true schaltet die Workshop-UI frei und verlangt workshopAppId. modInjection entscheidet, wie das Panel Mods uebergibt: none (aus), startupArg (modStartupArgumentFormat landet im argv) oder file (Workshop-Modliste wird nach modListFilePath geschrieben, gegen install_dir validiert — keine Escape-Pfade moeglich)."
+        "title": "mods & Steam Workshop",
+        "body": "supportsSteamWorkshop=true schaltet die Workshop-UI für diesen Server-Typ frei und verlangt workshopAppId.\n\nmodInjection entscheidet, wie das Panel Mods an den Server übergibt:\n\n• none — Mod-System aus.\n• startupArg — modStartupArgumentFormat landet als argv-Element im Startup-Befehl.\n• file — Workshop-Modliste wird nach modListFilePath geschrieben. Der Pfad wird gegen install_dir validiert — Escape-Pfade sind nicht möglich."
       },
       "import": {
-        "title": "Blueprint importieren",
-        "body": "Owner (oder Accounts mit panel.settings.write) koennen eine Blueprint via POST /api/blueprints/import hochladen. Das JSON wird gegen dasselbe Schema wie native Blueprints geprueft. Native IDs werden niemals ueberschrieben — bitte andere meta.id waehlen. Nach dem Import taucht die Blueprint sofort in der Server-Erstellen-Auswahl auf."
+        "title": "Blueprint hochladen",
+        "body": "Owner oder Accounts mit panel.settings.write können Blueprints auf zwei Wegen importieren:\n\n• Bequem: Button „Blueprint hochladen\" oben auf dieser Seite. Wähle eine .blueprint.json-Datei aus deinem Dateisystem.\n• Per API: POST /api/blueprints/import mit dem JSON als Body (CSRF-Token erforderlich).\n\nDas JSON wird gegen dasselbe Schema wie native Blueprints geprüft. Native IDs werden niemals überschrieben — wähle in dem Fall eine andere meta.id. Nach erfolgreichem Import erscheint die Blueprint sofort im Spiel-Dropdown der Server-Erstellung."
       }
     }
   },
@@ -95,14 +116,14 @@
     "editNetworkTitle": "Netzwerk bearbeiten",
     "editNetworkDescription": "Bind-IP und Ports anpassen. Bei laufendem Server werden alte Firewall-Regeln entfernt, der Container neu erstellt und mit den neuen Bindings gestartet.",
     "bindIp": {
-      "hint": "Aus den verfuegbaren Host-Interfaces waehlen. 0.0.0.0 ist nicht erlaubt, da Docker sonst die UFW-Regeln umgeht.",
-      "choose": "-- Host-IP waehlen --",
-      "noneAvailable": "Keine Host-Interfaces verfuegbar",
+      "hint": "Aus den verfügbaren Host-Interfaces wählen. 0.0.0.0 ist nicht erlaubt, da Docker sonst die UFW-Regeln umgeht.",
+      "choose": "-- Host-IP wählen --",
+      "noneAvailable": "Keine Host-Interfaces verfügbar",
       "loopback": "Loopback",
       "private": "privat",
       "unset": "nicht gesetzt",
       "startBlockedTitle": "Start blockiert: Host-IP fehlt",
-      "startBlockedBody": "Der Server kann erst gestartet werden, wenn eine Host-IP zugewiesen ist. Ohne explizite Bind-IP wuerde Docker die UFW-Regeln umgehen (Anti-Leak).",
+      "startBlockedBody": "Der Server kann erst gestartet werden, wenn eine Host-IP zugewiesen ist. Ohne explizite Bind-IP würde Docker die UFW-Regeln umgehen (Anti-Leak).",
       "assignNow": "IP zuweisen"
     },
     "disk": {
