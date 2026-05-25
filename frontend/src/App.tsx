@@ -19,6 +19,7 @@ import { Users } from './pages/Users'
 import { Roles } from './pages/Roles'
 import { Settings } from './pages/Settings'
 import { Profile } from './pages/Profile'
+import { Docs } from './pages/Docs'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
@@ -85,6 +86,7 @@ function App() {
           }
         />
         <Route path="profile" element={<Profile />} />
+        <Route path="docs" element={<Docs />} />
       </Route>
     </Routes>
       <ToastContainer />

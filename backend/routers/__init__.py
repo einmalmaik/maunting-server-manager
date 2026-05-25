@@ -9,6 +9,7 @@ from .panel_settings import router as panel_settings_router
 from .files import router as files_router
 from .roles import router as roles_router
 from .permissions import router as permissions_router
+from .blueprints import router as blueprints_router
 
 __all__ = [
     "auth_router",
@@ -22,4 +23,5 @@ __all__ = [
     "files_router",
     "roles_router",
     "permissions_router",
+    "blueprints_router",
 ]

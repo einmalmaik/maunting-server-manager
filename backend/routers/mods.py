@@ -71,12 +71,13 @@ def update_mod(server_id: int, mod_id: int, load_order: int | None = None, auto_
         mod.enabled = enabled
     db.commit()
     db.refresh(mod)
-    # Write updated modlist to game config
+    # Write updated modlist to game config (no-op fuer Blueprints mit
+    # modInjection!=file; Helper kennt die Regeln aus der Blueprint).
     server = db.query(Server).filter(Server.id == server_id).first()
     if server:
         plugin = get_plugin(server.game_type)
-        if plugin and plugin.supports_mods and hasattr(plugin, '_update_modlist'):
-            plugin._update_modlist(server)
+        if plugin and plugin.supports_mods:
+            plugin.update_modlist(server)
     return mod
 
 
@@ -100,10 +101,10 @@ def reorder_mods(server_id: int, order: list[int], db: Session = Depends(get_db)
         if mod_id in mod_map:
             mod_map[mod_id].load_order = idx
     db.commit()
-    # Write updated modlist to game config
+    # Write updated modlist to game config (Helper ist Blueprint-driven).
     server = db.query(Server).filter(Server.id == server_id).first()
     if server:
         plugin = get_plugin(server.game_type)
-        if plugin and plugin.supports_mods and hasattr(plugin, '_update_modlist'):
-            plugin._update_modlist(server)
+        if plugin and plugin.supports_mods:
+            plugin.update_modlist(server)
     return db.query(Mod).filter(Mod.server_id == server_id).order_by(Mod.load_order.asc()).all()

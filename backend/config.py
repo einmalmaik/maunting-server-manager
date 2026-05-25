@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Produktion: /opt/msm/servers  |  Dev: ./servers
     servers_dir: str = "/opt/msm/servers"
 
+    # Blueprint-Verzeichnis (Community-Imports, getrennt von Repo-Code).
+    # Produktion: /opt/msm/blueprints/community  |  Dev/Test ggf. via MSM_BLUEPRINTS_DIR
+    blueprints_dir: str = "/opt/msm/blueprints/community"
+
     # Steam — SteamCMD läuft in einem ephemeren Container (cm2network/steamcmd:root),
     # nicht mehr auf dem Host. steamcmd_path bleibt nur für Backward-Compat-Tests
     # (sollte nirgendwo im Code mehr verwendet werden).

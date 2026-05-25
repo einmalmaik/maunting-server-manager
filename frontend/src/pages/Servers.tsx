@@ -303,50 +303,51 @@ export function Servers() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('servers.gamePort')}
-                  </label>
-                  <input
-                    type="number"
-                    min={1024}
-                    max={65535}
-                    value={form.game_port}
-                    onChange={(e) => setForm({ ...form, game_port: e.target.value })}
-                    className="msm-input"
-                    placeholder={t('servers.portAuto')}
-                  />
-                </div>
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('servers.queryPort')}
-                  </label>
-                  <input
-                    type="number"
-                    min={1024}
-                    max={65535}
-                    value={form.query_port}
-                    onChange={(e) => setForm({ ...form, query_port: e.target.value })}
-                    className="msm-input"
-                    placeholder={t('servers.portAuto')}
-                  />
-                </div>
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('servers.rconPort')}
-                  </label>
-                  <input
-                    type="number"
-                    min={1024}
-                    max={65535}
-                    value={form.rcon_port}
-                    onChange={(e) => setForm({ ...form, rcon_port: e.target.value })}
-                    className="msm-input"
-                    placeholder={t('servers.portAuto')}
-                  />
-                </div>
-              </div>
+              {(() => {
+                const selectedGame = games.find((g) => g.id === form.game_type)
+                const portDefs = selectedGame?.ports ?? [
+                  { name: 'game', protocol: 'udp' },
+                  { name: 'query', protocol: 'udp' },
+                  { name: 'rcon', protocol: 'tcp' },
+                ]
+                const roleToField: Record<string, 'game_port' | 'query_port' | 'rcon_port'> = {
+                  game: 'game_port',
+                  query: 'query_port',
+                  rcon: 'rcon_port',
+                }
+                const portRoles = portDefs.filter((p) => roleToField[p.name])
+                if (portRoles.length === 0) return null
+                return (
+                  <div className="grid grid-cols-3 gap-3" data-testid="port-fields">
+                    {portRoles.map((p) => {
+                      const fieldKey = roleToField[p.name]
+                      const labelKey =
+                        p.name === 'game'
+                          ? 'servers.gamePort'
+                          : p.name === 'query'
+                          ? 'servers.queryPort'
+                          : 'servers.rconPort'
+                      return (
+                        <div key={p.name}>
+                          <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                            {t(labelKey)}
+                          </label>
+                          <input
+                            type="number"
+                            min={1024}
+                            max={65535}
+                            value={form[fieldKey]}
+                            onChange={(e) => setForm({ ...form, [fieldKey]: e.target.value })}
+                            className="msm-input"
+                            placeholder={t('servers.portAuto')}
+                            data-testid={`port-input-${p.name}`}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"

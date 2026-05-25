@@ -1,7 +1,8 @@
-"""DayZ — Docker-basiertes Plugin.
+"""DayZ — Docker-basiertes Plugin, getrieben durch ``native/dayz.blueprint.json``.
 
-Lifecycle läuft komplett über GamePlugin-Defaults (docker_service). Spezifisch
-sind: Mod-Symlink-Logik, Start-Argumente (-mod=…;), Workshop-Pfade.
+Lifecycle laeuft komplett ueber GamePlugin-Defaults (docker_service). Spezifisch
+sind: Mod-Symlink-Logik, Workshop-Pfade. Image/Startup/Mod-Injection kommen aus
+der Blueprint, damit Verhalten und Doku konsistent bleiben.
 """
 
 from __future__ import annotations
@@ -10,16 +11,23 @@ import glob
 import os
 import threading
 
+from blueprints import Blueprint, render_argv
+from blueprints.registry import native_dir
+from blueprints.schema import load_blueprint_file
 from games.base import (
     CONTAINER_DATA_DIR,
     ConfigField,
     GamePlugin,
     VolumeBind,
     _append_console_log,
+    active_mod_ids,
     finish_install,
     run_steamcmd_install,
     run_steamcmd_workshop_download,
 )
+
+
+_BLUEPRINT_PATH = native_dir() / "dayz.blueprint.json"
 
 
 class DayZPlugin(GamePlugin):
@@ -34,12 +42,27 @@ class DayZPlugin(GamePlugin):
     supports_mods = True
     supports_steam_workshop = True
 
+    # Reine Convenience-Konstanten — gezogen aus der Blueprint, bewusst hier
+    # noch verfuegbar fuer Workshop-Pfad-Berechnungen.
     APP_ID = "223350"
     WORKSHOP_ID = "221100"
 
     docker_image = "cm2network/steamcmd:root"
     container_needs_tmpfs = False
     container_read_only_rootfs = False
+
+    def __init__(self) -> None:
+        self._blueprint: Blueprint = load_blueprint_file(_BLUEPRINT_PATH)
+        # Image & Workshop-IDs aus der Blueprint synchronisieren, damit die
+        # Klassen-Attribute auch fuer aeltere Aufrufer (z. B. Tests) stimmen.
+        self.docker_image = self._blueprint.runtime.image
+        self.APP_ID = self._blueprint.source.steam.appId  # type: ignore[union-attr]
+        bp_mods = self._blueprint.effective_mods()
+        if bp_mods.workshopAppId:
+            self.WORKSHOP_ID = bp_mods.workshopAppId
+
+    def get_blueprint(self) -> Blueprint:
+        return self._blueprint
 
     # ─ Setup ─────────────────────────────────────────────────────────────
 
@@ -60,46 +83,19 @@ class DayZPlugin(GamePlugin):
         thread.start()
         return {"message": "Installation gestartet"}
 
-    # ─ Mods → Start-Argument ─────────────────────────────────────────────
-
-    def _get_active_mod_ids(self, server) -> list[str]:
-        """Liest aktivierte (`enabled=True`) Mods in Lade-Reihenfolge.
-
-        Inaktive Mods bleiben im DB-State, werden aber NICHT in die
-        Startargumente geschrieben.
-        """
-        try:
-            from database import SessionLocal
-            from models import Mod
-            db = SessionLocal()
-            try:
-                mods = (
-                    db.query(Mod)
-                    .filter(Mod.server_id == server.id, Mod.enabled == True)  # noqa: E712
-                    .order_by(Mod.load_order.asc())
-                    .all()
-                )
-                return [m.workshop_id for m in mods]
-            finally:
-                db.close()
-        except Exception:
-            return []
-
     # ─ Container-Config ──────────────────────────────────────────────────
 
-    def _container_executable(self) -> str:
-        """Pfad zum DayZ-Server-Binary INNERHALB des Containers (Bind-Mount)."""
-        return f"{CONTAINER_DATA_DIR}/DayZServer"
-
     def build_container_command(self, server) -> list[str]:
-        cmd: list[str] = [self._container_executable()]
-        if server.game_port:
-            cmd.append(f"-port={server.game_port}")
-        mod_ids = self._get_active_mod_ids(server)
-        if mod_ids:
-            # DayZ erwartet ein einzelnes Argument mit semikolon-separierten Mod-IDs.
-            cmd.append(f"-mod={';'.join(mod_ids)};")
-        return cmd
+        return render_argv(
+            self._blueprint,
+            install_dir=CONTAINER_DATA_DIR,
+            ports={
+                "game": server.game_port,
+                "query": server.query_port,
+                "rcon": server.rcon_port,
+            },
+            active_mod_ids=active_mod_ids(server),
+        )
 
     # build_port_publishes erbt vom Base-Plugin (Phase 2):
     # game/query UDP + rcon TCP an public_bind_ip. Kein 0.0.0.0 erlaubt.
@@ -175,7 +171,12 @@ class DayZPlugin(GamePlugin):
     # ─ Mods ──────────────────────────────────────────────────────────────
 
     def install_mod(self, server, workshop_id: str) -> dict:
-        """DayZ mod install: SteamCMD download → symlink to server root → copy keys."""
+        """DayZ mod install: SteamCMD download → symlink to server root → copy keys.
+
+        Symlink-Erstellung haengt am game-spezifischen Layout (``keys/*.bikey``)
+        und bleibt deshalb in Python. Die Modliste wird hingegen ueber die
+        Blueprint im Renderer in die Startargumente injiziert — kein extra File.
+        """
         def _install():
             install_dir = server.install_dir
             workshop_dir = os.path.join(

@@ -6,6 +6,9 @@
 # MSM console logs (per-server, runtime)
 backend/logs/
 
+# Community-Blueprints (User-Daten, getrennt vom App-Code)
+backend/data/blueprints/
+
 # Virtual environments (anywhere in the repository)
 .venv/
 venv/
