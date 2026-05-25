@@ -201,6 +201,12 @@ def assign_role(
         raise HTTPException(status_code=404, detail="User nicht gefunden")
     if user.is_owner:
         raise HTTPException(status_code=400, detail="Owner-Account hat keine zuweisbare Rolle")
+    # Auch das Entfernen der aktuellen Rolle ist eine Eskalations-Aktion: ein
+    # Non-Owner darf einem User keine Rolle wegnehmen, deren Keys er selbst
+    # nicht besitzt (sonst koennte er einen Admin-Account "entwaffnen").
+    if user.role_id is not None:
+        current_keys = role_permission_keys(db, user.role_id)
+        _ensure_no_global_escalation(db, actor, current_keys)
     if req.role_id is not None:
         role = get_role(db, req.role_id)
         if not role:

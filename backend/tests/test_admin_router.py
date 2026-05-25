@@ -150,6 +150,39 @@ class TestAssignRoleEscalation:
         db.refresh(regular_user)
         assert regular_user.role_id != powerful.id
 
+    def test_non_owner_cannot_remove_powerful_role(
+        self,
+        client: TestClient,
+        db: Session,
+        owner_user: User,
+        regular_user: User,
+        user_cookies: dict,
+    ):
+        """Non-Owner darf einem User keine Rolle wegnehmen, deren Keys er
+        selbst nicht hat — sonst koennte er einen Admin "entwaffnen"."""
+        _attach_role_with_keys(
+            db, regular_user, "permmgr3", ["users.permissions.manage"]
+        )
+        # Erstelle Admin-User mit echter admin-Rolle (alle Keys)
+        from services import AuthService
+        target = AuthService.create_user(db, "victim", "victim@test.de", "VictimP123!")
+        target.email_verified = True
+        _promote_to_admin_role(db, target)
+        db.commit()
+        db.refresh(target)
+        prev_role_id = target.role_id
+        # Attacker versucht, die Admin-Rolle per role_id=null wegzunehmen
+        r = client.patch(
+            f"/api/admin/users/{target.id}/role",
+            json={"role_id": None},
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert r.status_code == 403
+        # Rolle unveraendert
+        db.refresh(target)
+        assert target.role_id == prev_role_id
+
     def test_owner_can_assign_any_role(
         self,
         client: TestClient,
