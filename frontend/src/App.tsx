@@ -83,7 +83,10 @@ function App() {
         <Route
           path="settings"
           element={
-            <RequirePermission keys={['panel.settings.read', 'panel.settings.write']}>
+            // Nur `panel.settings.read` — die Settings-Seite ruft direkt
+            // `GET /api/settings` auf, das genau diesen Key verlangt. Wer nur
+            // `.write` haette, wuerde nur eine kaputte Seite sehen.
+            <RequirePermission keys="panel.settings.read">
               <Settings />
             </RequirePermission>
           }

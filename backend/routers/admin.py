@@ -209,7 +209,7 @@ def assign_role(
     if user.id == actor.id:
         raise HTTPException(
             status_code=400,
-            detail="Du kannst deine eigene Rolle nicht aendern",
+            detail="Du kannst deine eigene Rolle nicht ändern",
         )
     # Auch das Entfernen der aktuellen Rolle ist eine Eskalations-Aktion: ein
     # Non-Owner darf einem User keine Rolle wegnehmen, deren Keys er selbst

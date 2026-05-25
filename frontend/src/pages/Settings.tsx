@@ -144,6 +144,10 @@ export function Settings() {
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
+        {/* Ohne `.write` ist das gesamte Formular read-only: alle Inputs werden
+            ueber das umschliessende <fieldset> disabled, sodass weder Tippen
+            noch Enter-Submit den 403-Pfad triggern kann. */}
+        <fieldset disabled={!canWriteSettings} className="space-y-6 border-0 p-0 m-0">
         {/* Panel Config */}
         <div className="msm-card p-6">
           <div className="flex items-center gap-3 mb-6">
@@ -513,6 +517,7 @@ export function Settings() {
           </button>
         </div>
         )}
+        </fieldset>
       </form>
     </div>
   )
