@@ -37,6 +37,9 @@ err()  { echo -e "${RED}[ERR]${NC}  $1" | tee -a "$LOG_FILE"; exit 1; }
 # die `git pull` als root ueberschrieben hat.
 restore_panel_ownership() {
     [[ -d "$MSM_DIR" ]] || return 0
+    # Wenn der msm-User noch gar nicht existiert (z.B. allererster Run vor
+    # install.sh), gibt es nichts zu chownen.
+    id "$MSM_USER" &>/dev/null || return 0
     # .git muss msm geschrieben werden koennen (sonst kann msm spaeter nicht
     # `git describe` o.ae. ausfuehren).
     if [[ -d "$MSM_DIR/.git" ]]; then
@@ -47,6 +50,12 @@ restore_panel_ownership() {
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" 2>/dev/null || true
         fi
     done
+    # npm-Cache des msm-Users (HOME=/opt/msm). Falls ein frueherer fehlge-
+    # schlagener Run als root in den Cache geschrieben hat, scheitert npm
+    # sonst beim naechsten Lauf.
+    if [[ -d "$MSM_DIR/.npm" ]]; then
+        chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/.npm" 2>/dev/null || true
+    fi
     # Top-Level-Dateien (Scripts, Templates, README, etc.).
     # `find -maxdepth 1` haelt /opt/msm/servers und /opt/msm/backups raus.
     find "$MSM_DIR" -maxdepth 1 -type f \
@@ -130,6 +139,11 @@ if [[ -z "$LATEST_TAG" ]]; then
             LATEST_TAG="unknown"
         elif [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
             ok "Panel ist bereits auf dem neuesten Stand (main: ${LOCAL_SHA:0:8})."
+            # Recovery: ein frueherer Run (z.B. mit der alten update.sh ohne
+            # Chown-Fix) kann Dateien als root zurueckgelassen haben. Bevor wir
+            # frueh aussteigen, stellen wir Besitz wieder her, damit der
+            # Panel-Service als msm-User schreibend zugreifen kann.
+            restore_panel_ownership
             exit 0
         else
             LATEST_TAG="main-${REMOTE_SHA:0:8}"
@@ -147,6 +161,9 @@ fi
 # ── Vergleich (nur bei Release-Mode) ──
 if [[ "$UPDATE_MODE" == "release" ]] && [[ "$CURRENT_VERSION" == "$LATEST_TAG" ]]; then
     ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_VERSION)."
+    # Recovery wie im Git-Pfad: Besitz zurueck auf msm, falls ein frueherer
+    # Run Dateien als root liegen gelassen hat.
+    restore_panel_ownership
     exit 0
 fi
 
@@ -308,6 +325,11 @@ su - msm -c "
 " 2>&1 | tee -a "$LOG_FILE"
 
 # ── Frontend bauen ──
+# Letzte Verteidigungslinie: selbst wenn alle vorherigen Pfade einen Chown
+# ausgelassen haben sollten (z.B. unerwarteter Code-Pfad), stellen wir hier
+# noch einmal sicher, dass der msm-User in frontend/ schreiben kann. Idempotent
+# und billig.
+restore_panel_ownership
 log "Baue Frontend..."
 if ! su - msm -c "
     set -e
