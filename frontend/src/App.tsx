@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom'
 import { Shell } from './components/layout/Shell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { PublicOnlyRoute } from './components/PublicOnlyRoute'
+import { RequirePermission } from './components/RequirePermission'
 import { ToastContainer } from './components/ui/ToastContainer'
 import { SetupWizard } from './pages/SetupWizard'
 import { Login } from './pages/Login'
@@ -63,9 +64,30 @@ function App() {
         <Route path="servers/:id/files" element={<FileManager />} />
         <Route path="servers/:id/mods" element={<ModManager />} />
         <Route path="servers/:id/backups" element={<Backups />} />
-        <Route path="users" element={<Users />} />
-        <Route path="roles" element={<Roles />} />
-        <Route path="settings" element={<Settings />} />
+        <Route
+          path="users"
+          element={
+            <RequirePermission keys={['users.read', 'users.manage']}>
+              <Users />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="roles"
+          element={
+            <RequirePermission keys="roles.manage">
+              <Roles />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="settings"
+          element={
+            <RequirePermission keys={['panel.settings.read', 'panel.settings.write']}>
+              <Settings />
+            </RequirePermission>
+          }
+        />
         <Route path="profile" element={<Profile />} />
       </Route>
     </Routes>

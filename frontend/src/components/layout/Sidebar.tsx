@@ -23,6 +23,8 @@ export function Sidebar() {
   const hasUsersManage = useHasPermission('users.manage')
   const canManageUsers = hasUsersRead || hasUsersManage
   const canManageRoles = useHasPermission('roles.manage')
+  const canCreateServer = useHasPermission('servers.create')
+  const canViewSettings = useHasPermission('panel.settings.read')
 
   const handleLogout = async () => {
     await logout()
@@ -38,7 +40,9 @@ export function Sidebar() {
     ...((user?.is_owner || canManageRoles) ? [
       { to: '/roles', icon: Shield, label: t('nav.roles') },
     ] : []),
-    { to: '/settings', icon: Settings, label: t('nav.settings') },
+    ...((user?.is_owner || canViewSettings) ? [
+      { to: '/settings', icon: Settings, label: t('nav.settings') },
+    ] : []),
   ]
 
   return (
@@ -56,8 +60,8 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Create Server Button */}
-      {user?.is_owner && (
+      {/* Create Server Button — nur wenn `servers.create` (Owner-Bypass via Hook). */}
+      {canCreateServer && (
         <div className="px-4 mb-6">
           <NavLink
             to="/servers"

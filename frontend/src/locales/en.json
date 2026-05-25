@@ -112,7 +112,42 @@
     "deselectAll": "Clear selection",
     "noPermissions": "No permissions selected",
     "globalGroup": "Global permissions",
-    "serverGroup": "Server permissions (blanket for all servers)"
+    "serverGroup": "Server permissions (blanket for all servers)",
+    "systemNames": {
+      "admin": "Admin",
+      "user": "User"
+    }
+  },
+  "permissions": {
+    "users.read": "View user list",
+    "users.manage": "Create, edit, delete users",
+    "users.permissions.manage": "Manage user roles and server permissions",
+    "roles.manage": "Create, edit, delete roles",
+    "panel.settings.read": "Read panel settings",
+    "panel.settings.write": "Change panel settings (Steam, email, ...)",
+    "servers.create": "Create a new server",
+    "servers.delete": "Delete servers (global, not delegable)",
+    "system.view": "View system resources, interfaces, version",
+    "server.view": "View server in list and detail",
+    "server.start": "Start server",
+    "server.stop": "Stop server",
+    "server.restart": "Restart server",
+    "server.install": "Install or reinstall server",
+    "server.config.write": "Edit server settings (name, auto-restart, backup schedule)",
+    "server.network.manage": "Change ports and bind IP",
+    "server.resources.manage": "Change CPU/RAM/disk limits",
+    "server.console.read": "Read console and logs",
+    "server.console.write": "Send commands to console",
+    "server.files.read": "Read and download files",
+    "server.files.write": "Upload, create, edit, extract files",
+    "server.files.delete": "Delete files",
+    "server.backups.read": "List backups",
+    "server.backups.create": "Create backup",
+    "server.backups.restore": "Restore backup",
+    "server.backups.delete": "Delete backup",
+    "server.mods.read": "List mods, search workshop",
+    "server.mods.write": "Subscribe, remove, reorder mods",
+    "server.mods.toggle": "Enable or disable mods"
   },
   "serverPermissions": {
     "title": "Permissions",

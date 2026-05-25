@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Mail, Globe, Save, Send, Gamepad2 } from 'lucide-react'
 import { api } from '@/api/client'
+import { toast } from '@/stores/toastStore'
+import { useHasPermission } from '@/hooks/useHasPermission'
 
 interface PanelSettings {
   panel_url: string
@@ -21,6 +23,7 @@ interface PanelSettings {
 
 export function Settings() {
   const { t, i18n } = useTranslation()
+  const canWriteSettings = useHasPermission('panel.settings.write')
   const [settings, setSettings] = useState<PanelSettings>({
     panel_url: '',
     smtp_host: '',
@@ -38,18 +41,15 @@ export function Settings() {
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [savedMsg, setSavedMsg] = useState('')
   const [testEmail, setTestEmail] = useState('')
   const [sendingTest, setSendingTest] = useState(false)
-  const [testMsg, setTestMsg] = useState('')
 
   const fetchSettings = async () => {
     try {
       const data = await api<PanelSettings>('/settings')
       setSettings(data)
     } catch (err: any) {
-      setError(err.message)
+      toast.error(err.message)
     } finally {
       setLoading(false)
     }
@@ -62,17 +62,14 @@ export function Settings() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
-    setError('')
-    setSavedMsg('')
     try {
       await api('/settings', {
         method: 'POST',
         body: JSON.stringify(settings),
       })
-      setSavedMsg(t('settings.saved'))
-      setTimeout(() => setSavedMsg(''), 3000)
+      toast.success(t('settings.saved'))
     } catch (err: any) {
-      setError(err.message)
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }
@@ -81,17 +78,14 @@ export function Settings() {
   const handleTestEmail = async () => {
     if (!testEmail) return
     setSendingTest(true)
-    setTestMsg('')
-    setError('')
     try {
       await api('/settings/test-email', {
         method: 'POST',
         body: JSON.stringify({ to: testEmail }),
       })
-      setTestMsg(t('settings.testEmailSent'))
-      setTimeout(() => setTestMsg(''), 3000)
+      toast.success(t('settings.testEmailSent'))
     } catch (err: any) {
-      setError(err.message)
+      toast.error(err.message)
     } finally {
       setSendingTest(false)
     }
@@ -101,10 +95,8 @@ export function Settings() {
   const [provider, setProvider] = useState<'smtp' | 'resend'>('smtp')
   const [newResendKey, setNewResendKey] = useState('')
   const [savingResend, setSavingResend] = useState(false)
-  const [resendMsg, setResendMsg] = useState('')
   const [newSteamKey, setNewSteamKey] = useState('')
   const [savingSteam, setSavingSteam] = useState(false)
-  const [steamMsg, setSteamMsg] = useState('')
   const [testingSteam, setTestingSteam] = useState(false)
 
   useEffect(() => {
@@ -119,20 +111,16 @@ export function Settings() {
   const handleSaveResendKey = async () => {
     if (!newResendKey.trim()) return
     setSavingResend(true)
-    setError('')
-    setResendMsg('')
     try {
       await api('/settings/resend-key', {
         method: 'POST',
         body: JSON.stringify({ resend_api_key: newResendKey.trim() }),
       })
-      setResendMsg('Resend API-Key gespeichert')
+      toast.success(t('settings.saved'))
       setNewResendKey('')
-      // Refresh settings to pick up the masked key status
       await fetchSettings()
-      setTimeout(() => setResendMsg(''), 3000)
     } catch (err: any) {
-      setError(err.message)
+      toast.error(err.message)
     } finally {
       setSavingResend(false)
     }
@@ -154,9 +142,6 @@ export function Settings() {
           {t('settings.subtitle')}
         </p>
       </div>
-
-      {error && <div className="msm-alert-error text-sm">{error}</div>}
-      {savedMsg && <div className="msm-alert-success text-sm">{savedMsg}</div>}
 
       <form onSubmit={handleSave} className="space-y-6">
         {/* Panel Config */}
@@ -354,13 +339,11 @@ export function Settings() {
                 </p>
               </div>
 
-              {resendMsg && <p className="text-sm text-status-success">{resendMsg}</p>}
-
               <div className="flex justify-end">
                 <button
                   type="button"
                   onClick={handleSaveResendKey}
-                  disabled={savingResend || !newResendKey.trim()}
+                  disabled={savingResend || !newResendKey.trim() || !canWriteSettings}
                   className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
                 >
                   {savingResend ? (
@@ -403,9 +386,6 @@ export function Settings() {
                 {t('settings.testEmail')}
               </button>
             </div>
-            {testMsg && (
-              <p className="text-sm text-status-success mt-2">{testMsg}</p>
-            )}
           </div>
         </div>
 
@@ -459,21 +439,16 @@ export function Settings() {
               </p>
             </div>
 
-            {steamMsg && <p className="text-sm text-status-success">{steamMsg}</p>}
-
             <div className="flex gap-3 justify-end">
               <button
                 type="button"
                 onClick={async () => {
                   setTestingSteam(true)
-                  setSteamMsg('')
-                  setError('')
                   try {
                     const res = await api<{message: string; valid: boolean}>('/settings/steam-key/test')
-                    setSteamMsg(res.message)
-                    setTimeout(() => setSteamMsg(''), 3000)
+                    toast.success(res.message)
                   } catch (err: any) {
-                    setError(err.message)
+                    toast.error(err.message)
                   } finally {
                     setTestingSteam(false)
                   }
@@ -493,24 +468,21 @@ export function Settings() {
                 onClick={async () => {
                   if (!newSteamKey.trim()) return
                   setSavingSteam(true)
-                  setError('')
-                  setSteamMsg('')
                   try {
                     await api('/settings/steam-key', {
                       method: 'POST',
                       body: JSON.stringify({ steam_api_key: newSteamKey.trim() }),
                     })
-                    setSteamMsg(t('settings.steamSaved'))
+                    toast.success(t('settings.steamSaved'))
                     setNewSteamKey('')
                     await fetchSettings()
-                    setTimeout(() => setSteamMsg(''), 3000)
                   } catch (err: any) {
-                    setError(err.message)
+                    toast.error(err.message)
                   } finally {
                     setSavingSteam(false)
                   }
                 }}
-                disabled={savingSteam || !newSteamKey.trim()}
+                disabled={savingSteam || !newSteamKey.trim() || !canWriteSettings}
                 className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
               >
                 {savingSteam ? (
@@ -524,7 +496,8 @@ export function Settings() {
           </div>
         </div>
 
-        {/* Save button */}
+        {/* Save button — nur sichtbar mit panel.settings.write */}
+        {canWriteSettings && (
         <div className="flex justify-end">
           <button
             type="submit"
@@ -539,6 +512,7 @@ export function Settings() {
             {t('settings.save')}
           </button>
         </div>
+        )}
       </form>
     </div>
   )

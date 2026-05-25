@@ -201,6 +201,16 @@ def assign_role(
         raise HTTPException(status_code=404, detail="User nicht gefunden")
     if user.is_owner:
         raise HTTPException(status_code=400, detail="Owner-Account hat keine zuweisbare Rolle")
+    # Self-Lockout-Schutz: ein User darf seine eigene Rolle nicht aendern.
+    # Ohne diesen Guard koennte ein Admin sich versehentlich oder durch
+    # Drittparteien (CSRF, kompromittierte Session) zum User downgraden und
+    # sich damit selbst aussperren. Rollenwechsel passiert immer durch einen
+    # anderen Account mit `users.permissions.manage`.
+    if user.id == actor.id:
+        raise HTTPException(
+            status_code=400,
+            detail="Du kannst deine eigene Rolle nicht aendern",
+        )
     # Auch das Entfernen der aktuellen Rolle ist eine Eskalations-Aktion: ein
     # Non-Owner darf einem User keine Rolle wegnehmen, deren Keys er selbst
     # nicht besitzt (sonst koennte er einen Admin-Account "entwaffnen").

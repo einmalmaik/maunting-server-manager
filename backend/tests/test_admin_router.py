@@ -126,7 +126,8 @@ class TestAssignRoleEscalation:
         regular_user: User,
         user_cookies: dict,
     ):
-        """User mit nur `users.permissions.manage` kann sich keine maechtige Rolle zuweisen."""
+        """User mit nur `users.permissions.manage` kann einem ANDEREN User
+        keine maechtige Rolle zuweisen (Eskalations-Schutz)."""
         _attach_role_with_keys(
             db, regular_user, "permmgr", ["users.permissions.manage"]
         )
@@ -138,17 +139,21 @@ class TestAssignRoleEscalation:
         db.add(RolePermission(role_id=powerful.id, permission_key="servers.delete"))
         db.add(RolePermission(role_id=powerful.id, permission_key="panel.settings.write"))
         db.commit()
-        # Regular-User versucht sich selbst die maechtige Rolle zuzuweisen
+        # Drittes User-Ziel, weil Self-Modify durch separaten Guard blockiert ist.
+        from services import AuthService
+        target = AuthService.create_user(db, "rt-target", "rt@test.de", "TargetP123!")
+        target.email_verified = True
+        db.commit()
+        db.refresh(target)
         r = client.patch(
-            f"/api/admin/users/{regular_user.id}/role",
+            f"/api/admin/users/{target.id}/role",
             json={"role_id": powerful.id},
             cookies=user_cookies,
             headers=_csrf(user_cookies),
         )
         assert r.status_code == 403
-        # Rolle unverndert
-        db.refresh(regular_user)
-        assert regular_user.role_id != powerful.id
+        db.refresh(target)
+        assert target.role_id != powerful.id
 
     def test_non_owner_cannot_remove_powerful_role(
         self,
@@ -182,6 +187,40 @@ class TestAssignRoleEscalation:
         # Rolle unveraendert
         db.refresh(target)
         assert target.role_id == prev_role_id
+
+    def test_cannot_change_own_role(
+        self,
+        client: TestClient,
+        db: Session,
+        regular_user: User,
+        user_cookies: dict,
+    ):
+        """Self-Lockout-Schutz: ein User kann seine eigene Rolle nicht aendern
+        (sonst koennte ein Admin sich selbst zum User downgraden und sich
+        damit aussperren)."""
+        # Promote zu admin, damit er `users.permissions.manage` global hat.
+        _promote_to_admin_role(db, regular_user)
+        prev_role_id = regular_user.role_id
+        # Versuche, eigene Rolle auf None zu setzen
+        r1 = client.patch(
+            f"/api/admin/users/{regular_user.id}/role",
+            json={"role_id": None},
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert r1.status_code == 400
+        # Versuche, eigene Rolle auf user-Rolle zu setzen (Self-Downgrade)
+        user_role = db.query(Role).filter(Role.name == "user").first()
+        r2 = client.patch(
+            f"/api/admin/users/{regular_user.id}/role",
+            json={"role_id": user_role.id if user_role else 1},
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert r2.status_code == 400
+        # Sanity: Rolle unveraendert
+        db.refresh(regular_user)
+        assert regular_user.role_id == prev_role_id
 
     def test_owner_can_assign_any_role(
         self,
