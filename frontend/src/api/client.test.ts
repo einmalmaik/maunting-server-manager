@@ -184,6 +184,21 @@ describe('api client', () => {
       await expect(api('/test')).rejects.toThrow('bad gateway')
     })
 
+    it('should surface message + errors[] from structured detail', async () => {
+      fetchSpy.mockReturnValueOnce(
+        mockResponse(400, {
+          detail: {
+            message: 'Blueprint-Validierung fehlgeschlagen',
+            errors: ['meta.id: ungueltig', 'meta.category: ungueltig'],
+          },
+        }),
+      )
+
+      await expect(api('/test')).rejects.toThrow(
+        'Blueprint-Validierung fehlgeschlagen: meta.id: ungueltig; meta.category: ungueltig',
+      )
+    })
+
     it('should fallback to statusText when body is empty', async () => {
       fetchSpy.mockReturnValueOnce({
         ok: false,
