@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "minecraft_fabric",
+    "name": "Minecraft (Fabric)",
+    "category": "non_steam_game",
+    "author": "Maunting Studios",
+    "description": "Fabric-Server via itzg/minecraft-server. Leichter, moderner Mod-Loader. Fabric-Mods (.jar) in /data/mods ablegen — werden beim Start automatisch geladen."
+  },
+  "runtime": {
+    "image": "itzg/minecraft-server:latest",
+    "workdir": "/data",
+    "env": {
+      "EULA": "TRUE",
+      "TYPE": "FABRIC",
+      "VERSION": "LATEST",
+      "SERVER_PORT": "{GAME_PORT}",
+      "ENABLE_RCON": "true",
+      "RCON_PORT": "{RCON_PORT}"
+    },
+    "startup": "/start"
+  },
+  "ports": [
+    { "name": "game",  "protocol": "tcp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon",  "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "dockerOnly",
+    "steam": null,
+    "http": null
+  },
+  "mods": {
+    "supportsMods": true,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null
+  }
+}

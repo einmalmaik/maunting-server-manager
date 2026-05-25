@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "minecraft_vanilla",
+    "name": "Minecraft (Vanilla)",
+    "category": "non_steam_game",
+    "author": "Maunting Studios",
+    "description": "Vanilla Minecraft Java Edition Server via itzg/minecraft-server. EULA=TRUE bedeutet Zustimmung zu Mojangs EULA (https://www.minecraft.net/eula). VERSION=LATEST nimmt die aktuellste stable Release; fuer feste Version Blueprint herunterladen, VERSION anpassen, neu hochladen."
+  },
+  "runtime": {
+    "image": "itzg/minecraft-server:latest",
+    "workdir": "/data",
+    "env": {
+      "EULA": "TRUE",
+      "TYPE": "VANILLA",
+      "VERSION": "LATEST",
+      "SERVER_PORT": "{GAME_PORT}",
+      "ENABLE_RCON": "true",
+      "RCON_PORT": "{RCON_PORT}"
+    },
+    "startup": "/start"
+  },
+  "ports": [
+    { "name": "game",  "protocol": "tcp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon",  "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "dockerOnly",
+    "steam": null,
+    "http": null
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null
+  }
+}

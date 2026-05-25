@@ -142,6 +142,20 @@ _ALLOWED_STARTUP_TOKENS: frozenset[str] = frozenset({
     "MOD_ARG",
 })
 
+# Tokens, die in ``runtime.env``-Werten substituiert werden duerfen.
+# Bewusst kleiner als ``_ALLOWED_STARTUP_TOKENS``: KEIN ``INSTALL_DIR`` (Container-
+# Pfad ist nichts, was als Env-Var Sinn macht), KEIN ``MOD_ARG`` (Argument-String,
+# nicht Env-Wert) und KEIN ``ENV.<KEY>`` (waere zirkular). Nur Port-Werte —
+# Use-Case: Images wie ``itzg/minecraft-server`` lesen ``SERVER_PORT`` aus der
+# Env. Damit kann der Host-Port in den Container weitergereicht werden.
+_ALLOWED_ENV_VALUE_TOKENS: frozenset[str] = frozenset({
+    "GAME_PORT",
+    "QUERY_PORT",
+    "RCON_PORT",
+    "VOICE_PORT",
+    "WEB_PORT",
+})
+
 _ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
@@ -224,12 +238,39 @@ class BlueprintRuntime(BaseModel):
     @field_validator("env")
     @classmethod
     def _check_env(cls, v: dict[str, str]) -> dict[str, str]:
-        for key in v.keys():
+        for key, value in v.items():
             if not _ENV_KEY_RE.match(key):
                 raise ValueError(
                     f"runtime.env-Key '{key}' ist ungueltig "
                     "(erlaubt: ^[A-Z][A-Z0-9_]*$)."
                 )
+            # Shell-Substitutionszeichen auch in Env-Werten ausschliessen.
+            # ``docker run -e KEY=VALUE`` uebergibt das ohne Shell-Auswertung,
+            # aber Defense-in-Depth fuer den Fall, dass ein Konsument den Wert
+            # je in ein Shell-Skript einbaut.
+            for seq in _FORBIDDEN_STARTUP_SEQ:
+                if seq in value:
+                    raise ValueError(
+                        f"runtime.env['{key}'] enthaelt verbotene Shell-Sequenz '{seq}'."
+                    )
+            for ch in _FORBIDDEN_STARTUP_CHARS:
+                if ch in value:
+                    raise ValueError(
+                        f"runtime.env['{key}'] enthaelt verbotenes Shell-Sonderzeichen '{ch}'."
+                    )
+            # Token-Whitelist fuer Env-Werte. Nur Port-Tokens — siehe
+            # ``_ALLOWED_ENV_VALUE_TOKENS``.
+            for match in _TOKEN_FIND_RE.finditer(value):
+                token = match.group(1)
+                if not _ALLOWED_STARTUP_TOKEN_RE.match(token):
+                    raise ValueError(
+                        f"runtime.env['{key}']: Token '{{{token}}}' hat unzulaessige Syntax."
+                    )
+                if token not in _ALLOWED_ENV_VALUE_TOKENS:
+                    raise ValueError(
+                        f"runtime.env['{key}']: Token '{{{token}}}' nicht erlaubt "
+                        f"(erlaubt in Env-Werten: {sorted(_ALLOWED_ENV_VALUE_TOKENS)})."
+                    )
         return v
 
     @field_validator("startup")

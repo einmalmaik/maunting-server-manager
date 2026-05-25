@@ -22,10 +22,14 @@ from .schema import (
     Blueprint,
     BlueprintModInjection,
     BlueprintValidationError,
+    _ALLOWED_ENV_VALUE_TOKENS,
 )
 
 
 _TOKEN_RE = re.compile(r"\{([A-Z][A-Z0-9_]*(?:\.[A-Z0-9_]+)?)\}")
+
+# Reiner Port-Token-Regex (kein ``ENV.X``). Wird fuer env-Wert-Substitution genutzt.
+_PORT_TOKEN_RE = re.compile(r"\{([A-Z][A-Z0-9_]*)\}")
 
 
 def build_mod_arg(blueprint: Blueprint, active_mod_ids: list[str]) -> str:
@@ -50,6 +54,42 @@ def build_mod_arg(blueprint: Blueprint, active_mod_ids: list[str]) -> str:
         # Schema schliesst das bereits aus, aber Defense-in-Depth.
         return ""
     return fmt.replace("{mods}", ";".join(active_mod_ids))
+
+
+def render_env_values(
+    env: Mapping[str, str],
+    *,
+    ports: Mapping[str, int | None],
+) -> dict[str, str]:
+    """Substituiert Port-Tokens in den Werten von ``runtime.env``.
+
+    Token-Whitelist: :data:`blueprints.schema._ALLOWED_ENV_VALUE_TOKENS`
+    (``GAME_PORT``, ``QUERY_PORT``, ``RCON_PORT``, ``VOICE_PORT``, ``WEB_PORT``).
+    Nicht-zugewiesene Ports werden zu leerem String — Konsumenten muessen damit
+    rechnen, dass z. B. ``RCON_PORT`` leer ist, wenn der Server keinen RCON-Port
+    hat. Tokens ausserhalb der Whitelist sind schon im Schema-Validator
+    abgewiesen, hier ist es Defense-in-Depth.
+    """
+    ports_map: dict[str, str] = {
+        "GAME_PORT": "" if not ports.get("game") else str(ports["game"]),
+        "QUERY_PORT": "" if not ports.get("query") else str(ports["query"]),
+        "RCON_PORT": "" if not ports.get("rcon") else str(ports["rcon"]),
+        "VOICE_PORT": "" if not ports.get("voice") else str(ports["voice"]),
+        "WEB_PORT": "" if not ports.get("web") else str(ports["web"]),
+    }
+
+    def _sub(match: re.Match[str]) -> str:
+        token = match.group(1)
+        if token not in _ALLOWED_ENV_VALUE_TOKENS:
+            raise BlueprintValidationError(
+                f"Env-Wert-Token '{{{token}}}' ist nicht in der Whitelist."
+            )
+        return ports_map.get(token, "")
+
+    out: dict[str, str] = {}
+    for key, value in env.items():
+        out[key] = _PORT_TOKEN_RE.sub(_sub, value)
+    return out
 
 
 def render_argv(

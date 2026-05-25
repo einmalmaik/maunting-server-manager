@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "hytale",
+    "name": "Hytale (Dedicated)",
+    "category": "non_steam_game",
+    "author": "Maunting Studios",
+    "description": "Hytale Dedicated Server (Closed Beta). Image: ghcr.io/natroutter/egg-hytale (Community-Build, Java 25 + Hytale-Downloader). Hinweis: Hytale hat (Stand 05/2026) kein offizielles Docker-Image. Erststart benoetigt OAuth-Device-Login per '/auth login device' in der Container-Konsole — das funktioniert erst, sobald die Server-Konsole interaktive Eingabe unterstuetzt. Port 5520/UDP (QUIC) ist Hypixels Standard. AOT-Cache wird per Startup-Flag aktiviert (siehe offizielles Manual)."
+  },
+  "runtime": {
+    "image": "ghcr.io/natroutter/egg-hytale:latest",
+    "workdir": "/data",
+    "env": {
+      "AUTH_MODE": "AUTHENTICATED",
+      "AUTOMATIC_UPDATE": "1",
+      "PATCHLINE": "release",
+      "ASSET_PACK": "Assets.zip",
+      "DISABLE_SENTRY": "1",
+      "ACCEPT_EARLY_PLUGINS": "0",
+      "LEVERAGE_AHEAD_OF_TIME_CACHE": "1"
+    },
+    "startup": "java -XX:AOTCache=HytaleServer.aot -jar HytaleServer.jar --assets Assets.zip --bind 0.0.0.0:{GAME_PORT}"
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" }
+  ],
+  "source": {
+    "type": "dockerOnly",
+    "steam": null,
+    "http": null
+  },
+  "mods": {
+    "supportsMods": true,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null
+  }
+}
