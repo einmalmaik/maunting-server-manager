@@ -4,6 +4,7 @@ import { Plus, Trash2, Shield, Mail, CheckCircle, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { rbacApi } from '@/api/rbac'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { useAuthStore } from '@/stores/authStore'
 import type { User } from '@/types'
@@ -75,7 +76,7 @@ export function Users() {
   }
 
   const handleDelete = async (userId: number) => {
-    if (!window.confirm(t('users.confirmDelete'))) return
+    if (!(await confirm({ message: t('users.confirmDelete'), danger: true, confirmText: t('common.delete') }))) return
     try {
       await api(`/admin/users/${userId}`, { method: 'DELETE' })
       await fetchAll()

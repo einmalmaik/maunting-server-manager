@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Plus, Shield, Trash2, Pencil, X } from 'lucide-react'
 import { rbacApi } from '@/api/rbac'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { PermissionCatalog, PermissionDef, Role } from '@/types/permissions'
 
@@ -247,7 +248,7 @@ export function Roles() {
   }
 
   const handleDelete = async (role: Role) => {
-    if (!window.confirm(t('roles.confirmDelete'))) return
+    if (!(await confirm({ message: t('roles.confirmDelete'), danger: true, confirmText: t('common.delete') }))) return
     try {
       await rbacApi.deleteRole(role.id)
       toast.success(t('roles.deleted'))

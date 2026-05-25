@@ -4,6 +4,7 @@ import { Plus, Trash2, Save, X } from 'lucide-react'
 import { api } from '@/api/client'
 import { rbacApi } from '@/api/rbac'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
 import type { User } from '@/types'
 import type { PermissionCatalog } from '@/types/permissions'
 
@@ -116,7 +117,7 @@ export function ServerPermissionsPanel({ serverId }: Props) {
   }
 
   const revoke = async (userId: number) => {
-    if (!window.confirm(t('serverPermissions.revokeConfirm'))) return
+    if (!(await confirm({ message: t('serverPermissions.revokeConfirm'), danger: true }))) return
     try {
       await rbacApi.revokeServerPermissions(userId, serverId)
       toast.success(t('serverPermissions.saved'))

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
 import { HardDrive, Plus, RotateCcw, Trash2, ArrowLeft, Settings } from 'lucide-react'
 
 interface Backup {
@@ -95,7 +96,7 @@ export function Backups() {
   }
 
   const restoreBackup = async (backupId: number) => {
-    if (!confirm(t('backups.confirmRestore'))) return
+    if (!(await confirm({ message: t('backups.confirmRestore') }))) return
     setActionLoading(`restore-${backupId}`)
     try {
       await api(`/backups/${serverId}/restore/${backupId}`, { method: 'POST' })
@@ -108,7 +109,7 @@ export function Backups() {
   }
 
   const deleteBackup = async (backupId: number) => {
-    if (!confirm(t('backups.confirmDelete'))) return
+    if (!(await confirm({ message: t('backups.confirmDelete'), danger: true, confirmText: t('common.delete') }))) return
     setActionLoading(`delete-${backupId}`)
     try {
       await api(`/backups/${serverId}/${backupId}`, { method: 'DELETE' })
