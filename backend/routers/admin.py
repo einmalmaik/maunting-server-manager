@@ -13,13 +13,63 @@ from dependencies import require_global, verify_csrf
 from services import AuthService, EmailService
 from services.email_verification_service import EmailVerificationService
 from services.permission_service import (
+    has_global_permission,
+    has_server_permission,
     list_user_server_permission_keys,
     set_user_server_permissions,
 )
 from services.permission_catalog import SYSTEM_ROLE_ADMIN, SYSTEM_ROLE_USER
-from services.role_service import get_role, get_role_by_name
+from services.role_service import (
+    get_role,
+    get_role_by_name,
+    role_permission_keys,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+def _ensure_no_global_escalation(
+    db: Session, actor: User, required_keys: list[str]
+) -> None:
+    """Non-Owner darf nur Aktionen ausloesen, die Permissions verlangen,
+    die er selbst global besitzt — sonst Eskalation."""
+    if actor.is_owner:
+        return
+    missing = sorted(
+        {k for k in required_keys if not has_global_permission(db, actor, k)}
+    )
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Du kannst nur Permissions vergeben/zuweisen, die du selbst "
+                f"besitzt. Fehlend: {missing}"
+            ),
+        )
+
+
+def _ensure_no_server_escalation(
+    db: Session,
+    actor: User,
+    server_id: int,
+    required_keys: list[str],
+) -> None:
+    """Non-Owner darf einem Sub-User auf einem Server nur die Server-Keys
+    delegieren, die er auf diesem Server selbst hat (per Rolle pauschal oder
+    via eigene Per-Server-Delegation)."""
+    if actor.is_owner:
+        return
+    missing = sorted(
+        {k for k in required_keys if not has_server_permission(db, actor, server_id, k)}
+    )
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Du kannst auf diesem Server nur Permissions delegieren, die "
+                f"du selbst besitzt. Fehlend: {missing}"
+            ),
+        )
 
 
 @router.get("/users", response_model=list[UserResponse])
@@ -77,7 +127,7 @@ def update_user(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_global("users.manage")),
+    actor: User = Depends(require_global("users.manage")),
     __: None = Depends(verify_csrf),
 ) -> dict:
     user = db.query(User).filter(User.id == user_id).first()
@@ -85,6 +135,17 @@ def delete_user(
         raise HTTPException(status_code=404, detail="User nicht gefunden")
     if user.is_owner:
         raise HTTPException(status_code=403, detail="Owner kann nicht gelöscht werden")
+    # Selbst-Loeschen verhindern — Account wuerde sofort wegbrechen, Session-
+    # Cookies wuerden ins Leere zeigen und der User koennte nicht mehr
+    # eingreifen, falls die Aktion versehentlich passiert.
+    if user.id == actor.id:
+        raise HTTPException(status_code=400, detail="Du kannst dich nicht selbst löschen")
+    # Eskalations-Schutz: Wer einen User loescht, dessen Rolle Keys haelt, die
+    # man selbst nicht hat, koennte indirekt Berechtigungen verschieben
+    # (z.B. ein Non-Owner-Admin loescht einen Admin). Nur Subset zulassen.
+    if user.role_id is not None:
+        target_keys = role_permission_keys(db, user.role_id)
+        _ensure_no_global_escalation(db, actor, target_keys)
     db.delete(user)
     db.commit()
     return {"message": "User gelöscht"}
@@ -151,6 +212,12 @@ def assign_role(
                 status_code=403,
                 detail="Nur Owner kann die admin-Rolle zuweisen",
             )
+        # Generalisiertes Eskalationsverbot: Actor muss alle Keys der
+        # Ziel-Rolle selbst global besitzen — sonst koennte er sich (oder
+        # andere) ueber eine Custom-Rolle hochziehen.
+        _ensure_no_global_escalation(
+            db, actor, role_permission_keys(db, role.id)
+        )
     user.role_id = req.role_id
     db.commit()
     db.refresh(user)
@@ -198,6 +265,11 @@ async def set_server_permissions(
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    # Non-Owner darf auf einem Server nur Keys delegieren, die er selbst auf
+    # diesem Server besitzt — sonst kann ein User mit nur
+    # `users.permissions.manage` (ohne eigene Server-Rechte) beliebige
+    # Server-Aktionen an andere weiterreichen.
+    _ensure_no_server_escalation(db, actor, server_id, req.permissions)
 
     had_any = (
         db.query(ServerPermission.id)
