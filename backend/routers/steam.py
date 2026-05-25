@@ -68,6 +68,7 @@ async def search_workshop_mods(
 async def get_popular_mods(
     server_id: int,
     limit: int = Query(20, ge=1, le=50, description="Anzahl der Mods"),
+    page: int = Query(1, ge=1, description="Seitennummer (Pagination)"),
     sort: str = Query("trending", description="Sortierung: trending | popular | newest | updated"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
@@ -100,6 +101,7 @@ async def get_popular_mods(
             limit=limit,
             required_tags=required_tags if required_tags else None,
             sort=sort,
+            page=page,
         )
         
         return [_mod_to_dict(mod) for mod in mods]

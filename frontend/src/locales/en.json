@@ -30,6 +30,8 @@
     "logs": "Logs",
     "noLogs": "No logs available yet.",
     "console": "Console",
+    "consoleClear": "Clear",
+    "consoleClearTitle": "Hide the current console output locally (server logs are preserved)",
     "consolePlaceholder": "Type command…",
     "gameLogs": "Game Logs",
     "install": "Install",
@@ -290,7 +292,8 @@
     "disable": "Disable",
     "installedTitle": "Installed Mods",
     "addById": "Add by Workshop ID",
-    "clearSearch": "Clear search"
+    "clearSearch": "Clear search",
+    "loadMore": "Load more"
   },
   "tabs": {
     "files": "Files",

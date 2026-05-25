@@ -30,6 +30,8 @@
     "logs": "Logs",
     "noLogs": "Noch keine Logs verfügbar.",
     "console": "Konsole",
+    "consoleClear": "Leeren",
+    "consoleClearTitle": "Aktuelle Konsole lokal ausblenden (Server-Logs bleiben erhalten)",
     "consolePlaceholder": "Befehl eingeben…",
     "gameLogs": "Game-Logs",
     "install": "Installieren",
@@ -290,7 +292,8 @@
     "removeFailed": "Entfernen fehlgeschlagen",
     "updateSettingFailed": "Einstellung fehlgeschlagen",
     "reorderFailed": "Neusortierung fehlgeschlagen",
-    "steamSearchError": "Steam-Suche fehlgeschlagen"
+    "steamSearchError": "Steam-Suche fehlgeschlagen",
+    "loadMore": "Mehr anzeigen"
   },
   "files": {
     "title": "Datei-Manager",

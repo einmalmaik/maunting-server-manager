@@ -508,7 +508,7 @@ export function FileManager({ serverId }: FileManagerProps) {
 
   const TreePanel = (
     <div
-      className={`msm-card overflow-hidden flex flex-col ${dragOver ? 'border-secondary' : ''}`}
+      className={`msm-card overflow-hidden flex flex-col h-full ${dragOver ? 'border-secondary' : ''}`}
       onDragOver={(e) => {
         e.preventDefault()
         setDragOver(true)
@@ -584,8 +584,9 @@ export function FileManager({ serverId }: FileManagerProps) {
         />
       </div>
 
-      {/* List body */}
-      <div className="flex-1 overflow-y-auto max-h-[60vh] md:max-h-[calc(100vh-380px)]">
+      {/* List body — flex-1 + min-h-0 laesst den Baum die gesamte Card-Hoehe
+          ausfuellen, statt nur auf Inhalt zu schrumpfen. */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {searchResults ? (
           <>
             {searchTruncated && (
@@ -681,11 +682,15 @@ export function FileManager({ serverId }: FileManagerProps) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        <div className={`lg:col-span-4 xl:col-span-3 ${drawerOpen ? '' : 'hidden md:block'}`}>{TreePanel}</div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:min-h-[calc(100vh-260px)]">
+        <div
+          className={`lg:col-span-4 xl:col-span-3 min-h-[60vh] lg:min-h-0 ${drawerOpen ? '' : 'hidden md:block'}`}
+        >
+          {TreePanel}
+        </div>
 
         {/* Editor */}
-        <div className="lg:col-span-8 xl:col-span-9 msm-card overflow-hidden flex flex-col">
+        <div className="lg:col-span-8 xl:col-span-9 msm-card overflow-hidden flex flex-col h-full">
           <div className="px-4 py-2 border-b border-outline flex items-center justify-between gap-3 min-h-[44px]">
             <p className="font-mono text-xs text-on-surface-variant truncate">
               {selectedFile || t('files.selectFile')}
