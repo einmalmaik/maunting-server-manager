@@ -16,9 +16,22 @@ function extractErrorMessage(detail: unknown): string | null {
   }
   if (typeof detail === 'object') {
     const obj = detail as Record<string, unknown>
-    if (typeof obj.message === 'string' && obj.message) return obj.message
-    if (typeof obj.error === 'string' && obj.error) return obj.error
-    if (typeof obj.detail === 'string' && obj.detail) return obj.detail
+    // Falls das Backend strukturierte Validierungsfehler liefert (z. B. unter
+    // {message, errors[]} wie der Blueprint-Importer), die Detail-Liste mit
+    // anhaengen, damit der Nutzer sieht, welche Felder konkret kaputt sind.
+    const errorsList = Array.isArray(obj.errors)
+      ? (obj.errors as unknown[]).map((e) => String(e)).filter(Boolean)
+      : []
+    const baseMessage =
+      (typeof obj.message === 'string' && obj.message) ||
+      (typeof obj.error === 'string' && obj.error) ||
+      (typeof obj.detail === 'string' && obj.detail) ||
+      null
+    if (baseMessage && errorsList.length) {
+      return `${baseMessage}: ${errorsList.join('; ')}`
+    }
+    if (baseMessage) return baseMessage
+    if (errorsList.length) return errorsList.join('; ')
     return null
   }
   return String(detail)
