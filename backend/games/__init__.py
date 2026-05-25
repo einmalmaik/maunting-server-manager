@@ -4,7 +4,6 @@ from .base import (
     ServerStatus,
     _append_console_log,
     container_name_for,
-    query_a2s_info,
     run_steamcmd_install,
     run_steamcmd_workshop_download,
 )
@@ -24,15 +23,35 @@ def get_plugin(game_type: str) -> GamePlugin | None:
     return None
 
 
+def list_game_info() -> list[dict]:
+    """Liefert die UI-Liste der unterstuetzten Spiele dynamisch aus den Plugins.
+
+    KISS: ein flaches dict pro Spiel, identisch zu dem, was das alte
+    hartcodierte `/api/system/games` lieferte, plus das neue
+    `supports_steam_workshop`-Flag. Frontend liest beides direkt.
+    """
+    out: list[dict] = []
+    for game_id, plugin_cls in PLUGINS.items():
+        plugin = plugin_cls()
+        out.append({
+            "id": game_id,
+            "name": plugin.game_name,
+            "platform": "linux",
+            "mod_support": bool(plugin.supports_mods),
+            "supports_steam_workshop": bool(plugin.supports_steam_workshop),
+        })
+    return out
+
+
 __all__ = [
     "GamePlugin",
     "ServerStatus",
     "ConfigField",
     "get_plugin",
+    "list_game_info",
     "PLUGINS",
     "_append_console_log",
     "container_name_for",
-    "query_a2s_info",
     "run_steamcmd_install",
     "run_steamcmd_workshop_download",
 ]

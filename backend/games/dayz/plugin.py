@@ -32,6 +32,7 @@ class DayZPlugin(GamePlugin):
     game_id = "dayz"
     game_name = "DayZ"
     supports_mods = True
+    supports_steam_workshop = True
 
     APP_ID = "223350"
     WORKSHOP_ID = "221100"

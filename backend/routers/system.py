@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from config import settings
 from dependencies import get_current_user, require_global
+from games import list_game_info
 from models import User
 from services import network_interfaces_service
 
@@ -56,21 +57,14 @@ async def system_resources(user: User = Depends(require_global("system.view"))) 
 
 @router.get("/games")
 def supported_games(user: User = Depends(get_current_user)) -> list[dict]:
-    # Wird später dynamisch aus dem Plugin-System geladen
-    return [
-        {
-            "id": "conan_exiles_ue5",
-            "name": "Conan Exiles (UE5)",
-            "platform": "linux",
-            "mod_support": True,
-        },
-        {
-            "id": "dayz",
-            "name": "DayZ",
-            "platform": "linux",
-            "mod_support": True,
-        },
-    ]
+    """Dynamische Plugin-Liste inkl. Capability-Flags.
+
+    `mod_support` und `supports_steam_workshop` kommen direkt vom Plugin und
+    sind die Quelle der Wahrheit fuer die UI-Sichtbarkeit (z.B. ob der
+    Mod-Manager-Tab im Server-Detail erscheint). Backend-Routen bleiben
+    zusaetzlich Defensiv-Layer (`require_server_permission` + Plugin-Check).
+    """
+    return list_game_info()
 
 
 @router.get("/interfaces")

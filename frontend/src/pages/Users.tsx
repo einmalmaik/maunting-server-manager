@@ -7,7 +7,8 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { useAuthStore } from '@/stores/authStore'
-import type { User } from '@/types'
+import { ServerPermissionsPanel } from '@/components/ServerPermissionsPanel'
+import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
 
 export function Users() {
@@ -17,6 +18,8 @@ export function Users() {
   const canManagePermissions = useHasPermission('users.permissions.manage')
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
+  const [servers, setServers] = useState<Server[]>([])
+  const [permServerId, setPermServerId] = useState<number | ''>('')
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [createForm, setCreateForm] = useState({
@@ -30,12 +33,17 @@ export function Users() {
 
   const fetchAll = async () => {
     try {
-      const [u, r] = await Promise.all([
+      const [u, r, s] = await Promise.all([
         api<User[]>('/admin/users'),
         rbacApi.listRoles().catch(() => [] as Role[]),
+        canManagePermissions ? api<Server[]>('/servers').catch(() => [] as Server[]) : Promise.resolve([] as Server[]),
       ])
       setUsers(u)
       setRoles(r)
+      setServers(s)
+      if (canManagePermissions && s.length > 0 && permServerId === '') {
+        setPermServerId(s[0].id)
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
@@ -210,6 +218,41 @@ export function Users() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Server-Berechtigungen verwalten (verschoben aus ServerDetail).
+          Quelle der Wahrheit bleibt das Backend; UI ist nur Convenience. */}
+      {canManagePermissions && servers.length > 0 && (
+        <div className="msm-card p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="font-headline text-body-lg text-primary">{t('serverPermissions.adminTitle')}</h3>
+              <p className="font-body-md text-sm text-on-surface-variant mt-1">{t('serverPermissions.adminSubtitle')}</p>
+            </div>
+            <div>
+              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
+                {t('serverPermissions.selectServer')}
+              </label>
+              <select
+                value={permServerId === '' ? '' : String(permServerId)}
+                onChange={(e) => setPermServerId(e.target.value ? Number(e.target.value) : '')}
+                className="msm-input text-sm"
+              >
+                <option value="">{t('serverPermissions.selectServerPlaceholder')}</option>
+                {servers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {typeof permServerId === 'number' && (
+            <div className="border-t border-outline-variant pt-4">
+              <ServerPermissionsPanel serverId={permServerId} />
+            </div>
+          )}
         </div>
       )}
 

@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
-import { HardDrive, Plus, RotateCcw, Trash2, ArrowLeft, Settings } from 'lucide-react'
+import { HardDrive, Plus, RotateCcw, Trash2, Settings } from 'lucide-react'
 
 interface Backup {
   id: number
@@ -32,11 +31,12 @@ const INTERVAL_OPTIONS = [
   { value: 720, label: 'Monatlich' },
 ]
 
-export function Backups() {
+interface BackupsProps {
+  serverId: number
+}
+
+export function Backups({ serverId }: BackupsProps) {
   const { t } = useTranslation()
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const serverId = parseInt(id || '0')
   const [backups, setBackups] = useState<Backup[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -142,17 +142,6 @@ export function Backups() {
     try { return new Date(iso).toLocaleString() } catch { return iso }
   }
 
-  if (!serverId) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="font-headline text-headline-sm text-primary">{t('nav.backups')}</h1>
-          <p className="font-body-md text-body-md text-on-surface-variant mt-1">{t('backups.selectServer')}</p>
-        </div>
-      </div>
-    )
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -163,20 +152,9 @@ export function Backups() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button
-            className="p-2 rounded-md border border-outline bg-surface-container-highest hover:bg-surface-container text-on-surface transition-colors"
-            onClick={() => navigate(`/servers/${serverId}`)}
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div>
-            <h1 className="font-headline text-headline-sm text-primary">{t('nav.backups')}</h1>
-            <p className="font-body-md text-body-md text-on-surface-variant mt-1">{t('backups.subtitle')}</p>
-          </div>
-        </div>
+      {/* Header (Tab-Body) */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="font-body-md text-body-md text-on-surface-variant">{t('backups.subtitle')}</p>
         <div className="flex gap-2">
           <button
             onClick={() => setShowSettings(!showSettings)}

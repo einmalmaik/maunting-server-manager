@@ -421,7 +421,6 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
             "ram_mb": None,
             "disk_mb": disk_used,
             "uptime_seconds": None,
-            "players_online": None,
             "cpu_limit_percent": server.cpu_limit_percent,
             "ram_limit_mb": server.ram_limit_mb,
             "disk_limit_gb": server.disk_limit_gb,
@@ -445,7 +444,6 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
         # gesetztes disk_limit ein Used-Wert angezeigt wird.
         "disk_mb": plugin_status.disk_mb if plugin_status.disk_mb is not None else disk_used,
         "uptime_seconds": plugin_status.uptime_seconds,
-        "players_online": plugin_status.players_online,
         "cpu_limit_percent": server.cpu_limit_percent,
         "ram_limit_mb": server.ram_limit_mb,
         "disk_limit_gb": server.disk_limit_gb,

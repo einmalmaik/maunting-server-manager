@@ -38,6 +38,7 @@ export interface GameInfo {
   name: string
   platform: string
   mod_support: boolean
+  supports_steam_workshop: boolean
 }
 
 export interface VersionInfo {
