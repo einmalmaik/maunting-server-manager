@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import i18n from '@/i18n'
 import { api } from './client'
+
+// Locking the language guarantees the test does not silently break, wenn der
+// LanguageDetector im jsdom-Env eine andere Sprache als Fallback waehlt.
+beforeEach(async () => {
+  await i18n.changeLanguage('en')
+})
 
 describe('api client', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>
@@ -125,12 +132,14 @@ describe('api client', () => {
       expect(fetchSpy.mock.calls[2][0]).toBe('/api/test')
     })
 
-    it('should throw SESSION_EXPIRED when refresh fails', async () => {
+    it('should throw localized SESSION_EXPIRED message when refresh fails', async () => {
       fetchSpy
         .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
         .mockReturnValueOnce(mockResponse(401, { detail: 'Invalid refresh' }))
 
-      await expect(api('/test')).rejects.toThrow('SESSION_EXPIRED')
+      await expect(api('/test')).rejects.toThrow(
+        i18n.t('errors.SESSION_EXPIRED'),
+      )
     })
 
     it('should NOT refresh on /auth/login 401', async () => {
@@ -149,10 +158,10 @@ describe('api client', () => {
   })
 
   describe('rate limiting', () => {
-    it('should throw RATE_LIMITED on 429', async () => {
+    it('should throw localized RATE_LIMITED message on 429', async () => {
       fetchSpy.mockReturnValueOnce(mockResponse(429, { detail: 'Too many requests' }))
 
-      await expect(api('/test')).rejects.toThrow('RATE_LIMITED')
+      await expect(api('/test')).rejects.toThrow(i18n.t('errors.RATE_LIMITED'))
     })
   })
 
