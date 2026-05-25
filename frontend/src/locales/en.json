@@ -8,7 +8,51 @@
     "users": "Users",
     "roles": "Roles",
     "settings": "Settings",
+    "docs": "Help",
     "logout": "Logout"
+  },
+  "docs": {
+    "pageTitle": "Blueprint Documentation",
+    "pageSubtitle": "How to define your own server types",
+    "downloadTemplate": "Download Blueprint Template",
+    "sections": {
+      "intro": {
+        "title": "What is a Blueprint?",
+        "body": "A Blueprint is a pure JSON definition for a server type — not a single server instance. It declares the Docker image, port roles, startup template, source strategy (Steam/HTTP/Docker-only/custom) and optional Steam Workshop support. Blueprints never contain scripts or hooks. They are validated strictly before they touch any container."
+      },
+      "location": {
+        "title": "Where do Blueprints live?",
+        "body": "Native Blueprints ship with the panel (read-only, in the repository). Community Blueprints live under /opt/msm/blueprints/community/ and survive panel updates. Filename must follow <id>.blueprint.json and match meta.id exactly."
+      },
+      "schema": {
+        "title": "JSON Schema",
+        "body": "Every Blueprint contains the same four top-level objects: meta (id/name/category/author/description), runtime (Docker image + startup template + env), ports (list of role/protocol entries) and source (steam/http/dockerOnly/custom). The optional mods object enables the Steam Workshop UI and tells the panel how to inject mods (none/startupArg/file)."
+      },
+      "runtime": {
+        "title": "Runtime & startup template",
+        "body": "runtime.startup is an argv template. The renderer tokenizes the string FIRST (shlex.split), then substitutes whitelisted tokens like {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {INSTALL_DIR}, {MOD_ARG} and {ENV.MY_VAR}. Shell substitution ($, backticks, $(...) and ${...}) is rejected at validation time. Mod IDs containing semicolons can never spawn new argv elements — they stay literal arguments."
+      },
+      "ports": {
+        "title": "Ports",
+        "body": "Blueprints only declare port ROLES (game/query/rcon/voice/web/custom) and a protocol (tcp/udp). Actual port numbers are chosen when a server is created — the UI renders one input per declared role."
+      },
+      "source": {
+        "title": "Source (where the server data comes from)",
+        "body": "Pick one strategy: steam (with appId, platform, compatibility), http (https-only URL plus optional sha256), dockerOnly (the image already contains the server) or custom (manual install)."
+      },
+      "httpSecurity": {
+        "title": "HTTP source security",
+        "body": "HTTP downloads are HTTPS-only and stream the archive into the install directory (5 GiB hard cap). The downloader rejects redirects to private/loopback IPs (SSRF guard), refuses symlink/hardlink members, validates every member path against the install directory (Zip-Slip guard), and enforces a 10 GiB decompressed cap with a 1:100 per-member ratio (Zip-/Tar-Bomb guard). Set source.http.sha256 to enforce content integrity (recommended for any external download)."
+      },
+      "mods": {
+        "title": "Mods & Steam Workshop",
+        "body": "supportsSteamWorkshop=true unlocks the Workshop UI and requires workshopAppId. modInjection picks how the panel passes mods to the server: none (off), startupArg (writes modStartupArgumentFormat into argv) or file (writes the workshop modlist into modListFilePath, validated against install_dir so it can never escape)."
+      },
+      "import": {
+        "title": "Importing a Blueprint",
+        "body": "Owners (or anyone with panel.settings.write) can POST a Blueprint to /api/blueprints/import. The JSON is validated against the same schema as native Blueprints. Native IDs are never overwritten — try a different meta.id. Once imported, the Blueprint appears immediately in the Create-Server dropdown."
+      }
+    }
   },
   "servers": {
     "subtitle": "Manage your game servers",

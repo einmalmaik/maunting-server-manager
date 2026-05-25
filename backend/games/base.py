@@ -28,6 +28,8 @@ from typing import Any
 from services import docker_service
 from services.docker_service import PortPublish, VolumeBind
 
+from blueprints.schema import Blueprint, BlueprintModInjection
+
 
 def _require_bind_ip(server) -> str:
     """Liefert ``server.public_bind_ip`` oder wirft RuntimeError.
@@ -313,6 +315,84 @@ def run_steamcmd_workshop_download(
     return result
 
 
+# ── Mod-Helfer (Blueprint-getrieben) ───────────────────────────────────────
+
+
+def _query_active_mods(server_id: int) -> list:
+    """Liest aktive Mods (``enabled=True``) in ``load_order``-Reihenfolge.
+
+    Eine frische DB-Session, weil die Request-Session bei Background-Threads
+    laengst geschlossen sein kann. Wir geben ORM-Objekte zurueck, damit der
+    Caller auch ``workshop_id``, ``name`` etc. lesen kann.
+    """
+    from database import SessionLocal
+    from models import Mod
+
+    db = SessionLocal()
+    try:
+        return (
+            db.query(Mod)
+            .filter(Mod.server_id == server_id, Mod.enabled == True)  # noqa: E712
+            .order_by(Mod.load_order.asc())
+            .all()
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Active-Mods-Abfrage fuer Server %s fehlgeschlagen: %s", server_id, exc)
+        return []
+    finally:
+        db.close()
+
+
+def active_mod_ids(server) -> list[str]:
+    """Liefert Workshop-IDs aller aktiven Mods in Lade-Reihenfolge."""
+    return [m.workshop_id for m in _query_active_mods(server.id)]
+
+
+def write_workshop_modlist(server, relative_path: str, lines: list[str]) -> None:
+    """Schreibt eine Workshop-Modliste in eine sichere Datei unter ``install_dir``.
+
+    Sicherheits-Invarianten:
+    - ``relative_path`` MUSS relativ sein und darf nach ``realpath``-Aufloesung
+      nicht aus ``install_dir`` ausbrechen (Symlink-Escape-Schutz).
+    - Bei jedem Fehler wird in das Console-Log geschrieben, NICHT geraised —
+      sonst wuerden Mod-Mutationen im Router crashen.
+    """
+    install_dir = getattr(server, "install_dir", None) or ""
+    if not install_dir:
+        _append_console_log(server.id, "[MSM] Modliste: kein install_dir gesetzt\n")
+        return
+    if not relative_path or relative_path.startswith("/") or "\x00" in relative_path:
+        _append_console_log(server.id, "[MSM] Modliste: unsicherer Pfad abgelehnt\n")
+        return
+    if any(part == ".." for part in relative_path.split("/")):
+        _append_console_log(server.id, "[MSM] Modliste: Pfad enthaelt '..'\n")
+        return
+
+    try:
+        install_real = os.path.realpath(install_dir)
+        target = os.path.realpath(os.path.join(install_real, relative_path))
+    except OSError as exc:
+        _append_console_log(server.id, f"[MSM] Modliste: realpath fehlgeschlagen: {exc}\n")
+        return
+
+    rel = os.path.relpath(target, install_real)
+    if rel.startswith("..") or os.path.isabs(rel):
+        _append_console_log(
+            server.id,
+            f"[MSM] Modliste: Pfad {relative_path} verlaesst install_dir — abgelehnt\n",
+        )
+        return
+
+    target_dir = os.path.dirname(target)
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            for line in lines:
+                f.write(f"{line}\n")
+    except OSError as exc:
+        _append_console_log(server.id, f"[MSM] Modliste: Schreiben fehlgeschlagen: {exc}\n")
+
+
 # ── Plugin-Basis ───────────────────────────────────────────────────────────
 
 
@@ -542,3 +622,43 @@ class GamePlugin(ABC):
         if self.supports_mods:
             return {"workshop_id": None, "dependency_resolution": False, "required_tags": []}
         return None
+
+    # ─ Blueprint-Hook ────────────────────────────────────────────────────
+
+    def get_blueprint(self) -> Blueprint | None:
+        """Liefert die Blueprint, aus der dieses Plugin seine Metadaten zieht.
+
+        Native Plugins ueberschreiben dies und laden ihre
+        ``backend/blueprints/native/<id>.blueprint.json``. Plugins ohne
+        Blueprint (z. B. rein generischer ``BlueprintPlugin``-Wrapper laesst
+        ``self._blueprint`` setzen) muessen dies konsistent ausliefern.
+        """
+        return None
+
+    def format_modlist_lines(self, server, mods: list) -> list[str]:
+        """Wandelt aktive Mod-Rows in eine Liste von Zeilen fuer ``modlist.txt``.
+
+        Default: eine Workshop-ID pro Zeile. Plugins mit game-spezifischem
+        Datei-Format (z. B. Conan, das pak-Dateinamen erwartet) ueberschreiben.
+        """
+        return [m.workshop_id for m in mods]
+
+    def update_modlist(self, server) -> None:
+        """Schreibt die Workshop-Modliste, falls die Blueprint ``file``-Injection nutzt.
+
+        Sicherheits-Invariante: Der finale Pfad muss innerhalb des
+        ``install_dir`` des Servers liegen. Symlink-Escape per ``realpath``
+        ausgeschlossen.
+        """
+        blueprint = self.get_blueprint()
+        if blueprint is None:
+            return
+        bp_mods = blueprint.effective_mods()
+        if not bp_mods.supportsSteamWorkshop:
+            return
+        if bp_mods.modInjection != BlueprintModInjection.FILE:
+            return
+        rel_path = bp_mods.modListFilePath or ""
+        if not rel_path:
+            return
+        write_workshop_modlist(server, rel_path, self.format_modlist_lines(server, _query_active_mods(server.id)))

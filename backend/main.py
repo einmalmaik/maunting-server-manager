@@ -27,6 +27,7 @@ from routers import (
     files_router,
     roles_router,
     permissions_router,
+    blueprints_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -301,6 +302,7 @@ app.include_router(panel_settings_router)
 app.include_router(files_router)
 app.include_router(roles_router)
 app.include_router(permissions_router)
+app.include_router(blueprints_router)
 
 # Static Frontend (nur in Produktion)
 import os

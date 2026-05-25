@@ -8,7 +8,51 @@
     "users": "Benutzer",
     "roles": "Rollen",
     "settings": "Einstellungen",
+    "docs": "Hilfe",
     "logout": "Abmelden"
+  },
+  "docs": {
+    "pageTitle": "Blueprint-Dokumentation",
+    "pageSubtitle": "So definierst du eigene Server-Typen",
+    "downloadTemplate": "Blueprint-Template herunterladen",
+    "sections": {
+      "intro": {
+        "title": "Was ist eine Blueprint?",
+        "body": "Eine Blueprint ist eine reine JSON-Definition fuer einen Server-Typ — keine einzelne Server-Instanz. Sie beschreibt das Docker-Image, Port-Rollen, das Startup-Template, die Source-Strategie (Steam/HTTP/Docker-only/custom) und optional Steam-Workshop-Support. Blueprints enthalten niemals Skripte oder Hooks. Sie werden strikt validiert, bevor sie einen Container beruehren."
+      },
+      "location": {
+        "title": "Wo liegen Blueprints?",
+        "body": "Native Blueprints werden mit dem Panel ausgeliefert (read-only, im Repository). Community-Blueprints liegen unter /opt/msm/blueprints/community/ und ueberleben Panel-Updates. Dateinamen folgen dem Schema <id>.blueprint.json und muessen exakt zu meta.id passen."
+      },
+      "schema": {
+        "title": "JSON-Schema",
+        "body": "Jede Blueprint enthaelt dieselben vier Top-Level-Objekte: meta (id/name/category/author/description), runtime (Docker-Image + Startup-Template + env), ports (Liste aus Rolle/Protokoll) und source (steam/http/dockerOnly/custom). Das optionale mods-Objekt aktiviert die Workshop-UI und entscheidet, wie die Mods injiziert werden (none/startupArg/file)."
+      },
+      "runtime": {
+        "title": "Runtime & Startup-Template",
+        "body": "runtime.startup ist ein argv-Template. Der Renderer tokenisiert den String ZUERST (shlex.split) und substituiert dann nur whitelisted Tokens wie {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {INSTALL_DIR}, {MOD_ARG} und {ENV.MEINE_VAR}. Shell-Substitution ($, Backticks, $(...) und ${...}) wird bereits bei der Validierung abgelehnt. Mod-IDs mit Semikolon koennen niemals ein neues argv-Element erzeugen — sie bleiben literal."
+      },
+      "ports": {
+        "title": "Ports",
+        "body": "Blueprints deklarieren nur Port-ROLLEN (game/query/rcon/voice/web/custom) und ein Protokoll (tcp/udp). Konkrete Portnummern werden beim Server-Erstellen gesetzt — die UI rendert pro deklarierter Rolle ein Eingabefeld."
+      },
+      "source": {
+        "title": "Source (woher kommen die Server-Daten?)",
+        "body": "Waehle eine Strategie: steam (mit appId, platform, compatibility), http (https-only URL plus optional sha256), dockerOnly (das Image bringt den Server schon mit) oder custom (manueller Install)."
+      },
+      "httpSecurity": {
+        "title": "HTTP-Source-Sicherheit",
+        "body": "HTTP-Downloads sind HTTPS-only und werden direkt ins Install-Dir gestreamt (5 GiB Hard-Cap). Der Downloader lehnt Redirects auf private/Loopback-IPs ab (SSRF-Schutz), verwirft Symlink/Hardlink-Members, validiert jeden Member-Pfad gegen das Install-Dir (Zip-Slip-Schutz) und erzwingt 10 GiB Decompressed-Cap mit 1:100-Ratio pro Member (Zip-/Tar-Bomb-Schutz). Setze source.http.sha256, um die Datei vor dem Entpacken auf Integritaet zu pruefen (empfohlen fuer jeden externen Download)."
+      },
+      "mods": {
+        "title": "Mods & Steam Workshop",
+        "body": "supportsSteamWorkshop=true schaltet die Workshop-UI frei und verlangt workshopAppId. modInjection entscheidet, wie das Panel Mods uebergibt: none (aus), startupArg (modStartupArgumentFormat landet im argv) oder file (Workshop-Modliste wird nach modListFilePath geschrieben, gegen install_dir validiert — keine Escape-Pfade moeglich)."
+      },
+      "import": {
+        "title": "Blueprint importieren",
+        "body": "Owner (oder Accounts mit panel.settings.write) koennen eine Blueprint via POST /api/blueprints/import hochladen. Das JSON wird gegen dasselbe Schema wie native Blueprints geprueft. Native IDs werden niemals ueberschrieben — bitte andere meta.id waehlen. Nach dem Import taucht die Blueprint sofort in der Server-Erstellen-Auswahl auf."
+      }
+    }
   },
   "servers": {
     "subtitle": "Verwalte deine Game-Server",

@@ -33,12 +33,39 @@ export interface Server {
   created_at: string
 }
 
+export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'custom'
+export type BlueprintPortProtocol = 'tcp' | 'udp'
+
+export interface BlueprintPortDef {
+  name: BlueprintPortRole
+  protocol: BlueprintPortProtocol
+}
+
 export interface GameInfo {
   id: string
   name: string
   platform: string
+  category?: string
   mod_support: boolean
   supports_steam_workshop: boolean
+  ports?: BlueprintPortDef[]
+  source?: 'native' | 'community'
+}
+
+export interface BlueprintListEntry {
+  id: string
+  name: string
+  category: string
+  author: string | null
+  description: string | null
+  origin: 'native' | 'community'
+  version: number
+  image: string
+  source_type: 'steam' | 'http' | 'dockerOnly' | 'custom'
+  supports_mods: boolean
+  supports_steam_workshop: boolean
+  mod_injection: 'none' | 'startupArg' | 'file'
+  ports: BlueprintPortDef[]
 }
 
 export interface VersionInfo {

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "dayz",
+    "name": "DayZ",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "DayZ Linux Dedicated Server (App-ID 223350, Workshop 221100)."
+  },
+  "runtime": {
+    "image": "cm2network/steamcmd:root",
+    "workdir": "/data",
+    "env": {},
+    "startup": "/data/DayZServer -port={GAME_PORT} {MOD_ARG}"
+  },
+  "ports": [
+    { "name": "game",  "protocol": "udp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon",  "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "223350",
+      "platform": "linux",
+      "compatibility": "native"
+    }
+  },
+  "mods": {
+    "supportsMods": true,
+    "supportsSteamWorkshop": true,
+    "workshopAppId": "221100",
+    "modInjection": "startupArg",
+    "modStartupArgumentFormat": "-mod={mods};",
+    "modListFilePath": null
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "conan_exiles_ue5",
+    "name": "Conan Exiles (UE5)",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "Conan Exiles Enhanced (UE5) Dedicated Server (App-ID 443030, Workshop 440900)."
+  },
+  "runtime": {
+    "image": "cm2network/steamcmd:root",
+    "workdir": "/data",
+    "env": {},
+    "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT}"
+  },
+  "ports": [
+    { "name": "game",  "protocol": "udp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon",  "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "443030",
+      "platform": "linux",
+      "compatibility": "native"
+    }
+  },
+  "mods": {
+    "supportsMods": true,
+    "supportsSteamWorkshop": true,
+    "workshopAppId": "440900",
+    "modInjection": "file",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": "ConanSandbox/Mods/modlist.txt"
+  }
+}
