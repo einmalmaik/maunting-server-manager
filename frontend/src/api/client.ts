@@ -1,3 +1,5 @@
+import i18n from '@/i18n'
+
 const API_BASE = '/api'
 
 function getCsrfToken(): string | null {
@@ -90,14 +92,16 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
         headers: newHeaders,
       })
     } catch {
-      // Refresh fehlgeschlagen — Weiterleitung zum Login im Aufrufer
-      throw new Error('SESSION_EXPIRED')
+      // Refresh fehlgeschlagen — Weiterleitung zum Login im Aufrufer.
+      // Lokalisierte Meldung, damit der Caller die Fehlermeldung direkt
+      // anzeigen kann (kein doppelter `t()`-Aufruf noetig).
+      throw new Error(i18n.t('errors.SESSION_EXPIRED'))
     }
   }
 
   if (!res.ok) {
     if (res.status === 429) {
-      throw new Error('RATE_LIMITED')
+      throw new Error(i18n.t('errors.RATE_LIMITED'))
     }
     const text = await res.text()
     let message: string | null = null
