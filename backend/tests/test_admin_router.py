@@ -247,6 +247,86 @@ class TestAssignRoleEscalation:
         assert regular_user.role_id == powerful.id
 
 
+class TestCreateUserOwnerProtection:
+    """create_user_admin: nur der Owner darf is_owner=true setzen."""
+
+    def test_non_owner_admin_cannot_create_owner(
+        self,
+        client: TestClient,
+        db: Session,
+        regular_user: User,
+        user_cookies: dict,
+    ):
+        """Ein Admin (Non-Owner) mit users.manage darf KEINEN Owner-Account erstellen."""
+        _promote_to_admin_role(db, regular_user)
+        r = client.post(
+            "/api/admin/users",
+            json={
+                "username": "evil-owner",
+                "email": "evil@test.de",
+                "password": "EvilPass123!",
+                "is_owner": True,
+                "auto_verify": True,
+            },
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert r.status_code == 403
+        # Sicherheits-Invariante: es darf kein Owner-Account angelegt worden sein.
+        assert db.query(User).filter(User.username == "evil-owner").first() is None
+
+    def test_non_owner_admin_can_create_normal_user(
+        self,
+        client: TestClient,
+        db: Session,
+        regular_user: User,
+        user_cookies: dict,
+    ):
+        """Regression: ein Admin (Non-Owner) darf weiterhin normale User anlegen."""
+        _promote_to_admin_role(db, regular_user)
+        r = client.post(
+            "/api/admin/users",
+            json={
+                "username": "new-user",
+                "email": "new@test.de",
+                "password": "NewPass123!",
+                "is_owner": False,
+                "auto_verify": True,
+            },
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert r.status_code == 201
+        created = db.query(User).filter(User.username == "new-user").first()
+        assert created is not None
+        assert created.is_owner is False
+
+    def test_owner_can_create_owner(
+        self,
+        client: TestClient,
+        db: Session,
+        owner_user: User,
+        owner_cookies: dict,
+    ):
+        """Owner darf weitere Owner-Accounts erstellen (Bootstrap-Override)."""
+        r = client.post(
+            "/api/admin/users",
+            json={
+                "username": "second-owner",
+                "email": "second@test.de",
+                "password": "OwnerPass123!",
+                "is_owner": True,
+                "auto_verify": True,
+            },
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 201
+        created = db.query(User).filter(User.username == "second-owner").first()
+        assert created is not None
+        assert created.is_owner is True
+
+
 class TestDeleteUserProtection:
     """delete_user: Selbstloeschung und Eskalation verhindern."""
 

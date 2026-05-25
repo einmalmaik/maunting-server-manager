@@ -157,20 +157,26 @@ export function Users() {
               />
             </div>
             <div className="flex items-end gap-6">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <div className={`relative w-10 h-6 rounded-full transition-colors ${createForm.is_owner ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
-                  <input
-                    type="checkbox"
-                    checked={createForm.is_owner}
-                    onChange={(e) => setCreateForm({ ...createForm, is_owner: e.target.checked })}
-                    className="sr-only"
-                  />
-                  <span className={`absolute top-1 left-1 w-4 h-4 bg-on-surface rounded-full transition-transform ${createForm.is_owner ? 'translate-x-4 bg-on-secondary' : ''}`} />
-                </div>
-                <span className="font-body-md text-sm text-on-surface-variant">
-                  {t('users.isOwner')}
-                </span>
-              </label>
+              {/* Owner-Accounts darf ausschliesslich der Owner selbst anlegen.
+                  Backend lehnt is_owner=true fuer Non-Owner mit 403 ab; das UI
+                  spiegelt diese Invariante, damit Admins die Option nicht
+                  sehen und nicht versehentlich versuchen. */}
+              {currentUser?.is_owner && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <div className={`relative w-10 h-6 rounded-full transition-colors ${createForm.is_owner ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
+                    <input
+                      type="checkbox"
+                      checked={createForm.is_owner}
+                      onChange={(e) => setCreateForm({ ...createForm, is_owner: e.target.checked })}
+                      className="sr-only"
+                    />
+                    <span className={`absolute top-1 left-1 w-4 h-4 bg-on-surface rounded-full transition-transform ${createForm.is_owner ? 'translate-x-4 bg-on-secondary' : ''}`} />
+                  </div>
+                  <span className="font-body-md text-sm text-on-surface-variant">
+                    {t('users.isOwner')}
+                  </span>
+                </label>
+              )}
               <label className="flex items-center gap-2 cursor-pointer">
                 <div className={`relative w-10 h-6 rounded-full transition-colors ${createForm.auto_verify ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
                   <input
