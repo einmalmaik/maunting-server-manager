@@ -47,12 +47,16 @@ def update_user(
     user_id: int,
     req: UserUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_global("users.manage")),
+    actor: User = Depends(require_global("users.manage")),
     __: None = Depends(verify_csrf),
 ) -> User:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User nicht gefunden")
+    # Owner-Account ist hart geschuetzt — niemand ausser dem Owner selbst
+    # darf is_active, email oder 2FA des Owners aendern.
+    if user.is_owner and not actor.is_owner:
+        raise HTTPException(status_code=403, detail="Owner-Account kann nur vom Owner geaendert werden")
     if req.email is not None:
         user.email = req.email
     if req.is_active is not None:

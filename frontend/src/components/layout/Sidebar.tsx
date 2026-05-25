@@ -17,7 +17,11 @@ export function Sidebar() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
-  const canManageUsers = useHasPermission('users.read') || useHasPermission('users.manage')
+  // Hooks duerfen nicht hinter `||`-Short-Circuit verschwinden — daher beide
+  // Permissions getrennt aufrufen und erst danach booleisch verknuepfen.
+  const hasUsersRead = useHasPermission('users.read')
+  const hasUsersManage = useHasPermission('users.manage')
+  const canManageUsers = hasUsersRead || hasUsersManage
   const canManageRoles = useHasPermission('roles.manage')
 
   const handleLogout = async () => {
