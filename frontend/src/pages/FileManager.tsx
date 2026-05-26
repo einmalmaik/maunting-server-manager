@@ -14,6 +14,7 @@ import {
   File as FileIcon,
   Folder,
   FolderPlus,
+  PackageOpen,
   Pencil,
   Plus,
   RefreshCw,
@@ -402,9 +403,27 @@ export function FileManager({ serverId }: FileManagerProps) {
     }
   }
 
+  const isArchive = (name: string): boolean => {
+    const n = name.toLowerCase()
+    return n.endsWith('.zip') || n.endsWith('.tar.gz') || n.endsWith('.tgz') || n.endsWith('.tar.xz') || n.endsWith('.txz') || n.endsWith('.tar.bz2') || n.endsWith('.tbz2')
+  }
+
   const downloadEntry = (entry: FileEntry) => {
     const relPath = joinPath(currentPath, entry.name)
     window.open(`/api/files/${serverId}/download?path=${encodeURIComponent(relPath)}`, '_blank')
+  }
+
+  const handleExtract = async (entry: FileEntry) => {
+    const relPath = joinPath(currentPath, entry.name)
+    try {
+      await api(`/files/${serverId}/extract?path=${encodeURIComponent(relPath)}`, {
+        method: 'POST',
+      })
+      toast.success(t('files.extracted'))
+      void fetchEntries()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
   }
 
   // ── Rendering helpers ────────────────────────────────────────────────
@@ -743,6 +762,18 @@ export function FileManager({ serverId }: FileManagerProps) {
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
+          {!contextMenu.entry.is_dir && isArchive(contextMenu.entry.name) && (
+            <button
+              onClick={() => {
+                void handleExtract(contextMenu.entry)
+                setContextMenu(null)
+              }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-surface-container-highest inline-flex items-center gap-2"
+            >
+              <PackageOpen className="w-4 h-4" />
+              {t('files.extract')}
+            </button>
+          )}
           {!contextMenu.entry.is_dir && (
             <button
               onClick={() => {

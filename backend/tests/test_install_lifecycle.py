@@ -299,6 +299,132 @@ class TestPluginInstallCallback:
         shutil.rmtree(test_server.install_dir, ignore_errors=True)
 
 
+class TestManualUploadLifecycle:
+    def test_manual_upload_install_writes_readme_sets_status(self, db: Session, test_server: Server, tmp_path):
+        from games.blueprint_plugin import BlueprintPlugin
+        from blueprints.schema import Blueprint, BlueprintSourceType
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_manual", "name": "Test", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [],
+            "source": {
+                "type": "manualUpload",
+                "manual": {
+                    "requiredFiles": ["server.jar"],
+                    "instructions": "Upload server.jar",
+                },
+            },
+        })
+        plugin = BlueprintPlugin(bp)
+        test_server.status = "installing"
+        test_server.install_dir = str(tmp_path)
+        db.commit()
+
+        with patch("games.blueprint_plugin.finish_install") as mock_finish:
+            plugin.install(test_server)
+            import time
+            for _ in range(20):
+                if mock_finish.called:
+                    break
+                time.sleep(0.05)
+            assert mock_finish.called
+            args = mock_finish.call_args
+            assert args[0][1]["ok"] is True
+            assert args[0][1]["next_status"] == "awaiting_files"
+
+        readme = tmp_path / "MANUAL_INSTALL.md"
+        assert readme.exists()
+        assert "Upload server.jar" in readme.read_text(encoding="utf-8")
+
+    def test_manual_upload_existing_readme_not_overwritten(self, db: Session, test_server: Server, tmp_path):
+        from games.blueprint_plugin import BlueprintPlugin
+        from blueprints.schema import Blueprint
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_manual2", "name": "Test", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [],
+            "source": {
+                "type": "manualUpload",
+                "manual": {
+                    "requiredFiles": ["a.jar"],
+                    "instructions": "New instr",
+                },
+            },
+        })
+        plugin = BlueprintPlugin(bp)
+        test_server.install_dir = str(tmp_path)
+        existing = tmp_path / "MANUAL_INSTALL.md"
+        existing.write_text("User notes", encoding="utf-8")
+        db.commit()
+
+        plugin.install(test_server)
+        assert existing.read_text(encoding="utf-8") == "User notes"
+
+    def test_steam_requires_login_blocks_install_without_account(self, db: Session, test_server: Server):
+        from games.blueprint_plugin import BlueprintPlugin
+        from blueprints.schema import Blueprint
+        from services.steam_account_service import SteamAccountService
+
+        SteamAccountService.clear()
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_steam_login", "name": "Test", "category": "steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [],
+            "source": {
+                "type": "steam",
+                "steam": {"appId": "123", "platform": "linux", "compatibility": "native", "requiresLogin": True},
+            },
+        })
+        plugin = BlueprintPlugin(bp)
+        test_server.status = "installing"
+        db.commit()
+
+        result = plugin.install(test_server)
+        assert "error" in result
+        assert "Steam-Account" in result["error"]
+
+    def test_steam_requires_login_uses_account_when_configured(self, db: Session, test_server: Server, tmp_path):
+        from games.blueprint_plugin import BlueprintPlugin
+        from blueprints.schema import Blueprint
+        from services.steam_account_service import SteamAccountService
+
+        SteamAccountService.set("steamuser", "steampass")
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_steam_login_ok", "name": "Test", "category": "steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [],
+            "source": {
+                "type": "steam",
+                "steam": {"appId": "123", "platform": "linux", "compatibility": "native", "requiresLogin": True},
+            },
+        })
+        plugin = BlueprintPlugin(bp)
+        test_server.status = "installing"
+        test_server.install_dir = str(tmp_path)
+        db.commit()
+
+        with patch("games.blueprint_plugin.run_steamcmd_install") as mock_run, \
+             patch("games.blueprint_plugin.finish_install") as mock_finish:
+            mock_run.return_value = {"ok": True}
+            plugin.install(test_server)
+            import time
+            for _ in range(20):
+                if mock_finish.called:
+                    break
+                time.sleep(0.05)
+            assert mock_finish.called
+            call_kwargs = mock_run.call_args.kwargs
+            assert call_kwargs["use_authenticated_login"] is True
+
+        SteamAccountService.clear()
+
+
 class TestRestoreStopsContainer:
     """Restore-Endpoint stoppt Container, bevor er install_dir ersetzt."""
 

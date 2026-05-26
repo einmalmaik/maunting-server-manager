@@ -69,6 +69,7 @@ class BlueprintSourceType(str, Enum):
     HTTP = "http"
     DOCKER_ONLY = "dockerOnly"
     CUSTOM = "custom"
+    MANUAL_UPLOAD = "manualUpload"
 
 
 class BlueprintPortName(str, Enum):
@@ -322,6 +323,7 @@ class BlueprintSteamSource(BaseModel):
     appId: str
     platform: BlueprintSteamPlatform
     compatibility: BlueprintSteamCompatibility | None = None
+    requiresLogin: bool = False
 
     @field_validator("appId")
     @classmethod
@@ -386,29 +388,67 @@ class BlueprintHttpSource(BaseModel):
         return v
 
 
+class BlueprintManualSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requiredFiles: list[str] = Field(min_length=1, max_length=16)
+    instructions: str = Field(min_length=1, max_length=4096)
+    instructionsUrl: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("requiredFiles")
+    @classmethod
+    def _check_required_files(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        for p in v:
+            if not _is_safe_relative_path(p):
+                raise ValueError(
+                    f"source.manual.requiredFiles enthaelt unsicheren Pfad '{p}' "
+                    "(absolute/'..'-Pfade sind verboten)."
+                )
+            if p in seen:
+                raise ValueError(f"source.manual.requiredFiles: Duplikat '{p}'.")
+            seen.add(p)
+        return v
+
+    @field_validator("instructionsUrl")
+    @classmethod
+    def _check_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.startswith("https://"):
+            raise ValueError("source.manual.instructionsUrl muss mit 'https://' beginnen.")
+        return v
+
+
 class BlueprintSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: BlueprintSourceType
     steam: BlueprintSteamSource | None = None
     http: BlueprintHttpSource | None = None
+    manual: BlueprintManualSource | None = None
 
     @model_validator(mode="after")
     def _check_subobjects(self) -> "BlueprintSource":
         if self.type == BlueprintSourceType.STEAM:
             if self.steam is None:
                 raise ValueError("source.type=steam benoetigt source.steam.")
-            if self.http is not None:
-                raise ValueError("source.type=steam darf source.http nicht setzen.")
+            if self.http is not None or self.manual is not None:
+                raise ValueError("source.type=steam darf source.http/manual nicht setzen.")
         elif self.type == BlueprintSourceType.HTTP:
             if self.http is None:
                 raise ValueError("source.type=http benoetigt source.http.")
-            if self.steam is not None:
-                raise ValueError("source.type=http darf source.steam nicht setzen.")
-        else:  # dockerOnly / custom
+            if self.steam is not None or self.manual is not None:
+                raise ValueError("source.type=http darf source.steam/manual nicht setzen.")
+        elif self.type == BlueprintSourceType.MANUAL_UPLOAD:
+            if self.manual is None:
+                raise ValueError("source.type=manualUpload benoetigt source.manual.")
             if self.steam is not None or self.http is not None:
+                raise ValueError("source.type=manualUpload darf source.steam/http nicht setzen.")
+        else:  # dockerOnly / custom
+            if self.steam is not None or self.http is not None or self.manual is not None:
                 raise ValueError(
-                    f"source.type={self.type.value} darf weder source.steam noch source.http setzen."
+                    f"source.type={self.type.value} darf weder source.steam, source.http noch source.manual setzen."
                 )
         return self
 
@@ -584,8 +624,10 @@ EMPTY_TEMPLATE: dict[str, Any] = {
             "appId": "",
             "platform": "linux",
             "compatibility": "native",
+            "requiresLogin": False,
         },
         "http": None,
+        "manual": None,
     },
     "mods": {
         "supportsMods": False,

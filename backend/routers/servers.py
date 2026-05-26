@@ -1,6 +1,7 @@
 import asyncio
 import os
 import shutil
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -13,6 +14,7 @@ from models import Server, User
 from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
 from dependencies import get_current_user, require_global, require_server_permission, verify_csrf
 from services import permission_service
+from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
 from games import get_plugin
 from games.base import container_name_for
 from services import EmailService, docker_service
@@ -287,6 +289,29 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     }
 
 
+def _missing_required_files(install_dir: str, required_files: list[str]) -> list[str]:
+    """Prueft, ob alle requiredFiles als reguläre Dateien (keine Symlinks) vorhanden sind."""
+    base = Path(install_dir).resolve()
+    missing: list[str] = []
+    for p in required_files:
+        if not _is_safe_relative_path(p):
+            missing.append(p)
+            continue
+        target = base / p
+        # Path-Traversal via resolve pruefen (Symlinks werden dabei dereferenziert,
+        # aber der Existenz-Check zaehlt Symlinks selbst als fehlend).
+        try:
+            resolved = target.resolve(strict=False)
+            resolved.relative_to(base)
+        except (ValueError, RuntimeError):
+            missing.append(p)
+            continue
+        # Symlinks gelten nicht als vorhanden — Defense-in-Depth.
+        if target.is_symlink() or not target.is_file():
+            missing.append(p)
+    return missing
+
+
 @router.post("/{server_id}/start")
 async def start_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     require_server_permission(user, server_id, db, "server.start")
@@ -307,6 +332,23 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
                 "eine Public-IP zuweisen, bevor er gestartet wird."
             ),
         )
+
+    # NEU: Pre-Check fuer manualUpload — VOR Firewall-Regeln.
+    bp = plugin.get_blueprint()
+    if bp and bp.source.type == BlueprintSourceType.MANUAL_UPLOAD:
+        manual = bp.source.manual
+        assert manual is not None
+        missing = _missing_required_files(server.install_dir, manual.requiredFiles)
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Server kann nicht gestartet werden — folgende Dateien fehlen "
+                    f"im Server-Verzeichnis: {', '.join(missing)}. "
+                    "Bitte ueber den File Manager hochladen (Archive koennen per "
+                    "Rechtsklick → Entpacken ausgepackt werden)."
+                ),
+            )
 
     # Firewall-Regeln öffnen vor Container-Start.
     open_ports(server.name, server.game_port, server.query_port, server.rcon_port)

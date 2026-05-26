@@ -15,6 +15,8 @@ class PanelSettingsResponse(BaseModel):
     email_provider: str = "none"
     steam_api_key: str = ""
     steam_api_configured: bool = False
+    steam_account_username: str = ""
+    steam_account_configured: bool = False
 
 
 class PanelSettingsUpdate(BaseModel):
@@ -39,3 +41,8 @@ class ResendKeyRequest(BaseModel):
 
 class SteamApiKeyRequest(BaseModel):
     steam_api_key: str
+
+
+class SteamAccountRequest(BaseModel):
+    username: str
+    password: str

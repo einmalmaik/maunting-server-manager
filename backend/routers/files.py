@@ -22,7 +22,6 @@ import os
 import secrets
 import shutil
 import time
-import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
@@ -30,6 +29,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from blueprints.archive_extract import ArchiveExtractError, safe_extract_archive
 from database import get_db
 from models import Server, User
 from dependencies import get_current_user, verify_csrf, require_server_permission
@@ -706,35 +706,48 @@ def move_path(
     return {"message": "Verschoben", "from_path": body.from_path, "to_path": rel_target}
 
 
+_ALLOWED_EXTRACT_EXTS = (
+    ".zip",
+    ".tar.gz",
+    ".tgz",
+    ".tar.xz",
+    ".txz",
+    ".tar.bz2",
+    ".tbz2",
+)
+
+
+def _is_archive(name: str) -> bool:
+    n = name.lower()
+    return n.endswith(".zip") or any(n.endswith(ext) for ext in _ALLOWED_EXTRACT_EXTS)
+
+
 @router.post("/{server_id}/extract")
-def extract_zip(
+def extract_archive(
     server_id: int,
     path: str = Query(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Extract a zip archive in place."""
+    """Extract a zip or tar archive in place."""
     require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
     target = _safe_path(server.install_dir, path)
 
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="Archiv nicht gefunden")
-    if not target.name.lower().endswith(".zip"):
-        raise HTTPException(status_code=400, detail="Nur ZIP-Archive werden unterstuetzt")
+    if not _is_archive(target.name):
+        raise HTTPException(
+            status_code=400,
+            detail="Nur ZIP- und Tar-Archive werden unterstuetzt.",
+        )
 
     extract_dir = target.parent
     try:
-        with zipfile.ZipFile(str(target), "r") as zf:
-            for member in zf.namelist():
-                # `_safe_path` macht aus relativen Eintraegen einen Absolutpfad
-                # innerhalb des Server-Roots; jeder Versuch nach aussen wirft
-                # 403 und bricht das Entpacken sicher ab.
-                _safe_path(server.install_dir, os.path.join(os.path.dirname(path), member))
-            zf.extractall(str(extract_dir))
-    except zipfile.BadZipFile:
-        raise HTTPException(status_code=400, detail="Ungueltiges ZIP-Archiv")
+        safe_extract_archive(target, extract_dir, Path(server.install_dir).resolve())
+    except ArchiveExtractError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except HTTPException:
         raise
     except Exception as e:

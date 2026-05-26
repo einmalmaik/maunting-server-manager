@@ -5,7 +5,7 @@
     "name": "Hytale (Dedicated)",
     "category": "non_steam_game",
     "author": "Maunting Studios",
-    "description": "Hytale Dedicated Server (Closed Beta). Image: ghcr.io/natroutter/egg-hytale (Community-Build, Java 25 + Hytale-Downloader). Hinweis: Hytale hat (Stand 05/2026) kein offizielles Docker-Image. Erststart benoetigt OAuth-Device-Login per '/auth login device' in der Container-Konsole — das funktioniert erst, sobald die Server-Konsole interaktive Eingabe unterstuetzt. Port 5520/UDP (QUIC) ist Hypixels Standard. AOT-Cache wird per Startup-Flag aktiviert (siehe offizielles Manual)."
+    "description": "Hytale Dedicated Server (Closed Beta). Der Panel-Betreiber muss die Server-Binaries selbst beschaffen und per File Manager hochladen."
   },
   "runtime": {
     "image": "ghcr.io/natroutter/egg-hytale:latest",
@@ -25,9 +25,12 @@
     { "name": "game", "protocol": "udp" }
   ],
   "source": {
-    "type": "dockerOnly",
-    "steam": null,
-    "http": null
+    "type": "manualUpload",
+    "manual": {
+      "requiredFiles": ["HytaleServer.jar", "Assets.zip"],
+      "instructions": "Hytale-Server (Closed Beta) benoetigt zwei Dateien: HytaleServer.jar und Assets.zip. Diese werden von Hypixel nur ueber den Account-Bereich bereitgestellt. Lade beide Dateien per File Manager in das Server-Verzeichnis hoch, bevor du den Server startest.",
+      "instructionsUrl": "https://accounts.hytale.com/"
+    }
   },
   "mods": {
     "supportsMods": true,

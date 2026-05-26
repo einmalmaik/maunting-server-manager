@@ -169,3 +169,107 @@ class TestServerStatusDiskFields:
         assert data["disk_free_mb"] is None or isinstance(data["disk_free_mb"], int)
         # Disk-MB fällt auf den DB-Wert zurück, wenn das Plugin None liefert
         assert data["disk_mb"] == 456
+
+
+class TestManualUploadStartPreCheck:
+    def test_start_blocks_when_files_missing(
+        self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session, tmp_path
+    ):
+        from blueprints.schema import Blueprint
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_manual_start", "name": "Test", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [],
+            "source": {
+                "type": "manualUpload",
+                "manual": {"requiredFiles": ["server.jar"], "instructions": "Upload"},
+            },
+        })
+        test_server.game_type = "test_manual_start"
+        test_server.install_dir = str(tmp_path)
+        test_server.status = "awaiting_files"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+
+        with patch("routers.servers.get_plugin") as mock_get_plugin:
+            mock_plugin = mock_get_plugin.return_value
+            mock_plugin.get_blueprint.return_value = bp
+            response = client.post(
+                f"/api/servers/{test_server.id}/start",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 400
+        assert "server.jar" in response.json()["detail"]
+
+    def test_start_succeeds_when_all_files_present(
+        self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session, tmp_path
+    ):
+        from blueprints.schema import Blueprint
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_manual_start2", "name": "Test", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [],
+            "source": {
+                "type": "manualUpload",
+                "manual": {"requiredFiles": ["server.jar"], "instructions": "Upload"},
+            },
+        })
+        test_server.game_type = "test_manual_start2"
+        test_server.install_dir = str(tmp_path)
+        test_server.status = "awaiting_files"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+        (tmp_path / "server.jar").write_text("fake", encoding="utf-8")
+
+        with patch("routers.servers.get_plugin") as mock_get_plugin, \
+             patch("routers.servers.open_ports"), \
+             patch("routers.servers.iptables_accept_server"), \
+             patch("routers.servers.asyncio.to_thread") as mock_thread:
+            mock_plugin = mock_get_plugin.return_value
+            mock_plugin.get_blueprint.return_value = bp
+            mock_thread.return_value = {"message": "started"}
+            response = client.post(
+                f"/api/servers/{test_server.id}/start",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+
+    def test_start_blocks_when_symlink_present(
+        self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session, tmp_path
+    ):
+        from blueprints.schema import Blueprint
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_manual_symlink", "name": "Test", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [],
+            "source": {
+                "type": "manualUpload",
+                "manual": {"requiredFiles": ["server.jar"], "instructions": "Upload"},
+            },
+        })
+        test_server.game_type = "test_manual_symlink"
+        test_server.install_dir = str(tmp_path)
+        test_server.status = "awaiting_files"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+        (tmp_path / "real.jar").write_text("fake", encoding="utf-8")
+        (tmp_path / "server.jar").symlink_to(tmp_path / "real.jar")
+
+        with patch("routers.servers.get_plugin") as mock_get_plugin:
+            mock_plugin = mock_get_plugin.return_value
+            mock_plugin.get_blueprint.return_value = bp
+            response = client.post(
+                f"/api/servers/{test_server.id}/start",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 400
+        assert "server.jar" in response.json()["detail"]

@@ -258,3 +258,84 @@ def test_template_is_valid_json() -> None:
     payload = json.dumps(EMPTY_TEMPLATE)
     assert "version" in payload
     assert "modInjection" in payload
+
+
+# ── Manual Upload ──────────────────────────────────────────────────────────
+
+
+def test_manual_upload_requires_manual() -> None:
+    d = _minimal_valid_dict()
+    d["source"] = {"type": "manualUpload", "manual": None, "steam": None, "http": None}
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
+def test_manual_upload_forbids_other_sources() -> None:
+    d = _minimal_valid_dict()
+    d["source"] = {
+        "type": "manualUpload",
+        "manual": {"requiredFiles": ["server.jar"], "instructions": "Test"},
+        "steam": {"appId": "1", "platform": "linux", "compatibility": "native"},
+    }
+    with pytest.raises(BlueprintValidationError) as exc:
+        load_blueprint_dict(d)
+    assert "steam/http" in " ".join(exc.value.errors)
+
+
+def test_manual_upload_rejects_traversal() -> None:
+    d = _minimal_valid_dict()
+    d["source"] = {
+        "type": "manualUpload",
+        "manual": {"requiredFiles": ["../etc/passwd"], "instructions": "Test"},
+    }
+    with pytest.raises(BlueprintValidationError) as exc:
+        load_blueprint_dict(d)
+    assert any("unsicheren Pfad" in e for e in exc.value.errors)
+
+
+def test_manual_upload_rejects_duplicate() -> None:
+    d = _minimal_valid_dict()
+    d["source"] = {
+        "type": "manualUpload",
+        "manual": {"requiredFiles": ["a.jar", "a.jar"], "instructions": "Test"},
+    }
+    with pytest.raises(BlueprintValidationError) as exc:
+        load_blueprint_dict(d)
+    assert any("Duplikat" in e for e in exc.value.errors)
+
+
+def test_manual_upload_rejects_http_instructions_url() -> None:
+    d = _minimal_valid_dict()
+    d["source"] = {
+        "type": "manualUpload",
+        "manual": {"requiredFiles": ["a.jar"], "instructions": "Test", "instructionsUrl": "http://example.com"},
+    }
+    with pytest.raises(BlueprintValidationError) as exc:
+        load_blueprint_dict(d)
+    assert any("https://" in e for e in exc.value.errors)
+
+
+def test_manual_upload_valid() -> None:
+    d = _minimal_valid_dict()
+    d["source"] = {
+        "type": "manualUpload",
+        "manual": {
+            "requiredFiles": ["HytaleServer.jar", "Assets.zip"],
+            "instructions": "Lade die Dateien hoch.",
+            "instructionsUrl": "https://accounts.hytale.com/",
+        },
+    }
+    bp = load_blueprint_dict(d)
+    assert bp.source.type.value == "manualUpload"
+    assert bp.source.manual is not None
+    assert bp.source.manual.requiredFiles == ["HytaleServer.jar", "Assets.zip"]
+
+
+# ── Steam requiresLogin ───────────────────────────────────────────────────
+
+
+def test_steam_requires_login_default_false() -> None:
+    d = _minimal_valid_dict()
+    bp = load_blueprint_dict(d)
+    assert bp.source.steam is not None
+    assert bp.source.steam.requiresLogin is False
