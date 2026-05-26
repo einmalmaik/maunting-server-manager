@@ -2,7 +2,9 @@ import asyncio
 import os
 import shutil
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -481,6 +483,121 @@ def server_console(server_id: int, lines: int = 200, db: Session = Depends(get_d
     if plugin:
         console_log = plugin.get_console_log(server, lines=lines)
     return {"logs": console_log}
+
+
+@router.get("/{server_id}/console/stream")
+async def server_console_stream(
+    server_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Live-Stream der Container-Logs als Server-Sent Events.
+
+    SSE statt WebSocket: unidirektional reicht (Server → Client), keine neue
+    Protokoll-Schicht, EventSource im Browser ohne extra Lib. Auth via Cookie
+    + ``server.console.read`` (CSRF entfaellt bei GET).
+
+    Implementierung: ``docker logs --follow --tail 200`` als async-Subprocess,
+    Zeilen werden als ``data:``-Frames durchgereicht. Bei Client-Disconnect
+    wird der Subprocess sauber beendet.
+    """
+    require_server_permission(user, server_id, db, "server.console.read")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    container = container_name_for(server.id)
+
+    async def event_gen():
+        # Container-Logs follow. ``--tail 200`` als Verlauf, danach Live.
+        # ``--timestamps`` bewusst NICHT — der User-Konsole brauchen wir das
+        # Rohformat (Datumsstempel sind im MSM-Console-Log eh nicht da).
+        proc: asyncio.subprocess.Process | None = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "logs", "--follow", "--tail", "200", container,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            assert proc.stdout is not None
+            while True:
+                if await request.is_disconnected():
+                    break
+                # ~1 s Timeout, damit wir disconnect-checks pollen koennen.
+                try:
+                    raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    # Heartbeat-Kommentar, haelt Proxies / EventSource am Leben.
+                    yield ": keepalive\n\n"
+                    continue
+                if not raw:
+                    # Subprocess hat EOF — Stream-Ende sauber kommunizieren.
+                    yield "event: end\ndata: \n\n"
+                    break
+                line = raw.decode("utf-8", errors="replace").rstrip("\n")
+                # SSE-Frame: jedes "data:" wird zu einer eigenen Zeile. ``\n``
+                # darf NICHT im Wert vorkommen — wir splitten praeventiv.
+                for chunk in line.split("\n"):
+                    yield f"data: {chunk}\n"
+                yield "\n"
+        finally:
+            if proc and proc.returncode is None:
+                try:
+                    proc.terminate()
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except (asyncio.TimeoutError, ProcessLookupError):
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            # Nginx-Buffering aus, sonst sieht der Client nichts bis zum Flush.
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+class ConsoleInputBody(BaseModel):
+    """Eingabezeile fuer die Konsole.
+
+    Limit von 1 KiB pro POST schuetzt vor Missbrauch (z. B. Riesen-Payloads via
+    XSS). Server-Spiele schicken in der Praxis Befehlszeilen << 1 KiB.
+    """
+    line: str = Field(..., min_length=0, max_length=1024)
+
+
+@router.post("/{server_id}/console/input")
+def server_console_input(
+    server_id: int,
+    body: ConsoleInputBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Schreibt ``body.line`` in den stdin des Container-Prozesses.
+
+    Auth: Cookie + CSRF + ``server.console.write``. Die Eingabe selbst wird
+    NICHT geloggt — sie kann sensibel sein (OAuth-Codes, RCON-Tokens, etc.).
+    """
+    require_server_permission(user, server_id, db, "server.console.write")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    container = container_name_for(server.id)
+    if not docker_service.is_running(container):
+        raise HTTPException(status_code=409, detail="Container läuft nicht")
+    # Newline erzwingen — die meisten Game-Server lesen zeilenweise.
+    data = body.line if body.line.endswith("\n") else body.line + "\n"
+    result = docker_service.send_stdin(container, data)
+    if not result["ok"]:
+        # Generische Fehlermeldung — keine Container-Internas leaken.
+        raise HTTPException(status_code=500, detail="Eingabe konnte nicht zugestellt werden")
+    return {"ok": True}
 
 
 @router.get("/{server_id}/logs")
