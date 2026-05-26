@@ -24,17 +24,20 @@ import threading
 
 from blueprints import Blueprint, render_argv
 from blueprints.http_source import install_http_source
-from blueprints.schema import BlueprintSourceType
+from blueprints.renderer import render_env_values
+from blueprints.schema import BlueprintPortProtocol, BlueprintSourceType
 from games.base import (
     CONTAINER_DATA_DIR,
     ConfigField,
     GamePlugin,
     _append_console_log,
+    _require_bind_ip,
     active_mod_ids,
     finish_install,
     run_steamcmd_install,
     run_steamcmd_workshop_download,
 )
+from services.docker_service import PortPublish
 
 
 class BlueprintPlugin(GamePlugin):
@@ -103,22 +106,56 @@ class BlueprintPlugin(GamePlugin):
 
     # ─ Container ──────────────────────────────────────────────────────────
 
+    def _server_ports(self, server) -> dict[str, int | None]:
+        return {
+            "game": server.game_port,
+            "query": server.query_port,
+            "rcon": server.rcon_port,
+        }
+
     def build_container_command(self, server) -> list[str]:
         return render_argv(
             self._blueprint,
             install_dir=CONTAINER_DATA_DIR,
-            ports={
-                "game": server.game_port,
-                "query": server.query_port,
-                "rcon": server.rcon_port,
-            },
+            ports=self._server_ports(server),
             active_mod_ids=active_mod_ids(server),
             extra_env=self._blueprint.runtime.env,
         )
 
     def build_container_env(self, server) -> dict[str, str]:
-        # Werte werden NIE geloggt — wir geben sie 1:1 an Docker weiter.
-        return dict(self._blueprint.runtime.env)
+        # Port-Tokens in Env-Werten aufloesen (z. B. ``SERVER_PORT={GAME_PORT}``
+        # fuer ``itzg/minecraft-server``). Werte selbst werden NIE geloggt.
+        return render_env_values(
+            self._blueprint.runtime.env,
+            ports=self._server_ports(server),
+        )
+
+    def build_port_publishes(self, server) -> list[PortPublish]:
+        """Port-Publishes aus der Blueprint statt UDP-Hartkodierung.
+
+        Liest Protokoll je Port-Rolle aus ``blueprint.ports``. Damit funktionieren
+        TCP-Spiele (Minecraft & Co.) genauso wie UDP-Spiele (DayZ, Hytale) im
+        gleichen Blueprint-System. Host- und Container-Port sind identisch —
+        Container-seitig nutzt das Image den gleichen Port (entweder per
+        Startup-Arg ``--bind 0.0.0.0:{GAME_PORT}`` oder per Env-Var
+        ``SERVER_PORT={GAME_PORT}``).
+
+        Bind-IP-Pflicht aus :func:`games.base._require_bind_ip` bleibt bestehen —
+        kein ``0.0.0.0``-Bypass.
+        """
+        bind_ip = _require_bind_ip(server)
+        port_map: dict[str, int | None] = self._server_ports(server)
+        out: list[PortPublish] = []
+        for port_def in self._blueprint.ports:
+            role = port_def.name.value
+            host_port = port_map.get(role)
+            if not host_port:
+                continue
+            protocol = (
+                "tcp" if port_def.protocol == BlueprintPortProtocol.TCP else "udp"
+            )
+            out.append(PortPublish(host_port, host_port, protocol, bind_ip))
+        return out
 
     # ─ Logs / Config (minimal) ────────────────────────────────────────────
 

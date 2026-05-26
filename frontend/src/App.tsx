@@ -20,6 +20,7 @@ import { Roles } from './pages/Roles'
 import { Settings } from './pages/Settings'
 import { Profile } from './pages/Profile'
 import { Docs } from './pages/Docs'
+import { Blueprints } from './pages/Blueprints'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
@@ -87,6 +88,14 @@ function App() {
         />
         <Route path="profile" element={<Profile />} />
         <Route path="docs" element={<Docs />} />
+        <Route
+          path="blueprints"
+          element={
+            <RequirePermission keys="panel.settings.read">
+              <Blueprints />
+            </RequirePermission>
+          }
+        />
       </Route>
     </Routes>
       <ToastContainer />

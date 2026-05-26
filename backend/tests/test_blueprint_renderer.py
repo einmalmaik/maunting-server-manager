@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from blueprints import render_argv
+from blueprints.renderer import render_env_values
 from blueprints.schema import (
     BlueprintValidationError,
     load_blueprint_dict,
@@ -163,3 +164,60 @@ def test_workshop_disabled_means_no_mod_arg() -> None:
     ))
     argv = render_argv(bp, install_dir="/data", ports={"game": 1, "query": None, "rcon": None}, active_mod_ids=["12345"])
     assert "12345" not in " ".join(argv)
+
+
+# ── render_env_values ──────────────────────────────────────────────────────
+
+
+def test_render_env_values_substitutes_port_tokens() -> None:
+    """Use-Case Minecraft (itzg): SERVER_PORT={GAME_PORT} muss zur Laufzeit
+    den Host-Port enthalten, damit der Container intern denselben Port hoert."""
+    out = render_env_values(
+        {"SERVER_PORT": "{GAME_PORT}", "RCON_PORT": "{RCON_PORT}", "STATIC": "x"},
+        ports={"game": 25566, "query": None, "rcon": 25579},
+    )
+    assert out == {"SERVER_PORT": "25566", "RCON_PORT": "25579", "STATIC": "x"}
+
+
+def test_render_env_values_unassigned_port_becomes_empty() -> None:
+    out = render_env_values(
+        {"QUERY_PORT": "{QUERY_PORT}"},
+        ports={"game": 1, "query": None, "rcon": None},
+    )
+    assert out == {"QUERY_PORT": ""}
+
+
+def test_env_value_install_dir_token_rejected_by_schema() -> None:
+    """{INSTALL_DIR} darf in Env-Werten NICHT erlaubt sein."""
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict({
+            "version": 1,
+            "meta": {"id": "env_bad", "name": "E", "category": "steam_game"},
+            "runtime": {
+                "image": "alpine",
+                "workdir": "/data",
+                "env": {"PATH_VAR": "{INSTALL_DIR}/bin"},
+                "startup": "/data/run",
+            },
+            "ports": [{"name": "game", "protocol": "udp"}],
+            "source": {"type": "steam", "steam": {"appId": "1", "platform": "linux", "compatibility": "native"}},
+            "mods": None,
+        })
+
+
+def test_env_value_shell_meta_rejected_by_schema() -> None:
+    """``$`` in Env-Werten wird verboten (Defense-in-Depth)."""
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict({
+            "version": 1,
+            "meta": {"id": "env_bad2", "name": "E", "category": "steam_game"},
+            "runtime": {
+                "image": "alpine",
+                "workdir": "/data",
+                "env": {"INJECT": "value$(whoami)"},
+                "startup": "/data/run",
+            },
+            "ports": [{"name": "game", "protocol": "udp"}],
+            "source": {"type": "steam", "steam": {"appId": "1", "platform": "linux", "compatibility": "native"}},
+            "mods": None,
+        })

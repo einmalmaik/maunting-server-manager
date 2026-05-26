@@ -12,6 +12,7 @@ import {
   LogOut,
   Plus,
   BookOpen,
+  Boxes,
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -43,6 +44,7 @@ export function Sidebar() {
     ] : []),
     ...((user?.is_owner || canViewSettings) ? [
       { to: '/settings', icon: Settings, label: t('nav.settings') },
+      { to: '/blueprints', icon: Boxes, label: t('nav.blueprints') },
     ] : []),
     { to: '/docs', icon: BookOpen, label: t('nav.docs') },
   ]

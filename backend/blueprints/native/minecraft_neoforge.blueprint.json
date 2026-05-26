@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "minecraft_neoforge",
+    "name": "Minecraft (NeoForge)",
+    "category": "non_steam_game",
+    "author": "Maunting Studios",
+    "description": "NeoForge-Server via itzg/minecraft-server. Community-Fork von Forge, fuer 1.20.4+ der neue Standard fuer Mod-Server. Mods (.jar) in /data/mods."
+  },
+  "runtime": {
+    "image": "itzg/minecraft-server:latest",
+    "workdir": "/data",
+    "env": {
+      "EULA": "TRUE",
+      "TYPE": "NEOFORGE",
+      "VERSION": "LATEST",
+      "SERVER_PORT": "{GAME_PORT}",
+      "ENABLE_RCON": "true",
+      "RCON_PORT": "{RCON_PORT}"
+    },
+    "startup": "/start"
+  },
+  "ports": [
+    { "name": "game",  "protocol": "tcp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon",  "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "dockerOnly",
+    "steam": null,
+    "http": null
+  },
+  "mods": {
+    "supportsMods": true,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null
+  }
+}
