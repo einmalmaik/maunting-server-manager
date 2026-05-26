@@ -19,6 +19,8 @@ interface PanelSettings {
   email_provider: string
   steam_api_key: string
   steam_api_configured: boolean
+  steam_account_username: string
+  steam_account_configured: boolean
 }
 
 export function Settings() {
@@ -38,7 +40,12 @@ export function Settings() {
     email_provider: 'none',
     steam_api_key: '',
     steam_api_configured: false,
+    steam_account_username: '',
+    steam_account_configured: false,
   })
+  const [steamAccountUsername, setSteamAccountUsername] = useState('')
+  const [steamAccountPassword, setSteamAccountPassword] = useState('')
+  const [savingSteamAccount, setSavingSteamAccount] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testEmail, setTestEmail] = useState('')
@@ -123,6 +130,38 @@ export function Settings() {
       toast.error(err.message)
     } finally {
       setSavingResend(false)
+    }
+  }
+
+  const handleSaveSteamAccount = async () => {
+    if (!steamAccountUsername.trim() || !steamAccountPassword) return
+    setSavingSteamAccount(true)
+    try {
+      await api('/settings/steam-account', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: steamAccountUsername.trim(),
+          password: steamAccountPassword,
+        }),
+      })
+      toast.success(t('settings.steamAccountSaved'))
+      setSteamAccountUsername('')
+      setSteamAccountPassword('')
+      await fetchSettings()
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setSavingSteamAccount(false)
+    }
+  }
+
+  const handleRemoveSteamAccount = async () => {
+    try {
+      await api('/settings/steam-account', { method: 'DELETE' })
+      toast.success(t('settings.steamAccountRemoved'))
+      await fetchSettings()
+    } catch (err: any) {
+      toast.error(err.message)
     }
   }
 
@@ -495,6 +534,84 @@ export function Settings() {
                   <Save className="w-4 h-4" />
                 )}
                 {t('settings.steamSaveKey')}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Steam Account */}
+        <div className="msm-card p-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
+              <Gamepad2 className="w-5 h-5 text-secondary" />
+            </div>
+            <h2 className="font-headline text-headline-sm text-primary">{t('settings.steamAccountTitle')}</h2>
+          </div>
+
+          <div className="space-y-4">
+            <div className="p-3 bg-status-error/10 border border-status-error/30 rounded-md text-sm text-status-error">
+              {t('settings.steamAccountWarning')}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${settings.steam_account_configured ? 'bg-status-success' : 'bg-on-surface-variant'}`} />
+              <span className="font-body-md text-sm text-on-surface">
+                {settings.steam_account_configured
+                  ? `${t('settings.steamAccountConfigured')} (${settings.steam_account_username})`
+                  : t('settings.steamAccountNotConfigured')}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  {t('settings.steamAccountUsername')}
+                </label>
+                <input
+                  type="text"
+                  value={steamAccountUsername}
+                  onChange={(e) => setSteamAccountUsername(e.target.value)}
+                  className="msm-input"
+                  placeholder="steamuser"
+                />
+              </div>
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  {t('settings.steamAccountPassword')}
+                </label>
+                <input
+                  type="password"
+                  value={steamAccountPassword}
+                  onChange={(e) => setSteamAccountPassword(e.target.value)}
+                  className="msm-input"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              {settings.steam_account_configured && (
+                <button
+                  type="button"
+                  onClick={handleRemoveSteamAccount}
+                  disabled={!canWriteSettings}
+                  className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+                >
+                  {t('settings.steamAccountRemove')}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleSaveSteamAccount}
+                disabled={savingSteamAccount || !steamAccountUsername.trim() || !steamAccountPassword || !canWriteSettings}
+                className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                {savingSteamAccount ? (
+                  <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                {t('settings.steamAccountSave')}
               </button>
             </div>
           </div>

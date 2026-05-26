@@ -106,6 +106,7 @@ export function Servers() {
         return 'bg-surface-container-highest border-outline text-on-surface-variant'
       case 'installing':
       case 'updating':
+      case 'awaiting_files':
         return 'bg-status-warning/10 border-status-warning/30 text-status-warning'
       default:
         return 'bg-status-error/10 border-status-error/30 text-status-error'

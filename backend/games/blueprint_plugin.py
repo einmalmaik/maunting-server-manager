@@ -21,6 +21,7 @@ Was NICHT abgedeckt ist (bewusst, KISS):
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 from blueprints import Blueprint, render_argv
 from blueprints.http_source import install_http_source
@@ -38,6 +39,7 @@ from games.base import (
     run_steamcmd_workshop_download,
 )
 from services.docker_service import PortPublish
+from services.steam_account_service import SteamAccountService
 
 
 class BlueprintPlugin(GamePlugin):
@@ -63,6 +65,20 @@ class BlueprintPlugin(GamePlugin):
         bp = self._blueprint
         if bp.source.type == BlueprintSourceType.STEAM:
             assert bp.source.steam is not None
+            requires_login = bp.source.steam.requiresLogin
+
+            if requires_login and not SteamAccountService.is_configured():
+                error_msg = (
+                    "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
+                    "Bitte unter Einstellungen → Steam Account einen Benutzer "
+                    "und Passwort hinterlegen (Steam Guard muss deaktiviert sein, "
+                    "siehe Hinweis dort)."
+                )
+                # Status auf "error" setzen, sonst bleibt der Server in
+                # "installing" haengen (Create-Route ignoriert Rueckgabewert).
+                finish_install(server.id, {"ok": False, "error": error_msg})
+                return {"error": error_msg}
+
             app_id = bp.source.steam.appId
             install_dir = server.install_dir
             server_id = server.id
@@ -72,6 +88,7 @@ class BlueprintPlugin(GamePlugin):
                     server_id=server_id,
                     install_dir=install_dir,
                     app_id=app_id,
+                    use_authenticated_login=requires_login,
                 )
                 finish_install(server_id, result)
 
@@ -97,12 +114,32 @@ class BlueprintPlugin(GamePlugin):
             threading.Thread(target=_http_install, daemon=True).start()
             return {"message": "Installation gestartet"}
 
+        if bp.source.type == BlueprintSourceType.MANUAL_UPLOAD:
+            assert bp.source.manual is not None
+            install_dir = Path(server.install_dir)
+            install_dir.mkdir(parents=True, exist_ok=True)
+
+            readme = install_dir / "MANUAL_INSTALL.md"
+            if not readme.exists():
+                readme.write_text(
+                    f"# Manuelle Installation: {bp.meta.name}\n\n"
+                    f"{bp.source.manual.instructions}\n\n"
+                    f"Erforderliche Dateien:\n"
+                    + "\n".join(f"- `{p}`" for p in bp.source.manual.requiredFiles)
+                    + (f"\n\nWeitere Infos: {bp.source.manual.instructionsUrl}\n" if bp.source.manual.instructionsUrl else "\n"),
+                    encoding="utf-8",
+                )
+
+            _append_console_log(
+                server.id,
+                f"[MSM] Blueprint '{bp.meta.id}' erwartet manuelle Uploads:\n"
+                + "\n".join(f"  - {p}" for p in bp.source.manual.requiredFiles)
+                + "\n[MSM] Status: awaiting_files\n",
+            )
+            finish_install(server.id, {"ok": True, "next_status": "awaiting_files"})
+            return {"message": "Installation: warte auf manuellen Upload"}
+
         if bp.source.type in (BlueprintSourceType.DOCKER_ONLY, BlueprintSourceType.CUSTOM):
-            # Keine Files zu installieren — Image bringt alles mit. Status direkt
-            # auf ``stopped`` setzen UND eine sichtbare Console-Notiz schreiben,
-            # damit der User im UI klar sieht, dass der Klick auf „Installieren"
-            # verarbeitet wurde. Ohne diese Zeile wirkt der Vorgang im Panel so,
-            # als waere nichts passiert (kein SteamCMD-Output, kein Download).
             _append_console_log(
                 server.id,
                 f"[MSM] Blueprint '{bp.meta.id}' ist Docker-only — keine Dateien "
@@ -201,6 +238,9 @@ class BlueprintPlugin(GamePlugin):
         workshop_app_id = bp_mods.workshopAppId
         server_id = server.id
         install_dir = server.install_dir
+        requires_login = False
+        if self._blueprint.source.type == BlueprintSourceType.STEAM and self._blueprint.source.steam:
+            requires_login = self._blueprint.source.steam.requiresLogin
 
         def _install():
             run_steamcmd_workshop_download(
@@ -208,6 +248,7 @@ class BlueprintPlugin(GamePlugin):
                 install_dir=install_dir,
                 workshop_app_id=workshop_app_id,
                 workshop_item_id=workshop_id,
+                use_authenticated_login=requires_login,
             )
             # Nach jedem Mod-Install die Modliste re-generieren (falls Datei-
             # injection); fuer startupArg ist das ein No-op.

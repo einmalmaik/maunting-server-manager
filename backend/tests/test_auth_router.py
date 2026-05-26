@@ -206,7 +206,8 @@ class TestSetupVerification:
             "password": "SetupPass123!",
         })
         # Ohne SMTP ist der Status 503 mit Code im Detail
-        assert response.status_code in (200, 503)
+        # 201 = Owner wurde erfolgreich angelegt (neuer Flow)
+        assert response.status_code in (200, 201, 503)
 
     def test_setup_verify_with_wrong_code_fails(self, client: TestClient, db: Session):
         from services.auth_service import AuthService

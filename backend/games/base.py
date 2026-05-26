@@ -129,7 +129,8 @@ def finish_install(server_id: int, result: dict) -> None:
     ausführt. Muss eine FRISCHE DB-Session öffnen, weil die Request-Session
     längst geschlossen ist (Request endete mit "Installation gestartet").
 
-    Bei Erfolg → status="stopped" (bereit zum Starten).
+    Bei Erfolg → status="stopped" (bereit zum Starten), oder ``next_status``
+    aus dem Result-Dict (z. B. "awaiting_files").
     Bei Fehler → status="error" + Fehlertext (gekürzt).
     """
     # Inline-Imports, weil base.py beim Modul-Load noch keine Modelle kennen darf
@@ -143,7 +144,7 @@ def finish_install(server_id: int, result: dict) -> None:
         if not server:
             return
         if result.get("ok"):
-            server.status = "stopped"
+            server.status = result.get("next_status", "stopped")
             server.status_message = None
         else:
             err = result.get("error") or "Installation fehlgeschlagen"
@@ -216,23 +217,49 @@ def _build_steamcmd_bash_command(steam_args: list[str], chown_uid: int, chown_gi
     return ["-c", script]
 
 
+def _redact(text: str, secrets_to_redact: list[str]) -> str:
+    for s in secrets_to_redact:
+        if s:
+            text = text.replace(s, "***")
+    return text
+
+
 def run_steamcmd_install(
     *,
     server_id: int,
     install_dir: str,
     app_id: str,
     extra_args: list[str] | None = None,
+    use_authenticated_login: bool = False,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
 
     Schreibt strukturiertes Console-Log und gibt strukturiertes dict zurück.
     """
+    from services.steam_account_service import SteamAccountService
+
     os.makedirs(install_dir, exist_ok=True)
+
+    if use_authenticated_login:
+        if not SteamAccountService.is_configured():
+            return {
+                "ok": False,
+                "error": (
+                    "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
+                    "Bitte unter Einstellungen → Steam Account einen Benutzer "
+                    "und Passwort hinterlegen (Steam Guard muss deaktiviert sein)."
+                ),
+            }
+        username = SteamAccountService.get_username()
+        password = SteamAccountService.get_decrypted_password()
+        login_args = ["+login", username, password]
+    else:
+        login_args = ["+login", "anonymous"]
 
     steam_args: list[str] = [
         "+force_install_dir", CONTAINER_DATA_DIR,
-        "+login", "anonymous",
+        *login_args,
         "+app_update", app_id, "validate",
     ]
     if extra_args:
@@ -262,15 +289,13 @@ def run_steamcmd_install(
     )
 
     # SteamCMD-Output ins Console-Log spiegeln — IMMER, egal ob ok oder Fehler.
-    # Beim Fehler ist der volle Output das Wichtigste für die Diagnose: SteamCMD
-    # schreibt Login-Probleme, "App not available", "Connection lost" usw. nur
-    # dort. Würden wir nur ``result['error']`` (die letzte Zeile) loggen, sähe
-    # der User im Panel nur die kryptische Wrapper-Meldung
-    # ``steamcmd.sh[7]: Restarting steamcmd by request...`` und wüsste nicht,
-    # was wirklich kaputt war.
+    # Passwort niemals ins Log schreiben (Defense-in-Depth).
+    secrets_to_redact: list[str] = []
+    if use_authenticated_login:
+        secrets_to_redact.append(SteamAccountService.get_decrypted_password())
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
     if out:
-        _append_console_log(server_id, out)
+        _append_console_log(server_id, _redact(out, secrets_to_redact))
     if result["ok"]:
         _append_console_log(server_id, f"\n[MSM] SteamCMD abgeschlossen (App {app_id}).\n")
     else:
@@ -284,6 +309,7 @@ def run_steamcmd_workshop_download(
     install_dir: str,
     workshop_app_id: str,
     workshop_item_id: str,
+    use_authenticated_login: bool = False,
 ) -> dict:
     """Lädt ein Workshop-Item via ephemerem SteamCMD-Container.
 
@@ -291,9 +317,26 @@ def run_steamcmd_workshop_download(
     Vollredownload — das übernimmt SteamCMD selbst, sofern lokale Files
     existieren.
     """
+    from services.steam_account_service import SteamAccountService
+
+    if use_authenticated_login:
+        if not SteamAccountService.is_configured():
+            return {
+                "ok": False,
+                "error": (
+                    "Dieses Spiel benötigt einen Steam-Account für Workshop-Downloads. "
+                    "Bitte unter Einstellungen → Steam Account hinterlegen."
+                ),
+            }
+        username = SteamAccountService.get_username()
+        password = SteamAccountService.get_decrypted_password()
+        login_args = ["+login", username, password]
+    else:
+        login_args = ["+login", "anonymous"]
+
     steam_args: list[str] = [
         "+force_install_dir", CONTAINER_DATA_DIR,
-        "+login", "anonymous",
+        *login_args,
         "+workshop_download_item", workshop_app_id, workshop_item_id,
         "+quit",
     ]
@@ -311,9 +354,12 @@ def run_steamcmd_workshop_download(
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
     )
+    secrets_to_redact: list[str] = []
+    if use_authenticated_login:
+        secrets_to_redact.append(SteamAccountService.get_decrypted_password())
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
     if out:
-        _append_console_log(server_id, out)
+        _append_console_log(server_id, _redact(out, secrets_to_redact))
     if not result["ok"]:
         _append_console_log(
             server_id, f"\n[MSM] Workshop-Download fehlgeschlagen: {result['error']}\n"

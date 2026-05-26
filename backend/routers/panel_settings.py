@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import get_db
 from dependencies import require_global, verify_csrf
-from schemas.panel_settings import PanelSettingsResponse, PanelSettingsUpdate, TestEmailRequest, ResendKeyRequest, SteamApiKeyRequest
+from schemas.panel_settings import PanelSettingsResponse, PanelSettingsUpdate, TestEmailRequest, ResendKeyRequest, SteamApiKeyRequest, SteamAccountRequest
 from services.panel_settings_service import PanelSettingsService
 from services.email_service import EmailService
+from services.steam_account_service import SteamAccountService
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -46,6 +47,8 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "email_provider": EmailService._get_provider(),
         "steam_api_key": _mask_secret(steam_key),
         "steam_api_configured": bool(steam_key),
+        "steam_account_username": SteamAccountService.get_username(),
+        "steam_account_configured": SteamAccountService.is_configured(),
     }
 
 
@@ -186,6 +189,28 @@ def update_steam_key(
     os.environ["STEAM_API_KEY"] = key
 
     return {"message": "Steam API-Key gespeichert"}
+
+
+@router.post("/steam-account", status_code=200)
+def update_steam_account(
+    req: SteamAccountRequest,
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    try:
+        SteamAccountService.set(req.username, req.password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"message": "Steam-Account gespeichert"}
+
+
+@router.delete("/steam-account", status_code=200)
+def delete_steam_account(
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    SteamAccountService.clear()
+    return {"message": "Steam-Account entfernt"}
 
 
 @router.post("/steam-key/test", status_code=200)

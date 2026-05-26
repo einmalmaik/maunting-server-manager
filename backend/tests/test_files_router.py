@@ -428,3 +428,72 @@ class TestCapabilityFlag:
         by_id = {g["id"]: g for g in games}
         assert by_id["conan_exiles_ue5"]["supports_steam_workshop"] is True
         assert by_id["dayz"]["supports_steam_workshop"] is True
+
+
+# ── Tar-Extract ───────────────────────────────────────────────────────────
+
+
+class TestTarExtract:
+    def test_extract_tar_skips_symlinks(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server, tmp_path: Path):
+        import tarfile
+        archive = Path(server_with_dir.install_dir) / "test.tar.gz"
+        with tarfile.open(str(archive), "w:gz") as tf:
+            # normal file
+            normal = tmp_path / "normal.txt"
+            normal.write_text("ok")
+            tf.add(str(normal), arcname="normal.txt")
+            # symlink
+            link = tmp_path / "link"
+            link.symlink_to("/etc/passwd")
+            tf.add(str(link), arcname="link")
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/extract?path=test.tar.gz",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert res.status_code == 200
+        assert (Path(server_with_dir.install_dir) / "normal.txt").exists()
+        assert not (Path(server_with_dir.install_dir) / "link").exists()
+
+    def test_extract_tar_rejects_traversal(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server, tmp_path: Path):
+        import tarfile
+        archive = Path(server_with_dir.install_dir) / "bad.tar.gz"
+        with tarfile.open(str(archive), "w:gz") as tf:
+            bad = tmp_path / "evil.txt"
+            bad.write_text("bad")
+            tf.add(str(bad), arcname="../../evil.txt")
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/extract?path=bad.tar.gz",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert res.status_code == 400
+        assert "Zip-Slip" in res.json()["detail"] or "entweichen" in res.json()["detail"]
+
+    def test_extract_tar_small_ok(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server, tmp_path: Path):
+        import tarfile
+        archive = Path(server_with_dir.install_dir) / "small.tar.gz"
+        small = tmp_path / "small.txt"
+        small.write_text("hello", encoding="utf-8")
+        with tarfile.open(str(archive), "w:gz") as tf:
+            tf.add(str(small), arcname="small.txt")
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/extract?path=small.tar.gz",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert res.status_code == 200
+        assert (Path(server_with_dir.install_dir) / "small.txt").read_text() == "hello"
+
+    def test_extract_zip_still_works(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server, tmp_path: Path):
+        import zipfile
+        archive = Path(server_with_dir.install_dir) / "test.zip"
+        with zipfile.ZipFile(str(archive), "w") as zf:
+            zf.writestr("hello.txt", "world")
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/extract?path=test.zip",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert res.status_code == 200
+        assert (Path(server_with_dir.install_dir) / "hello.txt").read_text() == "world"

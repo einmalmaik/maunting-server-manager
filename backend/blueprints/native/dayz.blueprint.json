@@ -5,7 +5,7 @@
     "name": "DayZ",
     "category": "steam_game",
     "author": "Maunting Studios",
-    "description": "DayZ Linux Dedicated Server (App-ID 223350, Workshop 221100)."
+    "description": "DayZ Linux Dedicated Server (App-ID 223350, Workshop 221100). Benötigt einen konfigurierten globalen Steam-Account unter Settings (Steam Guard muss deaktiviert sein)."
   },
   "runtime": {
     "image": "cm2network/steamcmd:root",
@@ -23,7 +23,8 @@
     "steam": {
       "appId": "223350",
       "platform": "linux",
-      "compatibility": "native"
+      "compatibility": "native",
+      "requiresLogin": true
     }
   },
   "mods": {

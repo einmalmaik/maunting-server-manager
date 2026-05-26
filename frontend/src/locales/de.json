@@ -179,7 +179,8 @@
       "starting": "startet",
       "installing": "wird installiert",
       "updating": "wird aktualisiert",
-      "error": "Fehler"
+      "error": "Fehler",
+      "awaiting_files": "wartet auf Dateien"
     }
   },
   "users": {
@@ -415,6 +416,7 @@
     "saved": "Datei gespeichert",
     "deleted": "Gelöscht",
     "extracted": "Archiv entpackt",
+    "extract": "Entpacken",
     "empty": "Verzeichnis ist leer",
     "selectFile": "Datei auswählen zum Bearbeiten",
     "dropHere": "Dateien hier ablegen zum Hochladen",
@@ -498,6 +500,16 @@
     "steamSaveKey": "API-Key speichern",
     "steamSaved": "Steam API-Key gespeichert",
     "steamTest": "API-Key testen",
+    "steamAccountTitle": "Steam Account (für Spiele wie DayZ)",
+    "steamAccountWarning": "Du brauchst einen EXTRA Steam-Account für das Panel. Steam Guard MUSS deaktiviert sein, sonst kann SteamCMD nicht autonom installieren/updaten.",
+    "steamAccountUsername": "Username",
+    "steamAccountPassword": "Passwort",
+    "steamAccountConfigured": "Konfiguriert",
+    "steamAccountNotConfigured": "Nicht konfiguriert",
+    "steamAccountSave": "Speichern",
+    "steamAccountRemove": "Entfernen",
+    "steamAccountSaved": "Steam-Account gespeichert",
+    "steamAccountRemoved": "Steam-Account entfernt",
     "save": "Speichern",
     "saved": "Einstellungen gespeichert",
     "testEmail": "Test-E-Mail senden",

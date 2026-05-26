@@ -20,7 +20,8 @@ class Server(Base):
     container_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Status
-    status: Mapped[str] = mapped_column(String(32), default="stopped")  # stopped, running, installing, updating, error
+    # Freie Strings: stopped, running, installing, updating, error, awaiting_files
+    status: Mapped[str] = mapped_column(String(32), default="stopped")
     status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Auto-Restart
