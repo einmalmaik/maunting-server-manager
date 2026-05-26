@@ -243,14 +243,13 @@ def run_steamcmd_install(
 
     if use_authenticated_login:
         if not SteamAccountService.is_configured():
-            return {
-                "ok": False,
-                "error": (
-                    "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
-                    "Bitte unter Einstellungen → Steam Account einen Benutzer "
-                    "und Passwort hinterlegen (Steam Guard muss deaktiviert sein)."
-                ),
-            }
+            err = (
+                "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
+                "Bitte unter Einstellungen → Steam Account einen Benutzer "
+                "und Passwort hinterlegen (Steam Guard muss deaktiviert sein)."
+            )
+            _append_console_log(server_id, f"[MSM] {err}\n")
+            return {"ok": False, "error": err}
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]
@@ -321,13 +320,12 @@ def run_steamcmd_workshop_download(
 
     if use_authenticated_login:
         if not SteamAccountService.is_configured():
-            return {
-                "ok": False,
-                "error": (
-                    "Dieses Spiel benötigt einen Steam-Account für Workshop-Downloads. "
-                    "Bitte unter Einstellungen → Steam Account hinterlegen."
-                ),
-            }
+            err = (
+                "Dieses Spiel benötigt einen Steam-Account für Workshop-Downloads. "
+                "Bitte unter Einstellungen → Steam Account hinterlegen."
+            )
+            _append_console_log(server_id, f"[MSM] {err}\n")
+            return {"ok": False, "error": err}
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]

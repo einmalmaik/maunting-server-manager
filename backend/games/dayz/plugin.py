@@ -13,7 +13,7 @@ import threading
 
 from blueprints import Blueprint, render_argv
 from blueprints.registry import native_dir
-from blueprints.schema import load_blueprint_file
+from blueprints.schema import BlueprintSourceType, load_blueprint_file
 from games.base import (
     CONTAINER_DATA_DIR,
     ConfigField,
@@ -71,11 +71,16 @@ class DayZPlugin(GamePlugin):
         install_dir = server.install_dir
         app_id = self.APP_ID
 
+        requires_login = False
+        if self._blueprint.source.type == BlueprintSourceType.STEAM and self._blueprint.source.steam:
+            requires_login = self._blueprint.source.steam.requiresLogin
+
         def _install():
             result = run_steamcmd_install(
                 server_id=server_id,
                 install_dir=install_dir,
                 app_id=app_id,
+                use_authenticated_login=requires_login,
             )
             finish_install(server_id, result)
 
@@ -177,6 +182,10 @@ class DayZPlugin(GamePlugin):
         und bleibt deshalb in Python. Die Modliste wird hingegen ueber die
         Blueprint im Renderer in die Startargumente injiziert — kein extra File.
         """
+        requires_login = False
+        if self._blueprint.source.type == BlueprintSourceType.STEAM and self._blueprint.source.steam:
+            requires_login = self._blueprint.source.steam.requiresLogin
+
         def _install():
             install_dir = server.install_dir
             workshop_dir = os.path.join(
@@ -188,6 +197,7 @@ class DayZPlugin(GamePlugin):
                 install_dir=install_dir,
                 workshop_app_id=self.WORKSHOP_ID,
                 workshop_item_id=workshop_id,
+                use_authenticated_login=requires_login,
             )
 
             link_path = os.path.join(install_dir, workshop_id)
