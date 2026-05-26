@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from games.base import finish_install
+from games.base import _console_log_path, finish_install
 from models import Server, User
 
 
@@ -166,6 +166,84 @@ class TestDeleteServerCleanup:
 
         assert response.status_code == 200
         assert response.json()["cleanup"]["dir_removed"] is None
+
+
+class TestSteamCMDFullLogOnFailure:
+    """SteamCMD-Output muss IMMER ins Console-Log — auch bei Fehler.
+
+    Bug-Report (User, 2026-05): DayZ-Install schlug fehl, im Panel war als
+    einzige Log-Zeile nur die kryptische Wrapper-Meldung
+    ``steamcmd.sh[7]: Restarting steamcmd by request...`` sichtbar. Die echte
+    Ursache (Login-Problem, App nicht verfuegbar, etc.) wurde verschluckt,
+    weil der alte Code im Fehlerpfad nur ``result['error']`` (= letzte Zeile)
+    geloggt hat und stdout/stderr verworfen wurden.
+    """
+
+    def _read_console_log(self, server_id: int) -> str:
+        path = _console_log_path(server_id)
+        if not os.path.exists(path):
+            return ""
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def _clear_console_log(self, server_id: int) -> None:
+        path = _console_log_path(server_id)
+        if os.path.exists(path):
+            os.remove(path)
+
+    def test_failure_writes_full_stdout_and_stderr_to_console(self, test_server: Server, tmp_path):
+        from games.base import run_steamcmd_install
+
+        self._clear_console_log(test_server.id)
+        try:
+            with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+                 patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
+                mock_eph.return_value = {
+                    "ok": False,
+                    "error": "steamcmd.sh[7]: Restarting steamcmd by request...",
+                    "stdout": "Redirecting stderr to '/data/logs/stderr.txt'\nLogging directory: '/data/logs'\nERROR! Failed to install app '223350' (No subscription)\n",
+                    "stderr": "steamcmd.sh[7]: Restarting steamcmd by request...\n",
+                }
+                run_steamcmd_install(
+                    server_id=test_server.id,
+                    install_dir=str(tmp_path),
+                    app_id="223350",
+                )
+
+            log = self._read_console_log(test_server.id)
+            # Volle SteamCMD-Diagnose muss sichtbar sein — sonst kann der User
+            # die Ursache nicht erkennen.
+            assert "No subscription" in log
+            assert "Failed to install app '223350'" in log
+            # Die kurze Fehler-Zusammenfassung (Wrapper-Meldung) bleibt am Ende
+            # erhalten — fuer den Status-Text.
+            assert "[MSM] SteamCMD fehlgeschlagen" in log
+        finally:
+            self._clear_console_log(test_server.id)
+
+    def test_success_still_writes_full_output(self, test_server: Server, tmp_path):
+        from games.base import run_steamcmd_install
+
+        self._clear_console_log(test_server.id)
+        try:
+            with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+                 patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
+                mock_eph.return_value = {
+                    "ok": True,
+                    "stdout": "Success! App '223350' fully installed.\n",
+                    "stderr": "",
+                }
+                run_steamcmd_install(
+                    server_id=test_server.id,
+                    install_dir=str(tmp_path),
+                    app_id="223350",
+                )
+
+            log = self._read_console_log(test_server.id)
+            assert "Success! App '223350' fully installed" in log
+            assert "[MSM] SteamCMD abgeschlossen" in log
+        finally:
+            self._clear_console_log(test_server.id)
 
 
 class TestPluginInstallCallback:

@@ -261,11 +261,17 @@ def run_steamcmd_install(
         timeout=3600,
     )
 
-    if result["ok"]:
-        # SteamCMD-Output ins Console-Log spiegeln (ohne Stderr separat zu loggen — wir
-        # kombinieren bewusst, damit das UI eine vollständige Sicht hat)
-        out = (result.get("stdout") or "") + (result.get("stderr") or "")
+    # SteamCMD-Output ins Console-Log spiegeln — IMMER, egal ob ok oder Fehler.
+    # Beim Fehler ist der volle Output das Wichtigste für die Diagnose: SteamCMD
+    # schreibt Login-Probleme, "App not available", "Connection lost" usw. nur
+    # dort. Würden wir nur ``result['error']`` (die letzte Zeile) loggen, sähe
+    # der User im Panel nur die kryptische Wrapper-Meldung
+    # ``steamcmd.sh[7]: Restarting steamcmd by request...`` und wüsste nicht,
+    # was wirklich kaputt war.
+    out = (result.get("stdout") or "") + (result.get("stderr") or "")
+    if out:
         _append_console_log(server_id, out)
+    if result["ok"]:
         _append_console_log(server_id, f"\n[MSM] SteamCMD abgeschlossen (App {app_id}).\n")
     else:
         _append_console_log(server_id, f"\n[MSM] SteamCMD fehlgeschlagen: {result['error']}\n")

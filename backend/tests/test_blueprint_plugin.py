@@ -12,7 +12,9 @@ Schwerpunkt:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from unittest.mock import patch
 
 from blueprints.schema import load_blueprint_dict
 from games.blueprint_plugin import BlueprintPlugin
@@ -89,6 +91,48 @@ def test_build_container_env_substitutes_port_tokens() -> None:
     assert env["RCON_PORT"] == "25579"
     assert env["EULA"] == "TRUE"
     assert env["TYPE"] == "PAPER"
+
+
+def test_docker_only_install_writes_console_feedback(tmp_path, monkeypatch) -> None:
+    """Docker-only Install darf nicht stumm sein.
+
+    Bug-Report (User, 2026-05): "Hytale/Minecraft startet den Install nicht".
+    Tatsaechlich ist der Install fuer ``source.type == dockerOnly`` ein No-op
+    (Image bringt alles mit). Ohne sichtbare Console-Zeile wirkt das im UI so,
+    als waere nichts passiert. Diese Regression-Sperre garantiert eine
+    klare Feedback-Zeile.
+    """
+    from games.base import _console_log_path
+
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["meta"]["id"] = "minecraft_paper_feedback"
+    bp = load_blueprint_dict(bp_dict)
+    plugin = BlueprintPlugin(bp)
+
+    server = _FakeServer(id=4242)
+    # Sicherheit: vorhandenes Log-File leeren, damit der Test wirklich nur die
+    # neue Zeile sieht.
+    log_path = _console_log_path(server.id)
+    if os.path.exists(log_path):
+        os.remove(log_path)
+
+    try:
+        with patch("games.blueprint_plugin.finish_install") as mock_finish:
+            result = plugin.install(server)
+
+        assert "Installation nicht erforderlich" in result["message"]
+        mock_finish.assert_called_once_with(server.id, {"ok": True})
+
+        # Console-Log muss eine eindeutige Notiz enthalten — der User soll sehen,
+        # dass der Klick auf "Installieren" verarbeitet wurde.
+        with open(log_path, "r", encoding="utf-8") as f:
+            log = f.read()
+        assert "Docker-only" in log
+        assert "bereit zum Starten" in log
+        assert bp.meta.id in log
+    finally:
+        if os.path.exists(log_path):
+            os.remove(log_path)
 
 
 def test_native_minecraft_blueprints_load() -> None:

@@ -98,7 +98,16 @@ class BlueprintPlugin(GamePlugin):
             return {"message": "Installation gestartet"}
 
         if bp.source.type in (BlueprintSourceType.DOCKER_ONLY, BlueprintSourceType.CUSTOM):
-            # Keine Files zu installieren — Status direkt auf ``stopped`` setzen.
+            # Keine Files zu installieren — Image bringt alles mit. Status direkt
+            # auf ``stopped`` setzen UND eine sichtbare Console-Notiz schreiben,
+            # damit der User im UI klar sieht, dass der Klick auf „Installieren"
+            # verarbeitet wurde. Ohne diese Zeile wirkt der Vorgang im Panel so,
+            # als waere nichts passiert (kein SteamCMD-Output, kein Download).
+            _append_console_log(
+                server.id,
+                f"[MSM] Blueprint '{bp.meta.id}' ist Docker-only — keine Dateien "
+                "zu installieren. Image enthaelt den Server. Status: bereit zum Starten.\n",
+            )
             finish_install(server.id, {"ok": True})
             return {"message": "Installation nicht erforderlich (Source-Typ)"}
 
