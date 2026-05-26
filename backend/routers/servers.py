@@ -345,7 +345,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
                 detail=(
                     f"Server kann nicht gestartet werden — folgende Dateien fehlen "
                     f"im Server-Verzeichnis: {', '.join(missing)}. "
-                    "Bitte ueber den File Manager hochladen (Archive koennen per "
+                    "Bitte über den File Manager hochladen (Archive können per "
                     "Rechtsklick → Entpacken ausgepackt werden)."
                 ),
             )

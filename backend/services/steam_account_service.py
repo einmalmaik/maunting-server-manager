@@ -34,7 +34,7 @@ class SteamAccountService:
     def set(username: str, password: str) -> None:
         u = username.strip()
         if not u or not password:
-            raise ValueError("Username und Passwort muessen gesetzt sein.")
+            raise ValueError("Username und Passwort müssen gesetzt sein.")
         if len(u) > 256 or len(password) > 1024:
             raise ValueError("Username/Passwort zu lang.")
         enc = AuthService.encrypt_2fa_secret(password)
@@ -60,6 +60,6 @@ class SteamAccountService:
             return AuthService.decrypt_2fa_secret(enc)
         except InvalidToken as e:
             raise RuntimeError(
-                "Steam-Account-Passwort kann nicht entschluesselt werden — "
+                "Steam-Account-Passwort kann nicht entschlüsselt werden — "
                 "vermutlich wurde der SECRET_KEY rotiert. Bitte Account neu hinterlegen."
             ) from e

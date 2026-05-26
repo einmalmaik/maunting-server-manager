@@ -387,6 +387,14 @@ class TestManualUploadLifecycle:
         result = plugin.install(test_server)
         assert "error" in result
         assert "Steam-Account" in result["error"]
+        # Status darf nicht in "installing" haengen bleiben — sonst kann der
+        # User den Server nicht mehr reparieren ohne Re-Install zu triggern.
+        db.expire_all()
+        refreshed = db.query(Server).filter(Server.id == test_server.id).first()
+        assert refreshed is not None
+        assert refreshed.status == "error"
+        assert refreshed.status_message is not None
+        assert "Steam-Account" in refreshed.status_message
 
     def test_steam_requires_login_uses_account_when_configured(self, db: Session, test_server: Server, tmp_path):
         from games.blueprint_plugin import BlueprintPlugin

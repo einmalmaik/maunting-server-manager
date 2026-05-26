@@ -402,7 +402,7 @@ class BlueprintManualSource(BaseModel):
         for p in v:
             if not _is_safe_relative_path(p):
                 raise ValueError(
-                    f"source.manual.requiredFiles enthaelt unsicheren Pfad '{p}' "
+                    f"source.manual.requiredFiles enthält unsicheren Pfad '{p}' "
                     "(absolute/'..'-Pfade sind verboten)."
                 )
             if p in seen:
@@ -442,7 +442,7 @@ class BlueprintSource(BaseModel):
                 raise ValueError("source.type=http darf source.steam/manual nicht setzen.")
         elif self.type == BlueprintSourceType.MANUAL_UPLOAD:
             if self.manual is None:
-                raise ValueError("source.type=manualUpload benoetigt source.manual.")
+                raise ValueError("source.type=manualUpload benötigt source.manual.")
             if self.steam is not None or self.http is not None:
                 raise ValueError("source.type=manualUpload darf source.steam/http nicht setzen.")
         else:  # dockerOnly / custom

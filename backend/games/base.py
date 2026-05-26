@@ -246,7 +246,7 @@ def run_steamcmd_install(
             return {
                 "ok": False,
                 "error": (
-                    "Dieses Spiel benoetigt einen globalen Steam-Account-Login. "
+                    "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
                     "Bitte unter Einstellungen → Steam Account einen Benutzer "
                     "und Passwort hinterlegen (Steam Guard muss deaktiviert sein)."
                 ),
@@ -324,7 +324,7 @@ def run_steamcmd_workshop_download(
             return {
                 "ok": False,
                 "error": (
-                    "Dieses Spiel benoetigt einen Steam-Account fuer Workshop-Downloads. "
+                    "Dieses Spiel benötigt einen Steam-Account für Workshop-Downloads. "
                     "Bitte unter Einstellungen → Steam Account hinterlegen."
                 ),
             }

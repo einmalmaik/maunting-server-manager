@@ -45,7 +45,7 @@ def _resolve_into(base_dir: Path, member_name: str, extract_to: Path | None) -> 
     if not member_name or member_name.startswith("/") or "\x00" in member_name or "\\" in member_name:
         raise ArchiveExtractError(f"Member '{member_name}' hat unsicheren Pfad.")
     if any(part == ".." for part in member_name.split("/")):
-        raise ArchiveExtractError(f"Member '{member_name}' enthaelt '..' (Zip-Slip).")
+        raise ArchiveExtractError(f"Member '{member_name}' enthält '..' (Zip-Slip).")
     base = base_dir
     if extract_to:
         base = extract_to
@@ -55,7 +55,7 @@ def _resolve_into(base_dir: Path, member_name: str, extract_to: Path | None) -> 
         target.relative_to(base_real)
     except ValueError as exc:
         raise ArchiveExtractError(
-            f"Member '{member_name}' wuerde aus dem erlaubten Verzeichnis entweichen."
+            f"Member '{member_name}' würde aus dem erlaubten Verzeichnis entweichen."
         ) from exc
     return target
 
@@ -78,7 +78,7 @@ def _extract_zip(zf: zipfile.ZipFile, base_dir: Path, extract_to: Path | None) -
     for info in zf.infolist():
         unix_mode = (info.external_attr >> 16) & 0xFFFF
         if unix_mode and (unix_mode & 0o170000) == 0o120000:
-            logger.warning("Zip-Member '%s' ist ein Symlink — wird uebersprungen.", info.filename)
+            logger.warning("Zip-Member '%s' ist ein Symlink — wird übersprungen.", info.filename)
             continue
         if info.is_dir():
             target = _resolve_into(base_dir, info.filename, extract_to)
@@ -95,7 +95,7 @@ def _extract_zip(zf: zipfile.ZipFile, base_dir: Path, extract_to: Path | None) -
                 if written > decompressed_budget:
                     target.unlink(missing_ok=True)
                     raise ArchiveExtractError(
-                        "Decompressed-Groessen-Limit ueberschritten (Zip-Bomb-Schutz)."
+                        "Decompressed-Größen-Limit überschritten (Zip-Bomb-Schutz)."
                     )
                 dst.write(chunk)
 
@@ -111,10 +111,10 @@ def _extract_tar(tf: tarfile.TarFile, base_dir: Path, extract_to: Path | None) -
     written = 0
     for member in tf.getmembers():
         if member.issym() or member.islnk():
-            logger.warning("Tar-Member '%s' ist Sym-/Hardlink — wird uebersprungen.", member.name)
+            logger.warning("Tar-Member '%s' ist Sym-/Hardlink — wird übersprungen.", member.name)
             continue
         if member.isdev() or member.isfifo():
-            logger.warning("Tar-Member '%s' ist Device/FIFO — wird uebersprungen.", member.name)
+            logger.warning("Tar-Member '%s' ist Device/FIFO — wird übersprungen.", member.name)
             continue
         target = _resolve_into(base_dir, member.name, extract_to)
         if member.isdir():
@@ -133,7 +133,7 @@ def _extract_tar(tf: tarfile.TarFile, base_dir: Path, extract_to: Path | None) -
                 if written > decompressed_budget:
                     target.unlink(missing_ok=True)
                     raise ArchiveExtractError(
-                        "Decompressed-Groessen-Limit ueberschritten (Tar-Bomb-Schutz)."
+                        "Decompressed-Größen-Limit überschritten (Tar-Bomb-Schutz)."
                     )
                 dst.write(chunk)
 
@@ -148,14 +148,14 @@ def safe_extract_archive(archive_path: Path, extract_to: Path, base_dir: Path) -
     """
     kind = _detect_archive_kind(archive_path.name)
     if kind is None:
-        raise ArchiveExtractError("Nicht unterstuetztes Archiv-Format.")
+        raise ArchiveExtractError("Nicht unterstütztes Archiv-Format.")
 
     if kind == "zip":
         try:
             with zipfile.ZipFile(str(archive_path), "r") as zf:
                 _extract_zip(zf, base_dir, extract_to)
         except zipfile.BadZipFile as exc:
-            raise ArchiveExtractError("Ungueltiges ZIP-Archiv.") from exc
+            raise ArchiveExtractError("Ungültiges ZIP-Archiv.") from exc
     else:
         try:
             with tarfile.open(str(archive_path), "r:*") as tf:

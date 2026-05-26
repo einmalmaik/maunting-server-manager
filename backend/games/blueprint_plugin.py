@@ -68,14 +68,16 @@ class BlueprintPlugin(GamePlugin):
             requires_login = bp.source.steam.requiresLogin
 
             if requires_login and not SteamAccountService.is_configured():
-                return {
-                    "error": (
-                        "Dieses Spiel benoetigt einen globalen Steam-Account-Login. "
-                        "Bitte unter Einstellungen → Steam Account einen Benutzer "
-                        "und Passwort hinterlegen (Steam Guard muss deaktiviert sein, "
-                        "siehe Hinweis dort)."
-                    )
-                }
+                error_msg = (
+                    "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
+                    "Bitte unter Einstellungen → Steam Account einen Benutzer "
+                    "und Passwort hinterlegen (Steam Guard muss deaktiviert sein, "
+                    "siehe Hinweis dort)."
+                )
+                # Status auf "error" setzen, sonst bleibt der Server in
+                # "installing" haengen (Create-Route ignoriert Rueckgabewert).
+                finish_install(server.id, {"ok": False, "error": error_msg})
+                return {"error": error_msg}
 
             app_id = bp.source.steam.appId
             install_dir = server.install_dir

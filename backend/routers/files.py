@@ -740,7 +740,7 @@ def extract_archive(
     if not _is_archive(target.name):
         raise HTTPException(
             status_code=400,
-            detail="Nur ZIP- und Tar-Archive werden unterstuetzt.",
+            detail="Nur ZIP- und Tar-Archive werden unterstützt.",
         )
 
     extract_dir = target.parent
