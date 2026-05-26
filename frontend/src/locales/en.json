@@ -47,11 +47,11 @@
     "pageTitle": "Blueprint Documentation",
     "pageSubtitle": "Create, upload and configure server types",
     "downloadTemplate": "Download Blueprint Template",
-    "uploadBlueprint": "Upload Blueprint",
-    "uploadHint": "Pick a .blueprint.json file. It is validated against the official schema before it becomes active.",
-    "uploadSuccess": "Blueprint \"{{id}}\" imported.",
-    "uploadInvalidJson": "The file is not valid JSON.",
-    "uploadFailed": "Upload failed.",
+    "tocTitle": "Contents",
+    "copyExample": "Copy example",
+    "copiedExample": "Copied",
+    "manageBlueprints": "Go to Blueprint management",
+    "manageBlueprintsHint": "Upload, replace and delete happen on the \"Blueprints\" page.",
     "sections": {
       "intro": {
         "title": "What is a Blueprint?",
@@ -102,8 +102,16 @@
         "body": "supportsSteamWorkshop=true unlocks the Workshop UI for this server type and requires workshopAppId.\n\nmodInjection picks how the panel passes mods to the server:\n\n• none — mod system off.\n• startupArg — modStartupArgumentFormat is added as an argv element to the startup command.\n• file — the workshop modlist is written to modListFilePath. The path is validated against install_dir so it can never escape."
       },
       "import": {
-        "title": "Upload a Blueprint",
-        "body": "Owners or accounts with panel.settings.write can import Blueprints in two ways:\n\n• Convenient: the \"Upload Blueprint\" button at the top of this page. Pick a .blueprint.json file from your filesystem.\n• Via API: POST /api/blueprints/import with the JSON as body (CSRF token required).\n\nThe JSON is validated against the same schema as native Blueprints. Native IDs are never overwritten — pick a different meta.id in that case. After a successful import the Blueprint appears immediately in the Create-Server game dropdown."
+        "title": "Upload, replace or delete a Blueprint",
+        "body": "Owners or accounts with panel.settings.write manage Blueprints on the \"Blueprints\" page in the sidebar:\n\n• Upload — drop in a new .blueprint.json. Validated against the same schema as native Blueprints.\n• Replace — overwrite community Blueprints. The uploaded file must carry the same meta.id.\n• Delete — remove community Blueprints. Native Blueprints are hard-protected and can be neither replaced nor deleted.\n\nAlternatively via API: POST /api/blueprints/import (create + update) and DELETE /api/blueprints/{id} with a CSRF token. After a successful import the Blueprint appears immediately in the Create-Server game dropdown."
+      },
+      "exampleMinecraftVersion": {
+        "title": "Example: change the Minecraft version",
+        "body": "Native Minecraft Blueprints are read-only (version \"LATEST\"). To pin a specific version, clone the Blueprint once as a community Blueprint:\n\n1. On the \"Blueprints\" page, download the native variant you want (e.g. minecraft_paper).\n2. In the JSON, change only meta.id (a unique slug), meta.name and runtime.env.VERSION — leave everything else alone.\n3. Save as <new-id>.blueprint.json and upload via \"Blueprints → Upload new\".\n\nValid VERSION values (for itzg/minecraft-server): LATEST, SNAPSHOT, or a concrete version like 1.20.4. TYPE picks the server variant (VANILLA, PAPER, SPIGOT, PURPUR, FABRIC, FORGE, NEOFORGE, SPONGEVANILLA). Note: mods and plugins are not compatible across major versions — having one Blueprint per version makes that explicit."
+      },
+      "exampleWine": {
+        "title": "Example: run a Windows server via Wine",
+        "body": "Some games only ship a Windows binary. For a Wine-based server, write a custom Blueprint with a dockerOnly source: an image that already contains Wine plus the server binaries (built by you — never a random image from the internet).\n\nThings to watch:\n\n• The Wine prefix (~/.wine) must be persistent — keep it in the bind mount under /data.\n• No X server: only set DISPLAY=:0 if you actually run an Xvfb instance inside the image.\n• Headless: the server binary must not open a GUI.\n• Console input (e.g. EULA confirmation) works because MSM starts the container with --interactive — type directly in the console tab.\n\nThe example below starts a generic Windows server in a self-built Wine image. Adjust: meta.id, runtime.image (your registry), runtime.startup."
       }
     }
   },
@@ -130,6 +138,8 @@
     "consoleClear": "Clear",
     "consoleClearTitle": "Hide the current console output locally (server logs are preserved)",
     "consolePlaceholder": "Type command…",
+    "consoleSend": "Send",
+    "consoleInputFailed": "Input could not be delivered.",
     "gameLogs": "Game Logs",
     "install": "Install",
     "deleted": "Server deleted",

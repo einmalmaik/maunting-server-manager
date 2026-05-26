@@ -211,6 +211,11 @@ def run_container(
     args: list[str] = ["run"]
     if detach:
         args.append("-d")
+    # ``--interactive`` haelt den stdin von PID 1 als Pipe offen. Ohne dieses
+    # Flag landet ``/proc/1/fd/0`` auf ``/dev/null`` und Konsolen-Eingaben (z. B.
+    # Hytale-OAuth-``/auth login device``) gehen lautlos verloren. Spiele, die
+    # ihren stdin nicht lesen, ignorieren das Flag — kein Verhaltenswechsel.
+    args.append("-i")
     args.extend(["--name", name])
     args.extend(["--restart=on-failure:5"])
     args.extend(_DEFAULT_LOG_OPTS)
@@ -414,6 +419,26 @@ def exec_in(name: str, command: list[str], timeout: int = 30) -> dict:
         return {"ok": False, "error": "Container läuft nicht", "stdout": "", "stderr": ""}
     args = ["exec", name, *command]
     return _run_docker(args, timeout=timeout)
+
+
+def send_stdin(name: str, data: str) -> dict:
+    """Sendet ``data`` in den stdin (fd 0) des Container-Prozesses PID 1.
+
+    Standardpattern fuer Game-Panels: per ``docker exec`` einen ``cat``-Aufruf
+    starten, der seinen stdin auf ``/proc/1/fd/0`` umleitet — also direkt in den
+    stdin des Game-Servers. Funktioniert nur, wenn der Container mit ``-i``
+    gestartet wurde (siehe ``run_container``); andernfalls ist fd 0 auf
+    ``/dev/null`` gebunden und der Schreibvorgang ist ein No-op.
+
+    Wichtig: ``data`` (z. B. ein Hytale-OAuth-Code) wird **niemals** geloggt —
+    der Wrapper schiebt ihn via stdin direkt an ``docker exec`` weiter.
+    """
+    if not is_running(name):
+        return {"ok": False, "error": "Container läuft nicht", "stdout": "", "stderr": ""}
+    # ``-i`` an docker exec, damit die Pipe stehen bleibt bis ``data`` geschrieben
+    # ist. ``sh -c 'cat > /proc/1/fd/0'`` liest stdin und schreibt in PID-1-stdin.
+    args = ["exec", "-i", name, "sh", "-c", "cat > /proc/1/fd/0"]
+    return _run_docker(args, timeout=10, stdin=data)
 
 
 # ── Disk-Usage (Soft-Limit) ────────────────────────────────────────────────

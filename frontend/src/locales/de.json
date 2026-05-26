@@ -47,11 +47,11 @@
     "pageTitle": "Blueprint-Dokumentation",
     "pageSubtitle": "Server-Typen anlegen, hochladen und konfigurieren",
     "downloadTemplate": "Blueprint-Template herunterladen",
-    "uploadBlueprint": "Blueprint hochladen",
-    "uploadHint": "Wähle eine .blueprint.json. Datei wird gegen das offizielle Schema geprüft, bevor sie aktiv wird.",
-    "uploadSuccess": "Blueprint „{{id}}\" importiert.",
-    "uploadInvalidJson": "Die Datei ist kein gültiges JSON.",
-    "uploadFailed": "Upload fehlgeschlagen.",
+    "tocTitle": "Inhalt",
+    "copyExample": "Beispiel kopieren",
+    "copiedExample": "Kopiert",
+    "manageBlueprints": "Zur Blueprint-Verwaltung",
+    "manageBlueprintsHint": "Hochladen, Ersetzen und Löschen von Blueprints geschieht auf der Seite „Blueprints\".",
     "sections": {
       "intro": {
         "title": "Was ist eine Blueprint?",
@@ -102,8 +102,16 @@
         "body": "supportsSteamWorkshop=true schaltet die Workshop-UI für diesen Server-Typ frei und verlangt workshopAppId.\n\nmodInjection entscheidet, wie das Panel Mods an den Server übergibt:\n\n• none — Mod-System aus.\n• startupArg — modStartupArgumentFormat landet als argv-Element im Startup-Befehl.\n• file — Workshop-Modliste wird nach modListFilePath geschrieben. Der Pfad wird gegen install_dir validiert — Escape-Pfade sind nicht möglich."
       },
       "import": {
-        "title": "Blueprint hochladen",
-        "body": "Owner oder Accounts mit panel.settings.write können Blueprints auf zwei Wegen importieren:\n\n• Bequem: Button „Blueprint hochladen\" oben auf dieser Seite. Wähle eine .blueprint.json-Datei aus deinem Dateisystem.\n• Per API: POST /api/blueprints/import mit dem JSON als Body (CSRF-Token erforderlich).\n\nDas JSON wird gegen dasselbe Schema wie native Blueprints geprüft. Native IDs werden niemals überschrieben — wähle in dem Fall eine andere meta.id. Nach erfolgreichem Import erscheint die Blueprint sofort im Spiel-Dropdown der Server-Erstellung."
+        "title": "Blueprint hochladen, ersetzen oder löschen",
+        "body": "Owner oder Accounts mit panel.settings.write verwalten Blueprints auf der Seite „Blueprints\" im Menü links:\n\n• Hochladen — neue .blueprint.json-Datei einfügen. Validierung gegen dasselbe Schema wie native Blueprints.\n• Ersetzen — Community-Blueprints überschreiben. Die hochgeladene Datei muss dieselbe meta.id tragen.\n• Löschen — Community-Blueprints entfernen. Native Blueprints sind hart geschützt und können weder ersetzt noch gelöscht werden.\n\nAlternativ per API: POST /api/blueprints/import (Create + Update) und DELETE /api/blueprints/{id} mit CSRF-Token. Nach erfolgreichem Import erscheint die Blueprint sofort im Spiel-Dropdown der Server-Erstellung."
+      },
+      "exampleMinecraftVersion": {
+        "title": "Beispiel: Minecraft-Version wechseln",
+        "body": "Native Minecraft-Blueprints sind read-only (Version „LATEST\"). Für eine fixe Version klonst du die Blueprint einmal als Community:\n\n1. Auf der Seite „Blueprints\" die gewünschte Native-Variante herunterladen (z. B. minecraft_paper).\n2. In der JSON nur meta.id (eindeutiger Slug), meta.name und runtime.env.VERSION ändern — alles andere bleibt.\n3. Datei als <neue-id>.blueprint.json speichern und über „Blueprints → Neu hochladen\" einspielen.\n\nGültige VERSION-Werte (für itzg/minecraft-server): LATEST, SNAPSHOT, eine konkrete Version wie 1.20.4. TYPE bestimmt die Server-Variante (VANILLA, PAPER, SPIGOT, PURPUR, FABRIC, FORGE, NEOFORGE, SPONGEVANILLA). Beachte: Mods/Plugins sind nicht zwischen Major-Versionen kompatibel — eine eigene Blueprint pro Version macht das sichtbar."
+      },
+      "exampleWine": {
+        "title": "Beispiel: Windows-Server in Wine starten",
+        "body": "Manche Spiele bieten nur ein Windows-Binary an. Für einen Wine-basierten Server schreibst du eine Custom-Blueprint mit dockerOnly-Source: ein Image, das Wine + die Server-Binaries bereits enthält (selbst gebaut, niemals ein zufälliges Image aus dem Netz).\n\nZu beachten:\n\n• Der Wine-Prefix (~/.wine) muss persistent sein — er liegt im Bind-Mount unter /data.\n• Kein X-Server: setze DISPLAY=:0 nur, wenn du wirklich eine Xvfb-Instanz im Image laufen lässt.\n• Headless: das Server-Binary darf keine GUI öffnen.\n• Konsole-Eingabe (z. B. EULA-Bestätigung) funktioniert nur, weil MSM den Container mit --interactive startet — schreibe direkt im Konsole-Tab.\n\nDas folgende Beispiel startet einen generischen Windows-Server in einem selbst gebauten Wine-Image. Anpassen: meta.id, runtime.image (eigene Registry), runtime.startup."
       }
     }
   },
@@ -130,6 +138,8 @@
     "consoleClear": "Leeren",
     "consoleClearTitle": "Aktuelle Konsole lokal ausblenden (Server-Logs bleiben erhalten)",
     "consolePlaceholder": "Befehl eingeben…",
+    "consoleSend": "Senden",
+    "consoleInputFailed": "Eingabe konnte nicht zugestellt werden.",
     "gameLogs": "Game-Logs",
     "install": "Installieren",
     "deleted": "Server gelöscht",

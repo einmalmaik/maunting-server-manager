@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Eraser, Terminal } from 'lucide-react'
+import { Eraser, Send, Terminal } from 'lucide-react'
 import { api } from '@/api/client'
+import { useHasPermission } from '@/hooks/useHasPermission'
+import { toast } from '@/stores/toastStore'
 
 interface Props {
   serverId: number
@@ -34,44 +36,54 @@ const LINE_CLASS: Record<ReturnType<typeof classifyLine>, string> = {
 }
 
 /** Server-Konsole als eigener Tab.
- *  - Read-only Polling alle 3s (`/servers/:id/console?lines=400`).
- *  - Farb-Coding pro Zeile (Error rot, Warning gelb, Info grün, sonst neutral).
- *  - Lokal leeren via "Leeren"-Button (markiert den aktuellen Log-Stand als
- *    versteckt; neu eintreffende Zeilen werden weiterhin angezeigt).
- *  - Scrollbar visuell ausgeblendet (Scrollen funktioniert weiterhin).
+ *
+ *  - **Lesen:** Server-Sent Events ueber `/api/servers/:id/console/stream`
+ *    (gestreamt mit `docker logs --follow`). Auto-Reconnect via Browser-
+ *    EventSource bei Verbindungsabbruch.
+ *  - **Eingabe:** sichtbar nur mit Permission `server.console.write`. Enter
+ *    schickt POST an `/api/servers/:id/console/input`. Eingabe wird nicht
+ *    geloggt — Inhalt kann sensibel sein (OAuth-Codes, RCON-Tokens).
+ *  - **Lokal leeren:** versteckt den aktuellen Verlauf, neue Zeilen kommen
+ *    weiterhin.
+ *  - Farb-Coding pro Zeile (Error rot, Warning gelb, Info gruen).
+ *  - Scrollbar visuell ausgeblendet, Scrollen funktioniert weiterhin.
  */
 export function ServerConsolePanel({ serverId }: Props) {
   const { t } = useTranslation()
-  const [logs, setLogs] = useState('')
-  const [hideUpTo, setHideUpTo] = useState('')
+  const canWrite = useHasPermission('server.console.write', serverId)
+  const [logs, setLogs] = useState<string[]>([])
+  const [hideAbove, setHideAbove] = useState(0)
+  const [inputValue, setInputValue] = useState('')
+  const [sending, setSending] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    let cancelled = false
-    const fetchLogs = async () => {
-      try {
-        const data = await api<{ logs: string }>(`/servers/${serverId}/console?lines=400`)
-        if (!cancelled) setLogs(data.logs || '')
-      } catch {
-        // silent
-      }
+    // EventSource sendet automatisch Cookies (same-origin) und reconnectet bei
+    // Netzwerk-Aussetzern. Keine zusaetzliche Polling-Logik noetig.
+    const url = `/api/servers/${serverId}/console/stream`
+    const es = new EventSource(url)
+    es.onmessage = (ev) => {
+      // Backend liefert je SSE-Frame eine Log-Zeile. ``data:`` ist bereits
+      // ohne Newline (siehe Router).
+      setLogs((prev) => [...prev, ev.data])
     }
-    void fetchLogs()
-    const handle = setInterval(fetchLogs, 3000)
+    es.addEventListener('end', () => {
+      // Backend signalisiert Stream-Ende (Container weg). Verbindung schliessen.
+      es.close()
+    })
+    es.onerror = () => {
+      // Stille: Browser reconnected automatisch. Logs nicht spammen — der User
+      // sieht die fehlende Verbindung daran, dass keine neuen Zeilen kommen.
+    }
     return () => {
-      cancelled = true
-      clearInterval(handle)
+      es.close()
     }
   }, [serverId])
 
-  const visibleLogs = useMemo(() => {
-    if (!hideUpTo) return logs
-    if (logs.startsWith(hideUpTo)) {
-      return logs.slice(hideUpTo.length).replace(/^\n+/, '')
-    }
-    // Logs wurden serverseitig rotiert/neu geschnitten — Marker verwerfen.
-    return logs
-  }, [logs, hideUpTo])
+  const visibleLogs = useMemo(
+    () => logs.slice(hideAbove),
+    [logs, hideAbove],
+  )
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -79,7 +91,25 @@ export function ServerConsolePanel({ serverId }: Props) {
     }
   }, [visibleLogs])
 
-  const lines = visibleLogs.length > 0 ? visibleLogs.split('\n') : []
+  const sendInput = async () => {
+    const line = inputValue
+    if (!line.trim()) return
+    setSending(true)
+    // Eingabefeld sofort leeren — auch wenn der POST fehlschlaegt, soll der
+    // User nicht den Eindruck haben, dass das Feld haengt.
+    setInputValue('')
+    try {
+      await api<{ ok: boolean }>(`/servers/${serverId}/console/input`, {
+        method: 'POST',
+        body: JSON.stringify({ line }),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('servers.consoleInputFailed')
+      toast.error(message)
+    } finally {
+      setSending(false)
+    }
+  }
 
   return (
     <div className="msm-card">
@@ -89,7 +119,7 @@ export function ServerConsolePanel({ serverId }: Props) {
           <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
         </div>
         <button
-          onClick={() => setHideUpTo(logs)}
+          onClick={() => setHideAbove(logs.length)}
           className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
           title={t('servers.consoleClearTitle')}
         >
@@ -100,18 +130,51 @@ export function ServerConsolePanel({ serverId }: Props) {
       <div className="p-5">
         <div
           ref={scrollRef}
-          className="bg-surface-container-lowest border border-outline rounded-md p-4 h-[calc(100vh-340px)] min-h-[420px] overflow-auto font-mono text-xs whitespace-pre-wrap [&::-webkit-scrollbar]:hidden [scrollbar-width:none]"
+          className="bg-surface-container-lowest border border-outline rounded-md p-4 h-[calc(100vh-380px)] min-h-[420px] overflow-auto font-mono text-xs whitespace-pre-wrap [&::-webkit-scrollbar]:hidden [scrollbar-width:none]"
         >
-          {lines.length === 0 ? (
+          {visibleLogs.length === 0 ? (
             <span className="text-on-surface-variant">{t('servers.noLogs')}</span>
           ) : (
-            lines.map((line, i) => (
+            visibleLogs.map((line, i) => (
               <div key={i} className={LINE_CLASS[classifyLine(line)]}>
                 {line || '\u00A0'}
               </div>
             ))
           )}
         </div>
+
+        {canWrite && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              void sendInput()
+            }}
+            className="mt-3 flex items-center gap-2"
+            data-testid="console-input-form"
+          >
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder={t('servers.consolePlaceholder')}
+              disabled={sending}
+              maxLength={1024}
+              autoComplete="off"
+              spellCheck={false}
+              className="flex-1 bg-surface-container-lowest border border-outline rounded-md px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+              data-testid="console-input"
+            />
+            <button
+              type="submit"
+              disabled={sending || !inputValue.trim()}
+              className="msm-btn-primary px-3 py-2 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+              data-testid="console-send"
+            >
+              <Send className="w-3.5 h-3.5" />
+              {t('servers.consoleSend')}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   )
