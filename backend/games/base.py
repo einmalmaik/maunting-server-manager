@@ -670,7 +670,12 @@ class GamePlugin(ABC):
                 )
                 try:
                     mod_res = self.install_mod(server, wid)
-                    if isinstance(mod_res, dict) and "error" not in mod_res:
+                    success = (
+                        isinstance(mod_res, dict)
+                        and mod_res.get("ok", True) is not False
+                        and "error" not in mod_res
+                    )
+                    if success:
                         # Erfolg: Metadaten sofort in DB schreiben (last_updated + installed_version)
                         updater.update_mod_metadata_after_success(
                             server.id, wid, u.get("remote_updated")

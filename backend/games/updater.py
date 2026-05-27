@@ -517,7 +517,6 @@ def should_preserve_file(path: Path) -> bool:
 
 import shutil
 import subprocess
-import tempfile
 from typing import Optional
 
 

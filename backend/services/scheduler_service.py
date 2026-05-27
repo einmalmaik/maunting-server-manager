@@ -488,13 +488,14 @@ async def _background_update_check_task() -> None:
                                         getattr(u, "id", "?"), server.id, notify_err
                                     )
 
+                db.commit()
             except Exception as e:  # pragma: no cover - defensiv pro Server
+                db.rollback()
                 logger.warning(
                     "Background-Update-Check fehlgeschlagen für Server %s: %s", server.id, e
                 )
-
-        db.commit()
     except Exception as e:
+        db.rollback()
         logger.warning("background update check task crashed: %s", e)
     finally:
         db.close()

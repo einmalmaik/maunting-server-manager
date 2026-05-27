@@ -256,18 +256,29 @@ class BlueprintPlugin(GamePlugin):
         if self._blueprint.source.type == BlueprintSourceType.STEAM and self._blueprint.source.steam:
             requires_login = self._blueprint.source.steam.requiresLogin
 
-        def _install():
-            run_steamcmd_workshop_download(
-                server_id=server_id,
-                install_dir=install_dir,
-                workshop_app_id=workshop_app_id,
-                workshop_item_id=workshop_id,
-                use_authenticated_login=requires_login,
-            )
-            # Nach jedem Mod-Install die Modliste re-generieren (falls Datei-
-            # injection); fuer startupArg ist das ein No-op.
-            self.update_modlist(server)
-            _append_console_log(server.id, f"[MSM] Mod {workshop_id} verarbeitet\n")
+        result: dict = {}
 
-        threading.Thread(target=_install, daemon=True).start()
-        return {"message": f"Mod {workshop_id} wird verarbeitet"}
+        def _install():
+            nonlocal result
+            try:
+                download_res = run_steamcmd_workshop_download(
+                    server_id=server_id,
+                    install_dir=install_dir,
+                    workshop_app_id=workshop_app_id,
+                    workshop_item_id=workshop_id,
+                    use_authenticated_login=requires_login,
+                )
+                if not download_res.get("ok", False):
+                    result = {"error": download_res.get("error", "Workshop-Download fehlgeschlagen")}
+                    return
+                # Nach jedem Mod-Install die Modliste re-generieren (falls Datei-
+                # injection); fuer startupArg ist das ein No-op.
+                self.update_modlist(server)
+                _append_console_log(server.id, f"[MSM] Mod {workshop_id} verarbeitet\n")
+            except Exception as exc:
+                result = {"error": str(exc)}
+
+        thread = threading.Thread(target=_install, daemon=True)
+        thread.start()
+        thread.join()
+        return result

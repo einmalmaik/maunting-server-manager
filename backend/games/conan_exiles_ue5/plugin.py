@@ -188,41 +188,52 @@ class ConanExilesUE5Plugin(GamePlugin):
 
     def install_mod(self, server, workshop_id: str) -> dict:
         """Lädt Mod via SteamCMD-Container, kopiert .pak nach Mods/, aktualisiert modlist.txt."""
+        result: dict = {}
+
         def _install():
-            install_dir = server.install_dir
-            workshop_dir = os.path.join(
-                install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, workshop_id
-            )
-            mods_dir = os.path.join(install_dir, "ConanSandbox", "Mods")
-
-            run_steamcmd_workshop_download(
-                server_id=server.id,
-                install_dir=install_dir,
-                workshop_app_id=self.WORKSHOP_ID,
-                workshop_item_id=workshop_id,
-            )
-
-            os.makedirs(mods_dir, exist_ok=True)
-            pak_files = glob.glob(os.path.join(workshop_dir, "**", "*.pak"), recursive=True)
-
-            if not pak_files:
-                _append_console_log(
-                    server.id, f"[MSM] Warnung: Keine .pak-Dateien für Mod {workshop_id} gefunden\n"
+            nonlocal result
+            try:
+                install_dir = server.install_dir
+                workshop_dir = os.path.join(
+                    install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, workshop_id
                 )
-                return
+                mods_dir = os.path.join(install_dir, "ConanSandbox", "Mods")
 
-            for pak_path in pak_files:
-                pak_name = os.path.basename(pak_path)
-                dest = os.path.join(mods_dir, pak_name)
-                shutil.copy2(pak_path, dest)
-                _append_console_log(server.id, f"[MSM] Mod-Datei kopiert: {pak_name}\n")
+                download_res = run_steamcmd_workshop_download(
+                    server_id=server.id,
+                    install_dir=install_dir,
+                    workshop_app_id=self.WORKSHOP_ID,
+                    workshop_item_id=workshop_id,
+                )
+                if not download_res.get("ok", False):
+                    result = {"error": download_res.get("error", "Workshop-Download fehlgeschlagen")}
+                    return
 
-            self.update_modlist(server)
-            _append_console_log(server.id, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
+                os.makedirs(mods_dir, exist_ok=True)
+                pak_files = glob.glob(os.path.join(workshop_dir, "**", "*.pak"), recursive=True)
+
+                if not pak_files:
+                    _append_console_log(
+                        server.id, f"[MSM] Warnung: Keine .pak-Dateien für Mod {workshop_id} gefunden\n"
+                    )
+                    result = {"error": "Keine .pak-Dateien gefunden"}
+                    return
+
+                for pak_path in pak_files:
+                    pak_name = os.path.basename(pak_path)
+                    dest = os.path.join(mods_dir, pak_name)
+                    shutil.copy2(pak_path, dest)
+                    _append_console_log(server.id, f"[MSM] Mod-Datei kopiert: {pak_name}\n")
+
+                self.update_modlist(server)
+                _append_console_log(server.id, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
+            except Exception as exc:
+                result = {"error": str(exc)}
 
         thread = threading.Thread(target=_install, daemon=True)
         thread.start()
-        return {"message": f"Mod {workshop_id} wird installiert"}
+        thread.join()
+        return result
 
     # ─ Modlist (Blueprint: modInjection=file) ─────────────────────────────
 

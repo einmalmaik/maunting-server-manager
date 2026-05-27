@@ -194,56 +194,68 @@ class DayZPlugin(GamePlugin):
         if self._blueprint.source.type == BlueprintSourceType.STEAM and self._blueprint.source.steam:
             requires_login = self._blueprint.source.steam.requiresLogin
 
+        result: dict = {}
+
         def _install():
-            install_dir = server.install_dir
-            workshop_dir = os.path.join(
-                install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, workshop_id
-            )
-
-            run_steamcmd_workshop_download(
-                server_id=server.id,
-                install_dir=install_dir,
-                workshop_app_id=self.WORKSHOP_ID,
-                workshop_item_id=workshop_id,
-                use_authenticated_login=requires_login,
-            )
-
-            link_path = os.path.join(install_dir, workshop_id)
-            if os.path.isdir(workshop_dir):
-                if os.path.exists(link_path):
-                    if os.path.islink(link_path):
-                        os.unlink(link_path)
-                    else:
-                        _append_console_log(
-                            server.id,
-                            f"[MSM] Warnung: {link_path} existiert bereits und ist kein Symlink\n",
-                        )
-                        return
-                os.symlink(workshop_dir, link_path)
-                _append_console_log(
-                    server.id, f"[MSM] Mod {workshop_id} verlinkt: {link_path} → {workshop_dir}\n"
+            nonlocal result
+            try:
+                install_dir = server.install_dir
+                workshop_dir = os.path.join(
+                    install_dir, "steamapps", "workshop", "content", self.WORKSHOP_ID, workshop_id
                 )
-
-                # Bikey-Files in keys/ verlinken
-                keys_dir = os.path.join(install_dir, "keys")
-                os.makedirs(keys_dir, exist_ok=True)
-                mod_keys = os.path.join(workshop_dir, "keys")
-                if os.path.isdir(mod_keys):
-                    for key_file in glob.glob(os.path.join(mod_keys, "*.bikey")):
-                        key_link = os.path.join(keys_dir, os.path.basename(key_file))
-                        if os.path.exists(key_link):
-                            os.unlink(key_link)
-                        os.symlink(key_file, key_link)
-                        _append_console_log(
-                            server.id, f"[MSM] Key verlinkt: {os.path.basename(key_file)}\n"
-                        )
-            else:
-                _append_console_log(
-                    server.id, f"[MSM] Warnung: Workshop-Verzeichnis nicht gefunden: {workshop_dir}\n"
+                download_res = run_steamcmd_workshop_download(
+                    server_id=server.id,
+                    install_dir=install_dir,
+                    workshop_app_id=self.WORKSHOP_ID,
+                    workshop_item_id=workshop_id,
+                    use_authenticated_login=requires_login,
                 )
+                if not download_res.get("ok", False):
+                    result = {"error": download_res.get("error", "Workshop-Download fehlgeschlagen")}
+                    return
 
-            _append_console_log(server.id, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
+                link_path = os.path.join(install_dir, workshop_id)
+                if os.path.isdir(workshop_dir):
+                    if os.path.exists(link_path):
+                        if os.path.islink(link_path):
+                            os.unlink(link_path)
+                        else:
+                            _append_console_log(
+                                server.id,
+                                f"[MSM] Warnung: {link_path} existiert bereits und ist kein Symlink\n",
+                            )
+                            result = {"error": "Mod-Pfad existiert bereits und ist kein Symlink"}
+                            return
+                    os.symlink(workshop_dir, link_path)
+                    _append_console_log(
+                        server.id, f"[MSM] Mod {workshop_id} verlinkt: {link_path} → {workshop_dir}\n"
+                    )
+
+                    # Bikey-Files in keys/ verlinken
+                    keys_dir = os.path.join(install_dir, "keys")
+                    os.makedirs(keys_dir, exist_ok=True)
+                    mod_keys = os.path.join(workshop_dir, "keys")
+                    if os.path.isdir(mod_keys):
+                        for key_file in glob.glob(os.path.join(mod_keys, "*.bikey")):
+                            key_link = os.path.join(keys_dir, os.path.basename(key_file))
+                            if os.path.exists(key_link):
+                                os.unlink(key_link)
+                            os.symlink(key_file, key_link)
+                            _append_console_log(
+                                server.id, f"[MSM] Key verlinkt: {os.path.basename(key_file)}\n"
+                            )
+                else:
+                    _append_console_log(
+                        server.id, f"[MSM] Warnung: Workshop-Verzeichnis nicht gefunden: {workshop_dir}\n"
+                    )
+                    result = {"error": "Workshop-Verzeichnis nicht gefunden"}
+                    return
+
+                _append_console_log(server.id, f"[MSM] Mod {workshop_id} Installation abgeschlossen.\n")
+            except Exception as exc:
+                result = {"error": str(exc)}
 
         thread = threading.Thread(target=_install, daemon=True)
         thread.start()
-        return {"message": f"Mod {workshop_id} wird installiert"}
+        thread.join()
+        return result
