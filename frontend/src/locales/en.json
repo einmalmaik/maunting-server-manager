@@ -142,6 +142,10 @@
     "consoleInputFailed": "Input could not be delivered.",
     "gameLogs": "Game Logs",
     "install": "Install",
+    "reinstall": "Reinstall",
+    "reinstallConfirm": "Really reinstall server? Binaries and Workshop mods will be replaced. Manual configuration files will be preserved.",
+    "serverFileUpdateAvailable": "Server update available",
+    "modUpdatesAvailable": "{{count}} mod update(s) available",
     "deleted": "Server deleted",
     "confirmDelete": "Really delete this server? All data will be permanently removed.",
     "createDescription": "Create a new game server.",
@@ -368,7 +372,9 @@
     "searchHint": "Try a different search term.",
     "workshopId": "Workshop ID",
     "modName": "Name (optional)",
-    "autoUpdate": "Auto-Update",
+    "updateAvailable": "Update available",
+    "updating": "Updating...",
+    "lastChecked": "Last checked",
     "loadOrder": "Load Order",
     "add": "Add",
     "added": "Added",
@@ -551,7 +557,17 @@
     "disable": "Disable email notifications",
     "enable": "Enable email notifications",
     "disableConfirm": "Are you sure you want to stop receiving email notifications?",
-    "enableConfirm": "Enable email notifications again?"
+    "enableConfirm": "Enable email notifications again?",
+    "serverUpdateAvailable": "Server update available for {{name}}",
+    "modUpdateAvailable": "Mod update available for {{mod}} on server {{server}}"
+  },
+  "updater": {
+    "manualConfigsRestored": "Manual configuration files were automatically restored.",
+    "manualConfigsFailed": "Failed to restore manual configuration files – please check them manually.",
+    "panelUpdateAvailable": "Panel update available",
+    "current": "Current",
+    "viewRelease": "View release",
+    "manualUpdateCommand": "Update on server:"
   },
   "common": {
     "unlimited": "unlimited",

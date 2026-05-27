@@ -16,7 +16,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from database import SessionLocal
-from games import get_plugin
+from games import get_plugin, _append_console_log
 from services import docker_service
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,19 @@ DISK_WARN_THRESHOLD_PERCENT = 80
 DISK_STOP_THRESHOLD_PERCENT = 100
 # Wie oft Disk-Usage geprüft wird (Minuten).
 DISK_CHECK_INTERVAL_MINUTES = 15
+
+# Intervall für passive Hintergrund-Checks auf Mod- und Server-Datei-Updates (Stunden).
+# Rate-Limit-sicher (Steam-API, Workshop), KISS: nicht zu häufig, nur Erkennung.
+UPDATE_CHECK_INTERVAL_HOURS = 6
+
+# In-Memory Dedup-Sets (Prozess-Lebensdauer) für "nur einmal pro Fund" bei Update-Emails.
+# Schlüssel nutzen *bestehende Metadaten* aus check_*-Rückgaben (remote_updated, current_updated,
+# local_mtime, reason) → bei Apply + später neuem Update ändert sich der Key automatisch.
+# Innerhalb eines Laufs: keine 6h-Wiederhol-Mails (Anti-Spam).
+# Bei MSM-Prozess-Neustart: Reset (einmaliger Reminder akzeptabel, kein Dauer-Spam).
+# Keine DB-Felder, keine Persistenz, KISS + defensiv (AGENTS.md).
+_notified_server_update_keys: set[str] = set()
+_notified_mod_update_keys: set[str] = set()
 
 _scheduler: Optional[AsyncIOScheduler] = None
 
@@ -44,6 +57,9 @@ def start_scheduler():
     scheduler = get_scheduler()
     if not scheduler.running:
         scheduler.start()
+    # Globalen passiven Background-Update-Check-Job sicherstellen (auch hier,
+    # damit der Job nach Scheduler-Restart/Neustart aktiv ist; KISS, idempotent).
+    _ensure_background_update_check_job()
 
 
 def stop_scheduler():
@@ -328,11 +344,190 @@ def _ensure_disk_check_job() -> None:
     )
 
 
+async def _background_update_check_task() -> None:
+    """Globaler periodischer Scheduler-Job für passive Hintergrund-Checks.
+
+    Für ALLE Server:
+    - Ruft über das Plugin `check_for_mod_updates` und `check_for_server_file_update` auf.
+    - Bei Fund (Mod-Updates oder Server-Datei-Update verfügbar):
+      * Schreibt Eintrag in die MSM-Console-Log (sichtbar im UI-Console).
+      * Setzt `server.status_message` mit Hinweis (passiv, rein informativ).
+    - NUR passiv: KEIN automatisches Update, KEIN Download, KEIN Container-Stop/Start.
+      Auch bei laufendem Server wird nur erkannt und gemeldet (User plant Restart selbst).
+    - Rate-Limit-sicher: alle 6 Stunden (UPDATE_CHECK_INTERVAL_HOURS).
+    - Email-Benachrichtigungen (verdrahtet):
+      * Nur wenn EmailService.is_configured() True.
+      * Nur an User mit user.email_notifications=True (Glocke im Topbar).
+      * Nur an User mit server.view-Recht auf dem betroffenen Server
+        (Owner via is_owner, Rolle oder explizite ServerPermission; has_server_permission).
+      * Nur 1x pro Fund: Dedup-Key aus *bestehenden Metadaten* der Check-Rückgabe
+        (remote_updated, current_updated, local_mtime, reason, workshop_id).
+        In-Memory (Prozess-Laufzeit) — bei Apply + neuem remote Update: neuer Key,
+        Mail geht raus. Kein 6h-Spam bei pending Updates.
+    - Keine AuditLogs (minimaler Scope, KISS).
+    - Defensiv: pro-Server try/except + pro-Notify try/except, frische DB-Session,
+      Snapshot der Kandidaten am Task-Start, keine Secrets, keine neuen DB-Writes.
+
+    Entspricht exakt _disk_soft_limit_task-Pattern (AGENTS.md + Architektur).
+    Deutsche Kommentare, keine neue Komplexität, keine destruktiven Aktionen.
+    Verdrahtung referenziert send_server_update_available_notification und
+    send_mod_update_available_notification aus email_service.py (Aufrufbedingung
+    exakt wie in deren Docstring beschrieben).
+    """
+    from models import Server, User
+    from services.email_service import EmailService
+    from services.permission_service import has_server_permission
+
+    db = SessionLocal()
+    try:
+        # Email-Kandidaten einmalig am Task-Start snapshotten (KISS).
+        # Nur wenn konfiguriert: sonst kein Query, keine Mail-Logik.
+        email_configured = False
+        candidate_users: list[User] = []
+        try:
+            email_configured = EmailService.is_configured()
+            if email_configured:
+                candidate_users = (
+                    db.query(User)
+                    .filter(
+                        User.is_active == True,
+                        User.email_notifications == True,
+                        User.email.isnot(None),
+                    )
+                    .all()
+                )
+        except Exception:  # pragma: no cover - defensiv
+            email_configured = False
+            candidate_users = []
+
+        servers = db.query(Server).all()
+        for server in servers:
+            try:
+                plugin = get_plugin(server.game_type)
+                if not plugin:
+                    continue
+
+                # 1. Workshop-Mod-Updates (passiver Check via Plugin/Updater)
+                mod_updates = plugin.check_for_mod_updates(server)
+                if mod_updates:
+                    count = len(mod_updates)
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] Background-Check: {count} Workshop-Mod(s) benötigen Update/Installation "
+                        f"für Server '{server.name}' (passiv erkannt — kein automatisches Update).\n"
+                    )
+                    server.status_message = (
+                        f"Hintergrund-Check: {count} Mod-Update(s) verfügbar (Workshop). "
+                        "Bitte bei nächstem Neustart prüfen/ausführen."
+                    )
+                    logger.info(
+                        "Background-Check: %d Mod-Update(s) für Server %s ('%s') gefunden (passiv).",
+                        count, server.id, server.name
+                    )
+
+                    # E-Mail-Benachrichtigung (nur 1x pro neuem Fund via Metadaten-Dedup)
+                    if email_configured and candidate_users:
+                        for mod_info in mod_updates:
+                            mod_name = mod_info.get("name") or str(mod_info.get("workshop_id") or "Unbekannt")
+                            remote = mod_info.get("remote_updated") or ""
+                            current = mod_info.get("current_updated") or ""
+                            wid = mod_info.get("workshop_id") or ""
+                            dedup_key = f"mod:{server.id}:{wid}:{remote}:{current}"
+                            if dedup_key not in _notified_mod_update_keys:
+                                _notified_mod_update_keys.add(dedup_key)
+                                for u in candidate_users:
+                                    try:
+                                        if not has_server_permission(db, u, server.id, "server.view"):
+                                            continue
+                                        if EmailService.is_configured() and getattr(u, "email_notifications", False):
+                                            await EmailService.send_mod_update_available_notification(
+                                                u.email, u.username, server.name, mod_name
+                                            )
+                                    except Exception as notify_err:  # pragma: no cover - defensiv
+                                        logger.warning(
+                                            "Mod-Update-Email fehlgeschlagen für User %s, Server %s, Mod %s: %s",
+                                            getattr(u, "id", "?"), server.id, mod_name, notify_err
+                                        )
+
+                # 2. Server-Datei-Update (Game-Binaries, passiv)
+                server_update = plugin.check_for_server_file_update(server)
+                if server_update.get("action") == "update":
+                    reason = server_update.get("reason", "unbekannt")
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] Background-Check: Server-Datei-Update erkannt für '{server.name}' "
+                        f"({reason}) — passiv, kein Auto-Update (auch nicht bei laufendem Server).\n"
+                    )
+                    server.status_message = (
+                        f"Hintergrund-Check: Server-Datei-Update verfügbar ({reason}). "
+                        "Update wird vor manuellem Neustart empfohlen."
+                    )
+                    logger.info(
+                        "Background-Check: Server-Datei-Update für Server %s ('%s') gefunden (%s, passiv).",
+                        server.id, server.name, reason
+                    )
+
+                    # E-Mail-Benachrichtigung (nur 1x pro neuem Fund via Metadaten-Dedup)
+                    if email_configured and candidate_users:
+                        remote = server_update.get("remote_updated") or ""
+                        local = server_update.get("local_mtime") or ""
+                        dedup_key = f"server:{server.id}:{reason}:{remote}:{local}"
+                        if dedup_key not in _notified_server_update_keys:
+                            _notified_server_update_keys.add(dedup_key)
+                            for u in candidate_users:
+                                try:
+                                    if not has_server_permission(db, u, server.id, "server.view"):
+                                        continue
+                                    if EmailService.is_configured() and getattr(u, "email_notifications", False):
+                                        await EmailService.send_server_update_available_notification(
+                                            u.email, u.username, server.name
+                                        )
+                                except Exception as notify_err:  # pragma: no cover - defensiv
+                                    logger.warning(
+                                        "Server-Update-Email fehlgeschlagen für User %s, Server %s: %s",
+                                        getattr(u, "id", "?"), server.id, notify_err
+                                    )
+
+            except Exception as e:  # pragma: no cover - defensiv pro Server
+                logger.warning(
+                    "Background-Update-Check fehlgeschlagen für Server %s: %s", server.id, e
+                )
+
+        db.commit()
+    except Exception as e:
+        logger.warning("background update check task crashed: %s", e)
+    finally:
+        db.close()
+
+
+def _ensure_background_update_check_job() -> None:
+    """Stellt den globalen passiven Update-Check-Job sicher (idempotent, wie _ensure_disk)."""
+    scheduler = get_scheduler()
+    job_id = "global_background_update_checks"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_background_update_check_task,
+        trigger=IntervalTrigger(hours=UPDATE_CHECK_INTERVAL_HOURS),
+        id=job_id,
+        name="Passive Background Update Checks (Mods + Server Files)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def init_server_schedules(db):
     """Initialize schedules for all servers on startup."""
     from models import Server
 
     _ensure_disk_check_job()
+    # Passiver Hintergrund-Update-Check-Job (global, für alle Server):
+    # Ruft check_for_mod_updates + check_for_server_file_update passiv auf.
+    # Integriert hier + in start_scheduler (genau nach Plan).
+    _ensure_background_update_check_job()
 
     servers = db.query(Server).all()
     for server in servers:

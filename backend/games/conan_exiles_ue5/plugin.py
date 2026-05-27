@@ -70,10 +70,17 @@ class ConanExilesUE5Plugin(GamePlugin):
         app_id = self.APP_ID
 
         def _install():
-            result = run_steamcmd_install(
-                server_id=server_id,
-                install_dir=install_dir,
-                app_id=app_id,
+            # Reinstall-Schutz für manuelle Configs: Cache + Restore via zentrale
+            # perform_install_with_protection (verhindert Überschreiben von .ini/.cfg etc.).
+            from games.updater import perform_install_with_protection
+            result = perform_install_with_protection(
+                server,
+                lambda: run_steamcmd_install(
+                    server_id=server_id,
+                    install_dir=install_dir,
+                    app_id=app_id,
+                ),
+                blueprint=self._blueprint,
             )
             finish_install(server_id, result)
 

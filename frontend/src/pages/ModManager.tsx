@@ -27,7 +27,6 @@ interface Mod {
   last_updated: string | null
   installed_version: number | null
   load_order: number | null
-  auto_update: boolean
   enabled: boolean
   dependencies_json: string | null
 }
@@ -217,18 +216,9 @@ export function ModManager({ serverId }: ModManagerProps) {
     }
   }
 
-  const patchModFlag = async (modId: number, flag: 'auto_update' | 'enabled', value: boolean) => {
+  const patchModFlag = async (modId: number, flag: 'enabled', value: boolean) => {
     const params = new URLSearchParams({ [flag]: value ? 'true' : 'false' })
     await api<Mod>(`/mods/${serverId}/${modId}?${params.toString()}`, { method: 'PATCH' })
-  }
-
-  const toggleAutoUpdate = async (modId: number, current: boolean) => {
-    try {
-      await patchModFlag(modId, 'auto_update', !current)
-      await loadMods()
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : t('mods.updateSettingFailed'))
-    }
   }
 
   const toggleEnabled = async (modId: number, current: boolean) => {
@@ -468,18 +458,6 @@ export function ModManager({ serverId }: ModManagerProps) {
                     >
                       <ExternalLink className="w-4 h-4 text-on-surface-variant" />
                     </a>
-
-                    <label className="flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-outline cursor-pointer hover:bg-surface-container transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={mod.auto_update}
-                        onChange={() => toggleAutoUpdate(mod.id, mod.auto_update)}
-                        className="rounded border-outline bg-surface-container-highest text-secondary focus:ring-secondary"
-                      />
-                      <span className="text-sm text-on-surface font-body-md">
-                        {t('mods.autoUpdate')}
-                      </span>
-                    </label>
 
                     <button
                       onClick={() => removeMod(mod.id)}

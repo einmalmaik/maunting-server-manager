@@ -76,11 +76,19 @@ class DayZPlugin(GamePlugin):
             requires_login = self._blueprint.source.steam.requiresLogin
 
         def _install():
-            result = run_steamcmd_install(
-                server_id=server_id,
-                install_dir=install_dir,
-                app_id=app_id,
-                use_authenticated_login=requires_login,
+            # Reinstall-Schutz für manuelle Configs (.cfg, .ini, serverDZ.cfg etc.):
+            # Vor dem SteamCMD-Lauf cachen, danach (auch bei Fehler) restored.
+            # Siehe games/updater.py:perform_install_with_protection + _protect...
+            from games.updater import perform_install_with_protection
+            result = perform_install_with_protection(
+                server,
+                lambda: run_steamcmd_install(
+                    server_id=server_id,
+                    install_dir=install_dir,
+                    app_id=app_id,
+                    use_authenticated_login=requires_login,
+                ),
+                blueprint=self._blueprint,
             )
             finish_install(server_id, result)
 

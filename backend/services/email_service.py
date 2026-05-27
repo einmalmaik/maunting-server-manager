@@ -393,3 +393,74 @@ Maunting Server Manager
 """
         html = EmailService._notification_email_html(username, "Zu Server hinzugefügt", f'Du wurdest von <strong>{added_by}</strong> zum Server "{server_name}" hinzugefügt.')
         return await EmailService.send_email(to, subject, body, html)
+
+    # ------------------------------------------------------------------
+    # Update-Benachrichtigungen (für Hintergrund-Check-Job)
+    # ------------------------------------------------------------------
+    # Deutsche Templates mit englischem Fallback im Plain-Text-Body (sinnvoll
+    # für internationale Nutzer / Text-Fallback in Mail-Clients).
+    # Wiederverwendung von _notification_email_html + _base_template (exakt
+    # wie bei allen anderen Status-/Install-Benachrichtigungen).
+    #
+    # Aufruf-Bedingung (durch Caller sicherzustellen, global):
+    #   if EmailService.is_configured() and user.email_notifications:
+    #     await EmailService.send_... (keine neuen DB-Felder nötig;
+    #     Steuerung erfolgt über bestehendes User.email_notifications + Glocke
+    #     im Topbar).
+    #
+    # KISS + AGENTS.md:
+    # - Keine Secrets, Pfade, IPs, Workshop-IDs, Versionen oder Hashes in Mails.
+    # - Nur Server-/Mod-Name (bereits in anderen Mails verwendet, nicht sensitiv).
+    # - Keine neuen Abhängigkeiten, keine Komplexität.
+    # - Deutsche Kommentare.
+    # - Methoden sind rein informativ (werden bei passiven Checks gerufen).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def send_server_update_available_notification(to: str, username: str, server_name: str) -> bool:
+        """Sendet E-Mail-Benachrichtigung, wenn ein Server-Datei-Update verfügbar ist.
+
+        Typischer Aufruf aus Hintergrund-Check-Job (Scheduler), nachdem
+        check_for_server_file_update() ein "update" gemeldet hat.
+        Kein automatisches Update, nur Hinweis.
+        """
+        subject = f"Maunting Server Manager — Server-Update verfügbar: {server_name}"
+        body = f"""Hallo {username},
+
+[DE] Ein Update für die Server-Dateien von "{server_name}" ist verfügbar.
+     Das Update wird beim nächsten Neustart berücksichtigt.
+
+[EN] A server file update is available for "{server_name}".
+     The update will be considered on the next restart.
+
+Maunting Server Manager
+"""
+        html = EmailService._notification_email_html(
+            username,
+            "Server-Update verfügbar",
+            f'Ein Update für die Server-Dateien von <strong>"{server_name}"</strong> ist verfügbar.'
+        )
+        return await EmailService.send_email(to, subject, body, html)
+
+    @staticmethod
+    async def send_mod_update_available_notification(to: str, username: str, server_name: str, mod_name: str) -> bool:
+        """Sendet E-Mail-Benachrichtigung, wenn ein Workshop-Mod-Update verfügbar ist.
+
+        Typischer Aufruf aus Hintergrund-Check-Job (Scheduler), nachdem
+        check_for_mod_updates() relevante Einträge geliefert hat.
+        """
+        subject = f"Maunting Server Manager — Mod-Update verfügbar: {mod_name}"
+        body = f"""Hallo {username},
+
+[DE] Ein Update für den Mod "{mod_name}" auf Server "{server_name}" ist verfügbar.
+
+[EN] An update for the mod "{mod_name}" on server "{server_name}" is available.
+
+Maunting Server Manager
+"""
+        html = EmailService._notification_email_html(
+            username,
+            "Mod-Update verfügbar",
+            f'Ein Update für den Mod <strong>"{mod_name}"</strong> auf Server "{server_name}" ist verfügbar.'
+        )
+        return await EmailService.send_email(to, subject, body, html)

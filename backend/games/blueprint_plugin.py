@@ -84,11 +84,18 @@ class BlueprintPlugin(GamePlugin):
             server_id = server.id
 
             def _install():
-                result = run_steamcmd_install(
-                    server_id=server_id,
-                    install_dir=install_dir,
-                    app_id=app_id,
-                    use_authenticated_login=requires_login,
+                # Reinstall-Schutz (manuelle .cfg/.ini etc.): Cache vor, Restore nach.
+                # Frische Install: 0 Dateien → No-Op. Nutzt zentrale Helper aus updater.py.
+                from games.updater import perform_install_with_protection
+                result = perform_install_with_protection(
+                    server,
+                    lambda: run_steamcmd_install(
+                        server_id=server_id,
+                        install_dir=install_dir,
+                        app_id=app_id,
+                        use_authenticated_login=requires_login,
+                    ),
+                    blueprint=bp,
                 )
                 finish_install(server_id, result)
 
@@ -101,7 +108,13 @@ class BlueprintPlugin(GamePlugin):
 
             def _http_install():
                 _append_console_log(server_id, "[MSM] HTTP-Source-Download startet\n")
-                result = install_http_source(bp, install_dir)
+                # Reinstall-Schutz (manuelle Configs): Cache vor, Restore nach dem Entpacken.
+                from games.updater import perform_install_with_protection
+                result = perform_install_with_protection(
+                    server,
+                    lambda: install_http_source(bp, install_dir),
+                    blueprint=bp,
+                )
                 if result.get("ok"):
                     _append_console_log(server_id, "[MSM] HTTP-Source erfolgreich entpackt\n")
                 else:

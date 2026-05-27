@@ -29,6 +29,7 @@ from services import docker_service
 from services.docker_service import PortPublish, VolumeBind
 
 from blueprints.schema import Blueprint, BlueprintModInjection
+from games import updater  # zentrale KISS-Updater-Logik (Blueprint-konform)
 
 
 def _require_bind_ip(server) -> str:
@@ -527,6 +528,208 @@ class GamePlugin(ABC):
         sensibler Werte und keine Network-Calls.
         """
         return None
+
+    # ── Zentrale Updater-Hooks (KISS, Blueprint-getrieben) ───────────────────
+
+    def prepare_for_updates(self, server) -> None:
+        """
+        Hook: wird vor Neustarts / Installs aufgerufen.
+
+        Zentrale Stelle für passive oder vorbereitende Update-Checks
+        (Workshop-Mods + Server-Dateien). Default ist No-Op.
+
+        Wird vom neuen `games.updater` Modul bedient.
+        Keine Netzwerk-Calls oder schwere Arbeit hier – nur Delegation.
+        """
+        return None
+
+    def check_for_mod_updates(self, server) -> list[dict]:
+        """
+        Liefert Liste von Workshop-Mods, die installiert oder aktualisiert
+        werden sollten (siehe games.updater.check_workshop_mod_updates).
+
+        Wird nach Server-Neustart und im Background-Scheduler genutzt.
+        """
+        try:
+            bp = self.get_blueprint()
+            if bp is None:
+                return []
+            return updater.check_workshop_mod_updates(server, bp)
+        except Exception as exc:  # pragma: no cover - defensiv
+            logger.warning("Mod-Update-Check fehlgeschlagen für Server %s: %s", getattr(server, "id", "?"), exc)
+            return []
+
+    def check_for_server_file_update(self, server) -> dict:
+        """
+        Prüft, ob Server-Dateien (Game-Binaries) aktualisiert werden sollten.
+        Wird **ausschließlich** vor Neustarts ausgeführt (nie zur Laufzeit).
+        """
+        try:
+            bp = self.get_blueprint()
+            if bp is None:
+                return {"action": "none", "reason": "no_blueprint"}
+            return updater.check_server_file_update(server, bp)
+        except Exception as exc:  # pragma: no cover - defensiv
+            logger.warning("Serverfile-Update-Check fehlgeschlagen für Server %s: %s", getattr(server, "id", "?"), exc)
+            return {"action": "none", "reason": "error"}
+
+    def perform_server_file_update(self, server) -> dict:
+        """
+        Führt ein Server-Datei-Update (Game-Binaries) **synchron** aus.
+
+        Wird **ausschließlich** im Restart-Pfad (routers/servers.py) aufgerufen,
+        wenn check_for_server_file_update() ein Update meldet.
+
+        Garantiert:
+        - Update läuft VOR plugin.start() (Container-Start)
+        - cache_manual_configs wird vor dem Update aufgerufen
+        - restore_manual_configs wird nach dem Update (oder Fehlerfall) aufgerufen
+        - Blockiert den Aufrufer bis Abschluss (Caller muss to_thread nutzen!)
+
+        Implementierung: Delegation an games.updater.apply_server_file_update
+        (KISS: keine Duplizierung der Source-Logik, nutzt bestehende
+        run_steamcmd_install + install_http_source).
+
+        Native Plugins (DayZ, Conan) profitieren automatisch über get_blueprint().
+
+        Sicherheit (AGENTS.md):
+        - Diese Methode fängt Fehler intern ab (siehe apply_).
+        - Restart darf unter KEINEN Umständen durch Server-Datei-Update scheitern.
+        - Keine Mod-Logik, kein Background, keine E-Mails.
+
+        Rückgabe: {"ok": bool, ...} — siehe apply_server_file_update.
+        """
+        try:
+            bp = self.get_blueprint()
+            if bp is None:
+                return {"ok": False, "error": "no_blueprint"}
+            # Delegation (Lazy nicht nötig, da "updater" bereits auf Modulebene importiert ist)
+            return updater.apply_server_file_update(server, bp)
+        except Exception as exc:  # pragma: no cover - defensiv, Restart-Sicherheit
+            logger.warning("perform_server_file_update fehlgeschlagen für Server %s: %s", getattr(server, "id", "?"), exc)
+            # Niemals Exception nach oben werfen — Restart muss weiterlaufen
+            return {"ok": False, "error": str(exc)}
+
+    def perform_workshop_mod_updates(self, server) -> dict:
+        """
+        Führt erkannte Workshop-Mod-Updates und -Neuinstallationen **synchron** aus.
+
+        Aufruf: ausschließlich aus Restart-Pfad (routers/servers.py) und optional
+        direktem Start-Pfad, nachdem check_for_mod_updates() Handlungsbedarf gemeldet hat.
+
+        Verwendete bestehende Funktionen (genau wie gefordert):
+        - self.install_mod(server, workshop_id): Game-spezifischer Einstieg (Plugins
+          überschreiben für Custom-Pfade etc.). Ruft intern run_steamcmd_workshop_download
+          (siehe base.py:306) auf, um den eigentlichen SteamCMD-Workshop-Download
+          durchzuführen (mit Login-Handling, Logging, chown etc.).
+        - updater.update_mod_metadata_after_success(...): Setzt nach Erfolg
+          korrekt Mod.last_updated (remote time_updated) + Mod.installed_version.
+
+        Ablauf pro Mod:
+        1. Console-Log (Transparenz).
+        2. install_mod aufrufen (blockierend, kann lange dauern).
+        3. Bei Erfolg (kein "error" im Result): Metadaten-Update in DB.
+        4. Am Ende: update_modlist(server) für Blueprints mit FILE-Injection.
+
+        KISS + AGENTS.md:
+        - Keine neuen Abstraktionen, keine Pipelines, keine Manager-Klassen.
+        - Symmetrisch zu perform_server_file_update.
+        - Fehler werden nur geloggt + in Console; der Restart/Start läuft IMMER weiter
+          (sicheres Verhalten, keine harten Abhängigkeiten).
+        - Nur aktive Mods (enabled=True) werden betrachtet (Check filtert).
+        - Blockierend → Caller (Router) muss asyncio.to_thread verwenden.
+        - Deutsche Kommentare, minimale Code-Änderung.
+
+        Rückgabe: {"ok": bool, "applied": int, "errors": list, "message": str}
+        """
+        try:
+            bp = self.get_blueprint()
+            if bp is None:
+                return {"ok": False, "error": "no_blueprint"}
+
+            needed = self.check_for_mod_updates(server)
+            if not needed:
+                return {"ok": True, "applied": 0, "message": "keine Workshop-Mod-Updates nötig"}
+
+            _append_console_log(
+                server.id,
+                f"[MSM] Starte Workshop-Mod-Updates/Installationen für {len(needed)} Mod(s) "
+                "(via install_mod + internes run_steamcmd_workshop_download vor Container-Start)...\n"
+            )
+
+            applied = 0
+            errors: list[str] = []
+
+            for u in needed:
+                wid = u.get("workshop_id", "")
+                name = u.get("name", wid)
+                action = u.get("action", "update")
+                _append_console_log(
+                    server.id,
+                    f"[MSM]   → {action.upper()}: Workshop-Mod {wid} ({name})\n"
+                )
+                try:
+                    mod_res = self.install_mod(server, wid)
+                    if isinstance(mod_res, dict) and "error" not in mod_res:
+                        # Erfolg: Metadaten sofort in DB schreiben (last_updated + installed_version)
+                        updater.update_mod_metadata_after_success(
+                            server.id, wid, u.get("remote_updated")
+                        )
+                        applied += 1
+                        _append_console_log(
+                            server.id, f"[MSM]     ✓ {wid} erfolgreich verarbeitet.\n"
+                        )
+                    else:
+                        err = (
+                            (mod_res or {}).get("error", "unbekannter Fehler")
+                            if isinstance(mod_res, dict)
+                            else str(mod_res)
+                        )
+                        errors.append(f"{wid}: {err}")
+                        _append_console_log(
+                            server.id, f"[MSM]     ✗ {wid} fehlgeschlagen: {err}\n"
+                        )
+                except Exception as exc:  # pragma: no cover - defensiv
+                    errors.append(f"{wid}: {exc}")
+                    _append_console_log(
+                        server.id, f"[MSM]     ✗ {wid} Exception während install_mod: {exc}\n"
+                    )
+
+            # Mod-Liste für Injection aktualisieren (z. B. modlist.txt) – nach allen Downloads
+            try:
+                self.update_modlist(server)
+            except Exception as exc:
+                _append_console_log(
+                    server.id,
+                    f"[MSM] update_modlist nach Workshop-Mod-Updates fehlgeschlagen (nicht kritisch): {exc}\n",
+                )
+
+            ok = len(errors) == 0
+            summary = f"{applied} Workshop-Mod(s) erfolgreich installiert/aktualisiert"
+            if errors:
+                summary += f" ({len(errors)} Fehler)"
+            _append_console_log(
+                server.id, f"[MSM] Workshop-Mod-Updates abgeschlossen: {summary}.\n"
+            )
+
+            return {
+                "ok": ok,
+                "applied": applied,
+                "errors": errors,
+                "message": summary,
+            }
+        except Exception as exc:  # pragma: no cover - Restart/Start-Sicherheit (AGENTS.md)
+            logger.warning(
+                "perform_workshop_mod_updates fehlgeschlagen für Server %s: %s",
+                getattr(server, "id", "?"),
+                exc,
+            )
+            sid = getattr(server, "id", 0)
+            _append_console_log(
+                sid,
+                f"[MSM] Workshop-Mod-Update fehlgeschlagen — Restart/Start wird trotzdem fortgesetzt: {exc}\n",
+            )
+            return {"ok": False, "error": str(exc), "applied": 0}
 
     # ─ Default Lifecycle (Docker) ────────────────────────────────────────
 

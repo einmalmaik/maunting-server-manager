@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Download, X, ExternalLink } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import type { VersionInfo } from '@/types'
 
 export function UpdateBanner() {
+  const { t } = useTranslation()
   const [version, setVersion] = useState<VersionInfo | null>(null)
   const [dismissed, setDismissed] = useState(false)
 
@@ -26,10 +28,10 @@ export function UpdateBanner() {
           <Download className="w-5 h-5 text-status-warning flex-shrink-0 mt-0.5" />
           <div>
             <h3 className="font-headline text-body-md text-on-surface">
-              Update verfügbar
+              {t('updater.panelUpdateAvailable', 'Panel-Update verfügbar')}
             </h3>
             <p className="font-body-md text-sm text-on-surface-variant mt-1">
-              Aktuell: <span className="font-mono">{version.current_version}</span>
+              {t('updater.current')}: <span className="font-mono">{version.current_version}</span>
               {' → '}
               <span className="font-mono text-status-warning">{version.latest_version}</span>
             </p>
@@ -41,10 +43,10 @@ export function UpdateBanner() {
                 className="msm-btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
-                Release ansehen
+                {t('updater.viewRelease', 'Release ansehen')}
               </a>
               <span className="font-body-md text-xs text-on-surface-variant">
-                Update auf dem Server:{' '}
+                {t('updater.manualUpdateCommand', 'Update auf dem Server:')}{' '}
                 <code className="font-mono bg-surface-container-high px-1 py-0.5 rounded">
                   sudo bash /opt/msm/update.sh
                 </code>
@@ -55,7 +57,7 @@ export function UpdateBanner() {
         <button
           onClick={() => setDismissed(true)}
           className="text-on-surface-variant hover:text-on-surface transition-colors"
-          aria-label="Schließen"
+          aria-label={t('common.close', 'Schließen')}
         >
           <X className="w-4 h-4" />
         </button>
