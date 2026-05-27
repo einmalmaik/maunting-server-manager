@@ -1144,8 +1144,13 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 # /opt/msm existiert immer (Home des msm-Users) → kein NAMESPACE-Crash
-# /etc/systemd/system für Game-Server-Units
-ReadWritePaths=/opt/msm /etc/systemd/system
+# /etc/systemd/system  → Game-Server-Units
+# UFW-Pfade fuer firewall_service.py (Port-Manager). ProtectSystem=strict
+# macht /run, /etc, /var/lib read-only im Namespace; ohne diese Pfade
+# scheitert ``sudo ufw ...`` aus dem Backend. ``-``-Praefix => systemd
+# ueberspringt nicht existierende Pfade (z.B. ``/run/ufw.lock`` vor dem
+# ersten ufw-Aufruf) statt mit ``status=226/NAMESPACE`` zu crashen.
+ReadWritePaths=/opt/msm /etc/systemd/system -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock
 
 [Install]
 WantedBy=multi-user.target
