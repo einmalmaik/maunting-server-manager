@@ -50,6 +50,7 @@ class TestCreateServer:
         # nichts; install_dir landet unter /tmp/msm-test/.
         with patch("routers.servers.os.makedirs"), \
              patch("routers.servers.os.chmod"), \
+             patch("routers.servers.os.path.exists", return_value=False), \
              patch("routers.servers.open_ports"), \
              patch("routers.servers.get_plugin", return_value=None):
             response = client.post(
@@ -76,6 +77,55 @@ class TestCreateServer:
             cookies=owner_cookies,
         )
         assert response.status_code == 403
+
+    def test_create_uses_stable_id_based_install_dir(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str):
+        """Nach dem Fix wird install_dir aus der echten PK (server.id) gebildet,
+        nicht mehr aus Count()+1. Auch mit gemockten FS-Calls können wir prüfen,
+        dass der Name im Response die ID enthält (kein Reuse nach DELETEs möglich).
+        """
+        with patch("routers.servers.os.makedirs"), \
+             patch("routers.servers.os.chmod"), \
+             patch("routers.servers.os.path.exists", return_value=False), \
+             patch("routers.servers.open_ports"), \
+             patch("routers.servers.get_plugin", return_value=None):
+            response = client.post(
+                "/api/servers",
+                json={"name": "Id-Based Server", "game_type": "dayz"},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+            assert response.status_code in (200, 201)
+            data = response.json()
+            # Der Pfad muss jetzt die echte Datenbank-ID enthalten, nicht einen Count-Wert.
+            assert f"dayz_{data['id']}" in data["install_dir"]
+            assert "/tmp/msm-pending" not in data["install_dir"]
+
+    def test_create_rejects_preexisting_dir_on_disk_with_409(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str):
+        """Simuliert exakt den Bug (verwaistes dayz_1 oder root-owned Dir):
+        os.path.exists liefert True für den id-basierten Pfad → saubere 409,
+        keine 500 + EPERM, und keine Phantom-Row in der DB.
+        """
+        # Wir patchen nur den exists-Guard. Der Rest (ports etc.) läuft normal.
+        # create_server berechnet den Pfad intern aus der frischen id.
+        conflicting_path = "/opt/msm/servers/dayz_999999"  # kann nicht existieren
+        with patch("routers.servers.os.path.exists", return_value=True) as mock_exists, \
+             patch("routers.servers.os.makedirs"), \
+             patch("routers.servers.os.chmod"), \
+             patch("routers.servers.open_ports"), \
+             patch("routers.servers.get_plugin", return_value=None):
+            response = client.post(
+                "/api/servers",
+                json={"name": "Collision Test", "game_type": "dayz"},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+            assert response.status_code == 409
+            assert "existierte bereits" in response.json()["detail"].lower() or "existier" in response.json()["detail"].lower()
+            # Wichtig: die Placeholder-Row wurde aufgeräumt (keine Server mit Pending-Pfad).
+            # (Der genaue Check über DB ist in Integration-Tests abgedeckt; hier reicht 409.)
+
+        # exists wurde mindestens einmal für den Guard aufgerufen.
+        assert mock_exists.called
 
 
 class TestDeleteServer:

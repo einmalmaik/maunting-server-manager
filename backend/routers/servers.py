@@ -39,24 +39,10 @@ def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current
 async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(require_global("servers.create")), _: None = Depends(verify_csrf)) -> Server:
 
     base_dir = os.path.abspath(settings.servers_dir)
-    count = db.query(Server).count() + 1
-    install_dir = os.path.join(base_dir, f"{req.game_type}_{count}")
 
-    # Verzeichnis anlegen — wird vom Panel-User (`msm`) angelegt und ist von dort
-    # rw, während der Container das Volume mit derselben UID/GID mountet (siehe
-    # docker_service.host_uid_gid()). Kein useradd, kein chown via sudo nötig.
-    try:
-        os.makedirs(install_dir, exist_ok=True)
-        os.chmod(install_dir, 0o750)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
-
-    # Bind-IP bestimmen: User-Vorgabe > Default = erste Public-IP des Hosts.
-    # 127.0.0.1 oder 0.0.0.0 sind im Validator (schemas/server.py) verboten.
+    # Bind-IP und Ports zuerst validieren (keine Seiteneffekte auf FS oder DB).
+    # 127.0.0.1 / 0.0.0.0 verboten (Validator + hier).
     bind_ip = req.public_bind_ip or default_bind_ip()
-
-    # Ports automatisch vergeben (oder vom Nutzer übernehmen) — TCP/UDP-Check
-    # gegen DB UND Host (ss + bind probe).
     try:
         game_port, query_port, rcon_port = allocate_ports(
             db,
@@ -66,17 +52,20 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
             bind_ip=bind_ip or "0.0.0.0",
         )
     except PortConflictError as e:
-        # Konflikt mit Host (SSH/Caddy) oder anderem MSM-Server.
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
+    # Placeholder-Row zuerst einfügen, um stabile PK (server.id) zu erhalten.
+    # Danach install_dir = f".../{game_type}_{id}" — kollisionsfrei über alle Zeit,
+    # auch nach DELETEs (Count-basiert war die Ursache für dayz_1-Reuse).
+    # Placeholder wird bei Konflikt sofort wieder gelöscht (nie sichtbar für User).
     server = Server(
         name=req.name,
         game_type=req.game_type,
-        install_dir=install_dir,
+        install_dir="/tmp/msm-pending-create",
         status="stopped",
         auto_restart=req.auto_restart,
         restart_interval_hours=req.restart_interval_hours,
@@ -90,6 +79,41 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         public_bind_ip=bind_ip,
     )
     db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    install_dir = os.path.join(base_dir, f"{req.game_type}_{server.id}")
+
+    # Vorheriges Verzeichnis auf Host prüfen (verwaist von abgebrochenem Install,
+    # manuellem Eingriff oder root-owned SteamCMD-Artifact). Saubere 409 statt
+    # mysteriösem EPERM auf chmod.
+    if os.path.exists(install_dir):
+        db.delete(server)
+        db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Server-Verzeichnis existiert bereits auf dem Host: {install_dir}. "
+                "Möglicherweise verwaist aus einem vorherigen (fehlgeschlagenen) "
+                "Installationsversuch. Bitte manuell aufräumen oder Support kontaktieren."
+            ),
+        )
+
+    # Verzeichnis anlegen — wird vom Panel-User (`msm`) angelegt und ist von dort
+    # rw, während der Container das Volume mit derselben UID/GID mountet (siehe
+    # docker_service.host_uid_gid()). Kein useradd, kein chown via sudo nötig.
+    # exist_ok=False ist jetzt sicher (Guard oben).
+    try:
+        os.makedirs(install_dir, exist_ok=False)
+        os.chmod(install_dir, 0o750)
+    except OSError as e:
+        # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
+        db.delete(server)
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
+
+    # install_dir endgültig setzen + persistieren.
+    server.install_dir = install_dir
     db.commit()
     db.refresh(server)
 
