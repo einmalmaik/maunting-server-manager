@@ -202,3 +202,30 @@ class TestConsoleStreamRBAC:
             cookies=user_cookies,
         )
         assert response.status_code == 403
+
+
+class TestConsoleStreamWhenDockerMissing:
+    """Der Live-Stream darf bei fehlendem docker-Binary (z. B. eingeschränkter
+    PATH im systemd-Unit) nicht mehr mit roher Exception abstürzen.
+    Er muss stattdessen ein sauberes Error-Event liefern (200 OK + SSE).
+    """
+
+    def test_stream_yields_error_event_instead_of_crashing_when_docker_cli_missing(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        test_server: Server,
+    ):
+        with patch("routers.servers.shutil.which", return_value=None):
+            response = client.get(
+                f"/api/servers/{test_server.id}/console/stream",
+                cookies=owner_cookies,
+            )
+
+        # Muss 200 liefern — der Stream selbst startet, auch wenn später
+        # ein Error-Event kommt. Kein 500-Crash mehr!
+        assert response.status_code == 200
+        # Body enthält das von uns yieldete Error-Event (text/event-stream).
+        body = response.text
+        assert "event: error" in body
+        assert "Docker CLI nicht im PATH" in body or "nicht verfügbar" in body

@@ -16,7 +16,7 @@ from dependencies import get_current_user, require_global, require_server_permis
 from services import permission_service
 from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
 from games import get_plugin
-from games.base import container_name_for
+from games.base import container_name_for, _console_log_path
 from services import EmailService, docker_service
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
@@ -578,10 +578,30 @@ async def server_console_stream(
         # Container-Logs follow. ``--tail 200`` als Verlauf, danach Live.
         # ``--timestamps`` bewusst NICHT — der User-Konsole brauchen wir das
         # Rohformat (Datumsstempel sind im MSM-Console-Log eh nicht da).
+        #
+        # Wichtig: Der Endpoint darf NIEMALS roh abstürzen (FileNotFoundError
+        # bei fehlendem docker-Binary im PATH des systemd-Units etc.).
+        # Wir yielden stattdessen ein klares Error-Event + graceful Fallback
+        # auf die MSM-internen Datei-Logs.
         proc: asyncio.subprocess.Process | None = None
         try:
+            docker_bin = shutil.which("docker")
+            if not docker_bin:
+                # Saubere, client-freundliche Meldung statt harter Exception
+                # (die vorher den ganzen SSE-Stream + ASGI-Handler killte).
+                log_path = _console_log_path(server.id)
+                msm_hint = ""
+                if os.path.exists(log_path):
+                    msm_hint = " (MSM-interne Install-/Start-Meldungen stehen unter dem statischen Console-Tab)"
+                yield (
+                    "event: error\n"
+                    f"data: [MSM] Docker CLI nicht im PATH des Backends gefunden. "
+                    f"Live-Container-Logs (docker logs --follow) sind nicht verfügbar{msm_hint}.\n\n"
+                )
+                return
+
             proc = await asyncio.create_subprocess_exec(
-                "docker", "logs", "--follow", "--tail", "200", container,
+                docker_bin, "logs", "--follow", "--tail", "200", container,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -606,6 +626,9 @@ async def server_console_stream(
                 for chunk in line.split("\n"):
                     yield f"data: {chunk}\n"
                 yield "\n"
+        except Exception as exc:  # alle Fälle abfangen (FileNotFound, Permission, etc.)
+            # Niemals rohe Exception in den ASGI-Handler propagieren.
+            yield f"event: error\ndata: [MSM] Konsole-Stream Fehler: {type(exc).__name__}\n\n"
         finally:
             if proc and proc.returncode is None:
                 try:
