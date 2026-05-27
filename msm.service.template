@@ -7,7 +7,8 @@ Type=simple
 User=msm
 Group=msm
 WorkingDirectory={{MSM_DIR}}/backend
-Environment="PATH={{MSM_DIR}}/backend/venv/bin"
+# venv zuerst (python/uvicorn), danach Standard-System-Pfade fuer docker etc.
+Environment="PATH={{MSM_DIR}}/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart={{MSM_DIR}}/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=on-failure
 RestartSec=5
