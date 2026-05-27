@@ -37,9 +37,11 @@ const LINE_CLASS: Record<ReturnType<typeof classifyLine>, string> = {
 
 /** Server-Konsole als eigener Tab.
  *
- *  - **Lesen:** Server-Sent Events ueber `/api/servers/:id/console/stream`
- *    (gestreamt mit `docker logs --follow`). Auto-Reconnect via Browser-
- *    EventSource bei Verbindungsabbruch.
+ *  - **Lesen:** Server-Sent Events ueber `/api/servers/:id/console/stream`.
+ *    Backend liefert zuerst den MSM-Logdatei-Backlog (Install-Output,
+ *    Lifecycle-Events) und danach live `docker logs --follow` zusammen mit
+ *    neuen Lifecycle-Eintraegen aus der Logdatei. Auto-Reconnect via
+ *    Browser-EventSource bei Verbindungsabbruch.
  *  - **Eingabe:** sichtbar nur mit Permission `server.console.write`. Enter
  *    schickt POST an `/api/servers/:id/console/input`. Eingabe wird nicht
  *    geloggt — Inhalt kann sensibel sein (OAuth-Codes, RCON-Tokens).
@@ -63,13 +65,9 @@ export function ServerConsolePanel({ serverId }: Props) {
     const url = `/api/servers/${serverId}/console/stream`
     const es = new EventSource(url)
     es.onmessage = (ev) => {
-      // Backend emits only plain `data:` frames (raw combined docker logs) + `event: end/error`.
+      // Backend yieldet ausschliesslich ``data:``-Frames (eine Logzeile pro Frame).
       setLogs((prev) => [...prev, ev.data])
     }
-
-    es.addEventListener("end", () => {
-      es.close()
-    })
     es.onerror = () => {
       // Stille: Browser reconnected automatisch.
     }
