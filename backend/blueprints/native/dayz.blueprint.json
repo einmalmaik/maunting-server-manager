@@ -11,7 +11,8 @@
     "image": "cm2network/steamcmd:root",
     "workdir": "/data",
     "env": {},
-    "startup": "/data/DayZServer -profiles=/data/profiles -port={GAME_PORT} {MOD_ARG}"
+    "startup": "/data/DayZServer -profiles=/data/profiles -port={GAME_PORT} {MOD_ARG}",
+    "configPatches": []
   },
   "ports": [
     { "name": "game",  "protocol": "udp" },
@@ -33,6 +34,21 @@
     "workshopAppId": "221100",
     "modInjection": "startupArg",
     "modStartupArgumentFormat": "-mod={mods};",
-    "modListFilePath": null
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": [
+      {
+        "operation": "symlink",
+        "source": "steamapps/workshop/content/{WORKSHOP_APP_ID}/{WORKSHOP_ID}",
+        "target": "{WORKSHOP_ID}",
+        "required": true
+      },
+      {
+        "operation": "symlink",
+        "source": "steamapps/workshop/content/{WORKSHOP_APP_ID}/{WORKSHOP_ID}/keys/*.bikey",
+        "target": "keys/{BASENAME}",
+        "required": false
+      }
+    ]
   }
 }

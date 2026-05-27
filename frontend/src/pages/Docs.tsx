@@ -21,6 +21,8 @@ const SECTIONS: readonly Section[] = [
   { key: 'source' },
   { key: 'httpSecurity' },
   { key: 'mods' },
+  { key: 'workshopActions' },
+  { key: 'configPatches' },
   { key: 'import' },
   {
     key: 'exampleMinecraftVersion',

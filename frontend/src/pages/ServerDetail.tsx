@@ -38,6 +38,10 @@ interface ServerStatus {
   ram_limit_mb?: number | null
   disk_limit_gb?: number | null
   message?: string | null
+  // Extra fields from backend server-file / mod checkers (Status-Response)
+  server_file_update_available?: boolean
+  server_file_update_reason?: string | null
+  mod_updates_available?: any[]
 }
 
 /** Formatiert MB als kompakte Angabe (MB / GB). */
@@ -250,6 +254,28 @@ export function ServerDetail() {
     )
   }
 
+  // KISS: Install vs Reinstall Button-Logik + Update-Badge (genau nach Spec)
+  // - Keine Server-Dateien (awaiting_files oder Disk <= 0) → servers.install
+  // - Sobald Dateien da → servers.reinstall
+  // - Badge reagiert auf neue Checker (extra Felder in Status-Response)
+  // - Reinstall: Confirm mit reinstallConfirm (manuelle Configs bleiben erhalten)
+  const diskUsed = ((status?.disk_used_mb ?? server.disk_usage_mb ?? 0) as number)
+  const awaitingFiles = server.status === 'awaiting_files'
+  const hasServerFiles = !awaitingFiles && diskUsed > 0
+  const isReinstall = hasServerFiles
+  const installLabel = isReinstall ? t('servers.reinstall') : t('servers.install')
+
+  const handleInstall = async () => {
+    if (isReinstall) {
+      const ok = await confirm({
+        message: t('servers.reinstallConfirm'),
+        // Kein danger: expliziter Reinstall-Wunsch (Configs per Text geschützt)
+      })
+      if (!ok) return
+    }
+    doAction('install')
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -325,14 +351,34 @@ export function ServerDetail() {
         </button>
         {server.status !== 'installing' && (
           <button
-            onClick={() => doAction('install')}
+            onClick={handleInstall}
             disabled={!!actionLoading}
             className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
           >
             <Download className="w-4 h-4" />
-            {actionLoading === 'install' ? t('common.loading') : t('servers.install')}
+            {actionLoading === 'install' ? t('common.loading') : installLabel}
           </button>
         )}
+
+        {/* Clean Update Badge using real backend fields */}
+        {(status?.server_file_update_available || (status?.mod_updates_available?.length ?? 0) > 0) && (
+          <div className="flex items-center gap-2 self-center">
+            {status?.server_file_update_available && (
+              <span
+                className="font-mono-sm text-mono-sm px-2.5 py-1 rounded-full border bg-status-warning/10 border-status-warning/30 text-status-warning"
+                title={status?.server_file_update_reason || undefined}
+              >
+                {t('servers.serverFileUpdateAvailable')}
+              </span>
+            )}
+            {(status?.mod_updates_available?.length ?? 0) > 0 && (
+              <span className="font-mono-sm text-mono-sm px-2.5 py-1 rounded-full border bg-status-warning/10 border-status-warning/30 text-status-warning">
+                {t('servers.modUpdatesAvailable', { count: status?.mod_updates_available?.length ?? 0 })}
+              </span>
+            )}
+          </div>
+        )}
+
         <button
           onClick={handleDelete}
           disabled={!!actionLoading}

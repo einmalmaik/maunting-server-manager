@@ -119,3 +119,9 @@ class ServerStatusResponse(BaseModel):
     disk_limit_gb: int | None = None
     disk_used_mb: int | None = None
     disk_free_mb: int | None = None
+
+    # Update availability for frontend badge (wired from plugin checks).
+    # Defaults ensure schema is robust; actual values populated in router.
+    server_file_update_available: bool = False
+    server_file_update_reason: str | None = None
+    mod_updates_available: list[dict] = Field(default_factory=list)

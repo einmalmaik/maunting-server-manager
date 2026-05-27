@@ -1,6 +1,8 @@
 import asyncio
 import os
 import shutil
+import threading
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,13 +18,26 @@ from dependencies import get_current_user, require_global, require_server_permis
 from services import permission_service
 from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
 from games import get_plugin
-from games.base import container_name_for, _console_log_path
+from games.base import container_name_for, _console_log_path, _append_console_log
 from services import EmailService, docker_service
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
 from services.network_interfaces_service import default_bind_ip, list_host_interfaces
 from services.port_allocation_service import PortConflictError, allocate_ports
+
+import logging
+logger = logging.getLogger(__name__)
+
+# ── Leichtergewichtiger, passiver Cache für Update-Checks im Status-Endpoint ──
+# Zweck: Frontend-Badge (Update-Verfügbarkeit) ohne teure Calls (Workshop/Steam)
+# bei jedem Poll. KISS + defensiv: TTL-basiert, nie status kaputt machen.
+# TTL 5min reicht für Badge (Updates sind nicht sekündlich).
+_UPDATE_CACHE: dict[int, dict] = {}
+_UPDATE_CACHE_LOCK = threading.Lock()
+_UPDATE_CACHE_TTL_SECONDS = 300
+_SERVER_OPERATION_LOCKS: dict[int, asyncio.Lock] = {}
+
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
@@ -374,32 +389,61 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
                 ),
             )
 
-    # Firewall-Regeln öffnen vor Container-Start.
-    open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
-    iptables_accept_server(
-        server.name,
-        server.public_bind_ip,
-        server.game_port, server.query_port, server.rcon_port,
-    )
-
-    # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
-    # async-Route blockieren sie den gesamten Uvicorn-Event-Loop — alle anderen
-    # Requests hängen mit. Daher in einen Threadpool auslagern.
-    result = await asyncio.to_thread(plugin.start, server)
-    if "error" in result:
-        # Container-Start fehlgeschlagen — Firewall-Regeln wieder schließen.
-        close_ports(server.game_port, server.query_port, server.rcon_port)
-        iptables_revoke_server(
+    lock = _SERVER_OPERATION_LOCKS.setdefault(server.id, asyncio.Lock())
+    async with lock:
+        # Firewall-Regeln öffnen vor Container-Start.
+        open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+        iptables_accept_server(
             server.name,
             server.public_bind_ip,
             server.game_port, server.query_port, server.rcon_port,
         )
-        raise HTTPException(status_code=500, detail=result["error"])
-    server.status = "running"
-    db.commit()
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestartet")
-    return {"message": "Start-Befehl gesendet", "status": server.status, **result}
+
+        # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
+        # async-Route blockieren sie den gesamten Uvicorn-Event-Loop — alle anderen
+        # Requests hängen mit. Daher in einen Threadpool auslagern.
+
+        # Updater-Hook vor jedem Start (vor allem für Workshop-Mod-Checks nach Neustart)
+        # Optional: Auch im normalen Start-Pfad Workshop-Mod-Updates ausführen (KISS,
+        # falls ein Server lange stand und in der Zwischenzeit Mod-Updates auf Steam
+        # erschienen sind). Primär aber der Restart-Pfad (wie Server-Datei-Updates).
+        try:
+            plugin.prepare_for_updates(server)
+
+            # Optionale Execution im direkten Start (neben dem Pflicht-Restart-Pfad)
+            mod_updates = plugin.check_for_mod_updates(server)
+            if mod_updates:
+                _append_console_log(
+                    server.id,
+                    f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt – "
+                    "führe Download via install_mod/run_steamcmd_workshop_download aus...\n"
+                )
+                mod_res = await asyncio.to_thread(
+                    plugin.perform_workshop_mod_updates, server
+                )
+                if not mod_res.get("ok", False):
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] Workshop-Mod-Update beim Start hatte Probleme (nicht kritisch): {mod_res.get('error') or mod_res}\n"
+                    )
+        except Exception as exc:
+            _append_console_log(server.id, f"[MSM] prepare_for_updates / Mod-Update beim Start fehlgeschlagen (nicht kritisch): {exc}\n")
+
+        result = await asyncio.to_thread(plugin.start, server)
+        if "error" in result:
+            # Container-Start fehlgeschlagen — Firewall-Regeln wieder schließen.
+            close_ports(server.game_port, server.query_port, server.rcon_port)
+            iptables_revoke_server(
+                server.name,
+                server.public_bind_ip,
+                server.game_port, server.query_port, server.rcon_port,
+            )
+            raise HTTPException(status_code=500, detail=result["error"])
+        server.status = "running"
+        db.commit()
+        if EmailService.is_configured() and user.email_notifications:
+            await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestartet")
+        return {"message": "Start-Befehl gesendet", "status": server.status, **result}
 
 
 @router.post("/{server_id}/stop")
@@ -441,39 +485,125 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    # Firewall-Regeln vor dem Stop schließen (genau wie im dedizierten Stop-Pfad).
-    close_ports(server.game_port, server.query_port, server.rcon_port)
-    iptables_revoke_server(
-        server.name,
-        server.public_bind_ip or "",
-        server.game_port, server.query_port, server.rcon_port,
-    )
+    lock = _SERVER_OPERATION_LOCKS.setdefault(server.id, asyncio.Lock())
+    async with lock:
+        # Firewall-Regeln vor dem Stop schließen (genau wie im dedizierten Stop-Pfad).
+        close_ports(server.game_port, server.query_port, server.rcon_port)
+        iptables_revoke_server(
+            server.name,
+            server.public_bind_ip or "",
+            server.game_port, server.query_port, server.rcon_port,
+        )
 
-    stop_result = await asyncio.to_thread(plugin.stop, server)
-    if "error" in stop_result:
-        raise HTTPException(status_code=500, detail=stop_result["error"])
+        stop_result = await asyncio.to_thread(plugin.stop, server)
+        if "error" in stop_result:
+            raise HTTPException(status_code=500, detail=stop_result["error"])
 
-    # Nach erfolgreichem Start die Firewall-Regeln wieder öffnen
-    # (genau wie im dedizierten Start-Pfad). Das war im reinen Restart-Pfad
-    # bisher komplett vergessen.
-    start_result = await asyncio.to_thread(plugin.start, server)
-    if "error" in start_result:
-        # Bei Start-Fehler die Regeln nicht wieder öffnen (sind schon geschlossen).
-        raise HTTPException(status_code=500, detail=start_result["error"])
+        # ── Zentrale Updater-Hooks (Blueprint-konform, KISS) ─────────────────────
+        # Wird direkt nach dem Stop und vor dem Start ausgeführt.
+        # Hier laufen die Prüfungen für:
+        #   - Server-Datei-Updates (werden NUR beim Neustart angewendet)
+        #   - Workshop-Mod-Updates (werden vorbereitet oder direkt angewendet)
+        #
+        # Wichtig (genau nach Plan):
+        # - Server-Datei-Updates passieren **ausschließlich** hier (vor plugin.start).
+        # - Update-Ausführung ist **synchron** (via perform_ + to_thread), damit
+        #   die Dateien wirklich aktualisiert sind, BEVOR der Container startet.
+        # - cache_manual_configs + restore_manual_configs werden an der richtigen
+        #   Stelle ausgeführt (vor Update cachen, danach restore) — siehe
+        #   updater.apply_server_file_update.
+        # - Workshop-Mod-Updates: nur Check hier, Ausführung ggf. später.
+        try:
+            plugin.prepare_for_updates(server)
 
-    # Regeln erst nach erfolgreichem Container-Start wieder öffnen.
-    open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
-    iptables_accept_server(
-        server.name,
-        server.public_bind_ip or "",
-        server.game_port, server.query_port, server.rcon_port,
-    )
+            # Server-Dateien: Prüfung + ggf. Update VOR dem eigentlichen Start
+            # (Update passiert NUR wenn Check "update" meldet. Dann via perform_
+            # mit integriertem Cache/Restore. Niemals plugin.install() — das wäre
+            # asynchron und würde zu Race mit dem nachfolgenden Start führen.)
+            server_update = plugin.check_for_server_file_update(server)
+            if server_update.get("action") == "update":
+                _append_console_log(
+                    server.id,
+                    f"[MSM] Server-Datei-Update erkannt ({server_update.get('reason')}). "
+                    "Update wird **vor** dem Container-Start ausgeführt (synchron + Config-Cache/Restore)...\n"
+                )
+                # Kritischer Fix: Sync-Ausführung über to_thread.
+                # - Garantiert: Update fertig vor plugin.start()
+                # - Garantiert: Cachen vor, Restore nach dem eigentlichen Update
+                # - Garantiert: Restart läuft auch bei Fehlern weiter (try/except + "ok"-Prüfung)
+                update_res = await asyncio.to_thread(
+                    plugin.perform_server_file_update, server
+                )
+                if not update_res.get("ok", False):
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] Server-Datei-Update fehlgeschlagen (Restart wird fortgesetzt): {update_res.get('error') or update_res}\n"
+                    )
+                else:
+                    _append_console_log(
+                        server.id,
+                        "[MSM] Server-Datei-Update inkl. Wiederherstellung manueller Config-Dateien erfolgreich abgeschlossen.\n"
+                    )
 
-    server.status = "running"
-    db.commit()
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_server_status_notification(user.email, user.username, server.name, "neugestartet")
-    return {"message": "Restart-Befehl gesendet", "status": server.status, "stop": stop_result, "start": start_result}
+            # Workshop-Mods: Prüfung + tatsächliche Ausführung (volle Execution-Logik)
+            # Wird NUR im Restart-Pfad (vor plugin.start) ausgeführt, damit die
+            # Workshop-Dateien bereits im Volume liegen, wenn der Container startet.
+            # Verwendet perform_workshop_mod_updates (base.py) → install_mod + internes
+            # run_steamcmd_workshop_download + Metadaten-Update (last_updated + installed_version).
+            # Bei Fehlern: Restart läuft trotzdem weiter (AGENTS.md-Sicherheit).
+            mod_updates = plugin.check_for_mod_updates(server)
+            if mod_updates:
+                _append_console_log(
+                    server.id,
+                    f"[MSM] {len(mod_updates)} Workshop-Mod(s) benötigen Update/Installation – "
+                    "Download via install_mod/run_steamcmd_workshop_download wird **vor** dem "
+                    "Container-Start ausgeführt (synchron + Metadaten-Update)...\n"
+                )
+                mod_res = await asyncio.to_thread(
+                    plugin.perform_workshop_mod_updates, server
+                )
+                if not mod_res.get("ok", False):
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] Workshop-Mod-Update fehlgeschlagen (Restart wird fortgesetzt): {mod_res.get('error') or mod_res}\n"
+                    )
+                else:
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] Workshop-Mod-Update erfolgreich: {mod_res.get('message', '')} "
+                        f"({mod_res.get('applied', 0)} Mods).\n"
+                    )
+
+        except Exception as exc:
+            # Updater-Fehler dürfen den Restart niemals komplett verhindern.
+            # Nur Logging + Console-Eintrag (sicheres Verhalten, AGENTS.md-konform).
+            _append_console_log(
+                server.id,
+                f"[MSM] Updater-Hook während Restart fehlgeschlagen (nicht kritisch): {exc}\n"
+            )
+            logger.warning("Updater-Hook beim Restart von Server %s fehlgeschlagen: %s", server.id, exc)
+
+        # Nach erfolgreichem Start die Firewall-Regeln wieder öffnen
+        # (genau wie im dedizierten Start-Pfad). Das war im reinen Restart-Pfad
+        # bisher komplett vergessen.
+        start_result = await asyncio.to_thread(plugin.start, server)
+        if "error" in start_result:
+            # Bei Start-Fehler die Regeln nicht wieder öffnen (sind schon geschlossen).
+            raise HTTPException(status_code=500, detail=start_result["error"])
+
+        # Regeln erst nach erfolgreichem Container-Start wieder öffnen.
+        open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+        iptables_accept_server(
+            server.name,
+            server.public_bind_ip or "",
+            server.game_port, server.query_port, server.rcon_port,
+        )
+
+        server.status = "running"
+        db.commit()
+        if EmailService.is_configured() and user.email_notifications:
+            await EmailService.send_server_status_notification(user.email, user.username, server.name, "neugestartet")
+        return {"message": "Restart-Befehl gesendet", "status": server.status, "stop": stop_result, "start": start_result}
 
 
 def _disk_free_mb(path: str) -> int | None:
@@ -485,12 +615,84 @@ def _disk_free_mb(path: str) -> int | None:
     try:
         if not path:
             return None
+        if not hasattr(os, "statvfs"):
+            return None
         # Falls install_dir noch nicht existiert, das Eltern-Verzeichnis nehmen
         target = path if os.path.exists(path) else os.path.dirname(path) or "/"
         st = os.statvfs(target)
         return int((st.f_bavail * st.f_frsize) // (1024 * 1024))
-    except OSError:
+    except (AttributeError, OSError):
         return None
+
+
+def _get_cached_update_availability(server, plugin) -> dict:
+    """Leichtgewichtige, cached/passive Ermittlung der Update-Verfügbarkeit.
+
+    Ruft plugin.check_for_* NUR bei TTL-Miss (5min). Status-Endpoint bleibt schnell.
+    Defensiv + KISS: fängt alles ab, liefert Defaults, keine Seiteneffekte.
+    mod_updates_available: list[dict] exakt mit workshop_id, name, action, reason.
+    """
+    if not plugin or not getattr(server, "id", None):
+        return {
+            "server_file_update_available": False,
+            "server_file_update_reason": None,
+            "mod_updates_available": [],
+        }
+
+    sid = server.id
+    now = time.time()
+    with _UPDATE_CACHE_LOCK:
+        cached = _UPDATE_CACHE.get(sid)
+    if cached and (now - cached.get("ts", 0) < _UPDATE_CACHE_TTL_SECONDS):
+        return cached["data"]
+
+    # Cache-Miss → echte (aber seltene) Checks
+    try:
+        check_server = getattr(plugin, "check_for_server_file_update", None)
+        server_update = check_server(server) if check_server else {}
+        if not isinstance(server_update, dict):
+            server_update = {}
+        server_file_available = server_update.get("action") == "update"
+        server_file_reason = server_update.get("reason") if server_file_available else None
+
+        check_mods = getattr(plugin, "check_for_mod_updates", None)
+        mod_updates_raw = check_mods(server) if check_mods else []
+        if not isinstance(mod_updates_raw, (list, tuple)):
+            mod_updates_raw = []
+
+        mod_updates = []
+        for m in mod_updates_raw:
+            if isinstance(m, dict):
+                mod_updates.append({
+                    "workshop_id": m.get("workshop_id"),
+                    "name": m.get("name"),
+                    "action": m.get("action"),
+                    "reason": m.get("reason"),
+                })
+
+        data = {
+            "server_file_update_available": bool(server_file_available),
+            "server_file_update_reason": server_file_reason,
+            "mod_updates_available": mod_updates,
+        }
+        with _UPDATE_CACHE_LOCK:
+            _UPDATE_CACHE[sid] = {"ts": now, "data": data}
+        return data
+    except Exception as exc:
+        # Niemals Status-Endpoint durch Update-Checks zum Absturz bringen.
+        # Badge zeigt einfach "kein Update" – sicher + wartbar.
+        logger.warning(
+            "Passive update check failed for server %s (non-fatal): %s",
+            sid, exc
+        )
+        fallback = {
+            "server_file_update_available": False,
+            "server_file_update_reason": None,
+            "mod_updates_available": [],
+        }
+        with _UPDATE_CACHE_LOCK:
+            _UPDATE_CACHE[sid] = {"ts": now, "data": fallback}
+        return fallback
 
 
 @router.get("/{server_id}/status", response_model=ServerStatusResponse)
@@ -502,6 +704,11 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
     plugin = get_plugin(server.game_type)
     disk_used = server.disk_usage_mb
     disk_free = _disk_free_mb(server.install_dir) if server.install_dir else None
+
+    # Update-Info leichtgewichtig + cached (nicht bei jedem Status-Call teuer).
+    # Ergebnisse von check_for_server_file_update + check_for_mod_updates.
+    update_info = _get_cached_update_availability(server, plugin)
+
     if not plugin:
         return {
             "id": server.id,
@@ -516,6 +723,9 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
             "disk_limit_gb": server.disk_limit_gb,
             "disk_used_mb": disk_used,
             "disk_free_mb": disk_free,
+            "server_file_update_available": update_info["server_file_update_available"],
+            "server_file_update_reason": update_info["server_file_update_reason"],
+            "mod_updates_available": update_info["mod_updates_available"],
         }
     plugin_status = plugin.get_status(server)
     # installing/updating/error nicht ueberschreiben — Background-Thread oder
@@ -539,6 +749,9 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
         "disk_limit_gb": server.disk_limit_gb,
         "disk_used_mb": disk_used,
         "disk_free_mb": disk_free,
+        "server_file_update_available": update_info["server_file_update_available"],
+        "server_file_update_reason": update_info["server_file_update_reason"],
+        "mod_updates_available": update_info["mod_updates_available"],
     }
 
 

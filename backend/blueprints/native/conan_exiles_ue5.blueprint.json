@@ -11,7 +11,37 @@
     "image": "cm2network/steamcmd:root",
     "workdir": "/data",
     "env": {},
-    "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT}"
+    "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT}",
+    "configPatches": [
+      {
+        "type": "ini",
+        "file": "ConanSandbox/Saved/Config/LinuxServer/Engine.ini",
+        "section": "URL",
+        "key": "Port",
+        "value": "{GAME_PORT}"
+      },
+      {
+        "type": "ini",
+        "file": "ConanSandbox/Saved/Config/LinuxServer/Engine.ini",
+        "section": "OnlineSubsystemNull",
+        "key": "GameServerQueryPort",
+        "value": "{QUERY_PORT}"
+      },
+      {
+        "type": "ini",
+        "file": "ConanSandbox/Saved/Config/LinuxServer/Game.ini",
+        "section": "RconPlugin",
+        "key": "RconPort",
+        "value": "{RCON_PORT}"
+      },
+      {
+        "type": "ini",
+        "file": "ConanSandbox/Saved/Config/LinuxServer/Game.ini",
+        "section": "RconPlugin",
+        "key": "RconEnabled",
+        "value": "True"
+      }
+    ]
   },
   "ports": [
     { "name": "game",  "protocol": "udp" },
@@ -32,6 +62,15 @@
     "workshopAppId": "440900",
     "modInjection": "file",
     "modStartupArgumentFormat": null,
-    "modListFilePath": "ConanSandbox/Mods/modlist.txt"
+    "modListFilePath": "ConanSandbox/Mods/modlist.txt",
+    "modListContent": "postInstallTargetBasenames",
+    "postInstall": [
+      {
+        "operation": "copy",
+        "source": "steamapps/workshop/content/{WORKSHOP_APP_ID}/{WORKSHOP_ID}/**/*.pak",
+        "target": "ConanSandbox/Mods/{BASENAME}",
+        "required": true
+      }
+    ]
   }
 }

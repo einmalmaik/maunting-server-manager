@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from blueprints.schema import load_blueprint_dict
+from blueprints.schema import load_blueprint_dict, load_blueprint_file
 from games.blueprint_plugin import BlueprintPlugin
 
 
@@ -161,3 +163,44 @@ def test_native_minecraft_blueprints_load() -> None:
         "minecraft_neoforge", "minecraft_sponge",
     }
     assert set(minecraft_ids) == expected
+
+
+def _native_plugin(blueprint_id: str) -> BlueprintPlugin:
+    path = Path(__file__).resolve().parents[1] / "blueprints" / "native" / f"{blueprint_id}.blueprint.json"
+    return BlueprintPlugin(load_blueprint_file(path))
+
+
+def test_dayz_blueprint_post_install_symlinks_mod_and_keys(tmp_path) -> None:
+    plugin = _native_plugin("dayz")
+    server = _FakeServer(id=77, install_dir=str(tmp_path))
+    workshop_dir = tmp_path / "steamapps" / "workshop" / "content" / "221100" / "12345"
+    keys_dir = workshop_dir / "keys"
+    keys_dir.mkdir(parents=True)
+    key = keys_dir / "test.bikey"
+    key.write_text("key", encoding="utf-8")
+
+    with patch("games.blueprint_plugin.run_steamcmd_workshop_download", return_value={"ok": True}), \
+         patch.object(plugin, "update_modlist"):
+        result = plugin.install_mod(server, "12345")
+
+    assert result == {}
+    assert (tmp_path / "12345").is_symlink()
+    assert (tmp_path / "keys" / "test.bikey").is_symlink()
+
+
+def test_conan_blueprint_post_install_copies_paks_and_formats_modlist(tmp_path) -> None:
+    plugin = _native_plugin("conan_exiles_ue5")
+    server = _FakeServer(id=78, install_dir=str(tmp_path))
+    workshop_dir = tmp_path / "steamapps" / "workshop" / "content" / "440900" / "999" / "nested"
+    workshop_dir.mkdir(parents=True)
+    pak = workshop_dir / "Example.pak"
+    pak.write_text("pak", encoding="utf-8")
+
+    with patch("games.blueprint_plugin.run_steamcmd_workshop_download", return_value={"ok": True}), \
+         patch.object(plugin, "update_modlist"):
+        result = plugin.install_mod(server, "999")
+
+    copied = tmp_path / "ConanSandbox" / "Mods" / "Example.pak"
+    assert result == {}
+    assert copied.read_text(encoding="utf-8") == "pak"
+    assert plugin.format_modlist_lines(server, [SimpleNamespace(workshop_id="999")]) == ["Example.pak"]

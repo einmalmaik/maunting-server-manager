@@ -114,6 +114,20 @@ class BlueprintModInjection(str, Enum):
     FILE = "file"
 
 
+class BlueprintWorkshopFileOperation(str, Enum):
+    COPY = "copy"
+    SYMLINK = "symlink"
+
+
+class BlueprintModListContent(str, Enum):
+    WORKSHOP_IDS = "workshopIds"
+    POST_INSTALL_TARGET_BASENAMES = "postInstallTargetBasenames"
+
+
+class BlueprintConfigPatchType(str, Enum):
+    INI = "ini"
+
+
 # ── Helpers (statisch genug fuer KISS) ─────────────────────────────────────
 
 _ID_RE = re.compile(r"^[a-z0-9_]{1,64}$")
@@ -158,6 +172,18 @@ _ALLOWED_ENV_VALUE_TOKENS: frozenset[str] = frozenset({
 })
 
 _ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_ALLOWED_CONFIG_VALUE_TOKENS: frozenset[str] = frozenset({
+    "GAME_PORT",
+    "QUERY_PORT",
+    "RCON_PORT",
+    "VOICE_PORT",
+    "WEB_PORT",
+})
+_ALLOWED_WORKSHOP_PATH_TOKENS: frozenset[str] = frozenset({
+    "WORKSHOP_APP_ID",
+    "WORKSHOP_ID",
+    "BASENAME",
+})
 
 
 def _is_safe_relative_path(value: str) -> bool:
@@ -180,6 +206,38 @@ def _is_safe_relative_path(value: str) -> bool:
         if part in ("", ".", ".."):
             # leere Segmente bedeuten "//" oder leading "/"; ".." waere Escape;
             # "." waere nutzlos -> ablehnen, sonst entstehen ueberraschende Pfade
+            return False
+    return True
+
+
+def _is_safe_relative_template(
+    value: str,
+    *,
+    allowed_tokens: frozenset[str],
+    allow_glob: bool = False,
+) -> bool:
+    """Wie _is_safe_relative_path, aber mit whitelisted Tokens und optional Glob.
+
+    Blueprints duerfen damit Dateien innerhalb von install_dir beschreiben,
+    ohne absolute Pfade, ``..`` oder unbekannte Platzhalter einzufuehren.
+    """
+    if not value:
+        return False
+    if value.startswith("/") or "\x00" in value or "\\" in value:
+        return False
+    if value.startswith("~"):
+        return False
+
+    for match in _TOKEN_FIND_RE.finditer(value):
+        if match.group(1) not in allowed_tokens:
+            return False
+
+    sanitized = _TOKEN_FIND_RE.sub("token", value)
+    parts = sanitized.split("/")
+    for part in parts:
+        if part in ("", ".", ".."):
+            return False
+        if not allow_glob and ("*" in part or "?" in part or "[" in part or "]" in part):
             return False
     return True
 
@@ -214,6 +272,7 @@ class BlueprintRuntime(BaseModel):
     workdir: str | None = Field(default=None, max_length=512)
     env: dict[str, str] = Field(default_factory=dict)
     startup: str = Field(min_length=1, max_length=2048)
+    configPatches: list["BlueprintConfigPatch"] = Field(default_factory=list, max_length=32)
 
     @field_validator("image")
     @classmethod
@@ -462,6 +521,8 @@ class BlueprintMods(BaseModel):
     modInjection: BlueprintModInjection = BlueprintModInjection.NONE
     modStartupArgumentFormat: str | None = Field(default=None, max_length=256)
     modListFilePath: str | None = Field(default=None, max_length=512)
+    modListContent: BlueprintModListContent = BlueprintModListContent.WORKSHOP_IDS
+    postInstall: list["BlueprintWorkshopFileAction"] = Field(default_factory=list, max_length=32)
 
     @field_validator("workshopAppId")
     @classmethod
@@ -523,7 +584,95 @@ class BlueprintMods(BaseModel):
                 raise ValueError(
                     "mods.modListFilePath ist Pflicht bei modInjection=file."
                 )
+        if self.modListContent == BlueprintModListContent.POST_INSTALL_TARGET_BASENAMES:
+            if not self.postInstall:
+                raise ValueError(
+                    "mods.postInstall ist Pflicht bei modListContent=postInstallTargetBasenames."
+                )
         return self
+
+
+class BlueprintWorkshopFileAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: BlueprintWorkshopFileOperation
+    source: str = Field(min_length=1, max_length=512)
+    target: str = Field(min_length=1, max_length=512)
+    required: bool = False
+
+    @field_validator("source")
+    @classmethod
+    def _check_source(cls, v: str) -> str:
+        if not _is_safe_relative_template(
+            v,
+            allowed_tokens=_ALLOWED_WORKSHOP_PATH_TOKENS,
+            allow_glob=True,
+        ):
+            raise ValueError(
+                "mods.postInstall.source muss ein sicherer relativer Pfad mit "
+                "whitelisted Workshop-Tokens sein."
+            )
+        return v
+
+    @field_validator("target")
+    @classmethod
+    def _check_target(cls, v: str) -> str:
+        if not _is_safe_relative_template(
+            v,
+            allowed_tokens=_ALLOWED_WORKSHOP_PATH_TOKENS,
+            allow_glob=False,
+        ):
+            raise ValueError(
+                "mods.postInstall.target muss ein sicherer relativer Pfad mit "
+                "whitelisted Workshop-Tokens sein."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _check_glob_target(self) -> "BlueprintWorkshopFileAction":
+        source_has_glob = any(ch in self.source for ch in ("*", "?", "["))
+        if source_has_glob and "{BASENAME}" not in self.target:
+            raise ValueError(
+                "mods.postInstall.target muss {BASENAME} enthalten, wenn source ein Glob ist."
+            )
+        return self
+
+
+class BlueprintConfigPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: BlueprintConfigPatchType
+    file: str = Field(min_length=1, max_length=512)
+    section: str = Field(min_length=1, max_length=128)
+    key: str = Field(min_length=1, max_length=128)
+    value: str = Field(min_length=1, max_length=512)
+
+    @field_validator("file")
+    @classmethod
+    def _check_file(cls, v: str) -> str:
+        if not _is_safe_relative_path(v):
+            raise ValueError("runtime.configPatches.file muss ein sicherer relativer Pfad sein.")
+        return v
+
+    @field_validator("section", "key")
+    @classmethod
+    def _check_ini_name(cls, v: str) -> str:
+        if "\x00" in v or "\n" in v or "\r" in v or "[" in v or "]" in v or "=" in v:
+            raise ValueError("INI-Section/Key enthaelt verbotene Zeichen.")
+        return v
+
+    @field_validator("value")
+    @classmethod
+    def _check_value(cls, v: str) -> str:
+        if "\x00" in v or "\n" in v or "\r" in v:
+            raise ValueError("runtime.configPatches.value enthaelt verbotene Zeichen.")
+        for match in _TOKEN_FIND_RE.finditer(v):
+            token = match.group(1)
+            if token not in _ALLOWED_CONFIG_VALUE_TOKENS:
+                raise ValueError(
+                    f"runtime.configPatches.value: Token '{{{token}}}' nicht erlaubt."
+                )
+        return v
 
 
 class Blueprint(BaseModel):
@@ -614,6 +763,7 @@ EMPTY_TEMPLATE: dict[str, Any] = {
         "workdir": "/data",
         "env": {},
         "startup": "",
+        "configPatches": [],
     },
     "ports": [
         {"name": "game", "protocol": "udp"},
@@ -636,5 +786,7 @@ EMPTY_TEMPLATE: dict[str, Any] = {
         "modInjection": "none",
         "modStartupArgumentFormat": None,
         "modListFilePath": None,
+        "modListContent": "workshopIds",
+        "postInstall": [],
     },
 }

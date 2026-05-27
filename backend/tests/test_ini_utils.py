@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from blueprints.schema import load_blueprint_file
 from games.ini_utils import remove_ini_key, set_ini_value
+from games.blueprint_plugin import BlueprintPlugin
+
+
+def _conan_blueprint_plugin() -> BlueprintPlugin:
+    path = Path(__file__).resolve().parents[1] / "blueprints" / "native" / "conan_exiles_ue5.blueprint.json"
+    return BlueprintPlugin(load_blueprint_file(path))
 
 
 class TestSetIniValue:
@@ -93,11 +102,9 @@ class TestRemoveIniKey:
 
 
 class TestConanPrepareRuntime:
-    """Integration-Tests fuer das Conan-Plugin-Port-Mapping."""
+    """Integration-Tests fuer das Blueprint-getriebene Conan-Port-Mapping."""
 
     def test_writes_ports_to_engine_and_game_ini(self, tmp_path):
-        from games.conan_exiles_ue5.plugin import ConanExilesUE5Plugin
-
         class _Srv:
             def __init__(self, install_dir):
                 self.id = 1
@@ -107,7 +114,7 @@ class TestConanPrepareRuntime:
                 self.rcon_port = 27017
 
         srv = _Srv(str(tmp_path))
-        plugin = ConanExilesUE5Plugin()
+        plugin = _conan_blueprint_plugin()
         plugin.prepare_runtime(srv)
 
         engine_ini = (
@@ -131,8 +138,6 @@ class TestConanPrepareRuntime:
         assert "RconEnabled=True" in game_content
 
     def test_skips_unset_ports(self, tmp_path):
-        from games.conan_exiles_ue5.plugin import ConanExilesUE5Plugin
-
         class _Srv:
             def __init__(self, install_dir):
                 self.id = 2
@@ -142,7 +147,7 @@ class TestConanPrepareRuntime:
                 self.rcon_port = None
 
         srv = _Srv(str(tmp_path))
-        plugin = ConanExilesUE5Plugin()
+        plugin = _conan_blueprint_plugin()
         plugin.prepare_runtime(srv)
 
         engine_ini = (
@@ -160,8 +165,6 @@ class TestConanPrepareRuntime:
         assert not game_ini.exists() or "RconPort=" not in game_ini.read_text()
 
     def test_idempotent_on_repeat_call(self, tmp_path):
-        from games.conan_exiles_ue5.plugin import ConanExilesUE5Plugin
-
         class _Srv:
             def __init__(self, install_dir):
                 self.id = 3
@@ -171,7 +174,7 @@ class TestConanPrepareRuntime:
                 self.rcon_port = 27017
 
         srv = _Srv(str(tmp_path))
-        plugin = ConanExilesUE5Plugin()
+        plugin = _conan_blueprint_plugin()
         plugin.prepare_runtime(srv)
         first_content = (
             tmp_path / "ConanSandbox" / "Saved" / "Config" / "LinuxServer" / "Engine.ini"
@@ -190,8 +193,6 @@ class TestConanPrepareRuntime:
 
     def test_preserves_existing_user_keys(self, tmp_path):
         """User-Edits an anderen Keys ueberleben einen Port-Patch."""
-        from games.conan_exiles_ue5.plugin import ConanExilesUE5Plugin
-
         config_dir = tmp_path / "ConanSandbox" / "Saved" / "Config" / "LinuxServer"
         config_dir.mkdir(parents=True)
         engine_ini = config_dir / "Engine.ini"
@@ -208,7 +209,7 @@ class TestConanPrepareRuntime:
                 self.query_port = 27016
                 self.rcon_port = 27017
 
-        ConanExilesUE5Plugin().prepare_runtime(_Srv())
+        _conan_blueprint_plugin().prepare_runtime(_Srv())
         content = engine_ini.read_text()
 
         # Port ist gepatcht

@@ -9,14 +9,22 @@
 import os
 import shutil
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from blueprints.schema import load_blueprint_file
+from games.blueprint_plugin import BlueprintPlugin
 from games.base import _console_log_path, finish_install
 from models import Server, User
+
+
+def _native_blueprint_plugin(blueprint_id: str) -> BlueprintPlugin:
+    path = Path(__file__).resolve().parents[1] / "blueprints" / "native" / f"{blueprint_id}.blueprint.json"
+    return BlueprintPlugin(load_blueprint_file(path))
 
 
 class TestFinishInstall:
@@ -250,15 +258,13 @@ class TestPluginInstallCallback:
     """Plugin.install() spawnt Thread, der finish_install() aufruft."""
 
     def test_conan_install_thread_calls_finish(self, db: Session, test_server: Server):
-        from games.conan_exiles_ue5.plugin import ConanExilesUE5Plugin
-
-        plugin = ConanExilesUE5Plugin()
+        plugin = _native_blueprint_plugin("conan_exiles_ue5")
         test_server.status = "installing"
         test_server.install_dir = tempfile.mkdtemp()
         db.commit()
 
-        with patch("games.conan_exiles_ue5.plugin.run_steamcmd_install") as mock_run, \
-             patch("games.conan_exiles_ue5.plugin.finish_install") as mock_finish:
+        with patch("games.blueprint_plugin.run_steamcmd_install") as mock_run, \
+             patch("games.blueprint_plugin.finish_install") as mock_finish:
             mock_run.return_value = {"ok": True}
             plugin.install(test_server)
 
@@ -275,15 +281,14 @@ class TestPluginInstallCallback:
         shutil.rmtree(test_server.install_dir, ignore_errors=True)
 
     def test_dayz_install_thread_calls_finish(self, db: Session, test_server: Server):
-        from games.dayz.plugin import DayZPlugin
-
-        plugin = DayZPlugin()
+        plugin = _native_blueprint_plugin("dayz")
         test_server.status = "installing"
         test_server.install_dir = tempfile.mkdtemp()
         db.commit()
 
-        with patch("games.dayz.plugin.run_steamcmd_install") as mock_run, \
-             patch("games.dayz.plugin.finish_install") as mock_finish:
+        with patch("games.blueprint_plugin.SteamAccountService.is_configured", return_value=True), \
+             patch("games.blueprint_plugin.run_steamcmd_install") as mock_run, \
+             patch("games.blueprint_plugin.finish_install") as mock_finish:
             mock_run.return_value = {"ok": False, "error": "test failure"}
             plugin.install(test_server)
 

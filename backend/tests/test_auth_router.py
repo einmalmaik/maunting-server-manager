@@ -341,6 +341,7 @@ class TestCsrfProtectionOnEndpoints:
         with patch("routers.servers.os.makedirs"), \
              patch("routers.servers.os.chmod"), \
              patch("routers.servers.os.path.exists", return_value=False), \
+             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
              patch("routers.servers.open_ports"), \
              patch("routers.servers.get_plugin", return_value=None):
             csrf = owner_cookies.get("__Secure-csrf_token")
