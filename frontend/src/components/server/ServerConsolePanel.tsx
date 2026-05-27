@@ -63,17 +63,15 @@ export function ServerConsolePanel({ serverId }: Props) {
     const url = `/api/servers/${serverId}/console/stream`
     const es = new EventSource(url)
     es.onmessage = (ev) => {
-      // Backend liefert je SSE-Frame eine Log-Zeile. ``data:`` ist bereits
-      // ohne Newline (siehe Router).
+      // Backend emits only plain `data:` frames (raw combined docker logs) + `event: end/error`.
       setLogs((prev) => [...prev, ev.data])
     }
-    es.addEventListener('end', () => {
-      // Backend signalisiert Stream-Ende (Container weg). Verbindung schliessen.
+
+    es.addEventListener("end", () => {
       es.close()
     })
     es.onerror = () => {
-      // Stille: Browser reconnected automatisch. Logs nicht spammen — der User
-      // sieht die fehlende Verbindung daran, dass keine neuen Zeilen kommen.
+      // Stille: Browser reconnected automatisch.
     }
     return () => {
       es.close()

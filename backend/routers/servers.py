@@ -609,8 +609,6 @@ async def server_console_stream(
         try:
             docker_bin = shutil.which("docker")
             if not docker_bin:
-                # Saubere, client-freundliche Meldung statt harter Exception
-                # (die vorher den ganzen SSE-Stream + ASGI-Handler killte).
                 log_path = _console_log_path(server.id)
                 msm_hint = ""
                 if os.path.exists(log_path):
@@ -625,42 +623,53 @@ async def server_console_stream(
             proc = await asyncio.create_subprocess_exec(
                 docker_bin, "logs", "--follow", "--tail", "200", container,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+                stderr=asyncio.subprocess.STDOUT,  # KISS: merge for raw combined stdout+stderr (Pterodactyl-like terminal view)
             )
             assert proc.stdout is not None
-            while True:
-                if await request.is_disconnected():
-                    break
-                # ~1 s Timeout, damit wir disconnect-checks pollen koennen.
-                try:
-                    raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    # Heartbeat-Kommentar, haelt Proxies / EventSource am Leben.
-                    yield ": keepalive\n\n"
-                    continue
-                if not raw:
-                    # Subprocess hat EOF — Stream-Ende sauber kommunizieren.
-                    yield "event: end\ndata: \n\n"
-                    break
-                line = raw.decode("utf-8", errors="replace").rstrip("\n")
-                # SSE-Frame: jedes "data:" wird zu einer eigenen Zeile. ``\n``
-                # darf NICHT im Wert vorkommen — wir splitten praeventiv.
-                for chunk in line.split("\n"):
-                    yield f"data: {chunk}\n"
-                yield "\n"
-        except Exception as exc:  # alle Fälle abfangen (FileNotFound, Permission, etc.)
-            # Niemals rohe Exception in den ASGI-Handler propagieren.
-            yield f"event: error\ndata: [MSM] Konsole-Stream Fehler: {type(exc).__name__}\n\n"
-        finally:
-            if proc and proc.returncode is None:
-                try:
-                    proc.terminate()
-                    await asyncio.wait_for(proc.wait(), timeout=2.0)
-                except (asyncio.TimeoutError, ProcessLookupError):
+
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
                     try:
-                        proc.kill()
-                    except ProcessLookupError:
+                        raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+                    except asyncio.CancelledError:
+                        raise
+                    if not raw:
+                        # EOF vom Container-Log → sauberes Ende
+                        yield "event: end\ndata: \n\n"
+                        break
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                    yield f"data: {line}\n\n"
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # Alle Fehler (inkl. Docker-Probleme nach Start) → nur error event, kein double end+error
+                yield f"event: error\ndata: [MSM] Konsole-Stream Fehler: {type(exc).__name__}\n\n"
+            finally:
+                # Proc immer sauber terminieren (auch bei Disconnect)
+                if proc.returncode is None:
+                    try:
+                        proc.terminate()
+                        await asyncio.wait_for(proc.wait(), timeout=2.0)
+                    except (asyncio.TimeoutError, ProcessLookupError):
+                        try:
+                            proc.kill()
+                        except ProcessLookupError:
+                            pass
+                # Defensive Pipe-Cleanup (FD-Leaks bei häufigem Connect/Disconnect vermeiden)
+                if proc.stdout is not None:
+                    try:
+                        proc.stdout.close()
+                    except Exception:
                         pass
+        except Exception as exc:
+            # Fängt Fehler beim create_subprocess_exec (Permission, etc.) ab, bevor der Stream-Loop erreicht wird.
+            # Niemals rohe Exception in ASGI-Handler lassen (wie im Original-Design).
+            yield f"event: error\ndata: [MSM] Konsole-Stream Fehler: {type(exc).__name__}\n\n"
 
     return StreamingResponse(
         event_gen(),

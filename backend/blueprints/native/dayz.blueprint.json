@@ -11,7 +11,7 @@
     "image": "cm2network/steamcmd:root",
     "workdir": "/data",
     "env": {},
-    "startup": "/data/DayZServer -port={GAME_PORT} {MOD_ARG}"
+    "startup": "/data/DayZServer -profiles=/data/profiles -port={GAME_PORT} {MOD_ARG}"
   },
   "ports": [
     { "name": "game",  "protocol": "udp" },

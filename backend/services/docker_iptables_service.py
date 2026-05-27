@@ -48,20 +48,26 @@ _COMMENT_PREFIX = "MSM"
 _BASELINE_COMMENT_UDP = f"{_COMMENT_PREFIX}:baseline:udp"
 _BASELINE_COMMENT_TCP = f"{_COMMENT_PREFIX}:baseline:tcp"
 
+# Thin root-owned wrapper (deployed by install/update) that gates all privileged iptables calls.
+# See backend/scripts/msm-iptables and msm-panel.sudoers (SSOT).
+_IPTABLES_WRAPPER = "/usr/local/sbin/msm-iptables"
+
 
 def _run_iptables(*args: str, check_only: bool = False) -> subprocess.CompletedProcess | None:
     """Fuehre ``iptables <args>`` aus. Gibt None zurueck, wenn iptables fehlt.
 
-    Versucht zuerst ``sudo -n iptables`` (für den msm-User mit sudoers-Regeln).
+    Versucht zuerst ``sudo -n /usr/local/sbin/msm-iptables`` (Wrapper-Gate aus
+    der SSOT-Policy; erlaubt exakt die variablen DOCKER-USER-Regeln).
     Fällt bei Misserfolg auf direkten Aufruf zurück (saubere Migration).
 
     ``check_only=True`` deutet darauf hin, dass der Aufruf nur prueft (``-C``)
     — non-zero-Exit ist dann NICHT als Fehler zu werten.
     """
     try:
-        # 1. Versuch mit sudo (non-interactive)
+        # 1. Versuch mit sudo via wrapper (non-interactive). Wrapper enforces DOCKER-USER-only.
+        # Falls Wrapper (noch) nicht installiert: sudo schlägt fehl → sauberer Fallback auf direkten Aufruf.
         sudo_result = subprocess.run(
-            ["sudo", "-n", "iptables", *args],
+            ["sudo", "-n", _IPTABLES_WRAPPER, *args],
             check=False,
             capture_output=True,
             text=True,

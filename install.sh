@@ -1167,13 +1167,77 @@ EOF
         fi
         ok "Service registriert"
 
-        # ── Legacy-sudoers entfernen: Game-Server laufen jetzt in Docker, der
-        # msm-User braucht keine root-Privilegien für systemd/useradd mehr. ──
-        if [[ -f /etc/sudoers.d/msm-panel ]]; then
-            log "Entferne legacy /etc/sudoers.d/msm-panel (Game-Server laufen jetzt in Docker)..."
-            rm -f /etc/sudoers.d/msm-panel
-            ok "Legacy-sudoers entfernt"
+        # ── sudoers + iptables-Wrapper direkt als root schreiben (Sicherheitsfix) ──
+        # Die privileged Artifakte (Wrapper-Gate + Policy) dürfen NIEMALS aus dem
+        # msm-owned Baum ($MSM_DIR/backend/scripts) gelesen werden (chown -R msm
+        # passiert früher). Deshalb: direkte Heredocs als root (wie ursprünglich),
+        # aber mit dem korrekten Wrapper (variable Arg-Listen für DOCKER-USER)
+        # und ohne Over-Privilege. SSOT-Dateien bleiben im Repo als Review-Master.
+        if [[ -d /etc/sudoers.d ]]; then
+            mkdir -p /usr/local/sbin
+            # Wrapper (direkt als root geschrieben — kein cp aus msm-writable Source)
+            cat > /usr/local/sbin/msm-iptables <<'WRAPEOF'
+#!/bin/sh
+# MSM iptables wrapper — thin, root-owned privilege gate for DOCKER-USER defense-in-depth.
+# (Content authoritative in this heredoc + backend/scripts/msm-iptables for audit.)
+set -eu
+IPT="/usr/sbin/iptables"
+if [ $# -eq 0 ]; then
+    printf 'msm-iptables: refused disallowed invocation (no args)\n' >&2
+    exit 1
+fi
+case "${1:-}" in
+    --version)
+        exec "$IPT" "$@"
+        ;;
+    -L)
+        if [ $# -eq 3 ] && [ "$2" = "DOCKER-USER" ] && [ "$3" = "-n" ]; then
+            exec "$IPT" "$@"
         fi
+        ;;
+    -C|-A|-D)
+        if [ "$2" = "DOCKER-USER" ]; then
+            exec "$IPT" "$@"
+        fi
+        ;;
+    -I)
+        if [ "$2" = "DOCKER-USER" ]; then
+            exec "$IPT" "$@"
+        fi
+        ;;
+esac
+printf 'msm-iptables: refused disallowed invocation: %s\n' "$*" >&2
+exit 1
+WRAPEOF
+            chown root:root /usr/local/sbin/msm-iptables
+            chmod 755 /usr/local/sbin/msm-iptables
+
+            # Policy (direkt als root; Wrapper-Referenz + tightened UFW delete)
+            cat > /etc/sudoers.d/msm-panel <<'SUDOEOF'
+# MSM Panel — Game-Server systemd-Unit-Verwaltung + Firewall (UFW/iptables)
+# Deployed via root heredoc in install.sh/update.sh (never read from msm-writable tree).
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
+
+# UFW (exact from firewall_service.py; delete tightened to match allow glob)
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw allow [0-9]*/[a-z]* comment *
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow [0-9]*/[a-z]*
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw status numbered
+
+# iptables ONLY via vetted wrapper (enforces DOCKER-USER only for variable long args)
+msm ALL=(root) NOPASSWD: /usr/local/sbin/msm-iptables
+SUDOEOF
+            chmod 440 /etc/sudoers.d/msm-panel
+            ok "sudoers + iptables-Wrapper für Firewall-Regeln eingerichtet (direkt als root)"
+        fi
+
     else
         warn "systemd nicht verfügbar (typisch für WSL). msm-panel.service wird geschrieben, aber nicht aktiviert."
         warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"

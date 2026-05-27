@@ -327,7 +327,7 @@ class TestCsrfProtectionOnEndpoints:
     def test_post_without_csrf_fails(self, client: TestClient, owner_cookies: dict):
         # Try to create server without CSRF
         response = client.post("/api/servers", json={
-            "name": "Test",
+            "name": "CSRF-Test-Forbidden",
             "game_type": "dayz",
         }, cookies=owner_cookies)
         assert response.status_code == 403
@@ -340,12 +340,13 @@ class TestCsrfProtectionOnEndpoints:
         # gegen den Docker-Daemon laufen kann.
         with patch("routers.servers.os.makedirs"), \
              patch("routers.servers.os.chmod"), \
+             patch("routers.servers.os.path.exists", return_value=False), \
              patch("routers.servers.open_ports"), \
              patch("routers.servers.get_plugin", return_value=None):
             csrf = owner_cookies.get("__Secure-csrf_token")
             response = client.post(
                 "/api/servers",
-                json={"name": "Test", "game_type": "dayz"},
+                json={"name": "CSRF-Test-Success", "game_type": "dayz"},
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf},
             )

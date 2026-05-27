@@ -1,0 +1,27 @@
+# MSM Panel — Game-Server systemd-Unit-Verwaltung + Firewall (UFW/iptables)
+# Single Source of Truth (SSOT). Deployed by install.sh and update.sh.
+# Edit ONLY this file. Never edit the installed /etc/sudoers.d/msm-panel directly.
+#
+# Privilege boundary for the `msm` system user (defense-in-depth for Docker DOCKER-USER chain
+# and systemd units). Follows KISS + minimal necessary rights. No over-privilege.
+# iptables operations are gated through a root-owned thin wrapper (see below).
+
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
+msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
+
+# UFW (exact from firewall_service.py; delete tightened to match allow glob)
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw allow [0-9]*/[a-z]* comment *
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow [0-9]*/[a-z]*
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw status numbered
+
+# iptables — ONLY via vetted root-owned wrapper (enables long arg lists for -C/-A/-I/-D on DOCKER-USER exactly as emitted by docker_iptables_service.py:_run_iptables).
+# The wrapper (installed to /usr/local/sbin/msm-iptables) validates chain==DOCKER-USER (or version/L) before exec.
+# This is the only secure way to support variable-length rules without either (a) broken matching or (b) over-privilege to other chains.
+msm ALL=(root) NOPASSWD: /usr/local/sbin/msm-iptables

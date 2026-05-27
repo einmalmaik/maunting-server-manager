@@ -280,11 +280,52 @@ for asset in data.get('assets', []):
     restore_panel_ownership
 fi
 
-# ── sudoers aktualisieren (immer, damit neue Regeln sofort gelten) ──
+# ── sudoers + iptables-Wrapper direkt als root schreiben (Sicherheitsfix) ──
+# Nie aus dem (nach restore_panel_ownership) msm-owned $MSM_DIR lesen.
+# Direkte Heredocs als root (Wrapper + Policy). SSOT im Repo bleibt Review-Master.
 if [[ -d /etc/sudoers.d ]]; then
     log "Aktualisiere sudoers-Regeln..."
+    mkdir -p /usr/local/sbin
+    # Wrapper direkt als root
+    cat > /usr/local/sbin/msm-iptables <<'WRAPEOF'
+#!/bin/sh
+# MSM iptables wrapper — thin, root-owned privilege gate for DOCKER-USER defense-in-depth.
+set -eu
+IPT="/usr/sbin/iptables"
+if [ $# -eq 0 ]; then
+    printf 'msm-iptables: refused disallowed invocation (no args)\n' >&2
+    exit 1
+fi
+case "${1:-}" in
+    --version)
+        exec "$IPT" "$@"
+        ;;
+    -L)
+        if [ $# -eq 3 ] && [ "$2" = "DOCKER-USER" ] && [ "$3" = "-n" ]; then
+            exec "$IPT" "$@"
+        fi
+        ;;
+    -C|-A|-D)
+        if [ "$2" = "DOCKER-USER" ]; then
+            exec "$IPT" "$@"
+        fi
+        ;;
+    -I)
+        if [ "$2" = "DOCKER-USER" ]; then
+            exec "$IPT" "$@"
+        fi
+        ;;
+esac
+printf 'msm-iptables: refused disallowed invocation: %s\n' "$*" >&2
+exit 1
+WRAPEOF
+    chown root:root /usr/local/sbin/msm-iptables
+    chmod 755 /usr/local/sbin/msm-iptables
+
+    # Policy direkt als root (Wrapper + tightened delete)
     cat > /etc/sudoers.d/msm-panel <<'SUDOEOF'
-# MSM Panel — Game-Server systemd-Unit-Verwaltung
+# MSM Panel — Game-Server systemd-Unit-Verwaltung + Firewall (UFW/iptables)
+# Deployed via root heredoc (never from msm-writable tree at update time).
 msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
 msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
 msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
@@ -293,26 +334,20 @@ msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
 msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
 msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
 msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
-msm ALL=(root) NOPASSWD: /usr/sbin/useradd -r -m -s /usr/sbin/nologin -d * msm_srv_*
-msm ALL=(root) NOPASSWD: /usr/sbin/usermod -s /usr/sbin/nologin msm_srv_*
-msm ALL=(root) NOPASSWD: /usr/sbin/userdel -r msm_srv_*
-msm ALL=(root) NOPASSWD: /usr/bin/chown msm_srv_*:msm_srv_* /opt/msm/servers/*
-msm ALL=(root) NOPASSWD: /usr/bin/chmod 750 /opt/msm/servers/*
 
-# UFW (nur MSM-spezifische Regeln für einzelne Ports mit Kommentar)
-msm ALL=(root) NOPASSWD: /usr/sbin/ufw allow [0-9]*/tcp comment MSM *
-msm ALL=(root) NOPASSWD: /usr/sbin/ufw allow [0-9]*/udp comment MSM *
-msm ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow [0-9]*/tcp
-msm ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow [0-9]*/udp
+# UFW (exact; delete tightened)
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw allow [0-9]*/[a-z]* comment *
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow [0-9]*/[a-z]*
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw status numbered
 
-# iptables DOCKER-USER Chain (Baseline + per-Server ACCEPT/DELETE)
-msm ALL=(root) NOPASSWD: /usr/sbin/iptables -A DOCKER-USER *
-msm ALL=(root) NOPASSWD: /usr/sbin/iptables -I DOCKER-USER *
-msm ALL=(root) NOPASSWD: /usr/sbin/iptables -D DOCKER-USER *
+# iptables ONLY via vetted wrapper
+msm ALL=(root) NOPASSWD: /usr/local/sbin/msm-iptables
 SUDOEOF
     chmod 440 /etc/sudoers.d/msm-panel
-    ok "sudoers aktualisiert"
+    ok "sudoers aktualisiert (direkt als root + Wrapper)"
 fi
+
 
 # ── Backups-Verzeichnis sicherstellen ──
 mkdir -p /opt/msm/backups

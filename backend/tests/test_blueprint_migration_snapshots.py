@@ -1,8 +1,10 @@
 """Snapshot-Tests: DayZ + Conan-Plugins produzieren *nach* der Blueprint-Migration
-exakt dieselbe ``build_container_command``-Ausgabe wie vorher.
+die geschützte ``build_container_command``-Ausgabe (post-evolution baseline).
 
 Diese Tests sind die Regressionsschranke gegen unbeabsichtigte Verhaltens-
 aenderungen beim Wechsel von hartcodierten Kommandos auf den Renderer.
+Intentional baseline evolutions (z. B. DayZ -profiles) werden mit Kommentar
+dokumentiert und die Assertions entsprechend aktualisiert.
 """
 
 from __future__ import annotations
@@ -33,7 +35,10 @@ def test_dayz_no_mods_matches_legacy_argv() -> None:
     server = _stub_server(game_port=2302)
     with patch("games.dayz.plugin.active_mod_ids", return_value=[]):
         argv = plugin.build_container_command(server)
-    assert argv == ["/data/DayZServer", "-port=2302"]
+    # NOTE: -profiles=/data/profiles is the new intentional baseline (standard DayZ practice;
+    # see dayz.blueprint.json). The snapshot contract was deliberately evolved; this is NOT a regression.
+    # Decision: keep the profiles flag (improves server file layout, matches community hosting docs).
+    assert argv == ["/data/DayZServer", "-profiles=/data/profiles", "-port=2302"]
 
 
 def test_dayz_with_mods_matches_legacy_argv() -> None:
@@ -41,7 +46,7 @@ def test_dayz_with_mods_matches_legacy_argv() -> None:
     server = _stub_server(game_port=2302)
     with patch("games.dayz.plugin.active_mod_ids", return_value=["12345", "67890"]):
         argv = plugin.build_container_command(server)
-    assert argv == ["/data/DayZServer", "-port=2302", "-mod=12345;67890;"]
+    assert argv == ["/data/DayZServer", "-profiles=/data/profiles", "-port=2302", "-mod=12345;67890;"]
 
 
 def test_dayz_without_game_port_omits_port_arg() -> None:
@@ -49,7 +54,7 @@ def test_dayz_without_game_port_omits_port_arg() -> None:
     server = _stub_server(game_port=None)
     with patch("games.dayz.plugin.active_mod_ids", return_value=[]):
         argv = plugin.build_container_command(server)
-    assert argv == ["/data/DayZServer"]
+    assert argv == ["/data/DayZServer", "-profiles=/data/profiles"]
 
 
 def test_conan_full_argv_matches_legacy() -> None:

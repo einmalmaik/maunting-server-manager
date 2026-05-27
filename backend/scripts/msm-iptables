@@ -1,0 +1,52 @@
+#!/bin/sh
+# MSM iptables wrapper — thin, root-owned privilege gate for DOCKER-USER defense-in-depth.
+# Invoked exclusively via `sudo -n /usr/local/sbin/msm-iptables ...` by the `msm` user (see msm-panel.sudoers).
+#
+# Purpose: allow the exact dynamic long argument lists that docker_iptables_service.py emits
+# for baseline DROP + per-server ACCEPT rules, while preventing any access to other iptables
+# chains, -F, -P, or other subcommands. KISS: minimal validation, full exec of iptables for allowed cases.
+#
+# Security: this file must be owned by root:root, mode 0755, and never writable by the msm user.
+# If compromised `msm` account calls it, it can still only touch DOCKER-USER (Docker's designated hook chain).
+#
+# Do not add logging of args (may contain IPs in comments).
+
+set -eu
+
+IPT="/usr/sbin/iptables"
+
+if [ $# -eq 0 ]; then
+    printf 'msm-iptables: refused disallowed invocation (no args)\n' >&2
+    exit 1
+fi
+
+# Allowed patterns (must match first 1-3 tokens after wrapper; remaining args passed through)
+case "${1:-}" in
+    --version)
+        # iptables --version
+        exec "$IPT" "$@"
+        ;;
+    -L)
+        # iptables -L DOCKER-USER -n   (exactly as _chain_exists)
+        if [ $# -eq 3 ] && [ "$2" = "DOCKER-USER" ] && [ "$3" = "-n" ]; then
+            exec "$IPT" "$@"
+        fi
+        ;;
+    -C|-A|-D)
+        # iptables -C DOCKER-USER ... (long rule with -p -dport -m comment --comment MSM:... -j DROP/ACCEPT)
+        # same for -A and -D
+        if [ "$2" = "DOCKER-USER" ]; then
+            exec "$IPT" "$@"
+        fi
+        ;;
+    -I)
+        # iptables -I DOCKER-USER 1 ... (insert at position 1; our code builds rule_for_insert)
+        if [ "$2" = "DOCKER-USER" ]; then
+            exec "$IPT" "$@"
+        fi
+        ;;
+esac
+
+# Refuse everything else (prevents -t, other chains, flush, policy etc.)
+printf 'msm-iptables: refused disallowed invocation: %s\n' "$*" >&2
+exit 1
