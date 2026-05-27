@@ -1,32 +1,36 @@
 """Generischer Game-Plugin-Wrapper, getrieben von einer Blueprint-JSON.
 
-Wird fuer **Community-Blueprints** instanziiert (Native-Plugins fuer DayZ/Conan
-bleiben Python-Klassen mit game-spezifischer Installations-Logik). Der Wrapper
-deckt die Standardfaelle ab:
+Wird fuer native und Community-Blueprints instanziiert. Native Unterstuetzung
+bedeutet nur, dass MSM die Blueprint-Datei mitliefert; die Runtime bleibt fuer
+alle Server-Typen dieselbe.
 
 - Docker-Image + Startup-Argv aus der Blueprint
 - Source ``steam`` → SteamCMD-Install (App-ID aus der Blueprint)
 - Source ``http``  → Streaming-Download via :mod:`blueprints.http_source`
 - Source ``dockerOnly`` / ``custom`` → kein Install (UI markiert ``stopped``)
-- Workshop-Mods via ``modInjection=startupArg|file`` (Modliste schreibt der
-  Helfer ``write_workshop_modlist``)
-
-Was NICHT abgedeckt ist (bewusst, KISS):
-
-- Game-spezifische Filesystem-Operationen (Symlinks, .pak-Copy etc.). Wer
-  sowas braucht, schreibt ein natives Plugin — das ist die dokumentierte
-  Grenze des Blueprint-Systems.
+- Workshop-Mods via ``modInjection=startupArg|file``
+- deklarative Workshop-Dateiaktionen (copy/symlink) via ``mods.postInstall``
+- deklarative INI-Patches vor dem Start via ``runtime.configPatches``
 """
 
 from __future__ import annotations
 
+import glob
+import os
+import shutil
 import threading
 from pathlib import Path
 
 from blueprints import Blueprint, render_argv
 from blueprints.http_source import install_http_source
 from blueprints.renderer import render_env_values
-from blueprints.schema import BlueprintPortProtocol, BlueprintSourceType
+from blueprints.schema import (
+    BlueprintConfigPatchType,
+    BlueprintModListContent,
+    BlueprintPortProtocol,
+    BlueprintSourceType,
+    BlueprintWorkshopFileOperation,
+)
 from games.base import (
     CONTAINER_DATA_DIR,
     ConfigField,
@@ -38,6 +42,7 @@ from games.base import (
     run_steamcmd_install,
     run_steamcmd_workshop_download,
 )
+from games.ini_utils import set_ini_value
 from services.docker_service import PortPublish
 from services.steam_account_service import SteamAccountService
 
@@ -189,6 +194,35 @@ class BlueprintPlugin(GamePlugin):
             ports=self._server_ports(server),
         )
 
+    def prepare_runtime(self, server) -> None:
+        base = Path(server.install_dir).resolve()
+        ports = self._server_ports(server)
+        values = {
+            "GAME_PORT": ports.get("game"),
+            "QUERY_PORT": ports.get("query"),
+            "RCON_PORT": ports.get("rcon"),
+            "VOICE_PORT": ports.get("voice"),
+            "WEB_PORT": ports.get("web"),
+        }
+
+        for patch in self._blueprint.runtime.configPatches:
+            if patch.type != BlueprintConfigPatchType.INI:
+                continue
+            target = (base / patch.file).resolve()
+            target.relative_to(base)
+            value = patch.value
+            skip = False
+            for token, port in values.items():
+                placeholder = "{" + token + "}"
+                if placeholder in value:
+                    if not port:
+                        skip = True
+                        break
+                    value = value.replace(placeholder, str(port))
+            if skip:
+                continue
+            set_ini_value(str(target), patch.section, patch.key, value)
+
     def build_port_publishes(self, server) -> list[PortPublish]:
         """Port-Publishes aus der Blueprint statt UDP-Hartkodierung.
 
@@ -271,6 +305,10 @@ class BlueprintPlugin(GamePlugin):
                 if not download_res.get("ok", False):
                     result = {"error": download_res.get("error", "Workshop-Download fehlgeschlagen")}
                     return
+                action_res = self._run_workshop_post_install_actions(server, workshop_id)
+                if "error" in action_res:
+                    result = action_res
+                    return
                 # Nach jedem Mod-Install die Modliste re-generieren (falls Datei-
                 # injection); fuer startupArg ist das ein No-op.
                 self.update_modlist(server)
@@ -282,3 +320,98 @@ class BlueprintPlugin(GamePlugin):
         thread.start()
         thread.join()
         return result
+
+    def format_modlist_lines(self, server, mods: list) -> list[str]:
+        bp_mods = self._blueprint.effective_mods()
+        if bp_mods.modListContent != BlueprintModListContent.POST_INSTALL_TARGET_BASENAMES:
+            return [m.workshop_id for m in mods]
+
+        lines: list[str] = []
+        base = Path(server.install_dir).resolve()
+        for mod in mods:
+            workshop_id = str(mod.workshop_id)
+            for action in bp_mods.postInstall:
+                if "{BASENAME}" not in action.target:
+                    continue
+                for source in self._resolve_workshop_sources(base, action.source, workshop_id):
+                    target = self._render_workshop_path(
+                        action.target,
+                        workshop_id,
+                        basename=source.name,
+                    )
+                    target_path = (base / target).resolve()
+                    try:
+                        target_path.relative_to(base)
+                    except ValueError:
+                        continue
+                    if target_path.exists():
+                        lines.append(target_path.name)
+        return lines
+
+    def _run_workshop_post_install_actions(self, server, workshop_id: str) -> dict:
+        bp_mods = self._blueprint.effective_mods()
+        if not bp_mods.postInstall:
+            return {}
+
+        base = Path(server.install_dir).resolve()
+        for action in bp_mods.postInstall:
+            sources = self._resolve_workshop_sources(base, action.source, workshop_id)
+            if action.required and not sources:
+                return {"error": f"Keine Dateien für postInstall-Quelle gefunden: {action.source}"}
+
+            for source in sources:
+                target_rel = self._render_workshop_path(
+                    action.target,
+                    workshop_id,
+                    basename=source.name,
+                )
+                target = (base / target_rel).resolve()
+                try:
+                    source.relative_to(base)
+                    target.relative_to(base)
+                except ValueError:
+                    return {"error": "Blueprint postInstall-Pfad verlässt install_dir"}
+
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if action.operation == BlueprintWorkshopFileOperation.COPY:
+                    if not source.is_file():
+                        return {"error": f"postInstall copy erwartet Datei: {source.name}"}
+                    shutil.copy2(source, target)
+                    continue
+
+                if target.exists() or target.is_symlink():
+                    if target.is_symlink():
+                        target.unlink()
+                    else:
+                        return {"error": f"postInstall-Ziel existiert bereits: {target_rel}"}
+                os.symlink(source, target, target_is_directory=source.is_dir())
+
+        return {}
+
+    def _resolve_workshop_sources(
+        self,
+        base: Path,
+        source_template: str,
+        workshop_id: str,
+    ) -> list[Path]:
+        source_rel = self._render_workshop_path(source_template, workshop_id)
+        if any(ch in source_rel for ch in ("*", "?", "[")):
+            matches = glob.glob(str(base / source_rel), recursive=True)
+            return [Path(match).resolve() for match in matches]
+        source = (base / source_rel).resolve()
+        return [source] if source.exists() else []
+
+    def _render_workshop_path(
+        self,
+        template: str,
+        workshop_id: str,
+        *,
+        basename: str = "",
+    ) -> str:
+        bp_mods = self._blueprint.effective_mods()
+        return (
+            template
+            .replace("{WORKSHOP_APP_ID}", bp_mods.workshopAppId or "")
+            .replace("{WORKSHOP_ID}", workshop_id)
+            .replace("{BASENAME}", basename)
+        )

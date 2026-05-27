@@ -51,6 +51,7 @@ class TestCreateServer:
         with patch("routers.servers.os.makedirs"), \
              patch("routers.servers.os.chmod"), \
              patch("routers.servers.os.path.exists", return_value=False), \
+             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
              patch("routers.servers.open_ports"), \
              patch("routers.servers.get_plugin", return_value=None):
             response = client.post(
@@ -86,6 +87,7 @@ class TestCreateServer:
         with patch("routers.servers.os.makedirs"), \
              patch("routers.servers.os.chmod"), \
              patch("routers.servers.os.path.exists", return_value=False), \
+             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
              patch("routers.servers.open_ports"), \
              patch("routers.servers.get_plugin", return_value=None):
             response = client.post(
@@ -111,6 +113,7 @@ class TestCreateServer:
         with patch("routers.servers.os.path.exists", return_value=True) as mock_exists, \
              patch("routers.servers.os.makedirs"), \
              patch("routers.servers.os.chmod"), \
+             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
              patch("routers.servers.open_ports"), \
              patch("routers.servers.get_plugin", return_value=None):
             response = client.post(

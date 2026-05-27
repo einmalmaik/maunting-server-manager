@@ -56,6 +56,8 @@ describe('Docs page', () => {
       'source',
       'httpSecurity',
       'mods',
+      'workshopActions',
+      'configPatches',
       'import',
       'exampleMinecraftVersion',
       'exampleWine',

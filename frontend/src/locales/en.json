@@ -99,7 +99,15 @@
       },
       "mods": {
         "title": "mods & Steam Workshop",
-        "body": "supportsSteamWorkshop=true unlocks the Workshop UI for this server type and requires workshopAppId.\n\nmodInjection picks how the panel passes mods to the server:\n\n• none — mod system off.\n• startupArg — modStartupArgumentFormat is added as an argv element to the startup command.\n• file — the workshop modlist is written to modListFilePath. The path is validated against install_dir so it can never escape."
+        "body": "supportsSteamWorkshop=true unlocks the Workshop UI for this server type and requires workshopAppId.\n\nmodInjection picks how the panel passes mods to the server:\n\n• none — mod system off.\n• startupArg — modStartupArgumentFormat is added as an argv element to the startup command.\n• file — the workshop modlist is written to modListFilePath. The path is validated against install_dir so it can never escape.\n\nmodListContent controls file modlist contents:\n\n• workshopIds — one Workshop ID per line.\n• postInstallTargetBasenames — target filenames from mods.postInstall."
+      },
+      "workshopActions": {
+        "title": "mods.postInstall — arrange Workshop files",
+        "body": "mods.postInstall describes safe file actions after a successful Steam Workshop download. This covers games that do not load mods directly from steamapps/workshop/content.\n\nAllowed operations:\n\n• copy — copy a file into a target path below install_dir.\n• symlink — link a file or directory below install_dir.\n\nAllowed path tokens: {WORKSHOP_APP_ID}, {WORKSHOP_ID}, {BASENAME}. Source may use globs like **/*.pak. If source is a glob, target must contain {BASENAME}. Absolute paths, .. and unknown tokens are rejected.\n\nExamples:\n\n• DayZ: symlink the Workshop mod directory to {WORKSHOP_ID} and symlink *.bikey into keys/{BASENAME}.\n• Conan Exiles: copy **/*.pak to ConanSandbox/Mods/{BASENAME}."
+      },
+      "configPatches": {
+        "title": "runtime.configPatches — patch files before start",
+        "body": "runtime.configPatches writes safe configuration values before every container start. MSM currently supports type=ini. This replaces older game-specific Python hooks for servers that read ports from INI files instead of only CLI arguments.\n\nFields:\n\n• file — relative path below install_dir.\n• section — INI section without brackets.\n• key — key to set.\n• value — literal value or port token.\n\nAllowed value tokens: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. If a referenced port is empty, that patch is skipped. Other keys and sections in the file are preserved."
       },
       "import": {
         "title": "Upload, replace or delete a Blueprint",

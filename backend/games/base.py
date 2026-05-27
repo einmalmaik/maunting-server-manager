@@ -7,9 +7,9 @@ Jeder GamePlugin liefert minimale, Docker-spezifische Bausteine:
   - build_volume_binds(server)       → Liste von VolumeBind (host↔container)
 
 `start/stop/get_status/get_logs` haben Default-Implementierungen in der Basis,
-die alle Container-Operationen über `docker_service` ausführen. Plugins
-überschreiben nur, was wirklich game-spezifisch ist (z. B. Custom-Workshop-
-Pfade beim install_mod).
+die alle Container-Operationen über `docker_service` ausführen. Server-Typen
+kommen aus Blueprints; game-spezifische Runtime-Varianten werden deklarativ in
+der Blueprint beschrieben und vom generischen `BlueprintPlugin` ausgeführt.
 
 Es gibt KEINE systemd-/linux-user-Pfade mehr. Game-Server laufen ausschließlich
 in Docker-Containern. Isolation kommt von Docker, nicht von POSIX-Usern.

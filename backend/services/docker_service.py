@@ -471,4 +471,6 @@ def host_uid_gid() -> tuple[int, int]:
     """Aktuelles UID:GID des Panel-Prozesses. Wird als `--user` an Container übergeben,
     damit Bind-Mount-Files die korrekte Besitzer haben.
     """
+    if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
+        return 0, 0
     return os.getuid(), os.getgid()

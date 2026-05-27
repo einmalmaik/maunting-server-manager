@@ -615,11 +615,13 @@ def _disk_free_mb(path: str) -> int | None:
     try:
         if not path:
             return None
+        if not hasattr(os, "statvfs"):
+            return None
         # Falls install_dir noch nicht existiert, das Eltern-Verzeichnis nehmen
         target = path if os.path.exists(path) else os.path.dirname(path) or "/"
         st = os.statvfs(target)
         return int((st.f_bavail * st.f_frsize) // (1024 * 1024))
-    except OSError:
+    except (AttributeError, OSError):
         return None
 
 

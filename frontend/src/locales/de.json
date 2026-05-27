@@ -99,7 +99,15 @@
       },
       "mods": {
         "title": "mods & Steam Workshop",
-        "body": "supportsSteamWorkshop=true schaltet die Workshop-UI für diesen Server-Typ frei und verlangt workshopAppId.\n\nmodInjection entscheidet, wie das Panel Mods an den Server übergibt:\n\n• none — Mod-System aus.\n• startupArg — modStartupArgumentFormat landet als argv-Element im Startup-Befehl.\n• file — Workshop-Modliste wird nach modListFilePath geschrieben. Der Pfad wird gegen install_dir validiert — Escape-Pfade sind nicht möglich."
+        "body": "supportsSteamWorkshop=true schaltet die Workshop-UI für diesen Server-Typ frei und verlangt workshopAppId.\n\nmodInjection entscheidet, wie das Panel Mods an den Server übergibt:\n\n• none — Mod-System aus.\n• startupArg — modStartupArgumentFormat landet als argv-Element im Startup-Befehl.\n• file — Workshop-Modliste wird nach modListFilePath geschrieben. Der Pfad wird gegen install_dir validiert — Escape-Pfade sind nicht möglich.\n\nmodListContent steuert den Inhalt einer Datei-Modliste:\n\n• workshopIds — eine Workshop-ID pro Zeile.\n• postInstallTargetBasenames — Dateinamen der Ziele aus mods.postInstall."
+      },
+      "workshopActions": {
+        "title": "mods.postInstall — Workshop-Dateien anordnen",
+        "body": "mods.postInstall beschreibt sichere Dateiaktionen nach einem erfolgreichen Steam-Workshop-Download. Damit lassen sich Spiele abbilden, die Mods nicht direkt aus steamapps/workshop/content laden.\n\nErlaubte Operationen:\n\n• copy — Datei in einen Zielpfad unter install_dir kopieren.\n• symlink — Datei oder Verzeichnis unter install_dir verlinken.\n\nErlaubte Pfad-Tokens: {WORKSHOP_APP_ID}, {WORKSHOP_ID}, {BASENAME}. Source darf Globs wie **/*.pak verwenden. Wenn source ein Glob ist, muss target {BASENAME} enthalten. Absolute Pfade, .. und unbekannte Tokens werden abgelehnt.\n\nBeispiele:\n\n• DayZ: Workshop-Mod-Verzeichnis nach {WORKSHOP_ID} symlinken und *.bikey nach keys/{BASENAME} symlinken.\n• Conan Exiles: **/*.pak nach ConanSandbox/Mods/{BASENAME} kopieren."
+      },
+      "configPatches": {
+        "title": "runtime.configPatches — Dateien vor dem Start patchen",
+        "body": "runtime.configPatches schreibt sichere Konfigurationswerte vor jedem Containerstart. Aktuell unterstützt MSM type=ini. Das ersetzt frühere spiel-spezifische Python-Hooks für Fälle, in denen ein Server Ports aus INI-Dateien statt nur aus CLI-Argumenten liest.\n\nFelder:\n\n• file — relativer Pfad unter install_dir.\n• section — INI-Section ohne Klammern.\n• key — zu setzender Schlüssel.\n• value — Wert oder Port-Token.\n\nErlaubte value-Tokens: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Wenn ein verwendeter Port leer ist, wird dieser Patch übersprungen. Andere Keys und Sections in der Datei bleiben erhalten."
       },
       "import": {
         "title": "Blueprint hochladen, ersetzen oder löschen",

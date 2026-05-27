@@ -49,7 +49,8 @@ class TestListHostInterfaces:
         assert ifs["169.254.0.1"].is_link_local is True
 
     def test_skips_non_ipv4_families(self):
-        fake = {"eth0": [SimpleNamespace(family=socket.AF_PACKET, address="aa:bb", netmask=None, broadcast=None, ptp=None)]}
+        non_ipv4_family = getattr(socket, "AF_PACKET", object())
+        fake = {"eth0": [SimpleNamespace(family=non_ipv4_family, address="aa:bb", netmask=None, broadcast=None, ptp=None)]}
         with patch("services.network_interfaces_service.psutil.net_if_addrs", return_value=fake):
             assert nis.list_host_interfaces() == []
 
