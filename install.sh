@@ -1126,7 +1126,11 @@ Type=simple
 User=msm
 Group=msm
 WorkingDirectory=/opt/msm/backend
-Environment="PATH=/opt/msm/backend/venv/bin"
+# Systemd-Units erben kein PATH vom Login-Shell. Ohne /usr/bin etc. findet
+# das Backend ``docker`` nicht und der Console-Stream meldet "Docker CLI
+# nicht im PATH". venv zuerst, damit ``python``/``uvicorn`` aus der venv
+# kommen, danach die Standard-System-Pfade fuer ``docker``, ``shutil`` etc.
+Environment="PATH=/opt/msm/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/opt/msm/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=on-failure
 RestartSec=5

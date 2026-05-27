@@ -395,6 +395,18 @@ if [[ -f "$PANEL_UNIT" ]] && grep -q 'NoNewPrivileges=true' "$PANEL_UNIT"; then
     ok "Panel-Service aktualisiert"
 fi
 
+# ── Panel-Service reparieren: System-PATH erweitern, damit docker auffindbar ──
+# Alte Installationen hatten ``PATH=/opt/msm/backend/venv/bin`` ohne ``/usr/bin``.
+# Folge: ``shutil.which("docker")`` schlug fehl, der Console-Stream meldete
+# permanent "Docker CLI nicht im PATH des Backends". Idempotenter sed-Fix.
+NEW_PATH_LINE='Environment="PATH=/opt/msm/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+if [[ -f "$PANEL_UNIT" ]] && grep -qE '^Environment="PATH=/opt/msm/backend/venv/bin"\s*$' "$PANEL_UNIT"; then
+    log "Erweitere Panel-Service PATH um System-Pfade (Docker-CLI auffindbar machen)..."
+    sed -i "s|^Environment=\"PATH=/opt/msm/backend/venv/bin\"\s*\$|${NEW_PATH_LINE}|" "$PANEL_UNIT"
+    systemctl daemon-reload
+    ok "Panel-Service PATH erweitert"
+fi
+
 # ── Service neustarten ──
 log "Starte Services neu..."
 systemctl restart msm-panel.service
