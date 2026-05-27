@@ -118,11 +118,23 @@ class TestCleanupLegacyRanges:
 
         # Pruefe: nur die beiden Ranges wurden geloescht. Einzelner Port und
         # SSH/HTTP bleiben unberuehrt.
-        delete_calls = [c.args[0] for c in run.call_args_list if c.args[0][:2] == ["ufw", "delete"]]
-        assert ["ufw", "delete", "allow", "27015:27999/udp"] in delete_calls
-        assert ["ufw", "delete", "allow", "27015:27999/tcp"] in delete_calls
+        # Akzeptiere sowohl direkte ufw-Aufrufe als auch sudo -n ufw (neuer Wrapper)
+        def is_delete_call(args):
+            if args[:2] == ["ufw", "delete"]:
+                return True
+            if args[:3] == ["sudo", "-n", "ufw"] and args[3:5] == ["delete", "allow"]:
+                return True
+            return False
+
+        delete_calls = [c.args[0] for c in run.call_args_list if is_delete_call(c.args[0])]
+        assert any(c[0] == "ufw" and c[1:] == ["delete", "allow", "27015:27999/udp"] or
+                   c[0] == "sudo" and c[3:] == ["delete", "allow", "27015:27999/udp"]
+                   for c in delete_calls)
+        assert any(c[0] == "ufw" and c[1:] == ["delete", "allow", "27015:27999/tcp"] or
+                   c[0] == "sudo" and c[3:] == ["delete", "allow", "27015:27999/tcp"]
+                   for c in delete_calls)
         # Kein Delete fuer 22/tcp, 80/tcp oder 27015/udp
-        deleted_rules = {c[3] for c in delete_calls}
+        deleted_rules = {c[-1] for c in delete_calls}
         assert "22/tcp" not in deleted_rules
         assert "80/tcp" not in deleted_rules
         assert "27015/udp" not in deleted_rules

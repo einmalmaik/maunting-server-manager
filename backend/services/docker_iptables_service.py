@@ -52,10 +52,26 @@ _BASELINE_COMMENT_TCP = f"{_COMMENT_PREFIX}:baseline:tcp"
 def _run_iptables(*args: str, check_only: bool = False) -> subprocess.CompletedProcess | None:
     """Fuehre ``iptables <args>`` aus. Gibt None zurueck, wenn iptables fehlt.
 
+    Versucht zuerst ``sudo -n iptables`` (für den msm-User mit sudoers-Regeln).
+    Fällt bei Misserfolg auf direkten Aufruf zurück (saubere Migration).
+
     ``check_only=True`` deutet darauf hin, dass der Aufruf nur prueft (``-C``)
     — non-zero-Exit ist dann NICHT als Fehler zu werten.
     """
     try:
+        # 1. Versuch mit sudo (non-interactive)
+        sudo_result = subprocess.run(
+            ["sudo", "-n", "iptables", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=_SYSTEM_ENV,
+            timeout=10,
+        )
+        if sudo_result.returncode == 0:
+            return sudo_result
+
+        # 2. Fallback: direkter iptables-Aufruf
         result = subprocess.run(
             ["iptables", *args],
             check=False,
@@ -64,10 +80,17 @@ def _run_iptables(*args: str, check_only: bool = False) -> subprocess.CompletedP
             env=_SYSTEM_ENV,
             timeout=10,
         )
+
+        if result.returncode == 0 and sudo_result.returncode != 0:
+            logger.info(
+                "iptables-Befehl erfolgreich ohne sudo ausgeführt (sudoers-Regel fehlt)."
+            )
+
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
         logger.debug("iptables nicht ausfuehrbar (%s)", exc)
         return None
-    if result.returncode != 0 and not check_only:
+
+    if result is not None and result.returncode != 0 and not check_only:
         logger.warning(
             "iptables %s fehlgeschlagen: %s",
             " ".join(args), (result.stderr or result.stdout).strip(),

@@ -298,6 +298,17 @@ msm ALL=(root) NOPASSWD: /usr/sbin/usermod -s /usr/sbin/nologin msm_srv_*
 msm ALL=(root) NOPASSWD: /usr/sbin/userdel -r msm_srv_*
 msm ALL=(root) NOPASSWD: /usr/bin/chown msm_srv_*:msm_srv_* /opt/msm/servers/*
 msm ALL=(root) NOPASSWD: /usr/bin/chmod 750 /opt/msm/servers/*
+
+# UFW (nur MSM-spezifische Regeln für einzelne Ports mit Kommentar)
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw allow [0-9]*/tcp comment MSM *
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw allow [0-9]*/udp comment MSM *
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow [0-9]*/tcp
+msm ALL=(root) NOPASSWD: /usr/sbin/ufw delete allow [0-9]*/udp
+
+# iptables DOCKER-USER Chain (Baseline + per-Server ACCEPT/DELETE)
+msm ALL=(root) NOPASSWD: /usr/sbin/iptables -A DOCKER-USER *
+msm ALL=(root) NOPASSWD: /usr/sbin/iptables -I DOCKER-USER *
+msm ALL=(root) NOPASSWD: /usr/sbin/iptables -D DOCKER-USER *
 SUDOEOF
     chmod 440 /etc/sudoers.d/msm-panel
     ok "sudoers aktualisiert"

@@ -45,10 +45,26 @@ def _ufw_available() -> bool:
 def _run_ufw(*args: str) -> subprocess.CompletedProcess:
     """Fuehre ``ufw <args>`` mit festem PATH/Locale aus.
 
-    ``check=False`` — Fehler werden geloggt aber nicht propagiert: die Aktion
-    soll idempotent sein (z. B. doppeltes Schliessen).
+    Versucht zuerst ``sudo -n ufw`` (für den msm-User mit sudoers-Regeln).
+    Fällt bei Misserfolg (keine sudoers-Regel oder sudo nicht verfügbar)
+    auf direkten ``ufw``-Aufruf zurück. Das erlaubt eine saubere Migration.
+
+    ``check=False`` — Fehler werden nur geloggt, nicht propagiert.
     """
-    return subprocess.run(
+    # 1. Versuch mit sudo (non-interactive)
+    sudo_result = subprocess.run(
+        ["sudo", "-n", "ufw", *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_SYSTEM_ENV,
+        timeout=10,
+    )
+    if sudo_result.returncode == 0:
+        return sudo_result
+
+    # 2. Fallback: direkter ufw-Aufruf (für Systeme ohne angepasste sudoers)
+    direct_result = subprocess.run(
         ["ufw", *args],
         check=False,
         capture_output=True,
@@ -56,6 +72,16 @@ def _run_ufw(*args: str) -> subprocess.CompletedProcess:
         env=_SYSTEM_ENV,
         timeout=10,
     )
+
+    # Wenn sudo fehlgeschlagen ist, aber wir im Fallback Erfolg hatten,
+    # loggen wir einen Hinweis (einmalig pro Prozesslauf wäre noch besser,
+    # aber für KISS reicht es hier).
+    if direct_result.returncode == 0 and sudo_result.returncode != 0:
+        logger.info(
+            "UFW-Befehl erfolgreich ohne sudo ausgeführt (sudoers-Regel fehlt oder sudo nicht verfügbar)."
+        )
+
+    return direct_result
 
 
 def _allow(port: int, protocol: str, comment: str) -> None:

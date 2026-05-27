@@ -441,12 +441,34 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    # Firewall-Regeln vor dem Stop schließen (genau wie im dedizierten Stop-Pfad).
+    close_ports(server.game_port, server.query_port, server.rcon_port)
+    iptables_revoke_server(
+        server.name,
+        server.public_bind_ip or "",
+        server.game_port, server.query_port, server.rcon_port,
+    )
+
     stop_result = await asyncio.to_thread(plugin.stop, server)
     if "error" in stop_result:
         raise HTTPException(status_code=500, detail=stop_result["error"])
+
+    # Nach erfolgreichem Start die Firewall-Regeln wieder öffnen
+    # (genau wie im dedizierten Start-Pfad). Das war im reinen Restart-Pfad
+    # bisher komplett vergessen.
     start_result = await asyncio.to_thread(plugin.start, server)
     if "error" in start_result:
+        # Bei Start-Fehler die Regeln nicht wieder öffnen (sind schon geschlossen).
         raise HTTPException(status_code=500, detail=start_result["error"])
+
+    # Regeln erst nach erfolgreichem Container-Start wieder öffnen.
+    open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+    iptables_accept_server(
+        server.name,
+        server.public_bind_ip or "",
+        server.game_port, server.query_port, server.rcon_port,
+    )
+
     server.status = "running"
     db.commit()
     if EmailService.is_configured() and user.email_notifications:
