@@ -1,7 +1,9 @@
 """Tests fuer Live-Konsole: SSE-Stream + stdin-Eingabe.
 
-Decken die Sicherheitsinvarianten ab:
+Decken die Sicherheitsinvarianten und das KISS-Stream-Design ab:
 - Stream-Endpoint verlangt ``server.console.read``.
+- Stream liefert zuerst den MSM-Logdatei-Backlog (Install/Lifecycle),
+  dann live ``docker logs --follow`` zusammen mit neuen Datei-Eintraegen.
 - Input-Endpoint verlangt ``server.console.write``.
 - Input-POST loggt den Inhalt NICHT (z. B. OAuth-Code).
 - ``send_stdin`` ruft ``docker exec -i`` mit dem korrekten Aufruf auf.
@@ -9,6 +11,7 @@ Decken die Sicherheitsinvarianten ab:
   stdin nicht).
 """
 
+import os
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -204,28 +207,92 @@ class TestConsoleStreamRBAC:
         assert response.status_code == 403
 
 
-class TestConsoleStreamWhenDockerMissing:
-    """Der Live-Stream darf bei fehlendem docker-Binary (z. B. eingeschränkter
-    PATH im systemd-Unit) nicht mehr mit roher Exception abstürzen.
-    Er muss stattdessen ein sauberes Error-Event liefern (200 OK + SSE).
+class _StubRequest:
+    """Minimaler Request-Stub: kontrolliert, wann der Stream beendet wird."""
+
+    def __init__(self, disconnect_after: int = 1) -> None:
+        self._calls = 0
+        self._disconnect_after = disconnect_after
+
+    async def is_disconnected(self) -> bool:
+        self._calls += 1
+        return self._calls > self._disconnect_after
+
+
+async def _drain_stream(gen, max_frames: int = 50) -> list[str]:
+    payloads: list[str] = []
+    async for chunk in gen:
+        for line in chunk.split("\n"):
+            if line.startswith("data: "):
+                payloads.append(line[len("data: "):])
+        if len(payloads) >= max_frames:
+            break
+    return payloads
+
+
+class TestConsoleStreamGenerator:
+    """Direkter Test des Stream-Generators — unabhängig von HTTP-Transport.
+
+    KISS-Invariante: die MSM-Console-Logdatei ist die single source of truth.
+    Backlog (Install-Output, Lifecycle-Events) wird sofort bei Verbindungs-
+    aufbau geliefert, damit die Konsole während Install **und** Betrieb
+    nie leer ist.
     """
 
-    def test_stream_yields_error_event_instead_of_crashing_when_docker_cli_missing(
-        self,
-        client: TestClient,
-        owner_cookies: dict,
-        test_server: Server,
-    ):
+    def test_replays_existing_msm_log_backlog(self, test_server: Server):
+        import asyncio
+
+        from games.base import _console_log_path
+        from routers.servers import _console_event_stream
+
+        log_path = _console_log_path(test_server.id)
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        try:
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write("[MSM] SteamCMD startet für App 12345 (Docker)\n")
+                f.write("Success! App '12345' fully installed.\n")
+                f.write("[MSM] Container msm-srv-1 gestartet\n")
+
+            with patch("routers.servers.shutil.which", return_value=None):
+                payloads = asyncio.run(
+                    _drain_stream(
+                        _console_event_stream(
+                            _StubRequest(disconnect_after=0),
+                            container="msm-srv-x",
+                            log_path=log_path,
+                        ),
+                        max_frames=10,
+                    )
+                )
+
+            assert "[MSM] SteamCMD startet für App 12345 (Docker)" in payloads
+            assert "Success! App '12345' fully installed." in payloads
+            assert "[MSM] Container msm-srv-1 gestartet" in payloads
+        finally:
+            if os.path.exists(log_path):
+                os.remove(log_path)
+
+    def test_reports_missing_docker_as_visible_data_line(self, test_server: Server):
+        import asyncio
+
+        from games.base import _console_log_path
+        from routers.servers import _console_event_stream
+
+        log_path = _console_log_path(test_server.id)
+        if os.path.exists(log_path):
+            os.remove(log_path)
+
         with patch("routers.servers.shutil.which", return_value=None):
-            response = client.get(
-                f"/api/servers/{test_server.id}/console/stream",
-                cookies=owner_cookies,
+            payloads = asyncio.run(
+                _drain_stream(
+                    _console_event_stream(
+                        _StubRequest(disconnect_after=2),
+                        container="msm-srv-x",
+                        log_path=log_path,
+                    ),
+                    max_frames=5,
+                )
             )
 
-        # Muss 200 liefern — der Stream selbst startet, auch wenn später
-        # ein Error-Event kommt. Kein 500-Crash mehr!
-        assert response.status_code == 200
-        # Body enthält das von uns yieldete Error-Event (text/event-stream).
-        body = response.text
-        assert "event: error" in body
-        assert "Docker CLI nicht im PATH" in body or "nicht verfügbar" in body
+        # Sichtbare ``data:``-Zeile statt verstecktem ``event: error``.
+        assert any("Docker CLI nicht im PATH" in p for p in payloads)

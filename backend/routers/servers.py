@@ -560,19 +560,6 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
     return {"message": "Installation gestartet", **result}
 
 
-@router.get("/{server_id}/console")
-def server_console(server_id: int, lines: int = 200, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    require_server_permission(user, server_id, db, "server.console.read")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    plugin = get_plugin(server.game_type)
-    console_log = ""
-    if plugin:
-        console_log = plugin.get_console_log(server, lines=lines)
-    return {"logs": console_log}
-
-
 @router.get("/{server_id}/console/stream")
 async def server_console_stream(
     server_id: int,
@@ -580,106 +567,173 @@ async def server_console_stream(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    """Live-Stream der Container-Logs als Server-Sent Events.
+    """Live-Stream der Console als Server-Sent Events.
 
-    SSE statt WebSocket: unidirektional reicht (Server → Client), keine neue
-    Protokoll-Schicht, EventSource im Browser ohne extra Lib. Auth via Cookie
-    + ``server.console.read`` (CSRF entfaellt bei GET).
+    Single Source of Truth (KISS): die MSM-Console-Logdatei
+    ``backend/logs/<server_id>/console.log``. Sie sammelt:
 
-    Implementierung: ``docker logs --follow --tail 200`` als async-Subprocess,
-    Zeilen werden als ``data:``-Frames durchgereicht. Bei Client-Disconnect
-    wird der Subprocess sauber beendet.
+    - Install-/Update-Output (SteamCMD, HTTP-Source, manuelle Hinweise)
+    - Lifecycle-Events (``[MSM] Container gestartet/gestoppt``, Fehler)
+    - Live-Container-Stdout/Stderr während der Server läuft (siehe unten)
+
+    Damit auch Live-Container-Output in dieselbe Datei landet, koppelt der
+    Endpoint einen ``docker logs --follow``-Subprozess: dessen Output wird
+    parallel an den Stream geyielded. Die Datei bleibt der primäre Backlog,
+    Docker liefert nur die laufenden neuen Zeilen.
+
+    SSE statt WebSocket: unidirektional reicht, EventSource im Browser ohne
+    extra Lib. Auth via Cookie + ``server.console.read`` (CSRF entfällt bei
+    GET). Bei Client-Disconnect werden Subprozess + Hintergrund-Tasks sauber
+    beendet.
     """
     require_server_permission(user, server_id, db, "server.console.read")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
     container = container_name_for(server.id)
-
-    async def event_gen():
-        # Container-Logs follow. ``--tail 200`` als Verlauf, danach Live.
-        # ``--timestamps`` bewusst NICHT — der User-Konsole brauchen wir das
-        # Rohformat (Datumsstempel sind im MSM-Console-Log eh nicht da).
-        #
-        # Wichtig: Der Endpoint darf NIEMALS roh abstürzen (FileNotFoundError
-        # bei fehlendem docker-Binary im PATH des systemd-Units etc.).
-        # Wir yielden stattdessen ein klares Error-Event + graceful Fallback
-        # auf die MSM-internen Datei-Logs.
-        proc: asyncio.subprocess.Process | None = None
-        try:
-            docker_bin = shutil.which("docker")
-            if not docker_bin:
-                log_path = _console_log_path(server.id)
-                msm_hint = ""
-                if os.path.exists(log_path):
-                    msm_hint = " (MSM-interne Install-/Start-Meldungen stehen unter dem statischen Console-Tab)"
-                yield (
-                    "event: error\n"
-                    f"data: [MSM] Docker CLI nicht im PATH des Backends gefunden. "
-                    f"Live-Container-Logs (docker logs --follow) sind nicht verfügbar{msm_hint}.\n\n"
-                )
-                return
-
-            proc = await asyncio.create_subprocess_exec(
-                docker_bin, "logs", "--follow", "--tail", "200", container,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,  # KISS: merge for raw combined stdout+stderr (Pterodactyl-like terminal view)
-            )
-            assert proc.stdout is not None
-
-            try:
-                while True:
-                    if await request.is_disconnected():
-                        break
-                    try:
-                        raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        yield ": keepalive\n\n"
-                        continue
-                    except asyncio.CancelledError:
-                        raise
-                    if not raw:
-                        # EOF vom Container-Log → sauberes Ende
-                        yield "event: end\ndata: \n\n"
-                        break
-                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-                    yield f"data: {line}\n\n"
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                # Alle Fehler (inkl. Docker-Probleme nach Start) → nur error event, kein double end+error
-                yield f"event: error\ndata: [MSM] Konsole-Stream Fehler: {type(exc).__name__}\n\n"
-            finally:
-                # Proc immer sauber terminieren (auch bei Disconnect)
-                if proc.returncode is None:
-                    try:
-                        proc.terminate()
-                        await asyncio.wait_for(proc.wait(), timeout=2.0)
-                    except (asyncio.TimeoutError, ProcessLookupError):
-                        try:
-                            proc.kill()
-                        except ProcessLookupError:
-                            pass
-                # Defensive Pipe-Cleanup (FD-Leaks bei häufigem Connect/Disconnect vermeiden)
-                if proc.stdout is not None:
-                    try:
-                        proc.stdout.close()
-                    except Exception:
-                        pass
-        except Exception as exc:
-            # Fängt Fehler beim create_subprocess_exec (Permission, etc.) ab, bevor der Stream-Loop erreicht wird.
-            # Niemals rohe Exception in ASGI-Handler lassen (wie im Original-Design).
-            yield f"event: error\ndata: [MSM] Konsole-Stream Fehler: {type(exc).__name__}\n\n"
+    log_path = _console_log_path(server.id)
 
     return StreamingResponse(
-        event_gen(),
+        _console_event_stream(request, container, log_path),
         media_type="text/event-stream",
         headers={
-            # Nginx-Buffering aus, sonst sieht der Client nichts bis zum Flush.
+            # Nginx/Caddy-Buffering aus, sonst sieht der Client nichts bis zum Flush.
             "X-Accel-Buffering": "no",
             "Cache-Control": "no-cache",
         },
     )
+
+
+def _sse_data(line: str) -> str:
+    """Eine Logzeile als SSE ``data:``-Frame kodieren.
+
+    Mehrzeilige Werte werden zeilenweise als mehrere ``data:``-Felder
+    geschickt — das ist die SSE-Spezifikation für Newlines im Payload.
+    """
+    return "".join(f"data: {part}\n" for part in line.split("\n")) + "\n"
+
+
+async def _console_event_stream(request: Request, container: str, log_path: str):
+    """Generator für den Console-SSE-Stream.
+
+    1. Backlog: bestehende MSM-Console-Logdatei wird einmalig dumped.
+    2. Live: zwei Hintergrund-Tasks puschen neue Zeilen in eine Queue
+       (a) neue Zeilen aus der Logdatei (Lifecycle-Events) und
+       (b) ``docker logs --follow --tail 0`` falls Docker verfügbar.
+    3. Consumer-Loop yieldet bis der Client trennt.
+    """
+    # 1. Initial-Backlog senden (Install-/Lifecycle-Historie).
+    initial_bytes = 0
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, "rb") as f:
+                content_bytes = f.read()
+            initial_bytes = len(content_bytes)
+            for line in content_bytes.decode("utf-8", errors="replace").splitlines():
+                yield _sse_data(line)
+        except OSError:
+            # Datei verschwand zwischen exists() und open() — kein Problem,
+            # Live-Tail fängt neue Schreibvorgänge.
+            initial_bytes = 0
+
+    # 2. Live-Quellen einrichten.
+    queue: asyncio.Queue[str] = asyncio.Queue()
+
+    async def _tail_file():
+        """Poll die MSM-Logdatei alle 250 ms auf neue Bytes (Lifecycle/Install)."""
+        pos = initial_bytes
+        while True:
+            await asyncio.sleep(0.25)
+            try:
+                size = os.path.getsize(log_path)
+            except OSError:
+                continue
+            if size < pos:
+                # Datei wurde rotiert/geleert → von vorn beginnen.
+                pos = 0
+            if size <= pos:
+                continue
+            try:
+                with open(log_path, "rb") as f:
+                    f.seek(pos)
+                    chunk = f.read(size - pos)
+                pos = size
+            except OSError:
+                continue
+            for line in chunk.decode("utf-8", errors="replace").splitlines():
+                await queue.put(line)
+
+    async def _tail_docker():
+        """Streame Live-Container-Stdout/Stderr (oder melde, dass Docker fehlt).
+
+        ``--tail 200`` als historischer Backlog des Container-Outputs —
+        komplementär zum MSM-Logdatei-Backlog (Install/Lifecycle), keine
+        Duplikate. Fehlende Container/Container-CLI sind kein Fehler:
+        dann bleibt der Stream einfach still und liefert nur File-
+        Lifecycle-Events.
+        """
+        docker_bin = shutil.which("docker")
+        if not docker_bin:
+            await queue.put(
+                "[MSM] Docker CLI nicht im PATH des Backends — Live-Container-Logs deaktiviert."
+            )
+            return
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                docker_bin, "logs", "--follow", "--tail", "200", container,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        except (FileNotFoundError, OSError):
+            return
+        try:
+            assert proc.stdout is not None
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                await queue.put(line)
+        finally:
+            if proc.returncode is None:
+                try:
+                    proc.terminate()
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except (asyncio.TimeoutError, ProcessLookupError):
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+            if proc.stdout is not None:
+                try:
+                    proc.stdout.close()
+                except Exception:
+                    pass
+
+    tasks = [
+        asyncio.create_task(_tail_file()),
+        asyncio.create_task(_tail_docker()),
+    ]
+
+    try:
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                line = await asyncio.wait_for(queue.get(), timeout=15.0)
+            except asyncio.TimeoutError:
+                # SSE-Keepalive — verhindert dass Proxies die Verbindung kappen.
+                yield ": keepalive\n\n"
+                continue
+            yield _sse_data(line)
+    finally:
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 class ConsoleInputBody(BaseModel):

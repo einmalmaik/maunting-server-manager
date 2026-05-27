@@ -630,22 +630,6 @@ class GamePlugin(ABC):
         """Liest die game-spezifischen Logs (z. B. UE-/DayZ-Logfile im install_dir)."""
         ...
 
-    def get_console_log(self, server, lines: int = 200) -> str:
-        """MSM-Console-Log (Install-Output, MSM-Events) + Docker-Container-Logs."""
-        log_path = _console_log_path(server.id)
-        msm_part = ""
-        if os.path.exists(log_path):
-            try:
-                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                    all_lines = f.readlines()
-                msm_part = "".join(all_lines[-lines:])
-            except Exception:
-                msm_part = ""
-        docker_part = docker_service.logs(container_name_for(server.id), lines=lines)
-        if not docker_part:
-            return msm_part
-        return msm_part + "\n--- container logs ---\n" + docker_part
-
     # ─ Config ────────────────────────────────────────────────────────────
 
     @abstractmethod
