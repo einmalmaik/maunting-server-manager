@@ -407,6 +407,24 @@ if [[ -f "$PANEL_UNIT" ]] && grep -qE '^Environment="PATH=/opt/msm/backend/venv/
     ok "Panel-Service PATH erweitert"
 fi
 
+# ── Panel-Service reparieren: UFW-ReadWritePaths optional markieren ──
+# Manuelle Setups hatten ``ReadWritePaths=... /run/ufw.lock`` ohne Optional-
+# Praefix. Wenn UFW beim Service-Start die Lockdatei noch nicht erzeugt hat,
+# scheitert das systemd-Namespacing mit ``status=226/NAMESPACE`` und das
+# Panel landet in einer Restart-Schleife. ``-``-Praefix laesst systemd
+# fehlende Pfade still ueberspringen.
+GOOD_RWP="ReadWritePaths=/opt/msm /etc/systemd/system -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock"
+# Bekannte kaputte Variante (exakt wie auf Produktion beobachtet).
+BAD_RWP="ReadWritePaths=/opt/msm /etc/systemd/system /run/ufw /var/lib/ufw /etc/ufw /run/ufw.lock"
+if [[ -f "$PANEL_UNIT" ]] && grep -qF "$BAD_RWP" "$PANEL_UNIT"; then
+    log "Markiere UFW-ReadWritePaths als optional (verhindert status=226/NAMESPACE)..."
+    # grep -qF + Variablen-Quoting → sed-sicher (Pfade enthalten ``/``, kein
+    # regex-Special-Char; trotzdem benutzen wir ``|`` als Trennzeichen).
+    sed -i "s|${BAD_RWP}|${GOOD_RWP}|" "$PANEL_UNIT"
+    systemctl daemon-reload
+    ok "Panel-Service ReadWritePaths aktualisiert"
+fi
+
 # ── Service neustarten ──
 log "Starte Services neu..."
 systemctl restart msm-panel.service
