@@ -87,13 +87,11 @@ def update_backup_settings(server_id: int, body: BackupSettingsRequest, db: Sess
 
 
 @router.post("/{server_id}/auto")
-def auto_backup(server_id: int, db: Session = Depends(get_db), request: Request = None) -> dict:
+def auto_backup(server_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
     """Interner Endpoint (nur von GamePlugin.start via Loopback mit Header).
-    Kein volles Auth, aber Schutz gegen öffentlichen Missbrauch via Caddy.
+    Kein volles Auth.
     """
-    # Minimaler interner Guard (KISS): Header von der internen callsite.
-    # Ohne Header → 403 (verhindert Public Abuse / Enumeration / DoS).
-    if not request or request.headers.get("X-MSM-Internal-Auto") != "1":
+    if request.headers.get("X-MSM-Internal-Auto") != "1":
         raise HTTPException(status_code=403, detail="Interner Endpoint")
 
     server = db.query(Server).filter(Server.id == server_id).first()

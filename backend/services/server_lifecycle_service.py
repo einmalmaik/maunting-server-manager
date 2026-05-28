@@ -43,6 +43,15 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
 
     lock = get_server_lifecycle_lock(server.id)
     async with lock:
+        db.refresh(server)
+        if not server.public_bind_ip:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Server hat keine Bind-IP konfiguriert. Bitte im Server-Detail "
+                    "eine Public-IP zuweisen, bevor er gestartet wird."
+                ),
+            )
         close_ports(server.game_port, server.query_port, server.rcon_port)
         iptables_revoke_server(
             server.name,

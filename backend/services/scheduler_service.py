@@ -15,7 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from database import SessionLocal
 from games import get_plugin, _append_console_log
 from services import docker_service
-from services.server_lifecycle_service import restart_server_with_updates
+from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
 
 logger = logging.getLogger(__name__)
 
@@ -415,13 +415,16 @@ async def _background_update_check_task() -> None:
                         "Background-Check: %d Mod-Update(s) für Server %s ('%s') gefunden.",
                         count, server.id, server.name
                     )
-                    mod_res = plugin.perform_workshop_mod_updates(server)
-                    if not mod_res.get("ok", False):
-                        _append_console_log(
-                            server.id,
-                            f"[MSM] Autonomes Workshop-Mod-Update fehlgeschlagen: "
-                            f"{mod_res.get('error') or mod_res}\n",
-                        )
+                    async with get_server_lifecycle_lock(server.id):
+                        db.refresh(server)
+                        if server.status not in ("running", "starting", "stopping"):
+                            mod_res = plugin.perform_workshop_mod_updates(server)
+                            if not mod_res.get("ok", False):
+                                _append_console_log(
+                                    server.id,
+                                    f"[MSM] Autonomes Workshop-Mod-Update fehlgeschlagen: "
+                                    f"{mod_res.get('error') or mod_res}\n",
+                                )
 
                 # 2. Server-Datei-Update (Game-Binaries, passiv)
                 server_update = plugin.check_for_server_file_update(server)
