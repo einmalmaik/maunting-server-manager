@@ -4,7 +4,6 @@ import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { confirm } from "@/stores/confirmStore";
 import { HardDrive, Plus, RotateCcw, Trash2, Settings } from "lucide-react";
-import { formatPanelTime, type PanelTimeFormat } from "@/utils/timeFormat"; // TODO: prepared per task 3 for future "nächstes geplantes Backup" display (formatPanelTime + scheduler jobs); currently unused but kept as exact mandated copy from ServerRestartPanel
 
 interface Backup {
   id: number;
@@ -50,7 +49,6 @@ export function Backups({ serverId }: BackupsProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<BackupSettings | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [timeFormat, setTimeFormat] = useState<PanelTimeFormat>("24h");
   const [backupStatus, setBackupStatus] = useState<any>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -80,12 +78,6 @@ export function Backups({ serverId }: BackupsProps) {
     fetchBackups();
     fetchSettings();
   }, [serverId]);
-
-  useEffect(() => {
-    api<{ time_format: PanelTimeFormat }>("/settings")
-      .then((data) => setTimeFormat(data.time_format === "12h" ? "12h" : "24h"))
-      .catch(() => setTimeFormat("24h"));
-  }, []);
 
   // Live-Status Polling (alle 2s)
   useEffect(() => {
