@@ -153,7 +153,6 @@
     "reinstall": "Reinstall",
     "reinstallConfirm": "Really reinstall server? Binaries and Workshop mods will be replaced. Manual configuration files will be preserved.",
     "serverFileUpdateAvailable": "Server update available",
-    "modUpdatesAvailable": "{{count}} mod update(s) available",
     "deleted": "Server deleted",
     "confirmDelete": "Really delete this server? All data will be permanently removed.",
     "createDescription": "Create a new game server.",
@@ -421,6 +420,7 @@
     "files": "Files",
     "console": "Console",
     "mods": "Mods",
+    "restarts": "Auto-Restart",
     "backups": "Backups"
   },
   "files": {
@@ -492,6 +492,20 @@
     "enabled": "Enabled",
     "nextRun": "Next Run"
   },
+  "restarts": {
+    "subtitle": "Automatic restarts for this server.",
+    "enabled": "Enable automatic restarts",
+    "modeInterval": "Interval",
+    "modeIntervalHint": "Restart after a fixed hour interval.",
+    "modeFixed": "Fixed times",
+    "modeFixedHint": "Restart at selected times.",
+    "interval": "Interval",
+    "everyHours": "Every {{count}} hour(s)",
+    "fixedTimes": "Restart times",
+    "addTime": "Add time",
+    "saved": "Restart schedule saved.",
+    "maxTimesReached": "Max. 12 times reached"
+  },
   "settings": {
     "title": "Settings",
     "subtitle": "Panel settings",
@@ -505,6 +519,10 @@
     "smtpTls": "Use TLS",
     "resendApiKey": "Resend API Key",
     "defaultLanguage": "Default Language",
+    "timeFormat": "Time format",
+    "timeFormat24": "24-hour format",
+    "timeFormat12": "12-hour format",
+    "timeFormatHint": "Used by restart schedules in the server panel.",
     "steamApiKey": "Steam Web API",
     "steamConfigured": "Steam API configured",
     "steamNotConfigured": "Steam API not configured",

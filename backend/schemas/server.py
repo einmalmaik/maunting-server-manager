@@ -30,6 +30,31 @@ def _validate_bind_ip(value: str | None) -> str | None:
     return str(addr)
 
 
+def _validate_restart_times(value: str | None) -> str | None:
+    if value is None or value.strip() == "":
+        return None
+    # Dedup preserving order (Set would not); prevents duplicate cron jobs from validator bypass / legacy data / direct PATCH.
+    # Then enforce max 12 on the normalized unique list (data min + schema contract).
+    raw_parts = [part.strip() for part in value.split(",") if part.strip()]
+    seen = set()
+    parts: list[str] = []
+    for p in raw_parts:
+        if p not in seen:
+            seen.add(p)
+            parts.append(p)
+    if len(parts) > 12:
+        raise ValueError("Maximal 12 feste Restart-Zeiten sind erlaubt.")
+    for part in parts:
+        if len(part) != 5 or part[2] != ":":
+            raise ValueError("Restart-Zeiten muessen im Format HH:MM gespeichert werden.")
+        hour, minute = part.split(":")
+        if not (hour.isdigit() and minute.isdigit()):
+            raise ValueError("Restart-Zeiten muessen numerisch sein.")
+        if int(hour) > 23 or int(minute) > 59:
+            raise ValueError("Restart-Zeiten muessen gueltige 24h-Zeiten sein.")
+    return ",".join(parts)
+
+
 # cpu_limit_percent erlaubt Werte > 100 (200 % = 2 Cores). Limit 3200 % = 32 Cores
 # als pragmatische Obergrenze.
 
@@ -40,6 +65,7 @@ class ServerCreate(BaseModel):
     auto_restart: bool = False
     restart_interval_hours: int | None = Field(None, ge=1, le=168)
     restart_time_utc: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+    restart_times_utc: str | None = Field(None, max_length=256)
     cpu_limit_percent: int | None = Field(None, ge=10, le=3200)
     ram_limit_mb: int | None = Field(None, ge=512)
     disk_limit_gb: int | None = Field(None, ge=1)
@@ -59,12 +85,18 @@ class ServerCreate(BaseModel):
     def _check_bind_ip(cls, v: str | None) -> str | None:
         return _validate_bind_ip(v)
 
+    @field_validator("restart_times_utc")
+    @classmethod
+    def _check_restart_times(cls, v: str | None) -> str | None:
+        return _validate_restart_times(v)
+
 
 class ServerUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=128)
     auto_restart: bool | None = None
     restart_interval_hours: int | None = Field(None, ge=1, le=168)
     restart_time_utc: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+    restart_times_utc: str | None = Field(None, max_length=256)
     cpu_limit_percent: int | None = Field(None, ge=10, le=3200)
     ram_limit_mb: int | None = Field(None, ge=512)
     disk_limit_gb: int | None = Field(None, ge=1)
@@ -78,18 +110,25 @@ class ServerUpdate(BaseModel):
     def _check_bind_ip(cls, v: str | None) -> str | None:
         return _validate_bind_ip(v)
 
+    @field_validator("restart_times_utc")
+    @classmethod
+    def _check_restart_times(cls, v: str | None) -> str | None:
+        return _validate_restart_times(v)
+
 
 class ServerResponse(BaseModel):
     id: int
     name: str
     game_type: str
-    install_dir: str
-    container_name: str | None
+    # install_dir / container_name entfernt (Security + data min): interne Host-Pfade nicht an view-only User leaken.
+    # Früher in allen Responses (auch server.view). Nur noch intern in DB/audit/owner-flows.
+    # Kein FE-Usage außer types (entfernt); Router-Responses bleiben kompatibel.
     status: str
     status_message: str | None
     auto_restart: bool
     restart_interval_hours: int | None
     restart_time_utc: str | None
+    restart_times_utc: str | None
     cpu_limit_percent: int | None
     ram_limit_mb: int | None
     disk_limit_gb: int | None

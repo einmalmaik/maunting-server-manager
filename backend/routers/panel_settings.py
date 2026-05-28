@@ -49,6 +49,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "steam_api_configured": bool(steam_key),
         "steam_account_username": SteamAccountService.get_username(),
         "steam_account_configured": SteamAccountService.is_configured(),
+        "time_format": all_db.get("time_format", "24h"),
     }
 
 
@@ -71,6 +72,8 @@ def update_settings(
     """
     data = req.model_dump(exclude_none=True)
     for key, value in data.items():
+        if key == "time_format" and value not in ("24h", "12h"):
+            raise HTTPException(status_code=400, detail="Ungueltiges Zeitformat")
         if _is_masked(str(value)):
             continue
         PanelSettingsService.set(key, str(value))

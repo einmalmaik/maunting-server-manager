@@ -61,6 +61,11 @@ class TestCreateServer:
                 headers={"X-CSRF-Token": csrf_token},
             )
             assert response.status_code in (200, 201)
+            # Positive "install_dir not leaked" (data minimization per security #13) even in basic create path
+            create_data = response.json()
+            assert "install_dir" not in create_data
+            assert "container_name" not in create_data
+            assert {"install_dir", "container_name"}.isdisjoint(create_data.keys())  # stronger positive removal assert for data-min (re-review gap)
 
     def test_regular_user_cannot_create(self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str):
         response = client.post(
@@ -98,9 +103,10 @@ class TestCreateServer:
             )
             assert response.status_code in (200, 201)
             data = response.json()
-            # Der Pfad muss jetzt die echte Datenbank-ID enthalten, nicht einen Count-Wert.
-            assert f"dayz_{data['id']}" in data["install_dir"]
-            assert "/tmp/msm-pending" not in data["install_dir"]
+            # Positive asserts for security fix (install_dir leak removed): explicit "not in response" per re-review gap.
+            assert "install_dir" not in data
+            assert "container_name" not in data
+            # Pfad-Logik (id-basiert) bleibt intern in create_server + DB (kein Leak mehr; siehe schemas/server.py + security review #13).
 
     def test_create_rejects_preexisting_dir_on_disk_with_409(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str):
         """Simuliert exakt den Bug (verwaistes dayz_1 oder root-owned Dir):
@@ -326,3 +332,24 @@ class TestManualUploadStartPreCheck:
             )
         assert response.status_code == 400
         assert "server.jar" in response.json()["detail"]
+
+
+# === Coverage for central lifecycle lock (unified per security fix #1) ===
+# Basic import + acquisition test (delegation exercised in start/stop/restart routers + scheduler).
+# Note: full async lock usage covered in integration/runtime; this closes the "0 coverage for server_lifecycle_service.py" gap without new file.
+import asyncio
+
+from services.server_lifecycle_service import get_server_lifecycle_lock
+
+
+class TestLifecycleLockBasic:
+    def test_lifecycle_lock_import_and_acquisition(self):
+        """Exercises import of central service + per-id lock acquisition (KISS helper)."""
+        lock = get_server_lifecycle_lock(4242)
+        assert lock is not None
+        assert isinstance(lock, asyncio.Lock)
+        # Re-acquire yields same instance (setdefault semantics)
+        lock2 = get_server_lifecycle_lock(4242)
+        assert lock is lock2
+        # Additional coverage for lifecycle service helper (distinct ids -> distinct locks; addresses re-review gap on 0 coverage for server_lifecycle_service)
+        assert get_server_lifecycle_lock(111) is not lock

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
@@ -11,6 +11,7 @@ import {
   Package,
   Play,
   RefreshCw,
+  RotateCcw,
   Square,
   Terminal,
   Trash2,
@@ -23,10 +24,11 @@ import { FileManager } from './FileManager'
 import { ModManager } from './ModManager'
 import { Backups } from './Backups'
 import { ServerConsolePanel } from '@/components/server/ServerConsolePanel'
+import { ServerRestartPanel } from '@/components/server/ServerRestartPanel'
 import type { GameInfo, Server } from '@/types'
 
-type TabKey = 'files' | 'console' | 'mods' | 'backups'
-const VALID_TABS: TabKey[] = ['files', 'console', 'mods', 'backups']
+type TabKey = 'files' | 'console' | 'mods' | 'restarts' | 'backups'
+const VALID_TABS: TabKey[] = ['files', 'console', 'mods', 'restarts', 'backups']
 
 interface ServerStatus {
   status?: string
@@ -76,6 +78,21 @@ export function ServerDetail() {
   const [games, setGames] = useState<GameInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+
+  // Stabiler Badge-State (KISS-Fix fuer Polling/Cache-Race-Flicker):
+  // Badge (nur Server-Updates via Blueprint) bleibt sichtbar, sobald einmal true,
+  // bis Reload ODER erfolgreicher Restart (doAction cleared ref).
+  // Vermeidet on/off durch 5s-Poll + 5min-Cache-Miss. Keine Mods, pure UI-Stabilitaet.
+  // Post-restart clear erlaubt "update applied" Sichtbarkeit ohne Reload.
+  const lastServerUpdateBadgeRef = useRef<{ available: boolean; reason: string | null } | null>(null)
+  const serverUpdateBadge = useMemo(() => {
+    if (status?.server_file_update_available) {
+      const b = { available: true, reason: status.server_file_update_reason ?? null }
+      lastServerUpdateBadgeRef.current = b
+      return b
+    }
+    return lastServerUpdateBadgeRef.current
+  }, [status?.server_file_update_available, status?.server_file_update_reason])
 
   const [showEditNetwork, setShowEditNetwork] = useState(false)
   const [savingNetwork, setSavingNetwork] = useState(false)
@@ -140,6 +157,7 @@ export function ServerDetail() {
       { key: 'console', label: t('tabs.console'), icon: Terminal },
     ]
     if (showModTab) list.push({ key: 'mods', label: t('tabs.mods'), icon: Package })
+    list.push({ key: 'restarts', label: t('tabs.restarts', { defaultValue: 'Restarts' }), icon: RotateCcw })
     list.push({ key: 'backups', label: t('tabs.backups'), icon: HardDrive })
     return list
   }, [t, showModTab])
@@ -159,6 +177,12 @@ export function ServerDetail() {
     setActionLoading(action)
     try {
       await api(`/servers/${serverId}/${action}`, { method: 'POST' })
+      if (action === 'restart') {
+        // Clear persist-once badge ref on successful restart: allows post-apply "update cleared" state
+        // to become visible without full reload (addresses reviewer correctness gap while keeping
+        // flicker protection for normal polls). KISS: 2 lines, explicit.
+        lastServerUpdateBadgeRef.current = null
+      }
       void fetchAll()
     } catch (err: unknown) {
       const raw = err instanceof Error ? err.message : String(err)
@@ -360,22 +384,16 @@ export function ServerDetail() {
           </button>
         )}
 
-        {/* Clean Update Badge using real backend fields */}
-        {(status?.server_file_update_available || (status?.mod_updates_available?.length ?? 0) > 0) && (
+        {/* Clean Update Badge: nur Server-Datei-/Blueprint-Updates (Blueprint-driven, nie Mods).
+            Stabil via Ref (kein Flicker durch Poll/Cache-Race). */}
+        {serverUpdateBadge?.available && (
           <div className="flex items-center gap-2 self-center">
-            {status?.server_file_update_available && (
-              <span
-                className="font-mono-sm text-mono-sm px-2.5 py-1 rounded-full border bg-status-warning/10 border-status-warning/30 text-status-warning"
-                title={status?.server_file_update_reason || undefined}
-              >
-                {t('servers.serverFileUpdateAvailable')}
-              </span>
-            )}
-            {(status?.mod_updates_available?.length ?? 0) > 0 && (
-              <span className="font-mono-sm text-mono-sm px-2.5 py-1 rounded-full border bg-status-warning/10 border-status-warning/30 text-status-warning">
-                {t('servers.modUpdatesAvailable', { count: status?.mod_updates_available?.length ?? 0 })}
-              </span>
-            )}
+            <span
+              className="font-mono-sm text-mono-sm px-2.5 py-1 rounded-full border bg-status-warning/10 border-status-warning/30 text-status-warning"
+              title={serverUpdateBadge.reason || undefined}
+            >
+              {t('servers.serverFileUpdateAvailable')}
+            </span>
           </div>
         )}
 
@@ -488,6 +506,7 @@ export function ServerDetail() {
         {activeTab === 'files' && <FileManager serverId={serverId} />}
         {activeTab === 'console' && <ServerConsolePanel serverId={serverId} />}
         {activeTab === 'mods' && showModTab && <ModManager serverId={serverId} />}
+        {activeTab === 'restarts' && <ServerRestartPanel server={server} serverId={serverId} onSaved={fetchAll} />}
         {activeTab === 'backups' && <Backups serverId={serverId} />}
       </div>
 

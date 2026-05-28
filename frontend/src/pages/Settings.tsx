@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Mail, Globe, Save, Send, Gamepad2 } from 'lucide-react'
+import { Clock, Mail, Globe, Save, Send, Gamepad2 } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -21,6 +21,7 @@ interface PanelSettings {
   steam_api_configured: boolean
   steam_account_username: string
   steam_account_configured: boolean
+  time_format: '24h' | '12h'
 }
 
 export function Settings() {
@@ -42,6 +43,7 @@ export function Settings() {
     steam_api_configured: false,
     steam_account_username: '',
     steam_account_configured: false,
+    time_format: '24h',
   })
   const [steamAccountUsername, setSteamAccountUsername] = useState('')
   const [steamAccountPassword, setSteamAccountPassword] = useState('')
@@ -227,6 +229,23 @@ export function Settings() {
                 <option value="de">Deutsch</option>
                 <option value="en">English</option>
               </select>
+            </div>
+            <div>
+              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                {t('settings.timeFormat')}
+              </label>
+              <select
+                value={settings.time_format}
+                onChange={(e) => setSettings({ ...settings, time_format: e.target.value as '24h' | '12h' })}
+                className="msm-input"
+              >
+                <option value="24h">{t('settings.timeFormat24')}</option>
+                <option value="12h">{t('settings.timeFormat12')}</option>
+              </select>
+              <p className="font-body-md text-xs text-on-surface-variant mt-1.5 inline-flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                {t('settings.timeFormatHint')}
+              </p>
             </div>
           </div>
         </div>

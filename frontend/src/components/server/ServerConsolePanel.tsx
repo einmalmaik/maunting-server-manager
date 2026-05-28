@@ -9,46 +9,52 @@ interface Props {
   serverId: number
 }
 
-/** Klassifiziert eine Log-Zeile fuer das Farb-Coding.
- *  Reine Heuristik anhand gaengiger Log-Level-Tokens. */
-function classifyLine(line: string): 'error' | 'warn' | 'info' | 'default' {
-  const upper = line.toUpperCase()
-  if (
-    /\b(ERROR|FATAL|CRITICAL|EXCEPTION|TRACEBACK)\b/.test(upper) ||
-    /\bERR\b/.test(upper)
-  ) {
-    return 'error'
-  }
-  if (/\bWARN(ING)?\b/.test(upper)) {
-    return 'warn'
-  }
-  if (/\b(INFO|NOTICE|STARTED|READY|LISTENING)\b/.test(upper)) {
-    return 'info'
-  }
-  return 'default'
+type LineTone = 'error' | 'warn' | 'success' | 'info' | 'default'
+
+const ANSI_RE = /\x1b\[[0-9;]*m/g
+
+// ZENTRALE Mapping-Funktion für Farbkodierung (KISS + wartbar).
+// Alle Regex-Patterns AN EINER STELLE. Verwendet existierende Design-Token-Klassen
+// (text-status-destructive/warning/success, text-secondary, text-on-surface-variant)
+// per MauntingStudios Design-DNA. Keine custom Colors, keine verteilte Logik.
+// Erweitert um Player-Events (joined/left etc.) für sichtbare Unterscheidung.
+const LINE_PATTERNS: Array<[RegExp, LineTone]> = [
+  [/\b(ERROR|FATAL|CRITICAL|EXCEPTION|TRACEBACK|ERR)\b/i, 'error'],
+  [/\bWARN(ING)?\b/i, 'warn'],
+  [/\b(OK|DONE|SUCCESS|SUCCESSFUL|COMPLETED)\b/i, 'success'],
+  [/\b(INFO|NOTICE|STARTED|READY|LISTENING)\b/i, 'info'],
+  // Player-Events (Pterodactyl-ähnlich, positiv als success)
+  [/\b(joined|left|connected|disconnected|login|logout|player.*?(?:join|leave|connect|disconnect))\b/i, 'success'],
+]
+
+export function cleanLine(line: string): string {
+  return line.replace(ANSI_RE, '')
 }
 
-const LINE_CLASS: Record<ReturnType<typeof classifyLine>, string> = {
+export const LINE_CLASS: Record<LineTone, string> = {
   error: 'text-status-destructive',
   warn: 'text-status-warning',
-  info: 'text-status-success',
+  success: 'text-status-success',
+  info: 'text-secondary',
   default: 'text-on-surface-variant',
+}
+
+/** Zentrale colorizeOutput: liefert die passende Token-Klasse für die Zeile (sicher für React-Text). */
+export function colorizeOutput(line: string): string {
+  const cleaned = cleanLine(line)
+  const tone = LINE_PATTERNS.find(([pattern]) => pattern.test(cleaned))?.[1] ?? 'default'
+  return LINE_CLASS[tone]
 }
 
 /** Server-Konsole als eigener Tab.
  *
- *  - **Lesen:** Server-Sent Events ueber `/api/servers/:id/console/stream`.
- *    Backend liefert zuerst den MSM-Logdatei-Backlog (Install-Output,
- *    Lifecycle-Events) und danach live `docker logs --follow` zusammen mit
- *    neuen Lifecycle-Eintraegen aus der Logdatei. Auto-Reconnect via
- *    Browser-EventSource bei Verbindungsabbruch.
- *  - **Eingabe:** sichtbar nur mit Permission `server.console.write`. Enter
- *    schickt POST an `/api/servers/:id/console/input`. Eingabe wird nicht
- *    geloggt — Inhalt kann sensibel sein (OAuth-Codes, RCON-Tokens).
- *  - **Lokal leeren:** versteckt den aktuellen Verlauf, neue Zeilen kommen
- *    weiterhin.
- *  - Farb-Coding pro Zeile (Error rot, Warning gelb, Info gruen).
- *  - Scrollbar visuell ausgeblendet, Scrollen funktioniert weiterhin.
+ *  - **Direktanzeige ohne Reload:** Live-Stream (EventSource) startet sofort beim Mount
+ *    (Tab-Oeffnen). Backend liefert KOMPLETTEN MSM-Log-Backlog SOFORT + docker logs --follow
+ *    (inkl. --tail Buffer bei Container-Start fuer automatischen Re-Buffer).
+ *  - Zentrale colorizeOutput (eine Stelle, alle Regex) mit DNA-Token-Klassen
+ *    (destructive/warning/success/secondary) + Player-Events (joined/left...).
+ *  - **Eingabe:** sichtbar nur mit Permission `server.console.write`. ...
+ *  - Farbkodierung wartbar zentral (keine verteilte Einzellogik).
  */
 export function ServerConsolePanel({ serverId }: Props) {
   const { t } = useTranslation()
@@ -66,7 +72,9 @@ export function ServerConsolePanel({ serverId }: Props) {
     const es = new EventSource(url)
     es.onmessage = (ev) => {
       // Backend yieldet ausschliesslich ``data:``-Frames (eine Logzeile pro Frame).
-      setLogs((prev) => [...prev, ev.data])
+      // Cap at 2000 lines (KISS): verhindert unbounded state + re-render thrash bei chatty/long-running Servern oder vielen Reconnects.
+      // Virtualisierung (react-window o.ä.) abgelehnt (neue Komplexität/Dep ohne belegten Nutzen für typische MSM-Console-Volumen; per AGENTS KISS).
+      setLogs((prev) => [...prev, ev.data].slice(-2000))
     }
     es.onerror = () => {
       // Stille: Browser reconnected automatisch.
@@ -132,8 +140,8 @@ export function ServerConsolePanel({ serverId }: Props) {
             <span className="text-on-surface-variant">{t('servers.noLogs')}</span>
           ) : (
             visibleLogs.map((line, i) => (
-              <div key={i} className={LINE_CLASS[classifyLine(line)]}>
-                {line || '\u00A0'}
+              <div key={i} className={colorizeOutput(line)}>
+                {cleanLine(line) || '\u00A0'}
               </div>
             ))
           )}

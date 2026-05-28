@@ -129,4 +129,39 @@ describe('ServerConsolePanel', () => {
       expect(screen.getByText('Listening on port 25565')).toBeInTheDocument()
     })
   })
+
+  // === Neue Tests für zentrale colorizeOutput (Coverage für alle Töne + Player + ANSI per review/tests.md) ===
+  // (Direct require skipped for ESM/vitest compat; render assertions below cover classification + DNA classes + ANSI via onmessage)
+  it('renders color classes for ERROR/player/ANSI lines via SSE', async () => {
+    setMe(ownerMe)
+    const { container } = render(<ServerConsolePanel serverId={42} />)
+    const es = FakeEventSource.instances[0]
+    es.onmessage?.({ data: 'FATAL crash' } as MessageEvent)
+    es.onmessage?.({ data: 'Player bar joined the game' } as MessageEvent)
+    es.onmessage?.({ data: '\x1b[33mANSI warn\x1b[0m' } as MessageEvent)
+    await waitFor(() => {
+      const divs = container.querySelectorAll('div.font-mono > div')
+      // At least the 3 fed lines present with correct DNA classes
+      expect(Array.from(divs).some(d => d.className.includes('text-status-destructive') && d.textContent?.includes('FATAL'))).toBe(true)
+      expect(Array.from(divs).some(d => d.className.includes('text-status-success') && d.textContent?.includes('joined'))).toBe(true)
+      expect(Array.from(divs).some(d => d.className.includes('text-status-warning') && d.textContent?.includes('ANSI'))).toBe(true)
+    })
+  })
+
+  it('caps console logs at 2000 lines (invariant: append >2000 keeps len <=2000)', async () => {
+    setMe(ownerMe)
+    const { container } = render(<ServerConsolePanel serverId={42} />)
+    const es = FakeEventSource.instances[0]
+    // Fire >2000 lines to exercise the KISS slice(-2000) cap in onmessage (prevents unbounded state per review)
+    for (let i = 0; i < 2100; i++) {
+      es.onmessage?.({ data: `log line ${i}` } as MessageEvent)
+    }
+    await waitFor(() => {
+      const divs = container.querySelectorAll('div.font-mono > div')
+      // Invariant: never more than cap in rendered output (state + slice protects memory/re-renders)
+      expect(divs.length).toBeLessThanOrEqual(2000)
+      // Last line should be from the tail (most recent)
+      expect(divs[divs.length - 1]?.textContent).toContain('log line 2099')
+    })
+  })
 })

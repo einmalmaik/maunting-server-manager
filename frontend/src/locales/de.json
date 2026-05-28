@@ -153,7 +153,6 @@
     "reinstall": "Neu installieren",
     "reinstallConfirm": "Server wirklich neu installieren? Binaries und Workshop-Mods werden ersetzt. Manuelle Konfigurationsdateien bleiben erhalten.",
     "serverFileUpdateAvailable": "Server-Update verfügbar",
-    "modUpdatesAvailable": "{{count}} Mod-Update(s) verfügbar",
     "deleted": "Server gelöscht",
     "confirmDelete": "Server wirklich löschen? Alle Daten werden unwiderruflich entfernt.",
     "createDescription": "Erstelle einen neuen Game-Server.",
@@ -481,6 +480,7 @@
     "files": "Dateimanager",
     "console": "Konsole",
     "mods": "Mod-Manager",
+    "restarts": "Automatische Neustarts",
     "backups": "Backups"
   },
   "scheduler": {
@@ -491,6 +491,20 @@
     "cronTime": "Uhrzeit (HH:MM)",
     "enabled": "Aktiviert",
     "nextRun": "Nächste Ausführung"
+  },
+  "restarts": {
+    "subtitle": "Automatische Neustarts für diesen Server.",
+    "enabled": "Automatische Restarts aktivieren",
+    "modeInterval": "Intervall",
+    "modeIntervalHint": "Neustart nach festem Stundenabstand.",
+    "modeFixed": "Feste Zeiten",
+    "modeFixedHint": "Neustart zu ausgewählten Uhrzeiten.",
+    "interval": "Intervall",
+    "everyHours": "Alle {{count}} Stunde(n)",
+    "fixedTimes": "Restart-Zeiten",
+    "addTime": "Zeit hinzufügen",
+    "saved": "Restart-Zeitplan gespeichert.",
+    "maxTimesReached": "Maximum von 12 Zeiten erreicht"
   },
   "settings": {
     "title": "Einstellungen",
@@ -505,6 +519,10 @@
     "smtpTls": "TLS verwenden",
     "resendApiKey": "Resend API-Key",
     "defaultLanguage": "Standardsprache",
+    "timeFormat": "Zeitformat",
+    "timeFormat24": "24-Stunden-Format",
+    "timeFormat12": "12-Stunden-Format",
+    "timeFormatHint": "Gilt für Restart-Zeitpläne im Server-Panel.",
     "steamApiKey": "Steam Web API",
     "steamConfigured": "Steam API konfiguriert",
     "steamNotConfigured": "Steam API nicht konfiguriert",
