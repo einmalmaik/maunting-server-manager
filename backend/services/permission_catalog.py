@@ -46,6 +46,7 @@ SERVER_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("server.start",            "server", "Server starten"),
     PermissionDef("server.stop",             "server", "Server stoppen"),
     PermissionDef("server.restart",          "server", "Server neustarten"),
+    PermissionDef("server.kill",             "server", "Server erzwungen beenden (kill)"),
     PermissionDef("server.install",          "server", "Server (re)installieren"),
     PermissionDef("server.config.write",     "server", "Server-Einstellungen aendern (Name, Auto-Restart, Backup-Schedule)"),
     PermissionDef("server.network.manage",   "server", "Ports und Bind-IP aendern"),

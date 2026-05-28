@@ -191,8 +191,13 @@
       "installing": "installing",
       "updating": "updating",
       "error": "error",
-      "awaiting_files": "awaiting files"
-    }
+      "awaiting_files": "awaiting files",
+      "stopping": "Stopping...",
+      "restarting": "Restarting..."
+    },
+    "kill": "Force Kill",
+    "killConfirm": "Really force kill the server? All unsaved data will be lost.",
+    "killSuccess": "Server was force killed"
   },
   "users": {
     "subtitle": "Manage users and permissions",

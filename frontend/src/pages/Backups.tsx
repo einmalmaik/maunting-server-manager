@@ -74,9 +74,20 @@ export function Backups({ serverId }: BackupsProps) {
     }
   };
 
+  const fetchStatus = async () => {
+    if (!serverId) return;
+    try {
+      const s = await api<any>(`/backups/${serverId}/status`);
+      setBackupStatus(s);
+    } catch {
+      setBackupStatus(null);
+    }
+  };
+
   useEffect(() => {
     fetchBackups();
     fetchSettings();
+    fetchStatus(); // AUFGABE 1: sofort bei Mount (Tab-Wechsel)
   }, [serverId]);
 
   // Live-Status Polling (alle 2s)
@@ -95,6 +106,7 @@ export function Backups({ serverId }: BackupsProps) {
 
   // Live-Tick für "Läuft seit" (separate Sekundenuhr, nicht vom Poll)
   const tickRef = useRef<number | null>(null);
+  const createTimeoutRef = useRef<number | null>(null);
   useEffect(() => {
     if (backupStatus?.active && backupStatus?.started_at) {
       const start = new Date(backupStatus.started_at).getTime();
@@ -118,6 +130,26 @@ export function Backups({ serverId }: BackupsProps) {
     };
   }, [backupStatus?.active, backupStatus?.started_at]);
 
+  // AUFGABE 3: Bei Ende (active true -> false) sofort fetchBackups (nicht auf Tick warten)
+  const prevActiveRef = useRef(false);
+  useEffect(() => {
+    const nowActive = !!backupStatus?.active;
+    if (prevActiveRef.current && !nowActive) {
+      fetchBackups();
+    }
+    prevActiveRef.current = nowActive;
+  }, [backupStatus?.active]);
+
+  // Cleanup pending create timeout on unmount (review Issue 9)
+  useEffect(() => {
+    return () => {
+      if (createTimeoutRef.current) {
+        clearTimeout(createTimeoutRef.current);
+        createTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   const createBackup = async () => {
     setActionLoading("create");
     try {
@@ -126,12 +158,17 @@ export function Backups({ serverId }: BackupsProps) {
         body: JSON.stringify({ name: backupName.trim() || null }),
       });
       toast.success(t("backups.created"));
-      setShowCreateModal(false);
-      setBackupName("");
-      fetchBackups();
+      // AUFGABE 2: 1500ms auto-close + cleanup (review Issue 9)
+      if (createTimeoutRef.current) clearTimeout(createTimeoutRef.current);
+      createTimeoutRef.current = window.setTimeout(() => {
+        setShowCreateModal(false);
+        setBackupName("");
+        setActionLoading(null);
+        fetchBackups();
+        createTimeoutRef.current = null;
+      }, 1500);
     } catch (err: any) {
       toast.error(err.message || t("common.error"));
-    } finally {
       setActionLoading(null);
     }
   };
@@ -202,7 +239,7 @@ export function Backups({ serverId }: BackupsProps) {
         ? t("backups.restoring")
         : "";
   const elapsedLabel = isActive
-    ? `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`
+    ? `${elapsedSeconds} Sekunden`
     : "";
 
   if (loading) {
@@ -220,15 +257,15 @@ export function Backups({ serverId }: BackupsProps) {
         <div className="msm-card p-4 border border-secondary/40 bg-surface-container space-y-2">
           <div className="flex items-center gap-3 text-sm text-on-surface">
             <span className="w-4 h-4 border-2 border-secondary border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            <span className="font-body-md">{operationLabel}</span>
+            <span className="font-body-md">{operationLabel || t("backups.creating", "Backup wird erstellt...")}</span>
             {elapsedLabel && (
               <span className="text-on-surface-variant">
                 {t("backups.runningSince")} {elapsedLabel}
               </span>
             )}
-            {backupStatus?.estimated_size_mb != null && (
+            {backupStatus?.estimated_size_mb != null && backupStatus.estimated_size_mb > 0 && (
               <span className="text-on-surface-variant">
-                ~{backupStatus.estimated_size_mb} MB
+                Geschätzte Größe: {backupStatus.estimated_size_mb} MB
               </span>
             )}
           </div>

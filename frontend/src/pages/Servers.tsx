@@ -104,6 +104,10 @@ export function Servers() {
         return 'bg-status-success/10 border-status-success/30 text-status-success'
       case 'stopped':
         return 'bg-surface-container-highest border-outline text-on-surface-variant'
+      case 'starting':
+      case 'stopping':
+      case 'restarting':
+        return 'bg-status-warning/10 border-status-warning/30 text-status-warning'
       case 'installing':
       case 'updating':
       case 'awaiting_files':

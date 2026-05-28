@@ -450,6 +450,10 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
                 logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
                 # NO Hard-Fail: Server startet trotzdem (best-effort)
 
+        # AUFGABE 4A: transient status VOR Docker-Operation
+        server.status = "starting"
+        db.commit()
+
         result = await asyncio.to_thread(plugin.start, server)
         if "error" in result:
             # Container-Start fehlgeschlagen - Firewall-Regeln wieder schließen.
@@ -482,6 +486,9 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
     # Früher fehlte hier jeder Lock → TOCTOU mit Restart-Pfad.
     lock = get_server_lifecycle_lock(server.id)
     async with lock:
+        # AUFGABE 4A: transient status VOR Docker-Operation (für Echtzeit-Feedback)
+        server.status = "stopping"
+        db.commit()
         # Siehe start_server: docker stop ist synchron und kann bis zum
         # Graceful-Timeout dauern. Threadpool hält den Event-Loop frei.
         result = await asyncio.to_thread(plugin.stop, server)
@@ -512,10 +519,39 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+    # AUFGABE 4A: transient now set only inside locked service (before first docker stop) for consistency with stop/start + to avoid duplicate commit / small TOCTOU (review Issue 5/10)
     result = await restart_server_with_updates(db, server)
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_status_notification(user.email, user.username, server.name, "neugestartet")
     return result
+
+
+@router.post("/{server_id}/kill")
+async def kill_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+    """Erzwungenes Beenden (Docker force remove). Nur für running/stopping/restarting sichtbar im UI.
+    Permission "server.kill" (Naming analog zu server.stop, nicht server.power.* für Code-Konsistenz mit bestehenden server.* Keys).
+    """
+    require_server_permission(user, server_id, db, "server.kill")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+    lock = get_server_lifecycle_lock(server.id)
+    async with lock:
+        from games.base import container_name_for
+        from services import docker_service
+        container = container_name_for(server.id)
+        # AUFGABE fix (review Issue 1/2 + Security Finding 1): transient "stopping" (reuses existing amber/disable UI logic for in-flight kill; KISS no new i18n/statusClasses) + commit BEFORE docker remove (prevents stale "running" on hang, matches stop/start/restart invariant). Result checked; error before any final DB mutation (no false success).
+        server.status = "stopping"
+        db.commit()
+        result = docker_service.remove(container, force=True)
+        if isinstance(result, dict) and "error" in result:
+            raise HTTPException(status_code=500, detail="Erzwungenes Beenden fehlgeschlagen")
+        server.status = "stopped"
+        server.status_message = "Erzwungen beendet"
+        db.commit()
+
+    return {"message": "Server wurde erzwungen beendet"}
 
 
 def _disk_free_mb(path: str) -> int | None:

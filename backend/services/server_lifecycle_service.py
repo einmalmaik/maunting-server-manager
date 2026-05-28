@@ -44,6 +44,9 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
     lock = get_server_lifecycle_lock(server.id)
     async with lock:
         db.refresh(server)
+        # AUFGABE 4A: transient "restarting" VOR erstem stop() (im Lock)
+        server.status = "restarting"
+        db.commit()
         if not server.public_bind_ip:
             raise HTTPException(
                 status_code=400,

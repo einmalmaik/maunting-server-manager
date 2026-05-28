@@ -65,6 +65,10 @@ function statusClasses(s: string | undefined): string {
       return "bg-status-success/10 border-status-success/30 text-status-success";
     case "stopped":
       return "bg-surface-container-highest border-outline text-on-surface-variant";
+    case "starting":
+    case "stopping":
+    case "restarting":
+      return "bg-status-warning/10 border-status-warning/30 text-status-warning";
     case "installing":
     case "updating":
     case "awaiting_files":
@@ -108,6 +112,8 @@ export function ServerDetail() {
 
   const [showEditNetwork, setShowEditNetwork] = useState(false);
   const [savingNetwork, setSavingNetwork] = useState(false);
+  // Optimistic transient status for instant UI feedback (overwritten by next poll/fetch)
+  const [optimisticStatus, setOptimisticStatus] = useState<string | null>(null);
   const [networkForm, setNetworkForm] = useState({
     public_bind_ip: "",
     game_port: "",
@@ -192,20 +198,23 @@ export function ServerDetail() {
   };
 
   const doAction = async (action: string) => {
+    // AUFGABE 4B: optimistic für sofortiges Feedback (wird durch realen Poll überschrieben)
+    if (action === "stop") setOptimisticStatus("stopping");
+    else if (action === "start") setOptimisticStatus("starting");
+    else if (action === "restart") setOptimisticStatus("restarting");
+    // no "kill" branch here (handleKill dedicated; dead code removed per review Issue 6)
     setActionLoading(action);
     try {
       await api(`/servers/${serverId}/${action}`, { method: "POST" });
       if (action === "restart") {
-        // Clear persist-once badge ref on successful restart: allows post-apply "update cleared" state
-        // to become visible without full reload (addresses reviewer correctness gap while keeping
-        // flicker protection for normal polls). KISS: 2 lines, explicit.
         lastServerUpdateBadgeRef.current = null;
       }
-      void fetchAll();
+      void fetchAll().then(() => setOptimisticStatus(null)); // real data wins
     } catch (err: unknown) {
       const raw = err instanceof Error ? err.message : String(err);
       const msg = t(raw, { defaultValue: raw }) || t("common.error");
       toast.error(msg);
+      setOptimisticStatus(null);
     } finally {
       setActionLoading(null);
     }
@@ -277,6 +286,25 @@ export function ServerDetail() {
     }
   };
 
+  const handleKill = async () => {
+    // KISS: bestehendes confirmStore Pattern (explizit, wie delete/restore) + danger:true per review
+    const ok = await confirm({ message: t("servers.killConfirm"), danger: true });
+    if (!ok) return;
+    setOptimisticStatus("stopped");
+    setActionLoading("kill");
+    try {
+      await api(`/servers/${serverId}/kill`, { method: "POST" });
+      toast.success(t("servers.killSuccess"));
+      void fetchAll().then(() => setOptimisticStatus(null));
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : String(err);
+      toast.error(t(raw, { defaultValue: raw }) || t("common.error"));
+      setOptimisticStatus(null);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const gameName = (gameId: string) =>
     games.find((g) => g.id === gameId)?.name || gameId;
 
@@ -304,6 +332,8 @@ export function ServerDetail() {
       </div>
     );
   }
+
+  const effectiveStatus = optimisticStatus || server.status;
 
   // KISS: Install vs Reinstall Button-Logik + Update-Badge (genau nach Spec)
   // - Keine Server-Dateien (awaiting_files oder Disk <= 0) → servers.install
@@ -352,16 +382,16 @@ export function ServerDetail() {
           </div>
         </div>
         <span
-          className={`font-mono-sm text-mono-sm px-3 py-1 rounded-full border ${statusClasses(server.status)}`}
+          className={`font-mono-sm text-mono-sm px-3 py-1 rounded-full border ${statusClasses(effectiveStatus)}`}
         >
-          {t(`servers.status.${server.status}`, {
-            defaultValue: server.status,
+          {t(`servers.status.${effectiveStatus}`, {
+            defaultValue: effectiveStatus,
           })}
         </span>
       </div>
 
       {/* Warnung: keine Bind-IP */}
-      {!server.public_bind_ip && server.status !== "running" && (
+      {!server.public_bind_ip && effectiveStatus !== "running" && (
         <div className="msm-card p-4 border-status-warning/40 bg-status-warning/5 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-status-warning flex-shrink-0 mt-0.5" />
           <div className="flex-1">
@@ -383,7 +413,7 @@ export function ServerDetail() {
 
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
-        {server.status !== "running" && server.status !== "installing" && (
+        {effectiveStatus !== "running" && effectiveStatus !== "installing" && effectiveStatus !== "starting" && effectiveStatus !== "stopping" && effectiveStatus !== "restarting" && (
           <button
             onClick={() => doAction("start")}
             disabled={!!actionLoading || !server.public_bind_ip}
@@ -400,7 +430,7 @@ export function ServerDetail() {
               : t("servers.start")}
           </button>
         )}
-        {server.status === "running" && (
+        {effectiveStatus === "running" && (
           <button
             onClick={() => doAction("stop")}
             disabled={!!actionLoading}
@@ -412,7 +442,7 @@ export function ServerDetail() {
         )}
         <button
           onClick={() => doAction("restart")}
-          disabled={!!actionLoading || server.status === "installing"}
+          disabled={!!actionLoading || ["installing", "starting", "stopping", "restarting"].includes(effectiveStatus)}
           className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
         >
           <RefreshCw className="w-4 h-4" />
@@ -420,7 +450,17 @@ export function ServerDetail() {
             ? t("common.loading")
             : t("servers.restart")}
         </button>
-        {server.status !== "installing" && (
+        {/* AUFGABE 5: Kill-Button nur bei running|stopping|restarting (msm-btn-danger per DNA), mit confirm */}
+        {["running", "stopping", "restarting"].includes(effectiveStatus) && (
+          <button
+            onClick={handleKill}
+            disabled={!!actionLoading}
+            className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+          >
+            {actionLoading === "kill" ? t("common.loading") : t("servers.kill")}
+          </button>
+        )}
+        {effectiveStatus !== "installing" && (
           <button
             onClick={handleInstall}
             disabled={!!actionLoading}

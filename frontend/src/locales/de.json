@@ -191,8 +191,13 @@
       "installing": "wird installiert",
       "updating": "wird aktualisiert",
       "error": "Fehler",
-      "awaiting_files": "wartet auf Dateien"
-    }
+      "awaiting_files": "wartet auf Dateien",
+      "stopping": "Wird gestoppt...",
+      "restarting": "Wird neu gestartet..."
+    },
+    "kill": "Erzwingen",
+    "killConfirm": "Server wirklich erzwungen beenden? Alle ungespeicherten Daten gehen verloren.",
+    "killSuccess": "Server wurde erzwungen beendet"
   },
   "users": {
     "subtitle": "Benutzer und Berechtigungen verwalten",
