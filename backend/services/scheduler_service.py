@@ -525,6 +525,14 @@ def init_server_schedules(db):
                 logging.warning("Failed to schedule backup for server %s: %s", server.id, e)
 
     # Hinweis zum restart_time_utc / restart_times_utc Pattern (wie in models/server.py):
+    # Backup nutzt aktuell ausschließlich Interval (backup_interval_hours).
+    # Die Struktur ist bewusst so vorbereitet, dass später ein backup_times_utc
+    # (Cron-ähnlich, analog zu restart_times_utc) ergänzt werden kann,
+    # ohne die bestehende Interval-Logik oder die init_server_schedules zu zerstören.
+    # Zeitzonen-Handling: Beide Systeme speichern/interpretieren Zeiten als
+    # UTC-intendierte HH:MM-Strings. Globales time_format (PanelSettings) ist
+    # reine UI-Darstellung und wird nicht für Scheduling-Entscheidungen benötigt.
+    # (Konsistenz mit Restart-System gewährleistet.)
     # Backup verwendet aktuell NUR backup_interval_hours (IntervalTrigger).
     # Ein zukünftiges backup_times_utc (analog) würde kleine Erweiterungen in schedule_backup +
     # init erfordern (ähnlich der Restart-Logik), ist aber strukturell vorbereitet.

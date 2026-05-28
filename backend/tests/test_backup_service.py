@@ -424,6 +424,24 @@ class TestBackupsRouter:
         assert r.status_code == 200
         assert "deaktiviert" in r.json()["message"].lower()
 
+    def test_auto_backup_with_header_and_flag_true_calls_run_backup(self, client, test_server, db):
+        """c) Mit korrektem Header + backup_on_start=True → run_backup wird aufgerufen."""
+        test_server.backup_on_start = True
+        db.commit()
+
+        with patch("services.backup_service.run_backup") as mock_run:
+            fake_backup = MagicMock(id=123)
+            mock_run.return_value = fake_backup
+            r = client.post(f"/api/backups/{test_server.id}/auto", headers={"X-MSM-Internal-Auto": "1"})
+            assert r.status_code == 200
+            assert "erstellt" in r.json()["message"].lower()
+            # Wichtig: Der im Router via Depends(get_db) erhaltene Session ist nicht
+            # exakt dieselbe Instanz wie der Test-fixture. Deshalb nur auf Argumente prüfen.
+            mock_run.assert_called_once()
+            args, kwargs = mock_run.call_args
+            assert args[0] == test_server.id
+            assert kwargs.get("timeout_seconds") == 300
+
     def test_auto_backup_calls_service_and_graceful_on_error(self, client, test_server, db):
         test_server.backup_on_start = True
         db.commit()
