@@ -6,9 +6,6 @@ Simple, reliable, and extensible.
 """
 
 import logging
-import os
-import subprocess
-from datetime import datetime, timezone
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -103,8 +100,8 @@ async def _restart_server_task(server_id: int) -> None:
 
 
 async def _backup_server_task(server_id: int) -> None:
-    """Top-level job task: creates a backup directly without auth checks."""
-    from models import Backup, Server
+    """Top-level job task: delegates to central backup_service (no duplicated tar logic)."""
+    from models import Server  # only for existence check (service does the rest)
 
     db = SessionLocal()
     try:
@@ -112,24 +109,10 @@ async def _backup_server_task(server_id: int) -> None:
         if not server:
             return
 
-        backup_dir = f"/opt/msm/backups/{server_id}"
-        os.makedirs(backup_dir, exist_ok=True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        filename = f"{server.name}_{timestamp}.tar.gz"
-        filepath = os.path.join(backup_dir, filename)
-
-        subprocess.run(
-            ["tar", "-czf", filepath, "-C", server.install_dir, "."],
-            check=True, capture_output=True, timeout=300,
-            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
-        )
-        size_mb = os.path.getsize(filepath) // (1024 * 1024)
-
-        backup = Backup(server_id=server_id, filename=filepath, size_mb=size_mb)
-        db.add(backup)
-        db.commit()
-
-        cleanup_old_backups(server_id, db)
+        from services.backup_service import run_backup
+        # Scheduler path: kürzerer Timeout (300s), damit der Scheduler-Loop nicht zu lange blockiert.
+        # Service übernimmt tar + DB-Record + Retention-Cleanup.
+        run_backup(server_id, db, timeout_seconds=300)
     except Exception as e:
         import logging
         logging.warning("Auto-backup failed for server %s: %s", server_id, e)
@@ -282,27 +265,8 @@ def get_jobs(server_id: Optional[int] = None) -> list:
     ]
 
 
-def cleanup_old_backups(server_id: int, db):
-    """Keep only the configured number of backups per server."""
-    from models import Backup, Server
-
-    server = db.query(Server).filter(Server.id == server_id).first()
-    keep = server.backup_retention_count if server else 5
-
-    backups = db.query(Backup).filter(
-        Backup.server_id == server_id
-    ).order_by(Backup.created_at.desc()).all()
-
-    if len(backups) > keep:
-        for old_backup in backups[keep:]:
-            if os.path.exists(old_backup.filename):
-                try:
-                    os.remove(old_backup.filename)
-                except Exception:
-                    pass
-            db.delete(old_backup)
-        db.commit()
-
+# cleanup_old_backups wurde entfernt (war Duplikat). Zentrale Implementierung
+# jetzt in services/backup_service.py (wird von _backup_server_task und Router genutzt).
 
 async def _disk_soft_limit_task() -> None:
     """Globaler periodischer Job: aktualisiert `disk_usage_mb` für ALLE Server,
@@ -559,3 +523,8 @@ def init_server_schedules(db):
             except Exception as e:
                 import logging
                 logging.warning("Failed to schedule backup for server %s: %s", server.id, e)
+
+    # Hinweis zum restart_time_utc / restart_times_utc Pattern (wie in models/server.py):
+    # Backup verwendet aktuell NUR backup_interval_hours (IntervalTrigger).
+    # Ein zukünftiges backup_times_utc (analog) würde kleine Erweiterungen in schedule_backup +
+    # init erfordern (ähnlich der Restart-Logik), ist aber strukturell vorbereitet.

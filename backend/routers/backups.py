@@ -1,9 +1,9 @@
 import os
 import shutil
 import subprocess
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -30,74 +30,8 @@ class BackupSettingsResponse(BaseModel):
 
 router = APIRouter(prefix="/api/backups", tags=["backups"])
 
-
-def _cleanup_old_backups(server_id: int, keep: int, db: Session) -> None:
-    """Entfernt alte Backups über dem Retention-Limit."""
-    old = db.query(Backup).filter(Backup.server_id == server_id)\
-        .order_by(Backup.created_at.desc()).offset(keep).all()
-    for b in old:
-        if os.path.exists(b.filename):
-            try:
-                os.remove(b.filename)
-            except OSError:
-                pass
-        db.delete(b)
-    db.commit()
-
-
-def _run_backup(server_id: int, db: Session, name: str | None = None) -> Backup | None:
-    """Führt ein Backup aus und cleaned up alte Backups."""
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server or not os.path.isdir(server.install_dir):
-        return None
-
-    backup_dir = f"/opt/msm/backups/{server_id}"
-    os.makedirs(backup_dir, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"{server.name}_{timestamp}.tar.gz"
-    filepath = os.path.join(backup_dir, filename)
-
-    try:
-        subprocess.run(
-            ["tar", "-czf", filepath, "-C", server.install_dir, "."],
-            check=True, capture_output=True, timeout=600,
-            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
-        )
-        size_mb = os.path.getsize(filepath) // (1024 * 1024)
-    except Exception:
-        return None
-
-    backup = Backup(server_id=server_id, filename=filepath, size_mb=size_mb, name=name or None)
-    db.add(backup)
-    db.commit()
-    db.refresh(backup)
-
-    # Retention: alte Backups löschen
-    _cleanup_old_backups(server_id, server.backup_retention_count, db)
-    return backup
-
-
-def run_scheduled_backups(db: Session) -> None:
-    """Führt fällige geplante Backups aus (wird vom Scheduler aufgerufen)."""
-    servers = db.query(Server).filter(
-        Server.backup_interval_hours.isnot(None),
-        Server.backup_interval_hours > 0
-    ).all()
-
-    for server in servers:
-        # Prüfe ob letztes Backup älter als das Intervall ist
-        last = db.query(Backup).filter(Backup.server_id == server.id)\
-            .order_by(Backup.created_at.desc()).first()
-        if last and server.backup_interval_hours:
-            next_due = last.created_at + timedelta(hours=server.backup_interval_hours)
-            if datetime.now(timezone.utc) < next_due:
-                continue
-        _run_backup(server.id, db)
-
-
-
-
-
+# NOTE: Backup-Logik ist jetzt zentral in services/backup_service.py
+# (Single Source of Truth). Frühere _run_backup / _cleanup / run_scheduled_backups entfernt.
 @router.get("/{server_id}", response_model=list[BackupResponse])
 def list_backups(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     require_server_permission(user, server_id, db, "server.backups.read")
@@ -110,11 +44,15 @@ def create_backup(server_id: int, body: CreateBackupRequest | None = None, db: S
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    if not os.path.isdir(server.install_dir):
-        raise HTTPException(status_code=400, detail="Server-Verzeichnis existiert nicht. Ist der Server installiert?")
 
-    backup = _run_backup(server_id, db, name=body.name if body else None)
-    if not backup:
+    # Kein Duplikat-Check mehr (Single Source of Truth im Service); generische Fehlermeldung
+    # (verhindert Leak von install_dir / Pfaden in HTTP-Details und Logs).
+    from services.backup_service import run_backup as central_run_backup
+    try:
+        backup = central_run_backup(server_id, db, name=body.name if body else None, timeout_seconds=600)
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail="Server-Verzeichnis existiert nicht. Ist der Server installiert?")
+    except Exception:
         raise HTTPException(status_code=500, detail="Backup fehlgeschlagen")
     return {"message": "Backup erstellt", "backup_id": backup.id, "size_mb": backup.size_mb}
 
@@ -149,15 +87,29 @@ def update_backup_settings(server_id: int, body: BackupSettingsRequest, db: Sess
 
 
 @router.post("/{server_id}/auto")
-def auto_backup(server_id: int, db: Session = Depends(get_db)) -> dict:
-    """Interner Endpoint: Auto-Backup bei Server-Start (kein Auth-Check)."""
+def auto_backup(server_id: int, db: Session = Depends(get_db), request: Request = None) -> dict:
+    """Interner Endpoint (nur von GamePlugin.start via Loopback mit Header).
+    Kein volles Auth, aber Schutz gegen öffentlichen Missbrauch via Caddy.
+    """
+    # Minimaler interner Guard (KISS): Header von der internen callsite.
+    # Ohne Header → 403 (verhindert Public Abuse / Enumeration / DoS).
+    if not request or request.headers.get("X-MSM-Internal-Auto") != "1":
+        raise HTTPException(status_code=403, detail="Interner Endpoint")
+
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server or not server.backup_on_start:
         return {"message": "Auto-Backup deaktiviert"}
-    backup = _run_backup(server_id, db)
-    if backup:
+
+    from services.backup_service import run_backup as central_run_backup
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        backup = central_run_backup(server_id, db, timeout_seconds=300)
         return {"message": "Auto-Backup erstellt", "backup_id": backup.id}
-    return {"message": "Auto-Backup fehlgeschlagen"}
+    except Exception as e:
+        # Niemals crashen des Callers (Plugins rufen fire-and-forget ohne Error-Handling)
+        logger.warning("Auto-Backup fehlgeschlagen für Server %s: %s", server_id, e)
+        return {"message": "Auto-Backup fehlgeschlagen"}
 
 
 @router.post("/{server_id}/restore/{backup_id}")
@@ -197,8 +149,9 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
             check=True, capture_output=True, timeout=300,
             env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Wiederherstellung fehlgeschlagen: {e}")
+    except Exception:
+        # Security: niemals Pfade, install_dir oder Exception-Details leaken (generische Meldung)
+        raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
 
     # Status zurücksetzen — Server ist jetzt installiert/stopped, nicht running
     server.status = "stopped"
@@ -215,7 +168,11 @@ def delete_backup(server_id: int, backup_id: int, db: Session = Depends(get_db),
     if not backup:
         raise HTTPException(status_code=404, detail="Backup nicht gefunden")
     if os.path.exists(backup.filename):
-        os.remove(backup.filename)
+        try:
+            os.remove(backup.filename)
+        except OSError:
+            # Race oder Rechte-Problem: Record trotzdem löschen, keine Exception nach außen (200)
+            pass
     db.delete(backup)
     db.commit()
     return {"message": "Backup gelöscht"}
