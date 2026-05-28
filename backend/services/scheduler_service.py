@@ -113,9 +113,9 @@ async def _backup_server_task(server_id: int) -> None:
         # Scheduler path: kürzerer Timeout (300s), damit der Scheduler-Loop nicht zu lange blockiert.
         # Service übernimmt tar + DB-Record + Retention-Cleanup.
         run_backup(server_id, db, timeout_seconds=300)
-    except Exception as e:
+    except Exception:
         import logging
-        logging.warning("Auto-backup failed for server %s: %s", server_id, e)
+        logging.warning("Auto-backup failed for server %s (details redacted for security)", server_id)
     finally:
         db.close()
 

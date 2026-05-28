@@ -439,6 +439,17 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
         except Exception as exc:
             _append_console_log(server.id, f"[MSM] prepare_for_updates / Mod-Update beim Start fehlgeschlagen (nicht kritisch): {exc}\n")
 
+        db.refresh(server)
+
+        # Pre-Start-Backup (best-effort, nach Permission + Lock, vor docker run)
+        if server.backup_on_start:
+            from services.backup_service import run_backup
+            try:
+                run_backup(server.id, db, timeout_seconds=300)
+            except Exception:
+                logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
+                # NO Hard-Fail: Server startet trotzdem (best-effort)
+
         result = await asyncio.to_thread(plugin.start, server)
         if "error" in result:
             # Container-Start fehlgeschlagen - Firewall-Regeln wieder schließen.

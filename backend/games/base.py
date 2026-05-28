@@ -790,18 +790,6 @@ class GamePlugin(ABC):
 
         _append_console_log(server.id, f"[MSM] Container {name} gestartet\n")
 
-        # Optionaler Auto-Backup-Trigger (Fire-and-forget, lokaler Loopback).
-        # Header "X-MSM-Internal-Auto: 1" schützt den internen Endpoint vor Public Abuse.
-        try:
-            import requests
-            requests.post(
-                f"http://127.0.0.1:8000/api/backups/{server.id}/auto",
-                headers={"X-MSM-Internal-Auto": "1"},
-                timeout=5,
-            )
-        except Exception:
-            pass
-
         return {"message": "Server gestartet", "container": name}
 
     def stop(self, server) -> dict:

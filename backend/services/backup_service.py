@@ -22,6 +22,11 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+# Live-Status Tracking für Backup/Restore (KISS: module dict, kein Redis, kein neues Model).
+# Note on concurrency (Issue 2 defense): unsynchronized; races possible on same server_id across threads (uvicorn + APScheduler).
+# Acceptable for ephemeral UX banner only (last-writer wins, resets on process restart). Adding Lock would violate KISS/no-new-complexity (see AGENTS, architecture.md "no global state without compelling reason").
+_active_backups: dict[int, dict] = {}
+
 
 def run_backup(
     server_id: int,
@@ -50,6 +55,11 @@ def run_backup(
         # Generische Nachricht (kein Leak von install_dir in Exception-String / HTTP-Details)
         raise FileNotFoundError("Server-Verzeichnis existiert nicht. Ist der Server installiert?")
 
+    # Live-Status + Estimate vom letzten Backup (für UX-Banner)
+    from models import Backup  # für Estimate
+    last = db.query(Backup).filter(Backup.server_id == server_id).order_by(Backup.created_at.desc()).first()
+    est = last.size_mb if last else None
+
     backup_dir = f"/opt/msm/backups/{server_id}"
     os.makedirs(backup_dir, exist_ok=True)
 
@@ -62,6 +72,7 @@ def run_backup(
     # Tar ausführen (voller install_dir, .tar.gz, -C . für relative Pfade)
     tar_ok = False
     try:
+        set_active_backup_status(server_id, "creating", est)
         subprocess.run(
             ["tar", "-czf", filepath, "-C", server.install_dir, "."],
             check=True,
@@ -86,6 +97,7 @@ def run_backup(
             timeout_seconds,
             e,
         )
+        clear_active_backup_status(server_id)
         raise RuntimeError(
             f"Backup fehlgeschlagen (Timeout nach {timeout_seconds}s)"
         ) from e
@@ -96,6 +108,7 @@ def run_backup(
             except OSError:
                 pass
         logger.error("Backup fehlgeschlagen für Server %s: %s", server_id, e)
+        clear_active_backup_status(server_id)
         raise RuntimeError(f"Backup fehlgeschlagen: {e}") from e
 
     # DB + Retention nach erfolgreichem Tar. Bei DB-Fehler: Best-Effort Cleanup der Tar-Datei
@@ -128,10 +141,12 @@ def run_backup(
             except OSError:
                 pass
         logger.error("Backup DB/Retention fehlgeschlagen für Server %s (Tar bereinigt): %s", server_id, e)
+        clear_active_backup_status(server_id)
         raise RuntimeError(f"Backup fehlgeschlagen: {e}") from e
 
     # Nur nicht-sensible IDs + Metadaten loggen (kein full filepath / server.name im INFO-Log)
     logger.debug("Backup DB record created id=%s server=%s", backup.id, server_id)
+    clear_active_backup_status(server_id)
     return backup
 
 
@@ -175,3 +190,22 @@ def cleanup_old_backups(
             keep,
             len(old),
         )
+
+
+def set_active_backup_status(server_id: int, operation: str, estimated_size_mb: int | None = None) -> None:
+    """Setzt Live-Status (aufgerufen von run_backup und restore)."""
+    _active_backups[server_id] = {
+        "operation": operation,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "estimated_size_mb": estimated_size_mb,
+    }
+
+
+def clear_active_backup_status(server_id: int) -> None:
+    """Entfernt Live-Status (auch bei Fehlern)."""
+    _active_backups.pop(server_id, None)
+
+
+def get_active_backup_status(server_id: int) -> dict | None:
+    """Liefert Snapshot oder None."""
+    return _active_backups.get(server_id)

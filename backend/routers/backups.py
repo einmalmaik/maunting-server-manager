@@ -70,6 +70,29 @@ def get_backup_settings(server_id: int, db: Session = Depends(get_db), user: Use
     )
 
 
+@router.get("/{server_id}/status")
+def get_backup_status(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Live-Status für laufende Backup/Restore Operationen (Polling-UX).
+    Note (Issue 18): status is ephemeral (module dict); lost on backend restart (acceptable per original task).
+    """
+    require_server_permission(user, server_id, db, "server.backups.read")
+    from services.backup_service import get_active_backup_status
+    active = get_active_backup_status(server_id)
+    if active:
+        return {
+            "active": True,
+            "operation": active.get("operation"),
+            "started_at": active.get("started_at"),
+            "estimated_size_mb": active.get("estimated_size_mb"),
+        }
+    return {
+        "active": False,
+        "operation": None,
+        "started_at": None,
+        "estimated_size_mb": None,
+    }
+
+
 @router.patch("/{server_id}/settings")
 def update_backup_settings(server_id: int, body: BackupSettingsRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     require_server_permission(user, server_id, db, "server.config.write")
@@ -94,6 +117,9 @@ def auto_backup(server_id: int, request: Request, db: Session = Depends(get_db))
     if request.headers.get("X-MSM-Internal-Auto") != "1":
         raise HTTPException(status_code=403, detail="Interner Endpoint")
 
+    # /auto kept for compat (original task spec: caller removed from base.py GamePlugin.start only).
+    # Header guard is internal-only (no public callers post-cleanup). See Issue 9/15.
+
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server or not server.backup_on_start:
         return {"message": "Auto-Backup deaktiviert"}
@@ -104,9 +130,9 @@ def auto_backup(server_id: int, request: Request, db: Session = Depends(get_db))
     try:
         backup = central_run_backup(server_id, db, timeout_seconds=300)
         return {"message": "Auto-Backup erstellt", "backup_id": backup.id}
-    except Exception as e:
+    except Exception:
         # Niemals crashen des Callers (Plugins rufen fire-and-forget ohne Error-Handling)
-        logger.warning("Auto-Backup fehlgeschlagen für Server %s: %s", server_id, e)
+        logger.warning("Auto-Backup fehlgeschlagen für Server %s (details redacted for security)", server_id)
         return {"message": "Auto-Backup fehlgeschlagen"}
 
 
@@ -118,6 +144,10 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
     Server-Prozess auf Dateien zu, die wir gerade ersetzen, und das install_dir
     kann nicht atomar ersetzt werden. Container wird NICHT automatisch wieder
     gestartet; das übernimmt der Nutzer (UI bietet Start-Button).
+
+    Note (Issue 8): does not acquire get_server_lifecycle_lock (pre-existing design;
+    force-remove is idempotent; concurrent start/pre-start race window accepted as
+    user-initiated op with manual restart after restore).
     """
     require_server_permission(user, server_id, db, "server.backups.restore")
     server = db.query(Server).filter(Server.id == server_id).first()
@@ -137,6 +167,10 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
     # beansprucht bleibt und der Container beim nächsten Start frisch kommt
     docker_service.remove(container, force=True)
 
+    # Live-Status für Restore (Estimate = Größe des zu restore-nden Backups)
+    from services.backup_service import set_active_backup_status, clear_active_backup_status
+    set_active_backup_status(server_id, "restoring", backup.size_mb)
+
     try:
         # Alte Daten sichern (rollback path)
         old_backup = f"{server.install_dir}_pre_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
@@ -149,7 +183,10 @@ def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db)
         )
     except Exception:
         # Security: niemals Pfade, install_dir oder Exception-Details leaken (generische Meldung)
+        clear_active_backup_status(server_id)
         raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
+    finally:
+        clear_active_backup_status(server_id)
 
     # Status zurücksetzen — Server ist jetzt installiert/stopped, nicht running
     server.status = "stopped"

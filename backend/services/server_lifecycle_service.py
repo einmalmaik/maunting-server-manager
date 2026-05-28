@@ -106,6 +106,15 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
             )
             logger.warning("Updater-Hook beim Restart von Server %s fehlgeschlagen: %s", server.id, exc)
 
+        # Pre-Start-Backup (best-effort, nach Lock, vor docker run)
+        if server.backup_on_start:
+            from services.backup_service import run_backup
+            try:
+                run_backup(server.id, db, timeout_seconds=300)
+            except Exception:
+                logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
+                # NO Hard-Fail: Server startet trotzdem (best-effort)
+
         start_result = await asyncio.to_thread(plugin.start, server)
         if "error" in start_result:
             raise HTTPException(status_code=500, detail=start_result["error"])

@@ -473,15 +473,18 @@
     "createHint": "Create your first backup.",
     "selectServer": "Select a server to manage backups.",
     "settingsSaved": "Settings saved",
-    "scheduling": "Schedule",
-    "schedulingTitle": "Backup Schedule & Settings",
-    "backupOnStart": "Backup on start",
+    "scheduling": "Settings",
+    "schedulingTitle": "Backup Settings",
+    "backupOnStart": "Create backup before start",
     "interval": "Interval",
     "retention": "Retention (count)",
     "backupName": "Name (optional)",
     "backupNamePlaceholder": "e.g. Before update v1.5",
     "createModalHint": "Creates a compressed archive of the server directory.",
-    "createNow": "Create Backup"
+    "createNow": "Create Backup",
+    "creating": "Creating backup...",
+    "restoring": "Restoring backup...",
+    "runningSince": "Running since:"
   },
   "scheduler": {
     "title": "Scheduler",
