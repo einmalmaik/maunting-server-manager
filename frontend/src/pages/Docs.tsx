@@ -236,6 +236,16 @@ export function Docs() {
               <FieldRow field="runtime.configPatches" type="list" required={false}>{t('docs.reference.runtimeConfigPatches')}</FieldRow>
             </FieldTable>
 
+            <h4 className="font-semibold text-on-surface-variant mt-3 mb-1 text-sm">{t('docs.reference.configPatchFields')}</h4>
+            <FieldTable>
+              <FieldRow field="type" type="enum" required={true}>{t('docs.reference.configPatchType')}</FieldRow>
+              <FieldRow field="file" type="string" required={true}>{t('docs.reference.configPatchFile')}</FieldRow>
+              <FieldRow field="section" type="string" required={true}>{t('docs.reference.configPatchSection')}</FieldRow>
+              <FieldRow field="key" type="string" required={true}>{t('docs.reference.configPatchKey')}</FieldRow>
+              <FieldRow field="value" type="string" required={true}>{t('docs.reference.configPatchValue')}</FieldRow>
+            </FieldTable>
+
+
             <h3 className="font-bold text-primary mt-6 mb-2">ports</h3>
             <p className="text-sm text-on-surface-variant mb-2">{t('docs.reference.portsDesc')}</p>
             <FieldTable>

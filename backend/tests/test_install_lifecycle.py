@@ -253,6 +253,38 @@ class TestSteamCMDFullLogOnFailure:
         finally:
             self._clear_console_log(test_server.id)
 
+    def test_live_output_is_written_during_steamcmd_run_and_redacted(self, test_server: Server, tmp_path):
+        from games.base import run_steamcmd_install
+
+        self._clear_console_log(test_server.id)
+        try:
+            with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+                 patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)), \
+                 patch("services.steam_account_service.SteamAccountService.is_configured", return_value=True), \
+                 patch("services.steam_account_service.SteamAccountService.get_username", return_value="steam-user"), \
+                 patch("services.steam_account_service.SteamAccountService.get_decrypted_password", return_value="secret-pass"):
+
+                def fake_run_ephemeral(**kwargs):
+                    kwargs["log_callback"](
+                        "Update state (0x61) downloading, progress: 68.94 secret-pass\n"
+                    )
+                    return {"ok": True, "stdout": "", "stderr": ""}
+
+                mock_eph.side_effect = fake_run_ephemeral
+                run_steamcmd_install(
+                    server_id=test_server.id,
+                    install_dir=str(tmp_path),
+                    app_id="223350",
+                    use_authenticated_login=True,
+                )
+
+            log = self._read_console_log(test_server.id)
+            assert "Update state (0x61) downloading, progress: 68.94" in log
+            assert "secret-pass" not in log
+            assert "***" in log
+        finally:
+            self._clear_console_log(test_server.id)
+
 
 class TestPluginInstallCallback:
     """Plugin.install() spawnt Thread, der finish_install() aufruft."""
