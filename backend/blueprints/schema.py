@@ -723,11 +723,19 @@ def load_blueprint_dict(data: dict[str, Any]) -> Blueprint:
         raise BlueprintValidationError.from_pydantic(exc) from exc
 
 
+def _strip_json_comments(text: str) -> str:
+    """Entfernt // und /* */ Kommentare aus JSON, ohne Strings zu beschaedigen."""
+    # Pattern ueberspringt Strings ("...") und matcht Kommentare
+    pattern = r'(?:"(?:\\.|[^"\\])*")|(?P<comment>//[^\n]*|/\*.*?\*/)'
+    return re.sub(pattern, lambda m: "" if m.group("comment") else m.group(0), text, flags=re.DOTALL)
+
+
 def load_blueprint_file(path: Path | str) -> Blueprint:
     """Liest + parst + validiert eine ``.blueprint.json``-Datei."""
     p = Path(path)
     try:
         raw = p.read_text(encoding="utf-8")
+        raw = _strip_json_comments(raw)
     except OSError as exc:
         raise BlueprintValidationError(
             f"Blueprint-Datei {p} nicht lesbar: {exc}"
@@ -749,44 +757,75 @@ def load_blueprint_file(path: Path | str) -> Blueprint:
 # ── Downloadbares Template ────────────────────────────────────────────────
 
 
-EMPTY_TEMPLATE: dict[str, Any] = {
-    "version": SUPPORTED_BLUEPRINT_VERSION,
-    "meta": {
-        "id": "",
-        "name": "",
-        "category": "steam_game",
-        "author": "",
-        "description": "",
+COMMENTED_TEMPLATE: str = """{
+  "version": 1,
+  "meta": {
+    // Eindeutige ID (nur Kleinbuchstaben, Zahlen, Unterstrich). Dateiname muss <id>.blueprint.json sein.
+    "id": "my_custom_server",
+    // Name, der in der UI (z.B. im Dropdown) angezeigt wird.
+    "name": "Mein Eigener Server",
+    // Kategorie: steam_game, non_steam_game, voice_server, bot
+    "category": "non_steam_game",
+    "author": "Community",
+    // Optionale Beschreibung für die UI
+    "description": "Ein Blueprint-Template für einen neuen Server."
+  },
+  "runtime": {
+    // Das Docker-Image, das gestartet wird (Pflichtfeld).
+    "image": "ubuntu:24.04",
+    // Arbeitsverzeichnis im Container
+    "workdir": "/data",
+    // Umgebungsvariablen. Erlaubte Platzhalter in Werten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}
+    "env": {
+      "SERVER_PORT": "{GAME_PORT}",
+      "DEBUG_MODE": "false"
     },
-    "runtime": {
-        "image": "",
-        "workdir": "/data",
-        "env": {},
-        "startup": "",
-        "configPatches": [],
-    },
-    "ports": [
-        {"name": "game", "protocol": "udp"},
-    ],
-    "source": {
-        "type": "steam",
-        "steam": {
-            "appId": "",
-            "platform": "linux",
-            "compatibility": "native",
-            "requiresLogin": False,
-        },
-        "http": None,
-        "manual": None,
-    },
-    "mods": {
-        "supportsMods": False,
-        "supportsSteamWorkshop": False,
-        "workshopAppId": None,
-        "modInjection": "none",
-        "modStartupArgumentFormat": None,
-        "modListFilePath": None,
-        "modListContent": "workshopIds",
-        "postInstall": [],
-    },
+    // Startbefehl. Erlaubte Platzhalter: {GAME_PORT}, {INSTALL_DIR}, {ENV.SERVER_PORT} etc. Keine Shell-Metazeichen!
+    "startup": "./start_server.sh --port {GAME_PORT}",
+    // Dateien, die vor dem Start automatisch gepatcht werden sollen (z.B. INI-Dateien)
+    "configPatches": []
+  },
+  "ports": [
+    // Deklariert die benötigten Ports. Die UI fragt diese beim Server-Erstellen ab.
+    // Erlaubte Rollen: game, query, rcon, voice, web, custom
+    {
+      "name": "game",
+      "protocol": "udp"
+    }
+  ],
+  "source": {
+    // Woher kommen die Server-Dateien? Erlaubte Typen: steam, http, dockerOnly, manualUpload
+    "type": "dockerOnly"
+    
+    // Beispiel fuer Steam (entkommentieren und type auf "steam" setzen):
+    /*
+    "steam": {
+      "appId": "2394010",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false
+    }
+    */
+    
+    // Beispiel fuer HTTP-Download (entkommentieren und type auf "http" setzen):
+    /*
+    "http": {
+      "url": "https://example.com/server-files.zip",
+      "archiveType": "zip",
+      "extractTo": "."
+    }
+    */
+  },
+  "mods": {
+    // Falls Steam Workshop unterstuetzt wird, auf true setzen und workshopAppId eintragen.
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  }
 }
+"""

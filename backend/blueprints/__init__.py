@@ -30,7 +30,7 @@ from .schema import (
     BlueprintSource,
     BlueprintSourceType,
     BlueprintValidationError,
-    EMPTY_TEMPLATE,
+    COMMENTED_TEMPLATE,
     load_blueprint_dict,
     load_blueprint_file,
 )
@@ -53,7 +53,7 @@ __all__ = [
     "BlueprintSource",
     "BlueprintSourceType",
     "BlueprintValidationError",
-    "EMPTY_TEMPLATE",
+    "COMMENTED_TEMPLATE",
     "load_blueprint_dict",
     "load_blueprint_file",
     "BlueprintRegistry",

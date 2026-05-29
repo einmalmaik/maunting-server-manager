@@ -42,9 +42,11 @@ export function Blueprints() {
 
   const uploadFile = async (file: File, expectedId: string | null) => {
     const text = await file.text()
+    // Strip comments (// and /* */) safely without affecting strings (e.g. URLs)
+    const strippedText = text.replace(/\\"|"(?:\\"|[^"])*"|(\/\/.*|\/\*[\s\S]*?\*\/)/g, (m, g) => g ? "" : m)
     let body: unknown
     try {
-      body = JSON.parse(text)
+      body = JSON.parse(strippedText)
     } catch {
       toast.error(t('blueprints.uploadInvalidJson'))
       return

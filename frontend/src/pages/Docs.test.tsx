@@ -41,48 +41,24 @@ describe('Docs page', () => {
     expect(link.getAttribute('href')).toBe('/api/blueprints/template')
   })
 
-  it('renders all expected sections (including the two examples)', async () => {
-    renderDocs()
-    for (const key of [
-      'intro',
-      'workflow',
-      'addServer',
-      'addBlueprintSteam',
-      'addBlueprintCustom',
-      'location',
-      'schema',
-      'runtime',
-      'ports',
-      'source',
-      'httpSecurity',
-      'mods',
-      'workshopActions',
-      'configPatches',
-      'import',
-      'exampleMinecraftVersion',
-      'exampleWine',
-    ]) {
-      expect(screen.getByTestId(`docs-section-${key}`)).toBeInTheDocument()
+  it('renders expected new structured sections', async () => {
+    const { container } = renderDocs()
+    for (const key of ['intro', 'quickstart', 'minimal', 'reference', 'howto', 'troubleshooting']) {
+      expect(container.querySelector(`#docs-${key}`)).toBeInTheDocument()
     }
   })
 
-  it('renders the TOC sidebar with anchor links per section', () => {
+  it('renders the TOC sidebar with anchor links', () => {
     renderDocs()
-    expect(screen.getByTestId('docs-toc')).toBeInTheDocument()
-    const intro = screen.getByTestId('docs-toc-intro') as HTMLAnchorElement
-    expect(intro.getAttribute('href')).toBe('#docs-intro')
-    const mcEx = screen.getByTestId('docs-toc-exampleMinecraftVersion') as HTMLAnchorElement
-    expect(mcEx.getAttribute('href')).toBe('#docs-exampleMinecraftVersion')
+    const links = screen.getAllByRole('link')
+    const introLink = links.find(l => l.getAttribute('href') === '#docs-intro')
+    expect(introLink).toBeDefined()
   })
 
-  it('renders the Minecraft and Wine example JSON code blocks', () => {
-    renderDocs()
-    const mc = screen.getByTestId('docs-section-exampleMinecraftVersion')
-    expect(mc.textContent).toContain('"id": "minecraft_paper_1_20_4"')
-    expect(mc.textContent).toContain('"VERSION": "1.20.4"')
-    const wine = screen.getByTestId('docs-section-exampleWine')
-    expect(wine.textContent).toContain('"id": "my_windows_server"')
-    expect(wine.textContent).toContain('WINEPREFIX')
+  it('renders the minimal example JSON code block', () => {
+    const { container } = renderDocs()
+    const minimalSection = container.querySelector('#docs-minimal')
+    expect(minimalSection?.textContent).toContain('"id": "minimal_server"')
   })
 
   it('links to the Blueprints page for upload / replace / delete', () => {

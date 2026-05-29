@@ -13,9 +13,10 @@ from pathlib import Path
 import pytest
 
 from blueprints.schema import (
-    EMPTY_TEMPLATE,
+    COMMENTED_TEMPLATE,
     Blueprint,
     BlueprintValidationError,
+    _strip_json_comments,
     load_blueprint_dict,
     load_blueprint_file,
 )
@@ -75,13 +76,14 @@ def test_minimal_blueprint_is_valid() -> None:
     assert bp.source.type.value == "steam"
 
 
-def test_empty_template_round_trip() -> None:
-    """Das Default-Template hat leere Strings — es darf NICHT validieren
-    (User soll bewusst Felder ausfuellen). Stattdessen testen wir, dass eine
-    minimal ausgefuellte Variante davon validiert."""
-    template = deepcopy(EMPTY_TEMPLATE)
-    with pytest.raises(BlueprintValidationError):
-        load_blueprint_dict(template)
+def test_commented_template_validates() -> None:
+    """Das ausgelieferte kommentierte Template muss, nach Entfernen der
+    Kommentare, ein gueltiges JSON und eine gueltige Blueprint sein."""
+    clean_json = _strip_json_comments(COMMENTED_TEMPLATE)
+    raw = json.loads(clean_json)
+    bp = load_blueprint_dict(raw)
+    assert bp.meta.id == "my_custom_server"
+    assert bp.runtime.image == "ubuntu:24.04"
 
 
 # ── Shell-Metas ───────────────────────────────────────────────────────────
@@ -254,10 +256,11 @@ def test_workshop_app_id_required_when_workshop_on() -> None:
 
 
 def test_template_is_valid_json() -> None:
-    # EMPTY_TEMPLATE muss zumindest serialisierbar sein.
-    payload = json.dumps(EMPTY_TEMPLATE)
+    # COMMENTED_TEMPLATE muss nach dem Strippen serialisierbar sein.
+    clean_json = _strip_json_comments(COMMENTED_TEMPLATE)
+    payload = json.loads(clean_json)
     assert "version" in payload
-    assert "modInjection" in payload
+    assert "modInjection" in payload["mods"]
 
 
 # ── Manual Upload ──────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from blueprints import (
     Blueprint,
     BlueprintValidationError,
-    EMPTY_TEMPLATE,
+    COMMENTED_TEMPLATE,
     get_registry,
     load_blueprint_dict,
     reload_registry,
@@ -72,8 +72,8 @@ def list_blueprints(
 def download_template(
     _user: User = Depends(get_current_user),
 ) -> Response:
-    """Liefert das Leer-Template als JSON-Download. Aktive Felder leer."""
-    body = json.dumps(EMPTY_TEMPLATE, indent=2, ensure_ascii=False) + "\n"
+    """Liefert das kommentierte Template als JSON-Download."""
+    body = COMMENTED_TEMPLATE
     return Response(
         content=body,
         media_type="application/json",
@@ -126,11 +126,15 @@ async def import_blueprint(
     - Ueberschreiben vorhandener Community-Blueprint ist erlaubt (Update-Workflow).
     """
     try:
-        raw = await request.json()
-    except json.JSONDecodeError as exc:
+        raw_bytes = await request.body()
+        raw_str = raw_bytes.decode("utf-8")
+        from blueprints.schema import _strip_json_comments
+        clean_str = _strip_json_comments(raw_str)
+        raw = json.loads(clean_str)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(
             status_code=400,
-            detail=f"Body ist kein gueltiges JSON: {exc.msg}",
+            detail=f"Body ist kein gueltiges JSON (oder falsches Encoding): {str(exc)}",
         ) from exc
 
     if not isinstance(raw, dict):
