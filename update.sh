@@ -408,20 +408,31 @@ if [[ -f "$PANEL_UNIT" ]] && grep -qE '^Environment="PATH=/opt/msm/backend/venv/
     ok "Panel-Service PATH erweitert"
 fi
 
-# ── Panel-Service reparieren: UFW-ReadWritePaths optional markieren ──
-# Manuelle Setups hatten ``ReadWritePaths=... /run/ufw.lock`` ohne Optional-
-# Praefix. Wenn UFW beim Service-Start die Lockdatei noch nicht erzeugt hat,
-# scheitert das systemd-Namespacing mit ``status=226/NAMESPACE`` und das
-# Panel landet in einer Restart-Schleife. ``-``-Praefix laesst systemd
-# fehlende Pfade still ueberspringen.
-GOOD_RWP="ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock"
-# Bekannte kaputte Variante (exakt wie auf Produktion beobachtet).
-BAD_RWP="ReadWritePaths=/opt/msm /etc/systemd/system /run/ufw /var/lib/ufw /etc/ufw /run/ufw.lock"
-if [[ -f "$PANEL_UNIT" ]] && grep -qF "$BAD_RWP" "$PANEL_UNIT"; then
-    log "Markiere UFW-ReadWritePaths als optional (verhindert status=226/NAMESPACE)..."
-    # grep -qF + Variablen-Quoting → sed-sicher (Pfade enthalten ``/``, kein
-    # regex-Special-Char; trotzdem benutzen wir ``|`` als Trennzeichen).
-    sed -i "s|${BAD_RWP}|${GOOD_RWP}|" "$PANEL_UNIT"
+# ── Panel-Service reparieren: UFW-ReadWritePaths optional markieren und -/run/run hinzufügen ──
+# Wenn UFW beim Service-Start die Lockdatei noch nicht erzeugt hat,
+# scheitert das systemd-Namespacing mit ``status=226/NAMESPACE``.
+# ``-``-Praefix laesst systemd fehlende Pfade still ueberspringen.
+# ``-/run/user`` wird fuer die Verbindung zum Rootless Docker Socket benoetigt.
+GOOD_RWP="ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user"
+BAD_RWP_1="ReadWritePaths=/opt/msm /etc/systemd/system /run/ufw /var/lib/ufw /etc/ufw /run/ufw.lock"
+BAD_RWP_2="ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock"
+
+UPDATED_RWP=false
+if [[ -f "$PANEL_UNIT" ]]; then
+    if grep -qF "$BAD_RWP_1" "$PANEL_UNIT"; then
+        sed -i "s|${BAD_RWP_1}|${GOOD_RWP}|" "$PANEL_UNIT"
+        UPDATED_RWP=true
+    elif grep -qF "$BAD_RWP_2" "$PANEL_UNIT"; then
+        sed -i "s|${BAD_RWP_2}|${GOOD_RWP}|" "$PANEL_UNIT"
+        UPDATED_RWP=true
+    elif ! grep -qF "-/run/user" "$PANEL_UNIT"; then
+        sed -i 's|^ReadWritePaths=\(.*\)|ReadWritePaths=\1 -/run/user|' "$PANEL_UNIT"
+        UPDATED_RWP=true
+    fi
+fi
+
+if $UPDATED_RWP; then
+    log "Aktualisiere ReadWritePaths des Panel-Services (füge -/run/user hinzu)..."
     if $SYSTEMD_AVAILABLE; then
         systemctl daemon-reload
     fi

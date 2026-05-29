@@ -1213,7 +1213,7 @@ ProtectHome=true
 # scheitert ``sudo ufw ...`` aus dem Backend. ``-``-Praefix => systemd
 # ueberspringt nicht existierende Pfade (z.B. ``/run/ufw.lock`` vor dem
 # ersten ufw-Aufruf) statt mit ``status=226/NAMESPACE`` zu crashen.
-ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock
+ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user
 
 [Install]
 WantedBy=multi-user.target
