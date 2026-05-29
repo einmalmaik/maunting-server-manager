@@ -21,6 +21,19 @@ interface BackupSettings {
   backup_retention_count: number;
 }
 
+interface BackupStatus {
+  active: boolean;
+  operation: "creating" | "restoring" | null;
+  started_at: string | null;
+  estimated_size_mb: number | null;
+}
+
+interface CreateBackupResponse {
+  message: string;
+  backup_id: number;
+  size_mb: number | null;
+}
+
 const INTERVAL_OPTIONS = [
   { value: 0, label: "Deaktiviert" },
   { value: 1, label: "Stündlich" },
@@ -49,7 +62,7 @@ export function Backups({ serverId }: BackupsProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<BackupSettings | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [backupStatus, setBackupStatus] = useState<any>(null);
+  const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const fetchBackups = async () => {
@@ -77,7 +90,7 @@ export function Backups({ serverId }: BackupsProps) {
   const fetchStatus = async () => {
     if (!serverId) return;
     try {
-      const s = await api<any>(`/backups/${serverId}/status?_t=${Date.now()}`);
+      const s = await api<BackupStatus>(`/backups/${serverId}/status?_t=${Date.now()}`);
       setBackupStatus(s);
     } catch {
       setBackupStatus(null);
@@ -95,7 +108,7 @@ export function Backups({ serverId }: BackupsProps) {
     if (!serverId) return;
     const interval = setInterval(async () => {
       try {
-        const s = await api<any>(`/backups/${serverId}/status?_t=${Date.now()}`);
+        const s = await api<BackupStatus>(`/backups/${serverId}/status?_t=${Date.now()}`);
         setBackupStatus(s);
       } catch {
         setBackupStatus(null);
@@ -132,17 +145,24 @@ export function Backups({ serverId }: BackupsProps) {
 
   // AUFGABE 3: Bei Ende (active true -> false) sofort fetchBackups (nicht auf Tick warten)
   // Backend-Completion-Event: Modal hier schließen statt mit Timeout
-  const prevActiveRef = useRef(false);
+  const prevStatusRef = useRef<{ active: boolean; operation: BackupStatus["operation"] }>({
+    active: false,
+    operation: null,
+  });
   useEffect(() => {
     const nowActive = !!backupStatus?.active;
-    if (prevActiveRef.current && !nowActive) {
+    if (prevStatusRef.current.active && !nowActive) {
       fetchBackups();
-      setShowCreateModal(false);
-      setBackupName("");
-      toast.success(t("backups.created", "Backup erfolgreich abgeschlossen"));
+      if (prevStatusRef.current.operation === "creating") {
+        setShowCreateModal(false);
+        setBackupName("");
+      }
     }
-    prevActiveRef.current = nowActive;
-  }, [backupStatus?.active, t]);
+    prevStatusRef.current = {
+      active: nowActive,
+      operation: backupStatus?.operation ?? null,
+    };
+  }, [backupStatus?.active, backupStatus?.operation]);
 
   // Cleanup pending create timeout on unmount (review Issue 9)
   useEffect(() => {
@@ -157,15 +177,18 @@ export function Backups({ serverId }: BackupsProps) {
   const createBackup = async () => {
     setActionLoading("create");
     try {
-      await api(`/backups/${serverId}`, {
+      await api<CreateBackupResponse>(`/backups/${serverId}`, {
         method: "POST",
         body: JSON.stringify({ name: backupName.trim() || null }),
       });
-      // Der Aufruf blockiert nicht (async Backend).
-      // actionLoading wird zurückgesetzt, aber das Modal bleibt offen, bis das Polling (Completion-Event) das Ende signalisiert.
+      toast.success(t("backups.created", "Backup erfolgreich abgeschlossen"));
+      setShowCreateModal(false);
+      setBackupName("");
+      await fetchBackups();
+      await fetchStatus();
       setActionLoading(null);
-    } catch (err: any) {
-      toast.error(err.message || t("common.error"));
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t("common.error"));
       setActionLoading(null);
     }
   };
@@ -176,8 +199,8 @@ export function Backups({ serverId }: BackupsProps) {
     try {
       await api(`/backups/${serverId}/restore/${backupId}`, { method: "POST" });
       toast.success(t("backups.restored"));
-    } catch (err: any) {
-      toast.error(err.message || t("common.error"));
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t("common.error"));
     } finally {
       setActionLoading(null);
     }
@@ -197,8 +220,8 @@ export function Backups({ serverId }: BackupsProps) {
       await api(`/backups/${serverId}/${backupId}`, { method: "DELETE" });
       toast.success(t("backups.deletedBackup"));
       fetchBackups();
-    } catch (err: any) {
-      toast.error(err.message || t("common.error"));
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t("common.error"));
     } finally {
       setActionLoading(null);
     }
@@ -213,8 +236,8 @@ export function Backups({ serverId }: BackupsProps) {
         body: JSON.stringify(settings),
       });
       toast.success(t("backups.settingsSaved", "Einstellungen gespeichert"));
-    } catch (err: any) {
-      toast.error(err.message || t("common.error"));
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t("common.error"));
     } finally {
       setSettingsSaving(false);
     }

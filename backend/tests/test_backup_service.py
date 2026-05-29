@@ -18,6 +18,7 @@ All tests use realistic mocks, tmp_path for FS isolation, and the project confte
 """
 
 import os
+import logging
 import subprocess
 import tempfile
 from pathlib import Path
@@ -170,6 +171,26 @@ class TestRunBackupCore:
 
         after2 = db.query(Backup).filter(Backup.server_id == test_server.id).count()
         assert after2 == before
+
+    def test_tar_failure_logs_are_redacted(self, db: Session, test_server: Server, tmp_path: Path, caplog):
+        """Security: tar/OS errors may contain host paths and must not be logged verbatim."""
+        from services.backup_service import run_backup
+
+        install = tmp_path / "install_redacted"
+        install.mkdir()
+        test_server.install_dir = str(install)
+        db.commit()
+
+        with patch("services.backup_service.os.makedirs"), \
+             patch("services.backup_service.subprocess.run") as subp, \
+             patch("services.backup_service.os.path.exists", return_value=False):
+            subp.side_effect = RuntimeError("/secret/install/path leaked by tool")
+            with caplog.at_level(logging.ERROR):
+                with pytest.raises(RuntimeError, match="Backup fehlgeschlagen"):
+                    run_backup(test_server.id, db, timeout_seconds=5)
+
+        assert "/secret" not in caplog.text
+        assert "leaked by tool" not in caplog.text
 
     def test_post_tar_db_or_retention_error_does_not_crash_and_is_logged(
         self, db: Session, test_server: Server, tmp_path: Path
@@ -442,6 +463,21 @@ class TestBackupsRouter:
             assert args[0] == test_server.id
             assert kwargs.get("timeout_seconds") == 300
 
+    def test_auto_backup_rejects_header_from_non_loopback_client(self, client, test_server, db):
+        """Security: Der interne Header allein reicht nicht, wenn der Request nicht lokal ist."""
+        test_server.backup_on_start = True
+        db.commit()
+
+        with patch("routers.backups.settings.debug", False), \
+             patch("services.backup_service.run_backup") as mock_run:
+            r = client.post(
+                f"/api/backups/{test_server.id}/auto",
+                headers={"X-MSM-Internal-Auto": "1"},
+            )
+
+        assert r.status_code == 403
+        mock_run.assert_not_called()
+
     def test_auto_backup_calls_service_and_graceful_on_error(self, client, test_server, db):
         test_server.backup_on_start = True
         db.commit()
@@ -534,14 +570,56 @@ class TestBackupsRouter:
         # Trigger Fehler im Extract-Block (nach move) → generische 500 ohne Leak
         with patch("services.docker_service.is_running", return_value=False), \
              patch("services.docker_service.remove"):
-            with patch("routers.backups.shutil.move"):
-                with patch("routers.backups.subprocess.run", side_effect=Exception("/secret/path/leak")):
-                    resp = client.post(f"/api/backups/{test_server.id}/restore/{b.id}", cookies=owner_cookies, headers={"X-CSRF-Token": csrf_token})
-                    assert resp.status_code == 500
-                    detail = resp.json()["detail"]
-                    assert "/secret" not in detail
-                    assert "leak" not in detail
-                    assert "Wiederherstellung fehlgeschlagen" in detail
+            with patch("routers.backups._safe_extract_backup_tar", side_effect=Exception("/secret/path/leak")):
+                resp = client.post(f"/api/backups/{test_server.id}/restore/{b.id}", cookies=owner_cookies, headers={"X-CSRF-Token": csrf_token})
+                assert resp.status_code == 500
+                detail = resp.json()["detail"]
+                assert "/secret" not in detail
+                assert "leak" not in detail
+                assert "Wiederherstellung fehlgeschlagen" in detail
+                db.refresh(test_server)
+                assert test_server.status == "error"
+                assert install.exists()
+
+    def test_restore_rejects_path_traversal_tar_without_touching_install_dir(
+        self, client, owner_user, owner_cookies, csrf_token, test_server, db, tmp_path
+    ):
+        """Security: Restore akzeptiert keine Tar-Member, die aus install_dir ausbrechen."""
+        import tarfile
+
+        _grant_permission(db, owner_user.id, test_server.id, "server.backups.restore")
+
+        install = tmp_path / "safe_install"
+        install.mkdir()
+        marker = install / "old.txt"
+        marker.write_text("keep")
+        test_server.install_dir = str(install)
+        db.commit()
+
+        bad_backup = tmp_path / "bad.tar.gz"
+        payload = tmp_path / "payload.txt"
+        payload.write_text("evil")
+        with tarfile.open(str(bad_backup), "w:gz") as tf:
+            tf.add(str(payload), arcname="../escape.txt")
+
+        b = Backup(server_id=test_server.id, filename=str(bad_backup), size_mb=1)
+        db.add(b)
+        db.commit()
+        db.refresh(b)
+
+        with patch("services.docker_service.is_running", return_value=False), \
+             patch("services.docker_service.remove"):
+            resp = client.post(
+                f"/api/backups/{test_server.id}/restore/{b.id}",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert resp.status_code == 500
+        assert marker.exists()
+        assert not (tmp_path / "escape.txt").exists()
+        db.refresh(test_server)
+        assert test_server.status == "error"
 
     def test_delete_backup_deletes_file_and_record_graceful_when_file_already_gone(
         self, client, owner_cookies, csrf_token, test_server, db, tmp_path

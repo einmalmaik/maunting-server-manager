@@ -70,7 +70,6 @@ def run_backup(
     filepath = os.path.join(backup_dir, filename)
 
     # Tar ausführen (voller install_dir, .tar.gz, -C . für relative Pfade)
-    tar_ok = False
     try:
         set_active_backup_status(server_id, "creating", est)
         subprocess.run(
@@ -83,7 +82,6 @@ def run_backup(
                 "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             },
         )
-        tar_ok = True
         size_mb = os.path.getsize(filepath) // (1024 * 1024)
     except subprocess.TimeoutExpired as e:
         if os.path.exists(filepath):
@@ -91,12 +89,7 @@ def run_backup(
                 os.remove(filepath)
             except OSError:
                 pass
-        logger.error(
-            "Backup-Timeout für Server %s nach %ss: %s",
-            server_id,
-            timeout_seconds,
-            e,
-        )
+        logger.error("Backup-Timeout für Server %s nach %ss", server_id, timeout_seconds)
         clear_active_backup_status(server_id)
         raise RuntimeError(
             f"Backup fehlgeschlagen (Timeout nach {timeout_seconds}s)"
@@ -107,9 +100,9 @@ def run_backup(
                 os.remove(filepath)
             except OSError:
                 pass
-        logger.error("Backup fehlgeschlagen für Server %s: %s", server_id, e)
+        logger.error("Backup fehlgeschlagen für Server %s (details redacted for security)", server_id)
         clear_active_backup_status(server_id)
-        raise RuntimeError(f"Backup fehlgeschlagen: {e}") from e
+        raise RuntimeError("Backup fehlgeschlagen") from e
 
     # DB + Retention nach erfolgreichem Tar. Bei DB-Fehler: Best-Effort Cleanup der Tar-Datei
     # (verhindert Orphan .tar.gz ohne Record). Kein volles 2PC (KISS, keine neue Komplexität).
@@ -126,12 +119,11 @@ def run_backup(
 
         try:
             cleanup_old_backups(server_id, db, keep=server.backup_retention_count)
-        except Exception as e:
+        except Exception:
             logger.warning(
-                "Retention-Cleanup nach Backup %s (Server %s) fehlgeschlagen: %s",
+                "Retention-Cleanup nach Backup %s (Server %s) fehlgeschlagen",
                 backup.id,
                 server_id,
-                e,
             )
     except Exception as e:
         # Post-tar DB/Retention Fehler → Tar entfernen, um Orphan zu vermeiden
@@ -140,9 +132,9 @@ def run_backup(
                 os.remove(filepath)
             except OSError:
                 pass
-        logger.error("Backup DB/Retention fehlgeschlagen für Server %s (Tar bereinigt): %s", server_id, e)
+        logger.error("Backup DB/Retention fehlgeschlagen für Server %s (Tar bereinigt, details redacted for security)", server_id)
         clear_active_backup_status(server_id)
-        raise RuntimeError(f"Backup fehlgeschlagen: {e}") from e
+        raise RuntimeError("Backup fehlgeschlagen") from e
 
     # Nur nicht-sensible IDs + Metadaten loggen (kein full filepath / server.name im INFO-Log)
     logger.debug("Backup DB record created id=%s server=%s", backup.id, server_id)

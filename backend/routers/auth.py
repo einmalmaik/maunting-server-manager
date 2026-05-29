@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import uuid
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
@@ -22,6 +23,13 @@ from services.permission_catalog import SYSTEM_ROLE_USER
 from services.role_service import get_role_by_name
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+logger = logging.getLogger(__name__)
+
+
+def _log_smtp_missing(email: str) -> None:
+    logger.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s nicht versendet.", email)
 
 
 @router.get("/setup-status")
@@ -48,8 +56,7 @@ async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> 
     if EmailService.is_configured():
         await EmailService.send_verification_code_email(req.email, req.username, code)
     else:
-        import logging
-        logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", req.email, code)
+        _log_smtp_missing(req.email)
         # Setup-User und Verifikationseintrag wieder entfernen
         db.query(EmailVerification).filter(EmailVerification.email == req.email).delete()
         db.delete(user)
@@ -89,8 +96,7 @@ async def setup_resend(req: OwnerSetupRequest, db: Session = Depends(get_db)) ->
     if EmailService.is_configured():
         await EmailService.send_verification_code_email(req.email, user.username, code)
     else:
-        import logging
-        logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", req.email, code)
+        _log_smtp_missing(req.email)
         raise HTTPException(
             status_code=503,
             detail="SMTP nicht konfiguriert. Verifikation nicht moeglich."
@@ -110,8 +116,7 @@ async def resend_verification(req: ResendVerificationRequest, db: Session = Depe
     if EmailService.is_configured():
         await EmailService.send_verification_code_email(req.email, user.username, code)
     else:
-        import logging
-        logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", req.email, code)
+        _log_smtp_missing(req.email)
         raise HTTPException(
             status_code=503,
             detail="SMTP nicht konfiguriert. Verifikation nicht moeglich."
@@ -138,8 +143,7 @@ async def register(req: UserCreate, db: Session = Depends(get_db)) -> User:
     if EmailService.is_configured():
         await EmailService.send_verification_code_email(user.email, user.username, code)
     else:
-        import logging
-        logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", user.email, code)
+        _log_smtp_missing(user.email)
         
     return user
 
@@ -164,8 +168,7 @@ async def login(
         if EmailService.is_configured():
             await EmailService.send_verification_code_email(user.email, user.username, code)
         else:
-            import logging
-            logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", user.email, code)
+            _log_smtp_missing(user.email)
         return {"access_token": "", "token_type": "", "requires_2fa": False, "requires_verification": True, "email": user.email}
 
     if user.two_factor_enabled:

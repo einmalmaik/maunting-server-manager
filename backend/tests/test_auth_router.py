@@ -1,4 +1,7 @@
 """Tests for auth router: login, logout, refresh, CSRF, cookies."""
+import logging
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -194,6 +197,24 @@ class TestSetupVerification:
         # Ohne SMTP ist der Status 503 mit Code im Detail
         # 201 = Owner wurde erfolgreich angelegt (neuer Flow)
         assert response.status_code in (200, 201, 503)
+
+    def test_setup_does_not_log_verification_code_when_smtp_missing(
+        self, client: TestClient, db: Session, caplog
+    ):
+        db.query(User).delete()
+        db.commit()
+
+        with patch("routers.auth.EmailVerificationService.create_verification", return_value="123456"), \
+             caplog.at_level(logging.WARNING):
+            response = client.post("/api/auth/setup", json={
+                "username": "nologowner",
+                "email": "nolog@test.de",
+                "password": "SetupPass123!",
+            })
+
+        assert response.status_code == 503
+        assert "123456" not in caplog.text
+        assert "nicht versendet" in caplog.text
 
     def test_setup_verify_with_wrong_code_fails(self, client: TestClient, db: Session):
         from services.auth_service import AuthService
