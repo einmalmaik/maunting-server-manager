@@ -175,7 +175,7 @@ def browse_directory(
                 # Einzelne Eintraege ohne Leserechte ueberspringen, Rest anzeigen
                 continue
     except PermissionError:
-        raise HTTPException(status_code=403, detail="Keine Berechtigung fuer dieses Verzeichnis")
+        raise HTTPException(status_code=403, detail="Keine Berechtigung für dieses Verzeichnis")
 
     return {"path": path, "entries": entries, "exists": True}
 
@@ -310,7 +310,7 @@ async def upload_file(
                     raise HTTPException(
                         status_code=413,
                         detail=(
-                            f"Datei zu gross fuer Direkt-Upload (max {MAX_UPLOAD_SIZE // (1024*1024)} MB) "
+                            f"Datei zu gross für Direkt-Upload (max {MAX_UPLOAD_SIZE // (1024*1024)} MB) "
                             "— bitte den resumable Upload verwenden."
                         ),
                     )

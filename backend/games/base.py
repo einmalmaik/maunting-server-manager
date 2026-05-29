@@ -273,9 +273,10 @@ def run_steamcmd_install(
     _append_console_log(server_id, f"[MSM] SteamCMD startet für App {app_id} (Docker)\n")
 
     uid, gid = docker_service.host_uid_gid()
+    chown_uid, chown_gid = (0, 0) if docker_service.is_rootless() else (uid, gid)
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
-        command=_build_steamcmd_bash_command(steam_args, uid, gid),
+        command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         # Explizit Container-Root: das `:root`-Image hat /home/steam Mode 700
         # für den steam-User. Files werden im bash-Wrapper nach dem Run auf
@@ -347,9 +348,10 @@ def run_steamcmd_workshop_download(
         server_id, f"[MSM] SteamCMD Workshop-Download: app={workshop_app_id} item={workshop_item_id}\n"
     )
     uid, gid = docker_service.host_uid_gid()
+    chown_uid, chown_gid = (0, 0) if docker_service.is_rootless() else (uid, gid)
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
-        command=_build_steamcmd_bash_command(steam_args, uid, gid),
+        command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         user="0:0",
         cap_adds=STEAMCMD_CAPS,
@@ -772,6 +774,7 @@ class GamePlugin(ABC):
             )
 
         uid, gid = docker_service.host_uid_gid()
+        run_user = "0:0" if docker_service.is_rootless() else f"{uid}:{gid}"
         name = container_name_for(server.id)
 
         result = docker_service.run_container(
@@ -783,7 +786,7 @@ class GamePlugin(ABC):
             volumes=self.build_volume_binds(server),
             cpu_limit_percent=server.cpu_limit_percent,
             ram_limit_mb=server.ram_limit_mb,
-            user=f"{uid}:{gid}",
+            user=run_user,
             workdir=self.container_workdir(server),
             read_only_rootfs=self.container_read_only_rootfs,
             tmpfs_paths=self.container_tmpfs_paths(server),

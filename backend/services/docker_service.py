@@ -646,3 +646,10 @@ def host_uid_gid() -> tuple[int, int]:
     if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
         return 0, 0
     return os.getuid(), os.getgid()
+
+
+def is_rootless() -> bool:
+    """True, wenn wir Rootless Docker nutzen (Erkennung anhand des Host-Prozesses)."""
+    if not hasattr(os, "getuid"):
+        return False
+    return os.getuid() != 0
