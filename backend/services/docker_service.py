@@ -141,8 +141,8 @@ def _get_client(force: bool = False) -> tuple[Any | None, str | None]:
     try:
         _CLIENT = docker.DockerClient(base_url=host)
         return _CLIENT, None
-    except (DockerException, OSError):
-        logger.warning("Docker SDK client creation failed")
+    except (DockerException, OSError) as exc:
+        logger.warning("Docker SDK client creation failed: %s", exc)
         return None, ROOTLESS_DOCKER_ERROR
 
 
