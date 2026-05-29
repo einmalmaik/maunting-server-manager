@@ -52,9 +52,10 @@ _DOCKER_AVAILABLE: bool | None = None
 
 
 class _ImageUnavailable(RuntimeError):
-    def __init__(self, image: str) -> None:
+    def __init__(self, image: str, pull_error: str | None = None) -> None:
         self.image = image
-        super().__init__(f"Docker-Image nicht verfügbar: {image}")
+        suffix = f" (Pull fehlgeschlagen: {pull_error})" if pull_error else ""
+        super().__init__(f"Docker-Image nicht verfügbar: {image}{suffix}")
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,32 @@ def _safe_error(exc: BaseException) -> str:
         return "Zeitueberschreitung bei der Kommunikation mit dem Docker Daemon"
         
     return "Systemfehler bei Container-Operation"
+
+
+def _safe_pull_error(exc: BaseException) -> str:
+    text = str(exc).strip()
+    if not text:
+        return "Docker Pull fehlgeschlagen"
+
+    text_lower = text.lower()
+    if "no such host" in text_lower or "temporary failure in name resolution" in text_lower:
+        return "Registry/DNS nicht erreichbar"
+    if "connection refused" in text_lower or "connection reset" in text_lower:
+        return "Registry-Verbindung abgelehnt oder unterbrochen"
+    if "timeout" in text_lower or "i/o timeout" in text_lower or "context deadline exceeded" in text_lower:
+        return "Zeitueberschreitung beim Registry-Zugriff"
+    if "certificate" in text_lower or "x509" in text_lower:
+        return "TLS/Zertifikatsfehler beim Registry-Zugriff"
+    if "unauthorized" in text_lower or "authentication required" in text_lower:
+        return "Registry-Authentifizierung erforderlich"
+    if "denied" in text_lower or "insufficient_scope" in text_lower:
+        return "Registry-Zugriff verweigert"
+    if "manifest unknown" in text_lower or "not found" in text_lower:
+        return "Image oder Tag in der Registry nicht gefunden"
+    if "toomanyrequests" in text_lower or "rate limit" in text_lower:
+        return "Registry-Rate-Limit erreicht"
+
+    return text[:240]
 
 
 def _get_client(force: bool = False) -> tuple[Any | None, str | None]:
@@ -222,16 +249,18 @@ def _tmpfs_dict(tmpfs_paths: list[str] | None) -> dict[str, str] | None:
 
 
 def _ensure_image_available(client: Any, image: str) -> None:
+    pull_error = None
     try:
         client.images.pull(image, auth_config={})
         return
-    except (DockerException, OSError):
-        pass
+    except (DockerException, OSError) as exc:
+        pull_error = _safe_pull_error(exc)
+        logger.warning("docker image pull failed for %s: %s", image, pull_error)
 
     try:
         client.images.get(image)
     except (ImageNotFound, NotFound, DockerException, OSError) as exc:
-        raise _ImageUnavailable(image) from exc
+        raise _ImageUnavailable(image, pull_error) from exc
 
 
 def is_available() -> bool:
@@ -247,8 +276,9 @@ def pull(image: str) -> dict:
         client.images.pull(image, auth_config={})
         return {"ok": True, "stdout": "", "stderr": ""}
     except (DockerException, OSError) as exc:
-        logger.warning("docker pull failed")
-        return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
+        pull_error = _safe_pull_error(exc)
+        logger.warning("docker pull failed for %s: %s", image, pull_error)
+        return {"ok": False, "error": f"Docker Pull fehlgeschlagen: {pull_error}", "stdout": "", "stderr": ""}
 
 
 def exists(name: str) -> bool:

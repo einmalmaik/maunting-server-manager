@@ -45,6 +45,22 @@ class TestDockerHost:
         with patch.object(docker_service.settings, "docker_host", "unix:///run/user/1001/docker.sock"):
             assert docker_service.resolve_docker_host() == "unix:///run/user/1001/docker.sock"
 
+    def test_pull_reports_registry_failure_cause(self):
+        client = MagicMock()
+        client.images.pull.side_effect = docker_service.DockerException(
+            "Get https://ghcr.io/v2/: dial tcp: lookup ghcr.io: no such host"
+        )
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:wine_staging")
+
+        assert result == {
+            "ok": False,
+            "error": "Docker Pull fehlgeschlagen: Registry/DNS nicht erreichbar",
+            "stdout": "",
+            "stderr": "",
+        }
+
 
 class TestRunContainer:
     def test_builds_hardened_sdk_call(self):
@@ -127,7 +143,12 @@ class TestRunContainer:
                 volumes=[],
             )
 
-        assert result == {"ok": False, "error": f"Docker-Image nicht verfügbar: {image}", "stdout": "", "stderr": ""}
+        assert result == {
+            "ok": False,
+            "error": f"Docker-Image nicht verfügbar: {image} (Pull fehlgeschlagen: registry offline)",
+            "stdout": "",
+            "stderr": "",
+        }
         client.containers.get.assert_not_called()
         client.containers.run.assert_not_called()
         existing.remove.assert_not_called()
@@ -277,8 +298,35 @@ class TestEphemeralRun:
                 env={},
             )
 
-        assert result == {"ok": False, "error": f"Docker-Image nicht verfügbar: {image}", "stdout": "", "stderr": ""}
+        assert result == {
+            "ok": False,
+            "error": f"Docker-Image nicht verfügbar: {image} (Pull fehlgeschlagen: registry offline)",
+            "stdout": "",
+            "stderr": "",
+        }
         client.containers.run.assert_not_called()
+
+    def test_unavailable_image_classifies_pull_auth_failure(self):
+        client = MagicMock()
+        image = "ghcr.io/ptero-eggs/yolks:wine_staging"
+        client.images.pull.side_effect = docker_service.DockerException("unauthorized: authentication required")
+        client.images.get.side_effect = docker_service.NotFound("missing image")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image=image,
+                command=["x"],
+                env={},
+                volumes=[],
+            )
+
+        assert result == {
+            "ok": False,
+            "error": f"Docker-Image nicht verfügbar: {image} (Pull fehlgeschlagen: Registry-Authentifizierung erforderlich)",
+            "stdout": "",
+            "stderr": "",
+        }
 
     def test_ephemeral_run_failure_preserves_stdout_stderr(self):
         client = MagicMock()
