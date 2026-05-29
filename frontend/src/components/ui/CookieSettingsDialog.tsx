@@ -57,7 +57,15 @@ export function CookieSettingsDialog({
                                 </ul>
                             </div>
                         </div>
-                        <input type="checkbox" checked disabled className="mt-2 w-5 h-5 accent-primary opacity-50" />
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked="true"
+                            disabled
+                            className="relative inline-flex h-5 w-9 shrink-0 items-center justify-center rounded-full border-2 border-transparent transition-colors mt-2 bg-primary opacity-50 cursor-not-allowed"
+                        >
+                            <span className="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform translate-x-4" />
+                        </button>
                     </div>
 
                     <div className="h-px w-full bg-border/50" />
@@ -78,7 +86,15 @@ export function CookieSettingsDialog({
                                 </ul>
                             </div>
                         </div>
-                        <input type="checkbox" checked={optional} onChange={(e) => onOptionalChange(e.target.checked)} className="mt-2 w-5 h-5 accent-primary cursor-pointer" />
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={optional}
+                            onClick={() => onOptionalChange(!optional)}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors mt-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${optional ? 'bg-primary' : 'bg-surface-variant'}`}
+                        >
+                            <span className={`pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${optional ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </button>
                     </div>
 
                     <div className="h-px w-full bg-border/50" />
@@ -104,7 +120,15 @@ export function CookieSettingsDialog({
                                 </ul>
                             </div>
                         </div>
-                        <input type="checkbox" checked={false} disabled className="mt-2 w-5 h-5 accent-primary opacity-50" />
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked="false"
+                            disabled
+                            className="relative inline-flex h-5 w-9 shrink-0 items-center justify-center rounded-full border-2 border-transparent transition-colors mt-2 bg-surface-variant opacity-50 cursor-not-allowed"
+                        >
+                            <span className="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform translate-x-0" />
+                        </button>
                     </div>
                 </div>
 
