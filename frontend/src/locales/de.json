@@ -34,6 +34,15 @@
     "deleteConfirm": "Löschen",
     "deleteSuccess": "Blueprint „{{id}}\" gelöscht.",
     "deleteFailed": "Löschen fehlgeschlagen.",
+    "search": "Blueprint suchen …",
+    "filterAll": "Alle",
+    "filterNative": "Nativ",
+    "filterCommunity": "Community",
+    "filterCategory": "Kategorie",
+    "noResults": "Keine Blueprints gefunden.",
+    "tagSteam": "Steam",
+    "tagHttp": "HTTP",
+    "tagDocker": "Docker",
     "columns": {
       "name": "Name",
       "id": "ID",
@@ -286,6 +295,17 @@
     "supportedGames": "Unterstützte Spiele",
     "system": "Systemstatus",
     "allSystemsOperational": "Alle Systeme funktionsfähig",
+    "systemDegraded": "Eingeschränkt – optionale Komponente fehlt",
+    "systemError": "Fehler – kritische Komponente nicht erreichbar",
+    "systemChecking": "Prüfe Systemstatus …",
+    "systemServices": {
+      "docker": "Docker",
+      "caddy": "Caddy",
+      "database": "Datenbank"
+    },
+    "statusOk": "OK",
+    "statusDegraded": "Eingeschränkt",
+    "statusError": "Fehler",
     "noServers": "Keine Server vorhanden",
     "createFirstServer": "Erstelle deinen ersten Server, um loszulegen.",
     "createServer": "Server erstellen"
