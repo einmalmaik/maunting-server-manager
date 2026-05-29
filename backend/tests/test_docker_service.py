@@ -61,6 +61,23 @@ class TestDockerHost:
             "stderr": "",
         }
 
+    def test_pull_reports_platform_manifest_mismatch_before_not_found(self):
+        client = MagicMock()
+        client.images.pull.side_effect = docker_service.DockerException(
+            "no matching manifest for linux/arm64 in the manifest list entries: "
+            "no match for platform in manifest: not found"
+        )
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:wine_staging")
+
+        assert result == {
+            "ok": False,
+            "error": "Docker Pull fehlgeschlagen: Image existiert, aber nicht fuer die Docker-Host-Plattform",
+            "stdout": "",
+            "stderr": "",
+        }
+
 
 class TestRunContainer:
     def test_builds_hardened_sdk_call(self):

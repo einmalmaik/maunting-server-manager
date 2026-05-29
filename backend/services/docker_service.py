@@ -153,6 +153,8 @@ def _safe_pull_error(exc: BaseException) -> str:
         return "Registry-Authentifizierung erforderlich"
     if "denied" in text_lower or "insufficient_scope" in text_lower:
         return "Registry-Zugriff verweigert"
+    if "no matching manifest" in text_lower or "no match for platform" in text_lower:
+        return "Image existiert, aber nicht fuer die Docker-Host-Plattform"
     if "manifest unknown" in text_lower or "not found" in text_lower:
         return "Image oder Tag in der Registry nicht gefunden"
     if "toomanyrequests" in text_lower or "rate limit" in text_lower:
