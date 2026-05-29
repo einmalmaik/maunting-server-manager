@@ -10,7 +10,7 @@ import { api } from '@/api/client'
 export function Topbar() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
-  const { user, logout } = useAuthStore()
+  const { user, logout, updateUser } = useAuthStore()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const request = useConfirmStore(s => s.request)
@@ -48,10 +48,8 @@ export function Topbar() {
     if (isConfirmed) {
       try {
         await api(`/auth/me/notifications?enabled=${next}`, { method: 'PATCH' })
-        // We update the local state manually or let SWR revalidate. 
-        // Since we removed updateUser, we might just reload the window or wait for SWR.
-        // Actually, without updateUser, let's just reload to keep it KISS.
-        window.location.reload()
+        // Optimistisches State-Update: kein Reload, kein MIME-Problem.
+        updateUser({ email_notifications: next })
       } catch (err: any) {
         console.error(err)
       }
