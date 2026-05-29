@@ -40,7 +40,6 @@ export function Topbar() {
     const next = user.email_notifications === false ? true : false
     
     const isConfirmed = await request({
-       title: next ? t('notifications.enable') : t('notifications.disable'),
        message: next ? t('notifications.enableConfirm') : t('notifications.disableConfirm'),
        confirmText: next ? t('notifications.enable') : t('notifications.disable'),
        danger: !next
@@ -90,7 +89,7 @@ export function Topbar() {
           <button
             onClick={handleBellClick}
             title="Benachrichtigungen"
-            className="p-2 rounded-full transition-colors active:scale-95 relative text-on-surface-variant hover:text-primary hover:bg-surface-variant/50"
+            className={`p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 ${user?.email_notifications === false ? 'text-status-error hover:text-status-error' : 'text-on-surface-variant hover:text-primary'}`}
           >
             <Bell className="w-[18px] h-[18px]" />
           </button>
