@@ -92,6 +92,7 @@ class BlueprintPlugin(GamePlugin):
                 # Reinstall-Schutz (manuelle .cfg/.ini etc.): Cache vor, Restore nach.
                 # Frische Install: 0 Dateien → No-Op. Nutzt zentrale Helper aus updater.py.
                 from games.updater import perform_install_with_protection
+                platform_str = bp.source.steam.platform.value if bp.source.steam.platform else None
                 result = perform_install_with_protection(
                     server,
                     lambda: run_steamcmd_install(
@@ -99,6 +100,7 @@ class BlueprintPlugin(GamePlugin):
                         install_dir=install_dir,
                         app_id=app_id,
                         use_authenticated_login=requires_login,
+                        platform=platform_str,
                     ),
                     blueprint=bp,
                 )

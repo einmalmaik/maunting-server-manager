@@ -232,6 +232,7 @@ def run_steamcmd_install(
     app_id: str,
     extra_args: list[str] | None = None,
     use_authenticated_login: bool = False,
+    platform: str | None = None,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
@@ -257,11 +258,14 @@ def run_steamcmd_install(
     else:
         login_args = ["+login", "anonymous"]
 
-    steam_args: list[str] = [
+    steam_args: list[str] = []
+    if platform:
+        steam_args.extend(["+@sSteamCmdForcePlatformType", platform])
+    steam_args.extend([
         "+force_install_dir", CONTAINER_DATA_DIR,
         *login_args,
         "+app_update", app_id, "validate",
-    ]
+    ])
     if extra_args:
         steam_args.extend(extra_args)
     steam_args.append("+quit")

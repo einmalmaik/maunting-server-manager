@@ -32,7 +32,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
     Passwoerter und API-Keys werden maskiert zurueckgegeben.
     """
     all_db = PanelSettingsService.get_all()
-    steam_key = settings.steam_api_key or os.getenv("STEAM_API_KEY", "")
+    steam_key = settings.steam_api_key or os.getenv("MSM_STEAM_API_KEY", "") or os.getenv("STEAM_API_KEY", "")
     return {
         "panel_url": all_db.get("panel_url", ""),
         "smtp_host": all_db.get("smtp_host", ""),
@@ -183,12 +183,13 @@ def update_steam_key(
         raise HTTPException(status_code=400, detail="Ungueltiger Steam API-Key")
 
     try:
-        _update_env_file("STEAM_API_KEY", key)
+        _update_env_file("MSM_STEAM_API_KEY", key)
     except OSError as e:
         raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
 
     # Update in-memory for immediate effect
     settings.__dict__["steam_api_key"] = key
+    os.environ["MSM_STEAM_API_KEY"] = key
     os.environ["STEAM_API_KEY"] = key
 
     return {"message": "Steam API-Key gespeichert"}
@@ -224,7 +225,7 @@ async def test_steam_key(
     """Tests whether the configured Steam API key is valid."""
     import httpx
 
-    key = settings.steam_api_key or os.getenv("STEAM_API_KEY", "")
+    key = settings.steam_api_key or os.getenv("MSM_STEAM_API_KEY", "") or os.getenv("STEAM_API_KEY", "")
     if not key:
         raise HTTPException(status_code=400, detail="Kein Steam API-Key konfiguriert")
 
