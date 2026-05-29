@@ -10,8 +10,35 @@ interface Props {
 }
 
 type LineTone = 'error' | 'warn' | 'success' | 'info' | 'default'
+type ConsoleLogLine = {
+  seq: number
+  text: string
+}
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g
+const MAX_LOG_LINES = 2000
+
+function clearMarkerKey(serverId: number): string {
+  return `msm.console.clearThrough.${serverId}`
+}
+
+function readClearMarker(serverId: number): number {
+  try {
+    const raw = window.localStorage.getItem(clearMarkerKey(serverId))
+    const parsed = raw ? Number.parseInt(raw, 10) : 0
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+  } catch {
+    return 0
+  }
+}
+
+function writeClearMarker(serverId: number, seq: number): void {
+  try {
+    window.localStorage.setItem(clearMarkerKey(serverId), String(seq))
+  } catch {
+    // Private mode / quota issues should not break console use.
+  }
+}
 
 // ZENTRALE Mapping-Funktion für Farbkodierung (KISS + wartbar).
 // Alle Regex-Patterns AN EINER STELLE. Verwendet existierende Design-Token-Klassen
@@ -46,6 +73,31 @@ export function colorizeOutput(line: string): string {
   return LINE_CLASS[tone]
 }
 
+export function displayConsoleLine(line: string, language: string): string {
+  const cleaned = cleanLine(line)
+  if (!language.toLowerCase().startsWith('en') || !cleaned.startsWith('[MSM]')) {
+    return cleaned
+  }
+
+  const replacements: Array<[RegExp, string | ((match: RegExpMatchArray) => string)]> = [
+    [/^\[MSM\] Hinweis: Pull für (.+) fehlgeschlagen, nutze lokales Image$/, (m) => `[MSM] Notice: Pull for ${m[1]} failed, using local image`],
+    [/^\[MSM\] Container (.+) gestartet$/, (m) => `[MSM] Container ${m[1]} started`],
+    [/^\[MSM\] Container (.+) gestoppt$/, (m) => `[MSM] Container ${m[1]} stopped`],
+    [/^\[MSM\] Container-Start fehlgeschlagen: (.+)$/, (m) => `[MSM] Container start failed: ${m[1]}`],
+    [/^\[MSM\] SteamCMD startet für App (.+) \(Docker\)$/, (m) => `[MSM] SteamCMD starting for app ${m[1]} (Docker)`],
+    [/^\[MSM\] SteamCMD abgeschlossen \(App (.+)\)\.$/, (m) => `[MSM] SteamCMD completed (app ${m[1]}).`],
+    [/^\[MSM\] SteamCMD fehlgeschlagen: (.+)$/, (m) => `[MSM] SteamCMD failed: ${m[1]}`],
+    [/^\[MSM\] Rootless Docker Daemon not running for user msm - Live-Container-Logs deaktiviert\.$/, '[MSM] Rootless Docker Daemon not running for user msm - live container logs disabled.'],
+  ]
+
+  for (const [pattern, replacement] of replacements) {
+    const match = cleaned.match(pattern)
+    if (!match) continue
+    return typeof replacement === 'function' ? replacement(match) : replacement
+  }
+  return cleaned
+}
+
 /** Server-Konsole als eigener Tab.
  *
  *  - **Direktanzeige ohne Reload:** Live-Stream (EventSource) startet sofort beim Mount
@@ -57,34 +109,43 @@ export function colorizeOutput(line: string): string {
  *  - Farbkodierung wartbar zentral (keine verteilte Einzellogik).
  */
 export function ServerConsolePanel({ serverId }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('server.console.write', serverId)
-  const [logs, setLogs] = useState<string[]>([])
-  const [hideAbove, setHideAbove] = useState(0)
+  const [logs, setLogs] = useState<ConsoleLogLine[]>([])
+  const [hiddenThrough, setHiddenThrough] = useState(() => readClearMarker(serverId))
   const [inputValue, setInputValue] = useState('')
   const [sending, setSending] = useState(false)
+  const nextSeqRef = useRef(0)
+  const bufferRef = useRef<string[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    nextSeqRef.current = 0
+    bufferRef.current = []
+    setLogs([])
+    setHiddenThrough(readClearMarker(serverId))
+
     // EventSource sendet automatisch Cookies (same-origin) und reconnectet bei
     // Netzwerk-Aussetzern. Keine zusaetzliche Polling-Logik noetig.
     const url = `/api/servers/${serverId}/console/stream`
     const es = new EventSource(url)
     
     // BATCHING FIX: UI-Freeze verhindern
-    let buffer: string[] = []
-    
     es.onmessage = (ev) => {
-      buffer.push(ev.data)
+      bufferRef.current.push(ev.data)
     }
     
     const flushInterval = setInterval(() => {
-      if (buffer.length > 0) {
-        const toFlush = buffer
-        buffer = []
+      if (bufferRef.current.length > 0) {
+        const toFlush = bufferRef.current
+        bufferRef.current = []
         setLogs((prev) => {
-          const next = [...prev, ...toFlush]
-          return next.length > 2000 ? next.slice(-2000) : next
+          const mapped = toFlush.map((text) => {
+            nextSeqRef.current += 1
+            return { seq: nextSeqRef.current, text }
+          })
+          const next = [...prev, ...mapped]
+          return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
         })
       }
     }, 50) // Alle 50ms gebatcht in den React-State flushen
@@ -99,8 +160,8 @@ export function ServerConsolePanel({ serverId }: Props) {
   }, [serverId])
 
   const visibleLogs = useMemo(
-    () => logs.slice(hideAbove),
-    [logs, hideAbove],
+    () => logs.filter((line) => line.seq > hiddenThrough),
+    [logs, hiddenThrough],
   )
 
   useEffect(() => {
@@ -129,6 +190,13 @@ export function ServerConsolePanel({ serverId }: Props) {
     }
   }
 
+  const clearConsole = () => {
+    bufferRef.current = []
+    const seq = nextSeqRef.current
+    setHiddenThrough(seq)
+    writeClearMarker(serverId, seq)
+  }
+
   return (
     <div className="msm-card">
       <div className="p-5 border-b border-outline flex items-center justify-between gap-3 flex-wrap">
@@ -137,7 +205,7 @@ export function ServerConsolePanel({ serverId }: Props) {
           <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
         </div>
         <button
-          onClick={() => setHideAbove(logs.length)}
+          onClick={clearConsole}
           className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
           title={t('servers.consoleClearTitle')}
         >
@@ -154,8 +222,8 @@ export function ServerConsolePanel({ serverId }: Props) {
             <span className="text-on-surface-variant">{t('servers.noLogs')}</span>
           ) : (
             visibleLogs.map((line, i) => (
-              <div key={i} className={colorizeOutput(line)}>
-                {cleanLine(line) || '\u00A0'}
+              <div key={`${line.seq}-${i}`} className={colorizeOutput(line.text)}>
+                {displayConsoleLine(line.text, i18n.language) || '\u00A0'}
               </div>
             ))
           )}

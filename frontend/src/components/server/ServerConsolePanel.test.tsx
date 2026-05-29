@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { ServerConsolePanel } from './ServerConsolePanel'
+import { displayConsoleLine, ServerConsolePanel } from './ServerConsolePanel'
 import i18n from '@/i18n'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useToastStore } from '@/stores/toastStore'
@@ -63,6 +63,7 @@ describe('ServerConsolePanel', () => {
     i18n.changeLanguage('en')
     setMe(null)
     useToastStore.setState({ toasts: [] })
+    localStorage.clear()
     FakeEventSource.instances = []
     originalEventSource = (globalThis as { EventSource?: typeof EventSource }).EventSource
     ;(globalThis as { EventSource?: unknown }).EventSource = FakeEventSource as unknown as typeof EventSource
@@ -128,6 +129,60 @@ describe('ServerConsolePanel', () => {
       expect(screen.getByText('Starting server...')).toBeInTheDocument()
       expect(screen.getByText('Listening on port 25565')).toBeInTheDocument()
     })
+  })
+
+  it('keeps the console cleared after remount while showing new lines', async () => {
+    setMe(ownerMe)
+    const { unmount } = render(<ServerConsolePanel serverId={42} />)
+    let es = FakeEventSource.instances[0]
+    es.onmessage?.({ data: 'old line 1' } as MessageEvent)
+    es.onmessage?.({ data: 'old line 2' } as MessageEvent)
+    await waitFor(() => {
+      expect(screen.getByText('old line 1')).toBeInTheDocument()
+      expect(screen.getByText('old line 2')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }))
+    await waitFor(() => {
+      expect(screen.queryByText('old line 1')).toBeNull()
+      expect(screen.queryByText('old line 2')).toBeNull()
+      expect(screen.getByText('No logs available yet.')).toBeInTheDocument()
+    })
+
+    unmount()
+    render(<ServerConsolePanel serverId={42} />)
+    es = FakeEventSource.instances[1]
+    es.onmessage?.({ data: 'old line 1' } as MessageEvent)
+    es.onmessage?.({ data: 'old line 2' } as MessageEvent)
+    es.onmessage?.({ data: 'new line after clear' } as MessageEvent)
+
+    await waitFor(() => {
+      expect(screen.queryByText('old line 1')).toBeNull()
+      expect(screen.queryByText('old line 2')).toBeNull()
+      expect(screen.getByText('new line after clear')).toBeInTheDocument()
+    })
+  })
+
+  it('drops buffered lines that arrived just before clear was clicked', async () => {
+    setMe(ownerMe)
+    render(<ServerConsolePanel serverId={42} />)
+    const es = FakeEventSource.instances[0]
+    es.onmessage?.({ data: 'buffered old line' } as MessageEvent)
+
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }))
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(screen.queryByText('buffered old line')).toBeNull()
+
+    es.onmessage?.({ data: 'fresh line' } as MessageEvent)
+    await waitFor(() => {
+      expect(screen.getByText('fresh line')).toBeInTheDocument()
+    })
+  })
+
+  it('translates known MSM panel console lines when language is english', () => {
+    expect(displayConsoleLine('[MSM] Container msm-srv-42 gestartet', 'en')).toBe('[MSM] Container msm-srv-42 started')
+    expect(displayConsoleLine('[MSM] Hinweis: Pull für ghcr.io/demo:latest fehlgeschlagen, nutze lokales Image', 'en')).toBe('[MSM] Notice: Pull for ghcr.io/demo:latest failed, using local image')
+    expect(displayConsoleLine('[MSM] Container msm-srv-42 gestartet', 'de')).toBe('[MSM] Container msm-srv-42 gestartet')
   })
 
   // === Neue Tests für zentrale colorizeOutput (Coverage für alle Töne + Player + ANSI per review/tests.md) ===

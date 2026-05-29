@@ -223,7 +223,7 @@ def _tmpfs_dict(tmpfs_paths: list[str] | None) -> dict[str, str] | None:
 
 def _ensure_image_available(client: Any, image: str) -> None:
     try:
-        client.images.pull(image)
+        client.images.pull(image, auth_config={})
         return
     except (DockerException, OSError):
         pass
@@ -244,7 +244,7 @@ def pull(image: str) -> dict:
     if error:
         return error
     try:
-        client.images.pull(image)
+        client.images.pull(image, auth_config={})
         return {"ok": True, "stdout": "", "stderr": ""}
     except (DockerException, OSError) as exc:
         logger.warning("docker pull failed")

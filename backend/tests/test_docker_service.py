@@ -85,7 +85,7 @@ class TestRunContainer:
         assert kwargs["memswap_limit"] == "4096m"
         assert kwargs["user"] == "1000:1000"
         assert kwargs["working_dir"] == "/data"
-        client.images.pull.assert_called_once_with("cm2network/steamcmd:root")
+        client.images.pull.assert_called_once_with("cm2network/steamcmd:root", auth_config={})
         calls = [call[0] for call in client.mock_calls]
         assert calls.index("images.pull") < calls.index("containers.run")
 
@@ -106,7 +106,7 @@ class TestRunContainer:
             )
 
         assert result["ok"] is True
-        client.images.pull.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
+        client.images.pull.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging", auth_config={})
         client.images.get.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
         client.containers.run.assert_called_once()
 
@@ -239,7 +239,7 @@ class TestEphemeralRun:
         assert kwargs["security_opt"] == ["no-new-privileges"]
         assert kwargs["volumes"] == {"/opt/msm/servers/1": {"bind": "/data", "mode": "rw"}}
         container.remove.assert_called_once_with(force=True)
-        client.images.pull.assert_called_once_with("cm2network/steamcmd:root")
+        client.images.pull.assert_called_once_with("cm2network/steamcmd:root", auth_config={})
 
     def test_ephemeral_run_uses_local_image_when_pull_fails(self):
         client = MagicMock()
@@ -259,7 +259,7 @@ class TestEphemeralRun:
             )
 
         assert result["ok"] is True
-        client.images.pull.assert_called_once_with("cm2network/steamcmd:root")
+        client.images.pull.assert_called_once_with("cm2network/steamcmd:root", auth_config={})
         client.images.get.assert_called_once_with("cm2network/steamcmd:root")
         client.containers.run.assert_called_once()
 
