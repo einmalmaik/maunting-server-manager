@@ -70,16 +70,30 @@ export function ServerConsolePanel({ serverId }: Props) {
     // Netzwerk-Aussetzern. Keine zusaetzliche Polling-Logik noetig.
     const url = `/api/servers/${serverId}/console/stream`
     const es = new EventSource(url)
+    
+    // BATCHING FIX: UI-Freeze verhindern
+    let buffer: string[] = []
+    
     es.onmessage = (ev) => {
-      // Backend yieldet ausschliesslich ``data:``-Frames (eine Logzeile pro Frame).
-      // Cap at 2000 lines (KISS): verhindert unbounded state + re-render thrash bei chatty/long-running Servern oder vielen Reconnects.
-      // Virtualisierung (react-window o.ä.) abgelehnt (neue Komplexität/Dep ohne belegten Nutzen für typische MSM-Console-Volumen; per AGENTS KISS).
-      setLogs((prev) => [...prev, ev.data].slice(-2000))
+      buffer.push(ev.data)
     }
+    
+    const flushInterval = setInterval(() => {
+      if (buffer.length > 0) {
+        const toFlush = buffer
+        buffer = []
+        setLogs((prev) => {
+          const next = [...prev, ...toFlush]
+          return next.length > 2000 ? next.slice(-2000) : next
+        })
+      }
+    }, 50) // Alle 50ms gebatcht in den React-State flushen
+
     es.onerror = () => {
       // Stille: Browser reconnected automatisch.
     }
     return () => {
+      clearInterval(flushInterval)
       es.close()
     }
   }, [serverId])

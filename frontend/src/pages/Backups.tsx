@@ -77,7 +77,7 @@ export function Backups({ serverId }: BackupsProps) {
   const fetchStatus = async () => {
     if (!serverId) return;
     try {
-      const s = await api<any>(`/backups/${serverId}/status`);
+      const s = await api<any>(`/backups/${serverId}/status?_t=${Date.now()}`);
       setBackupStatus(s);
     } catch {
       setBackupStatus(null);
@@ -90,12 +90,12 @@ export function Backups({ serverId }: BackupsProps) {
     fetchStatus(); // AUFGABE 1: sofort bei Mount (Tab-Wechsel)
   }, [serverId]);
 
-  // Live-Status Polling (alle 2s)
+  // Live-Status Polling (alle 2s) mit Cache-Buster
   useEffect(() => {
     if (!serverId) return;
     const interval = setInterval(async () => {
       try {
-        const s = await api<any>(`/backups/${serverId}/status`);
+        const s = await api<any>(`/backups/${serverId}/status?_t=${Date.now()}`);
         setBackupStatus(s);
       } catch {
         setBackupStatus(null);
@@ -131,14 +131,18 @@ export function Backups({ serverId }: BackupsProps) {
   }, [backupStatus?.active, backupStatus?.started_at]);
 
   // AUFGABE 3: Bei Ende (active true -> false) sofort fetchBackups (nicht auf Tick warten)
+  // Backend-Completion-Event: Modal hier schließen statt mit Timeout
   const prevActiveRef = useRef(false);
   useEffect(() => {
     const nowActive = !!backupStatus?.active;
     if (prevActiveRef.current && !nowActive) {
       fetchBackups();
+      setShowCreateModal(false);
+      setBackupName("");
+      toast.success(t("backups.created", "Backup erfolgreich abgeschlossen"));
     }
     prevActiveRef.current = nowActive;
-  }, [backupStatus?.active]);
+  }, [backupStatus?.active, t]);
 
   // Cleanup pending create timeout on unmount (review Issue 9)
   useEffect(() => {
@@ -157,16 +161,9 @@ export function Backups({ serverId }: BackupsProps) {
         method: "POST",
         body: JSON.stringify({ name: backupName.trim() || null }),
       });
-      toast.success(t("backups.created"));
-      // AUFGABE 2: 1000ms auto-close + cleanup (review Issue 9)
-      if (createTimeoutRef.current) clearTimeout(createTimeoutRef.current);
-      createTimeoutRef.current = window.setTimeout(() => {
-        setShowCreateModal(false);
-        setBackupName("");
-        setActionLoading(null);
-        fetchBackups();
-        createTimeoutRef.current = null;
-      }, 1000);
+      // Der Aufruf blockiert nicht (async Backend).
+      // actionLoading wird zurückgesetzt, aber das Modal bleibt offen, bis das Polling (Completion-Event) das Ende signalisiert.
+      setActionLoading(null);
     } catch (err: any) {
       toast.error(err.message || t("common.error"));
       setActionLoading(null);

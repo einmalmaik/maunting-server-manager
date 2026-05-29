@@ -451,7 +451,7 @@ export function ServerDetail() {
             : t("servers.restart")}
         </button>
         {/* AUFGABE 5: Kill-Button nur bei running|stopping|restarting (msm-btn-danger per DNA), mit confirm */}
-        {["running", "stopping", "restarting"].includes(effectiveStatus) && (
+        {["starting", "running", "stopping", "restarting"].includes(effectiveStatus) && (
           <button
             onClick={handleKill}
             disabled={!!actionLoading}
