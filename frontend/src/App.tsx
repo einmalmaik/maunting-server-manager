@@ -22,10 +22,12 @@ const Profile = lazy(() => import('./pages/Profile').then(module => ({ default: 
 const Docs = lazy(() => import('./pages/Docs').then(module => ({ default: module.Docs })))
 const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ default: module.Blueprints })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
+import { useAuthStore } from '@/stores/authStore'
 import { CookieConsent } from './components/ui/CookieConsent'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
+  const { isAuthenticated } = useAuthStore()
 
   useEffect(() => {
     fetch('/api/auth/setup-status')
@@ -67,6 +69,9 @@ function App() {
         <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
+        
+        {/* Oeffentliche Datenschutz-Route, wenn nicht eingeloggt */}
+        {!isAuthenticated && <Route path="/privacy" element={<Privacy />} />}
 
         {/* Geschuetzte App-Routen */}
         <Route path="/*" element={<ProtectedRoute><Shell /></ProtectedRoute>}>
