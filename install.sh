@@ -270,6 +270,9 @@ setup_rootless_docker() {
 
     if $SYSTEMD_AVAILABLE; then
         loginctl enable-linger "$MSM_USER" 2>&1 | tee -a "$LOG_FILE" || true
+        # Erzwinge den Start des Systemd-User-Managers für den msm-User,
+        # damit systemctl --user innerhalb von su - msm funktioniert.
+        systemctl start "user@${MSM_UID}.service" 2>&1 | tee -a "$LOG_FILE" || true
         install -d -o "$MSM_USER" -g "$MSM_USER" -m 700 "/run/user/${MSM_UID}" 2>/dev/null || true
         if [[ -f "$MSM_DIR/.config/systemd/user/docker.service" ]]; then
             log "Rootless-Docker-User-Service existiert bereits."
