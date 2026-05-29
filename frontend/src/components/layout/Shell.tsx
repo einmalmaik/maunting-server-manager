@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, Link } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 
@@ -23,7 +23,7 @@ export function Shell() {
           </div>
 
           <footer className="relative z-10 mt-12 pt-4 border-t border-border/20 text-center text-xs text-muted-foreground/60">
-             © 2026 · <a href="/privacy" className="hover:text-foreground transition-colors">Datenschutz</a> · <a href="/imprint" className="hover:text-foreground transition-colors">Impressum</a>
+             © 2026 · <Link to="/privacy" className="hover:text-foreground transition-colors">Datenschutz</Link> · <Link to="/privacy" className="hover:text-foreground transition-colors">Impressum</Link>
           </footer>
         </main>
       </div>
