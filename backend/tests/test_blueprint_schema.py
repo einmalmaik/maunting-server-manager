@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 
 from blueprints.schema import (
-    COMMENTED_TEMPLATE,
+    COMMENTED_TEMPLATE_DE,
+    COMMENTED_TEMPLATE_EN,
     Blueprint,
     BlueprintValidationError,
     _strip_json_comments,
@@ -79,11 +80,12 @@ def test_minimal_blueprint_is_valid() -> None:
 def test_commented_template_validates() -> None:
     """Das ausgelieferte kommentierte Template muss, nach Entfernen der
     Kommentare, ein gueltiges JSON und eine gueltige Blueprint sein."""
-    clean_json = _strip_json_comments(COMMENTED_TEMPLATE)
-    raw = json.loads(clean_json)
-    bp = load_blueprint_dict(raw)
-    assert bp.meta.id == "my_custom_server"
-    assert bp.runtime.image == "ubuntu:24.04"
+    for tmpl in [COMMENTED_TEMPLATE_DE, COMMENTED_TEMPLATE_EN]:
+        clean_json = _strip_json_comments(tmpl)
+        raw = json.loads(clean_json)
+        bp = load_blueprint_dict(raw)
+        assert bp.meta.id == "my_custom_server"
+        assert bp.runtime.image == "ubuntu:24.04"
 
 
 # ── Shell-Metas ───────────────────────────────────────────────────────────
@@ -257,10 +259,11 @@ def test_workshop_app_id_required_when_workshop_on() -> None:
 
 def test_template_is_valid_json() -> None:
     # COMMENTED_TEMPLATE muss nach dem Strippen serialisierbar sein.
-    clean_json = _strip_json_comments(COMMENTED_TEMPLATE)
-    payload = json.loads(clean_json)
-    assert "version" in payload
-    assert "modInjection" in payload["mods"]
+    for tmpl in [COMMENTED_TEMPLATE_DE, COMMENTED_TEMPLATE_EN]:
+        clean_json = _strip_json_comments(tmpl)
+        payload = json.loads(clean_json)
+        assert "version" in payload
+        assert "modInjection" in payload["mods"]
 
 
 # ── Manual Upload ──────────────────────────────────────────────────────────

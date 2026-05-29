@@ -19,7 +19,8 @@ from fastapi.responses import JSONResponse
 from blueprints import (
     Blueprint,
     BlueprintValidationError,
-    COMMENTED_TEMPLATE,
+    COMMENTED_TEMPLATE_DE,
+    COMMENTED_TEMPLATE_EN,
     get_registry,
     load_blueprint_dict,
     reload_registry,
@@ -70,10 +71,11 @@ def list_blueprints(
 
 @router.get("/template")
 def download_template(
+    lang: str = "en",
     _user: User = Depends(get_current_user),
 ) -> Response:
     """Liefert das kommentierte Template als JSON-Download."""
-    body = COMMENTED_TEMPLATE
+    body = COMMENTED_TEMPLATE_DE if lang == "de" else COMMENTED_TEMPLATE_EN
     return Response(
         content=body,
         media_type="application/json",

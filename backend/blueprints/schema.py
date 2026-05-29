@@ -757,7 +757,7 @@ def load_blueprint_file(path: Path | str) -> Blueprint:
 # ── Downloadbares Template ────────────────────────────────────────────────
 
 
-COMMENTED_TEMPLATE: str = """{
+COMMENTED_TEMPLATE_DE: str = """{
   "version": 1,
   "meta": {
     // Eindeutige ID (nur Kleinbuchstaben, Zahlen, Unterstrich). Dateiname muss <id>.blueprint.json sein.
@@ -818,6 +818,79 @@ COMMENTED_TEMPLATE: str = """{
   },
   "mods": {
     // Falls Steam Workshop unterstuetzt wird, auf true setzen und workshopAppId eintragen.
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  }
+}
+"""
+
+COMMENTED_TEMPLATE_EN: str = """{
+  "version": 1,
+  "meta": {
+    // Unique ID (lowercase letters, numbers, underscores only). Filename must be <id>.blueprint.json.
+    "id": "my_custom_server",
+    // Name displayed in the UI (e.g., in the server creation dropdown).
+    "name": "My Custom Server",
+    // Category: steam_game, non_steam_game, voice_server, bot
+    "category": "non_steam_game",
+    "author": "Community",
+    // Optional description for the UI
+    "description": "A blueprint template for a new server."
+  },
+  "runtime": {
+    // The Docker image to execute (required field).
+    "image": "ubuntu:24.04",
+    // Working directory inside the container
+    "workdir": "/data",
+    // Environment variables. Allowed placeholders in values: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}
+    "env": {
+      "SERVER_PORT": "{GAME_PORT}",
+      "DEBUG_MODE": "false"
+    },
+    // Startup command. Allowed placeholders: {GAME_PORT}, {INSTALL_DIR}, {ENV.SERVER_PORT} etc. No shell meta-characters!
+    "startup": "./start_server.sh --port {GAME_PORT}",
+    // Files that should be automatically patched before startup (e.g., INI files)
+    "configPatches": []
+  },
+  "ports": [
+    // Declares the required ports. The UI will prompt the user for these during server creation.
+    // Allowed roles: game, query, rcon, voice, web, custom
+    {
+      "name": "game",
+      "protocol": "udp"
+    }
+  ],
+  "source": {
+    // Where do the server files come from? Allowed types: steam, http, dockerOnly, manualUpload
+    "type": "dockerOnly"
+    
+    // Example for Steam (uncomment and set type to "steam"):
+    /*
+    "steam": {
+      "appId": "2394010",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false
+    }
+    */
+    
+    // Example for HTTP download (uncomment and set type to "http"):
+    /*
+    "http": {
+      "url": "https://example.com/server-files.zip",
+      "archiveType": "zip",
+      "extractTo": "."
+    }
+    */
+  },
+  "mods": {
+    // If Steam Workshop is supported, set to true and provide the workshopAppId.
     "supportsMods": false,
     "supportsSteamWorkshop": false,
     "workshopAppId": null,

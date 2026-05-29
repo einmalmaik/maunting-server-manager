@@ -38,7 +38,7 @@ describe('Docs page', () => {
     renderDocs()
     expect(await screen.findByText('Blueprint Documentation')).toBeInTheDocument()
     const link = screen.getByTestId('docs-template-download') as HTMLAnchorElement
-    expect(link.getAttribute('href')).toBe('/api/blueprints/template')
+    expect(link.getAttribute('href')).toBe('/api/blueprints/template?lang=en')
   })
 
   it('renders expected new structured sections', async () => {

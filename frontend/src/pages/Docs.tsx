@@ -99,7 +99,7 @@ function FieldRow({ field, type, required, children }: { field: string, type: st
 }
 
 export function Docs() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
 
   const TOC = [
     { key: 'intro', title: t('docs.toc.intro') },
@@ -139,7 +139,7 @@ export function Docs() {
 
       <div className="mb-8 flex flex-wrap items-center gap-3">
         <a
-          href="/api/blueprints/template"
+          href={`/api/blueprints/template?lang=${i18n.language}`}
           download
           data-testid="docs-template-download"
           className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
