@@ -82,12 +82,15 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     }
   }
 
+  const fetchOptions: RequestInit = {
+    ...options,
+    credentials: 'include',
+    headers,
+    ...(method === 'GET' ? { cache: 'no-store' } : {}),
+  }
+
   const makeRequest = async (): Promise<Response> => {
-    return fetch(`${API_BASE}${path}`, {
-      ...options,
-      credentials: 'include',
-      headers,
-    })
+    return fetch(`${API_BASE}${path}`, fetchOptions)
   }
 
   let res = await makeRequest()
@@ -105,8 +108,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
         delete newHeaders['X-CSRF-Token']
       }
       res = await fetch(`${API_BASE}${path}`, {
-        ...options,
-        credentials: 'include',
+        ...fetchOptions,
         headers: newHeaders,
       })
     } catch {

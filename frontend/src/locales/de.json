@@ -593,7 +593,9 @@
     "disableConfirm": "Bist du sicher, dass du keine E-Mail-Benachrichtigungen mehr erhalten möchtest?",
     "enableConfirm": "E-Mail-Benachrichtigungen wieder aktivieren?",
     "serverUpdateAvailable": "Server-Aktualisierung verfügbar für {{name}}",
-    "modUpdateAvailable": "Mod-Aktualisierung verfügbar für {{mod}} auf Server {{server}}"
+    "modUpdateAvailable": "Mod-Aktualisierung verfügbar für {{mod}} auf Server {{server}}",
+    "activeLabel": "E-Mail-Benachrichtigungen: aktiv",
+    "inactiveLabel": "E-Mail-Benachrichtigungen: deaktiviert"
   },
   "updater": {
     "manualConfigsRestored": "Manuelle Konfigurationen wurden automatisch wiederhergestellt.",

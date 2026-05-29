@@ -593,7 +593,9 @@
     "disableConfirm": "Are you sure you want to stop receiving email notifications?",
     "enableConfirm": "Enable email notifications again?",
     "serverUpdateAvailable": "Server update available for {{name}}",
-    "modUpdateAvailable": "Mod update available for {{mod}} on server {{server}}"
+    "modUpdateAvailable": "Mod update available for {{mod}} on server {{server}}",
+    "activeLabel": "Email notifications: active",
+    "inactiveLabel": "Email notifications: disabled"
   },
   "updater": {
     "manualConfigsRestored": "Manual configuration files were automatically restored.",

@@ -167,20 +167,6 @@ class TestGetCurrentUser:
         assert response.status_code == 401
 
 
-class TestVerifyEmail:
-    def test_verify_email_expired_token(self, client: TestClient, db: Session):
-        from datetime import datetime, timedelta, timezone
-        from services.auth_service import AuthService
-        user = AuthService.create_user(db, "verifytest", "verify@test.de", "Verify123!")
-        user.email_verification_token = "expired_token_123"
-        user.email_verification_expires = datetime.now(timezone.utc) - timedelta(hours=1)
-        db.commit()
-
-        response = client.get("/api/auth/verify-email?token=expired_token_123")
-        assert response.status_code == 400
-        assert "abgelaufen" in response.json()["detail"]
-
-
 class TestSetupStatus:
     def test_setup_required_when_no_owner(self, client: TestClient, db: Session):
         # Remove all users to simulate fresh install

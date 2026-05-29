@@ -15,6 +15,14 @@ export function Topbar() {
   const menuRef = useRef<HTMLDivElement>(null)
   const request = useConfirmStore(s => s.request)
 
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(user?.email_notifications ?? true)
+
+  useEffect(() => {
+    if (user) {
+      setNotificationsEnabled(user.email_notifications)
+    }
+  }, [user?.email_notifications])
+
   const toggleLang = () => {
     const next = i18n.language === 'de' ? 'en' : 'de'
     i18n.changeLanguage(next)
@@ -50,6 +58,7 @@ export function Topbar() {
         await api(`/auth/me/notifications?enabled=${next}`, { method: 'PATCH' })
         // Optimistisches State-Update: kein Reload, kein MIME-Problem.
         updateUser({ email_notifications: next })
+        setNotificationsEnabled(next)
       } catch (err: any) {
         console.error(err)
       }
@@ -86,10 +95,27 @@ export function Topbar() {
           {/* Notifications Toggle */}
           <button
             onClick={handleBellClick}
-            title="Benachrichtigungen"
-            className={`p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 ${user?.email_notifications === false ? 'text-status-error hover:text-status-error' : 'text-on-surface-variant hover:text-primary'}`}
+            title={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
+            aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
+            className="p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary"
           >
-            <Bell className="w-[18px] h-[18px]" />
+            <div className="bell-wrapper" style={{ position: 'relative', display: 'inline-flex' }}>
+              <Bell className="w-[18px] h-[18px]" />
+              <span
+                className="bell-status-dot"
+                aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
+                style={{
+                  position: 'absolute',
+                  top: '-2px',
+                  right: '-2px',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  border: '2px solid #101417',
+                  backgroundColor: notificationsEnabled ? '#22c55e' : '#ef4444',
+                }}
+              ></span>
+            </div>
           </button>
 
           {/* User Menu */}
