@@ -84,6 +84,11 @@ GITHUB_OWNER="${GITHUB_OWNER:-einmalmaik}"
 GITHUB_REPO="${GITHUB_REPO:-maunting-server-manager}"
 AUTO_UPDATE="${AUTO_UPDATE:-false}"
 
+SYSTEMD_AVAILABLE=false
+if [[ -d /run/systemd/system ]] && command -v systemctl &>/dev/null; then
+    SYSTEMD_AVAILABLE=true
+fi
+
 log "=== Maunting Server Manager Updater ==="
 log "Repository: $GITHUB_OWNER/$GITHUB_REPO"
 log ""
@@ -383,7 +388,9 @@ PANEL_UNIT="/etc/systemd/system/msm-panel.service"
 if [[ -f "$PANEL_UNIT" ]] && grep -q 'NoNewPrivileges=true' "$PANEL_UNIT"; then
     log "Entferne NoNewPrivileges aus Panel-Service (inkompatibel mit sudo)..."
     sed -i '/^NoNewPrivileges=true$/d' "$PANEL_UNIT"
-    systemctl daemon-reload
+    if $SYSTEMD_AVAILABLE; then
+        systemctl daemon-reload
+    fi
     ok "Panel-Service aktualisiert"
 fi
 
@@ -395,7 +402,9 @@ NEW_PATH_LINE='Environment="PATH=/opt/msm/backend/venv/bin:/usr/local/sbin:/usr/
 if [[ -f "$PANEL_UNIT" ]] && grep -qE '^Environment="PATH=/opt/msm/backend/venv/bin"\s*$' "$PANEL_UNIT"; then
     log "Erweitere Panel-Service PATH um System-Pfade (Docker-CLI auffindbar machen)..."
     sed -i "s|^Environment=\"PATH=/opt/msm/backend/venv/bin\"\s*\$|${NEW_PATH_LINE}|" "$PANEL_UNIT"
-    systemctl daemon-reload
+    if $SYSTEMD_AVAILABLE; then
+        systemctl daemon-reload
+    fi
     ok "Panel-Service PATH erweitert"
 fi
 
@@ -413,14 +422,20 @@ if [[ -f "$PANEL_UNIT" ]] && grep -qF "$BAD_RWP" "$PANEL_UNIT"; then
     # grep -qF + Variablen-Quoting → sed-sicher (Pfade enthalten ``/``, kein
     # regex-Special-Char; trotzdem benutzen wir ``|`` als Trennzeichen).
     sed -i "s|${BAD_RWP}|${GOOD_RWP}|" "$PANEL_UNIT"
-    systemctl daemon-reload
+    if $SYSTEMD_AVAILABLE; then
+        systemctl daemon-reload
+    fi
     ok "Panel-Service ReadWritePaths aktualisiert"
 fi
 
 # ── Service neustarten ──
 log "Starte Services neu..."
-systemctl restart msm-panel.service
-systemctl restart caddy 2>/dev/null || true
+if $SYSTEMD_AVAILABLE; then
+    systemctl restart msm-panel.service
+    systemctl restart caddy 2>/dev/null || true
+else
+    warn "systemd nicht verfügbar — Services können nicht neu gestartet werden."
+fi
 
 # ── Version aktualisieren ──
 cd "$MSM_DIR"

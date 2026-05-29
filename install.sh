@@ -205,8 +205,8 @@ if [[ ! -d "$SCRIPT_DIR/backend" || ! -d "$SCRIPT_DIR/frontend" ]]; then
     err "Backend/Frontend nicht gefunden. Bitte aus dem Repository-Root ausführen."
 fi
 
-# Prüfe ob systemd verfügbar ist (einmalig, damit die Prüfung nicht wiederholt werden muss)
-if command -v systemctl &>/dev/null; then
+# Prüfe ob systemd aktiv und verfügbar ist (einmalig, damit die Prüfung nicht wiederholt werden muss)
+if [[ -d /run/systemd/system ]] && command -v systemctl &>/dev/null; then
     SYSTEMD_AVAILABLE=true
 else
     SYSTEMD_AVAILABLE=false
