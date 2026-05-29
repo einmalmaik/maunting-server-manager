@@ -22,7 +22,7 @@ const Profile = lazy(() => import('./pages/Profile').then(module => ({ default: 
 const Docs = lazy(() => import('./pages/Docs').then(module => ({ default: module.Docs })))
 const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ default: module.Blueprints })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
-import { CookieBanner } from './components/ui/CookieBanner'
+import { CookieConsent } from './components/ui/CookieConsent'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
@@ -111,7 +111,7 @@ function App() {
         </Route>
       </Routes>
       </Suspense>
-      <CookieBanner />
+      <CookieConsent />
       <ToastContainer />
       <ConfirmDialog />
     </>

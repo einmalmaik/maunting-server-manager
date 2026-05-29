@@ -1,17 +1,19 @@
 import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
+import { useConfirmStore } from '@/stores/confirmStore'
 import { useNavigate } from 'react-router-dom'
 import { Logo } from '@/components/Logo'
 import { Globe, Bell, Menu, User, LogOut } from 'lucide-react'
+import { api } from '@/api/client'
 
 export function Topbar() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [confirmOpen, setConfirmOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const request = useConfirmStore(s => s.request)
 
   const toggleLang = () => {
     const next = i18n.language === 'de' ? 'en' : 'de'
@@ -33,8 +35,28 @@ export function Topbar() {
     navigate('/login', { replace: true })
   }
 
-  const handleBellClick = () => {
-    setConfirmOpen(true)
+  const handleBellClick = async () => {
+    if (!user) return
+    const next = user.email_notifications === false ? true : false
+    
+    const isConfirmed = await request({
+       title: next ? t('notifications.enable') : t('notifications.disable'),
+       message: next ? t('notifications.enableConfirm') : t('notifications.disableConfirm'),
+       confirmText: next ? t('notifications.enable') : t('notifications.disable'),
+       danger: !next
+    })
+    
+    if (isConfirmed) {
+      try {
+        await api(`/auth/me/notifications?enabled=${next}`, { method: 'PATCH' })
+        // We update the local state manually or let SWR revalidate. 
+        // Since we removed updateUser, we might just reload the window or wait for SWR.
+        // Actually, without updateUser, let's just reload to keep it KISS.
+        window.location.reload()
+      } catch (err: any) {
+        console.error(err)
+      }
+    }
   }
 
   return (
@@ -128,35 +150,6 @@ export function Topbar() {
         </div>
       </header>
 
-      {/* Confirm Dialog (Benachrichtigungen) */}
-      {confirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="msm-card w-full max-w-sm p-6 relative overflow-hidden">
-             {/* Subtle Glow */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/10 blur-[40px] rounded-full pointer-events-none -mr-10 -mt-10" />
-
-            <h2 className="font-headline text-headline-md text-foreground mb-4">
-              Benachrichtigungen
-            </h2>
-            <div className="flex flex-col items-center justify-center py-8 text-on-surface-variant">
-              <Bell className="w-12 h-12 mb-3 text-secondary/30" />
-              <p className="font-body-md text-sm text-center">
-                0 Benachrichtigungen
-              </p>
-            </div>
-            
-            <div className="flex justify-end mt-4">
-              <button
-                type="button"
-                className="msm-btn-primary px-6 py-2"
-                onClick={() => setConfirmOpen(false)}
-              >
-                Schließen
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }
