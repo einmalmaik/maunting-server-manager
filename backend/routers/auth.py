@@ -132,11 +132,15 @@ async def register(req: UserCreate, db: Session = Depends(get_db)) -> User:
     default_role = get_role_by_name(db, SYSTEM_ROLE_USER)
     if default_role is not None:
         user.role_id = default_role.id
-    token = AuthService.generate_token()
-    user.email_verification_token = token
-    user.email_verification_expires = datetime.now(timezone.utc) + timedelta(hours=24)
     db.commit()
-    await EmailService.send_verification_email(user.email, user.username, token)
+    
+    code = EmailVerificationService.create_verification(db, user.email, "setup")
+    if EmailService.is_configured():
+        await EmailService.send_verification_code_email(user.email, user.username, code)
+    else:
+        import logging
+        logging.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s: %s", user.email, code)
+        
     return user
 
 
@@ -359,24 +363,7 @@ def reset_password(
     return {"message": "Passwort zurueckgesetzt"}
 
 
-@router.get("/verify-email")
-def verify_email(token: str, db: Session = Depends(get_db)) -> dict:
-    user = db.query(User).filter(User.email_verification_token == token).first()
-    if not user:
-        raise HTTPException(status_code=400, detail="Ungueltiger Token")
-    expires = user.email_verification_expires
-    now = datetime.now(timezone.utc)
-    if expires is None:
-        raise HTTPException(status_code=400, detail="Verifikationstoken abgelaufen")
-    if expires.tzinfo is None:
-        expires = expires.replace(tzinfo=timezone.utc)
-    if expires <= now:
-        raise HTTPException(status_code=400, detail="Verifikationstoken abgelaufen")
-    user.email_verified = True
-    user.email_verification_token = None
-    user.email_verification_expires = None
-    db.commit()
-    return {"message": "E-Mail verifiziert"}
+
 
 
 @router.post("/2fa/setup")

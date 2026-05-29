@@ -2,14 +2,13 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { useNavigate } from 'react-router-dom'
-import { api } from '@/api/client'
 import { Logo } from '@/components/Logo'
-import { Globe, Bell, BellOff, Menu, User, LogOut } from 'lucide-react'
+import { Globe, Bell, Menu, User, LogOut } from 'lucide-react'
 
 export function Topbar() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
-  const { user, logout, updateUser } = useAuthStore()
+  const { user, logout } = useAuthStore()
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -34,25 +33,8 @@ export function Topbar() {
     navigate('/login', { replace: true })
   }
 
-  const notificationsEnabled = user?.email_notifications !== false
-
   const handleBellClick = () => {
     setConfirmOpen(true)
-  }
-
-  const toggleNotifications = async () => {
-    if (!user) return
-    const next = !notificationsEnabled
-    try {
-      await api(`/auth/me/notifications?enabled=${next}`, { method: 'PATCH' })
-      updateUser({ email_notifications: next })
-    } catch (err: any) {
-      const msg = t(err.message) || err.message || t('common.error')
-      // silent fail — user sees no toast needed here, the button state will revert visually
-      console.error(msg)
-    } finally {
-      setConfirmOpen(false)
-    }
   }
 
   return (
@@ -85,21 +67,10 @@ export function Topbar() {
           {/* Notifications Toggle */}
           <button
             onClick={handleBellClick}
-            title={notificationsEnabled ? t('notifications.disable') : t('notifications.enable')}
-            className={`p-2 rounded-full transition-colors active:scale-95 relative ${
-              notificationsEnabled
-                ? 'text-on-surface-variant hover:text-primary hover:bg-surface-variant/50'
-                : 'text-status-error hover:text-status-error hover:bg-status-destructive/10'
-            }`}
+            title="Benachrichtigungen"
+            className="p-2 rounded-full transition-colors active:scale-95 relative text-on-surface-variant hover:text-primary hover:bg-surface-variant/50"
           >
-            {notificationsEnabled ? (
-              <Bell className="w-[18px] h-[18px]" />
-            ) : (
-              <BellOff className="w-[18px] h-[18px]" />
-            )}
-            {notificationsEnabled && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-secondary rounded-full" />
-            )}
+            <Bell className="w-[18px] h-[18px]" />
           </button>
 
           {/* User Menu */}
@@ -157,32 +128,30 @@ export function Topbar() {
         </div>
       </header>
 
-      {/* Confirm Dialog */}
+      {/* Confirm Dialog (Benachrichtigungen) */}
       {confirmOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="msm-card w-full max-w-sm p-6">
-            <h2 className="font-headline text-headline-md text-primary mb-2">
-              {notificationsEnabled ? t('notifications.disable') : t('notifications.enable')}
+          <div className="msm-card w-full max-w-sm p-6 relative overflow-hidden">
+             {/* Subtle Glow */}
+            <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/10 blur-[40px] rounded-full pointer-events-none -mr-10 -mt-10" />
+
+            <h2 className="font-headline text-headline-md text-foreground mb-4">
+              Benachrichtigungen
             </h2>
-            <p className="font-body-md text-sm text-on-surface-variant mb-6">
-              {notificationsEnabled ? t('notifications.disableConfirm') : t('notifications.enableConfirm')}
-            </p>
-            <div className="flex gap-3">
+            <div className="flex flex-col items-center justify-center py-8 text-on-surface-variant">
+              <Bell className="w-12 h-12 mb-3 text-secondary/30" />
+              <p className="font-body-md text-sm text-center">
+                0 Benachrichtigungen
+              </p>
+            </div>
+            
+            <div className="flex justify-end mt-4">
               <button
                 type="button"
-                className="msm-btn-secondary flex-1 py-2"
+                className="msm-btn-primary px-6 py-2"
                 onClick={() => setConfirmOpen(false)}
               >
-                {t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                className={`msm-btn-primary flex-1 py-2 ${
-                  notificationsEnabled ? 'bg-status-error hover:bg-status-error/90' : ''
-                }`}
-                onClick={toggleNotifications}
-              >
-                {notificationsEnabled ? t('notifications.disable') : t('notifications.enable')}
+                Schließen
               </button>
             </div>
           </div>

@@ -44,15 +44,6 @@ self.addEventListener('fetch', (event) => {
       .then((response) => {
         // Return cached version or fetch from network
         return response || fetch(event.request)
-          .then((response) => {
-            // Cache successful responses
-            if (response.ok) {
-              const responseClone = response.clone();
-              caches.open(CACHE_NAME)
-                .then((cache) => cache.put(event.request, responseClone));
-            }
-            return response;
-          })
           .catch(() => {
             // Return offline fallback for HTML requests
             if (event.request.headers.get('accept')?.includes('text/html')) {
