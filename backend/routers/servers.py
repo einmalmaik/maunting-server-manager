@@ -126,7 +126,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     # exist_ok=False ist jetzt sicher (Guard oben).
     try:
         os.makedirs(install_dir, exist_ok=False)
-        os.chmod(install_dir, 0o750)
+        os.chmod(install_dir, 0o777)
     except OSError as e:
         # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
         db.delete(server)

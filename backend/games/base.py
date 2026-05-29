@@ -213,6 +213,7 @@ def _build_steamcmd_bash_command(steam_args: list[str], chown_uid: int, chown_gi
         f"{shlex.quote(STEAMCMD_BIN)} {quoted}; "
         "rc=$?; "
         f"chown -R {int(chown_uid)}:{int(chown_gid)} {shlex.quote(CONTAINER_DATA_DIR)}; "
+        f"chmod -R a+rwx {shlex.quote(CONTAINER_DATA_DIR)}; "
         "exit $rc"
     )
     return ["-c", script]
@@ -273,7 +274,7 @@ def run_steamcmd_install(
     _append_console_log(server_id, f"[MSM] SteamCMD startet für App {app_id} (Docker)\n")
 
     uid, gid = docker_service.host_uid_gid()
-    chown_uid, chown_gid = (0, 0) if docker_service.is_rootless() else (uid, gid)
+    chown_uid, chown_gid = uid, gid
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
         command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
@@ -348,7 +349,7 @@ def run_steamcmd_workshop_download(
         server_id, f"[MSM] SteamCMD Workshop-Download: app={workshop_app_id} item={workshop_item_id}\n"
     )
     uid, gid = docker_service.host_uid_gid()
-    chown_uid, chown_gid = (0, 0) if docker_service.is_rootless() else (uid, gid)
+    chown_uid, chown_gid = uid, gid
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
         command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
@@ -774,7 +775,7 @@ class GamePlugin(ABC):
             )
 
         uid, gid = docker_service.host_uid_gid()
-        run_user = "0:0" if docker_service.is_rootless() else f"{uid}:{gid}"
+        run_user = f"{uid}:{gid}"
         name = container_name_for(server.id)
 
         result = docker_service.run_container(
