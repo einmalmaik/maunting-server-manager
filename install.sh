@@ -1206,7 +1206,7 @@ StandardError=journal
 # laufen. Container-Lifecycle selbst benoetigt kein sudo mehr.
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=false
 # /opt/msm existiert immer (Home des msm-Users) → kein NAMESPACE-Crash
 # UFW-Pfade fuer firewall_service.py (Port-Manager). ProtectSystem=strict
 # macht /run, /etc, /var/lib read-only im Namespace; ohne diese Pfade

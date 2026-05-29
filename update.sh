@@ -439,6 +439,18 @@ if $UPDATED_RWP; then
     ok "Panel-Service ReadWritePaths aktualisiert"
 fi
 
+# ── Panel-Service reparieren: ProtectHome=true deaktivieren ──
+# ProtectHome=true macht /run/user fuer das Panel unsichtbar, was den Zugriff
+# auf den Rootless Docker Socket blockiert. Wir aendern es auf false.
+if [[ -f "$PANEL_UNIT" ]] && grep -q 'ProtectHome=true' "$PANEL_UNIT"; then
+    log "Deaktiviere ProtectHome im Panel-Service (erforderlich für Zugriff auf /run/user)..."
+    sed -i 's|ProtectHome=true|ProtectHome=false|' "$PANEL_UNIT"
+    if $SYSTEMD_AVAILABLE; then
+        systemctl daemon-reload
+    fi
+    ok "Panel-Service ProtectHome deaktiviert"
+fi
+
 # ── Service neustarten ──
 log "Starte Services neu..."
 if $SYSTEMD_AVAILABLE; then
