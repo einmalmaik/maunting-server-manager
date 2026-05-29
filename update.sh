@@ -322,18 +322,10 @@ WRAPEOF
     chown root:root /usr/local/sbin/msm-iptables
     chmod 755 /usr/local/sbin/msm-iptables
 
-    # Policy direkt als root (Wrapper + tightened delete)
+    # Policy direkt als root (nur Firewall-Gates, kein Container-systemctl)
     cat > /etc/sudoers.d/msm-panel <<'SUDOEOF'
-# MSM Panel — Game-Server systemd-Unit-Verwaltung + Firewall (UFW/iptables)
+# MSM Panel — Firewall (UFW/iptables) only
 # Deployed via root heredoc (never from msm-writable tree at update time).
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
 
 # UFW (exact; delete tightened)
 msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version
@@ -345,7 +337,7 @@ msm ALL=(root) NOPASSWD: /usr/sbin/ufw status numbered
 msm ALL=(root) NOPASSWD: /usr/local/sbin/msm-iptables
 SUDOEOF
     chmod 440 /etc/sudoers.d/msm-panel
-    ok "sudoers aktualisiert (direkt als root + Wrapper)"
+    ok "sudoers aktualisiert (direkt als root + Wrapper, ohne Container-systemctl)"
 fi
 
 
@@ -413,7 +405,7 @@ fi
 # scheitert das systemd-Namespacing mit ``status=226/NAMESPACE`` und das
 # Panel landet in einer Restart-Schleife. ``-``-Praefix laesst systemd
 # fehlende Pfade still ueberspringen.
-GOOD_RWP="ReadWritePaths=/opt/msm /etc/systemd/system -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock"
+GOOD_RWP="ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock"
 # Bekannte kaputte Variante (exakt wie auf Produktion beobachtet).
 BAD_RWP="ReadWritePaths=/opt/msm /etc/systemd/system /run/ufw /var/lib/ufw /etc/ufw /run/ufw.lock"
 if [[ -f "$PANEL_UNIT" ]] && grep -qF "$BAD_RWP" "$PANEL_UNIT"; then

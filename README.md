@@ -76,6 +76,10 @@ Der Installer fragt dich nach:
 
 **Das war's.** Der Rest läuft automatisch.
 
+MSM richtet Docker im Rootless-Modus für den `msm`-User ein. Der Panel-User
+ist nicht Mitglied der globalen `docker`-Gruppe und nutzt
+`unix:///run/user/<msm_uid>/docker.sock` statt `/var/run/docker.sock`.
+
 ---
 
 ## Nach der Installation
@@ -133,6 +137,13 @@ Das Panel nutzt folgende Ports:
 | 80 | TCP | HTTP (wird zu HTTPS weitergeleitet) |
 | 443 | TCP | HTTPS (Panel-Webinterface) |
 | 27015-27999 | UDP/TCP | Game-Server (automatisch vergeben) |
+
+Game-Server-Ports müssen über `1024` liegen. Rootless Docker bindet keine
+privilegierten Ports; MSM setzt dafür bewusst keinen `setcap`-Workaround.
+
+Bei einer Re-Installation stoppt der Installer alte rootful MSM-Container
+(`msm-srv-*`) und weist auf die Rootless-Migration hin. Die alten Container
+werden nicht automatisch gelöscht.
 
 Die Game-Server-Ports werden **automatisch** aus der Range 27015-27999 vergeben. Du musst nichts manuell einstellen.
 

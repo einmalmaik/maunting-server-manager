@@ -723,9 +723,9 @@ async def server_console_stream(
     - Live-Container-Stdout/Stderr während der Server läuft (siehe unten)
 
     Damit auch Live-Container-Output in dieselbe Datei landet, koppelt der
-    Endpoint einen ``docker logs --follow``-Subprozess: dessen Output wird
-    parallel an den Stream geyielded. Die Datei bleibt der primäre Backlog,
-    Docker liefert nur die laufenden neuen Zeilen.
+    Endpoint den Rootless-Docker-Logstream aus ``docker_service``: dessen
+    Output wird parallel an den Stream geyielded. Die Datei bleibt der primäre
+    Backlog, Docker liefert nur die laufenden neuen Zeilen.
 
     SSE statt WebSocket: unidirektional reicht, EventSource im Browser ohne
     extra Lib. Auth via Cookie + ``server.console.read`` (CSRF entfällt bei
@@ -820,57 +820,25 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
     async def _tail_docker():
         """Streame Live-Container-Stdout/Stderr (oder melde, dass Docker fehlt).
 
-        `--tail 200` als historischer Backlog des Container-Outputs -
+        `tail=200` als historischer Backlog des Container-Outputs -
         komplementaer zum MSM-Logdatei-Backlog (Install/Lifecycle), keine
-        Duplikate. Fehlende Container/Container-CLI sind kein Fehler:
-        dann bleibt der Stream einfach still und liefert nur File-
-        Lifecycle-Events.
+        Duplikate. Fehlende Container/Rootless-Docker-Verbindung sind kein
+        Fehler: dann bleibt der Stream einfach still und liefert nur
+        File-Lifecycle-Events.
         """
-        docker_bin = shutil.which("docker")
-        if not docker_bin:
+        if not docker_service.is_available():
             await queue.put(
-                "[MSM] Docker CLI nicht im PATH des Backends - Live-Container-Logs deaktiviert."
+                "[MSM] Rootless Docker Daemon not running for user msm - Live-Container-Logs deaktiviert."
             )
             return
-        tail = "200"
+        tail = 200
         while True:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    docker_bin, "logs", "--follow", "--tail", tail, container,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
-                )
-            except (FileNotFoundError, OSError):
-                return
-            try:
-                assert proc.stdout is not None
-                saw_line = False
-                while True:
-                    raw = await proc.stdout.readline()
-                    if not raw:
-                        break
-                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-                    if line.startswith("Error response from daemon:"):
-                        continue
-                    saw_line = True
-                    await queue.put(line)
-                if saw_line:
-                    tail = "0"
-            finally:
-                if proc.returncode is None:
-                    try:
-                        proc.terminate()
-                        await asyncio.wait_for(proc.wait(), timeout=2.0)
-                    except (asyncio.TimeoutError, ProcessLookupError):
-                        try:
-                            proc.kill()
-                        except ProcessLookupError:
-                            pass
-                if proc.stdout is not None:
-                    try:
-                        proc.stdout.close()
-                    except Exception:
-                        pass
+            saw_line = False
+            async for line in docker_service.stream_logs(container, tail=tail):
+                saw_line = True
+                await queue.put(line)
+            if saw_line:
+                tail = 0
             await asyncio.sleep(1.0)
 
     tasks = [
