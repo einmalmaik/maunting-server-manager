@@ -205,12 +205,93 @@ if [[ ! -d "$SCRIPT_DIR/backend" || ! -d "$SCRIPT_DIR/frontend" ]]; then
     err "Backend/Frontend nicht gefunden. Bitte aus dem Repository-Root ausführen."
 fi
 
-# Prüfe ob systemd verfügbar ist (einmalig, damit die Prüfung nicht wiederholt werden muss)
-if command -v systemctl &>/dev/null; then
+# Prüfe ob systemd aktiv und verfügbar ist (einmalig, damit die Prüfung nicht wiederholt werden muss)
+if [[ -d /run/systemd/system ]] && command -v systemctl &>/dev/null; then
     SYSTEMD_AVAILABLE=true
 else
     SYSTEMD_AVAILABLE=false
 fi
+
+ensure_subid_entry() {
+    local file="$1"
+    local user="$2"
+    local count="65536"
+    touch "$file"
+    chmod 644 "$file"
+    if grep -qE "^${user}:" "$file"; then
+        return 0
+    fi
+    local start
+    start=$(awk -F: '
+        BEGIN { max = 99999 }
+        NF >= 3 {
+            end = $2 + $3 - 1
+            if (end > max) max = end
+        }
+        END { print max + 1 }
+    ' "$file")
+    echo "${user}:${start}:${count}" >> "$file"
+}
+
+stop_legacy_rootful_msm_containers() {
+    if ! $REINSTALL_MODE || ! command -v docker &>/dev/null; then
+        return 0
+    fi
+    local containers
+    containers=$(env -u DOCKER_HOST docker ps --format '{{.Names}}' 2>/dev/null | awk '/^msm-srv-/ {print}' || true)
+    if [[ -z "$containers" ]]; then
+        return 0
+    fi
+    warn "Rootless-Docker-Migration: Stoppe bestehende rootful MSM-Container. Sie werden nicht gelöscht."
+    while read -r container; do
+        [[ -z "$container" ]] && continue
+        env -u DOCKER_HOST docker stop "$container" 2>&1 | tee -a "$LOG_FILE" || true
+    done <<< "$containers"
+    warn "Migration aktiv: MSM verwaltet Container ab jetzt über Rootless Docker. Bestehende rootful Container bleiben als Altbestand erhalten."
+}
+
+setup_rootless_docker() {
+    MSM_UID=$(id -u "$MSM_USER")
+    MSM_DOCKER_HOST="unix:///run/user/${MSM_UID}/docker.sock"
+
+    ensure_subid_entry /etc/subuid "$MSM_USER"
+    ensure_subid_entry /etc/subgid "$MSM_USER"
+
+    if id -nG "$MSM_USER" 2>/dev/null | grep -qw docker; then
+        log "Entferne $MSM_USER aus der globalen docker-Gruppe..."
+        gpasswd -d "$MSM_USER" docker 2>&1 | tee -a "$LOG_FILE" || true
+    fi
+
+    stop_legacy_rootful_msm_containers
+
+    if ! command -v dockerd-rootless-setuptool.sh &>/dev/null; then
+        err "dockerd-rootless-setuptool.sh nicht gefunden. Docker Engine wurde nicht korrekt installiert."
+    fi
+
+    if $SYSTEMD_AVAILABLE; then
+        loginctl enable-linger "$MSM_USER" 2>&1 | tee -a "$LOG_FILE" || true
+        # Erzwinge den Start des Systemd-User-Managers für den msm-User,
+        # damit systemctl --user innerhalb von su - msm funktioniert.
+        systemctl start "user@${MSM_UID}.service" 2>&1 | tee -a "$LOG_FILE" || true
+        install -d -o "$MSM_USER" -g "$MSM_USER" -m 700 "/run/user/${MSM_UID}" 2>/dev/null || true
+        if [[ -f "$MSM_DIR/.config/systemd/user/docker.service" ]]; then
+            log "Rootless-Docker-User-Service existiert bereits."
+        else
+            log "Richte Rootless Docker für $MSM_USER ein..."
+            su - "$MSM_USER" -c "export XDG_RUNTIME_DIR=/run/user/${MSM_UID}; dockerd-rootless-setuptool.sh install" 2>&1 | tee -a "$LOG_FILE" || \
+                err "Rootless-Docker-Setup fehlgeschlagen"
+        fi
+        su - "$MSM_USER" -c "export XDG_RUNTIME_DIR=/run/user/${MSM_UID}; systemctl --user enable docker.service && systemctl --user start docker.service" 2>&1 | tee -a "$LOG_FILE" || \
+            err "Rootless-Docker-User-Service konnte nicht gestartet werden"
+        log "Lade SteamCMD-Container-Image über Rootless Docker vor (cm2network/steamcmd:root)..."
+        su - "$MSM_USER" -c "export DOCKER_HOST='${MSM_DOCKER_HOST}'; docker pull cm2network/steamcmd:root" 2>&1 | tee -a "$LOG_FILE" || \
+            warn "Konnte SteamCMD-Image nicht vorziehen — wird beim ersten Server-Install nachgeholt."
+    else
+        warn "systemd nicht verfügbar. Rootless Docker wird vorbereitet, aber der User-Service kann nicht aktiviert werden."
+    fi
+
+    ok "Rootless Docker bereit (${MSM_DOCKER_HOST})"
+}
 
 log "=== Maunting Server Manager Installation ==="
 log "Log: $LOG_FILE"
@@ -303,9 +384,10 @@ CADDYEOF
     fi
 fi
 
-# ── Docker (Game-Server-Runtime — Phase 1) ──
-# Game-Server laufen ausschließlich in Docker-Containern. SteamCMD wird in
-# einem ephemeren Container (cm2network/steamcmd) genutzt, nicht auf dem Host.
+# ── Docker (Game-Server-Runtime — Rootless) ──
+# Docker Engine/CLI bleiben Systempakete. MSM nutzt danach ausschließlich den
+# Rootless-Daemon des msm-Users, nie /var/run/docker.sock.
+apt-get install -y -qq uidmap dbus-user-session 2>&1 | tee -a "$LOG_FILE"
 if ! command -v docker &>/dev/null; then
     log "Installiere Docker (offizieller Installer von docker.com)..."
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
@@ -315,25 +397,6 @@ if ! command -v docker &>/dev/null; then
 else
     log "Docker bereits installiert ($(docker --version 2>/dev/null || echo unbekannt))"
 fi
-
-if $SYSTEMD_AVAILABLE; then
-    systemctl enable docker 2>&1 | tee -a "$LOG_FILE" || true
-    systemctl start docker 2>&1 | tee -a "$LOG_FILE" || true
-fi
-
-# msm-User in docker-Gruppe → kann Container ohne sudo verwalten.
-# HINWEIS: docker-Gruppe ≈ lokale Root-Privilegien. Rootless-Docker ist als
-# nächster Sicherheits-TODO eingeplant (siehe docs/agent-rules/architecture.md).
-if ! id -nG "$MSM_USER" 2>/dev/null | grep -qw docker; then
-    log "Füge $MSM_USER der docker-Gruppe hinzu (rootless folgt in späterer Phase)..."
-    usermod -aG docker "$MSM_USER" 2>&1 | tee -a "$LOG_FILE" || true
-fi
-ok "Docker bereit (User '$MSM_USER' in docker-Gruppe)"
-
-# SteamCMD-Image vorziehen (idempotent, blockiert nicht harten Abbruch).
-log "Lade SteamCMD-Container-Image vor (cm2network/steamcmd:root)..."
-docker pull cm2network/steamcmd:root 2>&1 | tee -a "$LOG_FILE" || \
-    warn "Konnte SteamCMD-Image nicht vorziehen — wird beim ersten Server-Install nachgeholt."
 
 ok "System-Abhängigkeiten installiert"
 
@@ -430,6 +493,8 @@ mkdir -p /opt/msm/servers
 chown "$MSM_USER:$MSM_USER" /opt/msm/servers
 mkdir -p /opt/msm/backups
 chown "$MSM_USER:$MSM_USER" /opt/msm/backups
+
+setup_rootless_docker
 
 # ═══════════════════════════════════════════════════════════════
 # 4. Dateien kopieren
@@ -845,6 +910,7 @@ MSM_SMTP_FROM="${SMTP_FROM:-noreply@mauntingstudios.de}"
 MSM_RESEND_API_KEY="$RESEND_API_KEY"
 MSM_PANEL_URL="$PANEL_URL"
 MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
+MSM_DOCKER_HOST="$MSM_DOCKER_HOST"
 MSM_STEAMCMD_PATH="/usr/games/steamcmd"
 # Redis-URL Fallback (sicherstellen, dass sie nie leer ist wenn Redis aktiv sein soll)
 if $INSTALL_REDIS && [[ -z "$MSM_REDIS_URL" ]]; then
@@ -1126,11 +1192,9 @@ Type=simple
 User=msm
 Group=msm
 WorkingDirectory=/opt/msm/backend
-# Systemd-Units erben kein PATH vom Login-Shell. Ohne /usr/bin etc. findet
-# das Backend ``docker`` nicht und der Console-Stream meldet "Docker CLI
-# nicht im PATH". venv zuerst, damit ``python``/``uvicorn`` aus der venv
-# kommen, danach die Standard-System-Pfade fuer ``docker``, ``shutil`` etc.
+# Systemd-Units erben kein PATH vom Login-Shell. venv zuerst, danach System-Pfade.
 Environment="PATH=/opt/msm/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
 ExecStart=/opt/msm/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=on-failure
 RestartSec=5
@@ -1138,19 +1202,18 @@ StandardOutput=journal
 StandardError=journal
 
 # Security Hardening
-# NoNewPrivileges darf hier NICHT gesetzt werden — das Panel
-# benoetigt sudo fuer systemd-Unit-Verwaltung der Game-Server.
+# NoNewPrivileges bleibt aus, weil UFW/iptables weiterhin ueber enge sudo-Gates
+# laufen. Container-Lifecycle selbst benoetigt kein sudo mehr.
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=false
 # /opt/msm existiert immer (Home des msm-Users) → kein NAMESPACE-Crash
-# /etc/systemd/system  → Game-Server-Units
 # UFW-Pfade fuer firewall_service.py (Port-Manager). ProtectSystem=strict
 # macht /run, /etc, /var/lib read-only im Namespace; ohne diese Pfade
 # scheitert ``sudo ufw ...`` aus dem Backend. ``-``-Praefix => systemd
 # ueberspringt nicht existierende Pfade (z.B. ``/run/ufw.lock`` vor dem
 # ersten ufw-Aufruf) statt mit ``status=226/NAMESPACE`` zu crashen.
-ReadWritePaths=/opt/msm /etc/systemd/system -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock
+ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user
 
 [Install]
 WantedBy=multi-user.target
@@ -1221,18 +1284,10 @@ WRAPEOF
             chown root:root /usr/local/sbin/msm-iptables
             chmod 755 /usr/local/sbin/msm-iptables
 
-            # Policy (direkt als root; Wrapper-Referenz + tightened UFW delete)
+            # Policy (direkt als root; nur Firewall-Gates, kein Container-systemctl)
             cat > /etc/sudoers.d/msm-panel <<'SUDOEOF'
-# MSM Panel — Game-Server systemd-Unit-Verwaltung + Firewall (UFW/iptables)
+# MSM Panel — Firewall (UFW/iptables) only
 # Deployed via root heredoc in install.sh/update.sh (never read from msm-writable tree).
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
 
 # UFW (exact from firewall_service.py; delete tightened to match allow glob)
 msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version
@@ -1244,7 +1299,7 @@ msm ALL=(root) NOPASSWD: /usr/sbin/ufw status numbered
 msm ALL=(root) NOPASSWD: /usr/local/sbin/msm-iptables
 SUDOEOF
             chmod 440 /etc/sudoers.d/msm-panel
-            ok "sudoers + iptables-Wrapper für Firewall-Regeln eingerichtet (direkt als root)"
+            ok "sudoers + iptables-Wrapper für Firewall-Regeln eingerichtet (direkt als root, ohne Container-systemctl)"
         fi
 
     else

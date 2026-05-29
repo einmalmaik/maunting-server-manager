@@ -3,16 +3,16 @@
 Decken die Sicherheitsinvarianten und das KISS-Stream-Design ab:
 - Stream-Endpoint verlangt ``server.console.read``.
 - Stream liefert zuerst den MSM-Logdatei-Backlog (Install/Lifecycle),
-  dann live ``docker logs --follow`` zusammen mit neuen Datei-Eintraegen.
+  dann live Rootless-Docker-Logs zusammen mit neuen Datei-Eintraegen.
 - Input-Endpoint verlangt ``server.console.write``.
 - Input-POST loggt den Inhalt NICHT (z. B. OAuth-Code).
-- ``send_stdin`` ruft ``docker exec -i`` mit dem korrekten Aufruf auf.
+- ``send_stdin`` nutzt den Docker-SDK-Exec-Pfad mit dem korrekten Aufruf.
 - ``run_container`` startet den Container mit ``--interactive`` (sonst geht
   stdin nicht).
 """
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -26,29 +26,33 @@ class TestSendStdin:
     def test_invokes_docker_exec_i_with_pipe_to_pid1(self):
         from services import docker_service
 
-        with patch("services.docker_service.is_running", return_value=True), \
-             patch("services.docker_service._run_docker") as mock_run:
-            mock_run.return_value = {"ok": True, "stdout": "", "stderr": ""}
+        raw_socket = MagicMock()
+        raw_socket.recv.return_value = b""
+        exec_socket = type("ExecSocket", (), {"_sock": raw_socket})()
+        container = type("Container", (), {"id": "cid", "status": "running"})()
+        client = MagicMock()
+        client.api.exec_create.return_value = {"Id": "exec-id"}
+        client.api.exec_start.return_value = exec_socket
+        client.api.exec_inspect.return_value = {"ExitCode": 0}
+
+        with patch("services.docker_service._container", return_value=container), \
+             patch("services.docker_service._client_or_error", return_value=(client, None)):
             result = docker_service.send_stdin("msm-srv-1", "/auth login device\n")
 
         assert result["ok"] is True
-        args, kwargs = mock_run.call_args
-        cmd = args[0]
-        # Pruefe nur die security-relevanten Flags. Volle Argv darf sich aendern.
-        assert cmd[0] == "exec"
-        assert "-i" in cmd[:3]
-        assert "msm-srv-1" in cmd
+        args, kwargs = client.api.exec_create.call_args
+        cmd = args[1]
         # Der eigentliche Schreibvorgang muss in PID-1-stdin gehen.
         assert any("/proc/1/fd/0" in part for part in cmd)
         # Inhalt MUSS via stdin uebergeben werden — niemals als argv-Element.
         # Das ist die Security-Invariante: kein Leak in Process-Listings.
-        assert kwargs.get("stdin") == "/auth login device\n"
+        raw_socket.sendall.assert_called_once_with(b"/auth login device\n")
         assert "/auth login device\n" not in cmd
 
     def test_refuses_when_container_not_running(self):
         from services import docker_service
 
-        with patch("services.docker_service.is_running", return_value=False):
+        with patch("services.docker_service._container", return_value=None):
             result = docker_service.send_stdin("msm-srv-1", "anything\n")
 
         assert result["ok"] is False
@@ -61,20 +65,19 @@ class TestRunContainerKeepsStdinOpen:
     def test_run_container_includes_interactive_flag(self):
         from services import docker_service
 
-        with patch("services.docker_service.exists", return_value=False), \
-             patch("services.docker_service._run_docker") as mock_run:
-            mock_run.return_value = {"ok": True, "stdout": "", "stderr": ""}
+        client = MagicMock()
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = type("Container", (), {"id": "abc"})()
+
+        with patch("services.docker_service._client_or_error", return_value=(client, None)):
             docker_service.run_container(
                 name="msm-srv-1",
                 image="alpine:3.20",
             )
 
-        args, _ = mock_run.call_args
-        cmd = args[0]
-        assert cmd[0] == "run"
-        # ``-d`` (detach) + ``-i`` (interactive) muessen beide gesetzt sein.
-        assert "-d" in cmd
-        assert "-i" in cmd
+        kwargs = client.containers.run.call_args.kwargs
+        assert kwargs["detach"] is True
+        assert kwargs["stdin_open"] is True
 
 
 class TestConsoleInputEndpoint:
@@ -282,7 +285,7 @@ class TestConsoleStreamGenerator:
         if os.path.exists(log_path):
             os.remove(log_path)
 
-        with patch("routers.servers.shutil.which", return_value=None):
+        with patch("routers.servers.docker_service.is_available", return_value=False):
             payloads = asyncio.run(
                 _drain_stream(
                     _console_event_stream(
@@ -295,4 +298,4 @@ class TestConsoleStreamGenerator:
             )
 
         # Sichtbare ``data:``-Zeile statt verstecktem ``event: error``.
-        assert any("Docker CLI nicht im PATH" in p for p in payloads)
+        assert any("Rootless Docker Daemon not running for user msm" in p for p in payloads)

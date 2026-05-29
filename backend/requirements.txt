@@ -18,3 +18,4 @@ limits[redis]==3.13.0
 cryptography==42.0.8
 psycopg2-binary==2.9.9
 asyncpg==0.29.0
+docker==7.1.0

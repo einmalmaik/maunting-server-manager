@@ -84,6 +84,11 @@ GITHUB_OWNER="${GITHUB_OWNER:-einmalmaik}"
 GITHUB_REPO="${GITHUB_REPO:-maunting-server-manager}"
 AUTO_UPDATE="${AUTO_UPDATE:-false}"
 
+SYSTEMD_AVAILABLE=false
+if [[ -d /run/systemd/system ]] && command -v systemctl &>/dev/null; then
+    SYSTEMD_AVAILABLE=true
+fi
+
 log "=== Maunting Server Manager Updater ==="
 log "Repository: $GITHUB_OWNER/$GITHUB_REPO"
 log ""
@@ -322,18 +327,10 @@ WRAPEOF
     chown root:root /usr/local/sbin/msm-iptables
     chmod 755 /usr/local/sbin/msm-iptables
 
-    # Policy direkt als root (Wrapper + tightened delete)
+    # Policy direkt als root (nur Firewall-Gates, kein Container-systemctl)
     cat > /etc/sudoers.d/msm-panel <<'SUDOEOF'
-# MSM Panel — Game-Server systemd-Unit-Verwaltung + Firewall (UFW/iptables)
+# MSM Panel — Firewall (UFW/iptables) only
 # Deployed via root heredoc (never from msm-writable tree at update time).
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
 
 # UFW (exact; delete tightened)
 msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version
@@ -345,7 +342,7 @@ msm ALL=(root) NOPASSWD: /usr/sbin/ufw status numbered
 msm ALL=(root) NOPASSWD: /usr/local/sbin/msm-iptables
 SUDOEOF
     chmod 440 /etc/sudoers.d/msm-panel
-    ok "sudoers aktualisiert (direkt als root + Wrapper)"
+    ok "sudoers aktualisiert (direkt als root + Wrapper, ohne Container-systemctl)"
 fi
 
 
@@ -391,7 +388,9 @@ PANEL_UNIT="/etc/systemd/system/msm-panel.service"
 if [[ -f "$PANEL_UNIT" ]] && grep -q 'NoNewPrivileges=true' "$PANEL_UNIT"; then
     log "Entferne NoNewPrivileges aus Panel-Service (inkompatibel mit sudo)..."
     sed -i '/^NoNewPrivileges=true$/d' "$PANEL_UNIT"
-    systemctl daemon-reload
+    if $SYSTEMD_AVAILABLE; then
+        systemctl daemon-reload
+    fi
     ok "Panel-Service aktualisiert"
 fi
 
@@ -403,32 +402,63 @@ NEW_PATH_LINE='Environment="PATH=/opt/msm/backend/venv/bin:/usr/local/sbin:/usr/
 if [[ -f "$PANEL_UNIT" ]] && grep -qE '^Environment="PATH=/opt/msm/backend/venv/bin"\s*$' "$PANEL_UNIT"; then
     log "Erweitere Panel-Service PATH um System-Pfade (Docker-CLI auffindbar machen)..."
     sed -i "s|^Environment=\"PATH=/opt/msm/backend/venv/bin\"\s*\$|${NEW_PATH_LINE}|" "$PANEL_UNIT"
-    systemctl daemon-reload
+    if $SYSTEMD_AVAILABLE; then
+        systemctl daemon-reload
+    fi
     ok "Panel-Service PATH erweitert"
 fi
 
-# ── Panel-Service reparieren: UFW-ReadWritePaths optional markieren ──
-# Manuelle Setups hatten ``ReadWritePaths=... /run/ufw.lock`` ohne Optional-
-# Praefix. Wenn UFW beim Service-Start die Lockdatei noch nicht erzeugt hat,
-# scheitert das systemd-Namespacing mit ``status=226/NAMESPACE`` und das
-# Panel landet in einer Restart-Schleife. ``-``-Praefix laesst systemd
-# fehlende Pfade still ueberspringen.
-GOOD_RWP="ReadWritePaths=/opt/msm /etc/systemd/system -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock"
-# Bekannte kaputte Variante (exakt wie auf Produktion beobachtet).
-BAD_RWP="ReadWritePaths=/opt/msm /etc/systemd/system /run/ufw /var/lib/ufw /etc/ufw /run/ufw.lock"
-if [[ -f "$PANEL_UNIT" ]] && grep -qF "$BAD_RWP" "$PANEL_UNIT"; then
-    log "Markiere UFW-ReadWritePaths als optional (verhindert status=226/NAMESPACE)..."
-    # grep -qF + Variablen-Quoting → sed-sicher (Pfade enthalten ``/``, kein
-    # regex-Special-Char; trotzdem benutzen wir ``|`` als Trennzeichen).
-    sed -i "s|${BAD_RWP}|${GOOD_RWP}|" "$PANEL_UNIT"
-    systemctl daemon-reload
+# ── Panel-Service reparieren: UFW-ReadWritePaths optional markieren und -/run/run hinzufügen ──
+# Wenn UFW beim Service-Start die Lockdatei noch nicht erzeugt hat,
+# scheitert das systemd-Namespacing mit ``status=226/NAMESPACE``.
+# ``-``-Praefix laesst systemd fehlende Pfade still ueberspringen.
+# ``-/run/user`` wird fuer die Verbindung zum Rootless Docker Socket benoetigt.
+GOOD_RWP="ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user"
+BAD_RWP_1="ReadWritePaths=/opt/msm /etc/systemd/system /run/ufw /var/lib/ufw /etc/ufw /run/ufw.lock"
+BAD_RWP_2="ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock"
+
+UPDATED_RWP=false
+if [[ -f "$PANEL_UNIT" ]]; then
+    if grep -qF "$BAD_RWP_1" "$PANEL_UNIT"; then
+        sed -i "s|${BAD_RWP_1}|${GOOD_RWP}|" "$PANEL_UNIT"
+        UPDATED_RWP=true
+    elif grep -qF "$BAD_RWP_2" "$PANEL_UNIT"; then
+        sed -i "s|${BAD_RWP_2}|${GOOD_RWP}|" "$PANEL_UNIT"
+        UPDATED_RWP=true
+    elif ! grep -qF "-/run/user" "$PANEL_UNIT"; then
+        sed -i 's|^ReadWritePaths=\(.*\)|ReadWritePaths=\1 -/run/user|' "$PANEL_UNIT"
+        UPDATED_RWP=true
+    fi
+fi
+
+if $UPDATED_RWP; then
+    log "Aktualisiere ReadWritePaths des Panel-Services (füge -/run/user hinzu)..."
+    if $SYSTEMD_AVAILABLE; then
+        systemctl daemon-reload
+    fi
     ok "Panel-Service ReadWritePaths aktualisiert"
+fi
+
+# ── Panel-Service reparieren: ProtectHome=true deaktivieren ──
+# ProtectHome=true macht /run/user fuer das Panel unsichtbar, was den Zugriff
+# auf den Rootless Docker Socket blockiert. Wir aendern es auf false.
+if [[ -f "$PANEL_UNIT" ]] && grep -q 'ProtectHome=true' "$PANEL_UNIT"; then
+    log "Deaktiviere ProtectHome im Panel-Service (erforderlich für Zugriff auf /run/user)..."
+    sed -i 's|ProtectHome=true|ProtectHome=false|' "$PANEL_UNIT"
+    if $SYSTEMD_AVAILABLE; then
+        systemctl daemon-reload
+    fi
+    ok "Panel-Service ProtectHome deaktiviert"
 fi
 
 # ── Service neustarten ──
 log "Starte Services neu..."
-systemctl restart msm-panel.service
-systemctl restart caddy 2>/dev/null || true
+if $SYSTEMD_AVAILABLE; then
+    systemctl restart msm-panel.service
+    systemctl restart caddy 2>/dev/null || true
+else
+    warn "systemd nicht verfügbar — Services können nicht neu gestartet werden."
+fi
 
 # ── Version aktualisieren ──
 cd "$MSM_DIR"

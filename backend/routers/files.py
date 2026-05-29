@@ -96,6 +96,39 @@ def _ensure_allowed_extension(filename: str) -> None:
         raise HTTPException(status_code=400, detail=f"Dateityp {ext} ist nicht erlaubt")
 
 
+def _apply_permissions(install_dir: str, target: Path) -> None:
+    """Set recursive permissions on target, and ensure all its parent directories
+    up to install_dir are readable/writable/executable by everyone.
+    """
+    try:
+        if target.is_dir():
+            os.chmod(target, 0o777)
+            for root, dirs, files in os.walk(target):
+                for d in dirs:
+                    try:
+                        os.chmod(os.path.join(root, d), 0o777)
+                    except OSError:
+                        pass
+                for f in files:
+                    try:
+                        os.chmod(os.path.join(root, f), 0o666)
+                    except OSError:
+                        pass
+        else:
+            os.chmod(target, 0o666)
+
+        base = Path(install_dir).resolve()
+        p = target.parent.resolve()
+        while p != base and p != p.parent:
+            try:
+                os.chmod(p, 0o777)
+            except OSError:
+                pass
+            p = p.parent
+    except Exception:
+        pass
+
+
 def _chunk_tmp_dir(install_dir: str) -> Path:
     """Temp-Verzeichnis fuer aktive Chunked-Uploads.
 
@@ -175,7 +208,7 @@ def browse_directory(
                 # Einzelne Eintraege ohne Leserechte ueberspringen, Rest anzeigen
                 continue
     except PermissionError:
-        raise HTTPException(status_code=403, detail="Keine Berechtigung fuer dieses Verzeichnis")
+        raise HTTPException(status_code=403, detail="Keine Berechtigung für dieses Verzeichnis")
 
     return {"path": path, "entries": entries, "exists": True}
 
@@ -271,6 +304,7 @@ def write_file(
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body.content, encoding="utf-8")
+        _apply_permissions(server.install_dir, target)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schreiben fehlgeschlagen: {e}")
 
@@ -310,11 +344,12 @@ async def upload_file(
                     raise HTTPException(
                         status_code=413,
                         detail=(
-                            f"Datei zu gross fuer Direkt-Upload (max {MAX_UPLOAD_SIZE // (1024*1024)} MB) "
+                            f"Datei zu gross für Direkt-Upload (max {MAX_UPLOAD_SIZE // (1024*1024)} MB) "
                             "— bitte den resumable Upload verwenden."
                         ),
                     )
                 f.write(chunk)
+        _apply_permissions(server.install_dir, dest)
     except HTTPException:
         raise
     except Exception as e:
@@ -505,6 +540,7 @@ def chunked_upload_finalize(
 
     try:
         os.replace(tmp_path, dest)
+        _apply_permissions(server.install_dir, dest)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Verschieben fehlgeschlagen: {e}")
 
@@ -585,6 +621,7 @@ def make_directory(
 
     try:
         target.mkdir(parents=True, exist_ok=True)
+        _apply_permissions(server.install_dir, target)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erstellen fehlgeschlagen: {e}")
 
@@ -646,6 +683,7 @@ def rename_path(
 
     try:
         target.rename(new_target)
+        _apply_permissions(server.install_dir, new_target)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Umbenennen fehlgeschlagen: {e}")
 
@@ -700,6 +738,7 @@ def move_path(
 
     try:
         shutil.move(str(source), str(target))
+        _apply_permissions(server.install_dir, target)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Verschieben fehlgeschlagen: {e}")
 
@@ -746,6 +785,7 @@ def extract_archive(
     extract_dir = target.parent
     try:
         safe_extract_archive(target, extract_dir, Path(server.install_dir).resolve())
+        _apply_permissions(server.install_dir, extract_dir)
     except ArchiveExtractError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except HTTPException:

@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Produktion: /opt/msm/servers  |  Dev: ./servers
     servers_dir: str = "/opt/msm/servers"
 
+    # Rootless Docker. Produktion: unix:///run/user/<msm_uid>/docker.sock
+    # Leer = docker_service berechnet den Rootless-Default fuer den laufenden User.
+    docker_host: str = ""
+
     # Blueprint-Verzeichnis (Community-Imports, getrennt von Repo-Code).
     # Produktion: /opt/msm/blueprints/community  |  Dev/Test ggf. via MSM_BLUEPRINTS_DIR
     blueprints_dir: str = "/opt/msm/blueprints/community"

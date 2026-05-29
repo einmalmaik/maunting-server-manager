@@ -1,19 +1,35 @@
 [Unit]
 Description=Maunting Server Manager Panel
-After=network.target
+After=network.target redis-server.service
+Wants=redis-server.service
 
 [Service]
 Type=simple
 User=msm
 Group=msm
 WorkingDirectory={{MSM_DIR}}/backend
-# venv zuerst (python/uvicorn), danach Standard-System-Pfade fuer docker etc.
+# Systemd-Units erben kein PATH vom Login-Shell. venv zuerst, danach System-Pfade.
 Environment="PATH={{MSM_DIR}}/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DOCKER_HOST={{DOCKER_HOST}}"
 ExecStart={{MSM_DIR}}/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+
+# Security Hardening
+# NoNewPrivileges bleibt aus, weil UFW/iptables weiterhin ueber enge sudo-Gates
+# laufen. Container-Lifecycle selbst benoetigt kein sudo mehr.
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+# /opt/msm existiert immer (Home des msm-Users) → kein NAMESPACE-Crash
+# UFW-Pfade fuer firewall_service.py (Port-Manager). ProtectSystem=strict
+# macht /run, /etc, /var/lib read-only im Namespace; ohne diese Pfade
+# scheitert sudo ufw ... aus dem Backend. --Praefix => systemd
+# ueberspringt nicht existierende Pfade (z.B. /run/ufw.lock vor dem
+# ersten ufw-Aufruf) statt mit status=226/NAMESPACE zu crashen.
+ReadWritePaths={{MSM_DIR}} -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user
 
 [Install]
 WantedBy=multi-user.target

@@ -213,6 +213,7 @@ def _build_steamcmd_bash_command(steam_args: list[str], chown_uid: int, chown_gi
         f"{shlex.quote(STEAMCMD_BIN)} {quoted}; "
         "rc=$?; "
         f"chown -R {int(chown_uid)}:{int(chown_gid)} {shlex.quote(CONTAINER_DATA_DIR)}; "
+        f"chmod -R a+rwx {shlex.quote(CONTAINER_DATA_DIR)}; "
         "exit $rc"
     )
     return ["-c", script]
@@ -232,6 +233,7 @@ def run_steamcmd_install(
     app_id: str,
     extra_args: list[str] | None = None,
     use_authenticated_login: bool = False,
+    platform: str | None = None,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
@@ -257,11 +259,14 @@ def run_steamcmd_install(
     else:
         login_args = ["+login", "anonymous"]
 
-    steam_args: list[str] = [
+    steam_args: list[str] = []
+    if platform:
+        steam_args.extend(["+@sSteamCmdForcePlatformType", platform])
+    steam_args.extend([
         "+force_install_dir", CONTAINER_DATA_DIR,
         *login_args,
         "+app_update", app_id, "validate",
-    ]
+    ])
     if extra_args:
         steam_args.extend(extra_args)
     steam_args.append("+quit")
@@ -269,9 +274,10 @@ def run_steamcmd_install(
     _append_console_log(server_id, f"[MSM] SteamCMD startet für App {app_id} (Docker)\n")
 
     uid, gid = docker_service.host_uid_gid()
+    chown_uid, chown_gid = uid, gid
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
-        command=_build_steamcmd_bash_command(steam_args, uid, gid),
+        command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         # Explizit Container-Root: das `:root`-Image hat /home/steam Mode 700
         # für den steam-User. Files werden im bash-Wrapper nach dem Run auf
@@ -343,9 +349,10 @@ def run_steamcmd_workshop_download(
         server_id, f"[MSM] SteamCMD Workshop-Download: app={workshop_app_id} item={workshop_item_id}\n"
     )
     uid, gid = docker_service.host_uid_gid()
+    chown_uid, chown_gid = uid, gid
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
-        command=_build_steamcmd_bash_command(steam_args, uid, gid),
+        command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         user="0:0",
         cap_adds=STEAMCMD_CAPS,
@@ -768,6 +775,7 @@ class GamePlugin(ABC):
             )
 
         uid, gid = docker_service.host_uid_gid()
+        run_user = f"{uid}:{gid}"
         name = container_name_for(server.id)
 
         result = docker_service.run_container(
@@ -779,7 +787,7 @@ class GamePlugin(ABC):
             volumes=self.build_volume_binds(server),
             cpu_limit_percent=server.cpu_limit_percent,
             ram_limit_mb=server.ram_limit_mb,
-            user=f"{uid}:{gid}",
+            user=run_user,
             workdir=self.container_workdir(server),
             read_only_rootfs=self.container_read_only_rootfs,
             tmpfs_paths=self.container_tmpfs_paths(server),

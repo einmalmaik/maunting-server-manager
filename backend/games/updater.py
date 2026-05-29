@@ -74,7 +74,7 @@ def _fetch_steam_mod_updated(app_id: str, workshop_id: str) -> datetime | None:
     """
     from config import settings as app_settings
 
-    api_key = app_settings.steam_api_key or os.getenv("STEAM_API_KEY", "")
+    api_key = app_settings.steam_api_key or os.getenv("MSM_STEAM_API_KEY", "") or os.getenv("STEAM_API_KEY", "")
     if not api_key:
         return None
 
@@ -828,6 +828,8 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 return {"ok": False, "error": "steam-Konfiguration fehlt im Blueprint"}
             app_id = steam.appId
             requires_login = bool(getattr(steam, "requiresLogin", False))
+            platform = getattr(steam, "platform", None)
+            platform_str = platform.value if platform else None
             _append_console_log(
                 server_id,
                 f"[MSM] Server-Datei-Update: SteamCMD +app_update {app_id} validate (synchron vor Start)\n"
@@ -837,6 +839,7 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 install_dir=install_dir,
                 app_id=app_id,
                 use_authenticated_login=requires_login,
+                platform=platform_str,
             )
         elif source_type == BlueprintSourceType.HTTP:
             _append_console_log(

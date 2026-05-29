@@ -1,19 +1,10 @@
-# MSM Panel — Game-Server systemd-Unit-Verwaltung + Firewall (UFW/iptables)
+# MSM Panel — Firewall (UFW/iptables) only
 # Single Source of Truth (SSOT). Deployed by install.sh and update.sh.
 # Edit ONLY this file. Never edit the installed /etc/sudoers.d/msm-panel directly.
 #
 # Privilege boundary for the `msm` system user (defense-in-depth for Docker DOCKER-USER chain
-# and systemd units). Follows KISS + minimal necessary rights. No over-privilege.
+# only). Follows KISS + minimal necessary rights. No over-privilege.
 # iptables operations are gated through a root-owned thin wrapper (see below).
-
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl enable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl disable msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl start msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl stop msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/systemctl is-active msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/msm-*.service
-msm ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/msm-*.service
 
 # UFW (exact from firewall_service.py; delete tightened to match allow glob)
 msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version

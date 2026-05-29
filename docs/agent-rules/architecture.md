@@ -362,18 +362,20 @@ Regeln:
 
 ---
 
-## 12. Game-Server-Runtime (Phase 1 — Docker)
+## 12. Game-Server-Runtime (Phase 6 — Rootless Docker)
 
-Stand: 2026-05-23. Diese Sektion ist MSM-spezifisch und gilt für alle Game-/Voice-Server, die das Panel verwaltet.
+Stand: 2026-05-29. Diese Sektion ist MSM-spezifisch und gilt für alle Game-/Voice-Server, die das Panel verwaltet.
 
 ### 12.1 Invarianten
 
-- Game-Server laufen ausschließlich in Docker-Containern. Kein systemd-pro-Server, kein POSIX-User-pro-Server, kein direktes Binary auf dem Host.
+- Game-Server laufen ausschließlich in Rootless-Docker-Containern des `msm`-Users. Kein systemd-pro-Server, kein POSIX-User-pro-Server, kein direktes Binary auf dem Host.
 - Das Panel selbst (FastAPI) bindet weiterhin an `127.0.0.1:8000` und wird ausschließlich über Caddy nach außen gereicht. Container-Ports werden direkt von Docker auf der Host-Schnittstelle gepublisht (Option: spezifische `public_bind_ip`).
-- Container-Lifecycle wird über `services/docker_service.py` abgewickelt — ein dünner `subprocess`-Wrapper um `docker`. Kein Python-SDK, keine REST-API zum Docker-Daemon.
+- Container-Lifecycle wird über `services/docker_service.py` abgewickelt — eine kleine Fassade um das Python Docker SDK. Der Adapter spricht ausschließlich mit `DOCKER_HOST=unix:///run/user/<msm_uid>/docker.sock`.
+- Der `msm`-User darf nicht Mitglied der globalen `docker`-Gruppe sein. `/var/run/docker.sock` ist für MSM tabu.
 - Jeder Server erhält einen stabilen Container-Namen `msm-srv-<server_id>`. Das ist auch `server.container_name` in der DB.
 - Container starten mit `--cap-drop=ALL --security-opt=no-new-privileges --restart=on-failure:5 --log-driver=json-file --log-opt max-size=10m --log-opt max-file=3`.
 - Bind-Mounts: Host `<install_dir>` → Container `/data`. Der Container läuft mit derselben UID/GID wie der Panel-User (`msm`), damit Schreibrechte konsistent sind.
+- Game-Server-Ports müssen `>1024` bleiben. Rootless Docker bekommt keinen `setcap`-Workaround für privilegierte Ports.
 
 ### 12.2 Pflichtmethoden für Game-Plugins
 
@@ -442,13 +444,18 @@ KEIN `configparser`, weil UE-INIs Duplikat-Keys und multi-line-Werte erlauben, d
 
 Restore (`POST /api/backups/{id}/restore/{backup_id}`) stoppt + entfernt den Container VOR `tar -xzf`, damit der laufende Server keine Files mehr offen hält. Server-Status nach Restore: `"stopped"` (Nutzer startet manuell neu).
 
-### 12.8 TODO: Rootless Docker
+### 12.8 Rootless Docker
 
-Aktuell ist `msm` Mitglied der `docker`-Gruppe. Das ist effektiv lokales Root. Akzeptiert für Phase 1, ABER:
+Rootless Docker ist Pflicht. Installation/Migration:
 
-- Vor Phase 3 (RBAC) muss auf [rootless Docker](https://docs.docker.com/engine/security/rootless/) umgestellt werden. Dann läuft der Docker-Daemon als unprivilegierter `msm`-User, und ein Bruch im Container kompromittiert nur diesen User, nicht den Host.
-- Migrationspfad: `dockerd-rootless-setuptool.sh install` als `msm`, `DOCKER_HOST=unix:///run/user/<uid>/docker.sock`. Plus Anpassung der Bind-Mount-Pfade auf user-namespaced UIDs.
-- Bis dahin: Keine externen, nicht vertrauenswürdigen Images. Wir pinnen `cm2network/steamcmd:root` und prüfen Updates manuell.
+- `uidmap` und `dbus-user-session` müssen installiert sein.
+- `/etc/subuid` und `/etc/subgid` müssen für `msm` mindestens `65536` IDs enthalten.
+- Rootless-Setup läuft als `msm` über `dockerd-rootless-setuptool.sh install`.
+- `loginctl enable-linger msm` hält den User-Daemon über Logouts und Reboots hinweg aktiv.
+- Das Backend nutzt `MSM_DOCKER_HOST`/`DOCKER_HOST=unix:///run/user/<msm_uid>/docker.sock`.
+- Bei Re-Install stoppt `install.sh` alte rootful `msm-srv-*` Container, löscht sie aber nicht automatisch.
+
+Keine Game-Server-User-Units in Phase 6: Der direkte Container-Lifecycle bleibt der KISS-Pfad.
 
 ### 12.9 Keine 0.0.0.0-Bindings im Panel
 
