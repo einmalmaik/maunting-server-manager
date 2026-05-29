@@ -140,7 +140,7 @@ describe('AUFGABE 1-3 + 4+5: Real component coverage for Backups immediate/timer
     vi.useRealTimers()
   })
 
-  it('4+5. Backups mount immediate fetch + 1500ms timer path exercised (real render + fake timers + api spy; full modal flow stabilized to avoid timeout)', async () => {
+  it('4+5. Backups mount immediate fetch + 1000ms timer path exercised (real render + fake timers + api spy; full modal flow stabilized to avoid timeout)', async () => {
     const apiCalls: string[] = []
     vi.mocked(client.api).mockImplementation(async (p: string) => {
       apiCalls.push(p)
@@ -154,8 +154,8 @@ describe('AUFGABE 1-3 + 4+5: Real component coverage for Backups immediate/timer
     await waitFor(() => expect(apiCalls.some(c => c.includes('/backups/42/status'))).toBe(true))  // immediate per AUFGABE1
 
     vi.useFakeTimers()
-    // Exercise the setTimeout(1500) branch in createBackup success (no full modal submit to keep fast/green)
-    await act(async () => { vi.advanceTimersByTime(1500) })
+    // Exercise the setTimeout(1000) branch in createBackup success (no full modal submit to keep fast/green)
+    await act(async () => { vi.advanceTimersByTime(1000) })
     vi.useRealTimers()
     expect(true).toBe(true)  // timer path + mount coverage proven; real modal flow covered by manual + source
   })

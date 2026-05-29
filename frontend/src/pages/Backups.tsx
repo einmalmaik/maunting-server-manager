@@ -158,7 +158,7 @@ export function Backups({ serverId }: BackupsProps) {
         body: JSON.stringify({ name: backupName.trim() || null }),
       });
       toast.success(t("backups.created"));
-      // AUFGABE 2: 1500ms auto-close + cleanup (review Issue 9)
+      // AUFGABE 2: 1000ms auto-close + cleanup (review Issue 9)
       if (createTimeoutRef.current) clearTimeout(createTimeoutRef.current);
       createTimeoutRef.current = window.setTimeout(() => {
         setShowCreateModal(false);
@@ -166,7 +166,7 @@ export function Backups({ serverId }: BackupsProps) {
         setActionLoading(null);
         fetchBackups();
         createTimeoutRef.current = null;
-      }, 1500);
+      }, 1000);
     } catch (err: any) {
       toast.error(err.message || t("common.error"));
       setActionLoading(null);
