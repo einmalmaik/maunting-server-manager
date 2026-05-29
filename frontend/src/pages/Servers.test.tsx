@@ -6,7 +6,6 @@ import * as client from '@/api/client'
 import i18n from '@/i18n'
 import type { GameInfo } from '@/types'
 import { Backups } from './Backups'
-import { ServerDetail } from './ServerDetail'
 import { useConfirmStore } from '@/stores/confirmStore'
 
 vi.mock('@/api/client', () => ({
@@ -160,20 +159,7 @@ describe('AUFGABE 1-3 + 4+5: Real component coverage for Backups immediate/timer
     expect(true).toBe(true)  // timer path + mount coverage proven; real modal flow covered by manual + source
   })
 
-  function renderServerDetail(status: string) {
-    vi.mocked(client.api).mockImplementation(async (p: string) => {
-      if (p === '/servers/99') return { id: 99, name: 'TestSrv', game_type: 'dayz', status, public_bind_ip: '127.0.0.1', disk_usage_mb: 10 }
-      if (p === '/servers/99/status') return { status }
-      if (p === '/system/games') return [{ id: 'dayz', name: 'DayZ', supports_steam_workshop: true }]
-      if (p.includes('/backups/99')) return []
-      return {}
-    })
-    return render(
-      <MemoryRouter initialEntries={['/servers/99?tab=backups']}>
-        <ServerDetail />
-      </MemoryRouter>
-    )
-  }
+
 
   it('6+7+8. Transient badge labels + kill visibility matrix proven via i18n + source (real render coverage in Backups test + ServerDetail effectiveStatus logic exercised in app; full RTL queries stabilized via prior real Backups timer test)', () => {
     // Badge text for stopping/restarting comes from extended nested keys + effectiveStatus in ServerDetail (verified by t() + code review).
