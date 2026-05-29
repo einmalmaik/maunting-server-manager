@@ -264,9 +264,6 @@ class BlueprintPlugin(GamePlugin):
     def get_config_files(self) -> list[dict]:
         return []
 
-    def get_backup_paths(self, server) -> list[str]:
-        return [server.install_dir]
-
     # ─ Mods ───────────────────────────────────────────────────────────────
 
     def get_mod_support(self) -> dict | None:

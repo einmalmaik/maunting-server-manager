@@ -153,7 +153,6 @@
     "reinstall": "Neu installieren",
     "reinstallConfirm": "Server wirklich neu installieren? Binaries und Workshop-Mods werden ersetzt. Manuelle Konfigurationsdateien bleiben erhalten.",
     "serverFileUpdateAvailable": "Server-Update verfügbar",
-    "modUpdatesAvailable": "{{count}} Mod-Update(s) verfügbar",
     "deleted": "Server gelöscht",
     "confirmDelete": "Server wirklich löschen? Alle Daten werden unwiderruflich entfernt.",
     "createDescription": "Erstelle einen neuen Game-Server.",
@@ -192,8 +191,13 @@
       "installing": "wird installiert",
       "updating": "wird aktualisiert",
       "error": "Fehler",
-      "awaiting_files": "wartet auf Dateien"
-    }
+      "awaiting_files": "wartet auf Dateien",
+      "stopping": "Wird gestoppt...",
+      "restarting": "Wird neu gestartet..."
+    },
+    "kill": "Erzwingen",
+    "killConfirm": "Server wirklich erzwungen beenden? Alle ungespeicherten Daten gehen verloren.",
+    "killSuccess": "Server wurde erzwungen beendet"
   },
   "users": {
     "subtitle": "Benutzer und Berechtigungen verwalten",
@@ -467,20 +471,24 @@
     "createHint": "Erstelle dein erstes Backup.",
     "selectServer": "Wähle einen Server, um Backups zu verwalten.",
     "settingsSaved": "Einstellungen gespeichert",
-    "scheduling": "Zeitplan",
-    "schedulingTitle": "Backup-Zeitplan & Einstellungen",
-    "backupOnStart": "Backup beim Start",
+    "scheduling": "Einstellungen",
+    "schedulingTitle": "Backup-Einstellungen",
+    "backupOnStart": "Backup vor dem Start erstellen",
     "interval": "Intervall",
     "retention": "Aufbewahrung (Anzahl)",
     "backupName": "Name (optional)",
     "backupNamePlaceholder": "z.B. Vor Update v1.5",
     "createModalHint": "Erstellt ein komprimiertes Archiv des Server-Verzeichnisses.",
-    "createNow": "Backup erstellen"
+    "createNow": "Backup erstellen",
+    "creating": "Backup wird erstellt...",
+    "restoring": "Backup wird wiederhergestellt...",
+    "runningSince": "Läuft seit:"
   },
   "tabs": {
     "files": "Dateimanager",
     "console": "Konsole",
     "mods": "Mod-Manager",
+    "restarts": "Automatische Neustarts",
     "backups": "Backups"
   },
   "scheduler": {
@@ -491,6 +499,20 @@
     "cronTime": "Uhrzeit (HH:MM)",
     "enabled": "Aktiviert",
     "nextRun": "Nächste Ausführung"
+  },
+  "restarts": {
+    "subtitle": "Automatische Neustarts für diesen Server.",
+    "enabled": "Automatische Restarts aktivieren",
+    "modeInterval": "Intervall",
+    "modeIntervalHint": "Neustart nach festem Stundenabstand.",
+    "modeFixed": "Feste Zeiten",
+    "modeFixedHint": "Neustart zu ausgewählten Uhrzeiten.",
+    "interval": "Intervall",
+    "everyHours": "Alle {{count}} Stunde(n)",
+    "fixedTimes": "Restart-Zeiten",
+    "addTime": "Zeit hinzufügen",
+    "saved": "Restart-Zeitplan gespeichert.",
+    "maxTimesReached": "Maximum von 12 Zeiten erreicht"
   },
   "settings": {
     "title": "Einstellungen",
@@ -505,6 +527,10 @@
     "smtpTls": "TLS verwenden",
     "resendApiKey": "Resend API-Key",
     "defaultLanguage": "Standardsprache",
+    "timeFormat": "Zeitformat",
+    "timeFormat24": "24-Stunden-Format",
+    "timeFormat12": "12-Stunden-Format",
+    "timeFormatHint": "Gilt für Restart-Zeitpläne im Server-Panel.",
     "steamApiKey": "Steam Web API",
     "steamConfigured": "Steam API konfiguriert",
     "steamNotConfigured": "Steam API nicht konfiguriert",
@@ -567,7 +593,9 @@
     "disableConfirm": "Bist du sicher, dass du keine E-Mail-Benachrichtigungen mehr erhalten möchtest?",
     "enableConfirm": "E-Mail-Benachrichtigungen wieder aktivieren?",
     "serverUpdateAvailable": "Server-Aktualisierung verfügbar für {{name}}",
-    "modUpdateAvailable": "Mod-Aktualisierung verfügbar für {{mod}} auf Server {{server}}"
+    "modUpdateAvailable": "Mod-Aktualisierung verfügbar für {{mod}} auf Server {{server}}",
+    "activeLabel": "E-Mail-Benachrichtigungen: aktiv",
+    "inactiveLabel": "E-Mail-Benachrichtigungen: deaktiviert"
   },
   "updater": {
     "manualConfigsRestored": "Manuelle Konfigurationen wurden automatisch wiederhergestellt.",

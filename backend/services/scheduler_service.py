@@ -6,9 +6,6 @@ Simple, reliable, and extensible.
 """
 
 import logging
-import os
-import subprocess
-from datetime import datetime, timezone
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -18,6 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from database import SessionLocal
 from games import get_plugin, _append_console_log
 from services import docker_service
+from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
 
 logger = logging.getLogger(__name__)
 
@@ -71,26 +69,19 @@ def stop_scheduler():
 
 
 async def _restart_server_task(server_id: int) -> None:
-    """Top-level job task: stops and starts a server directly via its plugin."""
+    """Top-level job task: restartet über denselben Pfad wie der manuelle Button."""
     from models import AuditLog, Server
 
     db = SessionLocal()
     try:
         server = db.query(Server).filter(Server.id == server_id).first()
-        if not server or server.status != "running":
+        if not server:
             return
 
-        plugin = get_plugin(server.game_type)
-        if not plugin:
-            return
-
-        stop_result = plugin.stop(server)
-        if "error" in stop_result:
-            raise RuntimeError(f"stop failed: {stop_result['error']}")
-
-        start_result = plugin.start(server)
-        if "error" in start_result:
-            raise RuntimeError(f"start failed: {start_result['error']}")
+        # Kein früher Status-Check mehr außerhalb des Locks (TOCTOU-Race mit manual stop/start).
+        # Der zentrale restart_server_with_updates (mit einheitlichem Lifecycle-Lock) ist
+        # autoritativ und führt stop+firewall immer sicher aus (idempotent bei nicht-laufend).
+        await restart_server_with_updates(db, server)
 
         audit = AuditLog(
             user_id=None,
@@ -109,8 +100,8 @@ async def _restart_server_task(server_id: int) -> None:
 
 
 async def _backup_server_task(server_id: int) -> None:
-    """Top-level job task: creates a backup directly without auth checks."""
-    from models import Backup, Server
+    """Top-level job task: delegates to central backup_service (no duplicated tar logic)."""
+    from models import Server  # only for existence check (service does the rest)
 
     db = SessionLocal()
     try:
@@ -118,27 +109,13 @@ async def _backup_server_task(server_id: int) -> None:
         if not server:
             return
 
-        backup_dir = f"/opt/msm/backups/{server_id}"
-        os.makedirs(backup_dir, exist_ok=True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        filename = f"{server.name}_{timestamp}.tar.gz"
-        filepath = os.path.join(backup_dir, filename)
-
-        subprocess.run(
-            ["tar", "-czf", filepath, "-C", server.install_dir, "."],
-            check=True, capture_output=True, timeout=300,
-            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
-        )
-        size_mb = os.path.getsize(filepath) // (1024 * 1024)
-
-        backup = Backup(server_id=server_id, filename=filepath, size_mb=size_mb)
-        db.add(backup)
-        db.commit()
-
-        cleanup_old_backups(server_id, db)
-    except Exception as e:
+        from services.backup_service import run_backup
+        # Scheduler path: kürzerer Timeout (300s), damit der Scheduler-Loop nicht zu lange blockiert.
+        # Service übernimmt tar + DB-Record + Retention-Cleanup.
+        run_backup(server_id, db, timeout_seconds=300)
+    except Exception:
         import logging
-        logging.warning("Auto-backup failed for server %s: %s", server_id, e)
+        logging.warning("Auto-backup failed for server %s (details redacted for security)", server_id)
     finally:
         db.close()
 
@@ -185,6 +162,43 @@ def schedule_server_restart(
     )
 
     return job.id
+
+
+def remove_restart_jobs(server_id: int) -> None:
+    """Entfernt alle Auto-Restart-Jobs eines Servers."""
+    scheduler = get_scheduler()
+    for job in list(scheduler.get_jobs()):
+        if job.id == f"restart_server_{server_id}" or job.id.startswith(f"restart_cron_server_{server_id}_"):
+            remove_job(job.id)
+
+
+def sync_server_restart_schedule(server) -> None:
+    """Synchronisiert DB-Settings eines Servers in APScheduler.
+
+    DB bleibt die Quelle der Wahrheit. Intervall hat Vorrang vor festen Zeiten,
+    weil die UI immer genau einen Modus speichert.
+    """
+    remove_restart_jobs(server.id)
+    if not getattr(server, "auto_restart", False):
+        return
+
+    interval_hours = getattr(server, "restart_interval_hours", None)
+    if interval_hours:
+        schedule_server_restart(
+            server.id,
+            interval_hours=interval_hours,
+            job_id=f"restart_server_{server.id}",
+        )
+        return
+
+    times_raw = getattr(server, "restart_times_utc", None) or getattr(server, "restart_time_utc", None) or ""
+    for time_value in [part.strip() for part in times_raw.split(",") if part.strip()]:
+        safe_id = time_value.replace(":", "")
+        schedule_server_restart(
+            server.id,
+            cron_time=time_value,
+            job_id=f"restart_cron_server_{server.id}_{safe_id}",
+        )
 
 
 def schedule_backup(
@@ -251,27 +265,8 @@ def get_jobs(server_id: Optional[int] = None) -> list:
     ]
 
 
-def cleanup_old_backups(server_id: int, db):
-    """Keep only the configured number of backups per server."""
-    from models import Backup, Server
-
-    server = db.query(Server).filter(Server.id == server_id).first()
-    keep = server.backup_retention_count if server else 5
-
-    backups = db.query(Backup).filter(
-        Backup.server_id == server_id
-    ).order_by(Backup.created_at.desc()).all()
-
-    if len(backups) > keep:
-        for old_backup in backups[keep:]:
-            if os.path.exists(old_backup.filename):
-                try:
-                    os.remove(old_backup.filename)
-                except Exception:
-                    pass
-            db.delete(old_backup)
-        db.commit()
-
+# cleanup_old_backups wurde entfernt (war Duplikat). Zentrale Implementierung
+# jetzt in services/backup_service.py (wird von _backup_server_task und Router genutzt).
 
 async def _disk_soft_limit_task() -> None:
     """Globaler periodischer Job: aktualisiert `disk_usage_mb` für ALLE Server,
@@ -407,47 +402,29 @@ async def _background_update_check_task() -> None:
                 if not plugin:
                     continue
 
-                # 1. Workshop-Mod-Updates (passiver Check via Plugin/Updater)
+                # 1. Workshop-Mod-Updates werden autonom vorbereitet.
                 mod_updates = plugin.check_for_mod_updates(server)
                 if mod_updates:
                     count = len(mod_updates)
                     _append_console_log(
                         server.id,
                         f"[MSM] Background-Check: {count} Workshop-Mod(s) benötigen Update/Installation "
-                        f"für Server '{server.name}' (passiv erkannt — kein automatisches Update).\n"
-                    )
-                    server.status_message = (
-                        f"Hintergrund-Check: {count} Mod-Update(s) verfügbar (Workshop). "
-                        "Bitte bei nächstem Neustart prüfen/ausführen."
+                        f"für Server '{server.name}'. Autonomer Download startet.\n"
                     )
                     logger.info(
-                        "Background-Check: %d Mod-Update(s) für Server %s ('%s') gefunden (passiv).",
+                        "Background-Check: %d Mod-Update(s) für Server %s ('%s') gefunden.",
                         count, server.id, server.name
                     )
-
-                    # E-Mail-Benachrichtigung (nur 1x pro neuem Fund via Metadaten-Dedup)
-                    if email_configured and candidate_users:
-                        for mod_info in mod_updates:
-                            mod_name = mod_info.get("name") or str(mod_info.get("workshop_id") or "Unbekannt")
-                            remote = mod_info.get("remote_updated") or ""
-                            current = mod_info.get("current_updated") or ""
-                            wid = mod_info.get("workshop_id") or ""
-                            dedup_key = f"mod:{server.id}:{wid}:{remote}:{current}"
-                            if dedup_key not in _notified_mod_update_keys:
-                                _notified_mod_update_keys.add(dedup_key)
-                                for u in candidate_users:
-                                    try:
-                                        if not has_server_permission(db, u, server.id, "server.view"):
-                                            continue
-                                        if EmailService.is_configured() and getattr(u, "email_notifications", False):
-                                            await EmailService.send_mod_update_available_notification(
-                                                u.email, u.username, server.name, mod_name
-                                            )
-                                    except Exception as notify_err:  # pragma: no cover - defensiv
-                                        logger.warning(
-                                            "Mod-Update-Email fehlgeschlagen für User %s, Server %s, Mod %s: %s",
-                                            getattr(u, "id", "?"), server.id, mod_name, notify_err
-                                        )
+                    async with get_server_lifecycle_lock(server.id):
+                        db.refresh(server)
+                        if server.status not in ("running", "starting", "stopping"):
+                            mod_res = plugin.perform_workshop_mod_updates(server)
+                            if not mod_res.get("ok", False):
+                                _append_console_log(
+                                    server.id,
+                                    f"[MSM] Autonomes Workshop-Mod-Update fehlgeschlagen: "
+                                    f"{mod_res.get('error') or mod_res}\n",
+                                )
 
                 # 2. Server-Datei-Update (Game-Binaries, passiv)
                 server_update = plugin.check_for_server_file_update(server)
@@ -532,27 +509,12 @@ def init_server_schedules(db):
 
     servers = db.query(Server).all()
     for server in servers:
-        if server.auto_restart and server.restart_interval_hours:
+        if server.auto_restart:
             try:
-                schedule_server_restart(
-                    server.id,
-                    interval_hours=server.restart_interval_hours,
-                    job_id=f"restart_server_{server.id}"
-                )
+                sync_server_restart_schedule(server)
             except Exception as e:
                 import logging
                 logging.warning("Failed to schedule restart for server %s: %s", server.id, e)
-
-        if server.auto_restart and server.restart_time_utc:
-            try:
-                schedule_server_restart(
-                    server.id,
-                    cron_time=server.restart_time_utc,
-                    job_id=f"restart_cron_server_{server.id}"
-                )
-            except Exception as e:
-                import logging
-                logging.warning("Failed to schedule cron restart for server %s: %s", server.id, e)
 
         if server.backup_interval_hours and server.backup_interval_hours > 0:
             try:
@@ -564,3 +526,16 @@ def init_server_schedules(db):
             except Exception as e:
                 import logging
                 logging.warning("Failed to schedule backup for server %s: %s", server.id, e)
+
+    # Hinweis zum restart_time_utc / restart_times_utc Pattern (wie in models/server.py):
+    # Backup nutzt aktuell ausschließlich Interval (backup_interval_hours).
+    # Die Struktur ist bewusst so vorbereitet, dass später ein backup_times_utc
+    # (Cron-ähnlich, analog zu restart_times_utc) ergänzt werden kann,
+    # ohne die bestehende Interval-Logik oder die init_server_schedules zu zerstören.
+    # Zeitzonen-Handling: Beide Systeme speichern/interpretieren Zeiten als
+    # UTC-intendierte HH:MM-Strings. Globales time_format (PanelSettings) ist
+    # reine UI-Darstellung und wird nicht für Scheduling-Entscheidungen benötigt.
+    # (Konsistenz mit Restart-System gewährleistet.)
+    # Backup verwendet aktuell NUR backup_interval_hours (IntervalTrigger).
+    # Ein zukünftiges backup_times_utc (analog) würde kleine Erweiterungen in schedule_backup +
+    # init erfordern (ähnlich der Restart-Logik), ist aber strukturell vorbereitet.

@@ -6,19 +6,19 @@ from config import settings
 _COOKIE_CONFIG = {
     "__Secure-access_token": {
         "httponly": True,
-        "secure": not settings.debug,
+        "secure": True,
         "samesite": "strict",
         "path": "/api",
     },
     "__Secure-refresh_token": {
         "httponly": True,
-        "secure": not settings.debug,
+        "secure": True,
         "samesite": "strict",
         "path": "/api/auth",
     },
     "__Secure-csrf_token": {
         "httponly": False,  # JS muss lesen koennen fuer Double-Submit
-        "secure": not settings.debug,
+        "secure": True,
         "samesite": "strict",
         "path": "/",
     },

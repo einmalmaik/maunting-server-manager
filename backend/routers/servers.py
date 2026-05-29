@@ -25,6 +25,8 @@ from services.docker_iptables_service import revoke_server as iptables_revoke_se
 from services.firewall_service import close_ports, open_ports
 from services.network_interfaces_service import default_bind_ip, list_host_interfaces
 from services.port_allocation_service import PortConflictError, allocate_ports
+from services.scheduler_service import sync_server_restart_schedule
+from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
 
 import logging
 logger = logging.getLogger(__name__)
@@ -36,7 +38,10 @@ logger = logging.getLogger(__name__)
 _UPDATE_CACHE: dict[int, dict] = {}
 _UPDATE_CACHE_LOCK = threading.Lock()
 _UPDATE_CACHE_TTL_SECONDS = 300
-_SERVER_OPERATION_LOCKS: dict[int, asyncio.Lock] = {}
+
+# _SERVER_OPERATION_LOCKS entfernt: alle destruktiven Lifecycle-Ops (start/stop/restart)
+# verwenden nun EINHEITLICH get_server_lifecycle_lock aus server_lifecycle_service.
+# Verhindert TOCTOU auf Firewall/iptables (Security-Finding). KISS + zentrale Serialisierung.
 
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
@@ -74,7 +79,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         raise HTTPException(status_code=503, detail=str(e))
 
     # Placeholder-Row zuerst einfügen, um stabile PK (server.id) zu erhalten.
-    # Danach install_dir = f".../{game_type}_{id}" — kollisionsfrei über alle Zeit,
+    # Danach install_dir = f".../{game_type}_{id}" - kollisionsfrei über alle Zeit,
     # auch nach DELETEs (Count-basiert war die Ursache für dayz_1-Reuse).
     # Placeholder wird bei Konflikt sofort wieder gelöscht (nie sichtbar für User).
     server = Server(
@@ -85,6 +90,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         auto_restart=req.auto_restart,
         restart_interval_hours=req.restart_interval_hours,
         restart_time_utc=req.restart_time_utc,
+        restart_times_utc=req.restart_times_utc,
         cpu_limit_percent=req.cpu_limit_percent,
         ram_limit_mb=req.ram_limit_mb,
         disk_limit_gb=req.disk_limit_gb,
@@ -114,7 +120,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
             ),
         )
 
-    # Verzeichnis anlegen — wird vom Panel-User (`msm`) angelegt und ist von dort
+    # Verzeichnis anlegen - wird vom Panel-User (`msm`) angelegt und ist von dort
     # rw, während der Container das Volume mit derselben UID/GID mountet (siehe
     # docker_service.host_uid_gid()). Kein useradd, kein chown via sudo nötig.
     # exist_ok=False ist jetzt sicher (Guard oben).
@@ -149,6 +155,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_installed_notification(user.email, user.username, server.name)
 
+    sync_server_restart_schedule(server)
     return server
 
 
@@ -216,8 +223,11 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     db.commit()
     db.refresh(server)
 
+    if {"auto_restart", "restart_interval_hours", "restart_time_utc", "restart_times_utc"} & set(payload.keys()):
+        sync_server_restart_schedule(server)
+
     if network_change:
-        # Alte Firewall- und iptables-Regeln entfernen, neue anlegen — ABER
+        # Alte Firewall- und iptables-Regeln entfernen, neue anlegen - ABER
         # nur, wenn der Server gerade laeuft. Fuer gestoppte Server bleiben die
         # Regeln zu (Lifecycle-Kopplung).
         plugin = get_plugin(server.game_type)
@@ -234,7 +244,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                 old_bind_ip or "",
                 old_ports[0] or 0, old_ports[1], old_ports[2],
             )
-            # Container stoppen — Plugin.start() legt ihn mit den neuen Ports/
+            # Container stoppen - Plugin.start() legt ihn mit den neuen Ports/
             # Bind-Werten frisch an.
             plugin.stop(server)
             open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
@@ -256,7 +266,7 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
        laufende Container).
     2. UFW-Regeln für Ports schließen.
     3. Install-Verzeichnis (Bind-Mount-Quelle) vom Host entfernen.
-    4. Backup-Verzeichnis (alle TAR-Archive) vom Host entfernen — DB-Cascade
+    4. Backup-Verzeichnis (alle TAR-Archive) vom Host entfernen - DB-Cascade
        räumt die Backup-Records selbst.
     5. MSM-Console-Log-Verzeichnis entfernen.
     6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups).
@@ -267,7 +277,7 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
-    # 1. Container stoppen + entfernen (idempotent — force killt running)
+    # 1. Container stoppen + entfernen (idempotent - force killt running)
     container = container_name_for(server.id)
     docker_service.remove(container, force=True)
 
@@ -293,7 +303,7 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
         except OSError:
             pass
 
-    # 4. Backup-Verzeichnis (Files) löschen — DB-Cascade räumt Records
+    # 4. Backup-Verzeichnis (Files) löschen - DB-Cascade räumt Records
     backup_dir = f"/opt/msm/backups/{server.id}"
     backups_removed = False
     if os.path.exists(backup_dir):
@@ -345,7 +355,7 @@ def _missing_required_files(install_dir: str, required_files: list[str]) -> list
         except (ValueError, RuntimeError):
             missing.append(p)
             continue
-        # Symlinks gelten nicht als vorhanden — Defense-in-Depth.
+        # Symlinks gelten nicht als vorhanden - Defense-in-Depth.
         if target.is_symlink() or not target.is_file():
             missing.append(p)
     return missing
@@ -362,7 +372,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
 
     # Sicherheits-Vorprüfung: Server ohne explizite public_bind_ip darf nicht
-    # starten — sonst würde Docker auf 0.0.0.0 binden und die UFW-Falle auslösen.
+    # starten - sonst würde Docker auf 0.0.0.0 binden und die UFW-Falle auslösen.
     if not server.public_bind_ip:
         raise HTTPException(
             status_code=400,
@@ -372,7 +382,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
             ),
         )
 
-    # NEU: Pre-Check fuer manualUpload — VOR Firewall-Regeln.
+    # NEU: Pre-Check fuer manualUpload - VOR Firewall-Regeln.
     bp = plugin.get_blueprint()
     if bp and bp.source.type == BlueprintSourceType.MANUAL_UPLOAD:
         manual = bp.source.manual
@@ -382,14 +392,14 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Server kann nicht gestartet werden — folgende Dateien fehlen "
+                    f"Server kann nicht gestartet werden - folgende Dateien fehlen "
                     f"im Server-Verzeichnis: {', '.join(missing)}. "
                     "Bitte über den File Manager hochladen (Archive können per "
                     "Rechtsklick → Entpacken ausgepackt werden)."
                 ),
             )
 
-    lock = _SERVER_OPERATION_LOCKS.setdefault(server.id, asyncio.Lock())
+    lock = get_server_lifecycle_lock(server.id)
     async with lock:
         # Firewall-Regeln öffnen vor Container-Start.
         open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
@@ -400,7 +410,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
         )
 
         # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
-        # async-Route blockieren sie den gesamten Uvicorn-Event-Loop — alle anderen
+        # async-Route blockieren sie den gesamten Uvicorn-Event-Loop - alle anderen
         # Requests hängen mit. Daher in einen Threadpool auslagern.
 
         # Updater-Hook vor jedem Start (vor allem für Workshop-Mod-Checks nach Neustart)
@@ -429,9 +439,24 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
         except Exception as exc:
             _append_console_log(server.id, f"[MSM] prepare_for_updates / Mod-Update beim Start fehlgeschlagen (nicht kritisch): {exc}\n")
 
+        db.refresh(server)
+
+        # Pre-Start-Backup (best-effort, nach Permission + Lock, vor docker run)
+        if server.backup_on_start:
+            from services.backup_service import run_backup
+            try:
+                run_backup(server.id, db, timeout_seconds=300)
+            except Exception:
+                logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
+                # NO Hard-Fail: Server startet trotzdem (best-effort)
+
+        # AUFGABE 4A: transient status VOR Docker-Operation
+        server.status = "starting"
+        db.commit()
+
         result = await asyncio.to_thread(plugin.start, server)
         if "error" in result:
-            # Container-Start fehlgeschlagen — Firewall-Regeln wieder schließen.
+            # Container-Start fehlgeschlagen - Firewall-Regeln wieder schließen.
             close_ports(server.game_port, server.query_port, server.rcon_port)
             iptables_revoke_server(
                 server.name,
@@ -455,21 +480,30 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    # Siehe start_server: docker stop ist synchron und kann bis zum
-    # Graceful-Timeout dauern. Threadpool hält den Event-Loop frei.
-    result = await asyncio.to_thread(plugin.stop, server)
-    if "error" in result:
-        raise HTTPException(status_code=500, detail=result["error"])
-    server.status = "stopped"
-    db.commit()
 
-    # Firewall- und iptables-Regeln nach Container-Stop schließen.
-    close_ports(server.game_port, server.query_port, server.rcon_port)
-    iptables_revoke_server(
-        server.name,
-        server.public_bind_ip or "",
-        server.game_port, server.query_port, server.rcon_port,
-    )
+    # WICHTIG: Lock mit start/restart teilen (via get_server_lifecycle_lock).
+    # Verhindert Race auf stop + close/revoke vs. concurrent start/restart/firewall.
+    # Früher fehlte hier jeder Lock → TOCTOU mit Restart-Pfad.
+    lock = get_server_lifecycle_lock(server.id)
+    async with lock:
+        # AUFGABE 4A: transient status VOR Docker-Operation (für Echtzeit-Feedback)
+        server.status = "stopping"
+        db.commit()
+        # Siehe start_server: docker stop ist synchron und kann bis zum
+        # Graceful-Timeout dauern. Threadpool hält den Event-Loop frei.
+        result = await asyncio.to_thread(plugin.stop, server)
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+        server.status = "stopped"
+        db.commit()
+
+        # Firewall- und iptables-Regeln nach Container-Stop schließen.
+        close_ports(server.game_port, server.query_port, server.rcon_port)
+        iptables_revoke_server(
+            server.name,
+            server.public_bind_ip or "",
+            server.game_port, server.query_port, server.rcon_port,
+        )
 
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestoppt")
@@ -485,131 +519,45 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    lock = _SERVER_OPERATION_LOCKS.setdefault(server.id, asyncio.Lock())
+    # AUFGABE 4A: transient now set only inside locked service (before first docker stop) for consistency with stop/start + to avoid duplicate commit / small TOCTOU (review Issue 5/10)
+    result = await restart_server_with_updates(db, server)
+    if EmailService.is_configured() and user.email_notifications:
+        await EmailService.send_server_status_notification(user.email, user.username, server.name, "neugestartet")
+    return result
+
+
+@router.post("/{server_id}/kill")
+async def kill_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+    """Erzwungenes Beenden (Docker force remove). Nur für running/stopping/restarting sichtbar im UI.
+    Permission "server.kill" (Naming analog zu server.stop, nicht server.power.* für Code-Konsistenz mit bestehenden server.* Keys).
+    """
+    require_server_permission(user, server_id, db, "server.kill")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+    lock = get_server_lifecycle_lock(server.id)
     async with lock:
-        # Firewall-Regeln vor dem Stop schließen (genau wie im dedizierten Stop-Pfad).
-        close_ports(server.game_port, server.query_port, server.rcon_port)
-        iptables_revoke_server(
-            server.name,
-            server.public_bind_ip or "",
-            server.game_port, server.query_port, server.rcon_port,
-        )
-
-        stop_result = await asyncio.to_thread(plugin.stop, server)
-        if "error" in stop_result:
-            raise HTTPException(status_code=500, detail=stop_result["error"])
-
-        # ── Zentrale Updater-Hooks (Blueprint-konform, KISS) ─────────────────────
-        # Wird direkt nach dem Stop und vor dem Start ausgeführt.
-        # Hier laufen die Prüfungen für:
-        #   - Server-Datei-Updates (werden NUR beim Neustart angewendet)
-        #   - Workshop-Mod-Updates (werden vorbereitet oder direkt angewendet)
-        #
-        # Wichtig (genau nach Plan):
-        # - Server-Datei-Updates passieren **ausschließlich** hier (vor plugin.start).
-        # - Update-Ausführung ist **synchron** (via perform_ + to_thread), damit
-        #   die Dateien wirklich aktualisiert sind, BEVOR der Container startet.
-        # - cache_manual_configs + restore_manual_configs werden an der richtigen
-        #   Stelle ausgeführt (vor Update cachen, danach restore) — siehe
-        #   updater.apply_server_file_update.
-        # - Workshop-Mod-Updates: nur Check hier, Ausführung ggf. später.
-        try:
-            plugin.prepare_for_updates(server)
-
-            # Server-Dateien: Prüfung + ggf. Update VOR dem eigentlichen Start
-            # (Update passiert NUR wenn Check "update" meldet. Dann via perform_
-            # mit integriertem Cache/Restore. Niemals plugin.install() — das wäre
-            # asynchron und würde zu Race mit dem nachfolgenden Start führen.)
-            server_update = plugin.check_for_server_file_update(server)
-            if server_update.get("action") == "update":
-                _append_console_log(
-                    server.id,
-                    f"[MSM] Server-Datei-Update erkannt ({server_update.get('reason')}). "
-                    "Update wird **vor** dem Container-Start ausgeführt (synchron + Config-Cache/Restore)...\n"
-                )
-                # Kritischer Fix: Sync-Ausführung über to_thread.
-                # - Garantiert: Update fertig vor plugin.start()
-                # - Garantiert: Cachen vor, Restore nach dem eigentlichen Update
-                # - Garantiert: Restart läuft auch bei Fehlern weiter (try/except + "ok"-Prüfung)
-                update_res = await asyncio.to_thread(
-                    plugin.perform_server_file_update, server
-                )
-                if not update_res.get("ok", False):
-                    _append_console_log(
-                        server.id,
-                        f"[MSM] Server-Datei-Update fehlgeschlagen (Restart wird fortgesetzt): {update_res.get('error') or update_res}\n"
-                    )
-                else:
-                    _append_console_log(
-                        server.id,
-                        "[MSM] Server-Datei-Update inkl. Wiederherstellung manueller Config-Dateien erfolgreich abgeschlossen.\n"
-                    )
-
-            # Workshop-Mods: Prüfung + tatsächliche Ausführung (volle Execution-Logik)
-            # Wird NUR im Restart-Pfad (vor plugin.start) ausgeführt, damit die
-            # Workshop-Dateien bereits im Volume liegen, wenn der Container startet.
-            # Verwendet perform_workshop_mod_updates (base.py) → install_mod + internes
-            # run_steamcmd_workshop_download + Metadaten-Update (last_updated + installed_version).
-            # Bei Fehlern: Restart läuft trotzdem weiter (AGENTS.md-Sicherheit).
-            mod_updates = plugin.check_for_mod_updates(server)
-            if mod_updates:
-                _append_console_log(
-                    server.id,
-                    f"[MSM] {len(mod_updates)} Workshop-Mod(s) benötigen Update/Installation – "
-                    "Download via install_mod/run_steamcmd_workshop_download wird **vor** dem "
-                    "Container-Start ausgeführt (synchron + Metadaten-Update)...\n"
-                )
-                mod_res = await asyncio.to_thread(
-                    plugin.perform_workshop_mod_updates, server
-                )
-                if not mod_res.get("ok", False):
-                    _append_console_log(
-                        server.id,
-                        f"[MSM] Workshop-Mod-Update fehlgeschlagen (Restart wird fortgesetzt): {mod_res.get('error') or mod_res}\n"
-                    )
-                else:
-                    _append_console_log(
-                        server.id,
-                        f"[MSM] Workshop-Mod-Update erfolgreich: {mod_res.get('message', '')} "
-                        f"({mod_res.get('applied', 0)} Mods).\n"
-                    )
-
-        except Exception as exc:
-            # Updater-Fehler dürfen den Restart niemals komplett verhindern.
-            # Nur Logging + Console-Eintrag (sicheres Verhalten, AGENTS.md-konform).
-            _append_console_log(
-                server.id,
-                f"[MSM] Updater-Hook während Restart fehlgeschlagen (nicht kritisch): {exc}\n"
-            )
-            logger.warning("Updater-Hook beim Restart von Server %s fehlgeschlagen: %s", server.id, exc)
-
-        # Nach erfolgreichem Start die Firewall-Regeln wieder öffnen
-        # (genau wie im dedizierten Start-Pfad). Das war im reinen Restart-Pfad
-        # bisher komplett vergessen.
-        start_result = await asyncio.to_thread(plugin.start, server)
-        if "error" in start_result:
-            # Bei Start-Fehler die Regeln nicht wieder öffnen (sind schon geschlossen).
-            raise HTTPException(status_code=500, detail=start_result["error"])
-
-        # Regeln erst nach erfolgreichem Container-Start wieder öffnen.
-        open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
-        iptables_accept_server(
-            server.name,
-            server.public_bind_ip or "",
-            server.game_port, server.query_port, server.rcon_port,
-        )
-
-        server.status = "running"
+        from games.base import container_name_for
+        from services import docker_service
+        container = container_name_for(server.id)
+        # AUFGABE fix (review Issue 1/2 + Security Finding 1): transient "stopping" (reuses existing amber/disable UI logic for in-flight kill; KISS no new i18n/statusClasses) + commit BEFORE docker remove (prevents stale "running" on hang, matches stop/start/restart invariant). Result checked; error before any final DB mutation (no false success).
+        server.status = "stopping"
         db.commit()
-        if EmailService.is_configured() and user.email_notifications:
-            await EmailService.send_server_status_notification(user.email, user.username, server.name, "neugestartet")
-        return {"message": "Restart-Befehl gesendet", "status": server.status, "stop": stop_result, "start": start_result}
+        result = docker_service.remove(container, force=True)
+        if isinstance(result, dict) and "error" in result:
+            raise HTTPException(status_code=500, detail="Erzwungenes Beenden fehlgeschlagen")
+        server.status = "stopped"
+        server.status_message = "Erzwungen beendet"
+        db.commit()
+
+    return {"message": "Server wurde erzwungen beendet"}
 
 
 def _disk_free_mb(path: str) -> int | None:
     """Liefert freien Speicher auf dem Filesystem von `path` in MB.
 
-    Wir nutzen os.statvfs (Linux/Unix). Bei Fehler None — der Frontend zeigt
+    Wir nutzen os.statvfs (Linux/Unix). Bei Fehler None - der Frontend zeigt
     dann '-' an, statt zu crashen.
     """
     try:
@@ -630,7 +578,7 @@ def _get_cached_update_availability(server, plugin) -> dict:
 
     Ruft plugin.check_for_* NUR bei TTL-Miss (5min). Status-Endpoint bleibt schnell.
     Defensiv + KISS: fängt alles ab, liefert Defaults, keine Seiteneffekte.
-    mod_updates_available: list[dict] exakt mit workshop_id, name, action, reason.
+    Mod-Updates werden autonom vorbereitet und sind kein Server-Update-Badge.
     """
     if not plugin or not getattr(server, "id", None):
         return {
@@ -655,25 +603,10 @@ def _get_cached_update_availability(server, plugin) -> dict:
         server_file_available = server_update.get("action") == "update"
         server_file_reason = server_update.get("reason") if server_file_available else None
 
-        check_mods = getattr(plugin, "check_for_mod_updates", None)
-        mod_updates_raw = check_mods(server) if check_mods else []
-        if not isinstance(mod_updates_raw, (list, tuple)):
-            mod_updates_raw = []
-
-        mod_updates = []
-        for m in mod_updates_raw:
-            if isinstance(m, dict):
-                mod_updates.append({
-                    "workshop_id": m.get("workshop_id"),
-                    "name": m.get("name"),
-                    "action": m.get("action"),
-                    "reason": m.get("reason"),
-                })
-
         data = {
             "server_file_update_available": bool(server_file_available),
             "server_file_update_reason": server_file_reason,
-            "mod_updates_available": mod_updates,
+            "mod_updates_available": [],
         }
         with _UPDATE_CACHE_LOCK:
             _UPDATE_CACHE[sid] = {"ts": now, "data": data}
@@ -728,7 +661,7 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
             "mod_updates_available": update_info["mod_updates_available"],
         }
     plugin_status = plugin.get_status(server)
-    # installing/updating/error nicht ueberschreiben — Background-Thread oder
+    # installing/updating/error nicht ueberschreiben - Background-Thread oder
     # Admin setzen den Status selbst zurueck, wenn die Operation abgeschlossen ist
     if server.status not in ("installing", "updating", "error"):
         server.status = plugin_status.status
@@ -821,7 +754,7 @@ def _sse_data(line: str) -> str:
     """Eine Logzeile als SSE ``data:``-Frame kodieren.
 
     Mehrzeilige Werte werden zeilenweise als mehrere ``data:``-Felder
-    geschickt — das ist die SSE-Spezifikation für Newlines im Payload.
+    geschickt - das ist die SSE-Spezifikation für Newlines im Payload.
     """
     return "".join(f"data: {part}\n" for part in line.split("\n")) + "\n"
 
@@ -829,12 +762,20 @@ def _sse_data(line: str) -> str:
 async def _console_event_stream(request: Request, container: str, log_path: str):
     """Generator für den Console-SSE-Stream.
 
-    1. Backlog: bestehende MSM-Console-Logdatei wird einmalig dumped.
-    2. Live: zwei Hintergrund-Tasks puschen neue Zeilen in eine Queue
-       (a) neue Zeilen aus der Logdatei (Lifecycle-Events) und
-       (b) ``docker logs --follow --tail 0`` falls Docker verfügbar.
-    3. Consumer-Loop yieldet bis der Client trennt.
+    DESIGN-RATIONALE (explizite KISS-Ausnahme, dokumentiert per AGENTS §1.5 + general-3 review):
+    - Ziel: "Direkt volle History beim Tab-Öffnen + autom. Re-Buffer bei Container-Start" OHNE Tab-Switch.
+    - MSM-Logdatei = Single Source für alle [MSM] Lifecycle/Install-Events (zentral, persistent über Restarts).
+    - Docker --follow --tail 200 (dann 0) = komplementärer Container-Stdout für Game-Logs beim Start (keine Garantie auf Dupe-Freiheit, aber praktisch ok).
+    - Dual-Task + Queue + inner reconnect/terminate-Handling + Keepalive nötig, weil:
+      a) File-Poll für Events die NICHT im Container-Log landen.
+      b) Docker-Logs bei Start frischen Tail braucht, später live.
+      c) Rotation, disconnect, subprocess races müssen sauber sein (kein Leak bei vielen Consoles).
+    - Einfachere Alternative (ein Tail, oder nur docker, oder tail -f via shell) würde Feature oder Robustheit verlieren.
+    - Keine Pipeline/Orchestrator (verboten per examples.md); expliziter Generator mit 2 Tasks.
+    - Tests (test_console_endpoints) + runtime decken Grundpfad; volle E2E mit realem Game-Container ist env-limitiert.
+    Siehe auch ServerConsolePanel.tsx (EventSource Mount) und AGENTS KISS: "Kann ich simpler ohne Feature-Verlust?" - hier dokumentiert nein.
     """
+
     # 1. Initial-Backlog senden (Install-/Lifecycle-Historie).
     initial_bytes = 0
     if os.path.exists(log_path):
@@ -845,7 +786,7 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
             for line in content_bytes.decode("utf-8", errors="replace").splitlines():
                 yield _sse_data(line)
         except OSError:
-            # Datei verschwand zwischen exists() und open() — kein Problem,
+            # Datei verschwand zwischen exists() und open() - kein Problem,
             # Live-Tail fängt neue Schreibvorgänge.
             initial_bytes = 0
 
@@ -879,8 +820,8 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
     async def _tail_docker():
         """Streame Live-Container-Stdout/Stderr (oder melde, dass Docker fehlt).
 
-        ``--tail 200`` als historischer Backlog des Container-Outputs —
-        komplementär zum MSM-Logdatei-Backlog (Install/Lifecycle), keine
+        `--tail 200` als historischer Backlog des Container-Outputs -
+        komplementaer zum MSM-Logdatei-Backlog (Install/Lifecycle), keine
         Duplikate. Fehlende Container/Container-CLI sind kein Fehler:
         dann bleibt der Stream einfach still und liefert nur File-
         Lifecycle-Events.
@@ -888,40 +829,49 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
         docker_bin = shutil.which("docker")
         if not docker_bin:
             await queue.put(
-                "[MSM] Docker CLI nicht im PATH des Backends — Live-Container-Logs deaktiviert."
+                "[MSM] Docker CLI nicht im PATH des Backends - Live-Container-Logs deaktiviert."
             )
             return
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                docker_bin, "logs", "--follow", "--tail", "200", container,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-        except (FileNotFoundError, OSError):
-            return
-        try:
-            assert proc.stdout is not None
-            while True:
-                raw = await proc.stdout.readline()
-                if not raw:
-                    break
-                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-                await queue.put(line)
-        finally:
-            if proc.returncode is None:
-                try:
-                    proc.terminate()
-                    await asyncio.wait_for(proc.wait(), timeout=2.0)
-                except (asyncio.TimeoutError, ProcessLookupError):
+        tail = "200"
+        while True:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    docker_bin, "logs", "--follow", "--tail", tail, container,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+            except (FileNotFoundError, OSError):
+                return
+            try:
+                assert proc.stdout is not None
+                saw_line = False
+                while True:
+                    raw = await proc.stdout.readline()
+                    if not raw:
+                        break
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if line.startswith("Error response from daemon:"):
+                        continue
+                    saw_line = True
+                    await queue.put(line)
+                if saw_line:
+                    tail = "0"
+            finally:
+                if proc.returncode is None:
                     try:
-                        proc.kill()
-                    except ProcessLookupError:
+                        proc.terminate()
+                        await asyncio.wait_for(proc.wait(), timeout=2.0)
+                    except (asyncio.TimeoutError, ProcessLookupError):
+                        try:
+                            proc.kill()
+                        except ProcessLookupError:
+                            pass
+                if proc.stdout is not None:
+                    try:
+                        proc.stdout.close()
+                    except Exception:
                         pass
-            if proc.stdout is not None:
-                try:
-                    proc.stdout.close()
-                except Exception:
-                    pass
+            await asyncio.sleep(1.0)
 
     tasks = [
         asyncio.create_task(_tail_file()),
@@ -935,7 +885,7 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
             try:
                 line = await asyncio.wait_for(queue.get(), timeout=15.0)
             except asyncio.TimeoutError:
-                # SSE-Keepalive — verhindert dass Proxies die Verbindung kappen.
+                # SSE-Keepalive - verhindert dass Proxies die Verbindung kappen.
                 yield ": keepalive\n\n"
                 continue
             yield _sse_data(line)
@@ -969,7 +919,7 @@ def server_console_input(
     """Schreibt ``body.line`` in den stdin des Container-Prozesses.
 
     Auth: Cookie + CSRF + ``server.console.write``. Die Eingabe selbst wird
-    NICHT geloggt — sie kann sensibel sein (OAuth-Codes, RCON-Tokens, etc.).
+    NICHT geloggt - sie kann sensibel sein (OAuth-Codes, RCON-Tokens, etc.).
     """
     require_server_permission(user, server_id, db, "server.console.write")
     server = db.query(Server).filter(Server.id == server_id).first()
@@ -978,11 +928,11 @@ def server_console_input(
     container = container_name_for(server.id)
     if not docker_service.is_running(container):
         raise HTTPException(status_code=409, detail="Container läuft nicht")
-    # Newline erzwingen — die meisten Game-Server lesen zeilenweise.
+    # Newline erzwingen - die meisten Game-Server lesen zeilenweise.
     data = body.line if body.line.endswith("\n") else body.line + "\n"
     result = docker_service.send_stdin(container, data)
     if not result["ok"]:
-        # Generische Fehlermeldung — keine Container-Internas leaken.
+        # Generische Fehlermeldung - keine Container-Internas leaken.
         raise HTTPException(status_code=500, detail="Eingabe konnte nicht zugestellt werden")
     return {"ok": True}
 

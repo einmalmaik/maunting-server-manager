@@ -28,8 +28,17 @@ class Server(Base):
     auto_restart: Mapped[bool] = mapped_column(Boolean, default=False)
     restart_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     restart_time_utc: Mapped[str | None] = mapped_column(String(8), nullable=True)  # HH:MM
+    restart_times_utc: Mapped[str | None] = mapped_column(String(256), nullable=True)  # HH:MM,HH:MM
 
     # Backup-Scheduling
+    # Hinweis für zukünftige Erweiterung (analog zu Restart):
+    # - Aktuell nur backup_interval_hours (IntervalTrigger).
+    # - Später kann backup_times_utc (String, "HH:MM,HH:MM") hinzugefügt werden,
+    #   symmetrisch zu restart_times_utc.
+    # - Die Zeitangaben sind als UTC-intendierte HH:MM gespeichert (wie bei Restart).
+    # - time_format (globales Panel-Setting) ist reine UI-Anzeigepräferenz (12h/24h)
+    #   und beeinflusst nicht die Speicherung/Scheduling-Logik.
+    # - Beide Systeme (Restart + Backup) behandeln Zeiten konsistent über UTC-Strings.
     backup_on_start: Mapped[bool] = mapped_column(Boolean, default=False)
     backup_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 24=daily, 168=weekly, 720=monthly
     backup_retention_count: Mapped[int] = mapped_column(Integer, default=5)

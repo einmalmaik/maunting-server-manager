@@ -15,13 +15,14 @@ export interface Server {
   id: number
   name: string
   game_type: string
-  install_dir: string
-  container_name: string | null
+  // install_dir + container_name entfernt (Security/data-min per review): waren in allen Responses inkl. view-only User.
+  // Keine Verwendung im FE-Code (nur hier); interne Pfade bleiben server-only in DB/audit/owner flows.
   status: string
   status_message: string | null
   auto_restart: boolean
   restart_interval_hours: number | null
   restart_time_utc: string | null
+  restart_times_utc: string | null
   cpu_limit_percent: number | null
   ram_limit_mb: number | null
   disk_limit_gb: number | null

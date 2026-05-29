@@ -457,7 +457,7 @@ class GamePlugin(ABC):
 
     Pflichtmethoden:
       - build_container_command, build_container_env, build_port_publishes,
-        get_config_schema, get_config_files, get_backup_paths, get_logs
+        get_config_schema, get_config_files, get_logs
     """
 
     game_id: str = ""
@@ -790,13 +790,6 @@ class GamePlugin(ABC):
 
         _append_console_log(server.id, f"[MSM] Container {name} gestartet\n")
 
-        # Optionaler Auto-Backup-Trigger (Fire-and-forget, lokaler Loopback)
-        try:
-            import requests
-            requests.post(f"http://127.0.0.1:8000/api/backups/{server.id}/auto", timeout=5)
-        except Exception:
-            pass
-
         return {"message": "Server gestartet", "container": name}
 
     def stop(self, server) -> dict:
@@ -846,10 +839,6 @@ class GamePlugin(ABC):
 
     @abstractmethod
     def get_config_files(self) -> list[dict]:
-        ...
-
-    @abstractmethod
-    def get_backup_paths(self, server) -> list[str]:
         ...
 
     # ─ Mods ──────────────────────────────────────────────────────────────

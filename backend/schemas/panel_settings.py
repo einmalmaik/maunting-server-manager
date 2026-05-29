@@ -17,6 +17,7 @@ class PanelSettingsResponse(BaseModel):
     steam_api_configured: bool = False
     steam_account_username: str = ""
     steam_account_configured: bool = False
+    time_format: str = "24h"
 
 
 class PanelSettingsUpdate(BaseModel):
@@ -29,6 +30,7 @@ class PanelSettingsUpdate(BaseModel):
     smtp_tls: str | None = None
     resend_api_key: str | None = None
     default_language: str | None = None
+    time_format: str | None = None
 
 
 class TestEmailRequest(BaseModel):

@@ -1,18 +1,27 @@
 import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
+import { useConfirmStore } from '@/stores/confirmStore'
 import { useNavigate } from 'react-router-dom'
-import { api } from '@/api/client'
 import { Logo } from '@/components/Logo'
-import { Globe, Bell, BellOff, Menu, User, LogOut } from 'lucide-react'
+import { Globe, Bell, Menu, User, LogOut } from 'lucide-react'
+import { api } from '@/api/client'
 
 export function Topbar() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { user, logout, updateUser } = useAuthStore()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [confirmOpen, setConfirmOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const request = useConfirmStore(s => s.request)
+
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(user?.email_notifications ?? true)
+
+  useEffect(() => {
+    if (user) {
+      setNotificationsEnabled(user.email_notifications)
+    }
+  }, [user?.email_notifications])
 
   const toggleLang = () => {
     const next = i18n.language === 'de' ? 'en' : 'de'
@@ -34,24 +43,25 @@ export function Topbar() {
     navigate('/login', { replace: true })
   }
 
-  const notificationsEnabled = user?.email_notifications !== false
-
-  const handleBellClick = () => {
-    setConfirmOpen(true)
-  }
-
-  const toggleNotifications = async () => {
+  const handleBellClick = async () => {
     if (!user) return
-    const next = !notificationsEnabled
-    try {
-      await api(`/auth/me/notifications?enabled=${next}`, { method: 'PATCH' })
-      updateUser({ email_notifications: next })
-    } catch (err: any) {
-      const msg = t(err.message) || err.message || t('common.error')
-      // silent fail — user sees no toast needed here, the button state will revert visually
-      console.error(msg)
-    } finally {
-      setConfirmOpen(false)
+    const next = user.email_notifications === false ? true : false
+    
+    const isConfirmed = await request({
+       message: next ? t('notifications.enableConfirm') : t('notifications.disableConfirm'),
+       confirmText: next ? t('notifications.enable') : t('notifications.disable'),
+       danger: !next
+    })
+    
+    if (isConfirmed) {
+      try {
+        await api(`/auth/me/notifications?enabled=${next}`, { method: 'PATCH' })
+        // Optimistisches State-Update: kein Reload, kein MIME-Problem.
+        updateUser({ email_notifications: next })
+        setNotificationsEnabled(next)
+      } catch (err: any) {
+        console.error(err)
+      }
     }
   }
 
@@ -85,21 +95,27 @@ export function Topbar() {
           {/* Notifications Toggle */}
           <button
             onClick={handleBellClick}
-            title={notificationsEnabled ? t('notifications.disable') : t('notifications.enable')}
-            className={`p-2 rounded-full transition-colors active:scale-95 relative ${
-              notificationsEnabled
-                ? 'text-on-surface-variant hover:text-primary hover:bg-surface-variant/50'
-                : 'text-status-error hover:text-status-error hover:bg-status-destructive/10'
-            }`}
+            title={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
+            aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
+            className="p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary"
           >
-            {notificationsEnabled ? (
+            <div className="bell-wrapper" style={{ position: 'relative', display: 'inline-flex' }}>
               <Bell className="w-[18px] h-[18px]" />
-            ) : (
-              <BellOff className="w-[18px] h-[18px]" />
-            )}
-            {notificationsEnabled && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-secondary rounded-full" />
-            )}
+              <span
+                className="bell-status-dot"
+                aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
+                style={{
+                  position: 'absolute',
+                  top: '-2px',
+                  right: '-2px',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  border: '2px solid #101417',
+                  backgroundColor: notificationsEnabled ? '#22c55e' : '#ef4444',
+                }}
+              ></span>
+            </div>
           </button>
 
           {/* User Menu */}
@@ -157,37 +173,6 @@ export function Topbar() {
         </div>
       </header>
 
-      {/* Confirm Dialog */}
-      {confirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="msm-card w-full max-w-sm p-6">
-            <h2 className="font-headline text-headline-md text-primary mb-2">
-              {notificationsEnabled ? t('notifications.disable') : t('notifications.enable')}
-            </h2>
-            <p className="font-body-md text-sm text-on-surface-variant mb-6">
-              {notificationsEnabled ? t('notifications.disableConfirm') : t('notifications.enableConfirm')}
-            </p>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                className="msm-btn-secondary flex-1 py-2"
-                onClick={() => setConfirmOpen(false)}
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                className={`msm-btn-primary flex-1 py-2 ${
-                  notificationsEnabled ? 'bg-status-error hover:bg-status-error/90' : ''
-                }`}
-                onClick={toggleNotifications}
-              >
-                {notificationsEnabled ? t('notifications.disable') : t('notifications.enable')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }

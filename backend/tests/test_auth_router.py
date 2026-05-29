@@ -1,4 +1,7 @@
 """Tests for auth router: login, logout, refresh, CSRF, cookies."""
+import logging
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -167,20 +170,6 @@ class TestGetCurrentUser:
         assert response.status_code == 401
 
 
-class TestVerifyEmail:
-    def test_verify_email_expired_token(self, client: TestClient, db: Session):
-        from datetime import datetime, timedelta, timezone
-        from services.auth_service import AuthService
-        user = AuthService.create_user(db, "verifytest", "verify@test.de", "Verify123!")
-        user.email_verification_token = "expired_token_123"
-        user.email_verification_expires = datetime.now(timezone.utc) - timedelta(hours=1)
-        db.commit()
-
-        response = client.get("/api/auth/verify-email?token=expired_token_123")
-        assert response.status_code == 400
-        assert "abgelaufen" in response.json()["detail"]
-
-
 class TestSetupStatus:
     def test_setup_required_when_no_owner(self, client: TestClient, db: Session):
         # Remove all users to simulate fresh install
@@ -208,6 +197,24 @@ class TestSetupVerification:
         # Ohne SMTP ist der Status 503 mit Code im Detail
         # 201 = Owner wurde erfolgreich angelegt (neuer Flow)
         assert response.status_code in (200, 201, 503)
+
+    def test_setup_does_not_log_verification_code_when_smtp_missing(
+        self, client: TestClient, db: Session, caplog
+    ):
+        db.query(User).delete()
+        db.commit()
+
+        with patch("routers.auth.EmailVerificationService.create_verification", return_value="123456"), \
+             caplog.at_level(logging.WARNING):
+            response = client.post("/api/auth/setup", json={
+                "username": "nologowner",
+                "email": "nolog@test.de",
+                "password": "SetupPass123!",
+            })
+
+        assert response.status_code == 503
+        assert "123456" not in caplog.text
+        assert "nicht versendet" in caplog.text
 
     def test_setup_verify_with_wrong_code_fails(self, client: TestClient, db: Session):
         from services.auth_service import AuthService

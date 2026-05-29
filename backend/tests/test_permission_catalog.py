@@ -62,5 +62,6 @@ def test_known_server_keys_present():
         "server.files.read", "server.files.write", "server.files.delete",
         "server.backups.read", "server.backups.create", "server.backups.restore", "server.backups.delete",
         "server.mods.read", "server.mods.write", "server.mods.toggle",
+        "server.kill",
     }
     assert must_have <= SERVER_KEYS

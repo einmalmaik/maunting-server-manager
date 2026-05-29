@@ -1,0 +1,19 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+Allow: /security
+Allow: /pricing
+Allow: /privacy
+Allow: /impressum
+
+# Private/authenticated areas - don't index
+Disallow: /vault
+Disallow: /settings
+Disallow: /vault-health
+Disallow: /authenticator
+
+# Sitemap location
+Sitemap: https://singrapw.mauntingstudios.de/sitemap.xml
+
+# Crawl-delay for politeness (optional)
+Crawl-delay: 1

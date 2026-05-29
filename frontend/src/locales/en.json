@@ -153,7 +153,6 @@
     "reinstall": "Reinstall",
     "reinstallConfirm": "Really reinstall server? Binaries and Workshop mods will be replaced. Manual configuration files will be preserved.",
     "serverFileUpdateAvailable": "Server update available",
-    "modUpdatesAvailable": "{{count}} mod update(s) available",
     "deleted": "Server deleted",
     "confirmDelete": "Really delete this server? All data will be permanently removed.",
     "createDescription": "Create a new game server.",
@@ -192,8 +191,13 @@
       "installing": "installing",
       "updating": "updating",
       "error": "error",
-      "awaiting_files": "awaiting files"
-    }
+      "awaiting_files": "awaiting files",
+      "stopping": "Stopping...",
+      "restarting": "Restarting..."
+    },
+    "kill": "Force Kill",
+    "killConfirm": "Really force kill the server? All unsaved data will be lost.",
+    "killSuccess": "Server was force killed"
   },
   "users": {
     "subtitle": "Manage users and permissions",
@@ -421,6 +425,7 @@
     "files": "Files",
     "console": "Console",
     "mods": "Mods",
+    "restarts": "Auto-Restart",
     "backups": "Backups"
   },
   "files": {
@@ -473,15 +478,18 @@
     "createHint": "Create your first backup.",
     "selectServer": "Select a server to manage backups.",
     "settingsSaved": "Settings saved",
-    "scheduling": "Schedule",
-    "schedulingTitle": "Backup Schedule & Settings",
-    "backupOnStart": "Backup on start",
+    "scheduling": "Settings",
+    "schedulingTitle": "Backup Settings",
+    "backupOnStart": "Create backup before start",
     "interval": "Interval",
     "retention": "Retention (count)",
     "backupName": "Name (optional)",
     "backupNamePlaceholder": "e.g. Before update v1.5",
     "createModalHint": "Creates a compressed archive of the server directory.",
-    "createNow": "Create Backup"
+    "createNow": "Create Backup",
+    "creating": "Creating backup...",
+    "restoring": "Restoring backup...",
+    "runningSince": "Running since:"
   },
   "scheduler": {
     "title": "Scheduler",
@@ -491,6 +499,20 @@
     "cronTime": "Time (HH:MM)",
     "enabled": "Enabled",
     "nextRun": "Next Run"
+  },
+  "restarts": {
+    "subtitle": "Automatic restarts for this server.",
+    "enabled": "Enable automatic restarts",
+    "modeInterval": "Interval",
+    "modeIntervalHint": "Restart after a fixed hour interval.",
+    "modeFixed": "Fixed times",
+    "modeFixedHint": "Restart at selected times.",
+    "interval": "Interval",
+    "everyHours": "Every {{count}} hour(s)",
+    "fixedTimes": "Restart times",
+    "addTime": "Add time",
+    "saved": "Restart schedule saved.",
+    "maxTimesReached": "Max. 12 times reached"
   },
   "settings": {
     "title": "Settings",
@@ -505,6 +527,10 @@
     "smtpTls": "Use TLS",
     "resendApiKey": "Resend API Key",
     "defaultLanguage": "Default Language",
+    "timeFormat": "Time format",
+    "timeFormat24": "24-hour format",
+    "timeFormat12": "12-hour format",
+    "timeFormatHint": "Used by restart schedules in the server panel.",
     "steamApiKey": "Steam Web API",
     "steamConfigured": "Steam API configured",
     "steamNotConfigured": "Steam API not configured",
@@ -567,7 +593,9 @@
     "disableConfirm": "Are you sure you want to stop receiving email notifications?",
     "enableConfirm": "Enable email notifications again?",
     "serverUpdateAvailable": "Server update available for {{name}}",
-    "modUpdateAvailable": "Mod update available for {{mod}} on server {{server}}"
+    "modUpdateAvailable": "Mod update available for {{mod}} on server {{server}}",
+    "activeLabel": "Email notifications: active",
+    "inactiveLabel": "Email notifications: disabled"
   },
   "updater": {
     "manualConfigsRestored": "Manual configuration files were automatically restored.",
