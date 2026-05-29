@@ -23,12 +23,12 @@ from typing import Any, AsyncIterator
 
 try:
     import docker
-    from docker.errors import APIError, DockerException, NotFound
+    from docker.errors import APIError, DockerException, ImageNotFound, NotFound
     from docker.models.containers import Container
     from docker.types import LogConfig
 except ImportError:  # pragma: no cover - exercised on systems before deps install
     docker = None  # type: ignore[assignment]
-    APIError = DockerException = NotFound = Exception  # type: ignore[misc,assignment]
+    APIError = DockerException = ImageNotFound = NotFound = Exception  # type: ignore[misc,assignment]
     Container = Any  # type: ignore[misc,assignment]
     LogConfig = None  # type: ignore[assignment]
 
@@ -49,6 +49,12 @@ _HARDENING_CAP_DROP = ["ALL"]
 _HARDENING_SECURITY_OPT = ["no-new-privileges"]
 _CLIENT: Any | None = None
 _DOCKER_AVAILABLE: bool | None = None
+
+
+class _ImageUnavailable(RuntimeError):
+    def __init__(self, image: str) -> None:
+        self.image = image
+        super().__init__(f"Docker-Image nicht verfügbar: {image}")
 
 
 @dataclass(frozen=True)
@@ -215,6 +221,19 @@ def _tmpfs_dict(tmpfs_paths: list[str] | None) -> dict[str, str] | None:
     return {path: "rw,size=64m,mode=1777" for path in tmpfs_paths}
 
 
+def _ensure_image_available(client: Any, image: str) -> None:
+    try:
+        client.images.pull(image)
+        return
+    except (DockerException, OSError):
+        pass
+
+    try:
+        client.images.get(image)
+    except (ImageNotFound, NotFound, DockerException, OSError) as exc:
+        raise _ImageUnavailable(image) from exc
+
+
 def is_available() -> bool:
     """Public-API: ist Rootless Docker nutzbar?"""
     return _check_docker(force=True)
@@ -304,6 +323,11 @@ def run_container(
         return error
 
     try:
+        _ensure_image_available(client, image)
+    except _ImageUnavailable as exc:
+        return {"ok": False, "error": str(exc), "stdout": "", "stderr": ""}
+
+    try:
         existing = client.containers.get(name)
     except NotFound:
         existing = None
@@ -362,8 +386,15 @@ def run_ephemeral(
     entrypoint: str | None = None,
     cap_adds: list[str] | None = None,
     timeout: int = 1800,
+    log_callback: Any | None = None,
 ) -> dict:
-    """Fuehrt einen einmaligen Containerlauf aus und entfernt den Container danach."""
+    """Fuehrt einen einmaligen Containerlauf aus und entfernt den Container danach.
+
+    Wenn ``log_callback`` angegeben ist (Callable, nimmt einen str), werden
+    Container-Logs zeilenweise waehrend der Ausfuehrung an diesen Callback
+    weitergeleitet. So sieht der User den Fortschritt live statt erst am Ende.
+    Sicherheit: callback bekommt nur fertig dekodierte Zeilen, keine rohen bytes.
+    """
 
     client, error = _client_or_error()
     if error:
@@ -384,10 +415,33 @@ def run_ephemeral(
     kwargs = {key: value for key, value in kwargs.items() if value is not None}
     container = None
     try:
+        _ensure_image_available(client, image)
         container = client.containers.run(**kwargs)
+
+        if log_callback is not None:
+            # Live-Streaming: Logs zeilenweise lesen und an Callback senden.
+            # container.logs(stream=True, follow=True) liefert einen Generator
+            # ueber bytes-Chunks (eine Zeile pro Chunk bei Docker JSON-Log).
+            # Timeout via container.wait() parallel nicht moeglich; wir nutzen
+            # stattdessen den Generator mit einem separaten wait nach Abschluss.
+            try:
+                for chunk in container.logs(stream=True, follow=True, stdout=True, stderr=True):
+                    line = _decode(chunk).rstrip("\r\n")
+                    if line:
+                        log_callback(line + "\n")
+            except Exception as stream_exc:
+                logger.warning("Live-Log-Stream unterbrochen fuer ephemeral container: %s", stream_exc)
+
         wait_result = container.wait(timeout=timeout)
-        stdout = _decode(container.logs(stdout=True, stderr=False))
-        stderr = _decode(container.logs(stdout=False, stderr=True))
+        if log_callback is None:
+            # Kein Streaming — Output am Ende sammeln (alter Pfad)
+            stdout = _decode(container.logs(stdout=True, stderr=False))
+            stderr = _decode(container.logs(stdout=False, stderr=True))
+        else:
+            # Logs wurden bereits live gestreamt; fuer ok/error-Bestimmung
+            # brauchen wir nur den Exit-Code (logs koennen leer sein).
+            stdout = ""
+            stderr = ""
         status_code = int(wait_result.get("StatusCode", 1))
         if status_code != 0:
             return {
@@ -397,6 +451,8 @@ def run_ephemeral(
                 "stderr": stderr,
             }
         return {"ok": True, "stdout": stdout, "stderr": stderr}
+    except _ImageUnavailable as exc:
+        return {"ok": False, "error": str(exc), "stdout": "", "stderr": ""}
     except (DockerException, OSError) as exc:
         logger.warning("docker ephemeral run failed")
         return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}

@@ -46,6 +46,33 @@ Steam Workshop wird über `mods` aktiviert:
 - `workshopIds`: eine Workshop-ID pro Zeile
 - `postInstallTargetBasenames`: Dateinamen der Ziele aus `postInstall`
 
+## Runtime-Startup
+
+`runtime.startup` ist der Startbefehl des Containers. MSM tokenisiert den
+String zu einer argv-Liste und führt ihn nicht über eine Shell aus.
+
+Erlaubte Platzhalter:
+
+- `{GAME_PORT}`
+- `{QUERY_PORT}`
+- `{RCON_PORT}`
+- `{VOICE_PORT}`
+- `{WEB_PORT}`
+- `{INSTALL_DIR}`
+- `{MOD_ARG}`
+- `{ENV.<KEY>}` für eigene Werte aus `runtime.env`, z. B. `{ENV.SERVER_NAME}`
+
+`runtime.env`-Werte dürfen nur Port-Platzhalter nutzen:
+
+- `{GAME_PORT}`
+- `{QUERY_PORT}`
+- `{RCON_PORT}`
+- `{VOICE_PORT}`
+- `{WEB_PORT}`
+
+`{INSTALL_DIR}`, `{MOD_ARG}` und `{ENV.<KEY>}` sind in `runtime.env` bewusst
+nicht erlaubt.
+
 ## Workshop-Dateiaktionen
 
 `mods.postInstall` beschreibt, was nach einem erfolgreichen Workshop-Download
@@ -88,8 +115,9 @@ Wenn `source` ein Glob ist, muss `target` `{BASENAME}` enthalten.
 
 ## Runtime-Config-Patches
 
-`runtime.configPatches` patcht Dateien vor jedem Containerstart. Aktuell ist
-`type=ini` unterstützt.
+`runtime.configPatches` patcht Dateien vor jedem Containerstart. Jeder Patch
+braucht die Pflichtfelder `type`, `file`, `section`, `key` und `value`.
+Aktuell ist nur `type=ini` unterstützt.
 
 Erlaubte Tokens in `value`:
 
@@ -98,6 +126,10 @@ Erlaubte Tokens in `value`:
 - `{RCON_PORT}`
 - `{VOICE_PORT}`
 - `{WEB_PORT}`
+
+Nicht erlaubt in `value` sind `{INSTALL_DIR}`, `{MOD_ARG}` und `{ENV.<KEY>}`.
+Diese Tokens gelten nur für `runtime.startup` beziehungsweise gar nicht für
+Config-Patches.
 
 Beispiel:
 

@@ -85,6 +85,52 @@ class TestRunContainer:
         assert kwargs["memswap_limit"] == "4096m"
         assert kwargs["user"] == "1000:1000"
         assert kwargs["working_dir"] == "/data"
+        client.images.pull.assert_called_once_with("cm2network/steamcmd:root")
+        calls = [call[0] for call in client.mock_calls]
+        assert calls.index("images.pull") < calls.index("containers.run")
+
+    def test_run_container_uses_local_image_when_pull_fails(self):
+        client = MagicMock()
+        client.images.pull.side_effect = docker_service.DockerException("registry offline")
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/ptero-eggs/yolks:wine_staging",
+                command=["x"],
+                env={},
+                volumes=[],
+            )
+
+        assert result["ok"] is True
+        client.images.pull.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
+        client.images.get.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
+        client.containers.run.assert_called_once()
+
+    def test_run_container_fails_clearly_when_remote_and_local_image_missing(self):
+        client = MagicMock()
+        existing = MagicMock()
+        image = "ghcr.io/ptero-eggs/yolks:wine_staging"
+        client.images.pull.side_effect = docker_service.DockerException("registry offline")
+        client.images.get.side_effect = docker_service.NotFound("missing image")
+        client.containers.get.return_value = existing
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image=image,
+                command=["x"],
+                env={},
+                volumes=[],
+            )
+
+        assert result == {"ok": False, "error": f"Docker-Image nicht verfügbar: {image}", "stdout": "", "stderr": ""}
+        client.containers.get.assert_not_called()
+        client.containers.run.assert_not_called()
+        existing.remove.assert_not_called()
 
     def test_bind_ip_in_port_publish(self):
         client = MagicMock()
@@ -193,6 +239,46 @@ class TestEphemeralRun:
         assert kwargs["security_opt"] == ["no-new-privileges"]
         assert kwargs["volumes"] == {"/opt/msm/servers/1": {"bind": "/data", "mode": "rw"}}
         container.remove.assert_called_once_with(force=True)
+        client.images.pull.assert_called_once_with("cm2network/steamcmd:root")
+
+    def test_ephemeral_run_uses_local_image_when_pull_fails(self):
+        client = MagicMock()
+        container = MagicMock()
+        container.wait.return_value = {"StatusCode": 0}
+        container.logs.side_effect = [b"done\n", b""]
+        client.images.pull.side_effect = docker_service.DockerException("registry offline")
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.run.return_value = container
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_ephemeral(
+                image="cm2network/steamcmd:root",
+                command=["true"],
+                volumes=[],
+                env={},
+            )
+
+        assert result["ok"] is True
+        client.images.pull.assert_called_once_with("cm2network/steamcmd:root")
+        client.images.get.assert_called_once_with("cm2network/steamcmd:root")
+        client.containers.run.assert_called_once()
+
+    def test_ephemeral_run_fails_clearly_when_remote_and_local_image_missing(self):
+        client = MagicMock()
+        image = "cm2network/steamcmd:root"
+        client.images.pull.side_effect = docker_service.DockerException("registry offline")
+        client.images.get.side_effect = docker_service.NotFound("missing image")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_ephemeral(
+                image=image,
+                command=["true"],
+                volumes=[],
+                env={},
+            )
+
+        assert result == {"ok": False, "error": f"Docker-Image nicht verfügbar: {image}", "stdout": "", "stderr": ""}
+        client.containers.run.assert_not_called()
 
     def test_ephemeral_run_failure_preserves_stdout_stderr(self):
         client = MagicMock()
@@ -213,6 +299,34 @@ class TestEphemeralRun:
         assert result["error"] == "stderr details"
         assert result["stdout"] == "stdout details\n"
         assert result["stderr"] == "stderr details\n"
+        container.remove.assert_called_once_with(force=True)
+
+    def test_ephemeral_run_streams_live_logs_to_callback(self):
+        client = MagicMock()
+        container = MagicMock()
+        container.wait.return_value = {"StatusCode": 0}
+        container.logs.return_value = iter([
+            b"Update state (0x61) downloading, progress: 68.94\n",
+            b"Update state (0x81) verifying update, progress: 10.24\n",
+        ])
+        client.containers.run.return_value = container
+        lines: list[str] = []
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_ephemeral(
+                image="cm2network/steamcmd:root",
+                command=["true"],
+                volumes=[],
+                env={},
+                log_callback=lines.append,
+            )
+
+        assert result == {"ok": True, "stdout": "", "stderr": ""}
+        assert lines == [
+            "Update state (0x61) downloading, progress: 68.94\n",
+            "Update state (0x81) verifying update, progress: 10.24\n",
+        ]
+        container.logs.assert_called_once_with(stream=True, follow=True, stdout=True, stderr=True)
         container.remove.assert_called_once_with(force=True)
 
     def test_cap_adds_are_passed_to_sdk(self):

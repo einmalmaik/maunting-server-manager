@@ -256,8 +256,10 @@ def run_steamcmd_install(
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]
+        secrets_to_redact = [password]
     else:
         login_args = ["+login", "anonymous"]
+        secrets_to_redact = []
 
     steam_args: list[str] = []
     if platform:
@@ -275,30 +277,25 @@ def run_steamcmd_install(
 
     uid, gid = docker_service.host_uid_gid()
     chown_uid, chown_gid = uid, gid
+
+    def _live_log(line: str) -> None:
+        """Callback für Live-Streaming: redact Secrets, dann in Console-Log schreiben."""
+        _append_console_log(server_id, _redact(line, secrets_to_redact))
+
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
         command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
-        # Explizit Container-Root: das `:root`-Image hat /home/steam Mode 700
-        # für den steam-User. Files werden im bash-Wrapper nach dem Run auf
-        # {uid}:{gid} ge-chown't, damit der Panel-User sie danach lesen kann.
         user="0:0",
-        # Nach --cap-drop=ALL die minimal nötigen Caps wiederherstellen, damit
-        # Container-Root nicht von Linux-DAC eingeschränkt wird (sonst greift
-        # Mode-700 auch für root, weil CAP_DAC_OVERRIDE fehlt).
         cap_adds=STEAMCMD_CAPS,
         entrypoint="bash",
-        # SteamCMD legt Cache/Auth in $HOME ab. Auf /data umleiten, damit der
-        # Cache zwischen Runs persistent im Bind-Mount landet (kein Vollredownload).
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
+        log_callback=_live_log,
     )
 
-    # SteamCMD-Output ins Console-Log spiegeln — IMMER, egal ob ok oder Fehler.
-    # Passwort niemals ins Log schreiben (Defense-in-Depth).
-    secrets_to_redact: list[str] = []
-    if use_authenticated_login:
-        secrets_to_redact.append(SteamAccountService.get_decrypted_password())
+    # Bei Live-Streaming ist out leer (— wurde bereits live geschrieben).
+    # Fallback für den Fall, dass der Stream unterbrochen wurde.
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
     if out:
         _append_console_log(server_id, _redact(out, secrets_to_redact))
@@ -336,8 +333,10 @@ def run_steamcmd_workshop_download(
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]
+        secrets_to_redact = [password]
     else:
         login_args = ["+login", "anonymous"]
+        secrets_to_redact = []
 
     steam_args: list[str] = [
         "+force_install_dir", CONTAINER_DATA_DIR,
@@ -348,6 +347,10 @@ def run_steamcmd_workshop_download(
     _append_console_log(
         server_id, f"[MSM] SteamCMD Workshop-Download: app={workshop_app_id} item={workshop_item_id}\n"
     )
+
+    def _live_log(line: str) -> None:
+        _append_console_log(server_id, _redact(line, secrets_to_redact))
+
     uid, gid = docker_service.host_uid_gid()
     chown_uid, chown_gid = uid, gid
     result = docker_service.run_ephemeral(
@@ -359,10 +362,8 @@ def run_steamcmd_workshop_download(
         entrypoint="bash",
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
+        log_callback=_live_log,
     )
-    secrets_to_redact: list[str] = []
-    if use_authenticated_login:
-        secrets_to_redact.append(SteamAccountService.get_decrypted_password())
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
     if out:
         _append_console_log(server_id, _redact(out, secrets_to_redact))
@@ -765,13 +766,6 @@ class GamePlugin(ABC):
         except Exception as e:
             _append_console_log(
                 server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
-            )
-
-        # Image bei Bedarf vorziehen — KISS, scheitert nicht hart bei Offline
-        pull_result = docker_service.pull(self.docker_image)
-        if not pull_result["ok"]:
-            _append_console_log(
-                server.id, f"[MSM] Hinweis: Pull für {self.docker_image} fehlgeschlagen, nutze lokales Image\n"
             )
 
         uid, gid = docker_service.host_uid_gid()

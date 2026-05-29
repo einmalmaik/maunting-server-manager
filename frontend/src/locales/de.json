@@ -95,9 +95,15 @@
       "metaDescription": "Kurze Beschreibung für das UI-Dropdown.",
       "runtimeImage": "Gültiges Docker-Image (z.B. ubuntu:24.04).",
       "runtimeWorkdir": "Arbeitsverzeichnis im Container.",
-      "runtimeEnv": "Umgebungsvariablen. Erlaubt Platzhalter wie {GAME_PORT}.",
-      "runtimeStartup": "Der Befehl zum Starten (ohne Shell-Auswertung). Platzhalter erlaubt.",
-      "runtimeConfigPatches": "Liste von INI-Dateien, die vor dem Start gepatcht werden.",
+      "runtimeEnv": "Umgebungsvariablen als Key-Value-Dict. Werte dürfen Port-Platzhalter enthalten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Kein {INSTALL_DIR} oder {ENV.<KEY>} in env-Werten.",
+      "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen (z. B. {ENV.SERVER_NAME}). Verbotene Zeichen: $, Backtick.",
+      "runtimeConfigPatches": "Liste von Konfigurations-Patches, die vor dem Start angewendet werden. Jeder Patch muss type, file, section, key und value enthalten.",
+      "configPatchFields": "↳ configPatches[ ] — Felder",
+      "configPatchType": "Patch-Typ. Derzeit einziger gültiger Wert: ini.",
+      "configPatchFile": "Relativer Pfad zur Datei, z. B. Config/Server.ini. Keine absoluten Pfade und kein '..'.",
+      "configPatchSection": "INI-Sektion, z. B. ServerSettings.",
+      "configPatchKey": "Schlüssel innerhalb der Sektion.",
+      "configPatchValue": "Wert. Erlaubt sind Port-Platzhalter: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Nicht erlaubt: {ENV.<KEY>}, {MOD_ARG}, {INSTALL_DIR}.",
       "portsDesc": "Deklariere nur die benötigten Port-Rollen. Konkrete Nummern weist der User beim Erstellen zu.",
       "portsName": "Rollen: game, query, rcon, voice, web, custom.",
       "portsProtocol": "tcp oder udp.",
@@ -110,13 +116,13 @@
       "h1": "Wie aktiviere ich Steam Workshop?",
       "b1": "Setze im 'mods'-Objekt supportsMods=true, supportsSteamWorkshop=true und trage die workshopAppId ein. Stelle modInjection auf 'startupArg' oder 'file', je nachdem, wie das Spiel Mods lädt.",
       "h2": "Wie patche ich eine Konfigurationsdatei?",
-      "b2": "Nutze 'runtime.configPatches'. Gib den relativen Dateipfad, die INI-Sektion und den Schlüssel an. Der Wert darf Platzhalter wie {GAME_PORT} enthalten, um dynamisch zugewiesene Ports in die Datei zu schreiben."
+      "b2": "Nutze 'runtime.configPatches'. Pflichtfelder pro Patch: type (derzeit nur 'ini'), file (relativer Pfad zur Datei), section (INI-Sektion, z. B. 'Server'), key (Schlüssel) und value (Wert). Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.) — aber KEIN {ENV.<KEY>} und KEIN {MOD_ARG}, da diese nur im startup-Befehl sinnvoll sind."
     },
     "troubleshooting": {
       "err1Title": "Ungültiges JSON",
       "err1Body": "Das Panel entfernt zwar // Kommentare, aber bei Syntax-Fehlern (wie fehlenden Kommas) schlägt der Upload fehl. Nutze einen JSON-Linter.",
       "err2Title": "Verbotene Shell-Zeichen in 'startup'",
-      "err2Body": "Der Befehl in runtime.startup darf keine Shell-Metazeichen ($, &, |, ;, Backticks) enthalten. Das Panel tokenisiert den Befehl strikt als Liste, um Command-Injections zu verhindern.",
+      "err2Body": "Der Befehl in runtime.startup darf keine Shell-Substitutionen oder Kontrolloperatoren enthalten ($, Backticks, $(), ${}, &&, ||). Das Panel tokenisiert den Befehl strikt als Liste, um Command-Injections zu verhindern.",
       "err3Title": "Unsichere Pfade",
       "err3Body": "Alle Pfade in configPatches, modListen und extractTo müssen relativ zum Server-Verzeichnis sein. Absolute Pfade (/etc) oder Ausbrüche (../) werden abgelehnt."
     }

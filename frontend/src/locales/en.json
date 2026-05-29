@@ -95,9 +95,15 @@
       "metaDescription": "Short description for the UI dropdown.",
       "runtimeImage": "Valid Docker image (e.g., ubuntu:24.04).",
       "runtimeWorkdir": "Working directory in the container.",
-      "runtimeEnv": "Environment variables. Allows placeholders like {GAME_PORT}.",
-      "runtimeStartup": "The startup command (without shell evaluation). Placeholders allowed.",
-      "runtimeConfigPatches": "List of INI files patched before start.",
+      "runtimeEnv": "Environment variables as a key-value dict. Values may contain port placeholders: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. {INSTALL_DIR} and {ENV.<KEY>} are NOT allowed in env values.",
+      "runtimeStartup": "Startup command (passed as argv, NO shell). Valid placeholders: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. Also {ENV.<KEY>} for custom env variables (e.g. {ENV.SERVER_NAME}). Forbidden characters: $, backtick.",
+      "runtimeConfigPatches": "List of configuration patches applied before start. Each patch requires: type, file, section, key, and value.",
+      "configPatchFields": "↳ configPatches[ ] — fields",
+      "configPatchType": "Patch type. Currently the only valid value is: ini.",
+      "configPatchFile": "Relative file path, e.g. Config/Server.ini. No absolute paths and no '..'.",
+      "configPatchSection": "INI section, e.g. ServerSettings.",
+      "configPatchKey": "Key inside the section.",
+      "configPatchValue": "Value. Allowed port placeholders: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Not allowed: {ENV.<KEY>}, {MOD_ARG}, {INSTALL_DIR}.",
       "portsDesc": "Declare the required port roles. The user assigns concrete numbers during creation.",
       "portsName": "Roles: game, query, rcon, voice, web, custom.",
       "portsProtocol": "tcp or udp.",
@@ -110,13 +116,13 @@
       "h1": "How do I enable Steam Workshop?",
       "b1": "Set supportsMods=true, supportsSteamWorkshop=true, and add the workshopAppId in the 'mods' object. Set modInjection to 'startupArg' or 'file', depending on how the game loads mods.",
       "h2": "How do I patch a configuration file?",
-      "b2": "Use 'runtime.configPatches'. Provide the relative file path, the INI section, and the key. The value can contain placeholders like {GAME_PORT} to inject dynamically assigned ports."
+      "b2": "Use 'runtime.configPatches'. Required fields per patch: type (currently only 'ini'), file (relative path), section (INI section, e.g. 'Server'), key, and value. Port placeholders are allowed in value ({GAME_PORT} etc.) — but NOT {ENV.<KEY>} or {MOD_ARG}, as those are only valid in the startup command."
     },
     "troubleshooting": {
       "err1Title": "Invalid JSON",
       "err1Body": "While the panel removes // comments, syntax errors (like missing commas) will still cause the upload to fail. Use a JSON linter.",
       "err2Title": "Forbidden Shell Characters in 'startup'",
-      "err2Body": "The command in runtime.startup cannot contain shell meta-characters ($, &, |, ;, backticks). The panel tokenizes the command strictly as an array to prevent command injections.",
+      "err2Body": "The command in runtime.startup cannot contain shell substitutions or control operators ($, backticks, $(), ${}, &&, ||). The panel tokenizes the command strictly as an array to prevent command injections.",
       "err3Title": "Unsafe Paths",
       "err3Body": "All paths in configPatches, mod lists, and extractTo must be relative to the server directory. Absolute paths (/etc) or escapes (../) are rejected."
     }
