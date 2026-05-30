@@ -21,6 +21,7 @@ export function Login() {
   const [verifyEmail, setVerifyEmail] = useState('')
   const [verifyCode, setVerifyCode] = useState('')
   const [verifiedSuccess, setVerifiedSuccess] = useState(false)
+  const [pendingVerifiedUser, setPendingVerifiedUser] = useState<User | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -65,10 +66,23 @@ export function Login() {
     setError('')
     setSubmitting(true)
     try {
-      await api('/auth/setup-verify', {
+      const res = await api<{ requires_2fa: boolean }>('/auth/login-verify', {
         method: 'POST',
-        body: JSON.stringify({ email: verifyEmail, code: verifyCode }),
+        body: JSON.stringify({
+          username: form.username,
+          password: form.password,
+          code: verifyCode,
+          otp_code: form.otp || null,
+        }),
       })
+      if (res.requires_2fa) {
+        setRequires2FA(true)
+        setRequiresVerification(false)
+        setVerifyCode('')
+        return
+      }
+      const user = await api<User>('/auth/me')
+      setPendingVerifiedUser(user)
       setVerifiedSuccess(true)
       setRequiresVerification(false)
       setVerifyCode('')
@@ -136,16 +150,20 @@ export function Login() {
                 <Check className="w-8 h-8 text-status-success" />
               </div>
               <h2 className="font-headline text-headline-md text-primary mb-3">
-                {t('auth.emailNotVerified')}
+                {t('auth.registerSuccess')}
               </h2>
               <p className="font-body-md text-body-md text-on-surface-variant mb-8">
-                {t('auth.verifiedSuccess')}
+                {t('auth.verifiedAndSignedIn')}
               </p>
               <button
-                onClick={() => setVerifiedSuccess(false)}
+                onClick={() => {
+                  setUser(pendingVerifiedUser)
+                  setAuthenticated(true)
+                  navigate('/')
+                }}
                 className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
               >
-                {t('auth.signIn')}
+                {t('auth.continue')}
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

@@ -5,7 +5,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from models import User, RefreshToken
+from models import User, RefreshToken, EmailVerification
 
 
 class TestLogin:
@@ -62,6 +62,120 @@ class TestLogin:
         assert response.status_code == 200
         data = response.json()
         assert data["requires_2fa"] is True
+
+    def test_unverified_login_reuses_active_registration_code(self, client: TestClient, db: Session):
+        from services.auth_service import AuthService
+        from services.email_verification_service import EmailVerificationService
+
+        user = AuthService.create_user(db, "pending", "pending@test.de", "PendingPass123!")
+        user.email_verified = False
+        db.commit()
+        code = EmailVerificationService.create_verification(db, user.email, "register")
+
+        with patch("routers.auth.EmailService.is_configured", return_value=True), \
+             patch("routers.auth.EmailService.send_verification_code_email") as send_code:
+            response = client.post("/api/auth/login", json={
+                "username": "pending",
+                "password": "PendingPass123!",
+                "otp_code": None,
+            })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["requires_verification"] is True
+        send_code.assert_not_called()
+
+        verify_response = client.post("/api/auth/login-verify", json={
+            "username": "pending",
+            "password": "PendingPass123!",
+            "code": code,
+            "otp_code": None,
+        })
+        assert verify_response.status_code == 200
+        assert "__Secure-access_token" in verify_response.cookies
+
+    def test_unverified_login_sends_new_code_after_expiry(self, client: TestClient, db: Session):
+        from datetime import datetime, timedelta, timezone
+        from services.auth_service import AuthService
+
+        user = AuthService.create_user(db, "expired", "expired@test.de", "ExpiredPass123!")
+        user.email_verified = False
+        db.add(EmailVerification(
+            email=user.email,
+            code_hash="expired-test-code-hash",
+            purpose="register",
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        ))
+        db.commit()
+
+        with patch("routers.auth.EmailService.is_configured", return_value=True), \
+             patch("routers.auth.EmailService.send_verification_code_email") as send_code:
+            response = client.post("/api/auth/login", json={
+                "username": "expired",
+                "password": "ExpiredPass123!",
+                "otp_code": None,
+            })
+
+        assert response.status_code == 200
+        assert response.json()["requires_verification"] is True
+        send_code.assert_called_once()
+
+
+class TestRegistrationVerification:
+    def test_register_returns_minimal_verification_response_and_sends_code(self, client: TestClient):
+        with patch("routers.auth.EmailService.is_configured", return_value=True), \
+             patch("routers.auth.EmailService.send_verification_code_email") as send_code:
+            response = client.post("/api/auth/register", json={
+                "username": "newuser",
+                "email": "newuser@test.de",
+                "password": "NewUserPass123!",
+            })
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data == {"email": "newuser@test.de", "requires_verification": True}
+        send_code.assert_called_once()
+
+    def test_register_verify_sets_session_cookies(self, client: TestClient, db: Session):
+        from services.auth_service import AuthService
+        from services.email_verification_service import EmailVerificationService
+
+        user = AuthService.create_user(db, "verifynew", "verifynew@test.de", "VerifyNew123!")
+        user.email_verified = False
+        db.commit()
+        code = EmailVerificationService.create_verification(db, user.email, "register")
+
+        response = client.post("/api/auth/register-verify", json={
+            "email": user.email,
+            "code": code,
+        })
+
+        assert response.status_code == 200
+        assert response.json()["requires_verification"] is False
+        assert "__Secure-access_token" in response.cookies
+        assert "__Secure-refresh_token" in response.cookies
+        assert "__Secure-csrf_token" in response.cookies
+
+        me_response = client.get("/api/auth/me", cookies=dict(response.cookies))
+        assert me_response.status_code == 200
+        assert me_response.json()["email_verified"] is True
+
+    def test_register_verify_rejects_login_code_without_password(self, client: TestClient, db: Session):
+        from services.auth_service import AuthService
+        from services.email_verification_service import EmailVerificationService
+
+        user = AuthService.create_user(db, "loginonly", "loginonly@test.de", "LoginOnly123!")
+        user.email_verified = False
+        db.commit()
+        code = EmailVerificationService.create_verification(db, user.email, "login")
+
+        response = client.post("/api/auth/register-verify", json={
+            "email": user.email,
+            "code": code,
+        })
+
+        assert response.status_code == 400
+        assert "__Secure-access_token" not in response.cookies
 
 
 class TestLogout:

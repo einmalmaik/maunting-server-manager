@@ -350,11 +350,13 @@
     "registerSuccess": "Registration successful",
     "verifyEmailHint": "Please check your emails and verify your address.",
     "goToLogin": "Go to Login",
+    "continue": "Continue",
     "passwordMismatch": "Passwords do not match.",
     "passwordTooShort": "Password must be at least 8 characters.",
     "emailNotVerified": "Email not verified",
     "verifyNow": "Verify now",
     "verifiedSuccess": "Email verified. Please sign in now.",
+    "verifiedAndSignedIn": "Your email has been verified. Your session is active.",
     "verificationCode": "Verification code",
     "resendCode": "Resend code"
   },

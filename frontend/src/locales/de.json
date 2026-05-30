@@ -350,11 +350,13 @@
     "registerSuccess": "Registrierung erfolgreich",
     "verifyEmailHint": "Bitte prüfe deine E-Mails und verifiziere deine Adresse.",
     "goToLogin": "Zur Anmeldung",
+    "continue": "Weiter",
     "passwordMismatch": "Passwörter stimmen nicht überein.",
     "passwordTooShort": "Passwort muss mindestens 8 Zeichen haben.",
     "emailNotVerified": "E-Mail nicht verifiziert",
     "verifyNow": "Jetzt verifizieren",
     "verifiedSuccess": "E-Mail verifiziert. Melde dich jetzt an.",
+    "verifiedAndSignedIn": "Deine E-Mail wurde verifiziert. Deine Sitzung ist aktiv.",
     "verificationCode": "Verifizierungscode",
     "resendCode": "Code erneut senden"
   },
