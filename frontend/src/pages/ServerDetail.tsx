@@ -394,8 +394,18 @@ export function ServerDetail() {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h1 className="font-headline text-headline-sm text-primary">
+            <h1 className="font-headline text-headline-sm text-primary flex items-center gap-2">
               {server.name}
+              <span 
+                className="text-xs font-mono px-2 py-0.5 rounded bg-surface-container-highest border border-outline text-on-surface-variant cursor-pointer hover:bg-surface-container hover:text-on-surface transition-colors"
+                title="Copy Container ID"
+                onClick={() => {
+                  navigator.clipboard.writeText(`msm-srv-${server.id}`);
+                  toast.success("Container ID copied!");
+                }}
+              >
+                msm-srv-{server.id}
+              </span>
             </h1>
             <p className="font-body-md text-sm text-on-surface-variant">
               {gameName(server.game_type)}
