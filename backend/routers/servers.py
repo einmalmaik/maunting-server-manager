@@ -27,6 +27,11 @@ from services.network_interfaces_service import default_bind_ip, list_host_inter
 from services.port_allocation_service import PortConflictError, allocate_ports
 from services.scheduler_service import sync_server_restart_schedule
 from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
+from services.install_update_lock_service import (
+    INSTALL_UPDATE_ALREADY_RUNNING,
+    release_install_update_lock,
+    try_acquire_install_update_lock,
+)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -45,6 +50,16 @@ _UPDATE_CACHE_TTL_SECONDS = 300
 
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
+
+
+def _install_update_busy_error() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": INSTALL_UPDATE_ALREADY_RUNNING,
+            "message": f"errors.{INSTALL_UPDATE_ALREADY_RUNNING}",
+        },
+    )
 
 
 
@@ -134,61 +149,83 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     db.commit()
     db.refresh(server)
 
-    from models.server_port import ServerPort
-    for role, port_val, proto in allocated:
-        db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
-    db.commit()
-    db.refresh(server)
-
-    install_dir = os.path.join(base_dir, f"{req.game_type}_{server.id}")
-
-    # Vorheriges Verzeichnis auf Host prüfen (verwaist von abgebrochenem Install,
-    # manuellem Eingriff oder root-owned SteamCMD-Artifact). Saubere 409 statt
-    # mysteriösem EPERM auf chmod.
-    if os.path.exists(install_dir):
-        db.delete(server)
-        db.commit()
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Server-Verzeichnis existiert bereits auf dem Host: {install_dir}. "
-                "Möglicherweise verwaist aus einem vorherigen (fehlgeschlagenen) "
-                "Installationsversuch. Bitte manuell aufräumen oder Support kontaktieren."
-            ),
-        )
-
-    # Verzeichnis anlegen - wird vom Panel-User (`msm`) angelegt. Vor jedem
-    # Container-Start normalisiert docker_service.repair_bind_mount_permissions()
-    # Owner/Rechte im Container-Kontext, damit Runtime (z. B. Wine) und Panel
-    # konsistent auf dieselben Dateien zugreifen können.
-    # exist_ok=False ist jetzt sicher (Guard oben).
-    try:
-        os.makedirs(install_dir, exist_ok=False)
-        os.chmod(install_dir, 0o777)
-    except OSError as e:
-        # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
-        db.delete(server)
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
-
-    # install_dir endgültig setzen + persistieren.
-    server.install_dir = install_dir
-    db.commit()
-    db.refresh(server)
-
-    # Stabilen Container-Namen cachen (Debug/Audit).
-    server.container_name = container_name_for(server.id)
-    db.commit()
-    db.refresh(server)
-
-    # Auto-Install: Plugin startet Installation im Hintergrund.
-    # Firewall-Regeln werden ERST beim Start angelegt (Lifecycle-Kopplung).
-    plugin = get_plugin(req.game_type)
+    install_lock_acquired = False
     if plugin:
-        server.status = "installing"
-        server.status_message = "Installation gestartet"
+        install_lock_acquired = try_acquire_install_update_lock(
+            server.id, "install"
+        )
+        if not install_lock_acquired:
+            db.delete(server)
+            db.commit()
+            raise _install_update_busy_error()
+
+    install_started = False
+    try:
+        from models.server_port import ServerPort
+        for role, port_val, proto in allocated:
+            db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
         db.commit()
-        plugin.install(server)
+        db.refresh(server)
+
+        install_dir = os.path.join(base_dir, f"{req.game_type}_{server.id}")
+
+        # Vorheriges Verzeichnis auf Host prüfen (verwaist von abgebrochenem Install,
+        # manuellem Eingriff oder root-owned SteamCMD-Artifact). Saubere 409 statt
+        # mysteriösem EPERM auf chmod.
+        if os.path.exists(install_dir):
+            db.delete(server)
+            db.commit()
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Server-Verzeichnis existiert bereits auf dem Host: {install_dir}. "
+                    "Möglicherweise verwaist aus einem vorherigen (fehlgeschlagenen) "
+                    "Installationsversuch. Bitte manuell aufräumen oder Support kontaktieren."
+                ),
+            )
+
+        # Verzeichnis anlegen - wird vom Panel-User (`msm`) angelegt. Vor jedem
+        # Container-Start normalisiert docker_service.repair_bind_mount_permissions()
+        # Owner/Rechte im Container-Kontext, damit Runtime (z. B. Wine) und Panel
+        # konsistent auf dieselben Dateien zugreifen können.
+        # exist_ok=False ist jetzt sicher (Guard oben).
+        try:
+            os.makedirs(install_dir, exist_ok=False)
+            os.chmod(install_dir, 0o777)
+        except OSError as e:
+            # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
+            db.delete(server)
+            db.commit()
+            raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
+
+        # install_dir endgültig setzen + persistieren.
+        server.install_dir = install_dir
+        db.commit()
+        db.refresh(server)
+
+        # Stabilen Container-Namen cachen (Debug/Audit).
+        server.container_name = container_name_for(server.id)
+        db.commit()
+        db.refresh(server)
+
+        # Auto-Install: Plugin startet Installation im Hintergrund.
+        # Firewall-Regeln werden ERST beim Start angelegt (Lifecycle-Kopplung).
+        plugin = get_plugin(req.game_type)
+        if plugin:
+            server.status = "installing"
+            server.status_message = "Installation gestartet"
+            db.commit()
+            try:
+                result = plugin.install(server)
+            except Exception:
+                raise HTTPException(status_code=500, detail="Installation konnte nicht gestartet werden")
+            if "error" in result:
+                raise HTTPException(status_code=500, detail=result["error"])
+            install_started = True
+    except Exception:
+        if install_lock_acquired and not install_started:
+            release_install_update_lock(server.id)
+        raise
 
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_installed_notification(user.email, user.username, server.name)
@@ -471,44 +508,67 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
 
     lock = get_server_lifecycle_lock(server.id)
     async with lock:
-        # Firewall-Regeln öffnen vor Container-Start.
-        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
-        open_ports(server.name, ports_list)
-        iptables_accept_server(
-            server.name,
-            server.public_bind_ip,
-            ports_list,
-        )
-
-        # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
-        # async-Route blockieren sie den gesamten Uvicorn-Event-Loop - alle anderen
-        # Requests hängen mit. Daher in einen Threadpool auslagern.
-
-        # Updater-Hook vor jedem Start (vor allem für Workshop-Mod-Checks nach Neustart)
-        # Optional: Auch im normalen Start-Pfad Workshop-Mod-Updates ausführen (KISS,
-        # falls ein Server lange stand und in der Zwischenzeit Mod-Updates auf Steam
-        # erschienen sind). Primär aber der Restart-Pfad (wie Server-Datei-Updates).
+        mod_updates: list[dict] = []
         try:
             plugin.prepare_for_updates(server)
-
-            # Optionale Execution im direkten Start (neben dem Pflicht-Restart-Pfad)
             mod_updates = plugin.check_for_mod_updates(server)
-            if mod_updates:
-                _append_console_log(
-                    server.id,
-                    f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt – "
-                    "führe Download via install_mod/run_steamcmd_workshop_download aus...\n"
-                )
-                mod_res = await asyncio.to_thread(
-                    plugin.perform_workshop_mod_updates, server
-                )
-                if not mod_res.get("ok", False):
+        except Exception as exc:
+            _append_console_log(
+                server.id,
+                f"[MSM] prepare_for_updates / Mod-Update-Check beim Start fehlgeschlagen (nicht kritisch): {exc}\n",
+            )
+            mod_updates = []
+
+        update_lock_acquired = False
+        if mod_updates:
+            update_lock_acquired = try_acquire_install_update_lock(
+                server.id, "start_update"
+            )
+            if not update_lock_acquired:
+                raise _install_update_busy_error()
+
+        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+        try:
+            # Firewall-Regeln öffnen vor Container-Start.
+            open_ports(server.name, ports_list)
+            iptables_accept_server(
+                server.name,
+                server.public_bind_ip,
+                ports_list,
+            )
+
+            # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
+            # async-Route blockieren sie den gesamten Uvicorn-Event-Loop - alle anderen
+            # Requests hängen mit. Daher in einen Threadpool auslagern.
+
+            # Updater-Hook vor jedem Start (vor allem für Workshop-Mod-Checks nach Neustart)
+            # Optional: Auch im normalen Start-Pfad Workshop-Mod-Updates ausführen (KISS,
+            # falls ein Server lange stand und in der Zwischenzeit Mod-Updates auf Steam
+            # erschienen sind). Primär aber der Restart-Pfad (wie Server-Datei-Updates).
+            try:
+                # Optionale Execution im direkten Start (neben dem Pflicht-Restart-Pfad)
+                if mod_updates:
                     _append_console_log(
                         server.id,
-                        f"[MSM] Workshop-Mod-Update beim Start hatte Probleme (nicht kritisch): {mod_res.get('error') or mod_res}\n"
+                        f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt – "
+                        "führe Download via install_mod/run_steamcmd_workshop_download aus...\n"
                     )
-        except Exception as exc:
-            _append_console_log(server.id, f"[MSM] prepare_for_updates / Mod-Update beim Start fehlgeschlagen (nicht kritisch): {exc}\n")
+                    mod_res = await asyncio.to_thread(
+                        plugin.perform_workshop_mod_updates, server
+                    )
+                    if not mod_res.get("ok", False):
+                        _append_console_log(
+                            server.id,
+                            f"[MSM] Workshop-Mod-Update beim Start hatte Probleme (nicht kritisch): {mod_res.get('error') or mod_res}\n"
+                        )
+            except Exception as exc:
+                _append_console_log(
+                    server.id,
+                    f"[MSM] prepare_for_updates / Mod-Update beim Start fehlgeschlagen (nicht kritisch): {exc}\n",
+                )
+        finally:
+            if update_lock_acquired:
+                release_install_update_lock(server.id)
 
         db.refresh(server)
 
@@ -769,11 +829,18 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    server.status = "installing"
-    server.status_message = "Installation gestartet"
-    db.commit()
-    result = plugin.install(server)
+    if not try_acquire_install_update_lock(server.id, "install"):
+        raise _install_update_busy_error()
+    try:
+        server.status = "installing"
+        server.status_message = "Installation gestartet"
+        db.commit()
+        result = plugin.install(server)
+    except Exception:
+        release_install_update_lock(server.id)
+        raise HTTPException(status_code=500, detail="Installation konnte nicht gestartet werden")
     if "error" in result:
+        release_install_update_lock(server.id)
         raise HTTPException(status_code=500, detail=result["error"])
     return {"message": "Installation gestartet", **result}
 
@@ -782,6 +849,7 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
 async def server_console_stream(
     server_id: int,
     request: Request,
+    after: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
@@ -812,7 +880,7 @@ async def server_console_stream(
     log_path = _console_log_path(server.id)
 
     return StreamingResponse(
-        _console_event_stream(request, container, log_path),
+        _console_event_stream(request, container, log_path, after_bytes=after),
         media_type="text/event-stream",
         headers={
             # Nginx/Caddy-Buffering aus, sonst sieht der Client nichts bis zum Flush.
@@ -822,16 +890,23 @@ async def server_console_stream(
     )
 
 
-def _sse_data(line: str) -> str:
+def _sse_data(line: str, event_id: int | None = None) -> str:
     """Eine Logzeile als SSE ``data:``-Frame kodieren.
 
     Mehrzeilige Werte werden zeilenweise als mehrere ``data:``-Felder
     geschickt - das ist die SSE-Spezifikation für Newlines im Payload.
     """
-    return "".join(f"data: {part}\n" for part in line.split("\n")) + "\n"
+    prefix = f"id: {event_id}\n" if event_id is not None else ""
+    return prefix + "".join(f"data: {part}\n" for part in line.split("\n")) + "\n"
 
 
-async def _console_event_stream(request: Request, container: str, log_path: str):
+async def _console_event_stream(
+    request: Request,
+    container: str,
+    log_path: str,
+    *,
+    after_bytes: int | None = None,
+):
     """Generator für den Console-SSE-Stream.
 
     DESIGN-RATIONALE (explizite KISS-Ausnahme, dokumentiert per AGENTS §1.5 + general-3 review):
@@ -849,18 +924,22 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
     """
 
     # 1. Initial-Backlog senden (Install-/Lifecycle-Historie).
-    initial_bytes = 0
+    initial_bytes = max(after_bytes or 0, 0)
     if os.path.exists(log_path):
         try:
             with open(log_path, "rb") as f:
+                f.seek(initial_bytes)
                 content_bytes = f.read()
-            initial_bytes = len(content_bytes)
-            for line in content_bytes.decode("utf-8", errors="replace").splitlines():
-                yield _sse_data(line)
+            pos = initial_bytes
+            for raw_line in content_bytes.splitlines(keepends=True):
+                pos += len(raw_line)
+                line = raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace")
+                yield _sse_data(line, pos)
+            initial_bytes = pos
         except OSError:
             # Datei verschwand zwischen exists() und open() - kein Problem,
             # Live-Tail fängt neue Schreibvorgänge.
-            initial_bytes = 0
+            initial_bytes = max(after_bytes or 0, 0)
 
     # 2. Live-Quellen einrichten.
     queue: asyncio.Queue[str] = asyncio.Queue()
@@ -886,8 +965,11 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
                 pos = size
             except OSError:
                 continue
-            for line in chunk.decode("utf-8", errors="replace").splitlines():
-                await queue.put(line)
+            read_pos = pos - len(chunk)
+            for raw_line in chunk.splitlines(keepends=True):
+                read_pos += len(raw_line)
+                line = raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace")
+                await queue.put(_sse_data(line, read_pos))
 
     async def _tail_docker():
         """Streame Live-Container-Stdout/Stderr (oder melde, dass Docker fehlt).
@@ -900,15 +982,17 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
         """
         if not docker_service.is_available():
             await queue.put(
-                "[MSM] Rootless Docker Daemon not running for user msm - Live-Container-Logs deaktiviert."
+                _sse_data(
+                    "[MSM] Rootless Docker Daemon not running for user msm - Live-Container-Logs deaktiviert."
+                )
             )
             return
-        tail = 200
+        tail = 0 if after_bytes is not None else 200
         while True:
             saw_line = False
             async for line in docker_service.stream_logs(container, tail=tail):
                 saw_line = True
-                await queue.put(line)
+                await queue.put(_sse_data(line))
             if saw_line:
                 tail = 0
             await asyncio.sleep(1.0)
@@ -923,12 +1007,12 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
             if await request.is_disconnected():
                 break
             try:
-                line = await asyncio.wait_for(queue.get(), timeout=15.0)
+                frame = await asyncio.wait_for(queue.get(), timeout=15.0)
             except asyncio.TimeoutError:
                 # SSE-Keepalive - verhindert dass Proxies die Verbindung kappen.
                 yield ": keepalive\n\n"
                 continue
-            yield _sse_data(line)
+            yield frame
     finally:
         for task in tasks:
             task.cancel()

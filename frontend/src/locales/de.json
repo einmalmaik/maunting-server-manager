@@ -615,7 +615,8 @@
   },
   "errors": {
     "RATE_LIMITED": "Zu viele Anfragen. Bitte warte einen Moment.",
-    "SESSION_EXPIRED": "Sitzung abgelaufen. Bitte melde dich erneut an."
+    "SESSION_EXPIRED": "Sitzung abgelaufen. Bitte melde dich erneut an.",
+    "install_update_already_running": "Es läuft bereits eine Installation oder Aktualisierung. Bitte warte, bis dieser Job abgeschlossen ist."
   },
   "notifications": {
     "disable": "E-Mail-Benachrichtigungen deaktivieren",

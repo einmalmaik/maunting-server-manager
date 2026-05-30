@@ -360,3 +360,17 @@ def test_steam_requires_login_default_false() -> None:
     bp = load_blueprint_dict(d)
     assert bp.source.steam is not None
     assert bp.source.steam.requiresLogin is False
+
+
+def test_allows_multiple_custom_ports_with_same_protocol() -> None:
+    d = _minimal_valid_dict()
+    d["ports"] = [
+        {"name": "game", "protocol": "udp"},
+        {"name": "custom", "protocol": "udp"},
+        {"name": "custom", "protocol": "udp"},
+        {"name": "custom", "protocol": "tcp"},
+    ]
+
+    bp = load_blueprint_dict(d)
+
+    assert [p.name.value for p in bp.ports] == ["game", "custom", "custom", "custom"]

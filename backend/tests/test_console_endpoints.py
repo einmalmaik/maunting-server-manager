@@ -299,3 +299,37 @@ class TestConsoleStreamGenerator:
 
         # Sichtbare ``data:``-Zeile statt verstecktem ``event: error``.
         assert any("Rootless Docker Daemon not running for user msm" in p for p in payloads)
+
+    def test_after_cursor_skips_old_file_backlog_and_keeps_new_lines(self, test_server: Server):
+        import asyncio
+
+        from games.base import _console_log_path
+        from routers.servers import _console_event_stream
+
+        log_path = _console_log_path(test_server.id)
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        try:
+            old = b"old line\n"
+            new = b"new line\n"
+            with open(log_path, "wb") as f:
+                f.write(old)
+                f.write(new)
+
+            with patch("routers.servers.docker_service.is_available", return_value=False):
+                payloads = asyncio.run(
+                    _drain_stream(
+                        _console_event_stream(
+                            _StubRequest(disconnect_after=1),
+                            container="msm-srv-x",
+                            log_path=log_path,
+                            after_bytes=len(old),
+                        ),
+                        max_frames=3,
+                    )
+                )
+
+            assert "old line" not in payloads
+            assert "new line" in payloads
+        finally:
+            if os.path.exists(log_path):
+                os.remove(log_path)

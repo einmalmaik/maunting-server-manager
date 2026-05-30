@@ -6,6 +6,11 @@ from models import Mod, Server, User
 from schemas import ModResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from games import get_plugin
+from services.install_update_lock_service import (
+    INSTALL_UPDATE_ALREADY_RUNNING,
+    release_install_update_lock,
+    try_acquire_install_update_lock,
+)
 
 router = APIRouter(prefix="/api/mods", tags=["mods"])
 
@@ -22,30 +27,47 @@ def list_mods(server_id: int, db: Session = Depends(get_db), user: User = Depend
 @router.post("/{server_id}", response_model=ModResponse)
 def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
     require_server_permission(user, server_id, db, "server.mods.write")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+
     existing = db.query(Mod).filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Mod bereits abonniert")
 
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-
-    max_order = db.query(Mod).filter(Mod.server_id == server_id).count()
-    mod = Mod(
-        server_id=server_id,
-        workshop_id=workshop_id,
-        name=name,
-        load_order=max_order,
-        auto_update=True,
-    )
-    db.add(mod)
-    db.commit()
-    db.refresh(mod)
-
-    # Mod via SteamCMD im Hintergrund installieren
-    plugin = get_plugin(server.game_type)
+    lock_acquired = False
     if plugin and plugin.supports_mods:
-        plugin.install_mod(server, workshop_id)
+        lock_acquired = try_acquire_install_update_lock(server.id, "mod_install")
+        if not lock_acquired:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": INSTALL_UPDATE_ALREADY_RUNNING,
+                    "message": f"errors.{INSTALL_UPDATE_ALREADY_RUNNING}",
+                },
+            )
+
+    try:
+        max_order = db.query(Mod).filter(Mod.server_id == server_id).count()
+        mod = Mod(
+            server_id=server_id,
+            workshop_id=workshop_id,
+            name=name,
+            load_order=max_order,
+            auto_update=True,
+        )
+        db.add(mod)
+        db.commit()
+        db.refresh(mod)
+
+        # Mod via SteamCMD installieren. Der generische Install/Update-Lock schuetzt
+        # auch diesen Pfad, weil install_mod intern SteamCMD/Workshop-Downloads nutzt.
+        if plugin and plugin.supports_mods:
+            plugin.install_mod(server, workshop_id)
+    finally:
+        if lock_acquired:
+            release_install_update_lock(server.id)
 
     return mod
 

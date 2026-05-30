@@ -722,6 +722,8 @@ class Blueprint(BaseModel):
     def _check_ports_unique(cls, v: list[BlueprintPort]) -> list[BlueprintPort]:
         seen: set[tuple[str, str]] = set()
         for p in v:
+            if p.name == BlueprintPortName.CUSTOM:
+                continue
             key = (p.name.value, p.protocol.value)
             if key in seen:
                 raise ValueError(

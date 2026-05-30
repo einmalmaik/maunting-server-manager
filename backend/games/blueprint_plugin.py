@@ -296,8 +296,12 @@ class BlueprintPlugin(GamePlugin):
         bind_ip = _require_bind_ip(server)
         port_map: dict[str, int | None] = self._server_ports(server)
         out: list[PortPublish] = []
+        custom_idx = 1
         for port_def in self._blueprint.ports:
             role = port_def.name.value
+            if role == "custom":
+                role = f"custom_{custom_idx}"
+                custom_idx += 1
             host_port = port_map.get(role)
             if not host_port:
                 continue

@@ -11,7 +11,7 @@ interface Props {
 
 type LineTone = 'error' | 'warn' | 'success' | 'info' | 'default'
 type ConsoleLogLine = {
-  seq: number
+  marker: number
   text: string
 }
 
@@ -113,37 +113,56 @@ export function ServerConsolePanel({ serverId }: Props) {
   const canWrite = useHasPermission('server.console.write', serverId)
   const [logs, setLogs] = useState<ConsoleLogLine[]>([])
   const [hiddenThrough, setHiddenThrough] = useState(() => readClearMarker(serverId))
+  const [streamVersion, setStreamVersion] = useState(0)
   const [inputValue, setInputValue] = useState('')
   const [sending, setSending] = useState(false)
   const [copiedLogs, setCopiedLogs] = useState(false)
   const nextSeqRef = useRef(0)
   const bufferRef = useRef<string[]>([])
+  const activeStreamRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    activeStreamRef.current = streamVersion
     nextSeqRef.current = 0
     bufferRef.current = []
     setLogs([])
-    setHiddenThrough(readClearMarker(serverId))
+    const clearMarker = readClearMarker(serverId)
+    nextSeqRef.current = clearMarker
+    setHiddenThrough(clearMarker)
 
     // EventSource sendet automatisch Cookies (same-origin) und reconnectet bei
     // Netzwerk-Aussetzern. Keine zusaetzliche Polling-Logik noetig.
-    const url = `/api/servers/${serverId}/console/stream`
+    const url = clearMarker > 0
+      ? `/api/servers/${serverId}/console/stream?after=${clearMarker}`
+      : `/api/servers/${serverId}/console/stream`
     const es = new EventSource(url)
+    const streamToken = streamVersion
     
     // BATCHING FIX: UI-Freeze verhindern
     es.onmessage = (ev) => {
-      bufferRef.current.push(ev.data)
+      if (activeStreamRef.current !== streamToken) return
+      const eventMarker = Number.parseInt(ev.lastEventId || '', 10)
+      const marker = Number.isFinite(eventMarker) && eventMarker > 0
+        ? eventMarker
+        : nextSeqRef.current + 1
+      nextSeqRef.current = Math.max(nextSeqRef.current, marker)
+      bufferRef.current.push(JSON.stringify({ marker, text: ev.data }))
     }
     
     const flushInterval = setInterval(() => {
+      if (activeStreamRef.current !== streamToken) return
       if (bufferRef.current.length > 0) {
         const toFlush = bufferRef.current
         bufferRef.current = []
         setLogs((prev) => {
-          const mapped = toFlush.map((text) => {
-            nextSeqRef.current += 1
-            return { seq: nextSeqRef.current, text }
+          const mapped = toFlush.map((item) => {
+            try {
+              return JSON.parse(item) as ConsoleLogLine
+            } catch {
+              nextSeqRef.current += 1
+              return { marker: nextSeqRef.current, text: item }
+            }
           })
           const next = [...prev, ...mapped]
           return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
@@ -158,10 +177,10 @@ export function ServerConsolePanel({ serverId }: Props) {
       clearInterval(flushInterval)
       es.close()
     }
-  }, [serverId])
+  }, [serverId, streamVersion])
 
   const visibleLogs = useMemo(
-    () => logs.filter((line) => line.seq > hiddenThrough),
+    () => logs.filter((line) => line.marker > hiddenThrough),
     [logs, hiddenThrough],
   )
 
@@ -196,6 +215,8 @@ export function ServerConsolePanel({ serverId }: Props) {
     const seq = nextSeqRef.current
     setHiddenThrough(seq)
     writeClearMarker(serverId, seq)
+    setLogs([])
+    setStreamVersion((current) => current + 1)
   }
 
   const copyVisibleLogs = async () => {
@@ -250,7 +271,7 @@ export function ServerConsolePanel({ serverId }: Props) {
             <span className="text-on-surface-variant">{t('servers.noLogs')}</span>
           ) : (
             visibleLogs.map((line, i) => (
-              <div key={`${line.seq}-${i}`} className={colorizeOutput(line.text)}>
+              <div key={`${line.marker}-${i}`} className={colorizeOutput(line.text)}>
                 {displayConsoleLine(line.text, i18n.language) || '\u00A0'}
               </div>
             ))

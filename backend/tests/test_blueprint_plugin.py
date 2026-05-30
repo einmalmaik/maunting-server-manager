@@ -86,6 +86,42 @@ def test_build_port_publishes_skips_unassigned_roles() -> None:
     assert {p.host_port for p in publishes} == {25566, 25579}
 
 
+def test_build_port_publishes_maps_ordered_custom_ports() -> None:
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["ports"] = [
+        {"name": "game", "protocol": "udp"},
+        {"name": "custom", "protocol": "udp"},
+        {"name": "custom", "protocol": "tcp"},
+    ]
+    bp_dict["runtime"]["startup"] = (
+        "/start -game={GAME_PORT} -voice={CUSTOM_PORT_1} -query2={CUSTOM_PORT_2}"
+    )
+    bp = load_blueprint_dict(bp_dict)
+    plugin = BlueprintPlugin(bp)
+    server = _FakeServer(game_port=27015, rcon_port=None)
+    server.ports = [
+        SimpleNamespace(role="game", port=27015, protocol="udp"),
+        SimpleNamespace(role="custom_1", port=27016, protocol="udp"),
+        SimpleNamespace(role="custom_2", port=27017, protocol="tcp"),
+    ]
+
+    publishes = plugin.build_port_publishes(server)
+    by_role_port = {(p.host_port, p.protocol) for p in publishes}
+
+    assert by_role_port == {
+        (27015, "udp"),
+        (27016, "udp"),
+        (27017, "tcp"),
+    }
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        assert plugin.build_container_command(server) == [
+            "/start",
+            "-game=27015",
+            "-voice=27016",
+            "-query2=27017",
+        ]
+
+
 def test_build_container_env_substitutes_port_tokens() -> None:
     """``SERVER_PORT={GAME_PORT}`` muss zu der konkreten Portnummer werden."""
     bp = load_blueprint_dict(_mc_paper_blueprint())

@@ -10,6 +10,11 @@ from models import Server
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
+from services.install_update_lock_service import (
+    INSTALL_UPDATE_ALREADY_RUNNING,
+    release_install_update_lock,
+    try_acquire_install_update_lock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,22 +60,49 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
                     "eine Public-IP zuweisen, bevor er gestartet wird."
                 ),
             )
-        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
-        close_ports(ports_list)
-        iptables_revoke_server(
-            server.name,
-            server.public_bind_ip or "",
-            ports_list,
-        )
 
-        stop_result = await asyncio.to_thread(plugin.stop, server)
-        if "error" in stop_result:
-            raise HTTPException(status_code=500, detail=stop_result["error"])
-
+        server_update: dict = {}
+        mod_updates: list[dict] = []
         try:
             plugin.prepare_for_updates(server)
-
             server_update = plugin.check_for_server_file_update(server)
+            mod_updates = plugin.check_for_mod_updates(server)
+        except Exception as exc:
+            _append_console_log(
+                server.id,
+                f"[MSM] Updater-Check während Restart fehlgeschlagen (nicht kritisch): {exc}\n",
+            )
+            logger.warning("Updater-Check beim Restart von Server %s fehlgeschlagen: %s", server.id, exc)
+            server_update = {}
+            mod_updates = []
+
+        update_lock_acquired = False
+        needs_update_job = server_update.get("action") == "update" or bool(mod_updates)
+        if needs_update_job:
+            update_lock_acquired = try_acquire_install_update_lock(
+                server.id, "restart_update"
+            )
+            if not update_lock_acquired:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": INSTALL_UPDATE_ALREADY_RUNNING,
+                        "message": f"errors.{INSTALL_UPDATE_ALREADY_RUNNING}",
+                    },
+                )
+        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+        try:
+            close_ports(ports_list)
+            iptables_revoke_server(
+                server.name,
+                server.public_bind_ip or "",
+                ports_list,
+            )
+
+            stop_result = await asyncio.to_thread(plugin.stop, server)
+            if "error" in stop_result:
+                raise HTTPException(status_code=500, detail=stop_result["error"])
+
             if server_update.get("action") == "update":
                 _append_console_log(
                     server.id,
@@ -87,7 +119,6 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
                 else:
                     _append_console_log(server.id, "[MSM] Server-Datei-Update erfolgreich abgeschlossen.\n")
 
-            mod_updates = plugin.check_for_mod_updates(server)
             if mod_updates:
                 _append_console_log(
                     server.id,
@@ -107,6 +138,9 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
                 f"[MSM] Updater-Hook während Restart fehlgeschlagen (nicht kritisch): {exc}\n",
             )
             logger.warning("Updater-Hook beim Restart von Server %s fehlgeschlagen: %s", server.id, exc)
+        finally:
+            if update_lock_acquired:
+                release_install_update_lock(server.id)
 
         # Pre-Start-Backup (best-effort, nach Lock, vor docker run)
         if server.backup_on_start:

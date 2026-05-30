@@ -76,6 +76,121 @@ class TestFinishInstall:
         # Soll NICHT crashen, sondern still durchfallen
         finish_install(999_999, {"ok": True})
 
+    def test_finish_releases_install_update_lock(self, db: Session, test_server: Server):
+        from services.install_update_lock_service import (
+            active_install_update_lock,
+            try_acquire_install_update_lock,
+        )
+
+        assert try_acquire_install_update_lock(test_server.id, "install") is True
+        finish_install(test_server.id, {"ok": True})
+        assert active_install_update_lock() is None
+
+    def test_finish_releases_install_update_lock_after_error(self, db: Session, test_server: Server):
+        from services.install_update_lock_service import (
+            active_install_update_lock,
+            try_acquire_install_update_lock,
+        )
+
+        assert try_acquire_install_update_lock(test_server.id, "install") is True
+        finish_install(test_server.id, {"ok": False, "error": "synthetic failure"})
+        assert active_install_update_lock() is None
+
+
+class TestInstallUpdateLockService:
+    def test_second_job_is_rejected_until_release(self):
+        from services.install_update_lock_service import (
+            release_install_update_lock,
+            try_acquire_install_update_lock,
+        )
+
+        assert try_acquire_install_update_lock(1, "install") is True
+        assert try_acquire_install_update_lock(2, "install") is False
+        release_install_update_lock(1)
+        assert try_acquire_install_update_lock(2, "install") is True
+
+    def test_stale_lock_can_be_replaced(self):
+        from services.install_update_lock_service import (
+            active_install_update_lock,
+            try_acquire_install_update_lock,
+        )
+
+        assert try_acquire_install_update_lock(1, "install", ttl_seconds=-1) is True
+        assert active_install_update_lock() is None
+        assert try_acquire_install_update_lock(2, "install") is True
+
+
+class TestInstallEndpointLock:
+    def test_install_returns_structured_conflict_when_job_running(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        test_server: Server,
+    ):
+        from services.install_update_lock_service import (
+            INSTALL_UPDATE_ALREADY_RUNNING,
+            try_acquire_install_update_lock,
+        )
+
+        assert try_acquire_install_update_lock(999, "install") is True
+
+        with patch("routers.servers.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = MagicMock()
+            response = client.post(
+                f"/api/servers/{test_server.id}/install",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == INSTALL_UPDATE_ALREADY_RUNNING
+        assert response.json()["detail"]["message"] == "errors.install_update_already_running"
+
+    def test_install_releases_lock_when_plugin_errors_synchronously(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        test_server: Server,
+    ):
+        from services.install_update_lock_service import active_install_update_lock
+
+        plugin = MagicMock()
+        plugin.install.return_value = {"error": "synthetic install failure"}
+
+        with patch("routers.servers.get_plugin", return_value=plugin):
+            response = client.post(
+                f"/api/servers/{test_server.id}/install",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 500
+        assert active_install_update_lock() is None
+
+    def test_install_releases_lock_when_plugin_raises_synchronously(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        test_server: Server,
+    ):
+        from services.install_update_lock_service import active_install_update_lock
+
+        plugin = MagicMock()
+        plugin.install.side_effect = RuntimeError("synthetic install exception")
+
+        with patch("routers.servers.get_plugin", return_value=plugin):
+            response = client.post(
+                f"/api/servers/{test_server.id}/install",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 500
+        assert active_install_update_lock() is None
+
 
 class TestDeleteServerCleanup:
     """Delete-Endpoint räumt Container, install_dir, backup_dir, console-logs."""
@@ -282,6 +397,65 @@ class TestSteamCMDFullLogOnFailure:
             assert "Update state (0x61) downloading, progress: 68.94" in log
             assert "secret-pass" not in log
             assert "***" in log
+        finally:
+            self._clear_console_log(test_server.id)
+
+    def test_maps_known_steamcmd_0x202_error_without_secret_leak(self, test_server: Server, tmp_path):
+        from games.base import run_steamcmd_install
+
+        self._clear_console_log(test_server.id)
+        try:
+            with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+                 patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1001)), \
+                 patch("services.steam_account_service.SteamAccountService.is_configured", return_value=True), \
+                 patch("services.steam_account_service.SteamAccountService.get_username", return_value="steam-user"), \
+                 patch("services.steam_account_service.SteamAccountService.get_decrypted_password", return_value="secret-pass"):
+
+                def fake_run_ephemeral(**kwargs):
+                    kwargs["log_callback"](
+                        "Error! App '3792580' state is 0x202 after update job secret-pass\n"
+                    )
+                    return {"ok": False, "error": "exit 7", "stdout": "", "stderr": ""}
+
+                mock_eph.side_effect = fake_run_ephemeral
+                result = run_steamcmd_install(
+                    server_id=test_server.id,
+                    install_dir=str(tmp_path),
+                    app_id="3792580",
+                    use_authenticated_login=True,
+                )
+
+            assert result["ok"] is False
+            assert result["error_code"] == "steamcmd_update_state_0x202"
+            assert "nicht verifiziert" in result["error"]
+            log = self._read_console_log(test_server.id)
+            assert "secret-pass" not in log
+            assert "0x202" in log
+            assert "nicht verifiziert" in log
+        finally:
+            self._clear_console_log(test_server.id)
+
+    def test_maps_missing_configuration_error(self, test_server: Server, tmp_path):
+        from games.base import run_steamcmd_install
+
+        self._clear_console_log(test_server.id)
+        try:
+            with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+                 patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1001)):
+                mock_eph.return_value = {
+                    "ok": False,
+                    "error": "Missing Configuration",
+                    "stdout": "ERROR! Failed to install app '123' (Missing Configuration)\n",
+                    "stderr": "",
+                }
+                result = run_steamcmd_install(
+                    server_id=test_server.id,
+                    install_dir=str(tmp_path),
+                    app_id="123",
+                )
+
+            assert result["error_code"] == "steamcmd_missing_configuration"
+            assert "nicht verifiziert" in result["error"]
         finally:
             self._clear_console_log(test_server.id)
 

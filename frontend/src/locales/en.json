@@ -615,7 +615,8 @@
   },
   "errors": {
     "RATE_LIMITED": "Too many requests. Please wait a moment.",
-    "SESSION_EXPIRED": "Session expired. Please sign in again."
+    "SESSION_EXPIRED": "Session expired. Please sign in again.",
+    "install_update_already_running": "An installation or update is already running. Please wait until that job has finished."
   },
   "notifications": {
     "disable": "Disable email notifications",

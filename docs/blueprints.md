@@ -168,6 +168,10 @@ In der Blueprint-Definition unter `ports` können beliebig viele Custom Ports hi
 
 Im Startup-Befehl und in Config-Patches werden diese dynamischen Ports über die Platzhalter `{CUSTOM_PORT_1}`, `{CUSTOM_PORT_2}` usw. (aufsteigend indiziert basierend auf ihrer Reihenfolge der Definition) referenziert.
 
+Die Reihenfolge der `custom`-Ports ist auch die Reihenfolge der Docker-Publishes:
+der erste `custom`-Eintrag wird `custom_1`, der zweite `custom_2` usw. Das gilt
+unabhängig davon, ob mehrere Custom-Ports dasselbe Protokoll nutzen.
+
 ### 2. Wine-Umgebungsvariablen konfigurieren
 
 Die Kompatibilitätsschicht wird klassisch über Umgebungsvariablen (`runtime.env`) konfiguriert. Ein typisches Blueprint-Beispiel für ein Wine-Spiel:
@@ -185,3 +189,22 @@ Die Kompatibilitätsschicht wird klassisch über Umgebungsvariablen (`runtime.en
 ```
 
 Es wird kein spezifisches Wine-Token benötigt; alle Parameter können direkt über die standardmäßigen Umgebungsvariablen konfiguriert werden.
+
+## Install-/Update-Serialisierung
+
+MSM führt serverweite Installations- und Update-Jobs seriell aus. Dazu gehören
+Blueprint-Installationen, Reinstallationen, Server-Datei-Updates vor einem
+Restart und Workshop-Downloads, die über den Server-Start/Restart oder
+Mod-Subscribe ausgelöst werden.
+
+Wenn bereits ein Install-/Update-Job läuft, antwortet die API mit dem
+strukturierten Fehlercode `install_update_already_running`. Die UI übersetzt
+diesen Code i18n-fähig. Die Sperre ist generisch und nicht SteamCMD-spezifisch;
+sie schützt auch HTTP-Source- und künftige Blueprint-Update-Pfade.
+
+SteamCMD-Fehler wie `Missing Configuration` oder `state is 0x202 after update
+job` werden als strukturierte Fehler klassifiziert. Die genannten Ursachen im
+Status/Console-Log sind bewusst als mögliche Ursachen markiert und nicht als
+bewiesen: ohne Host-Metriken und vollständige SteamCMD-/Docker-Runtime kann MSM
+nicht sicher unterscheiden, ob App-Metadaten, Account/Lizenz, Plattform,
+Plattenplatz/Quota, Berechtigungen oder paralleler Zugriff die Ursache waren.

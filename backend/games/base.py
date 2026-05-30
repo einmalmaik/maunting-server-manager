@@ -138,6 +138,7 @@ def finish_install(server_id: int, result: dict) -> None:
     # (zirkulärer Import via games.__init__).
     from database import SessionLocal
     from models import Server
+    from services.install_update_lock_service import release_install_update_lock
 
     db = SessionLocal()
     try:
@@ -157,6 +158,7 @@ def finish_install(server_id: int, result: dict) -> None:
         logger.warning("finish_install failed for server %s: %s", server_id, e)
         db.rollback()
     finally:
+        release_install_update_lock(server_id)
         db.close()
 
 
@@ -226,6 +228,42 @@ def _redact(text: str, secrets_to_redact: list[str]) -> str:
     return text
 
 
+def classify_steamcmd_failure(output: str, fallback_error: str = "") -> dict[str, str] | None:
+    """Map known SteamCMD failure markers to safe structured errors.
+
+    The message intentionally names causes as possible and ``nicht verifiziert``:
+    SteamCMD output alone does not prove whether disk, quota, permissions,
+    platform metadata, or concurrent access was the root cause.
+    """
+    text = f"{output}\n{fallback_error}".lower()
+    if "0x202" in text:
+        return {
+            "error_code": "steamcmd_update_state_0x202",
+            "error": (
+                "SteamCMD meldet App-State 0x202 nach dem Update-Job. "
+                "Mögliche Ursachen (nicht verifiziert): unvollständige App-Konfiguration, "
+                "Plattenplatz/Quota, Berechtigungen oder paralleler Zugriff auf Install-/Cache-Daten."
+            ),
+        }
+    if "missing configuration" in text:
+        return {
+            "error_code": "steamcmd_missing_configuration",
+            "error": (
+                "SteamCMD meldet Missing Configuration. Mögliche Ursachen "
+                "(nicht verifiziert): fehlende/inkompatible App-Metadaten, falsche Plattform, "
+                "Account-/Lizenzproblem, Plattenplatz/Quota oder paralleler Zugriff."
+            ),
+        }
+    return None
+
+
+def _bounded_log_buffer_append(buffer: list[str], line: str, *, max_chars: int = 20000) -> None:
+    buffer.append(line)
+    total = sum(len(part) for part in buffer)
+    while buffer and total > max_chars:
+        total -= len(buffer.pop(0))
+
+
 def run_steamcmd_install(
     *,
     server_id: int,
@@ -278,9 +316,13 @@ def run_steamcmd_install(
     uid, gid = docker_service.container_runtime_uid_gid()
     chown_uid, chown_gid = uid, gid
 
+    live_output: list[str] = []
+
     def _live_log(line: str) -> None:
         """Callback für Live-Streaming: redact Secrets, dann in Console-Log schreiben."""
-        _append_console_log(server_id, _redact(line, secrets_to_redact))
+        safe_line = _redact(line, secrets_to_redact)
+        _bounded_log_buffer_append(live_output, safe_line)
+        _append_console_log(server_id, safe_line)
 
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
@@ -302,6 +344,13 @@ def run_steamcmd_install(
     if result["ok"]:
         _append_console_log(server_id, f"\n[MSM] SteamCMD abgeschlossen (App {app_id}).\n")
     else:
+        classified = classify_steamcmd_failure(
+            "".join(live_output) + out,
+            str(result.get("error") or ""),
+        )
+        if classified:
+            result = {**result, **classified}
+            _append_console_log(server_id, f"\n[MSM] SteamCMD Diagnose: {classified['error']}\n")
         _append_console_log(server_id, f"\n[MSM] SteamCMD fehlgeschlagen: {result['error']}\n")
     return result
 
@@ -348,8 +397,12 @@ def run_steamcmd_workshop_download(
         server_id, f"[MSM] SteamCMD Workshop-Download: app={workshop_app_id} item={workshop_item_id}\n"
     )
 
+    live_output: list[str] = []
+
     def _live_log(line: str) -> None:
-        _append_console_log(server_id, _redact(line, secrets_to_redact))
+        safe_line = _redact(line, secrets_to_redact)
+        _bounded_log_buffer_append(live_output, safe_line)
+        _append_console_log(server_id, safe_line)
 
     uid, gid = docker_service.container_runtime_uid_gid()
     chown_uid, chown_gid = uid, gid
@@ -368,6 +421,13 @@ def run_steamcmd_workshop_download(
     if out:
         _append_console_log(server_id, _redact(out, secrets_to_redact))
     if not result["ok"]:
+        classified = classify_steamcmd_failure(
+            "".join(live_output) + out,
+            str(result.get("error") or ""),
+        )
+        if classified:
+            result = {**result, **classified}
+            _append_console_log(server_id, f"\n[MSM] SteamCMD Diagnose: {classified['error']}\n")
         _append_console_log(
             server_id, f"\n[MSM] Workshop-Download fehlgeschlagen: {result['error']}\n"
         )

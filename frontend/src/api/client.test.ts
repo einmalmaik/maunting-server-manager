@@ -199,6 +199,24 @@ describe('api client', () => {
       )
     })
 
+    it('should surface install/update lock i18n key from structured detail', async () => {
+      fetchSpy.mockReturnValueOnce(
+        mockResponse(409, {
+          detail: {
+            code: 'install_update_already_running',
+            message: 'errors.install_update_already_running',
+          },
+        }),
+      )
+
+      await expect(api('/test', { method: 'POST' })).rejects.toThrow(
+        'errors.install_update_already_running',
+      )
+      expect(i18n.t('errors.install_update_already_running')).toBe(
+        'An installation or update is already running. Please wait until that job has finished.',
+      )
+    })
+
     it('should fallback to statusText when body is empty', async () => {
       fetchSpy.mockReturnValueOnce({
         ok: false,
