@@ -28,6 +28,7 @@ from blueprints.schema import (
     BlueprintConfigPatchType,
     BlueprintModListContent,
     BlueprintPortProtocol,
+    BlueprintSteamCompatibility,
     BlueprintSourceType,
     BlueprintWorkshopFileOperation,
 )
@@ -43,7 +44,7 @@ from games.base import (
     run_steamcmd_workshop_download,
 )
 from games.ini_utils import set_ini_value
-from services.docker_service import PortPublish
+from services.docker_service import PortPublish, VolumeBind
 from services.steam_account_service import SteamAccountService
 
 
@@ -179,14 +180,46 @@ class BlueprintPlugin(GamePlugin):
             "rcon": server.rcon_port,
         }
 
+    def _runtime_data_dir(self) -> str:
+        return self._blueprint.runtime.workdir or CONTAINER_DATA_DIR
+
+    def _uses_windows_compat_runtime(self) -> bool:
+        bp = self._blueprint
+        if bp.source.type != BlueprintSourceType.STEAM or bp.source.steam is None:
+            return False
+        return bp.source.steam.compatibility in (
+            BlueprintSteamCompatibility.WINE,
+            BlueprintSteamCompatibility.PROTON,
+        )
+
     def build_container_command(self, server) -> list[str]:
-        return render_argv(
+        argv = render_argv(
             self._blueprint,
-            install_dir=CONTAINER_DATA_DIR,
+            install_dir=self._runtime_data_dir(),
             ports=self._server_ports(server),
             active_mod_ids=active_mod_ids(server),
             extra_env=self._blueprint.runtime.env,
         )
+        if not argv or not self._uses_windows_compat_runtime():
+            return argv
+        first = Path(argv[0]).name.lower()
+        if first in {"wine", "wine64", "proton"}:
+            return argv
+        if argv[0].lower().endswith(".exe"):
+            return ["wine", *argv]
+        return argv
+
+    def build_volume_binds(self, server) -> list[VolumeBind]:
+        return [
+            VolumeBind(
+                host_path=server.install_dir,
+                container_path=self._runtime_data_dir(),
+                read_only=False,
+            )
+        ]
+
+    def container_workdir(self, server) -> str:
+        return self._runtime_data_dir()
 
     def build_container_env(self, server) -> dict[str, str]:
         # Port-Tokens in Env-Werten aufloesen (z. B. ``SERVER_PORT={GAME_PORT}``

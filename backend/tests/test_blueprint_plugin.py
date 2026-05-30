@@ -95,6 +95,67 @@ def test_build_container_env_substitutes_port_tokens() -> None:
     assert env["TYPE"] == "PAPER"
 
 
+def test_runtime_workdir_controls_mount_workdir_and_install_dir_token() -> None:
+    """Blueprint-Images wie Pterodactyl-Yolks erwarten die Dateien unter
+    ``/home/container``. Dann muss MSM den Server-Ordner auch dort mounten und
+    ``{INSTALL_DIR}`` auf denselben Container-Pfad rendern.
+    """
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["runtime"]["workdir"] = "/home/container"
+    bp_dict["runtime"]["startup"] = "{INSTALL_DIR}/start.sh"
+    bp = load_blueprint_dict(bp_dict)
+    plugin = BlueprintPlugin(bp)
+    server = _FakeServer(install_dir="/srv/msm/server-1")
+
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        assert plugin.build_container_command(server) == ["/home/container/start.sh"]
+
+    volumes = plugin.build_volume_binds(server)
+    assert len(volumes) == 1
+    assert volumes[0].host_path == "/srv/msm/server-1"
+    assert volumes[0].container_path == "/home/container"
+    assert volumes[0].read_only is False
+    assert plugin.container_workdir(server) == "/home/container"
+
+
+def test_windows_steam_compatibility_wraps_exe_with_wine() -> None:
+    """``platform=windows`` steuert nur SteamCMD. Fuer den Container-Start
+    braucht eine .exe einen Windows-Kompatibilitaetsrunner.
+    """
+    bp_dict = {
+        "version": 1,
+        "meta": {"id": "windows_test", "name": "Windows Test", "category": "steam_game"},
+        "runtime": {
+            "image": "ghcr.io/ptero-eggs/yolks:wine_staging",
+            "workdir": "/home/container",
+            "env": {"MAX_PLAYERS": "64"},
+            "startup": "./Server/Binaries/Win64/GameServer.exe -port={GAME_PORT} -MaxPlayers={ENV.MAX_PLAYERS}",
+        },
+        "ports": [{"name": "game", "protocol": "udp"}],
+        "source": {
+            "type": "steam",
+            "steam": {
+                "appId": "123",
+                "platform": "windows",
+                "compatibility": "proton",
+                "requiresLogin": False,
+            },
+        },
+        "mods": None,
+    }
+    plugin = BlueprintPlugin(load_blueprint_dict(bp_dict))
+
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        argv = plugin.build_container_command(_FakeServer(game_port=7777))
+
+    assert argv == [
+        "wine",
+        "./Server/Binaries/Win64/GameServer.exe",
+        "-port=7777",
+        "-MaxPlayers=64",
+    ]
+
+
 def test_docker_only_install_writes_console_feedback(tmp_path, monkeypatch) -> None:
     """Docker-only Install darf nicht stumm sein.
 
