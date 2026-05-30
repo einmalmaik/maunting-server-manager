@@ -154,3 +154,43 @@ class TestManualAllocation:
                 exclude_server_id=srv.id,
             )
         assert game == 27050
+
+
+class TestDynamicAllocation:
+    def test_dynamic_allocation_success(self, db: Session):
+        requirements = [
+            ("game", "udp"),
+            ("query", "udp"),
+            ("rcon", "tcp"),
+            ("custom_1", "udp"),
+            ("custom_2", "tcp"),
+        ]
+        with patch("services.port_allocation_service.is_port_available", return_value=True):
+            allocated = allocate_ports(
+                db,
+                port_requirements=requirements,
+            )
+        assert len(allocated) == 5
+        assert allocated[0] == ("game", PORT_RANGE_START, "udp")
+        assert allocated[1] == ("query", PORT_RANGE_START + 1, "udp")
+        assert allocated[2] == ("rcon", PORT_RANGE_START + 2, "tcp")
+        assert allocated[3] == ("custom_1", PORT_RANGE_START + 3, "udp")
+        assert allocated[4] == ("custom_2", PORT_RANGE_START + 4, "tcp")
+
+    def test_dynamic_allocation_with_overrides(self, db: Session):
+        requirements = [
+            ("game", "udp"),
+            ("custom_1", "udp"),
+        ]
+        requested = {
+            "game": 28000,
+        }
+        with patch("services.port_allocation_service.is_port_available", return_value=True):
+            allocated = allocate_ports(
+                db,
+                port_requirements=requirements,
+                requested_ports=requested,
+            )
+        assert len(allocated) == 2
+        assert allocated[0] == ("game", 28000, "udp")
+        assert allocated[1] == ("custom_1", PORT_RANGE_START, "udp")

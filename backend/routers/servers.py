@@ -60,16 +60,43 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
 
     base_dir = os.path.abspath(settings.servers_dir)
 
-    # Bind-IP und Ports zuerst validieren (keine Seiteneffekte auf FS oder DB).
-    # 127.0.0.1 / 0.0.0.0 verboten (Validator + hier).
+    plugin = get_plugin(req.game_type)
+    bp = plugin.get_blueprint() if plugin else None
+
+    # Map blueprint ports to requirements list [(role, protocol)]
+    port_requirements = []
+    if bp:
+        custom_idx = 1
+        for bp_port in bp.ports:
+            role = bp_port.name.value
+            if role == "custom":
+                role = f"custom_{custom_idx}"
+                custom_idx += 1
+            port_requirements.append((role, bp_port.protocol.value))
+    else:
+        port_requirements = [
+            ("game", "udp"),
+            ("query", "udp"),
+            ("rcon", "tcp"),
+        ]
+
+    # Overrides mapping
+    requested_ports = dict(req.ports or {})
+    if req.game_port is not None:
+        requested_ports["game"] = req.game_port
+    if req.query_port is not None:
+        requested_ports["query"] = req.query_port
+    if req.rcon_port is not None:
+        requested_ports["rcon"] = req.rcon_port
+
     bind_ip = req.public_bind_ip or default_bind_ip()
     try:
-        game_port, query_port, rcon_port = allocate_ports(
+        allocated = allocate_ports(
             db,
-            requested_game_port=req.game_port,
-            requested_query_port=req.query_port,
-            requested_rcon_port=req.rcon_port,
+            exclude_server_id=None,
             bind_ip=bind_ip or "0.0.0.0",
+            port_requirements=port_requirements,
+            requested_ports=requested_ports,
         )
     except PortConflictError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -77,6 +104,13 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+    if isinstance(allocated, tuple) and len(allocated) == 3 and all(isinstance(x, int) for x in allocated):
+        allocated = [
+            ("game", allocated[0], "udp"),
+            ("query", allocated[1], "udp"),
+            ("rcon", allocated[2], "tcp"),
+        ]
 
     # Placeholder-Row zuerst einfügen, um stabile PK (server.id) zu erhalten.
     # Danach install_dir = f".../{game_type}_{id}" - kollisionsfrei über alle Zeit,
@@ -94,12 +128,15 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         cpu_limit_percent=req.cpu_limit_percent,
         ram_limit_mb=req.ram_limit_mb,
         disk_limit_gb=req.disk_limit_gb,
-        game_port=game_port,
-        query_port=query_port,
-        rcon_port=rcon_port,
         public_bind_ip=bind_ip,
     )
     db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    from models.server_port import ServerPort
+    for role, port_val, proto in allocated:
+        db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
     db.commit()
     db.refresh(server)
 
@@ -176,11 +213,11 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
-    old_ports = (server.game_port, server.query_port, server.rcon_port)
+    old_ports = [(p.port, p.protocol, p.role) for p in server.ports]
     old_bind_ip = server.public_bind_ip
 
     payload = req.model_dump(exclude_unset=True)
-    port_fields = {"game_port", "query_port", "rcon_port"}
+    port_fields = {"game_port", "query_port", "rcon_port", "ports"}
     resource_fields = {"cpu_limit_percent", "ram_limit_mb", "disk_limit_gb"}
     changed_ports = port_fields & set(payload.keys())
     bind_ip_changed = "public_bind_ip" in payload and payload["public_bind_ip"] != old_bind_ip
@@ -192,16 +229,48 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
     # ── Port-/Bind-Aenderung: validieren ──
     if changed_ports:
-        # Bind-IP fuer den Host-Check: neue Vorgabe (falls mitgegeben) oder Bestand.
+        plugin = get_plugin(server.game_type)
+        bp = plugin.get_blueprint() if plugin else None
+        
+        # Map blueprint ports to requirements list [(role, protocol)]
+        port_requirements = []
+        if bp:
+            custom_idx = 1
+            for bp_port in bp.ports:
+                role = bp_port.name.value
+                if role == "custom":
+                    role = f"custom_{custom_idx}"
+                    custom_idx += 1
+                port_requirements.append((role, bp_port.protocol.value))
+        else:
+            port_requirements = [
+                ("game", "udp"),
+                ("query", "udp"),
+                ("rcon", "tcp"),
+            ]
+
+        current_ports = {p.role: p.port for p in server.ports}
+        requested_ports = dict(req.ports or {})
+        
+        if req.game_port is not None:
+            requested_ports["game"] = req.game_port
+        if req.query_port is not None:
+            requested_ports["query"] = req.query_port
+        if req.rcon_port is not None:
+            requested_ports["rcon"] = req.rcon_port
+
+        for role, _ in port_requirements:
+            if role not in requested_ports:
+                requested_ports[role] = current_ports.get(role)
+
         bind_ip_for_check = payload.get("public_bind_ip", old_bind_ip) or "0.0.0.0"
         try:
-            new_game, new_query, new_rcon = allocate_ports(
+            allocated = allocate_ports(
                 db,
-                requested_game_port=req.game_port if req.game_port is not None else server.game_port,
-                requested_query_port=req.query_port if req.query_port is not None else server.query_port,
-                requested_rcon_port=req.rcon_port if req.rcon_port is not None else server.rcon_port,
                 exclude_server_id=server.id,
                 bind_ip=bind_ip_for_check,
+                port_requirements=port_requirements,
+                requested_ports=requested_ports,
             )
         except PortConflictError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -210,17 +279,23 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
-        # Werte überschreiben (damit setattr korrekt arbeitet)
-        if req.game_port is not None:
-            req.game_port = new_game
-        if req.query_port is not None:
-            req.query_port = new_query
-        if req.rcon_port is not None:
-            req.rcon_port = new_rcon
+        if isinstance(allocated, tuple) and len(allocated) == 3 and all(isinstance(x, int) for x in allocated):
+            allocated = [
+                ("game", allocated[0], "udp"),
+                ("query", allocated[1], "udp"),
+                ("rcon", allocated[2], "tcp"),
+            ]
+
+        from models.server_port import ServerPort
+        db.query(ServerPort).filter(ServerPort.server_id == server.id).delete()
+        for role, port_val, proto in allocated:
+            db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
+        db.commit()
 
     # Standard-Update
     for key, val in payload.items():
-        setattr(server, key, val)
+        if key not in ("game_port", "query_port", "rcon_port", "ports"):
+            setattr(server, key, val)
     db.commit()
     db.refresh(server)
 
@@ -235,24 +310,21 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         was_running = plugin is not None and docker_service.is_running(container_name_for(server.id))
 
         if was_running:
-            close_ports(
-                game_port=old_ports[0] or 0,
-                query_port=old_ports[1],
-                rcon_port=old_ports[2],
-            )
+            close_ports(old_ports)
             iptables_revoke_server(
                 server.name,
                 old_bind_ip or "",
-                old_ports[0] or 0, old_ports[1], old_ports[2],
+                old_ports,
             )
             # Container stoppen - Plugin.start() legt ihn mit den neuen Ports/
             # Bind-Werten frisch an.
             plugin.stop(server)
-            open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+            new_ports = [(p.port, p.protocol, p.role) for p in server.ports]
+            open_ports(server.name, new_ports)
             iptables_accept_server(
                 server.name,
                 server.public_bind_ip or "",
-                server.game_port, server.query_port, server.rcon_port,
+                new_ports,
             )
             plugin.start(server)
 
@@ -283,15 +355,12 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     docker_service.remove(container, force=True)
 
     # 2. Firewall- und iptables-Regeln schließen
-    close_ports(
-        game_port=server.game_port or 0,
-        query_port=server.query_port,
-        rcon_port=server.rcon_port,
-    )
+    ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+    close_ports(ports_list)
     iptables_revoke_server(
         server.name,
         server.public_bind_ip or "",
-        server.game_port, server.query_port, server.rcon_port,
+        ports_list,
     )
 
     # 3. Install-Verzeichnis physisch löschen
@@ -403,11 +472,12 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
     lock = get_server_lifecycle_lock(server.id)
     async with lock:
         # Firewall-Regeln öffnen vor Container-Start.
-        open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+        open_ports(server.name, ports_list)
         iptables_accept_server(
             server.name,
             server.public_bind_ip,
-            server.game_port, server.query_port, server.rcon_port,
+            ports_list,
         )
 
         # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
@@ -458,11 +528,11 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
         result = await asyncio.to_thread(plugin.start, server)
         if "error" in result:
             # Container-Start fehlgeschlagen - Firewall-Regeln wieder schließen.
-            close_ports(server.game_port, server.query_port, server.rcon_port)
+            close_ports(ports_list)
             iptables_revoke_server(
                 server.name,
                 server.public_bind_ip,
-                server.game_port, server.query_port, server.rcon_port,
+                ports_list,
             )
             raise HTTPException(status_code=500, detail=result["error"])
         server.status = "running"
@@ -499,11 +569,12 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
         db.commit()
 
         # Firewall- und iptables-Regeln nach Container-Stop schließen.
-        close_ports(server.game_port, server.query_port, server.rcon_port)
+        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+        close_ports(ports_list)
         iptables_revoke_server(
             server.name,
             server.public_bind_ip or "",
-            server.game_port, server.query_port, server.rcon_port,
+            ports_list,
         )
 
     if EmailService.is_configured() and user.email_notifications:

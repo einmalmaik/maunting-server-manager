@@ -23,6 +23,8 @@ from .schema import (
     BlueprintModInjection,
     BlueprintValidationError,
     _ALLOWED_ENV_VALUE_TOKENS,
+    _ALLOWED_STARTUP_TOKENS,
+    _is_allowed_port_token,
 )
 
 
@@ -77,10 +79,17 @@ def render_env_values(
         "VOICE_PORT": "" if not ports.get("voice") else str(ports["voice"]),
         "WEB_PORT": "" if not ports.get("web") else str(ports["web"]),
     }
+    for k, v in ports.items():
+        if k not in ("game", "query", "rcon", "voice", "web"):
+            if k.startswith("custom_"):
+                num = k.split("_", 1)[1]
+                ports_map[f"CUSTOM_PORT_{num}"] = str(v) if v else ""
+            else:
+                ports_map[f"{k.upper()}_PORT"] = str(v) if v else ""
 
     def _sub(match: re.Match[str]) -> str:
         token = match.group(1)
-        if token not in _ALLOWED_ENV_VALUE_TOKENS:
+        if not _is_allowed_port_token(token, _ALLOWED_ENV_VALUE_TOKENS):
             raise BlueprintValidationError(
                 f"Env-Wert-Token '{{{token}}}' ist nicht in der Whitelist."
             )
@@ -136,6 +145,13 @@ def render_argv(
         "VOICE_PORT": "" if not ports.get("voice") else str(ports["voice"]),
         "WEB_PORT": "" if not ports.get("web") else str(ports["web"]),
     }
+    for k, v in ports.items():
+        if k not in ("game", "query", "rcon", "voice", "web"):
+            if k.startswith("custom_"):
+                num = k.split("_", 1)[1]
+                ports_map[f"CUSTOM_PORT_{num}"] = str(v) if v else ""
+            else:
+                ports_map[f"{k.upper()}_PORT"] = str(v) if v else ""
     mod_arg = build_mod_arg(blueprint, list(active_mod_ids or []))
 
     env_values: dict[str, str] = dict(extra_env or {})
@@ -157,6 +173,8 @@ def render_argv(
             elif token.startswith("ENV."):
                 key = token.split(".", 1)[1]
                 value = env_values.get(key, "")
+            elif _is_allowed_port_token(token, _ALLOWED_STARTUP_TOKENS):
+                value = ""
             else:
                 raise BlueprintValidationError(
                     f"Unbekanntes Startup-Token '{{{token}}}' beim Rendern."

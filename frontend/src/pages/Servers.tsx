@@ -27,6 +27,7 @@ export function Servers() {
     game_port: '',
     query_port: '',
     rcon_port: '',
+    ports: {} as Record<string, string>,
     public_bind_ip: '',
   })
 
@@ -63,6 +64,29 @@ export function Servers() {
     e.preventDefault()
     setCreating(true)
     try {
+      const portsPayload: Record<string, number | null> = {}
+      const selectedGame = games.find((g) => g.id === form.game_type)
+      const portDefs = selectedGame?.ports ?? [
+        { name: 'game', protocol: 'udp' },
+        { name: 'query', protocol: 'udp' },
+        { name: 'rcon', protocol: 'tcp' },
+      ]
+      let customIdx = 1
+      portDefs.forEach((p) => {
+        let role = p.name as string
+        if (role === 'custom') {
+          role = `custom_${customIdx}`
+          customIdx++
+        }
+        let valStr = ''
+        if (role === 'game') valStr = form.game_port
+        else if (role === 'query') valStr = form.query_port
+        else if (role === 'rcon') valStr = form.rcon_port
+        else valStr = form.ports[role] || ''
+        
+        portsPayload[role] = valStr ? parseInt(valStr) : null
+      })
+
       await api<Server>('/servers', {
         method: 'POST',
         body: JSON.stringify({
@@ -74,6 +98,7 @@ export function Servers() {
           game_port: form.game_port ? parseInt(form.game_port) : null,
           query_port: form.query_port ? parseInt(form.query_port) : null,
           rcon_port: form.rcon_port ? parseInt(form.rcon_port) : null,
+          ports: portsPayload,
           public_bind_ip: form.public_bind_ip || null,
         }),
       })
@@ -87,6 +112,7 @@ export function Servers() {
         game_port: '',
         query_port: '',
         rcon_port: '',
+        ports: {},
         public_bind_ip: defaultBindIp || '',
       })
       fetchServers()
@@ -315,37 +341,65 @@ export function Servers() {
                   { name: 'query', protocol: 'udp' },
                   { name: 'rcon', protocol: 'tcp' },
                 ]
-                const roleToField: Record<string, 'game_port' | 'query_port' | 'rcon_port'> = {
-                  game: 'game_port',
-                  query: 'query_port',
-                  rcon: 'rcon_port',
-                }
-                const portRoles = portDefs.filter((p) => roleToField[p.name])
-                if (portRoles.length === 0) return null
+                if (portDefs.length === 0) return null
+                
+                let customIdx = 1
+                const mappedPorts = portDefs.map((p) => {
+                  let role = p.name as string
+                  if (role === 'custom') {
+                    role = `custom_${customIdx}`
+                    customIdx++
+                  }
+                  return {
+                    ...p,
+                    mappedRole: role,
+                  }
+                })
+
                 return (
                   <div className="grid grid-cols-3 gap-3" data-testid="port-fields">
-                    {portRoles.map((p) => {
-                      const fieldKey = roleToField[p.name]
-                      const labelKey =
-                        p.name === 'game'
-                          ? 'servers.gamePort'
-                          : p.name === 'query'
-                          ? 'servers.queryPort'
-                          : 'servers.rconPort'
+                    {mappedPorts.map((p) => {
+                      const role = p.mappedRole
+                      const isLegacy = role === 'game' || role === 'query' || role === 'rcon'
+                      const val = isLegacy
+                        ? (role === 'game' ? form.game_port : role === 'query' ? form.query_port : form.rcon_port)
+                        : (form.ports[role] || '')
+                      
+                      const label = role === 'game'
+                        ? t('servers.gamePort')
+                        : role === 'query'
+                        ? t('servers.queryPort')
+                        : role === 'rcon'
+                        ? t('servers.rconPort')
+                        : `${role.replace('_', ' ').toUpperCase()} (${p.protocol.toUpperCase()})`
+
                       return (
-                        <div key={p.name}>
+                        <div key={role}>
                           <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                            {t(labelKey)}
+                            {label}
                           </label>
                           <input
                             type="number"
                             min={1024}
                             max={65535}
-                            value={form[fieldKey]}
-                            onChange={(e) => setForm({ ...form, [fieldKey]: e.target.value })}
+                            value={val}
+                            onChange={(e) => {
+                              if (isLegacy) {
+                                const fieldKey = role === 'game' ? 'game_port' : role === 'query' ? 'query_port' : 'rcon_port'
+                                setForm({ ...form, [fieldKey]: e.target.value })
+                              } else {
+                                setForm({
+                                  ...form,
+                                  ports: {
+                                    ...form.ports,
+                                    [role]: e.target.value,
+                                  },
+                                })
+                              }
+                            }}
                             className="msm-input"
                             placeholder={t('servers.portAuto')}
-                            data-testid={`port-input-${p.name}`}
+                            data-testid={`port-input-${role}`}
                           />
                         </div>
                       )

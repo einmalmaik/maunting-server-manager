@@ -162,7 +162,7 @@ def ensure_baseline_drop(
 def accept_server(
     name: str,
     bind_ip: str,
-    game_port: int | None,
+    game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None = None,
     rcon_port: int | None = None,
 ) -> bool:
@@ -179,7 +179,7 @@ def accept_server(
 def revoke_server(
     name: str,
     bind_ip: str,
-    game_port: int | None,
+    game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None = None,
     rcon_port: int | None = None,
 ) -> bool:
@@ -196,22 +196,29 @@ def _apply_server_rules(
     action: str,  # "insert" oder "delete"
     name: str,
     bind_ip: str,
-    game_port: int | None,
+    game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None,
     rcon_port: int | None,
 ) -> bool:
-    """Insert oder Delete fuer alle drei Ports."""
+    """Insert oder Delete fuer alle Ports."""
     if not bind_ip:
         logger.warning(
             "accept_server/revoke_server fuer '%s' ohne bind_ip — uebersprungen.", name,
         )
         return False
+
+    ports_to_process: list[tuple[int | None, str, str]]
+    if isinstance(game_port, list):
+        ports_to_process = game_port
+    else:
+        ports_to_process = [
+            (game_port, "udp", "game"),
+            (query_port, "udp", "query"),
+            (rcon_port, "tcp", "rcon"),
+        ]
+
     ok = True
-    for port, protocol, role in (
-        (game_port, "udp", "game"),
-        (query_port, "udp", "query"),
-        (rcon_port, "tcp", "rcon"),
-    ):
+    for port, protocol, role in ports_to_process:
         if not port:
             continue
         comment = f"{_COMMENT_PREFIX}:{_safe(name)}:{role}"

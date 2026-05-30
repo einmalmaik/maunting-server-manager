@@ -440,3 +440,117 @@ class TestLifecycleLockBasic:
         assert lock is lock2
         # Additional coverage for lifecycle service helper (distinct ids -> distinct locks; addresses re-review gap on 0 coverage for server_lifecycle_service)
         assert get_server_lifecycle_lock(111) is not lock
+
+
+class TestServerPortsRouter:
+    def test_create_server_with_ports(self, client: TestClient, owner_cookies: dict, csrf_token: str, db: Session):
+        from blueprints.schema import Blueprint
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_game_ports", "name": "Test Game Ports", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [
+                {"name": "game", "protocol": "udp"},
+                {"name": "query", "protocol": "udp"},
+                {"name": "rcon", "protocol": "tcp"},
+                {"name": "custom", "protocol": "udp"},
+            ],
+            "source": {"type": "manualUpload", "manual": {"requiredFiles": ["server.jar"], "instructions": "test"}},
+        })
+
+        with patch("routers.servers.os.makedirs"), \
+             patch("routers.servers.os.chmod"), \
+             patch("routers.servers.os.path.exists", return_value=False), \
+             patch("routers.servers.open_ports"), \
+             patch("routers.servers.allocate_ports", return_value=[
+                 ("game", 27015, "udp"),
+                 ("query", 27016, "udp"),
+                 ("rcon", 27017, "tcp"),
+                 ("custom_1", 29000, "udp"),
+             ]), \
+             patch("routers.servers.get_plugin") as mock_get_plugin:
+            
+            mock_plugin = mock_get_plugin.return_value
+            mock_plugin.get_blueprint.return_value = bp
+
+            response = client.post(
+                "/api/servers",
+                json={
+                    "name": "Custom Ports Server",
+                    "game_type": "test_game_ports",
+                    "ports": {"custom_1": 29000},
+                },
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+            assert response.status_code in (200, 201)
+            data = response.json()
+            assert "ports" in data
+            # Response must list all ports
+            ports = data["ports"]
+            assert len(ports) == 4
+            custom_port = next(p for p in ports if p["role"] == "custom_1")
+            assert custom_port["port"] == 29000
+            assert custom_port["protocol"] == "udp"
+
+    def test_update_server_ports(self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session):
+        from blueprints.schema import Blueprint
+        from models.server_port import ServerPort
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_game_ports", "name": "Test Game Ports", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [
+                {"name": "game", "protocol": "udp"},
+                {"name": "query", "protocol": "udp"},
+                {"name": "rcon", "protocol": "tcp"},
+                {"name": "custom", "protocol": "udp"},
+            ],
+            "source": {"type": "manualUpload", "manual": {"requiredFiles": ["server.jar"], "instructions": "test"}},
+        })
+
+        test_server.game_type = "test_game_ports"
+        test_server.ports = [
+            ServerPort(role="game", port=27015, protocol="udp"),
+            ServerPort(role="query", port=27016, protocol="udp"),
+            ServerPort(role="rcon", port=27017, protocol="tcp"),
+            ServerPort(role="custom_1", port=28015, protocol="udp"),
+        ]
+        db.commit()
+
+        with patch("routers.servers.open_ports"), \
+             patch("routers.servers.close_ports"), \
+             patch("routers.servers.iptables_accept_server"), \
+             patch("routers.servers.iptables_revoke_server"), \
+             patch("routers.servers.allocate_ports", return_value=[
+                 ("game", 27015, "udp"),
+                 ("query", 27016, "udp"),
+                 ("rcon", 27017, "tcp"),
+                 ("custom_1", 28999, "udp"),
+             ]), \
+             patch("routers.servers.get_plugin") as mock_get_plugin:
+            
+            mock_plugin = mock_get_plugin.return_value
+            mock_plugin.get_blueprint.return_value = bp
+
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={
+                    "ports": {
+                        "game": 27015,
+                        "query": 27016,
+                        "rcon": 27017,
+                        "custom_1": 28999,
+                    }
+                },
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert "ports" in data
+            ports = data["ports"]
+            custom_port = next(p for p in ports if p["role"] == "custom_1")
+            assert custom_port["port"] == 28999

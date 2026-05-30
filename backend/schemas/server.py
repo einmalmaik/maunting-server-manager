@@ -59,6 +59,15 @@ def _validate_restart_times(value: str | None) -> str | None:
 # als pragmatische Obergrenze.
 
 
+class ServerPortResponse(BaseModel):
+    role: str
+    port: int | None
+    protocol: str
+
+    class Config:
+        from_attributes = True
+
+
 class ServerCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     game_type: str = Field(..., pattern=r"^[a-z0-9_]+$")
@@ -74,6 +83,7 @@ class ServerCreate(BaseModel):
     game_port: int | None = Field(None, ge=1024, le=65535)
     query_port: int | None = Field(None, ge=1024, le=65535)
     rcon_port: int | None = Field(None, ge=1024, le=65535)
+    ports: dict[str, int | None] | None = None
 
     # Host-IP, an die die Container-Ports gebunden werden. Wenn leer, vergibt
     # der Router automatisch die erste Public-IP des Hosts (siehe
@@ -103,6 +113,7 @@ class ServerUpdate(BaseModel):
     game_port: int | None = Field(None, ge=1024, le=65535)
     query_port: int | None = Field(None, ge=1024, le=65535)
     rcon_port: int | None = Field(None, ge=1024, le=65535)
+    ports: dict[str, int | None] | None = None
     public_bind_ip: str | None = Field(None, max_length=64)
 
     @field_validator("public_bind_ip")
@@ -137,6 +148,7 @@ class ServerResponse(BaseModel):
     query_port: int | None
     rcon_port: int | None
     public_bind_ip: str | None
+    ports: list[ServerPortResponse] = Field(default_factory=list)
     created_at: datetime
 
     class Config:

@@ -174,11 +174,16 @@ class BlueprintPlugin(GamePlugin):
     # ─ Container ──────────────────────────────────────────────────────────
 
     def _server_ports(self, server) -> dict[str, int | None]:
-        return {
+        res = {
             "game": server.game_port,
             "query": server.query_port,
             "rcon": server.rcon_port,
         }
+        ports_list = getattr(server, "ports", None) or []
+        for p in ports_list:
+            if p.role not in ("game", "query", "rcon"):
+                res[p.role] = p.port
+        return res
 
     def _runtime_data_dir(self) -> str:
         return self._blueprint.runtime.workdir or CONTAINER_DATA_DIR
@@ -249,6 +254,13 @@ class BlueprintPlugin(GamePlugin):
             "VOICE_PORT": ports.get("voice"),
             "WEB_PORT": ports.get("web"),
         }
+        for k, v in ports.items():
+            if k not in ("game", "query", "rcon", "voice", "web"):
+                if k.startswith("custom_"):
+                    num = k.split("_", 1)[1]
+                    values[f"CUSTOM_PORT_{num}"] = v
+                else:
+                    values[f"{k.upper()}_PORT"] = v
 
         for patch in self._blueprint.runtime.configPatches:
             if patch.type != BlueprintConfigPatchType.INI:

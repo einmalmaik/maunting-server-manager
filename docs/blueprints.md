@@ -58,6 +58,7 @@ Erlaubte Platzhalter:
 - `{RCON_PORT}`
 - `{VOICE_PORT}`
 - `{WEB_PORT}`
+- `{CUSTOM_PORT_1}`, `{CUSTOM_PORT_2}`, ... `{CUSTOM_PORT_<N>}` (für zusätzliche custom Ports in Blueprints)
 - `{INSTALL_DIR}`
 - `{MOD_ARG}`
 - `{ENV.<KEY>}` für eigene Werte aus `runtime.env`, z. B. `{ENV.SERVER_NAME}`
@@ -69,6 +70,7 @@ Erlaubte Platzhalter:
 - `{RCON_PORT}`
 - `{VOICE_PORT}`
 - `{WEB_PORT}`
+- `{CUSTOM_PORT_<N>}`
 
 `{INSTALL_DIR}`, `{MOD_ARG}` und `{ENV.<KEY>}` sind in `runtime.env` bewusst
 nicht erlaubt.
@@ -126,6 +128,7 @@ Erlaubte Tokens in `value`:
 - `{RCON_PORT}`
 - `{VOICE_PORT}`
 - `{WEB_PORT}`
+- `{CUSTOM_PORT_<N>}`
 
 Nicht erlaubt in `value` sind `{INSTALL_DIR}`, `{MOD_ARG}` und `{ENV.<KEY>}`.
 Diese Tokens gelten nur für `runtime.startup` beziehungsweise gar nicht für
@@ -144,3 +147,41 @@ Beispiel:
 ```
 
 Wenn ein Port-Token leer ist, wird dieser Patch übersprungen.
+
+## Wine-Kompatibilität für Windows-Server
+
+Viele Windows-basierte Game-Server (wie z.B. *SCUM*, *Space Engineers*, etc.) benötigen eine Wine-Kompatibilitätsschicht unter Linux und oft zusätzliche Ports (z.B. für Voice, Query2, RCON2).
+
+### 1. Custom Ports in Blueprints deklarieren
+
+In der Blueprint-Definition unter `ports` können beliebig viele Custom Ports hinzugefügt werden:
+
+```json
+  "ports": [
+    { "name": "game", "protocol": "udp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon", "protocol": "tcp" },
+    { "name": "custom", "protocol": "udp" },
+    { "name": "custom", "protocol": "tcp" }
+  ]
+```
+
+Im Startup-Befehl und in Config-Patches werden diese dynamischen Ports über die Platzhalter `{CUSTOM_PORT_1}`, `{CUSTOM_PORT_2}` usw. (aufsteigend indiziert basierend auf ihrer Reihenfolge der Definition) referenziert.
+
+### 2. Wine-Umgebungsvariablen konfigurieren
+
+Die Kompatibilitätsschicht wird klassisch über Umgebungsvariablen (`runtime.env`) konfiguriert. Ein typisches Blueprint-Beispiel für ein Wine-Spiel:
+
+```json
+  "runtime": {
+    "image": "ghcr.io/einmalmaik/msm-wine:latest",
+    "env": {
+      "WINEDEBUG": "-all",
+      "WINEPREFIX": "/server/.wine",
+      "DISPLAY": ":0"
+    },
+    "startup": "wine64 /server/ScumSystem/Binaries/Win64/SCUM.exe -port={GAME_PORT} -queryport={QUERY_PORT}"
+  }
+```
+
+Es wird kein spezifisches Wine-Token benötigt; alle Parameter können direkt über die standardmäßigen Umgebungsvariablen konfiguriert werden.

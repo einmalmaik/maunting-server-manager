@@ -55,13 +55,12 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
                     "eine Public-IP zuweisen, bevor er gestartet wird."
                 ),
             )
-        close_ports(server.game_port, server.query_port, server.rcon_port)
+        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+        close_ports(ports_list)
         iptables_revoke_server(
             server.name,
             server.public_bind_ip or "",
-            server.game_port,
-            server.query_port,
-            server.rcon_port,
+            ports_list,
         )
 
         stop_result = await asyncio.to_thread(plugin.stop, server)
@@ -122,13 +121,12 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
         if "error" in start_result:
             raise HTTPException(status_code=500, detail=start_result["error"])
 
-        open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+        open_ports(server.name, ports_list)
         iptables_accept_server(
             server.name,
             server.public_bind_ip or "",
-            server.game_port,
-            server.query_port,
-            server.rcon_port,
+            ports_list,
         )
 
         server.status = "running"

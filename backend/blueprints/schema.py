@@ -186,6 +186,16 @@ _ALLOWED_WORKSHOP_PATH_TOKENS: frozenset[str] = frozenset({
 })
 
 
+def _is_allowed_port_token(token: str, allowed_base: frozenset[str]) -> bool:
+    if token in allowed_base:
+        return True
+    if token.startswith("CUSTOM_PORT_"):
+        suffix = token[12:]
+        return suffix.isdigit()
+    return False
+
+
+
 def _is_safe_relative_path(value: str) -> bool:
     """Prueft, ob ``value`` ein sicherer relativer Pfad ist.
 
@@ -339,10 +349,10 @@ class BlueprintRuntime(BaseModel):
                     raise ValueError(
                         f"runtime.env['{key}']: Token '{{{token}}}' hat unzulaessige Syntax."
                     )
-                if token not in _ALLOWED_ENV_VALUE_TOKENS:
+                if not _is_allowed_port_token(token, _ALLOWED_ENV_VALUE_TOKENS):
                     raise ValueError(
                         f"runtime.env['{key}']: Token '{{{token}}}' nicht erlaubt "
-                        f"(erlaubt in Env-Werten: {sorted(_ALLOWED_ENV_VALUE_TOKENS)})."
+                        f"(erlaubt in Env-Werten: {sorted(_ALLOWED_ENV_VALUE_TOKENS)} + CUSTOM_PORT_<N>)."
                     )
         return v
 
@@ -374,10 +384,10 @@ class BlueprintRuntime(BaseModel):
                         f"runtime.startup: ENV-Token '{{{token}}}' ungueltig."
                     )
                 continue
-            if token not in _ALLOWED_STARTUP_TOKENS:
+            if not _is_allowed_port_token(token, _ALLOWED_STARTUP_TOKENS):
                 raise ValueError(
                     f"runtime.startup: Token '{{{token}}}' nicht in der Whitelist "
-                    f"({sorted(_ALLOWED_STARTUP_TOKENS)} + ENV.<KEY>)."
+                    f"({sorted(_ALLOWED_STARTUP_TOKENS)} + ENV.<KEY> + CUSTOM_PORT_<N>)."
                 )
         return v
 
@@ -681,7 +691,7 @@ class BlueprintConfigPatch(BaseModel):
             raise ValueError("runtime.configPatches.value enthaelt verbotene Zeichen.")
         for match in _TOKEN_FIND_RE.finditer(v):
             token = match.group(1)
-            if token not in _ALLOWED_CONFIG_VALUE_TOKENS:
+            if not _is_allowed_port_token(token, _ALLOWED_CONFIG_VALUE_TOKENS):
                 raise ValueError(
                     f"runtime.configPatches.value: Token '{{{token}}}' nicht erlaubt."
                 )

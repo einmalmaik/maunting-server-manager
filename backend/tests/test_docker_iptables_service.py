@@ -171,3 +171,65 @@ class TestRevokeServer:
             assert dis.accept_server("srv", "1.2.3.4", 27015, None, None) is True
         inserts = [c.args for c in run.call_args_list if c.args and c.args[0] == "-I"]
         assert len(inserts) == 1
+
+
+class TestDynamicIptablesPortsList:
+    def test_accept_server_ports_list(self):
+        ports = [
+            (27015, "udp", "game"),
+            (27016, "udp", "query"),
+            (27017, "tcp", "rcon"),
+            (28000, "udp", "custom_1"),
+        ]
+        responses = iter([
+            _ok(),                   # iptables -version
+            _ok(),                   # iptables -L DOCKER-USER
+            _ok(returncode=1),       # exists game
+            _ok(),                   # -I game
+            _ok(returncode=1),       # exists query
+            _ok(),                   # -I query
+            _ok(returncode=1),       # exists rcon
+            _ok(),                   # -I rcon
+            _ok(returncode=1),       # exists custom_1
+            _ok(),                   # -I custom_1
+        ])
+        with patch(
+            "services.docker_iptables_service._run_iptables",
+            side_effect=lambda *a, **kw: next(responses),
+        ) as run:
+            assert dis.accept_server("srv", "1.2.3.4", ports) is True
+
+        inserts = [c.args for c in run.call_args_list if c.args and c.args[0] == "-I"]
+        assert len(inserts) == 4
+        dports = {args[args.index("--dport") + 1] for args in inserts}
+        assert dports == {"27015", "27016", "27017", "28000"}
+
+    def test_revoke_server_ports_list(self):
+        ports = [
+            (27015, "udp", "game"),
+            (27016, "udp", "query"),
+            (27017, "tcp", "rcon"),
+            (28000, "udp", "custom_1"),
+        ]
+        responses = iter([
+            _ok(), _ok(),
+            _ok(returncode=0),  # exists game
+            _ok(),              # -D game
+            _ok(returncode=0),  # exists query
+            _ok(),              # -D query
+            _ok(returncode=0),  # exists rcon
+            _ok(),              # -D rcon
+            _ok(returncode=0),  # exists custom_1
+            _ok(),              # -D custom_1
+        ])
+        with patch(
+            "services.docker_iptables_service._run_iptables",
+            side_effect=lambda *a, **kw: next(responses),
+        ) as run:
+            assert dis.revoke_server("srv", "1.2.3.4", ports) is True
+
+        deletes = [c.args for c in run.call_args_list if c.args and c.args[0] == "-D"]
+        assert len(deletes) == 4
+        dports = {args[args.index("--dport") + 1] for args in deletes}
+        assert dports == {"27015", "27016", "27017", "28000"}
+

@@ -41,15 +41,11 @@ class PortConflictError(ValueError):
 
 def _db_used_ports(db: Session, exclude_server_id: int | None = None) -> set[int]:
     """Liefert alle Ports, die andere MSM-Server bereits in der DB halten."""
-    used: set[int] = set()
-    query = db.query(Server)
+    from models.server_port import ServerPort
+    query = db.query(ServerPort.port)
     if exclude_server_id is not None:
-        query = query.filter(Server.id != exclude_server_id)
-    for srv in query.all():
-        for field in (srv.game_port, srv.query_port, srv.rcon_port):
-            if field:
-                used.add(field)
-    return used
+        query = query.filter(ServerPort.server_id != exclude_server_id)
+    return {r[0] for r in query.all()}
 
 
 def _assert_host_free(port: int, protocol: str, bind_ip: str) -> None:
@@ -67,62 +63,111 @@ def allocate_ports(
     requested_rcon_port: int | None = None,
     exclude_server_id: int | None = None,
     bind_ip: str = "0.0.0.0",
-) -> tuple[int, int, int]:
-    """Vergibt drei Ports (game, query, rcon) fuer einen Server.
+    *,
+    port_requirements: list[tuple[str, str]] | None = None,
+    requested_ports: dict[str, int | None] | None = None,
+) -> list[tuple[str, int, str]] | tuple[int, int, int]:
+    """Vergibt Ports fuer einen Server (dynamisch oder legacy).
 
-    Args:
-        db: SQLAlchemy-Session.
-        requested_game_port: Wenn gesetzt → strikt validieren; sonst Auto.
-        requested_query_port: optionaler Override (gegen exclude_server_id).
-        requested_rcon_port: optionaler Override.
-        exclude_server_id: Diesen Server bei Konflikt-Pruefung ignorieren
-            (notwendig fuer Updates).
-        bind_ip: Host-IP fuer die Real-World-Bind-Probe. ``0.0.0.0`` deckt
-            alle Interfaces ab — auch der Docker-Default-Publish-Bind.
-
-    Returns:
-        ``(game_port, query_port, rcon_port)``.
-
-    Raises:
-        PortConflictError: Port bereits in DB belegt oder vom Host gehalten.
-        ValueError: Port ausserhalb des erlaubten Bereichs.
-        RuntimeError: Kein freier Block in der Range verfuegbar.
+    Wenn ``port_requirements`` uebergeben wird → gibt Liste von ``(role, port, protocol)`` zurueck.
+    Sonst (Legacy-Verhalten) → gibt 3-Tuple ``(game_port, query_port, rcon_port)`` zurueck.
     """
+    is_legacy = port_requirements is None
+    if is_legacy:
+        port_requirements = [
+            ("game", "udp"),
+            ("query", "udp"),
+            ("rcon", "tcp"),
+        ]
+        requested_ports = {}
+        if requested_game_port:
+            requested_ports["game"] = requested_game_port
+            requested_ports["query"] = requested_query_port or (requested_game_port + 1)
+            requested_ports["rcon"] = requested_rcon_port or (requested_game_port + 2)
+        else:
+            if requested_query_port:
+                requested_ports["query"] = requested_query_port
+            if requested_rcon_port:
+                requested_ports["rcon"] = requested_rcon_port
+
     db_used = _db_used_ports(db, exclude_server_id=exclude_server_id)
 
-    # ── Explizite Port-Angabe ─────────────────────────────────────────────
-    if requested_game_port:
-        game = requested_game_port
-        query = requested_query_port or (game + 1)
-        rcon = requested_rcon_port or (game + 2)
+    # 1) Explizite Vorgaben validieren und setzen
+    allocated_ports: dict[str, int] = {}
+    if requested_ports:
+        for role, req_port in requested_ports.items():
+            if req_port is not None:
+                proto = next((p[1] for p in port_requirements if p[0] == role), "udp")
+                if not (1024 <= req_port <= 65535):
+                    raise ValueError(
+                        f"Port {req_port} ({role}) ausserhalb des gueltigen Bereichs (1024-65535)."
+                    )
+                if req_port in db_used:
+                    raise PortConflictError(
+                        f"Port {req_port} ({role}) ist bereits an einen anderen MSM-Server vergeben."
+                    )
+                _assert_host_free(req_port, proto, bind_ip)
+                allocated_ports[role] = req_port
 
-        for port, field in ((game, "game_port"), (query, "query_port"), (rcon, "rcon_port")):
-            if not (1024 <= port <= 65535):
-                raise ValueError(
-                    f"Port {port} ({field}) ausserhalb des gueltigen Bereichs (1024-65535)."
+    # 2) Uebrige Ports automatisch vergeben
+    remaining_reqs = [r for r in port_requirements if r[0] not in allocated_ports]
+    if not remaining_reqs:
+        res = [
+            (role, allocated_ports[role], next(p[1] for p in port_requirements if p[0] == role))
+            for role, _ in port_requirements
+        ]
+        if is_legacy:
+            return (allocated_ports["game"], allocated_ports["query"], allocated_ports["rcon"])
+        return res
+
+    # Blockweise Vergabe: wir suchen eine freie Range
+    N = len(port_requirements)
+    block_len = max(BLOCK_SIZE, N)
+    found_block = False
+    temp_allocated = dict(allocated_ports)
+
+    for base in range(PORT_RANGE_START, PORT_RANGE_END - block_len + 1, block_len):
+        conflict = False
+        temp_allocated = dict(allocated_ports)
+        idx = 0
+        for role, proto in remaining_reqs:
+            while base + idx in temp_allocated.values():
+                idx += 1
+            cand_port = base + idx
+            if cand_port in db_used:
+                conflict = True
+                break
+            if not is_port_available(cand_port, proto, bind_ip):
+                conflict = True
+                break
+            temp_allocated[role] = cand_port
+            idx += 1
+
+        if not conflict:
+            found_block = True
+            break
+
+    # Fallback bei starker Fragmentierung: suche einzelne freie Ports
+    if not found_block:
+        temp_allocated = dict(allocated_ports)
+        for role, proto in remaining_reqs:
+            found_port = False
+            for p in range(PORT_RANGE_START, PORT_RANGE_END + 1):
+                if p in db_used or p in temp_allocated.values():
+                    continue
+                if is_port_available(p, proto, bind_ip):
+                    temp_allocated[role] = p
+                    found_port = True
+                    break
+            if not found_port:
+                raise RuntimeError(
+                    f"Keine freien Ports in der Range {PORT_RANGE_START}-{PORT_RANGE_END} verfuegbar."
                 )
-            if port in db_used:
-                raise PortConflictError(
-                    f"Port {port} ({field}) ist bereits an einen anderen MSM-Server vergeben."
-                )
-            _assert_host_free(port, PORT_PROTOCOL[field], bind_ip)
 
-        return game, query, rcon
-
-    # ── Automatische Vergabe ──────────────────────────────────────────────
-    for base in range(PORT_RANGE_START, PORT_RANGE_END - BLOCK_SIZE + 1, BLOCK_SIZE):
-        block = (base, base + 1, base + 2)  # game, query, rcon
-        if any(p in db_used for p in block):
-            continue
-        # Real-World-Check: alle drei Ports muessen frei sein (UDP fuer
-        # game+query, TCP fuer rcon).
-        try:
-            for port, field in zip(block, ("game_port", "query_port", "rcon_port")):
-                _assert_host_free(port, PORT_PROTOCOL[field], bind_ip)
-        except PortConflictError:
-            continue
-        return block
-
-    raise RuntimeError(
-        f"Keine freien Ports in der Range {PORT_RANGE_START}-{PORT_RANGE_END} verfuegbar."
-    )
+    res = [
+        (role, temp_allocated[role], next(p[1] for p in port_requirements if p[0] == role))
+        for role, _ in port_requirements
+    ]
+    if is_legacy:
+        return (temp_allocated["game"], temp_allocated["query"], temp_allocated["rcon"])
+    return res

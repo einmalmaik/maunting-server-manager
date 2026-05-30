@@ -31,6 +31,7 @@ export interface Server {
   query_port: number | null
   rcon_port: number | null
   public_bind_ip: string | null
+  ports?: Array<{ role: string; port: number | null; protocol: string }>
   created_at: string
 }
 

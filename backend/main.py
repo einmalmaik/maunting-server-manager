@@ -64,9 +64,59 @@ async def lifespan(app: FastAPI):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_notifications BOOLEAN DEFAULT true"))
 
+    # Migration: server_ports Tabelle anlegen & Daten migrieren
+    if 'server_ports' not in inspector.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE server_ports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server_id INTEGER NOT NULL,
+                    role VARCHAR(64) NOT NULL,
+                    port INTEGER NOT NULL,
+                    protocol VARCHAR(16) NOT NULL,
+                    FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE
+                )
+            """))
+            conn.execute(text("CREATE INDEX ix_server_ports_id ON server_ports (id)"))
+
     # Migration: Backup-Scheduling-Spalten + Phase-1 Docker-Spalten
     if 'servers' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('servers')]
+        # Falls game_port noch in servers existiert, migrieren wir die Daten zuerst in server_ports
+        if 'game_port' in cols:
+            with engine.begin() as conn:
+                servers_data = conn.execute(text("SELECT id, game_port, query_port, rcon_port FROM servers")).fetchall()
+                for row in servers_data:
+                    srv_id = row[0]
+                    g_port = row[1]
+                    q_port = row[2]
+                    r_port = row[3]
+                    
+                    if g_port:
+                        conn.execute(
+                            text("INSERT INTO server_ports (server_id, role, port, protocol) VALUES (:sid, 'game', :port, 'udp')"),
+                            {"sid": srv_id, "port": g_port}
+                        )
+                    if q_port:
+                        conn.execute(
+                            text("INSERT INTO server_ports (server_id, role, port, protocol) VALUES (:sid, 'query', :port, 'udp')"),
+                            {"sid": srv_id, "port": q_port}
+                        )
+                    if r_port:
+                        conn.execute(
+                            text("INSERT INTO server_ports (server_id, role, port, protocol) VALUES (:sid, 'rcon', :port, 'tcp')"),
+                            {"sid": srv_id, "port": r_port}
+                        )
+                try:
+                    conn.execute(text("ALTER TABLE servers DROP COLUMN game_port"))
+                    conn.execute(text("ALTER TABLE servers DROP COLUMN query_port"))
+                    conn.execute(text("ALTER TABLE servers DROP COLUMN rcon_port"))
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning("Konnte alte Port-Spalten nicht droppen: %s", exc)
+                # Nach dem Droppen muessen wir cols neu laden, damit die folgenden checks nicht fehlschlagen
+                cols = [c['name'] for c in inspector.get_columns('servers')]
+
         with engine.begin() as conn:
             if 'backup_on_start' not in cols:
                 conn.execute(text("ALTER TABLE servers ADD COLUMN backup_on_start BOOLEAN DEFAULT false"))
