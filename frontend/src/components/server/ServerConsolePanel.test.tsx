@@ -67,6 +67,11 @@ describe('ServerConsolePanel', () => {
     FakeEventSource.instances = []
     originalEventSource = (globalThis as { EventSource?: typeof EventSource }).EventSource
     ;(globalThis as { EventSource?: unknown }).EventSource = FakeEventSource as unknown as typeof EventSource
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    })
     fetchSpy = vi.spyOn(global, 'fetch')
   })
 
@@ -177,6 +182,24 @@ describe('ServerConsolePanel', () => {
     await waitFor(() => {
       expect(screen.getByText('fresh line')).toBeInTheDocument()
     })
+  })
+
+  it('copies visible console lines', async () => {
+    setMe(ownerMe)
+    render(<ServerConsolePanel serverId={42} />)
+    const es = FakeEventSource.instances[0]
+    es.onmessage?.({ data: 'first line' } as MessageEvent)
+    es.onmessage?.({ data: '[MSM] Container msm-srv-42 gestartet' } as MessageEvent)
+
+    await waitFor(() => {
+      expect(screen.getByText('first line')).toBeInTheDocument()
+      expect(screen.getByText('[MSM] Container msm-srv-42 started')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /^copy$/i }))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      'first line\n[MSM] Container msm-srv-42 started',
+    )
   })
 
   it('translates known MSM panel console lines when language is english', () => {

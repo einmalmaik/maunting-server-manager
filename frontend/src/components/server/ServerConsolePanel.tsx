@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Eraser, Send, Terminal } from 'lucide-react'
+import { Check, Copy, Eraser, Send, Terminal } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { toast } from '@/stores/toastStore'
@@ -115,6 +115,7 @@ export function ServerConsolePanel({ serverId }: Props) {
   const [hiddenThrough, setHiddenThrough] = useState(() => readClearMarker(serverId))
   const [inputValue, setInputValue] = useState('')
   const [sending, setSending] = useState(false)
+  const [copiedLogs, setCopiedLogs] = useState(false)
   const nextSeqRef = useRef(0)
   const bufferRef = useRef<string[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -197,6 +198,20 @@ export function ServerConsolePanel({ serverId }: Props) {
     writeClearMarker(serverId, seq)
   }
 
+  const copyVisibleLogs = async () => {
+    const text = visibleLogs
+      .map((line) => displayConsoleLine(line.text, i18n.language))
+      .join('\n')
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedLogs(true)
+      window.setTimeout(() => setCopiedLogs(false), 1500)
+    } catch {
+      toast.error(t('servers.consoleCopyFailed'))
+    }
+  }
+
   return (
     <div className="msm-card">
       <div className="p-5 border-b border-outline flex items-center justify-between gap-3 flex-wrap">
@@ -204,14 +219,27 @@ export function ServerConsolePanel({ serverId }: Props) {
           <Terminal className="w-4 h-4 text-on-surface-variant" />
           <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
         </div>
-        <button
-          onClick={clearConsole}
-          className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
-          title={t('servers.consoleClearTitle')}
-        >
-          <Eraser className="w-3.5 h-3.5" />
-          {t('servers.consoleClear')}
-        </button>
+        <div className="inline-flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void copyVisibleLogs()}
+            disabled={visibleLogs.length === 0}
+            className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+            title={t('servers.consoleCopyTitle')}
+          >
+            {copiedLogs ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            {copiedLogs ? t('common.copied') : t('servers.consoleCopy')}
+          </button>
+          <button
+            type="button"
+            onClick={clearConsole}
+            className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
+            title={t('servers.consoleClearTitle')}
+          >
+            <Eraser className="w-3.5 h-3.5" />
+            {t('servers.consoleClear')}
+          </button>
+        </div>
       </div>
       <div className="p-5">
         <div

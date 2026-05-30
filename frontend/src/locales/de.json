@@ -124,7 +124,17 @@
       "err2Title": "Verbotene Shell-Zeichen in 'startup'",
       "err2Body": "Der Befehl in runtime.startup darf keine Shell-Substitutionen oder Kontrolloperatoren enthalten ($, Backticks, $(), ${}, &&, ||). Das Panel tokenisiert den Befehl strikt als Liste, um Command-Injections zu verhindern.",
       "err3Title": "Unsichere Pfade",
-      "err3Body": "Alle Pfade in configPatches, modListen und extractTo müssen relativ zum Server-Verzeichnis sein. Absolute Pfade (/etc) oder Ausbrüche (../) werden abgelehnt."
+      "err3Body": "Alle Pfade in configPatches, modListen und extractTo müssen relativ zum Server-Verzeichnis sein. Absolute Pfade (/etc) oder Ausbrüche (../) werden abgelehnt.",
+      "err4Title": "Docker-Image nicht verfügbar / Image oder Tag nicht gefunden",
+      "err4Body": "Prüfe runtime.image exakt inklusive Tag. ghcr.io/ptero-eggs/yolks:wine ist z. B. ein anderer Tag als ghcr.io/ptero-eggs/yolks:wine_staging. Teste als msm-User: docker pull <image> mit DOCKER_HOST auf den Rootless-Docker-Socket.",
+      "err5Title": "failed to extract layer ... to overlayfs",
+      "err5Body": "Docker hat das Image gefunden, scheitert aber beim Entpacken. Meist ist die Partition voll. Prüfe DockerRootDir mit docker info, danach df -h und df -ih auf diesem Pfad. Für große Wine-/Game-Images sollten mindestens 10-20 GB frei sein.",
+      "err6Title": "Rootless Docker Daemon not running for user msm",
+      "err6Body": "Der Rootless-Docker-Daemon des Panel-Users läuft nicht oder der Socket ist nicht erreichbar. Prüfe als msm-User systemctl --user status docker und ob DOCKER_HOST auf unix:///run/user/<msm_uid>/docker.sock zeigt.",
+      "err7Title": "public_bind_ip fehlt oder ist 0.0.0.0",
+      "err7Body": "MSM blockiert den Start, wenn Docker auf alle Interfaces binden würde. Setze im Server-Detail eine konkrete Host-IP. Das schützt die Firewall-Regeln vor unbeabsichtigter Umgehung.",
+      "err8Title": "Steam-Account nicht konfiguriert",
+      "err8Body": "Einige Steam-Server oder Workshop-Downloads benötigen einen globalen Steam-Login. Hinterlege den Account unter Einstellungen. Passwörter werden nicht in Logs oder Toasts ausgegeben."
     }
   },
   "servers": {
@@ -149,6 +159,9 @@
     "console": "Konsole",
     "consoleClear": "Leeren",
     "consoleClearTitle": "Aktuelle Konsole lokal ausblenden (Server-Logs bleiben erhalten)",
+    "consoleCopy": "Kopieren",
+    "consoleCopyTitle": "Sichtbare Konsolenzeilen kopieren",
+    "consoleCopyFailed": "Konsolenlog konnte nicht kopiert werden.",
     "consolePlaceholder": "Befehl eingeben…",
     "consoleSend": "Senden",
     "consoleInputFailed": "Eingabe konnte nicht zugestellt werden.",
@@ -632,6 +645,8 @@
     "error": "Fehler",
     "success": "Erfolg",
     "close": "Schließen",
+    "copy": "Kopieren",
+    "copied": "Kopiert",
     "confirm": "Bestätigen",
     "back": "Zurück",
     "refresh": "Aktualisieren",

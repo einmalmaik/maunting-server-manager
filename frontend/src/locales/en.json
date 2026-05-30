@@ -124,7 +124,17 @@
       "err2Title": "Forbidden Shell Characters in 'startup'",
       "err2Body": "The command in runtime.startup cannot contain shell substitutions or control operators ($, backticks, $(), ${}, &&, ||). The panel tokenizes the command strictly as an array to prevent command injections.",
       "err3Title": "Unsafe Paths",
-      "err3Body": "All paths in configPatches, mod lists, and extractTo must be relative to the server directory. Absolute paths (/etc) or escapes (../) are rejected."
+      "err3Body": "All paths in configPatches, mod lists, and extractTo must be relative to the server directory. Absolute paths (/etc) or escapes (../) are rejected.",
+      "err4Title": "Docker image unavailable / image or tag not found",
+      "err4Body": "Check runtime.image exactly, including the tag. ghcr.io/ptero-eggs/yolks:wine is a different tag than ghcr.io/ptero-eggs/yolks:wine_staging. Test as the msm user with docker pull <image> and DOCKER_HOST pointing to the rootless Docker socket.",
+      "err5Title": "failed to extract layer ... to overlayfs",
+      "err5Body": "Docker found the image but failed while extracting it. The usual cause is a full partition. Check DockerRootDir with docker info, then run df -h and df -ih for that path. Large Wine/game images should have at least 10-20 GB free.",
+      "err6Title": "Rootless Docker Daemon not running for user msm",
+      "err6Body": "The panel user's rootless Docker daemon is not running or its socket is not reachable. Check systemctl --user status docker as the msm user and verify that DOCKER_HOST points to unix:///run/user/<msm_uid>/docker.sock.",
+      "err7Title": "public_bind_ip missing or set to 0.0.0.0",
+      "err7Body": "MSM blocks the start when Docker would bind to all interfaces. Set a concrete host IP in the server detail view. This protects firewall rules from being bypassed accidentally.",
+      "err8Title": "Steam account not configured",
+      "err8Body": "Some Steam servers or Workshop downloads require a global Steam login. Configure the account in Settings. Passwords are not shown in logs or toasts."
     }
   },
   "servers": {
@@ -149,6 +159,9 @@
     "console": "Console",
     "consoleClear": "Clear",
     "consoleClearTitle": "Hide the current console output locally (server logs are preserved)",
+    "consoleCopy": "Copy",
+    "consoleCopyTitle": "Copy visible console lines",
+    "consoleCopyFailed": "Could not copy console log.",
     "consolePlaceholder": "Type command…",
     "consoleSend": "Send",
     "consoleInputFailed": "Input could not be delivered.",
@@ -632,6 +645,8 @@
     "error": "Error",
     "success": "Success",
     "close": "Close",
+    "copy": "Copy",
+    "copied": "Copied",
     "confirm": "Confirm",
     "back": "Back",
     "refresh": "Refresh",

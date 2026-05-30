@@ -284,6 +284,21 @@ export function Docs() {
               <Alert type="warning" title={t('docs.troubleshooting.err3Title')}>
                 {t('docs.troubleshooting.err3Body')}
               </Alert>
+              <Alert type="warning" title={t('docs.troubleshooting.err4Title')}>
+                {t('docs.troubleshooting.err4Body')}
+              </Alert>
+              <Alert type="warning" title={t('docs.troubleshooting.err5Title')}>
+                {t('docs.troubleshooting.err5Body')}
+              </Alert>
+              <Alert type="warning" title={t('docs.troubleshooting.err6Title')}>
+                {t('docs.troubleshooting.err6Body')}
+              </Alert>
+              <Alert type="warning" title={t('docs.troubleshooting.err7Title')}>
+                {t('docs.troubleshooting.err7Body')}
+              </Alert>
+              <Alert type="warning" title={t('docs.troubleshooting.err8Title')}>
+                {t('docs.troubleshooting.err8Body')}
+              </Alert>
             </div>
           </section>
 

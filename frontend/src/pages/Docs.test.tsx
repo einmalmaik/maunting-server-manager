@@ -80,4 +80,11 @@ describe('Docs page', () => {
     expect(await screen.findByText('Blueprint-Dokumentation')).toBeInTheDocument()
     await i18n.changeLanguage('en')
   })
+
+  it('documents common Docker start failures', () => {
+    renderDocs()
+    expect(screen.getByText('failed to extract layer ... to overlayfs')).toBeInTheDocument()
+    expect(screen.getByText('Docker image unavailable / image or tag not found')).toBeInTheDocument()
+    expect(screen.getByText('Rootless Docker Daemon not running for user msm')).toBeInTheDocument()
+  })
 })
