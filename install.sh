@@ -281,6 +281,9 @@ setup_rootless_docker() {
             su - "$MSM_USER" -c "export XDG_RUNTIME_DIR=/run/user/${MSM_UID}; dockerd-rootless-setuptool.sh install" 2>&1 | tee -a "$LOG_FILE" || \
                 err "Rootless-Docker-Setup fehlgeschlagen"
         fi
+        log "Konfiguriere slirp4netns für Source-IP Erhalt bei UDP..."
+        su - "$MSM_USER" -c "mkdir -p ~/.config/systemd/user/docker.service.d && echo -e '[Service]\nEnvironment=\"DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=slirp4netns\"' > ~/.config/systemd/user/docker.service.d/override.conf" 2>&1 | tee -a "$LOG_FILE" || true
+        su - "$MSM_USER" -c "export XDG_RUNTIME_DIR=/run/user/${MSM_UID}; systemctl --user daemon-reload" 2>&1 | tee -a "$LOG_FILE" || true
         su - "$MSM_USER" -c "export XDG_RUNTIME_DIR=/run/user/${MSM_UID}; systemctl --user enable docker.service && systemctl --user start docker.service" 2>&1 | tee -a "$LOG_FILE" || \
             err "Rootless-Docker-User-Service konnte nicht gestartet werden"
         log "Lade SteamCMD-Container-Image über Rootless Docker vor (cm2network/steamcmd:root)..."
