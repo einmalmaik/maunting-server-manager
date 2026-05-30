@@ -155,6 +155,7 @@ _ALLOWED_STARTUP_TOKENS: frozenset[str] = frozenset({
     "WEB_PORT",
     "INSTALL_DIR",
     "MOD_ARG",
+    "BIND_IP",
 })
 
 # Tokens, die in ``runtime.env``-Werten substituiert werden duerfen.
@@ -169,6 +170,7 @@ _ALLOWED_ENV_VALUE_TOKENS: frozenset[str] = frozenset({
     "RCON_PORT",
     "VOICE_PORT",
     "WEB_PORT",
+    "BIND_IP",
 })
 
 _ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")

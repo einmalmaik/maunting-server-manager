@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "scum_server",
+    "name": "SCUM",
+    "category": "steam_game",
+    "author": "Community",
+    "description": "Open World Survival - SCUM Dedicated Server via SteamCMD (AppID 3792580). Runs on Windows via Proton."
+  },
+  "runtime": {
+    "image": "ghcr.io/ptero-eggs/yolks:wine_staging",
+    "workdir": "/home/container",
+    "env": {
+      "SERVER_NAME": "My SCUM Server by MSM",
+      "MAX_PLAYERS": "64",
+      "SERVER_PASSWORD": ""
+    },
+    "startup": "./SCUM/Binaries/Win64/SCUMServer.exe -log -port={GAME_PORT} -queryPort={QUERY_PORT} -MaxPlayers={ENV.MAX_PLAYERS} -ServerName={ENV.SERVER_NAME} -MULTIHOME={BIND_IP}",
+    "configPatches": []
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" },
+    { "name": "custom", "protocol": "udp" },
+    { "name": "query", "protocol": "udp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "3792580",
+      "platform": "windows",
+      "compatibility": "proton",
+      "requiresLogin": false
+    }
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  }
+}

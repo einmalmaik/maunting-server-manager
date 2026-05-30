@@ -62,6 +62,7 @@ def render_env_values(
     env: Mapping[str, str],
     *,
     ports: Mapping[str, int | None],
+    bind_ip: str | None = None,
 ) -> dict[str, str]:
     """Substituiert Port-Tokens in den Werten von ``runtime.env``.
 
@@ -89,6 +90,8 @@ def render_env_values(
 
     def _sub(match: re.Match[str]) -> str:
         token = match.group(1)
+        if token == "BIND_IP":
+            return bind_ip or ""
         if not _is_allowed_port_token(token, _ALLOWED_ENV_VALUE_TOKENS):
             raise BlueprintValidationError(
                 f"Env-Wert-Token '{{{token}}}' ist nicht in der Whitelist."
@@ -106,6 +109,7 @@ def render_argv(
     *,
     install_dir: str,
     ports: Mapping[str, int | None],
+    bind_ip: str | None = None,
     active_mod_ids: list[str] | None = None,
     extra_env: Mapping[str, str] | None = None,
 ) -> list[str]:
@@ -168,6 +172,8 @@ def render_argv(
                 value = install_dir
             elif token == "MOD_ARG":
                 value = mod_arg
+            elif token == "BIND_IP":
+                value = bind_ip or ""
             elif token in ports_map:
                 value = ports_map[token]
             elif token.startswith("ENV."):

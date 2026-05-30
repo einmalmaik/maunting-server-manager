@@ -212,6 +212,7 @@ class BlueprintPlugin(GamePlugin):
             self._blueprint,
             install_dir=self._runtime_data_dir(),
             ports=self._server_ports(server),
+            bind_ip=server.public_bind_ip or None,
             active_mod_ids=active_mod_ids(server),
             extra_env=self._blueprint.runtime.env,
         )
@@ -242,6 +243,7 @@ class BlueprintPlugin(GamePlugin):
         return render_env_values(
             self._blueprint.runtime.env,
             ports=self._server_ports(server),
+            bind_ip=server.public_bind_ip or None,
         )
 
     def prepare_runtime(self, server) -> None:

@@ -11,7 +11,7 @@
     "image": "cm2network/steamcmd:root",
     "workdir": "/data",
     "env": {},
-    "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT}",
+    "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT} -MultiHome={BIND_IP}",
     "configPatches": [
       {
         "type": "ini",
