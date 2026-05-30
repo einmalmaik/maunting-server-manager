@@ -454,6 +454,10 @@ fi
 # ── Rootless Docker reparieren: UDP Source-IP Fix (slirp4netns) ──
 # Rootless Docker's default 'builtin' port driver drops Source-IPs for UDP connections.
 # This prevents games like DayZ or Ark from functioning properly. We force slirp4netns.
+if ! command -v slirp4netns &>/dev/null; then
+    log "Installiere slirp4netns für UDP Source-IP Erhalt..."
+    apt-get install -y -qq slirp4netns 2>/dev/null || true
+fi
 if id "msm" &>/dev/null; then
     MSM_UID=$(id -u "msm")
     MSM_OVERRIDE_CONF="/opt/msm/.config/systemd/user/docker.service.d/override.conf"

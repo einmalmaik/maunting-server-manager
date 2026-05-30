@@ -354,6 +354,7 @@ apt-get install -y -qq \
     libc6-i386 lib32stdc++6 lib32gcc-s1 \
     software-properties-common \
     debian-archive-keyring apt-transport-https \
+    slirp4netns \
     2>&1 | tee -a "$LOG_FILE"
 
 # ── Node.js 20 (nicht das veraltete aus apt) ──
