@@ -767,3 +767,16 @@ def is_rootless() -> bool:
     if not hasattr(os, "getuid"):
         return False
     return os.getuid() != 0
+
+
+def bind_mount_owner_uid_gid() -> tuple[int, int]:
+    """UID:GID innerhalb eines Containers fuer Host-Dateien des Panel-Users.
+
+    In Rootless Docker wird Container-Root (0:0) auf den unprivilegierten
+    Docker-/Panel-User auf dem Host gemappt. Ein `chown` auf die Host-UID
+    innerhalb des Containers wuerde dagegen auf eine Subuid/Subgid abgebildet
+    und kann Host-Dateien fuer das Panel unbeschreibbar machen.
+    """
+    if is_rootless():
+        return 0, 0
+    return host_uid_gid()

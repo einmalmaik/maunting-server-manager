@@ -275,7 +275,7 @@ def run_steamcmd_install(
 
     _append_console_log(server_id, f"[MSM] SteamCMD startet für App {app_id} (Docker)\n")
 
-    uid, gid = docker_service.host_uid_gid()
+    uid, gid = docker_service.bind_mount_owner_uid_gid()
     chown_uid, chown_gid = uid, gid
 
     def _live_log(line: str) -> None:
@@ -351,7 +351,7 @@ def run_steamcmd_workshop_download(
     def _live_log(line: str) -> None:
         _append_console_log(server_id, _redact(line, secrets_to_redact))
 
-    uid, gid = docker_service.host_uid_gid()
+    uid, gid = docker_service.bind_mount_owner_uid_gid()
     chown_uid, chown_gid = uid, gid
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,

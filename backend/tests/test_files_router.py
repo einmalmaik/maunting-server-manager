@@ -168,6 +168,25 @@ class TestBrowseReadWrite:
         assert res.status_code == 200
         assert res.json()["content"] == '{"port": 1234}'
 
+    def test_write_nested_scum_ini_path(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        server_with_dir: Server,
+    ):
+        path = "SCUM/Saved/Config/WindowsServer/ServerSettings.ini"
+        res = client.put(
+            f"/api/files/{server_with_dir.id}/write?path={path}",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"content": "ServerName=SCUM"},
+        )
+
+        assert res.status_code == 200
+        target = Path(server_with_dir.install_dir) / "SCUM" / "Saved" / "Config" / "WindowsServer" / "ServerSettings.ini"
+        assert target.read_text(encoding="utf-8") == "ServerName=SCUM"
+
     def test_write_repairs_permissions_after_permission_error(
         self,
         client: TestClient,
@@ -256,7 +275,8 @@ class TestBrowseReadWrite:
             _repair_install_permissions,
         )
 
-        with patch("routers.files.docker_service.host_uid_gid", return_value=(1001, 1002)), \
+        with patch("routers.files.docker_service.is_rootless", return_value=False), \
+             patch("routers.files.docker_service.host_uid_gid", return_value=(1001, 1002)), \
              patch("routers.files.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
             result = _repair_install_permissions(server_with_dir.install_dir)
 
@@ -272,6 +292,18 @@ class TestBrowseReadWrite:
         assert f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type f" in script
         assert f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type l" in script
         assert "chown -h 1001:1002" in script
+
+    def test_permission_repair_uses_container_root_owner_in_rootless_docker(self, server_with_dir: Server):
+        from routers.files import _repair_install_permissions
+
+        with patch("routers.files.docker_service.is_rootless", return_value=True), \
+             patch("routers.files.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
+            result = _repair_install_permissions(server_with_dir.install_dir)
+
+        assert result == {"ok": True}
+        script = mock_run.call_args.kwargs["command"][1]
+        assert "chown 0:0" in script
+        assert "chown -h 0:0" in script
 
 
 # ── Upload (Single-Shot) + Blocked Extensions ─────────────────────────────

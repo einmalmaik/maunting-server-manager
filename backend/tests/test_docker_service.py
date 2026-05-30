@@ -544,6 +544,7 @@ class TestSteamCMDHelpers:
         from games.base import STEAMCMD_BIN, STEAMCMD_CAPS, run_steamcmd_install
 
         with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.is_rootless", return_value=False), \
              patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
             mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
             run_steamcmd_install(server_id=1, install_dir=str(tmp_path), app_id="223350")
@@ -564,6 +565,7 @@ class TestSteamCMDHelpers:
         from games.base import STEAMCMD_CAPS, run_steamcmd_workshop_download
 
         with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.is_rootless", return_value=False), \
              patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
             mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
             run_steamcmd_workshop_download(
@@ -583,6 +585,7 @@ class TestSteamCMDHelpers:
         from games.base import run_steamcmd_install
 
         with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.is_rootless", return_value=False), \
              patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
             mock_eph.return_value = {"ok": True, "stdout": "", "stderr": ""}
             run_steamcmd_install(
@@ -595,3 +598,14 @@ class TestSteamCMDHelpers:
         script = mock_eph.call_args.kwargs["command"][1]
         assert "rm -rf /" in script
         assert script.count("chown -R 1001:1001 /data") == 1
+
+    def test_steamcmd_install_chowns_container_root_in_rootless_docker(self, tmp_path):
+        from games.base import run_steamcmd_install
+
+        with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.is_rootless", return_value=True):
+            mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
+            run_steamcmd_install(server_id=1, install_dir=str(tmp_path), app_id="223350")
+
+        script = mock_eph.call_args.kwargs["command"][1]
+        assert "chown -R 0:0 /data" in script

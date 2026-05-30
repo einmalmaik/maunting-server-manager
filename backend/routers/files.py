@@ -145,7 +145,7 @@ def _repair_install_permissions(install_dir: str) -> dict:
     if not base.exists() or not base.is_dir():
         return {"ok": False, "error": "Server-Verzeichnis existiert nicht"}
 
-    uid, gid = docker_service.host_uid_gid()
+    uid, gid = docker_service.bind_mount_owner_uid_gid()
     owner = f"{int(uid)}:{int(gid)}"
     script = (
         "set -e; "
