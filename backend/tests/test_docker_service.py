@@ -78,6 +78,25 @@ class TestDockerHost:
             "stderr": "",
         }
 
+    def test_pull_preserves_short_manifest_not_found_detail(self):
+        client = MagicMock()
+        client.images.pull.side_effect = docker_service.DockerException(
+            "manifest unknown: failed to resolve reference ghcr.io/ptero-eggs/yolks:typo"
+        )
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:typo")
+
+        assert result == {
+            "ok": False,
+            "error": (
+                "Docker Pull fehlgeschlagen: Image oder Tag in der Registry nicht gefunden: "
+                "manifest unknown: failed to resolve reference ghcr.io/ptero-eggs/yolks:typo"
+            ),
+            "stdout": "",
+            "stderr": "",
+        }
+
 
 class TestRunContainer:
     def test_builds_hardened_sdk_call(self):

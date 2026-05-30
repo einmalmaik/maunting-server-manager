@@ -139,6 +139,7 @@ def _safe_pull_error(exc: BaseException) -> str:
     text = str(exc).strip()
     if not text:
         return "Docker Pull fehlgeschlagen"
+    detail = " ".join(text.split())[:240]
 
     text_lower = text.lower()
     if "no such host" in text_lower or "temporary failure in name resolution" in text_lower:
@@ -156,11 +157,11 @@ def _safe_pull_error(exc: BaseException) -> str:
     if "no matching manifest" in text_lower or "no match for platform" in text_lower:
         return "Image existiert, aber nicht fuer die Docker-Host-Plattform"
     if "manifest unknown" in text_lower or "not found" in text_lower:
-        return "Image oder Tag in der Registry nicht gefunden"
+        return f"Image oder Tag in der Registry nicht gefunden: {detail}"
     if "toomanyrequests" in text_lower or "rate limit" in text_lower:
         return "Registry-Rate-Limit erreicht"
 
-    return text[:240]
+    return detail
 
 
 def _get_client(force: bool = False) -> tuple[Any | None, str | None]:
