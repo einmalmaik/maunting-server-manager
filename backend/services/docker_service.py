@@ -251,10 +251,35 @@ def _tmpfs_dict(tmpfs_paths: list[str] | None) -> dict[str, str] | None:
     return {path: "rw,size=64m,mode=1777" for path in tmpfs_paths}
 
 
+def _split_image_ref(image: str) -> tuple[str, str | None]:
+    if "@" in image:
+        return image, None
+    last_slash = image.rfind("/")
+    last_colon = image.rfind(":")
+    if last_colon > last_slash:
+        return image[:last_colon], image[last_colon + 1:]
+    return image, None
+
+
+def _pull_image(client: Any, image: str) -> None:
+    repository, tag = _split_image_ref(image)
+    stream = client.api.pull(repository, tag=tag, stream=True, decode=True, auth_config={})
+    for event in stream:
+        if not isinstance(event, dict):
+            continue
+        error = event.get("error")
+        if not error:
+            detail = event.get("errorDetail")
+            if isinstance(detail, dict):
+                error = detail.get("message")
+        if error:
+            raise DockerException(str(error))
+
+
 def _ensure_image_available(client: Any, image: str) -> None:
     pull_error = None
     try:
-        client.images.pull(image, auth_config={})
+        _pull_image(client, image)
         return
     except (DockerException, OSError) as exc:
         pull_error = _safe_pull_error(exc)
@@ -276,7 +301,7 @@ def pull(image: str) -> dict:
     if error:
         return error
     try:
-        client.images.pull(image, auth_config={})
+        _pull_image(client, image)
         return {"ok": True, "stdout": "", "stderr": ""}
     except (DockerException, OSError) as exc:
         pull_error = _safe_pull_error(exc)

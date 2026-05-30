@@ -47,7 +47,7 @@ class TestDockerHost:
 
     def test_pull_reports_registry_failure_cause(self):
         client = MagicMock()
-        client.images.pull.side_effect = docker_service.DockerException(
+        client.api.pull.side_effect = docker_service.DockerException(
             "Get https://ghcr.io/v2/: dial tcp: lookup ghcr.io: no such host"
         )
 
@@ -63,7 +63,7 @@ class TestDockerHost:
 
     def test_pull_reports_platform_manifest_mismatch_before_not_found(self):
         client = MagicMock()
-        client.images.pull.side_effect = docker_service.DockerException(
+        client.api.pull.side_effect = docker_service.DockerException(
             "no matching manifest for linux/arm64 in the manifest list entries: "
             "no match for platform in manifest: not found"
         )
@@ -80,7 +80,7 @@ class TestDockerHost:
 
     def test_pull_preserves_short_manifest_not_found_detail(self):
         client = MagicMock()
-        client.images.pull.side_effect = docker_service.DockerException(
+        client.api.pull.side_effect = docker_service.DockerException(
             "manifest unknown: failed to resolve reference ghcr.io/ptero-eggs/yolks:typo"
         )
 
@@ -96,6 +96,40 @@ class TestDockerHost:
             "stdout": "",
             "stderr": "",
         }
+
+    def test_pull_reports_stream_error(self):
+        client = MagicMock()
+        client.api.pull.return_value = [
+            {"status": "Pulling from ptero-eggs/yolks"},
+            {"error": "manifest unknown: failed to resolve reference"},
+        ]
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:typo")
+
+        assert result == {
+            "ok": False,
+            "error": (
+                "Docker Pull fehlgeschlagen: Image oder Tag in der Registry nicht gefunden: "
+                "manifest unknown: failed to resolve reference"
+            ),
+            "stdout": "",
+            "stderr": "",
+        }
+
+    def test_pull_does_not_inspect_after_successful_stream(self):
+        client = MagicMock()
+        client.api.pull.return_value = [
+            {"status": "Pulling from ptero-eggs/yolks"},
+            {"status": "Digest: sha256:abc"},
+        ]
+        client.images.get.side_effect = docker_service.NotFound("No such image")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:wine_staging")
+
+        assert result == {"ok": True, "stdout": "", "stderr": ""}
+        client.images.get.assert_not_called()
 
 
 class TestRunContainer:
@@ -137,13 +171,15 @@ class TestRunContainer:
         assert kwargs["memswap_limit"] == "4096m"
         assert kwargs["user"] == "1000:1000"
         assert kwargs["working_dir"] == "/data"
-        client.images.pull.assert_called_once_with("cm2network/steamcmd:root", auth_config={})
+        client.api.pull.assert_called_once_with(
+            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+        )
         calls = [call[0] for call in client.mock_calls]
-        assert calls.index("images.pull") < calls.index("containers.run")
+        assert calls.index("api.pull") < calls.index("containers.run")
 
     def test_run_container_uses_local_image_when_pull_fails(self):
         client = MagicMock()
-        client.images.pull.side_effect = docker_service.DockerException("registry offline")
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.return_value = SimpleNamespace(id="local-image")
         client.containers.get.side_effect = docker_service.NotFound("missing")
         client.containers.run.return_value = SimpleNamespace(id="abc")
@@ -158,7 +194,9 @@ class TestRunContainer:
             )
 
         assert result["ok"] is True
-        client.images.pull.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging", auth_config={})
+        client.api.pull.assert_called_once_with(
+            "ghcr.io/ptero-eggs/yolks", tag="wine_staging", stream=True, decode=True, auth_config={}
+        )
         client.images.get.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
         client.containers.run.assert_called_once()
 
@@ -166,7 +204,7 @@ class TestRunContainer:
         client = MagicMock()
         existing = MagicMock()
         image = "ghcr.io/ptero-eggs/yolks:wine_staging"
-        client.images.pull.side_effect = docker_service.DockerException("registry offline")
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.side_effect = docker_service.NotFound("missing image")
         client.containers.get.return_value = existing
 
@@ -296,14 +334,16 @@ class TestEphemeralRun:
         assert kwargs["security_opt"] == ["no-new-privileges"]
         assert kwargs["volumes"] == {"/opt/msm/servers/1": {"bind": "/data", "mode": "rw"}}
         container.remove.assert_called_once_with(force=True)
-        client.images.pull.assert_called_once_with("cm2network/steamcmd:root", auth_config={})
+        client.api.pull.assert_called_once_with(
+            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+        )
 
     def test_ephemeral_run_uses_local_image_when_pull_fails(self):
         client = MagicMock()
         container = MagicMock()
         container.wait.return_value = {"StatusCode": 0}
         container.logs.side_effect = [b"done\n", b""]
-        client.images.pull.side_effect = docker_service.DockerException("registry offline")
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.return_value = SimpleNamespace(id="local-image")
         client.containers.run.return_value = container
 
@@ -316,14 +356,16 @@ class TestEphemeralRun:
             )
 
         assert result["ok"] is True
-        client.images.pull.assert_called_once_with("cm2network/steamcmd:root", auth_config={})
+        client.api.pull.assert_called_once_with(
+            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+        )
         client.images.get.assert_called_once_with("cm2network/steamcmd:root")
         client.containers.run.assert_called_once()
 
     def test_ephemeral_run_fails_clearly_when_remote_and_local_image_missing(self):
         client = MagicMock()
         image = "cm2network/steamcmd:root"
-        client.images.pull.side_effect = docker_service.DockerException("registry offline")
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.side_effect = docker_service.NotFound("missing image")
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
@@ -345,7 +387,7 @@ class TestEphemeralRun:
     def test_unavailable_image_classifies_pull_auth_failure(self):
         client = MagicMock()
         image = "ghcr.io/ptero-eggs/yolks:wine_staging"
-        client.images.pull.side_effect = docker_service.DockerException("unauthorized: authentication required")
+        client.api.pull.side_effect = docker_service.DockerException("unauthorized: authentication required")
         client.images.get.side_effect = docker_service.NotFound("missing image")
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
