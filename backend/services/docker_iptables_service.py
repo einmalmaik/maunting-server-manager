@@ -224,9 +224,9 @@ def _apply_server_rules(
         comment = f"{_COMMENT_PREFIX}:{_safe(name)}:{role}"
         rule = [
             _DOCKER_USER_CHAIN,
-            "-d", bind_ip,
             "-p", protocol,
             "--dport", str(port),
+            "-m", "conntrack", "--ctorigdst", bind_ip,
             "-m", "comment", "--comment", comment,
             "-j", "ACCEPT",
         ]
