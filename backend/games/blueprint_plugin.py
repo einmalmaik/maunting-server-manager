@@ -183,6 +183,16 @@ class BlueprintPlugin(GamePlugin):
     def _runtime_data_dir(self) -> str:
         return self._blueprint.runtime.workdir or CONTAINER_DATA_DIR
 
+    def container_uid_gid(self, server) -> tuple[int, int]:
+        runtime_user = self._blueprint.runtime.user
+        if runtime_user:
+            uid, gid = runtime_user.split(":", 1)
+            return int(uid), int(gid)
+        image = self._blueprint.runtime.image.lower()
+        if self._runtime_data_dir() == "/home/container" or "ptero-eggs/yolks" in image:
+            return 1000, 1000
+        return super().container_uid_gid(server)
+
     def _uses_windows_compat_runtime(self) -> bool:
         bp = self._blueprint
         if bp.source.type != BlueprintSourceType.STEAM or bp.source.steam is None:

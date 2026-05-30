@@ -120,9 +120,10 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
             ),
         )
 
-    # Verzeichnis anlegen - wird vom Panel-User (`msm`) angelegt und ist von dort
-    # rw, während der Container das Volume mit derselben UID/GID mountet (siehe
-    # docker_service.host_uid_gid()). Kein useradd, kein chown via sudo nötig.
+    # Verzeichnis anlegen - wird vom Panel-User (`msm`) angelegt. Vor jedem
+    # Container-Start normalisiert docker_service.repair_bind_mount_permissions()
+    # Owner/Rechte im Container-Kontext, damit Runtime (z. B. Wine) und Panel
+    # konsistent auf dieselben Dateien zugreifen können.
     # exist_ok=False ist jetzt sicher (Guard oben).
     try:
         os.makedirs(install_dir, exist_ok=False)

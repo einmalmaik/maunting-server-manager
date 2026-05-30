@@ -275,7 +275,7 @@ def run_steamcmd_install(
 
     _append_console_log(server_id, f"[MSM] SteamCMD startet für App {app_id} (Docker)\n")
 
-    uid, gid = docker_service.bind_mount_owner_uid_gid()
+    uid, gid = docker_service.container_runtime_uid_gid()
     chown_uid, chown_gid = uid, gid
 
     def _live_log(line: str) -> None:
@@ -351,7 +351,7 @@ def run_steamcmd_workshop_download(
     def _live_log(line: str) -> None:
         _append_console_log(server_id, _redact(line, secrets_to_redact))
 
-    uid, gid = docker_service.bind_mount_owner_uid_gid()
+    uid, gid = docker_service.container_runtime_uid_gid()
     chown_uid, chown_gid = uid, gid
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
@@ -519,6 +519,9 @@ class GamePlugin(ABC):
 
     def container_workdir(self, server) -> str:
         return CONTAINER_DATA_DIR
+
+    def container_uid_gid(self, server) -> tuple[int, int]:
+        return docker_service.container_runtime_uid_gid()
 
     def container_tmpfs_paths(self, server) -> list[str]:
         return ["/tmp"] if self.container_needs_tmpfs else []
@@ -768,9 +771,23 @@ class GamePlugin(ABC):
                 server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
             )
 
-        uid, gid = docker_service.host_uid_gid()
+        uid, gid = self.container_uid_gid(server)
         run_user = f"{uid}:{gid}"
         name = container_name_for(server.id)
+        volume_binds = self.build_volume_binds(server)
+
+        for volume in volume_binds:
+            if volume.read_only:
+                continue
+            repair = docker_service.repair_bind_mount_permissions(
+                volume.host_path,
+                container_path=volume.container_path,
+                owner_uid_gid=(uid, gid),
+            )
+            if not repair.get("ok"):
+                err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
+                _append_console_log(server.id, f"[MSM] Permission-Repair fehlgeschlagen: {err}\n")
+                return {"error": err}
 
         result = docker_service.run_container(
             name=name,
@@ -778,7 +795,7 @@ class GamePlugin(ABC):
             command=self.build_container_command(server),
             env=self.build_container_env(server),
             ports=port_publishes,
-            volumes=self.build_volume_binds(server),
+            volumes=volume_binds,
             cpu_limit_percent=server.cpu_limit_percent,
             ram_limit_mb=server.ram_limit_mb,
             user=run_user,

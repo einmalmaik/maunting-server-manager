@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
 import socket
 import subprocess
 from dataclasses import dataclass
@@ -47,6 +48,9 @@ _SYSTEM_ENV = {
 _LOG_CONFIG = {"max-size": "10m", "max-file": "3"}
 _HARDENING_CAP_DROP = ["ALL"]
 _HARDENING_SECURITY_OPT = ["no-new-privileges"]
+PERMISSION_REPAIR_IMAGE = "cm2network/steamcmd:root"
+PERMISSION_REPAIR_CONTAINER_DIR = "/data"
+PERMISSION_REPAIR_CAPS = ["CHOWN", "FOWNER", "DAC_OVERRIDE", "DAC_READ_SEARCH"]
 _CLIENT: Any | None = None
 _DOCKER_AVAILABLE: bool | None = None
 
@@ -769,14 +773,58 @@ def is_rootless() -> bool:
     return os.getuid() != 0
 
 
-def bind_mount_owner_uid_gid() -> tuple[int, int]:
-    """UID:GID innerhalb eines Containers fuer Host-Dateien des Panel-Users.
+def container_runtime_uid_gid() -> tuple[int, int]:
+    """UID:GID, mit der Game-Server im Container laufen.
 
-    In Rootless Docker wird Container-Root (0:0) auf den unprivilegierten
-    Docker-/Panel-User auf dem Host gemappt. Ein `chown` auf die Host-UID
-    innerhalb des Containers wuerde dagegen auf eine Subuid/Subgid abgebildet
-    und kann Host-Dateien fuer das Panel unbeschreibbar machen.
+    Alle Installer, Repairs und Game-Container muessen denselben numerischen
+    Owner fuer Bind-Mount-Dateien verwenden. Unter Rootless Docker kann dieser
+    Owner auf dem Host eine Subuid/Subgid sein; der Panel-Prozess bekommt Zugriff
+    ueber die gesetzten Server-Verzeichnis-Rechte, nicht ueber Ownership.
     """
-    if is_rootless():
-        return 0, 0
     return host_uid_gid()
+
+
+def repair_bind_mount_permissions(
+    host_path: str,
+    *,
+    container_path: str = PERMISSION_REPAIR_CONTAINER_DIR,
+    owner_uid_gid: tuple[int, int] | None = None,
+    timeout: int = 600,
+) -> dict:
+    """Normalisiert Owner/Rechte eines Server-Bind-Mounts im Container-Kontext.
+
+    Ziel:
+    - Wenn owner_uid_gid gesetzt ist, wird der Game-Prozess Owner der Dateien
+      (wichtig fuer Wine-/Home-Verzeichnisse).
+    - Panel kann weiterhin Dateien anlegen/bearbeiten (ueber a+rwX im isolierten
+      Server-Verzeichnis).
+    - Symlinks werden nicht verfolgt; nur der Link selbst wird gechowned.
+    """
+    base = os.path.realpath(host_path)
+    if not os.path.isdir(base):
+        return {"ok": False, "error": "Server-Verzeichnis existiert nicht", "stdout": "", "stderr": ""}
+
+    target = shlex.quote(container_path.rstrip("/") or PERMISSION_REPAIR_CONTAINER_DIR)
+    script_parts = [
+        "set -e",
+        f"find {target} -xdev -type d -exec chmod a+rwX {{}} +",
+        f"find {target} -xdev -type f -exec chmod a+rwX {{}} +",
+    ]
+    if owner_uid_gid is not None:
+        uid, gid = owner_uid_gid
+        owner = f"{int(uid)}:{int(gid)}"
+        script_parts.extend([
+            f"find {target} -xdev -type d -exec chown {owner} {{}} +",
+            f"find {target} -xdev -type f -exec chown {owner} {{}} +",
+            f"find {target} -xdev -type l -exec chown -h {owner} {{}} +",
+        ])
+    script = "; ".join(script_parts)
+    return run_ephemeral(
+        image=PERMISSION_REPAIR_IMAGE,
+        command=["-c", script],
+        volumes=[VolumeBind(base, target, read_only=False)],
+        user="0:0",
+        entrypoint="bash",
+        cap_adds=PERMISSION_REPAIR_CAPS,
+        timeout=timeout,
+    )

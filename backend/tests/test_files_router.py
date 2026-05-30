@@ -268,15 +268,14 @@ class TestBrowseReadWrite:
         assert res.status_code == 413
 
     def test_permission_repair_is_scoped_to_server_root(self, server_with_dir: Server):
-        from routers.files import (
+        from routers.files import _repair_install_permissions
+        from services.docker_service import (
             PERMISSION_REPAIR_CAPS,
             PERMISSION_REPAIR_CONTAINER_DIR,
             PERMISSION_REPAIR_IMAGE,
-            _repair_install_permissions,
         )
 
-        with patch("routers.files.docker_service.is_rootless", return_value=False), \
-             patch("routers.files.docker_service.host_uid_gid", return_value=(1001, 1002)), \
+        with patch("routers.files.docker_service.host_uid_gid", return_value=(1001, 1002)), \
              patch("routers.files.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
             result = _repair_install_permissions(server_with_dir.install_dir)
 
@@ -290,20 +289,20 @@ class TestBrowseReadWrite:
         assert kwargs["volumes"][0].container_path == PERMISSION_REPAIR_CONTAINER_DIR
         script = kwargs["command"][1]
         assert f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type f" in script
-        assert f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type l" in script
-        assert "chown -h 1001:1002" in script
+        assert "chmod a+rwX" in script
+        assert "chown" not in script
 
-    def test_permission_repair_uses_container_root_owner_in_rootless_docker(self, server_with_dir: Server):
+    def test_file_permission_repair_does_not_change_runtime_owner(self, server_with_dir: Server):
         from routers.files import _repair_install_permissions
 
-        with patch("routers.files.docker_service.is_rootless", return_value=True), \
+        with patch("routers.files.docker_service.host_uid_gid", return_value=(1001, 1002)), \
              patch("routers.files.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
             result = _repair_install_permissions(server_with_dir.install_dir)
 
         assert result == {"ok": True}
         script = mock_run.call_args.kwargs["command"][1]
-        assert "chown 0:0" in script
-        assert "chown -h 0:0" in script
+        assert "chmod a+rwX" in script
+        assert "chown" not in script
 
 
 # ── Upload (Single-Shot) + Blocked Extensions ─────────────────────────────

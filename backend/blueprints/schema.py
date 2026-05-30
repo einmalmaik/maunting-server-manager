@@ -270,6 +270,7 @@ class BlueprintRuntime(BaseModel):
 
     image: str = Field(min_length=1, max_length=256)
     workdir: str | None = Field(default=None, max_length=512)
+    user: str | None = Field(default=None, max_length=32)
     env: dict[str, str] = Field(default_factory=dict)
     startup: str = Field(min_length=1, max_length=2048)
     configPatches: list["BlueprintConfigPatch"] = Field(default_factory=list, max_length=32)
@@ -293,6 +294,18 @@ class BlueprintRuntime(BaseModel):
             raise ValueError("runtime.workdir muss absoluter Container-Pfad sein.")
         if "\x00" in v or ".." in v.split("/"):
             raise ValueError("runtime.workdir enthaelt unsichere Komponenten.")
+        return v
+
+    @field_validator("user")
+    @classmethod
+    def _check_user(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        if not re.fullmatch(r"[1-9]\d{0,9}:[1-9]\d{0,9}", v):
+            raise ValueError("runtime.user muss numerisch im Format '<uid>:<gid>' sein und darf nicht root sein.")
+        uid, gid = (int(part) for part in v.split(":", 1))
+        if uid <= 0 or gid <= 0:
+            raise ValueError("runtime.user darf nicht root (0) sein.")
         return v
 
     @field_validator("env")
@@ -770,11 +783,13 @@ COMMENTED_TEMPLATE_DE: str = """{
     // Optionale Beschreibung für die UI
     "description": "Ein Blueprint-Template für einen neuen Server."
   },
-  "runtime": {
+    "runtime": {
     // Das Docker-Image, das gestartet wird (Pflichtfeld).
     "image": "ubuntu:24.04",
     // Arbeitsverzeichnis im Container
     "workdir": "/data",
+    // Optional: numerischer Container-User, z.B. "1000:1000" fuer Pterodactyl/Wine-Images
+    "user": null,
     // Umgebungsvariablen. Erlaubte Platzhalter in Werten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}
     "env": {
       "SERVER_PORT": "{GAME_PORT}",
@@ -843,11 +858,13 @@ COMMENTED_TEMPLATE_EN: str = """{
     // Optional description for the UI
     "description": "A blueprint template for a new server."
   },
-  "runtime": {
+    "runtime": {
     // The Docker image to execute (required field).
     "image": "ubuntu:24.04",
     // Working directory inside the container
     "workdir": "/data",
+    // Optional numeric container user, e.g. "1000:1000" for Pterodactyl/Wine images
+    "user": null,
     // Environment variables. Allowed placeholders in values: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}
     "env": {
       "SERVER_PORT": "{GAME_PORT}",

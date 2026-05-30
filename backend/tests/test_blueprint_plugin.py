@@ -31,6 +31,8 @@ class _FakeServer:
     query_port: int | None = None
     rcon_port: int | None = 25579
     public_bind_ip: str | None = "192.0.2.10"
+    cpu_limit_percent: int | None = None
+    ram_limit_mb: int | None = None
 
 
 def _mc_paper_blueprint() -> dict:
@@ -116,6 +118,16 @@ def test_runtime_workdir_controls_mount_workdir_and_install_dir_token() -> None:
     assert volumes[0].container_path == "/home/container"
     assert volumes[0].read_only is False
     assert plugin.container_workdir(server) == "/home/container"
+    assert plugin.container_uid_gid(server) == (1000, 1000)
+
+
+def test_runtime_user_overrides_blueprint_container_uid_gid() -> None:
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["runtime"]["user"] = "1234:1235"
+    bp = load_blueprint_dict(bp_dict)
+    plugin = BlueprintPlugin(bp)
+
+    assert plugin.container_uid_gid(_FakeServer()) == (1234, 1235)
 
 
 def test_windows_steam_compatibility_wraps_exe_with_wine() -> None:
@@ -154,6 +166,49 @@ def test_windows_steam_compatibility_wraps_exe_with_wine() -> None:
         "-port=7777",
         "-MaxPlayers=64",
     ]
+    assert plugin.container_uid_gid(_FakeServer()) == (1000, 1000)
+
+
+def test_wine_blueprint_start_repairs_home_container_for_runtime_user(tmp_path) -> None:
+    bp_dict = {
+        "version": 1,
+        "meta": {"id": "scum_like_windows_test", "name": "SCUM Like", "category": "steam_game"},
+        "runtime": {
+            "image": "ghcr.io/ptero-eggs/yolks:wine_staging",
+            "workdir": "/home/container",
+            "env": {},
+            "startup": "./Server.exe -port={GAME_PORT}",
+        },
+        "ports": [{"name": "game", "protocol": "udp"}],
+        "source": {
+            "type": "steam",
+            "steam": {
+                "appId": "3792580",
+                "platform": "windows",
+                "compatibility": "wine",
+                "requiresLogin": False,
+            },
+        },
+        "mods": None,
+    }
+    plugin = BlueprintPlugin(load_blueprint_dict(bp_dict))
+    server = _FakeServer(id=99, install_dir=str(tmp_path), game_port=7777)
+
+    with patch("games.base.docker_service.is_available", return_value=True), \
+         patch("games.base.docker_service.repair_bind_mount_permissions", return_value={"ok": True}) as mock_repair, \
+         patch("games.base.docker_service.run_container", return_value={"ok": True, "stdout": "", "stderr": ""}) as mock_run, \
+         patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        result = plugin.start(server)
+
+    assert result["message"] == "Server gestartet"
+    mock_repair.assert_called_once_with(
+        str(tmp_path),
+        container_path="/home/container",
+        owner_uid_gid=(1000, 1000),
+    )
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs["user"] == "1000:1000"
+    assert kwargs["workdir"] == "/home/container"
 
 
 def test_docker_only_install_writes_console_feedback(tmp_path, monkeypatch) -> None:

@@ -77,6 +77,21 @@ def test_minimal_blueprint_is_valid() -> None:
     assert bp.source.type.value == "steam"
 
 
+def test_runtime_user_accepts_numeric_non_root_uid_gid() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["user"] = "1000:1000"
+    bp = load_blueprint_dict(d)
+    assert bp.runtime.user == "1000:1000"
+
+
+@pytest.mark.parametrize("user", ["0:0", "0:1000", "1000:0", "container", "1000", "1000:container"])
+def test_runtime_user_rejects_root_or_non_numeric_user(user: str) -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["user"] = user
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
 def test_commented_template_validates() -> None:
     """Das ausgelieferte kommentierte Template muss, nach Entfernen der
     Kommentare, ein gueltiges JSON und eine gueltige Blueprint sein."""

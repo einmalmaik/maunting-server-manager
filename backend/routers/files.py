@@ -34,7 +34,6 @@ from database import get_db
 from models import Server, User
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from services import docker_service
-from services.docker_service import VolumeBind
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -55,9 +54,7 @@ MAX_SEARCH_RESULTS = 200
 # Liegt INNERHALB des Roots, damit `_safe_path` weiter greift und keine
 # externen Tempfile-Pfade entstehen.
 CHUNK_TMP_DIRNAME = ".msm-uploads"
-PERMISSION_REPAIR_IMAGE = "cm2network/steamcmd:root"
-PERMISSION_REPAIR_CONTAINER_DIR = "/data"
-PERMISSION_REPAIR_CAPS = ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+PERMISSION_REPAIR_CONTAINER_DIR = docker_service.PERMISSION_REPAIR_CONTAINER_DIR
 
 
 def _safe_path(install_dir: str, rel_path: str) -> Path:
@@ -141,30 +138,7 @@ def _repair_install_permissions(install_dir: str) -> dict:
     einziges Volume nach /data gemountet; der Container arbeitet ohne Host-Sudo
     und ohne Symlink-Traversal.
     """
-    base = Path(install_dir).resolve(strict=False)
-    if not base.exists() or not base.is_dir():
-        return {"ok": False, "error": "Server-Verzeichnis existiert nicht"}
-
-    uid, gid = docker_service.bind_mount_owner_uid_gid()
-    owner = f"{int(uid)}:{int(gid)}"
-    script = (
-        "set -e; "
-        f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type d "
-        f"-exec chown {owner} {{}} + -exec chmod u+rwx,g+rwX {{}} +; "
-        f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type f "
-        f"-exec chown {owner} {{}} + -exec chmod u+rw,g+rw {{}} +; "
-        f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type l "
-        f"-exec chown -h {owner} {{}} +"
-    )
-    return docker_service.run_ephemeral(
-        image=PERMISSION_REPAIR_IMAGE,
-        command=["-c", script],
-        volumes=[VolumeBind(str(base), PERMISSION_REPAIR_CONTAINER_DIR, read_only=False)],
-        user="0:0",
-        entrypoint="bash",
-        cap_adds=PERMISSION_REPAIR_CAPS,
-        timeout=600,
-    )
+    return docker_service.repair_bind_mount_permissions(install_dir)
 
 
 def _write_text_with_permission_repair(server: Server, target: Path, content: str) -> None:

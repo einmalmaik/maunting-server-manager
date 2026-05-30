@@ -11,6 +11,7 @@ import pytest
 
 from services import docker_service
 from services.docker_service import PortPublish, VolumeBind
+from games.base import GamePlugin, ServerStatus
 
 
 def _ok(stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
@@ -273,6 +274,87 @@ class TestRunContainer:
         assert client.containers.run.call_args.kwargs["ports"] == {"80/tcp": [8080, 443]}
 
 
+class _StartPlugin(GamePlugin):
+    game_id = "start-test"
+    game_name = "Start Test"
+    docker_image = "img"
+
+    def install(self, server) -> dict:
+        return {"ok": True}
+
+    def build_container_command(self, server) -> list[str]:
+        return ["./start.sh"]
+
+    def build_port_publishes(self, server) -> list[PortPublish]:
+        return []
+
+    def build_volume_binds(self, server) -> list[VolumeBind]:
+        return [VolumeBind(server.install_dir, "/home/container", read_only=False)]
+
+    def container_workdir(self, server) -> str:
+        return "/home/container"
+
+    def get_status(self, server) -> ServerStatus:
+        return ServerStatus(status="stopped")
+
+    def get_logs(self, server, lines: int = 100) -> str:
+        return ""
+
+    def get_config_schema(self) -> list:
+        return []
+
+    def get_config_files(self) -> list[dict]:
+        return []
+
+
+class TestGamePluginStartPermissions:
+    def test_start_repairs_bind_mount_before_running_container(self, tmp_path):
+        plugin = _StartPlugin()
+        server = SimpleNamespace(
+            id=42,
+            install_dir=str(tmp_path),
+            cpu_limit_percent=None,
+            ram_limit_mb=None,
+        )
+
+        with patch("services.docker_service.is_available", return_value=True), \
+             patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1002)), \
+             patch("games.base.docker_service.repair_bind_mount_permissions", return_value={"ok": True}) as mock_repair, \
+             patch("games.base.docker_service.run_container", return_value={"ok": True, "stdout": "", "stderr": ""}) as mock_run:
+            result = plugin.start(server)
+
+        assert result["message"] == "Server gestartet"
+        mock_repair.assert_called_once_with(
+            str(tmp_path),
+            container_path="/home/container",
+            owner_uid_gid=(1001, 1002),
+        )
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["user"] == "1001:1002"
+        assert kwargs["volumes"] == [VolumeBind(str(tmp_path), "/home/container", read_only=False)]
+
+    def test_start_stops_before_container_run_when_permission_repair_fails(self, tmp_path):
+        plugin = _StartPlugin()
+        server = SimpleNamespace(
+            id=43,
+            install_dir=str(tmp_path),
+            cpu_limit_percent=None,
+            ram_limit_mb=None,
+        )
+
+        with patch("services.docker_service.is_available", return_value=True), \
+             patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1002)), \
+             patch(
+                 "games.base.docker_service.repair_bind_mount_permissions",
+                 return_value={"ok": False, "error": "repair failed"},
+             ), \
+             patch("games.base.docker_service.run_container") as mock_run:
+            result = plugin.start(server)
+
+        assert result == {"error": "repair failed"}
+        mock_run.assert_not_called()
+
+
 
 class TestLifecycle:
     def test_stop_returns_ok_when_not_exists(self):
@@ -306,6 +388,33 @@ class TestHostUidGid:
         uid, gid = docker_service.host_uid_gid()
         assert isinstance(uid, int)
         assert isinstance(gid, int)
+
+
+class TestBindMountPermissionRepair:
+    def test_repair_chowns_only_when_runtime_owner_is_explicit(self, tmp_path):
+        with patch("services.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
+            result = docker_service.repair_bind_mount_permissions(
+                str(tmp_path),
+                container_path="/home/container",
+                owner_uid_gid=(1000, 1000),
+            )
+
+        assert result == {"ok": True}
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["volumes"] == [VolumeBind(str(tmp_path), "/home/container", read_only=False)]
+        script = kwargs["command"][1]
+        assert "chmod a+rwX" in script
+        assert "chown 1000:1000" in script
+        assert "chown -h 1000:1000" in script
+
+    def test_repair_without_runtime_owner_preserves_existing_owner(self, tmp_path):
+        with patch("services.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
+            result = docker_service.repair_bind_mount_permissions(str(tmp_path))
+
+        assert result == {"ok": True}
+        script = mock_run.call_args.kwargs["command"][1]
+        assert "chmod a+rwX" in script
+        assert "chown" not in script
 
 
 class TestEphemeralRun:
@@ -599,13 +708,13 @@ class TestSteamCMDHelpers:
         assert "rm -rf /" in script
         assert script.count("chown -R 1001:1001 /data") == 1
 
-    def test_steamcmd_install_chowns_container_root_in_rootless_docker(self, tmp_path):
+    def test_steamcmd_install_chowns_runtime_user_in_rootless_docker(self, tmp_path):
         from games.base import run_steamcmd_install
 
         with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
-             patch("games.base.docker_service.is_rootless", return_value=True):
+             patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1002)):
             mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
             run_steamcmd_install(server_id=1, install_dir=str(tmp_path), app_id="223350")
 
         script = mock_eph.call_args.kwargs["command"][1]
-        assert "chown -R 0:0 /data" in script
+        assert "chown -R 1001:1002 /data" in script
