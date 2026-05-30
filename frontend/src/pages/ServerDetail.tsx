@@ -813,7 +813,6 @@ export function ServerDetail() {
                   </div>
                 );
               })()}
-              </div>
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
