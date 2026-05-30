@@ -33,6 +33,8 @@ from blueprints.archive_extract import ArchiveExtractError, safe_extract_archive
 from database import get_db
 from models import Server, User
 from dependencies import get_current_user, verify_csrf, require_server_permission
+from services import docker_service
+from services.docker_service import VolumeBind
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -53,6 +55,9 @@ MAX_SEARCH_RESULTS = 200
 # Liegt INNERHALB des Roots, damit `_safe_path` weiter greift und keine
 # externen Tempfile-Pfade entstehen.
 CHUNK_TMP_DIRNAME = ".msm-uploads"
+PERMISSION_REPAIR_IMAGE = "cm2network/steamcmd:root"
+PERMISSION_REPAIR_CONTAINER_DIR = "/data"
+PERMISSION_REPAIR_CAPS = ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
 
 
 def _safe_path(install_dir: str, rel_path: str) -> Path:
@@ -127,6 +132,61 @@ def _apply_permissions(install_dir: str, target: Path) -> None:
             p = p.parent
     except Exception:
         pass
+
+
+def _repair_install_permissions(install_dir: str) -> dict:
+    """Repariert Besitzer/Rechte im Server-Root via Rootless-Docker.
+
+    Wird nur nach konkretem PermissionError aufgerufen. Der Host-Pfad wird als
+    einziges Volume nach /data gemountet; der Container arbeitet ohne Host-Sudo
+    und ohne Symlink-Traversal.
+    """
+    base = Path(install_dir).resolve(strict=False)
+    if not base.exists() or not base.is_dir():
+        return {"ok": False, "error": "Server-Verzeichnis existiert nicht"}
+
+    uid, gid = docker_service.host_uid_gid()
+    owner = f"{int(uid)}:{int(gid)}"
+    script = (
+        "set -e; "
+        f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type d "
+        f"-exec chown {owner} {{}} + -exec chmod u+rwx,g+rwX {{}} +; "
+        f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type f "
+        f"-exec chown {owner} {{}} + -exec chmod u+rw,g+rw {{}} +; "
+        f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type l "
+        f"-exec chown -h {owner} {{}} +"
+    )
+    return docker_service.run_ephemeral(
+        image=PERMISSION_REPAIR_IMAGE,
+        command=["-c", script],
+        volumes=[VolumeBind(str(base), PERMISSION_REPAIR_CONTAINER_DIR, read_only=False)],
+        user="0:0",
+        entrypoint="bash",
+        cap_adds=PERMISSION_REPAIR_CAPS,
+        timeout=600,
+    )
+
+
+def _write_text_with_permission_repair(server: Server, target: Path, content: str) -> None:
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return
+    except PermissionError as first_error:
+        repair = _repair_install_permissions(server.install_dir)
+        if not repair.get("ok"):
+            err = repair.get("error") or "unbekannter Fehler"
+            raise PermissionError(
+                f"{first_error}; Rechte-Reparatur fehlgeschlagen: {err}"
+            ) from first_error
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    except PermissionError as retry_error:
+        raise PermissionError(
+            f"{retry_error}; Rechte-Reparatur wurde ausgeführt, Datei bleibt aber nicht beschreibbar"
+        ) from retry_error
 
 
 def _chunk_tmp_dir(install_dir: str) -> Path:
@@ -302,8 +362,7 @@ def write_file(
     target = _safe_path(server.install_dir, path)
 
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body.content, encoding="utf-8")
+        _write_text_with_permission_repair(server, target, body.content)
         _apply_permissions(server.install_dir, target)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schreiben fehlgeschlagen: {e}")
