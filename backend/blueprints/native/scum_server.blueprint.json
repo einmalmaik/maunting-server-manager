@@ -13,9 +13,11 @@
     "env": {
       "SERVER_NAME": "My SCUM Server by MSM",
       "MAX_PLAYERS": "64",
-      "SERVER_PASSWORD": ""
+      "SERVER_PASSWORD": "",
+      "WINEESYNC": "1",
+      "WINEFSYNC": "1"
     },
-    "startup": "./SCUM/Binaries/Win64/SCUMServer.exe -log -port={GAME_PORT} -queryPort={QUERY_PORT} -MaxPlayers={ENV.MAX_PLAYERS} -ServerName={ENV.SERVER_NAME}",
+    "startup": "./SCUM/Binaries/Win64/SCUMServer.exe -log -nullrhi -port={GAME_PORT} -queryPort={QUERY_PORT} -MaxPlayers={ENV.MAX_PLAYERS} -ServerName={ENV.SERVER_NAME}",
     "configPatches": []
   },
   "ports": [
