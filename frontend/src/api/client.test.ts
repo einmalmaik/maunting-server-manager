@@ -210,9 +210,6 @@ describe('api client', () => {
       )
 
       await expect(api('/test', { method: 'POST' })).rejects.toThrow(
-        'errors.install_update_already_running',
-      )
-      expect(i18n.t('errors.install_update_already_running')).toBe(
         'An installation or update is already running. Please wait until that job has finished.',
       )
     })

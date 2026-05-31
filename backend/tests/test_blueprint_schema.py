@@ -272,6 +272,32 @@ def test_workshop_app_id_required_when_workshop_on() -> None:
         load_blueprint_dict(d)
 
 
+def test_mods_filter_tags_validation() -> None:
+    d = _minimal_valid_dict()
+    # 1) Gültiger Fall
+    d["mods"] = {
+        "supportsMods": True,
+        "supportsSteamWorkshop": True,
+        "workshopAppId": "440900",
+        "filterTags": ["Enhanced", "Another-Tag+1"],
+        "modInjection": "none",
+    }
+    bp = load_blueprint_dict(d)
+    assert bp.effective_mods().filterTags == ["Enhanced", "Another-Tag+1"]
+
+    # 2) Ungültiger Tag (verbotene Sonderzeichen)
+    d["mods"]["filterTags"] = ["Enhanced!"]
+    with pytest.raises(BlueprintValidationError) as exc:
+        load_blueprint_dict(d)
+    assert any("ungültige Zeichen" in e for e in exc.value.errors)
+
+    # 3) Zu langer Tag
+    d["mods"]["filterTags"] = ["A" * 65]
+    with pytest.raises(BlueprintValidationError) as exc:
+        load_blueprint_dict(d)
+    assert any("maximal 64" in e for e in exc.value.errors)
+
+
 def test_template_is_valid_json() -> None:
     # COMMENTED_TEMPLATE muss nach dem Strippen serialisierbar sein.
     for tmpl in [COMMENTED_TEMPLATE_DE, COMMENTED_TEMPLATE_EN]:

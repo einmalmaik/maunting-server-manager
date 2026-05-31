@@ -80,3 +80,17 @@ def reset_install_update_lock_for_tests() -> None:
     global _ACTIVE
     with _LOCK:
         _ACTIVE = None
+
+
+def acquire_install_update_lock_blocking(
+    server_id: int,
+    operation: str,
+    *,
+    ttl_seconds: int = DEFAULT_INSTALL_UPDATE_LOCK_TTL_SECONDS,
+) -> None:
+    """Reserve the single install/update slot, blocking until it is free.
+
+    Stale process-local locks are replaced after ``ttl_seconds``.
+    """
+    while not try_acquire_install_update_lock(server_id, operation, ttl_seconds=ttl_seconds):
+        time.sleep(1)

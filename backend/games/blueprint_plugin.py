@@ -332,7 +332,7 @@ class BlueprintPlugin(GamePlugin):
         return {
             "workshop_id": bp_mods.workshopAppId,
             "dependency_resolution": False,
-            "required_tags": [],
+            "required_tags": bp_mods.filterTags,
         }
 
     def install_mod(self, server, workshop_id: str) -> dict:

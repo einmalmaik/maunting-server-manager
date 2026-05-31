@@ -543,11 +543,24 @@ class BlueprintMods(BaseModel):
     supportsMods: bool = False
     supportsSteamWorkshop: bool = False
     workshopAppId: str | None = None
+    filterTags: list[str] = Field(default_factory=list, max_length=10)
     modInjection: BlueprintModInjection = BlueprintModInjection.NONE
     modStartupArgumentFormat: str | None = Field(default=None, max_length=256)
     modListFilePath: str | None = Field(default=None, max_length=512)
     modListContent: BlueprintModListContent = BlueprintModListContent.WORKSHOP_IDS
     postInstall: list["BlueprintWorkshopFileAction"] = Field(default_factory=list, max_length=32)
+
+    @field_validator("filterTags")
+    @classmethod
+    def _check_filter_tags(cls, v: list[str]) -> list[str]:
+        for tag in v:
+            if not tag or len(tag) > 64:
+                raise ValueError("Ein filterTag darf nicht leer und maximal 64 Zeichen lang sein.")
+            if not re.fullmatch(r"[a-zA-Z0-9_\-\+ ]+", tag):
+                raise ValueError(
+                    f"filterTag '{tag}' enthält ungültige Zeichen (erlaubt: Alphanumerisch, Leerzeichen, _, -, +)."
+                )
+        return v
 
     @field_validator("workshopAppId")
     @classmethod
@@ -850,6 +863,8 @@ COMMENTED_TEMPLATE_DE: str = """{
     "supportsMods": false,
     "supportsSteamWorkshop": false,
     "workshopAppId": null,
+    // Optionale Tags zur Filterung der Workshop-Suche
+    "filterTags": [],
     "modInjection": "none",
     "modStartupArgumentFormat": null,
     "modListFilePath": null,
@@ -925,6 +940,8 @@ COMMENTED_TEMPLATE_EN: str = """{
     "supportsMods": false,
     "supportsSteamWorkshop": false,
     "workshopAppId": null,
+    // Optional tags to filter workshop search
+    "filterTags": [],
     "modInjection": "none",
     "modStartupArgumentFormat": null,
     "modListFilePath": null,

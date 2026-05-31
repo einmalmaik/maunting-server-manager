@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import get_db, SessionLocal
 from models import Mod, Server, User
 from schemas import ModResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
@@ -10,12 +10,36 @@ from services.install_update_lock_service import (
     INSTALL_UPDATE_ALREADY_RUNNING,
     release_install_update_lock,
     try_acquire_install_update_lock,
+    acquire_install_update_lock_blocking,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mods", tags=["mods"])
 
 
+def install_mod_bg(server_id: int, workshop_id: str):
+    db = SessionLocal()
+    try:
+        server = db.query(Server).filter(Server.id == server_id).first()
+        if not server:
+            logger.error("Server %s nicht gefunden in Background Task", server_id)
+            return
+        plugin = get_plugin(server.game_type)
+        if not plugin or not plugin.supports_mods:
+            return
 
+        # Blockierenden Lock erwerben, um parallele SteamCMD-Aufrufe zu serialisieren
+        acquire_install_update_lock_blocking(server.id, "mod_install")
+        try:
+            plugin.install_mod(server, workshop_id)
+        finally:
+            release_install_update_lock(server.id)
+    except Exception as exc:
+        logger.exception("Fehler bei Hintergrund-Mod-Installation für Server %s (workshop_id: %s)", server_id, workshop_id)
+    finally:
+        db.close()
 
 
 @router.get("/{server_id}", response_model=list[ModResponse])
@@ -25,7 +49,15 @@ def list_mods(server_id: int, db: Session = Depends(get_db), user: User = Depend
 
 
 @router.post("/{server_id}", response_model=ModResponse)
-def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
+def subscribe_mod(
+    server_id: int,
+    workshop_id: str,
+    background_tasks: BackgroundTasks,
+    name: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
     require_server_permission(user, server_id, db, "server.mods.write")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -36,38 +68,21 @@ def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db:
     if existing:
         raise HTTPException(status_code=400, detail="Mod bereits abonniert")
 
-    lock_acquired = False
+    max_order = db.query(Mod).filter(Mod.server_id == server_id).count()
+    mod = Mod(
+        server_id=server_id,
+        workshop_id=workshop_id,
+        name=name,
+        load_order=max_order,
+        auto_update=True,
+    )
+    db.add(mod)
+    db.commit()
+    db.refresh(mod)
+
+    # Mod via SteamCMD installieren (in den Hintergrund auslagern, um nicht zu blockieren)
     if plugin and plugin.supports_mods:
-        lock_acquired = try_acquire_install_update_lock(server.id, "mod_install")
-        if not lock_acquired:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": INSTALL_UPDATE_ALREADY_RUNNING,
-                    "message": f"errors.{INSTALL_UPDATE_ALREADY_RUNNING}",
-                },
-            )
-
-    try:
-        max_order = db.query(Mod).filter(Mod.server_id == server_id).count()
-        mod = Mod(
-            server_id=server_id,
-            workshop_id=workshop_id,
-            name=name,
-            load_order=max_order,
-            auto_update=True,
-        )
-        db.add(mod)
-        db.commit()
-        db.refresh(mod)
-
-        # Mod via SteamCMD installieren. Der generische Install/Update-Lock schuetzt
-        # auch diesen Pfad, weil install_mod intern SteamCMD/Workshop-Downloads nutzt.
-        if plugin and plugin.supports_mods:
-            plugin.install_mod(server, workshop_id)
-    finally:
-        if lock_acquired:
-            release_install_update_lock(server.id)
+        background_tasks.add_task(install_mod_bg, server.id, workshop_id)
 
     return mod
 
