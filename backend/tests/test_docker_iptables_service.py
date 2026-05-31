@@ -19,56 +19,10 @@ def _ok(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
 
 
 class TestBaselineDrop:
-    def test_skipped_when_iptables_missing(self):
-        with patch("services.docker_iptables_service._run_iptables", return_value=None):
+    def test_disabled_no_op(self):
+        with patch("services.docker_iptables_service._run_iptables") as run:
             assert dis.ensure_baseline_drop() is False
-
-    def test_skipped_when_docker_user_chain_missing(self):
-        # version-check OK, chain check non-zero
-        responses = iter([_ok(), _ok(returncode=1)])
-        with patch(
-            "services.docker_iptables_service._run_iptables",
-            side_effect=lambda *a, **kw: next(responses),
-        ):
-            assert dis.ensure_baseline_drop() is False
-
-    def test_adds_both_protocols_when_missing(self):
-        # version-check OK, chain exists, both checks miss, both inserts OK.
-        responses = iter([
-            _ok(),                       # _iptables_available (-version)
-            _ok(),                       # _chain_exists (-L)
-            _ok(returncode=1),           # _rule_exists udp baseline
-            _ok(),                       # -A udp
-            _ok(returncode=1),           # _rule_exists tcp baseline
-            _ok(),                       # -A tcp
-        ])
-        with patch(
-            "services.docker_iptables_service._run_iptables",
-            side_effect=lambda *a, **kw: next(responses),
-        ) as run:
-            assert dis.ensure_baseline_drop() is True
-
-        # Pruefe: ein Insert fuer udp + ein Insert fuer tcp wurden aufgerufen.
-        appended = [c.args for c in run.call_args_list if c.args and c.args[0] == "-A"]
-        assert any("udp" in args for args in appended)
-        assert any("tcp" in args for args in appended)
-
-    def test_skips_when_rule_already_present(self):
-        responses = iter([
-            _ok(),               # -version
-            _ok(),               # -L
-            _ok(returncode=0),   # _rule_exists udp → bereits da
-            _ok(returncode=0),   # _rule_exists tcp → bereits da
-        ])
-        with patch(
-            "services.docker_iptables_service._run_iptables",
-            side_effect=lambda *a, **kw: next(responses),
-        ) as run:
-            assert dis.ensure_baseline_drop() is True
-
-        # Kein -A-Call darf passieren
-        appended = [c.args for c in run.call_args_list if c.args and c.args[0] == "-A"]
-        assert appended == []
+            run.assert_not_called()
 
 
 # ── accept_server / revoke_server ────────────────────────────────────────

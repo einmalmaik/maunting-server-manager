@@ -269,7 +269,7 @@ export function Servers() {
                   <input
                     type="number"
                     min={10}
-                    max={100}
+                    max={3200}
                     value={form.cpu_limit_percent}
                     onChange={(e) => setForm({ ...form, cpu_limit_percent: e.target.value })}
                     className="msm-input"
