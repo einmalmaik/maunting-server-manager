@@ -25,10 +25,10 @@ export function ToastContainer() {
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`pointer-events-auto flex items-start gap-3 p-4 rounded-lg shadow-lg border font-body-md text-sm backdrop-blur ${
+          className={`pointer-events-auto flex items-start gap-3 rounded-lg border p-4 font-body-md text-sm shadow-panel backdrop-blur-xl ${
             toast.type === 'error'
-              ? 'bg-status-destructive/10 border-status-destructive/30 text-status-destructive'
-              : 'bg-status-success/10 border-status-success/30 text-status-success'
+              ? 'bg-surface-container-high/95 border-status-destructive/40 text-status-destructive'
+              : 'bg-surface-container-high/95 border-status-success/40 text-status-success'
           }`}
           role={toast.type === 'error' ? 'alert' : 'status'}
         >

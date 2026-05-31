@@ -50,7 +50,10 @@
       "category": "Kategorie",
       "source": "Quelle",
       "actions": "Aktionen"
-    }
+    },
+    "docsBannerTitle": "Eigene Blueprints & Discord-Bots hosten",
+    "docsBannerText": "Möchtest du einen eigenen Discord-Bot oder Open-Source-Software per GitHub-ZIP hosten? Lies unsere How-To Anleitung in der Dokumentation.",
+    "docsBannerBtn": "Anleitung lesen"
   },
   "docs": {
     "pageTitle": "Blueprint-Dokumentation",
@@ -125,7 +128,11 @@
       "h1": "Wie aktiviere ich Steam Workshop?",
       "b1": "Setze im 'mods'-Objekt supportsMods=true, supportsSteamWorkshop=true und trage die workshopAppId ein. Stelle modInjection auf 'startupArg' oder 'file', je nachdem, wie das Spiel Mods lädt.",
       "h2": "Wie patche ich eine Konfigurationsdatei?",
-      "b2": "Nutze 'runtime.configPatches'. Pflichtfelder pro Patch: type (derzeit nur 'ini'), file (relativer Pfad zur Datei), section (INI-Sektion, z. B. 'Server'), key (Schlüssel) und value (Wert). Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.) — aber KEIN {ENV.<KEY>} und KEIN {MOD_ARG}, da diese nur im startup-Befehl sinnvoll sind."
+      "b2": "Nutze 'runtime.configPatches'. Pflichtfelder pro Patch: type (derzeit nur 'ini'), file (relativer Pfad zur Datei), section (INI-Sektion, z. B. 'Server'), key (Schlüssel) und value (Wert). Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.) — aber KEIN {ENV.<KEY>} und KEIN {MOD_ARG}, da diese nur im startup-Befehl sinnvoll sind.",
+      "h3": "Wie hoste ich Discord-Bots oder andere Open-Source-Software (GitHub)?",
+      "b3": "Du hast zwei Möglichkeiten: 1) Docker-Only: Stelle 'source.type' auf 'dockerOnly' und gib dein Docker-Image unter 'runtime.image' an. Umgebungsvariablen können statisch in 'runtime.env' definiert werden. 2) HTTP-Source (Empfohlen): Stelle 'source.type' auf 'http' und gib die GitHub-ZIP-URL an. Da das Startkommando ('runtime.startup') in der Blueprint fest hinterlegt ist, nutzt man am besten einen generischen Aufruf wie 'sh start.sh' oder 'npm start'. Der User kann dann über den Dateimanager (Tab 'Dateien') die Konfiguration (.env, config.json) anpassen und in der 'start.sh' bzw. 'package.json' seine individuelle Startdatei definieren. Beim Klick auf 'Server aktualisieren' zieht MSM die neuesten Updates von GitHub, wobei die Konfigurationsdateien geschützt bleiben.",
+      "b3_extra": "Hierbei schützt der automatische Updater von MSM deine Konfigurationsdateien: Alle typischen Config-Dateiendungen wie .json, .env, .toml, .yaml, .yml, .ini, .cfg oder .txt (unter 2MB Größe, außerhalb von Systemordnern) werden vor dem Herunterladen temporär gesichert und danach wiederhergestellt.",
+      "botExampleTitle": "Beispiel: Discord-Bot Blueprint (GitHub ZIP-Download & Auto-Update)"
     },
     "troubleshooting": {
       "err1Title": "Ungültiges JSON",
@@ -635,7 +642,18 @@
     "backupCodes": "Backup-Codes",
     "generateBackupCodes": "Backup-Codes generieren",
     "backupCodesWarning": "Speichere diese Codes sicher ab. Sie können 2FA nicht ersetzen, sondern nur als Notfall-Login.",
-    "otpRequired": "2FA-Code erforderlich"
+    "otpRequired": "2FA-Code erforderlich",
+    "notVerified": "Nicht verifiziert",
+    "2faQrCode": "2FA QR Code",
+    "deleteAccountTitle": "Konto löschen",
+    "deleteAccountSubtitle": "Lösche dein persönliches Konto und alle damit verbundenen Daten unwiderruflich.",
+    "ownerCannotDelete": "Als System-Owner kannst du dein Konto nicht löschen, um einen vollständigen Lockout zu verhindern.",
+    "deleteAccountBtn": "Konto löschen ...",
+    "deleteAccountWarningTitle": "Achtung: Dies ist eine irreversible Aktion!",
+    "deleteAccountWarningText": "Alle deine persönlichen Einstellungen, Sessions, 2FA-Registrierungen und Berechtigungen werden dauerhaft und vollständig gelöscht. Laufende Game-Server bleiben unberührt, aber du verlierst jeglichen Zugriff darauf.",
+    "confirmPasswordLabel": "Aktuelles Passwort zur Bestätigung",
+    "confirmOtpLabel": "Aktueller 6-stelliger 2FA-Code (kein Backup-Code)",
+    "deleteAccountFinalBtn": "Konto unwiderruflich löschen"
   },
   "errors": {
     "RATE_LIMITED": "Zu viele Anfragen. Bitte warte einen Moment.",
@@ -650,7 +668,8 @@
     "serverUpdateAvailable": "Server-Aktualisierung verfügbar für {{name}}",
     "modUpdateAvailable": "Mod-Aktualisierung verfügbar für {{mod}} auf Server {{server}}",
     "activeLabel": "E-Mail-Benachrichtigungen: aktiv",
-    "inactiveLabel": "E-Mail-Benachrichtigungen: deaktiviert"
+    "inactiveLabel": "E-Mail-Benachrichtigungen: deaktiviert",
+    "updateFailed": "Benachrichtigungseinstellung konnte nicht gespeichert werden."
   },
   "updater": {
     "manualConfigsRestored": "Manuelle Konfigurationen wurden automatisch wiederhergestellt.",
@@ -682,5 +701,9 @@
   "serverDetail": {
     "limit": "Limit",
     "free": "frei"
-  }
+  },
+  "Passwort ungültig": "Passwort ungültig",
+  "2FA-Code erforderlich": "2FA-Code erforderlich",
+  "Ungültiger 2FA-Code": "Ungültiger 2FA-Code",
+  "Owner-Account kann nicht gelöscht werden": "Owner-Account kann nicht gelöscht werden"
 }

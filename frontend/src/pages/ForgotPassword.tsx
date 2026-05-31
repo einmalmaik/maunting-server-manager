@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
+import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { Shield, Mail, ArrowRight, ArrowLeft } from 'lucide-react'
 
 export function ForgotPassword() {
@@ -32,7 +33,6 @@ export function ForgotPassword() {
   return (
     <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
       <div className="absolute inset-0 msm-deep-grid opacity-50" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-md">
         <div className="flex items-center justify-center gap-3 mb-8">
@@ -90,11 +90,7 @@ export function ForgotPassword() {
                 />
               </div>
 
-              {error && (
-                <div className="msm-alert-error text-sm">
-                  {error}
-                </div>
-              )}
+              <ErrorMessage message={error} className="text-sm" />
 
               <button
                 type="submit"

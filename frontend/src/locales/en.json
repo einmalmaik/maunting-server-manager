@@ -50,7 +50,10 @@
       "category": "Category",
       "source": "Source",
       "actions": "Actions"
-    }
+    },
+    "docsBannerTitle": "Host custom blueprints & Discord bots",
+    "docsBannerText": "Do you want to host your own Discord bot or open-source software via GitHub ZIP? Read our How-To guide in the documentation.",
+    "docsBannerBtn": "Read Guide"
   },
   "docs": {
     "pageTitle": "Blueprint Documentation",
@@ -125,7 +128,11 @@
       "h1": "How do I enable Steam Workshop?",
       "b1": "Set supportsMods=true, supportsSteamWorkshop=true, and add the workshopAppId in the 'mods' object. Set modInjection to 'startupArg' or 'file', depending on how the game loads mods.",
       "h2": "How do I patch a configuration file?",
-      "b2": "Use 'runtime.configPatches'. Required fields per patch: type (currently only 'ini'), file (relative path), section (INI section, e.g. 'Server'), key, and value. Port placeholders are allowed in value ({GAME_PORT} etc.) — but NOT {ENV.<KEY>} or {MOD_ARG}, as those are only valid in the startup command."
+      "b2": "Use 'runtime.configPatches'. Required fields per patch: type (currently only 'ini'), file (relative path), section (INI section, e.g. 'Server'), key, and value. Port placeholders are allowed in value ({GAME_PORT} etc.) — but NOT {ENV.<KEY>} or {MOD_ARG}, as those are only valid in the startup command.",
+      "h3": "How do I host Discord bots or other open-source software (GitHub)?",
+      "b3": "You have two options: 1) Docker-Only: Set 'source.type' to 'dockerOnly' and specify your Docker image in 'runtime.image'. Environment variables can be defined statically in 'runtime.env'. 2) HTTP Source (Recommended): Set 'source.type' to 'http' and specify the GitHub ZIP URL. Since the startup command ('runtime.startup') is read-only for the user, it is best to use a generic command like 'sh start.sh' or 'npm start'. The user can then use the File Manager ('Files' tab) to edit configuration files (.env, config.json) and define their startup file inside 'start.sh' or 'package.json'. When clicking 'Update Server', MSM downloads the newest files from GitHub while protecting custom config files.",
+      "b3_extra": "MSM's automatic updater will preserve your configuration files: Typical config extensions like .json, .env, .toml, .yaml, .yml, .ini, .cfg, or .txt (under 2MB in size, outside of system/data directories) are backed up temporarily during updates/reinstalls and restored automatically.",
+      "botExampleTitle": "Example: Discord Bot Blueprint (GitHub ZIP download & auto-update)"
     },
     "troubleshooting": {
       "err1Title": "Invalid JSON",
@@ -635,7 +642,18 @@
     "backupCodes": "Backup Codes",
     "generateBackupCodes": "Generate Backup Codes",
     "backupCodesWarning": "Save these codes securely. They cannot replace 2FA, only serve as emergency login.",
-    "otpRequired": "2FA code required"
+    "otpRequired": "2FA code required",
+    "notVerified": "Not verified",
+    "2faQrCode": "2FA QR Code",
+    "deleteAccountTitle": "Delete Account",
+    "deleteAccountSubtitle": "Permanently delete your personal account and all associated data.",
+    "ownerCannotDelete": "As the system owner, you cannot delete your account to prevent a total lockout.",
+    "deleteAccountBtn": "Delete Account ...",
+    "deleteAccountWarningTitle": "Warning: This action is irreversible!",
+    "deleteAccountWarningText": "All your personal settings, active sessions, 2FA registrations, and custom permissions will be permanently and completely deleted. Running game servers will remain untouched, but you will lose all access to them.",
+    "confirmPasswordLabel": "Confirm with your current password",
+    "confirmOtpLabel": "Current 6-digit 2FA code (no backup code)",
+    "deleteAccountFinalBtn": "Delete Account Permanently"
   },
   "errors": {
     "RATE_LIMITED": "Too many requests. Please wait a moment.",
@@ -650,7 +668,8 @@
     "serverUpdateAvailable": "Server update available for {{name}}",
     "modUpdateAvailable": "Mod update available for {{mod}} on server {{server}}",
     "activeLabel": "Email notifications: active",
-    "inactiveLabel": "Email notifications: disabled"
+    "inactiveLabel": "Email notifications: disabled",
+    "updateFailed": "Could not save notification setting."
   },
   "updater": {
     "manualConfigsRestored": "Manual configuration files were automatically restored.",
@@ -682,5 +701,9 @@
   "serverDetail": {
     "limit": "Limit",
     "free": "free"
-  }
+  },
+  "Passwort ungültig": "Invalid password",
+  "2FA-Code erforderlich": "2FA code required",
+  "Ungültiger 2FA-Code": "Invalid 2FA code",
+  "Owner-Account kann nicht gelöscht werden": "Owner account cannot be deleted"
 }

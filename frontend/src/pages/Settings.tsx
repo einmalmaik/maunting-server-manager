@@ -4,6 +4,8 @@ import { Clock, Mail, Globe, Save, Send, Gamepad2 } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { PasswordInput } from '@/components/ui/PasswordInput'
+import { supportedLocales } from '@/config/locales'
 
 interface PanelSettings {
   panel_url: string
@@ -226,8 +228,11 @@ export function Settings() {
                 }}
                 className="msm-input"
               >
-                <option value="de">Deutsch</option>
-                <option value="en">English</option>
+                {supportedLocales.map((locale) => (
+                  <option key={locale.code} value={locale.code}>
+                    {locale.nativeLabel}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -327,11 +332,9 @@ export function Settings() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('settings.smtpPassword')}
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
                   value={settings.smtp_password}
                   onChange={(e) => setSettings({ ...settings, smtp_password: e.target.value })}
-                  className="msm-input"
                   placeholder="••••••••"
                 />
               </div>
@@ -389,11 +392,9 @@ export function Settings() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   Neuer Resend API-Key
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
                   value={newResendKey}
                   onChange={(e) => setNewResendKey(e.target.value)}
-                  className="msm-input"
                   placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                 />
                 <p className="font-body-md text-xs text-on-surface-variant mt-2">
@@ -486,11 +487,9 @@ export function Settings() {
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                 {t('settings.steamNewKey')}
               </label>
-              <input
-                type="password"
+              <PasswordInput
                 value={newSteamKey}
                 onChange={(e) => setNewSteamKey(e.target.value)}
-                className="msm-input"
                 placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
               />
               <p className="font-body-md text-xs text-on-surface-variant mt-2">
@@ -598,11 +597,9 @@ export function Settings() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('settings.steamAccountPassword')}
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
                   value={steamAccountPassword}
                   onChange={(e) => setSteamAccountPassword(e.target.value)}
-                  className="msm-input"
                   placeholder="••••••••"
                 />
               </div>

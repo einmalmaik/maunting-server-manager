@@ -1,27 +1,35 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
-import de from './locales/de.json'
-import en from './locales/en.json'
+import { localeResources, supportedLocales } from './config/locales'
+import { getPersistedLocale, setPersistedLocale } from './utils/localePersistence'
 
-const resources = {
-  de: { translation: de },
-  en: { translation: en },
-} as const
+const detector = new LanguageDetector()
+detector.addDetector({
+  name: 'customConsentDetector',
+  lookup() {
+    return getPersistedLocale() ?? undefined
+  },
+  cacheUserLanguage(lng) {
+    setPersistedLocale(lng)
+  },
+})
+
+const supportedCodes = supportedLocales.map((l) => l.code)
 
 i18n
-  .use(LanguageDetector)
+  .use(detector)
   .use(initReactI18next)
   .init({
-    resources,
+    resources: localeResources,
     fallbackLng: 'en',
-    supportedLngs: ['en', 'de'],
+    supportedLngs: supportedCodes,
     interpolation: {
       escapeValue: false,
     },
     detection: {
-      order: ['localStorage', 'navigator', 'htmlTag'],
-      caches: ['localStorage'],
+      order: ['customConsentDetector', 'navigator', 'htmlTag'],
+      caches: ['customConsentDetector'],
     },
     react: {
       useSuspense: false,
@@ -33,4 +41,14 @@ i18n
     parseMissingKeyHandler: (key: string) => key,
   })
 
+if (typeof document !== 'undefined') {
+  i18n.on('languageChanged', (lng) => {
+    const meta = supportedLocales.find((l) => l.code === lng)
+    const dir = meta?.direction || 'ltr'
+    document.documentElement.dir = dir
+    document.documentElement.lang = lng
+  })
+}
+
 export default i18n
+

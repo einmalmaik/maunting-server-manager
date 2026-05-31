@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Shield, Server, ChevronRight, Check, Mail } from 'lucide-react'
 import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { api } from '@/api/client'
 
 interface SetupWizardProps {
@@ -227,34 +228,22 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   />
                 </div>
 
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('auth.password', 'Passwort')}
-                  </label>
-                  <input
-                    type="password"
-                    value={form.password}
-                    onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className="msm-input"
-                    placeholder="••••••••"
-                    required
-                    minLength={8}
-                  />
-                </div>
+                <PasswordInput
+                  label={t('auth.password', 'Passwort') || 'Passwort'}
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  placeholder="••••••••"
+                  required
+                  minLength={8}
+                />
 
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('auth.confirmPassword', 'Passwort bestätigen')}
-                  </label>
-                  <input
-                    type="password"
-                    value={form.confirm}
-                    onChange={(e) => setForm({ ...form, confirm: e.target.value })}
-                    className="msm-input"
-                    placeholder="••••••••"
-                    required
-                  />
-                </div>
+                <PasswordInput
+                  label={t('auth.confirmPassword', 'Passwort bestätigen') || 'Passwort bestätigen'}
+                  value={form.confirm}
+                  onChange={(e) => setForm({ ...form, confirm: e.target.value })}
+                  placeholder="••••••••"
+                  required
+                />
 
                 {error && (
                   <div className="msm-alert-error">

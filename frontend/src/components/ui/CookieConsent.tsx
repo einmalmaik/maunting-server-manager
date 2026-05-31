@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { CookieBanner } from './CookieBanner';
 import { CookieSettingsDialog } from './CookieSettingsDialog';
+import { setPersistedLocale, clearPersistedLocale } from '@/utils/localePersistence';
+import i18n from '@/i18n';
 
 const BANNER_ENTER_DELAY_MS = 80;
 const BANNER_EXIT_DELAY_MS = 250;
@@ -33,8 +35,8 @@ export function CookieConsent() {
             setIsSettingsOpen(true);
         };
 
-        window.addEventListener('singra:open-cookie-settings', handleOpenSettings);
-        return () => window.removeEventListener('singra:open-cookie-settings', handleOpenSettings);
+        window.addEventListener('msm:open-cookie-settings', handleOpenSettings);
+        return () => window.removeEventListener('msm:open-cookie-settings', handleOpenSettings);
     }, []);
 
     const dismissBanner = () => {
@@ -45,12 +47,14 @@ export function CookieConsent() {
     const handleAcceptAll = () => {
         localStorage.setItem('cookie_consent', JSON.stringify({ optional: true }));
         setOptional(true);
+        setPersistedLocale(i18n.language);
         dismissBanner();
     };
 
     const handleEssentialOnly = () => {
         localStorage.setItem('cookie_consent', JSON.stringify({ optional: false }));
         setOptional(false);
+        clearPersistedLocale();
         dismissBanner();
     };
 
@@ -72,10 +76,16 @@ export function CookieConsent() {
     const handleSaveSettings = () => {
         localStorage.setItem('cookie_consent', JSON.stringify({ optional }));
         setIsSettingsOpen(false);
+        if (optional) {
+            setPersistedLocale(i18n.language);
+        } else {
+            clearPersistedLocale();
+        }
         if (isBannerMounted) {
             dismissBanner();
         }
     };
+
 
     if (!isBannerMounted && !isSettingsOpen) {
         return null;

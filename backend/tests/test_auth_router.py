@@ -29,7 +29,7 @@ class TestLogin:
             "otp_code": None,
         })
         assert response.status_code == 401
-        assert response.json()["detail"] == "Ungueltige Anmeldedaten"
+        assert response.json()["detail"] == "Ungültige Anmeldedaten"
 
     def test_login_nonexistent_user(self, client: TestClient):
         response = client.post("/api/auth/login", json={

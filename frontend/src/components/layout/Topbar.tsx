@@ -6,6 +6,8 @@ import { useNavigate } from 'react-router-dom'
 import { Logo } from '@/components/Logo'
 import { Globe, Bell, Menu, User, LogOut } from 'lucide-react'
 import { api } from '@/api/client'
+import { toast } from '@/stores/toastStore'
+import { supportedLocales } from '@/config/locales'
 
 export function Topbar() {
   const { t, i18n } = useTranslation()
@@ -22,11 +24,6 @@ export function Topbar() {
       setNotificationsEnabled(user.email_notifications)
     }
   }, [user?.email_notifications])
-
-  const toggleLang = () => {
-    const next = i18n.language === 'de' ? 'en' : 'de'
-    i18n.changeLanguage(next)
-  }
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -59,8 +56,8 @@ export function Topbar() {
         // Optimistisches State-Update: kein Reload, kein MIME-Problem.
         updateUser({ email_notifications: next })
         setNotificationsEnabled(next)
-      } catch (err: any) {
-        console.error(err)
+      } catch {
+        toast.error(t('notifications.updateFailed'))
       }
     }
   }
@@ -83,14 +80,22 @@ export function Topbar() {
 
         {/* Right Actions */}
         <div className="flex items-center gap-4">
-          {/* Language Toggle */}
-          <button
-            onClick={toggleLang}
-            className="hidden sm:flex items-center gap-1.5 font-label-md text-xs text-on-surface-variant hover:text-primary transition-colors"
-          >
-            <Globe className="w-3.5 h-3.5" />
-            {i18n.language.toUpperCase()}
-          </button>
+          {/* Language Selector Dropdown */}
+          <div className="hidden sm:flex items-center gap-1.5 text-on-surface-variant hover:text-primary transition-colors relative">
+            <Globe className="w-3.5 h-3.5 absolute left-1.5 pointer-events-none" />
+            <select
+              value={i18n.language}
+              onChange={(e) => i18n.changeLanguage(e.target.value)}
+              className="bg-transparent border-0 text-xs font-label-md pl-6 pr-4 py-1.5 cursor-pointer focus:outline-none focus:ring-0 text-on-surface-variant hover:text-primary transition-colors appearance-none"
+              style={{ paddingRight: '1rem' }}
+            >
+              {supportedLocales.map((locale) => (
+                <option key={locale.code} value={locale.code} className="bg-surface-container-high text-on-surface">
+                  {locale.nativeLabel}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Notifications Toggle */}
           <button
@@ -99,21 +104,13 @@ export function Topbar() {
             aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
             className="p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary"
           >
-            <div className="bell-wrapper" style={{ position: 'relative', display: 'inline-flex' }}>
+            <div className="relative inline-flex">
               <Bell className="w-[18px] h-[18px]" />
               <span
-                className="bell-status-dot"
+                className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border-2 border-background ${
+                  notificationsEnabled ? 'bg-status-success' : 'bg-status-destructive'
+                }`}
                 aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
-                style={{
-                  position: 'absolute',
-                  top: '-2px',
-                  right: '-2px',
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  border: '2px solid #101417',
-                  backgroundColor: notificationsEnabled ? '#22c55e' : '#ef4444',
-                }}
               ></span>
             </div>
           </button>

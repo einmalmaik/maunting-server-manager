@@ -25,6 +25,7 @@ describe('Privacy page', () => {
     // Check header elements
     expect(screen.getByText('MauntingStudios')).toBeInTheDocument();
     expect(screen.getByText('Infrastructure Control')).toBeInTheDocument();
+    expect(screen.getByAltText('MauntingStudios')).toHaveAttribute('src', '/logo.png');
     
     // Check back button (German localization is default or fallback)
     expect(screen.getByRole('button')).toHaveTextContent(/Zurück|Back/);
@@ -37,6 +38,8 @@ describe('Privacy page', () => {
     expect(screen.getByText('3. Cookies')).toBeInTheDocument();
     expect(screen.getByText('4. Weitergabe an Dritte')).toBeInTheDocument();
     expect(screen.getByText('5. Recht auf Löschung')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Datenschutz' })).toHaveAttribute('href', '/privacy');
+    expect(screen.queryByText(/Impressum/i)).toBeNull();
   });
 
   it('renders privacy policy sections when authenticated (in-app page)', () => {
@@ -46,6 +49,7 @@ describe('Privacy page', () => {
     // In-app layout should NOT have the back button or standard public header
     expect(screen.queryByText('Infrastructure Control')).toBeNull();
     expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.getByAltText('MauntingStudios')).toHaveAttribute('src', '/logo.png');
 
     // Check main title and content are still loaded correctly
     expect(screen.getByText('Datenschutzerklärung')).toBeInTheDocument();

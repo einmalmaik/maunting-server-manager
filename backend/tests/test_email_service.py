@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from services.email_service import EmailService
+from config import settings
 
 
 class TestEmailServiceTemplates:
@@ -19,7 +20,16 @@ class TestEmailServiceTemplates:
         assert EmailService.LOGO_BASE64 in template
         assert "MauntingStudios" in template
         assert "INFRASTRUCTURE CONTROL" in template
-        assert "#0f172a" in template  # Header background color
+        assert EmailService.HEADER_COLOR in template
+
+    def test_logo_url_falls_back_to_png(self):
+        previous = settings.logo_url
+        settings.logo_url = ""
+        try:
+            logo_url = EmailService._get_logo_url()
+            assert logo_url.endswith("/logo.png")
+        finally:
+            settings.logo_url = previous
 
     def test_password_reset_email_html_contains_logo(self):
         html = EmailService._password_reset_email_html("testuser", "http://test-url/reset")

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import { api } from '@/api/client'
 import { Server, GameInfo } from '@/types'
 import { UpdateBanner } from '@/components/UpdateBanner'
@@ -220,11 +221,15 @@ export function Dashboard() {
       {servers.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {servers.map((server) => (
-            <div key={server.id} className="msm-card p-5">
+            <Link
+              key={server.id}
+              to={`/servers/${server.id}`}
+              className="msm-card p-5 block hover:border-primary/40 hover:bg-surface-container-high/40 transition-all duration-200 group cursor-pointer"
+            >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <ServerIcon className="w-4 h-4 text-on-surface-variant" />
-                  <h3 className="font-headline text-body-md text-on-surface">{server.name}</h3>
+                  <ServerIcon className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
+                  <h3 className="font-headline text-body-md text-on-surface group-hover:text-primary transition-colors">{server.name}</h3>
                 </div>
                 <span className={`font-mono-sm text-mono-sm px-2 py-0.5 rounded-full border ${
                   server.status === 'running'
@@ -253,7 +258,7 @@ export function Dashboard() {
                   </span>
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

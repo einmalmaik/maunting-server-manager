@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { usePermissionsStore } from '@/stores/permissionsStore'
+import { Loader } from '@/components/ui/Loader'
 
 /** Maximale Wartezeit auf das initiale Permissions-Laden, bevor zur Startseite
  * redirected wird. Schuetzt vor unendlichem Spinner, falls
@@ -40,7 +41,7 @@ export function RequirePermission({
     if (timedOut) return <Navigate to="/" replace />
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Loader label="Maunting Server Manager" />
       </div>
     )
   }

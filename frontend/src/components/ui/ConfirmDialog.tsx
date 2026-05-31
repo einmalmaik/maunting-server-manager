@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { useConfirmStore } from '@/stores/confirmStore'
+import { Button } from './Button'
 
 /** Globaler Confirm-Dialog. Genau einmal in der App montieren (siehe App.tsx).
  *
@@ -36,7 +37,7 @@ export function ConfirmDialog() {
 
   return (
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      className="msm-modal-overlay"
       onClick={() => resolve(false)}
       role="dialog"
       aria-modal="true"
@@ -62,25 +63,21 @@ export function ConfirmDialog() {
         </div>
 
         <div className="flex justify-end gap-2 mt-6">
-          <button
+          <Button
             type="button"
             onClick={() => resolve(false)}
-            className="px-4 py-2 rounded-md font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-highest transition-colors"
+            variant="ghost"
           >
             {cancelText}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             autoFocus
             onClick={() => resolve(true)}
-            className={
-              isDanger
-                ? 'px-4 py-2 rounded-md font-label-md text-label-md bg-status-destructive text-on-primary hover:opacity-90 transition-opacity'
-                : 'px-4 py-2 rounded-md font-label-md text-label-md bg-primary text-on-primary hover:opacity-90 transition-opacity'
-            }
+            variant={isDanger ? 'destructive' : 'primary'}
           >
             {confirmText}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

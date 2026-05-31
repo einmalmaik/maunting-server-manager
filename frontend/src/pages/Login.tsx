@@ -6,7 +6,10 @@ import { useAuthStore } from '@/stores/authStore'
 import type { User } from '@/types'
 import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
+import { ErrorMessage } from '@/components/ui/ErrorMessage'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Shield, ArrowRight, Globe, KeyRound, Mail, Check } from 'lucide-react'
+import { supportedLocales } from '@/config/locales'
 
 export function Login() {
   const { t, i18n } = useTranslation()
@@ -108,26 +111,27 @@ export function Login() {
     }
   }
 
-  const toggleLang = () => {
-    const next = i18n.language === 'de' ? 'en' : 'de'
-    i18n.changeLanguage(next)
-  }
-
   return (
     <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
       <div className="absolute inset-0 msm-deep-grid opacity-50" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
-      <div className="absolute top-20 right-20 w-64 h-64 bg-cyan-glow blur-[80px] rounded-full pointer-events-none opacity-40" />
 
       <div className="relative z-10 w-full max-w-md">
         <div className="flex justify-end mb-4">
-          <button
-            onClick={toggleLang}
-            className="flex items-center gap-1.5 font-label-md text-xs text-on-surface-variant hover:text-primary transition-colors"
-          >
-            <Globe className="w-3.5 h-3.5" />
-            {i18n.language.toUpperCase()}
-          </button>
+          <div className="flex items-center gap-1.5 text-on-surface-variant hover:text-primary transition-colors relative">
+            <Globe className="w-3.5 h-3.5 absolute left-1.5 pointer-events-none" />
+            <select
+              value={i18n.language}
+              onChange={(e) => i18n.changeLanguage(e.target.value)}
+              className="bg-transparent border-0 text-xs font-label-md pl-6 pr-4 py-1.5 cursor-pointer focus:outline-none focus:ring-0 text-on-surface-variant hover:text-primary transition-colors appearance-none"
+              style={{ paddingRight: '1rem' }}
+            >
+              {supportedLocales.map((locale) => (
+                <option key={locale.code} value={locale.code} className="bg-surface-container-high text-on-surface">
+                  {locale.nativeLabel}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex items-center justify-center gap-3 mb-8">
@@ -203,11 +207,7 @@ export function Login() {
                   />
                 </div>
 
-                {error && (
-                  <div className="msm-alert-error text-sm">
-                    {error}
-                  </div>
-                )}
+                <ErrorMessage message={error} className="text-sm" />
 
                 <button
                   type="submit"
@@ -279,20 +279,14 @@ export function Login() {
               />
             </div>
 
-            <div>
-              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                {t('auth.password')}
-              </label>
-              <input
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                className="msm-input"
-                placeholder="••••••••"
-                required
-                disabled={requires2FA}
-              />
-            </div>
+            <PasswordInput
+              label={t('auth.password') || 'Passwort'}
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              placeholder="••••••••"
+              required
+              disabled={requires2FA}
+            />
 
             {requires2FA && (
               <>
@@ -328,11 +322,7 @@ export function Login() {
               </>
             )}
 
-            {error && (
-              <div className="msm-alert-error text-sm">
-                {error}
-              </div>
-            )}
+            <ErrorMessage message={error} className="text-sm" />
 
             <button
               type="submit"

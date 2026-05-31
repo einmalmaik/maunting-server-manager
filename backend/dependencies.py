@@ -19,7 +19,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
     payload = AuthService.decode_token(token)
     if not payload or "sub" not in payload or payload.get("type") != "access":
-        raise HTTPException(status_code=401, detail="Ungueltiges Token")
+        raise HTTPException(status_code=401, detail="Ungültiges Token")
     jti = payload.get("jti")
     if jti and is_jwt_blacklisted(db, jti):
         raise HTTPException(status_code=401, detail="Token widerrufen")
@@ -84,7 +84,7 @@ def verify_csrf(request: Request) -> None:
             "CSRF check failed on %s: header does not match any of %d cookie value(s)",
             path, len(cookie_values),
         )
-        raise HTTPException(status_code=403, detail="CSRF-Token ungueltig")
+        raise HTTPException(status_code=403, detail="CSRF-Token ungültig")
 
 
 def require_server_permission(user: User, server_id: int, db: Session, key: str) -> None:

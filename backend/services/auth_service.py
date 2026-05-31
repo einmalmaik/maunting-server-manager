@@ -180,3 +180,40 @@ class AuthService:
         # Sicherheit: Bei Passwort-Aenderung alle Refresh-Tokens revozieren
         AuthService.revoke_all_user_refresh_tokens(db, user.id)
         db.commit()
+
+    @staticmethod
+    def verify_current_2fa_code(user: User, otp_code: str) -> bool:
+        if not user.two_factor_secret_encrypted:
+            return False
+        import pyotp
+        try:
+            secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted)
+            if not secret:
+                return False
+            totp = pyotp.TOTP(secret)
+            return totp.verify(otp_code)
+        except Exception:
+            return False
+
+    @staticmethod
+    def delete_account_atomically(db: Session, user: User) -> None:
+        from models.jwt_blacklist import JwtBlacklist
+        from models.email_verification import EmailVerification
+        from models.audit_log import AuditLog
+        from models.server_permission import ServerPermission
+
+        # Delete JwtBlacklist items
+        db.query(JwtBlacklist).filter(JwtBlacklist.user_id == user.id).delete()
+        
+        # Delete EmailVerification items
+        db.query(EmailVerification).filter(EmailVerification.email == user.email).delete()
+
+        # Set user_id to None on AuditLog items
+        db.query(AuditLog).filter(AuditLog.user_id == user.id).update({"user_id": None})
+
+        # Set granted_by to None on ServerPermission items granted by this user
+        db.query(ServerPermission).filter(ServerPermission.granted_by == user.id).update({"granted_by": None})
+
+        # Finally delete user
+        db.delete(user)
+        db.commit()

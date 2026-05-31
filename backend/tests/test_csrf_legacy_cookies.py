@@ -86,7 +86,7 @@ class TestVerifyCsrfWithStaleLegacyCookie:
         )
         assert response.status_code == 403
         # Detail unterscheidet den Mismatch-Fall vom Missing-Fall.
-        assert response.json()["detail"] == "CSRF-Token ungueltig"
+        assert response.json()["detail"] == "CSRF-Token ungültig"
 
     def test_rejects_when_no_csrf_header(
         self, client: TestClient, owner_user: User, owner_cookies: dict

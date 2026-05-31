@@ -12,7 +12,7 @@ from cookies import _set_auth_cookies, _clear_auth_cookies
 from database import get_db
 from dependencies import get_current_user, get_current_owner, verify_csrf
 from models import User, EmailVerification
-from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest
+from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest
 from schemas import ResendVerificationRequest
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest
 from services import AuthService, EmailService
@@ -74,7 +74,7 @@ async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> 
         db.commit()
         raise HTTPException(
             status_code=503,
-            detail="SMTP nicht konfiguriert. Verifikation nicht moeglich."
+            detail="SMTP nicht konfiguriert. Verifikation nicht möglich."
         )
 
     return {"message": "Verifikations-Code gesendet", "requires_verification": True}
@@ -84,13 +84,13 @@ async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> 
 def setup_verify(req: SetupVerifyRequest, db: Session = Depends(get_db)) -> dict:
     user = AuthService.get_user_by_email(db, req.email)
     if not user:
-        raise HTTPException(status_code=400, detail="Ungueltige E-Mail")
+        raise HTTPException(status_code=400, detail="Ungültige E-Mail")
     if user.email_verified:
         raise HTTPException(status_code=400, detail="Bereits verifiziert")
 
     valid = EmailVerificationService.verify_code(db, req.email, "setup", req.code)
     if not valid:
-        raise HTTPException(status_code=400, detail="Ungueltiger oder abgelaufener Code")
+        raise HTTPException(status_code=400, detail="Ungültiger oder abgelaufener Code")
 
     user.email_verified = True
     db.commit()
@@ -101,7 +101,7 @@ def setup_verify(req: SetupVerifyRequest, db: Session = Depends(get_db)) -> dict
 async def setup_resend(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> dict:
     user = AuthService.get_user_by_email(db, req.email)
     if not user or user.email_verified:
-        raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
+        raise HTTPException(status_code=400, detail="Ungültige Anfrage")
 
     code = EmailVerificationService.create_verification(db, req.email, LOGIN_VERIFICATION_PURPOSE)
     if EmailService.is_configured():
@@ -110,7 +110,7 @@ async def setup_resend(req: OwnerSetupRequest, db: Session = Depends(get_db)) ->
         _log_smtp_missing(req.email)
         raise HTTPException(
             status_code=503,
-            detail="SMTP nicht konfiguriert. Verifikation nicht moeglich."
+            detail="SMTP nicht konfiguriert. Verifikation nicht möglich."
         )
 
     return {"message": "Code erneut gesendet"}
@@ -118,10 +118,10 @@ async def setup_resend(req: OwnerSetupRequest, db: Session = Depends(get_db)) ->
 
 @router.post("/resend-verification")
 async def resend_verification(req: ResendVerificationRequest, db: Session = Depends(get_db)) -> dict:
-    """Neuen Verifizierungscode fuer einen unverifizierten User senden."""
+    """Neuen Verifizierungscode für einen unverifizierten User senden."""
     user = AuthService.get_user_by_email(db, req.email)
     if not user or user.email_verified:
-        raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
+        raise HTTPException(status_code=400, detail="Ungültige Anfrage")
 
     code = EmailVerificationService.create_verification(db, req.email, LOGIN_VERIFICATION_PURPOSE)
     if EmailService.is_configured():
@@ -130,7 +130,7 @@ async def resend_verification(req: ResendVerificationRequest, db: Session = Depe
         _log_smtp_missing(req.email)
         raise HTTPException(
             status_code=503,
-            detail="SMTP nicht konfiguriert. Verifikation nicht moeglich."
+            detail="SMTP nicht konfiguriert. Verifikation nicht möglich."
         )
 
     return {"message": "Code erneut gesendet"}
@@ -167,13 +167,13 @@ def register_verify(
 ) -> dict:
     user = AuthService.get_user_by_email(db, req.email)
     if not user:
-        raise HTTPException(status_code=400, detail="Ungueltige E-Mail")
+        raise HTTPException(status_code=400, detail="Ungültige E-Mail")
     if user.email_verified:
         raise HTTPException(status_code=400, detail="Bereits verifiziert")
 
     valid = EmailVerificationService.verify_code(db, req.email, REGISTER_VERIFICATION_PURPOSE, req.code)
     if not valid:
-        raise HTTPException(status_code=400, detail="Ungueltiger oder abgelaufener Code")
+        raise HTTPException(status_code=400, detail="Ungültiger oder abgelaufener Code")
 
     user.email_verified = True
     db.commit()
@@ -189,7 +189,7 @@ def login_verify(
 ) -> dict:
     user = AuthService.get_user_by_username(db, req.username)
     if not user or not AuthService.verify_password(req.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Ungueltige Anmeldedaten")
+        raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
     if not user.is_active:
         raise HTTPException(status_code=401, detail="Account deaktiviert")
     if user.email_verified:
@@ -202,7 +202,7 @@ def login_verify(
         req.code,
     )
     if not valid:
-        raise HTTPException(status_code=400, detail="Ungueltiger oder abgelaufener Code")
+        raise HTTPException(status_code=400, detail="Ungültiger oder abgelaufener Code")
 
     user.email_verified = True
     db.commit()
@@ -217,7 +217,7 @@ def login_verify(
         if not totp.verify(req.otp_code):
             backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
             if not backup_valid:
-                raise HTTPException(status_code=401, detail="Ungueltiger 2FA-Code oder Backup-Code")
+                raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
 
     _set_login_session(response, db, user)
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False, "requires_verification": False}
@@ -232,7 +232,7 @@ async def login(
 ) -> dict:
     user = AuthService.get_user_by_username(db, req.username)
     if not user or not AuthService.verify_password(req.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Ungueltige Anmeldedaten")
+        raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
 
     if not user.is_active:
         raise HTTPException(status_code=401, detail="Account deaktiviert")
@@ -263,7 +263,7 @@ async def login(
             # Backup-Code als Fallback pruefen
             backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
             if not backup_valid:
-                raise HTTPException(status_code=401, detail="Ungueltiger 2FA-Code oder Backup-Code")
+                raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
 
     _set_login_session(response, db, user)
 
@@ -328,7 +328,7 @@ def refresh(
         raise HTTPException(status_code=401, detail="Kein Refresh-Token")
     rt = AuthService.validate_refresh_token(db, refresh_cookie)
     if not rt:
-        raise HTTPException(status_code=401, detail="Ungueltiges Refresh-Token")
+        raise HTTPException(status_code=401, detail="Ungültiges Refresh-Token")
     family = rt.family
     AuthService.mark_refresh_token_used(db, rt)
     user = AuthService.get_user_by_id(db, rt.user_id)
@@ -365,7 +365,7 @@ async def change_password(
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Eigenes Passwort aendern. Erfordert aktuelles Passwort + 2FA-Code wenn 2FA aktiv."""
+    """Eigenes Passwort ändern. Erfordert aktuelles Passwort + 2FA-Code wenn 2FA aktiv."""
     if not AuthService.verify_password(req.current_password, user.password_hash):
         raise HTTPException(status_code=401, detail="Aktuelles Passwort falsch")
 
@@ -377,12 +377,12 @@ async def change_password(
             raise HTTPException(status_code=401, detail="2FA-Secret nicht gefunden")
         totp = pyotp.TOTP(secret)
         if not totp.verify(req.otp_code):
-            raise HTTPException(status_code=401, detail="Ungueltiger 2FA-Code")
+            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
 
     AuthService.reset_password(db, user, req.new_password)
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_password_changed_notification(user.email, user.username)
-    return {"message": "Passwort geaendert"}
+    return {"message": "Passwort geändert"}
 
 
 @router.post("/change-email")
@@ -392,7 +392,7 @@ async def change_email(
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """E-Mail-Adresse aendern. Erfordert 2FA-Code wenn 2FA aktiv."""
+    """E-Mail-Adresse ändern. Erfordert 2FA-Code wenn 2FA aktiv."""
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
 
@@ -404,7 +404,7 @@ async def change_email(
             raise HTTPException(status_code=401, detail="2FA-Secret nicht gefunden")
         totp = pyotp.TOTP(secret)
         if not totp.verify(req.otp_code):
-            raise HTTPException(status_code=401, detail="Ungueltiger 2FA-Code")
+            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
 
     user.email = req.email
     user.email_verified = False
@@ -413,7 +413,7 @@ async def change_email(
     if EmailService.is_configured():
         code = EmailVerificationService.create_verification(db, req.email, "setup")
         await EmailService.send_verification_code_email(req.email, user.username, code)
-    return {"message": "E-Mail geaendert. Bitte neue E-Mail verifizieren."}
+    return {"message": "E-Mail geändert. Bitte neue E-Mail verifizieren."}
 
 
 @router.post("/forgot-password")
@@ -436,13 +436,40 @@ def reset_password(
         User.password_reset_expires > datetime.now(timezone.utc),
     ).first()
     if not user:
-        raise HTTPException(status_code=400, detail="Ungueltiger oder abgelaufener Token")
+        raise HTTPException(status_code=400, detail="Ungültiger oder abgelaufener Token")
     AuthService.reset_password(db, user, req.new_password)
-    return {"message": "Passwort zurueckgesetzt"}
+    return {"message": "Passwort zurückgesetzt"}
+@router.delete("/delete-account")
+def delete_account(
+    req: DeleteAccountRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Eigenes Konto loeschen. Erfordert Passwort und aktuellen 2FA-Code (falls 2FA aktiv)."""
+    # 1. Passwort verifizieren
+    if not AuthService.verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Passwort ungültig")
 
+    # 2. 2FA verifizieren (falls aktiv)
+    if user.two_factor_enabled:
+        if not req.otp_code:
+            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
+        if not AuthService.verify_current_2fa_code(user, req.otp_code):
+            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
 
+    # 3. Owner-Sperre: Owner-Account darf nicht geloescht werden
+    if user.is_owner:
+        raise HTTPException(status_code=403, detail="Owner-Account kann nicht gelöscht werden")
 
+    # 4. Atomar loeschen
+    AuthService.delete_account_atomically(db, user)
 
+    # 5. Cookies loeschen
+    _clear_auth_cookies(response)
+
+    return {"message": "Account gelöscht"}
 
 @router.post("/2fa/setup")
 def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
@@ -461,7 +488,7 @@ async def enable_2fa(otp_code: str, user: User = Depends(get_current_user), db: 
     secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted)
     totp = pyotp.TOTP(secret)
     if not totp.verify(otp_code):
-        raise HTTPException(status_code=400, detail="Ungueltiger Code")
+        raise HTTPException(status_code=400, detail="Ungültiger Code")
     user.two_factor_enabled = True
     db.commit()
     if EmailService.is_configured() and user.email_notifications:
@@ -482,7 +509,7 @@ async def disable_2fa(
     secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted)
     totp = pyotp.TOTP(secret)
     if not totp.verify(otp_code):
-        raise HTTPException(status_code=400, detail="Ungueltiger 2FA-Code")
+        raise HTTPException(status_code=400, detail="Ungültiger 2FA-Code")
     user.two_factor_enabled = False
     user.two_factor_secret_encrypted = None
     BackupCodeService.clear_all_backup_codes(db, user.id)

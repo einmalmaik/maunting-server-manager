@@ -4,8 +4,9 @@
 
 @layer base {
   html {
-    background-color: #101417;
-    color: #dfe3e7;
+    background-color: #071013;
+    color: #e7f4f7;
+    color-scheme: dark;
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -15,11 +16,45 @@
     min-height: 100vh;
     margin: 0;
     padding: 0;
+    background: #071013;
   }
 
   ::selection {
-    background: hsl(194 44% 68% / 0.25);
-    color: #dfe3e7;
+    background: hsl(190 92% 62% / 0.28);
+    color: #e7f4f7;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(190 92% 62%);
+    outline-offset: 2px;
+  }
+
+  input[type='checkbox'] {
+    accent-color: #67e8f9;
+  }
+
+  * {
+    scrollbar-color: #284147 #071013;
+    scrollbar-width: thin;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: #071013;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #284147;
+    border: 2px solid #071013;
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: #3a5a63;
   }
 }
 
@@ -31,41 +66,61 @@
    * Surface Elevation: surface-container/70 + backdrop-blur-xl + ring-1 ring-white/10
    */
 
-  /* Glass Panel — Core container pattern */
+  /* Glass Panel - core container pattern */
   .msm-panel {
-    @apply bg-surface-container/70 backdrop-blur-xl ring-1 ring-white/10;
+    @apply bg-surface-container/85 backdrop-blur-xl border border-outline-variant/70;
+    box-shadow: 0 20px 48px hsl(0 0% 0% / 0.34);
   }
 
   .msm-card {
     @apply msm-panel rounded-lg;
   }
 
-  /* Primary Button — High-contrast white on dark with glow */
+  /* Primary Button - controlled logo cyan, high contrast on dark */
   .msm-btn-primary {
     @apply bg-primary text-on-primary font-label-md text-label-md rounded-md
            hover:shadow-primary-glow-hover active:scale-[0.98]
+           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
+           disabled:pointer-events-none disabled:opacity-50
            transition-all duration-200;
-    box-shadow: 0 0 20px rgba(255,255,255,0.15);
+    box-shadow: 0 12px 28px hsl(190 92% 62% / 0.18);
   }
 
-  /* Secondary Button — Glass panel with border */
+  /* Secondary Button - quiet glass panel with border */
   .msm-btn-secondary {
     @apply bg-surface-container-high/50 border border-outline-variant
            text-on-surface-variant hover:text-on-surface
            hover:bg-surface-variant/30 hover:border-outline
            font-label-md text-label-md rounded-md
+           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
+           disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
   }
 
-  /* Destructive Button — Red outline, fill on hover */
+  .msm-btn-tertiary {
+    @apply bg-transparent border border-transparent text-on-surface-variant
+           hover:text-primary hover:bg-primary/10 hover:border-primary/20
+           font-label-md text-label-md rounded-md
+           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
+           disabled:pointer-events-none disabled:opacity-50
+           active:scale-[0.98] transition-all duration-200;
+  }
+
+  /* Destructive Button - red only for destructive actions */
   .msm-btn-destructive {
     @apply border border-status-destructive text-error
            hover:bg-status-destructive hover:text-on-error
            font-label-md text-label-md rounded-md
+           focus-visible:ring-2 focus-visible:ring-status-destructive focus-visible:ring-offset-2 focus-visible:ring-offset-background
+           disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
   }
 
-  /* Input Field — Dark recessed surface */
+  .msm-btn-danger {
+    @apply msm-btn-destructive;
+  }
+
+  /* Input Field - dark recessed surface */
   .msm-input {
     @apply w-full bg-surface-container-high border border-outline-variant
            text-on-surface placeholder-on-surface-variant
@@ -143,6 +198,11 @@
            text-status-destructive p-3 rounded-lg font-body-md text-sm;
   }
 
+  .msm-alert-info {
+    @apply bg-primary/10 border border-primary/30
+           text-primary p-3 rounded-lg font-body-md text-sm;
+  }
+
   /* Navigation Link */
   .msm-nav-link {
     @apply flex items-center gap-3 px-4 py-3 mx-2 my-1
@@ -153,7 +213,7 @@
   }
 
   .msm-nav-link-active {
-    @apply msm-nav-link bg-secondary-container text-on-secondary-container font-bold;
+    @apply msm-nav-link bg-primary/10 text-primary border border-primary/20 font-bold;
   }
 
   /* Ambient Glow — Decorative background element */
@@ -165,8 +225,8 @@
   /* Deep Grid Background */
   .msm-deep-grid {
     background-image:
-      linear-gradient(to right, rgba(65, 72, 73, 0.1) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(65, 72, 73, 0.1) 1px, transparent 1px);
+      linear-gradient(to right, rgba(103, 232, 249, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(103, 232, 249, 0.06) 1px, transparent 1px);
     background-size: 40px 40px;
   }
 
@@ -196,4 +256,3 @@
     border-radius: 2px;
   }
 }
-

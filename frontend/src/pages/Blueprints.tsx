@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import {
   Boxes,
+  BookOpen,
   Download,
   RefreshCw,
   Search,
@@ -188,6 +190,25 @@ export function Blueprints() {
       <p className="font-body-md text-body-md text-on-surface-variant mb-6">
         {t('blueprints.pageSubtitle')}
       </p>
+
+      {/* Help Banner: Host custom blueprints & Discord bots */}
+      <div className="mb-6 bg-primary/10 border border-primary/20 rounded-md p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h4 className="font-bold text-on-surface text-sm">
+            {t('blueprints.docsBannerTitle')}
+          </h4>
+          <p className="text-xs text-on-surface-variant mt-1">
+            {t('blueprints.docsBannerText')}
+          </p>
+        </div>
+        <Link
+          to="/docs#docs-howto"
+          className="msm-btn-secondary py-1.5 px-3 text-xs shrink-0 self-start sm:self-center inline-flex items-center gap-1.5"
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          {t('blueprints.docsBannerBtn')}
+        </Link>
+      </div>
 
       {/* Toolbar: Upload + Suche + Filter */}
       <div className="flex flex-wrap gap-3 mb-6 items-start">

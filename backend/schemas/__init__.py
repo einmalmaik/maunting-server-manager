@@ -1,4 +1,4 @@
-from .auth import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, ResendVerificationRequest
+from .auth import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, ResendVerificationRequest, DeleteAccountRequest
 from .user import UserCreate, UserResponse, UserUpdate, OwnerSetupRequest
 from .server import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
 from .permission import PermissionCatalogResponse, PermissionDefResponse, MePermissionsResponse
@@ -7,7 +7,7 @@ from .backup import BackupResponse
 from .mod import ModResponse
 
 __all__ = [
-    "LoginRequest", "LoginVerifyRequest", "TokenResponse", "RegistrationResponse", "PasswordResetRequest", "PasswordResetConfirm", "ChangePasswordRequest", "ChangeEmailRequest", "ResendVerificationRequest",
+    "LoginRequest", "LoginVerifyRequest", "TokenResponse", "RegistrationResponse", "PasswordResetRequest", "PasswordResetConfirm", "ChangePasswordRequest", "ChangeEmailRequest", "ResendVerificationRequest", "DeleteAccountRequest",
     "UserCreate", "UserResponse", "UserUpdate", "OwnerSetupRequest",
     "ServerCreate", "ServerResponse", "ServerUpdate", "ServerStatusResponse",
     "PermissionCatalogResponse", "PermissionDefResponse", "MePermissionsResponse",
