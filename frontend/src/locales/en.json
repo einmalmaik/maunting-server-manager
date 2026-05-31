@@ -108,9 +108,9 @@
       "configPatchKey": "Key inside the section.",
       "configPatchValue": "Value. Allowed port placeholders: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Not allowed: {ENV.<KEY>}, {MOD_ARG}, {INSTALL_DIR}.",
       "portsDesc": "Declare the required port roles. The user assigns concrete numbers during creation. The same standard role may appear once per protocol, e.g. query/udp and query/tcp; MSM stores these as unique roles such as query and query_2.",
-      "portsName": "Roles: game, query, rcon, voice, web, custom. name is the functional role, not the protocol.",
+      "portsName": "Port role. Do not write 'ports.name' as the value; use game, query, rcon, voice, web, or custom. Concrete port numbers are assigned later when creating the server.",
       "portsProtocol": "tcp or udp. The protocol controls Docker mapping and firewall rules and can be changed later in the network panel.",
-      "sourceType": "steam, http, dockerOnly, manualUpload.",
+      "sourceType": "Where server files come from: steam = SteamCMD, http = HTTPS archive, dockerOnly = image contains everything, manualUpload = user uploads files manually.",
       "sourceSteam": "Defines appId, platform (linux/windows), and compatibility (native/proton).",
       "sourceHttp": "HTTPS URL to the server archive (zip/tar).",
       "sourceManual": "List of required files if users must upload them manually.",
@@ -130,9 +130,12 @@
       "h2": "How do I patch a configuration file?",
       "b2": "Use 'runtime.configPatches'. Required fields per patch: type (currently only 'ini'), file (relative path), section (INI section, e.g. 'Server'), key, and value. Port placeholders are allowed in value ({GAME_PORT} etc.) — but NOT {ENV.<KEY>} or {MOD_ARG}, as those are only valid in the startup command.",
       "h3": "How do I host Discord bots or other open-source software (GitHub)?",
-      "b3": "You have two options: 1) Docker-Only: Set 'source.type' to 'dockerOnly' and specify your Docker image in 'runtime.image'. Environment variables can be defined statically in 'runtime.env'. 2) HTTP Source (Recommended): Set 'source.type' to 'http' and specify the GitHub ZIP URL. Since the startup command ('runtime.startup') is read-only for the user, it is best to use a generic command like 'sh start.sh' or 'npm start'. The user can then use the File Manager ('Files' tab) to edit configuration files (.env, config.json) and define their startup file inside 'start.sh' or 'package.json'. When clicking 'Update Server', MSM downloads the newest files from GitHub while protecting custom config files.",
+      "b3": "First choose the source: 'steam' for SteamCMD, 'http' for a ZIP/TAR over HTTPS, 'dockerOnly' when everything is already inside the image, or 'manualUpload' when the user must upload files manually. Ports are roles, not fixed numbers: 'game' is the main port, 'query' is the server-list port, 'rcon' is the admin console, and 'voice' is a voice port. The user assigns the actual numbers when creating the server.",
       "b3_extra": "MSM's automatic updater will preserve your configuration files: Typical config extensions like .json, .env, .toml, .yaml, .yml, .ini, .cfg, or .txt (under 2MB in size, outside of system/data directories) are backed up temporarily during updates/reinstalls and restored automatically.",
-      "botExampleTitle": "Example: Discord Bot Blueprint (GitHub ZIP download & auto-update)"
+      "nonSteamExampleTitle": "Example: Non-Steam Game (Hytale)",
+      "steamExampleTitle": "Example: Steam Game (DayZ)",
+      "botExampleTitle": "Example: Discord Bot (GitHub ZIP)",
+      "voiceExampleTitle": "Example: Open-Source Voice Server (Mumble)"
     },
     "troubleshooting": {
       "err1Title": "Invalid JSON",
@@ -150,7 +153,9 @@
       "err7Title": "public_bind_ip missing or set to 0.0.0.0",
       "err7Body": "MSM blocks the start when Docker would bind to all interfaces. Set a concrete host IP in the server detail view. This protects firewall rules from being bypassed accidentally.",
       "err8Title": "Steam account not configured",
-      "err8Body": "Some Steam servers or Workshop downloads require a global Steam login. Configure the account in Settings. Passwords are not shown in logs or toasts."
+      "err8Body": "Some Steam servers or Workshop downloads require a global Steam login. Configure the account in Settings. Passwords are not shown in logs or toasts.",
+      "err9Title": "Hytale OAuth or downloader access failed",
+      "err9Body": "On the first Hytale start, the console shows an OAuth link. Open it, enter the code, and use a Hytale account with server-download access. If you see 403 or Unauthorized, the account usually lacks access, the code expired, or the local Hytale downloader credential file in that server directory must be renewed."
     }
   },
   "servers": {

@@ -125,6 +125,66 @@ export function Docs() {
     "source": { "type": "dockerOnly" }
   }
 
+  const nonSteamExample = {
+    "version": 1,
+    "meta": {
+      "id": "hytale",
+      "name": "Hytale (Dedicated)",
+      "category": "non_steam_game"
+    },
+    "runtime": {
+      "image": "ghcr.io/natroutter/egg-hytale:latest",
+      "workdir": "/home/container",
+      "env": {
+        "STARTUP": "./start.sh",
+        "SERVER_PORT": "{GAME_PORT}",
+        "AUTH_MODE": "AUTHENTICATED",
+        "AUTOMATIC_UPDATE": "1",
+        "PATCHLINE": "release"
+      },
+      "startup": "/entrypoint.sh"
+    },
+    "ports": [
+      { "name": "game", "protocol": "udp" }
+    ],
+    "source": {
+      "type": "http",
+      "http": {
+        "url": "https://downloader.hytale.com/hytale-downloader.zip",
+        "archiveType": "zip"
+      }
+    }
+  }
+
+  const steamGameExample = {
+    "version": 1,
+    "meta": {
+      "id": "dayz",
+      "name": "DayZ",
+      "category": "steam_game"
+    },
+    "runtime": {
+      "image": "cm2network/steamcmd:root",
+      "workdir": "/data",
+      "env": {},
+      "startup": "/data/DayZServer -profiles=/data/profiles -port={GAME_PORT}"
+    },
+    "ports": [
+      { "name": "game", "protocol": "udp" },
+      { "name": "query", "protocol": "udp" },
+      { "name": "rcon", "protocol": "tcp" }
+    ],
+    "source": {
+      "type": "steam",
+      "steam": {
+        "appId": "223350",
+        "platform": "linux",
+        "compatibility": "native",
+        "requiresLogin": true
+      }
+    }
+  }
+
   const botExample = {
     "version": 1,
     "meta": {
@@ -145,8 +205,31 @@ export function Docs() {
     "source": {
       "type": "http",
       "http": {
-        "url": "https://github.com/owner/repo/archive/refs/heads/main.zip"
+        "url": "https://github.com/owner/repo/archive/refs/heads/main.zip",
+        "archiveType": "zip"
       }
+    }
+  }
+
+  const voiceServerExample = {
+    "version": 1,
+    "meta": {
+      "id": "mumble_server",
+      "name": "Mumble Server",
+      "category": "voice_server"
+    },
+    "runtime": {
+      "image": "mumblevoip/mumble-server:latest",
+      "workdir": "/data",
+      "env": {},
+      "startup": "mumble-server"
+    },
+    "ports": [
+      { "name": "voice", "protocol": "tcp" },
+      { "name": "voice", "protocol": "udp" }
+    ],
+    "source": {
+      "type": "dockerOnly"
     }
   }
 
@@ -312,11 +395,31 @@ export function Docs() {
             <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.h3')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b3')}</p>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b3_extra')}</p>
-            <div className="mt-4">
-              <span className="font-semibold text-xs text-on-surface-variant block mb-1">
-                {t('docs.howto.botExampleTitle')}
-              </span>
-              <CodeBlock example={botExample} />
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
+              <div>
+                <span className="font-semibold text-xs text-on-surface-variant block mb-1">
+                  {t('docs.howto.nonSteamExampleTitle', 'Example: Non-Steam Game (Hytale)')}
+                </span>
+                <CodeBlock example={nonSteamExample} />
+              </div>
+              <div>
+                <span className="font-semibold text-xs text-on-surface-variant block mb-1">
+                  {t('docs.howto.steamExampleTitle', 'Example: Steam Game (DayZ)')}
+                </span>
+                <CodeBlock example={steamGameExample} />
+              </div>
+              <div>
+                <span className="font-semibold text-xs text-on-surface-variant block mb-1">
+                  {t('docs.howto.botExampleTitle')}
+                </span>
+                <CodeBlock example={botExample} />
+              </div>
+              <div>
+                <span className="font-semibold text-xs text-on-surface-variant block mb-1">
+                  {t('docs.howto.voiceExampleTitle', 'Example: Open-Source Voice Server (Mumble)')}
+                </span>
+                <CodeBlock example={voiceServerExample} />
+              </div>
             </div>
           </section>
 
@@ -346,6 +449,9 @@ export function Docs() {
               </Alert>
               <Alert type="warning" title={t('docs.troubleshooting.err8Title')}>
                 {t('docs.troubleshooting.err8Body')}
+              </Alert>
+              <Alert type="warning" title={t('docs.troubleshooting.err9Title', 'Hytale OAuth or downloader access failed')}>
+                {t('docs.troubleshooting.err9Body', 'On the first Hytale start, the console shows an OAuth link. Open it, enter the code, and use a Hytale account with server-download access. If you see 403 or Unauthorized, refresh the login flow or remove the local Hytale downloader credential file in that server directory.')}
               </Alert>
             </div>
           </section>

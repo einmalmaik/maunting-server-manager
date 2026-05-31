@@ -108,9 +108,9 @@
       "configPatchKey": "Schlüssel innerhalb der Sektion.",
       "configPatchValue": "Wert. Erlaubt sind Port-Platzhalter: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Nicht erlaubt: {ENV.<KEY>}, {MOD_ARG}, {INSTALL_DIR}.",
       "portsDesc": "Deklariere nur die benötigten Port-Rollen. Konkrete Nummern weist der User beim Erstellen zu. Dieselbe Standardrolle darf einmal pro Protokoll vorkommen, z. B. query/udp und query/tcp; MSM speichert daraus eindeutige Rollen wie query und query_2.",
-      "portsName": "Rollen: game, query, rcon, voice, web, custom. name ist die fachliche Rolle, nicht das Protokoll.",
+      "portsName": "Rolle des Ports. Du schreibst nicht 'ports.name' hinein, sondern einen Wert wie game, query, rcon, voice, web oder custom. Konkrete Portnummern kommen später beim Server-Erstellen.",
       "portsProtocol": "tcp oder udp. Das Protokoll bestimmt Docker-Mapping und Firewall-Freigabe und kann im Netzwerk-Panel nachträglich geändert werden.",
-      "sourceType": "steam, http, dockerOnly, manualUpload.",
+      "sourceType": "Quelle der Serverdateien: steam = SteamCMD, http = HTTPS-Archiv, dockerOnly = Image enthält alles, manualUpload = Nutzer lädt Dateien selbst hoch.",
       "sourceSteam": "Definiert appId, platform (linux/windows) und compatibility (native/proton).",
       "sourceHttp": "HTTPS-URL zum Server-Archiv (zip/tar).",
       "sourceManual": "Liste der benötigten Dateien, wenn User diese manuell hochladen müssen.",
@@ -130,9 +130,12 @@
       "h2": "Wie patche ich eine Konfigurationsdatei?",
       "b2": "Nutze 'runtime.configPatches'. Pflichtfelder pro Patch: type (derzeit nur 'ini'), file (relativer Pfad zur Datei), section (INI-Sektion, z. B. 'Server'), key (Schlüssel) und value (Wert). Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.) — aber KEIN {ENV.<KEY>} und KEIN {MOD_ARG}, da diese nur im startup-Befehl sinnvoll sind.",
       "h3": "Wie hoste ich Discord-Bots oder andere Open-Source-Software (GitHub)?",
-      "b3": "Du hast zwei Möglichkeiten: 1) Docker-Only: Stelle 'source.type' auf 'dockerOnly' und gib dein Docker-Image unter 'runtime.image' an. Umgebungsvariablen können statisch in 'runtime.env' definiert werden. 2) HTTP-Source (Empfohlen): Stelle 'source.type' auf 'http' und gib die GitHub-ZIP-URL an. Da das Startkommando ('runtime.startup') in der Blueprint fest hinterlegt ist, nutzt man am besten einen generischen Aufruf wie 'sh start.sh' oder 'npm start'. Der User kann dann über den Dateimanager (Tab 'Dateien') die Konfiguration (.env, config.json) anpassen und in der 'start.sh' bzw. 'package.json' seine individuelle Startdatei definieren. Beim Klick auf 'Server aktualisieren' zieht MSM die neuesten Updates von GitHub, wobei die Konfigurationsdateien geschützt bleiben.",
+      "b3": "Wähle zuerst die Quelle: 'steam' für SteamCMD, 'http' für ein ZIP/TAR über HTTPS, 'dockerOnly' wenn alles schon im Image steckt, oder 'manualUpload' wenn der Nutzer Dateien selbst hochladen muss. Ports sind Rollen, keine festen Nummern: 'game' ist der Hauptport, 'query' der Serverlisten-Port, 'rcon' die Admin-Konsole und 'voice' ein Sprachport. Die Nummern vergibt der Nutzer später beim Server-Erstellen.",
       "b3_extra": "Hierbei schützt der automatische Updater von MSM deine Konfigurationsdateien: Alle typischen Config-Dateiendungen wie .json, .env, .toml, .yaml, .yml, .ini, .cfg oder .txt (unter 2MB Größe, außerhalb von Systemordnern) werden vor dem Herunterladen temporär gesichert und danach wiederhergestellt.",
-      "botExampleTitle": "Beispiel: Discord-Bot Blueprint (GitHub ZIP-Download & Auto-Update)"
+      "nonSteamExampleTitle": "Beispiel: Nicht-Steam-Game (Hytale)",
+      "steamExampleTitle": "Beispiel: Steam-Game (DayZ)",
+      "botExampleTitle": "Beispiel: Discord-Bot (GitHub-ZIP)",
+      "voiceExampleTitle": "Beispiel: Open-Source-Voice-Server (Mumble)"
     },
     "troubleshooting": {
       "err1Title": "Ungültiges JSON",
@@ -150,7 +153,9 @@
       "err7Title": "public_bind_ip fehlt oder ist 0.0.0.0",
       "err7Body": "MSM blockiert den Start, wenn Docker auf alle Interfaces binden würde. Setze im Server-Detail eine konkrete Host-IP. Das schützt die Firewall-Regeln vor unbeabsichtigter Umgehung.",
       "err8Title": "Steam-Account nicht konfiguriert",
-      "err8Body": "Einige Steam-Server oder Workshop-Downloads benötigen einen globalen Steam-Login. Hinterlege den Account unter Einstellungen. Passwörter werden nicht in Logs oder Toasts ausgegeben."
+      "err8Body": "Einige Steam-Server oder Workshop-Downloads benötigen einen globalen Steam-Login. Hinterlege den Account unter Einstellungen. Passwörter werden nicht in Logs oder Toasts ausgegeben.",
+      "err9Title": "Hytale OAuth oder Downloader-Zugriff schlägt fehl",
+      "err9Body": "Beim ersten Hytale-Start zeigt die Console einen OAuth-Link. Öffne ihn, gib den Code ein und nutze einen Hytale-Account mit Zugriff auf den Serverdownload. Bei 403 oder Unauthorized ist meist der Account nicht berechtigt, der Code abgelaufen oder die lokale Hytale-Downloader-Credential-Datei im Server-Verzeichnis muss erneuert werden."
     }
   },
   "servers": {

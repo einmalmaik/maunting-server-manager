@@ -20,6 +20,179 @@ Blueprints sind Daten, keine Skripte:
 
 Erlaubt sind nur whitelisted Runtime-Fähigkeiten.
 
+## Für Einsteiger: Was trägst du wo ein?
+
+Eine Blueprint beschreibt einen Server-Typ, nicht einen einzelnen Server. Der
+Nutzer erstellt später eine konkrete Server-Instanz daraus und vergibt dort
+Ports, Limits und eine Bind-IP.
+
+Die wichtigsten Blöcke:
+
+- `meta`: Name, ID und Kategorie für die UI.
+- `runtime`: Docker-Image, Arbeitsverzeichnis, Umgebungsvariablen und
+  Startbefehl im Container.
+- `ports`: Welche Port-Rollen der Server braucht. Hier stehen Rollen wie
+  `game` oder `query`, keine konkreten Portnummern.
+- `source`: Woher die Server-Dateien kommen: Steam, HTTPS-Archiv, fertiges
+  Docker-Image oder manueller Upload.
+- `mods`: Ob MSM den Mod-Manager und optional Steam Workshop aktivieren soll.
+
+Faustregel: Wenn der Server schon komplett im Docker-Image steckt, nutze
+`source.type=dockerOnly`. Wenn MSM ein ZIP/TAR herunterladen soll, nutze
+`source.type=http`. Wenn SteamCMD die Dateien holen soll, nutze
+`source.type=steam`. Wenn der Nutzer Dateien selbst hochladen muss, nutze
+`source.type=manualUpload`.
+
+### Beispiel: Nicht-Steam-Game mit HTTPS-Download (Hytale)
+
+Hytale ist kein Steam-Spiel. MSM lädt zuerst den offiziellen Hytale-Downloader
+per HTTPS. Beim ersten Start zeigt die Console den OAuth-Link an, den der
+Serverbetreiber mit seinem Hytale-Account bestätigen muss.
+
+```json
+{
+  "version": 1,
+  "meta": {
+    "id": "hytale",
+    "name": "Hytale (Dedicated)",
+    "category": "non_steam_game"
+  },
+  "runtime": {
+    "image": "ghcr.io/natroutter/egg-hytale:latest",
+    "workdir": "/home/container",
+    "env": {
+      "STARTUP": "./start.sh",
+      "SERVER_PORT": "{GAME_PORT}",
+      "AUTH_MODE": "AUTHENTICATED",
+      "AUTOMATIC_UPDATE": "1",
+      "PATCHLINE": "release"
+    },
+    "startup": "/entrypoint.sh"
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" }
+  ],
+  "source": {
+    "type": "http",
+    "http": {
+      "url": "https://downloader.hytale.com/hytale-downloader.zip",
+      "archiveType": "zip"
+    }
+  }
+}
+```
+
+### Beispiel: Steam-Spiel
+
+Bei Steam-Spielen lädt MSM die Dateien über SteamCMD. `requiresLogin=true`
+bedeutet: Unter den Panel-Einstellungen muss ein globaler Steam-Account
+konfiguriert sein.
+
+```json
+{
+  "version": 1,
+  "meta": {
+    "id": "dayz",
+    "name": "DayZ",
+    "category": "steam_game"
+  },
+  "runtime": {
+    "image": "cm2network/steamcmd:root",
+    "workdir": "/data",
+    "env": {},
+    "startup": "/data/DayZServer -profiles=/data/profiles -port={GAME_PORT}"
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon", "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "223350",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": true
+    }
+  }
+}
+```
+
+### Beispiel: Discord-Bot aus einem ZIP
+
+Für Bots gibt es oft keine Ports. Das ZIP muss eine Startdatei enthalten, die
+zum `runtime.startup` passt.
+
+```json
+{
+  "version": 1,
+  "meta": {
+    "id": "custom_discord_bot",
+    "name": "Custom Discord Bot",
+    "category": "bot"
+  },
+  "runtime": {
+    "image": "node:20-alpine",
+    "workdir": "/data",
+    "env": {
+      "NODE_ENV": "production"
+    },
+    "startup": "npm start"
+  },
+  "ports": [],
+  "source": {
+    "type": "http",
+    "http": {
+      "url": "https://github.com/owner/repo/archive/refs/heads/main.zip",
+      "archiveType": "zip"
+    }
+  }
+}
+```
+
+### Beispiel: Open-Source-Voice-Server
+
+Mumble ist ein Beispiel für einen Voice-Server, der direkt aus einem Docker-Image
+starten kann. Deshalb ist `source.type=dockerOnly` ausreichend.
+
+```json
+{
+  "version": 1,
+  "meta": {
+    "id": "mumble_server",
+    "name": "Mumble Server",
+    "category": "voice_server"
+  },
+  "runtime": {
+    "image": "mumblevoip/mumble-server:latest",
+    "workdir": "/data",
+    "env": {},
+    "startup": "mumble-server"
+  },
+  "ports": [
+    { "name": "voice", "protocol": "tcp" },
+    { "name": "voice", "protocol": "udp" }
+  ],
+  "source": {
+    "type": "dockerOnly"
+  }
+}
+```
+
+### Typische Fehler bei eigenen Blueprints
+
+- `source.type=http`, aber kein Archivtyp erkannt: Setze `source.http.archiveType`
+  explizit auf `zip`, `tar.gz`, `tar.xz` oder ein anderes unterstütztes Format.
+- `ports[].name` falsch verstanden: In `name` kommt eine Rolle wie `game`,
+  `query`, `rcon`, `voice`, `web` oder `custom`, nicht die Portnummer.
+- Hytale startet und zeigt einen OAuth-Link: Das ist beim ersten Start erwartet.
+  Der Serverbetreiber muss den Link öffnen und den Code mit einem Hytale-Account
+  bestätigen, der Zugriff auf den Serverdownload hat.
+- Hytale meldet `403 Forbidden` oder `Unauthorized`: Der verwendete Hytale-Account
+  hat wahrscheinlich keinen Zugriff, der Code ist abgelaufen oder die lokal
+  gespeicherten Hytale-Downloader-Credentials müssen erneuert werden.
+
 ## Workshop-Mods
 
 Steam Workshop wird über `mods` aktiviert:

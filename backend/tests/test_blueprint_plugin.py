@@ -355,6 +355,25 @@ def test_native_minecraft_blueprints_load() -> None:
     assert set(minecraft_ids) == expected
 
 
+def test_native_hytale_uses_official_downloader_http_source() -> None:
+    """Hytale soll out-of-the-box den offiziellen Linux-Downloader bereitstellen.
+
+    Keine freien Install-Skripte im Blueprint: MSM nutzt nur die vorhandene
+    HTTP-Source und das Hytale-Image erledigt den ersten Serverdownload im
+    eigenen EntryPoint.
+    """
+    plugin = _native_plugin("hytale")
+    bp = plugin.get_blueprint()
+
+    assert bp.source.type.value == "http"
+    assert bp.source.http is not None
+    assert bp.source.http.url == "https://downloader.hytale.com/hytale-downloader.zip"
+    assert bp.runtime.workdir == "/home/container"
+    assert bp.runtime.startup == "/entrypoint.sh"
+    assert bp.runtime.env["STARTUP"] == "./start.sh"
+    assert bp.runtime.env["SERVER_PORT"] == "{GAME_PORT}"
+
+
 def _native_plugin(blueprint_id: str) -> BlueprintPlugin:
     path = Path(__file__).resolve().parents[1] / "blueprints" / "native" / f"{blueprint_id}.blueprint.json"
     return BlueprintPlugin(load_blueprint_file(path))
