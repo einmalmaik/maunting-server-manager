@@ -23,7 +23,7 @@
       "USE_PERSISTENT_AUTHENTICATION": "DISABLED",
       "MEMORY_OVERHEAD": "0"
     },
-    "startup": "/entrypoint.sh"
+    "startup": "/start.sh"
   },
   "ports": [
     { "name": "game", "protocol": "udp" }
