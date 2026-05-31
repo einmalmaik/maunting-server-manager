@@ -694,5 +694,9 @@
   "serverDetail": {
     "limit": "Limit",
     "free": "frei"
-  }
+  },
+  "Passwort ungültig": "Passwort ungültig",
+  "2FA-Code erforderlich": "2FA-Code erforderlich",
+  "Ungültiger 2FA-Code": "Ungültiger 2FA-Code",
+  "Owner-Account kann nicht gelöscht werden": "Owner-Account kann nicht gelöscht werden"
 }

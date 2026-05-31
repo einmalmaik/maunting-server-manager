@@ -200,6 +200,7 @@ class AuthService:
         from models.jwt_blacklist import JwtBlacklist
         from models.email_verification import EmailVerification
         from models.audit_log import AuditLog
+        from models.server_permission import ServerPermission
 
         # Delete JwtBlacklist items
         db.query(JwtBlacklist).filter(JwtBlacklist.user_id == user.id).delete()
@@ -209,6 +210,9 @@ class AuthService:
 
         # Set user_id to None on AuditLog items
         db.query(AuditLog).filter(AuditLog.user_id == user.id).update({"user_id": None})
+
+        # Set granted_by to None on ServerPermission items granted by this user
+        db.query(ServerPermission).filter(ServerPermission.granted_by == user.id).update({"granted_by": None})
 
         # Finally delete user
         db.delete(user)
