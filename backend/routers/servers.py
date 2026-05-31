@@ -407,6 +407,12 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     install_dir = server.install_dir
     dir_removed = False
     if install_dir and os.path.exists(install_dir):
+        repair = docker_service.repair_bind_mount_permissions(install_dir)
+        if not repair.get("ok"):
+            logger.warning(
+                "Install-Verzeichnis-Rechte konnten vor Delete nicht normalisiert werden: %s",
+                repair.get("error") or "unbekannter Fehler",
+            )
         try:
             shutil.rmtree(install_dir)
             dir_removed = True

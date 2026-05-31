@@ -235,8 +235,10 @@ class TestDeleteServerCleanup:
 
         try:
             with patch("routers.servers.docker_service.remove") as mock_remove, \
+                 patch("routers.servers.docker_service.repair_bind_mount_permissions") as mock_repair, \
                  patch("routers.servers.close_ports"):
                 mock_remove.return_value = {"ok": True}
+                mock_repair.return_value = {"ok": True, "stdout": "", "stderr": ""}
                 response = client.delete(
                     f"/api/servers/{test_server.id}",
                     cookies=owner_cookies,
@@ -247,6 +249,7 @@ class TestDeleteServerCleanup:
             body = response.json()
             # Container-Cleanup wurde angefordert
             mock_remove.assert_called_once()
+            mock_repair.assert_called_once_with(install_dir)
             assert body["cleanup"]["container_removed"].startswith("msm-srv-")
             # Install-Dir entfernt
             assert not os.path.exists(install_dir)
@@ -279,6 +282,7 @@ class TestDeleteServerCleanup:
             s.close()
 
         with patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch("routers.servers.docker_service.repair_bind_mount_permissions") as mock_repair, \
              patch("routers.servers.close_ports"):
             mock_remove.return_value = {"ok": True}
             response = client.delete(
@@ -288,7 +292,52 @@ class TestDeleteServerCleanup:
             )
 
         assert response.status_code == 200
+        mock_repair.assert_not_called()
         assert response.json()["cleanup"]["dir_removed"] is None
+
+    def test_delete_repairs_install_dir_permissions_before_rmtree(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        test_server: Server,
+        csrf_token: str,
+        tmp_path,
+    ):
+        install_dir = str(tmp_path / "wine-install")
+        os.makedirs(install_dir)
+        with open(os.path.join(install_dir, "wine-extension-chm.desktop"), "w") as f:
+            f.write("synthetic wine desktop file")
+
+        test_server.install_dir = install_dir
+        db = Session.object_session(test_server)
+        db.commit()
+
+        calls: list[str] = []
+        real_rmtree = shutil.rmtree
+
+        def tracked_rmtree(path, *args, **kwargs):
+            if path == install_dir:
+                calls.append("rmtree")
+            return real_rmtree(path, *args, **kwargs)
+
+        def repair(path):
+            assert path == install_dir
+            calls.append("repair")
+            return {"ok": True, "stdout": "", "stderr": ""}
+
+        with patch("routers.servers.docker_service.remove", return_value={"ok": True}), \
+             patch("routers.servers.docker_service.repair_bind_mount_permissions", side_effect=repair), \
+             patch("routers.servers.close_ports"), \
+             patch("routers.servers.shutil.rmtree", side_effect=tracked_rmtree):
+            response = client.delete(
+                f"/api/servers/{test_server.id}",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 200
+        assert calls[:2] == ["repair", "rmtree"]
+        assert not os.path.exists(install_dir)
 
 
 class TestSteamCMDFullLogOnFailure:
