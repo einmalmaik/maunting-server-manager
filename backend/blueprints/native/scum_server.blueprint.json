@@ -15,7 +15,7 @@
       "MAX_PLAYERS": "64",
       "SERVER_PASSWORD": ""
     },
-    "startup": "./SCUM/Binaries/Win64/SCUMServer.exe -log -port={GAME_PORT} -queryPort={QUERY_PORT} -MaxPlayers={ENV.MAX_PLAYERS} -ServerName={ENV.SERVER_NAME} -MULTIHOME=0.0.0.0",
+    "startup": "./SCUM/Binaries/Win64/SCUMServer.exe -log -port={GAME_PORT} -queryPort={QUERY_PORT} -MaxPlayers={ENV.MAX_PLAYERS} -ServerName={ENV.SERVER_NAME}",
     "configPatches": []
   },
   "ports": [

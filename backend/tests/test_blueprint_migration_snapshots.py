@@ -74,7 +74,6 @@ def test_conan_full_argv_matches_legacy() -> None:
         "-Port=27015",
         "-QueryPort=27016",
         "-RconPort=27017",
-        "-MultiHome=0.0.0.0",
     ]
 
 
@@ -89,7 +88,6 @@ def test_conan_missing_query_omits_arg() -> None:
         "-log",
         "-Port=27015",
         "-RconPort=27017",
-        "-MultiHome=0.0.0.0",
     ]
 
 

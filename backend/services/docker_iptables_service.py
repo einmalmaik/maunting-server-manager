@@ -226,9 +226,8 @@ def _apply_server_rules(
             _DOCKER_USER_CHAIN,
             "-p", protocol,
             "--dport", str(port),
-            "-m", "conntrack", "--ctorigdst", bind_ip,
             "-m", "comment", "--comment", comment,
-            "-j", "ACCEPT",
+            "-j", "RETURN",
         ]
         if action == "insert":
             # Skip wenn schon vorhanden (idempotent).
