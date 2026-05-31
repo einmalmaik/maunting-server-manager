@@ -122,6 +122,44 @@ def test_build_port_publishes_maps_ordered_custom_ports() -> None:
         ]
 
 
+def test_build_port_publishes_uses_server_protocol_override() -> None:
+    bp = load_blueprint_dict(_mc_paper_blueprint())
+    plugin = BlueprintPlugin(bp)
+    server = _FakeServer()
+    server.ports = [
+        SimpleNamespace(role="game", port=25566, protocol="udp"),
+        SimpleNamespace(role="rcon", port=25579, protocol="tcp"),
+    ]
+
+    publishes = plugin.build_port_publishes(server)
+    by_port = {p.host_port: p for p in publishes}
+
+    assert by_port[25566].protocol == "udp"
+    assert by_port[25579].protocol == "tcp"
+
+
+def test_build_port_publishes_same_role_tcp_and_udp() -> None:
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["ports"] = [
+        {"name": "query", "protocol": "udp"},
+        {"name": "query", "protocol": "tcp"},
+    ]
+    bp = load_blueprint_dict(bp_dict)
+    plugin = BlueprintPlugin(bp)
+    server = _FakeServer(query_port=28015, rcon_port=None)
+    server.ports = [
+        SimpleNamespace(role="query", port=28015, protocol="udp"),
+        SimpleNamespace(role="query_2", port=28015, protocol="tcp"),
+    ]
+
+    publishes = plugin.build_port_publishes(server)
+
+    assert {(p.host_port, p.protocol) for p in publishes} == {
+        (28015, "udp"),
+        (28015, "tcp"),
+    }
+
+
 def test_build_container_env_substitutes_port_tokens() -> None:
     """``SERVER_PORT={GAME_PORT}`` muss zu der konkreten Portnummer werden."""
     bp = load_blueprint_dict(_mc_paper_blueprint())

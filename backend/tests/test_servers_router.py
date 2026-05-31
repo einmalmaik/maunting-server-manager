@@ -494,6 +494,50 @@ class TestServerPortsRouter:
             assert custom_port["port"] == 29000
             assert custom_port["protocol"] == "udp"
 
+    def test_create_server_with_same_role_tcp_and_udp(self, client: TestClient, owner_cookies: dict, csrf_token: str, db: Session):
+        from blueprints.schema import Blueprint
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_query_dual_protocol", "name": "Test Query Dual Protocol", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [
+                {"name": "game", "protocol": "udp"},
+                {"name": "query", "protocol": "udp"},
+                {"name": "query", "protocol": "tcp"},
+            ],
+            "source": {"type": "manualUpload", "manual": {"requiredFiles": ["server.jar"], "instructions": "test"}},
+        })
+
+        with patch("routers.servers.os.makedirs"), \
+             patch("routers.servers.os.chmod"), \
+             patch("routers.servers.os.path.exists", return_value=False), \
+             patch("services.port_allocation_service.is_port_available", return_value=True), \
+             patch("routers.servers.get_plugin") as mock_get_plugin:
+
+            mock_plugin = mock_get_plugin.return_value
+            mock_plugin.get_blueprint.return_value = bp
+
+            response = client.post(
+                "/api/servers",
+                json={
+                    "name": "Dual Protocol Server",
+                    "game_type": "test_query_dual_protocol",
+                    "ports": {"query": 28015},
+                },
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code in (200, 201)
+        ports = response.json()["ports"]
+        query_udp = next(p for p in ports if p["role"] == "query")
+        query_tcp = next(p for p in ports if p["role"] == "query_2")
+        assert query_udp["port"] == 28015
+        assert query_udp["protocol"] == "udp"
+        assert query_tcp["port"] == 28015
+        assert query_tcp["protocol"] == "tcp"
+
     def test_update_server_ports(self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session):
         from blueprints.schema import Blueprint
         from models.server_port import ServerPort
@@ -554,3 +598,53 @@ class TestServerPortsRouter:
             ports = data["ports"]
             custom_port = next(p for p in ports if p["role"] == "custom_1")
             assert custom_port["port"] == 28999
+
+    def test_update_server_port_protocol(self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session):
+        from blueprints.schema import Blueprint
+        from models.server_port import ServerPort
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_game_ports", "name": "Test Game Ports", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [
+                {"name": "game", "protocol": "udp"},
+                {"name": "query", "protocol": "udp"},
+            ],
+            "source": {"type": "manualUpload", "manual": {"requiredFiles": ["server.jar"], "instructions": "test"}},
+        })
+
+        test_server.game_type = "test_game_ports"
+        test_server.ports = [
+            ServerPort(role="game", port=27015, protocol="udp"),
+            ServerPort(role="query", port=27016, protocol="udp"),
+        ]
+        db.commit()
+
+        with patch("services.port_allocation_service.is_port_available", return_value=True), \
+             patch("routers.servers.docker_service.is_running", return_value=False), \
+             patch("routers.servers.get_plugin") as mock_get_plugin:
+
+            mock_plugin = mock_get_plugin.return_value
+            mock_plugin.get_blueprint.return_value = bp
+
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={
+                    "ports": {
+                        "game": 27015,
+                        "query": 27016,
+                    },
+                    "port_protocols": {
+                        "game": "udp",
+                        "query": "tcp",
+                    },
+                },
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 200
+        query_port = next(p for p in response.json()["ports"] if p["role"] == "query")
+        assert query_port["port"] == 27016
+        assert query_port["protocol"] == "tcp"

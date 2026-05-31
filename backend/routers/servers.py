@@ -25,6 +25,7 @@ from services.docker_iptables_service import revoke_server as iptables_revoke_se
 from services.firewall_service import close_ports, open_ports
 from services.network_interfaces_service import default_bind_ip, list_host_interfaces
 from services.port_allocation_service import PortConflictError, allocate_ports
+from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.scheduler_service import sync_server_restart_schedule
 from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
 from services.install_update_lock_service import (
@@ -50,6 +51,33 @@ _UPDATE_CACHE_TTL_SECONDS = 300
 
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
+
+
+def _port_requirements_for_server(server: Server, protocol_overrides: dict[str, str] | None = None) -> list[tuple[str, str]]:
+    plugin = get_plugin(server.game_type)
+    bp = plugin.get_blueprint() if plugin else None
+    if bp:
+        requirements = blueprint_port_requirements(bp.ports)
+    else:
+        requirements = [
+            ("game", "udp"),
+            ("query", "udp"),
+            ("rcon", "tcp"),
+        ]
+
+    current_protocols = {
+        p.role: normalize_port_protocol(p.protocol)
+        for p in getattr(server, "ports", []) or []
+    }
+    overrides = {
+        role: normalize_port_protocol(protocol)
+        for role, protocol in (protocol_overrides or {}).items()
+    }
+
+    return [
+        (role, overrides.get(role, current_protocols.get(role, proto)))
+        for role, proto in requirements
+    ]
 
 
 def _install_update_busy_error() -> HTTPException:
@@ -78,22 +106,12 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     plugin = get_plugin(req.game_type)
     bp = plugin.get_blueprint() if plugin else None
 
-    # Map blueprint ports to requirements list [(role, protocol)]
-    port_requirements = []
-    if bp:
-        custom_idx = 1
-        for bp_port in bp.ports:
-            role = bp_port.name.value
-            if role == "custom":
-                role = f"custom_{custom_idx}"
-                custom_idx += 1
-            port_requirements.append((role, bp_port.protocol.value))
-    else:
-        port_requirements = [
-            ("game", "udp"),
-            ("query", "udp"),
-            ("rcon", "tcp"),
-        ]
+    # Map blueprint ports to stable, unique requirements [(role, protocol)].
+    port_requirements = blueprint_port_requirements(bp.ports) if bp else [
+        ("game", "udp"),
+        ("query", "udp"),
+        ("rcon", "tcp"),
+    ]
 
     # Overrides mapping
     requested_ports = dict(req.ports or {})
@@ -254,7 +272,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     old_bind_ip = server.public_bind_ip
 
     payload = req.model_dump(exclude_unset=True)
-    port_fields = {"game_port", "query_port", "rcon_port", "ports"}
+    port_fields = {"game_port", "query_port", "rcon_port", "ports", "port_protocols"}
     resource_fields = {"cpu_limit_percent", "ram_limit_mb", "disk_limit_gb"}
     changed_ports = port_fields & set(payload.keys())
     bind_ip_changed = "public_bind_ip" in payload and payload["public_bind_ip"] != old_bind_ip
@@ -266,25 +284,10 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
     # ── Port-/Bind-Aenderung: validieren ──
     if changed_ports:
-        plugin = get_plugin(server.game_type)
-        bp = plugin.get_blueprint() if plugin else None
-        
-        # Map blueprint ports to requirements list [(role, protocol)]
-        port_requirements = []
-        if bp:
-            custom_idx = 1
-            for bp_port in bp.ports:
-                role = bp_port.name.value
-                if role == "custom":
-                    role = f"custom_{custom_idx}"
-                    custom_idx += 1
-                port_requirements.append((role, bp_port.protocol.value))
-        else:
-            port_requirements = [
-                ("game", "udp"),
-                ("query", "udp"),
-                ("rcon", "tcp"),
-            ]
+        port_requirements = _port_requirements_for_server(
+            server,
+            protocol_overrides=req.port_protocols,
+        )
 
         current_ports = {p.role: p.port for p in server.ports}
         requested_ports = dict(req.ports or {})
@@ -331,7 +334,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
     # Standard-Update
     for key, val in payload.items():
-        if key not in ("game_port", "query_port", "rcon_port", "ports"):
+        if key not in ("game_port", "query_port", "rcon_port", "ports", "port_protocols"):
             setattr(server, key, val)
     db.commit()
     db.refresh(server)

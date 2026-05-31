@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from models import Server
+from models.server_port import ServerPort
 from services.port_allocation_service import (
     BLOCK_SIZE,
     PORT_RANGE_END,
@@ -119,6 +120,26 @@ class TestManualAllocation:
             with pytest.raises(PortConflictError):
                 allocate_ports(db, requested_game_port=27050)
 
+    def test_allows_same_number_for_other_protocol(self, db: Session):
+        existing = Server(
+            name="Other",
+            game_type="dayz",
+            install_dir="/tmp/x",
+            status="stopped",
+        )
+        db.add(existing)
+        db.commit()
+        db.add(ServerPort(server_id=existing.id, role="game", port=27050, protocol="udp"))
+        db.commit()
+
+        with patch("services.port_allocation_service.is_port_available", return_value=True):
+            allocated = allocate_ports(
+                db,
+                port_requirements=[("query", "tcp")],
+                requested_ports={"query": 27050},
+            )
+        assert allocated == [("query", 27050, "tcp")]
+
     def test_rejects_when_host_busy_on_manual_port(self, db: Session):
         with patch("services.port_allocation_service.is_port_available", return_value=False):
             with pytest.raises(PortConflictError):
@@ -194,3 +215,26 @@ class TestDynamicAllocation:
         assert len(allocated) == 2
         assert allocated[0] == ("game", 28000, "udp")
         assert allocated[1] == ("custom_1", PORT_RANGE_START, "udp")
+
+    def test_duplicate_base_role_shares_port_across_protocols(self, db: Session):
+        requirements = [
+            ("query", "udp"),
+            ("query_2", "tcp"),
+        ]
+        seen: list[tuple[int, str]] = []
+
+        def host_check(port, protocol, bind_ip):  # noqa: ARG001
+            seen.append((port, protocol))
+            return True
+
+        with patch("services.port_allocation_service.is_port_available", side_effect=host_check):
+            allocated = allocate_ports(
+                db,
+                port_requirements=requirements,
+            )
+
+        assert allocated == [
+            ("query", PORT_RANGE_START, "udp"),
+            ("query_2", PORT_RANGE_START, "tcp"),
+        ]
+        assert seen[:2] == [(PORT_RANGE_START, "udp"), (PORT_RANGE_START, "tcp")]

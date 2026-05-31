@@ -41,6 +41,7 @@ export type BlueprintPortProtocol = 'tcp' | 'udp'
 export interface BlueprintPortDef {
   name: BlueprintPortRole
   protocol: BlueprintPortProtocol
+  role?: string
 }
 
 export interface GameInfo {

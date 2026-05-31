@@ -27,7 +27,6 @@ from blueprints.renderer import render_env_values
 from blueprints.schema import (
     BlueprintConfigPatchType,
     BlueprintModListContent,
-    BlueprintPortProtocol,
     BlueprintSteamCompatibility,
     BlueprintSourceType,
     BlueprintWorkshopFileOperation,
@@ -45,6 +44,7 @@ from games.base import (
 )
 from games.ini_utils import set_ini_value
 from services.docker_service import PortPublish, VolumeBind
+from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.steam_account_service import SteamAccountService
 
 
@@ -181,8 +181,7 @@ class BlueprintPlugin(GamePlugin):
         }
         ports_list = getattr(server, "ports", None) or []
         for p in ports_list:
-            if p.role not in ("game", "query", "rcon"):
-                res[p.role] = p.port
+            res[p.role] = p.port
         return res
 
     def _runtime_data_dir(self) -> str:
@@ -297,19 +296,16 @@ class BlueprintPlugin(GamePlugin):
         """
         bind_ip = _require_bind_ip(server)
         port_map: dict[str, int | None] = self._server_ports(server)
+        protocols = {
+            p.role: normalize_port_protocol(p.protocol)
+            for p in (getattr(server, "ports", None) or [])
+        }
         out: list[PortPublish] = []
-        custom_idx = 1
-        for port_def in self._blueprint.ports:
-            role = port_def.name.value
-            if role == "custom":
-                role = f"custom_{custom_idx}"
-                custom_idx += 1
+        for role, blueprint_protocol in blueprint_port_requirements(self._blueprint.ports):
             host_port = port_map.get(role)
             if not host_port:
                 continue
-            protocol = (
-                "tcp" if port_def.protocol == BlueprintPortProtocol.TCP else "udp"
-            )
+            protocol = protocols.get(role, blueprint_protocol)
             out.append(PortPublish(host_port, host_port, protocol, bind_ip))
         return out
 

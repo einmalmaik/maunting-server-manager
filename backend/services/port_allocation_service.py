@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from models import Server
 from services.port_check_service import is_port_available
+from services.port_role_service import normalize_port_protocol, port_role_base
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +40,13 @@ class PortConflictError(ValueError):
     """Wird geworfen, wenn ein Port bereits belegt ist (DB oder Host)."""
 
 
-def _db_used_ports(db: Session, exclude_server_id: int | None = None) -> set[int]:
-    """Liefert alle Ports, die andere MSM-Server bereits in der DB halten."""
+def _db_used_ports(db: Session, exclude_server_id: int | None = None) -> set[tuple[int, str]]:
+    """Liefert alle Port/Protokoll-Paare, die andere MSM-Server halten."""
     from models.server_port import ServerPort
-    query = db.query(ServerPort.port)
+    query = db.query(ServerPort.port, ServerPort.protocol)
     if exclude_server_id is not None:
         query = query.filter(ServerPort.server_id != exclude_server_id)
-    return {r[0] for r in query.all()}
+    return {(int(port), normalize_port_protocol(protocol)) for port, protocol in query.all()}
 
 
 def _assert_host_free(port: int, protocol: str, bind_ip: str) -> None:
@@ -54,6 +55,25 @@ def _assert_host_free(port: int, protocol: str, bind_ip: str) -> None:
         raise PortConflictError(
             f"Port {port}/{protocol} ist auf dem Host bereits belegt."
         )
+
+
+def _result_from_allocated(
+    port_requirements: list[tuple[str, str]],
+    allocated_ports: dict[str, int],
+) -> list[tuple[str, int, str]]:
+    res = [
+        (role, allocated_ports[role], next(p[1] for p in port_requirements if p[0] == role))
+        for role, _ in port_requirements
+    ]
+    seen_pairs: set[tuple[int, str]] = set()
+    for role, port, protocol in res:
+        pair = (port, protocol)
+        if pair in seen_pairs:
+            raise PortConflictError(
+                f"Port {port}/{protocol} ist innerhalb dieses Servers doppelt definiert ({role})."
+            )
+        seen_pairs.add(pair)
+    return res
 
 
 def allocate_ports(
@@ -90,6 +110,10 @@ def allocate_ports(
             if requested_rcon_port:
                 requested_ports["rcon"] = requested_rcon_port
 
+    port_requirements = [
+        (role, normalize_port_protocol(proto))
+        for role, proto in port_requirements
+    ]
     db_used = _db_used_ports(db, exclude_server_id=exclude_server_id)
 
     # 1) Explizite Vorgaben validieren und setzen
@@ -102,20 +126,36 @@ def allocate_ports(
                     raise ValueError(
                         f"Port {req_port} ({role}) ausserhalb des gueltigen Bereichs (1024-65535)."
                     )
-                if req_port in db_used:
+                if (req_port, proto) in db_used:
                     raise PortConflictError(
-                        f"Port {req_port} ({role}) ist bereits an einen anderen MSM-Server vergeben."
+                        f"Port {req_port}/{proto} ({role}) ist bereits an einen anderen MSM-Server vergeben."
                     )
                 _assert_host_free(req_port, proto, bind_ip)
                 allocated_ports[role] = req_port
 
     # 2) Uebrige Ports automatisch vergeben
     remaining_reqs = [r for r in port_requirements if r[0] not in allocated_ports]
+    for role, proto in list(remaining_reqs):
+        base_role = port_role_base(role)
+        shared_port = next(
+            (
+                allocated_port
+                for allocated_role, allocated_port in allocated_ports.items()
+                if port_role_base(allocated_role) == base_role
+            ),
+            None,
+        )
+        if shared_port is None:
+            continue
+        if (shared_port, proto) in db_used:
+            raise PortConflictError(
+                f"Port {shared_port}/{proto} ({role}) ist bereits an einen anderen MSM-Server vergeben."
+            )
+        _assert_host_free(shared_port, proto, bind_ip)
+        allocated_ports[role] = shared_port
+    remaining_reqs = [r for r in port_requirements if r[0] not in allocated_ports]
     if not remaining_reqs:
-        res = [
-            (role, allocated_ports[role], next(p[1] for p in port_requirements if p[0] == role))
-            for role, _ in port_requirements
-        ]
+        res = _result_from_allocated(port_requirements, allocated_ports)
         if is_legacy:
             return (allocated_ports["game"], allocated_ports["query"], allocated_ports["rcon"])
         return res
@@ -131,10 +171,28 @@ def allocate_ports(
         temp_allocated = dict(allocated_ports)
         idx = 0
         for role, proto in remaining_reqs:
+            base_role = port_role_base(role)
+            shared_port = next(
+                (
+                    allocated_port
+                    for allocated_role, allocated_port in temp_allocated.items()
+                    if port_role_base(allocated_role) == base_role
+                ),
+                None,
+            )
+            if shared_port is not None:
+                if (shared_port, proto) in db_used:
+                    conflict = True
+                    break
+                if not is_port_available(shared_port, proto, bind_ip):
+                    conflict = True
+                    break
+                temp_allocated[role] = shared_port
+                continue
             while base + idx in temp_allocated.values():
                 idx += 1
             cand_port = base + idx
-            if cand_port in db_used:
+            if (cand_port, proto) in db_used:
                 conflict = True
                 break
             if not is_port_available(cand_port, proto, bind_ip):
@@ -151,9 +209,26 @@ def allocate_ports(
     if not found_block:
         temp_allocated = dict(allocated_ports)
         for role, proto in remaining_reqs:
+            base_role = port_role_base(role)
+            shared_port = next(
+                (
+                    allocated_port
+                    for allocated_role, allocated_port in temp_allocated.items()
+                    if port_role_base(allocated_role) == base_role
+                ),
+                None,
+            )
+            if shared_port is not None:
+                if (shared_port, proto) in db_used:
+                    raise PortConflictError(
+                        f"Port {shared_port}/{proto} ({role}) ist bereits an einen anderen MSM-Server vergeben."
+                    )
+                _assert_host_free(shared_port, proto, bind_ip)
+                temp_allocated[role] = shared_port
+                continue
             found_port = False
             for p in range(PORT_RANGE_START, PORT_RANGE_END + 1):
-                if p in db_used or p in temp_allocated.values():
+                if (p, proto) in db_used or p in temp_allocated.values():
                     continue
                 if is_port_available(p, proto, bind_ip):
                     temp_allocated[role] = p
@@ -164,10 +239,7 @@ def allocate_ports(
                     f"Keine freien Ports in der Range {PORT_RANGE_START}-{PORT_RANGE_END} verfuegbar."
                 )
 
-    res = [
-        (role, temp_allocated[role], next(p[1] for p in port_requirements if p[0] == role))
-        for role, _ in port_requirements
-    ]
+    res = _result_from_allocated(port_requirements, temp_allocated)
     if is_legacy:
         return (temp_allocated["game"], temp_allocated["query"], temp_allocated["rcon"])
     return res

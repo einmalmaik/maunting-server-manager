@@ -20,6 +20,7 @@ from .base import (
     write_workshop_modlist,
 )
 from .blueprint_plugin import BlueprintPlugin
+from services.port_role_service import blueprint_port_requirements
 
 
 PLUGINS: dict[str, type[GamePlugin]] = {}
@@ -55,6 +56,7 @@ def list_game_info() -> list[dict]:
             # Konflikte loggt die Registry bereits.
             continue
         bp_mods = bp.effective_mods()
+        port_requirements = blueprint_port_requirements(bp.ports)
         out.append({
             "id": bp.meta.id,
             "name": bp.meta.name,
@@ -63,8 +65,8 @@ def list_game_info() -> list[dict]:
             "mod_support": bp_mods.supportsMods,
             "supports_steam_workshop": bp_mods.supportsSteamWorkshop,
             "ports": [
-                {"name": p.name.value, "protocol": p.protocol.value}
-                for p in bp.ports
+                {"name": p.name.value, "protocol": p.protocol.value, "role": role}
+                for p, (role, _protocol) in zip(bp.ports, port_requirements)
             ],
             "source": entry.origin.value,
         })

@@ -6,6 +6,7 @@ import { toast } from '@/stores/toastStore'
 import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { Server, GameInfo } from '@/types'
+import { labelRole, mapBlueprintPorts } from '@/utils/portRoles'
 import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive } from 'lucide-react'
 
 export function Servers() {
@@ -71,13 +72,8 @@ export function Servers() {
         { name: 'query', protocol: 'udp' },
         { name: 'rcon', protocol: 'tcp' },
       ]
-      let customIdx = 1
-      portDefs.forEach((p) => {
-        let role = p.name as string
-        if (role === 'custom') {
-          role = `custom_${customIdx}`
-          customIdx++
-        }
+      mapBlueprintPorts(portDefs).forEach((p) => {
+        const role = p.mappedRole
         let valStr = ''
         if (role === 'game') valStr = form.game_port
         else if (role === 'query') valStr = form.query_port
@@ -343,18 +339,7 @@ export function Servers() {
                 ]
                 if (portDefs.length === 0) return null
                 
-                let customIdx = 1
-                const mappedPorts = portDefs.map((p) => {
-                  let role = p.name as string
-                  if (role === 'custom') {
-                    role = `custom_${customIdx}`
-                    customIdx++
-                  }
-                  return {
-                    ...p,
-                    mappedRole: role,
-                  }
-                })
+                const mappedPorts = mapBlueprintPorts(portDefs)
 
                 return (
                   <div className="grid grid-cols-3 gap-3" data-testid="port-fields">
@@ -365,11 +350,12 @@ export function Servers() {
                         ? (role === 'game' ? form.game_port : role === 'query' ? form.query_port : form.rcon_port)
                         : (form.ports[role] || '')
                       
-                      const label = role === 'game'
+                      const baseRole = labelRole(role)
+                      const label = baseRole === 'game'
                         ? t('servers.gamePort')
-                        : role === 'query'
+                        : baseRole === 'query'
                         ? t('servers.queryPort')
-                        : role === 'rcon'
+                        : baseRole === 'rcon'
                         ? t('servers.rconPort')
                         : `${role.replace('_', ' ').toUpperCase()} (${p.protocol.toUpperCase()})`
 
