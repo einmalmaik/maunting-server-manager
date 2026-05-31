@@ -458,7 +458,22 @@
     "installedTitle": "Installed Mods",
     "addById": "Add by Workshop ID",
     "clearSearch": "Clear search",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "statusPending": "Pending",
+    "statusUpdatePending": "Update pending",
+    "statusPendingHint": "Waiting in the install queue.",
+    "statusInstalling": "Downloading",
+    "statusUpdating": "Updating",
+    "statusInstalled": "Installed",
+    "statusError": "Error",
+    "statusErrorHint": "Installation failed.",
+    "etaCalculating": "Calculating remaining time.",
+    "etaAlmostDone": "Almost done.",
+    "etaLessThanMinute": "Less than 1 minute remaining.",
+    "etaMinutes_one": "About 1 minute remaining.",
+    "etaMinutes_other": "About {{count}} minutes remaining.",
+    "etaHours_one": "About 1 hour remaining.",
+    "etaHours_other": "About {{count}} hours remaining."
   },
   "tabs": {
     "files": "Files",

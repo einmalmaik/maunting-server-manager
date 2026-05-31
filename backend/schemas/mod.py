@@ -13,6 +13,13 @@ class ModResponse(BaseModel):
     auto_update: bool
     enabled: bool
     dependencies_json: str | None
+    install_status: str
+    install_action: str | None
+    install_progress: int | None
+    install_eta_seconds: int | None
+    install_started_at: datetime | None
+    install_completed_at: datetime | None
+    install_error: str | None
 
     class Config:
         from_attributes = True

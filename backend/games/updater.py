@@ -9,6 +9,9 @@ Prüfprinzip (für alle Updater):
 2. Ist sie bereits installiert (lokale Pfade / DB-Row / Datei-Mtime)?
 3. Gibt es ein verfügbares Update (Steam time_updated > last_updated, ETag/Last-Modified)?
 4. Ist das Update bereits eingespielt?
+5. Lokal vorhandene Mods ohne alte DB-Baseline werden einmalig gebaselined,
+   damit frisch installierte Mods nicht beim nächsten Start erneut als Update
+   laufen.
 
 Nur fehlende/aktualisierte Ressourcen werden zurückgegeben (Bandbreiten-Optimierung).
 
@@ -239,7 +242,20 @@ def check_workshop_mod_updates(
                 getattr(server, "id", "?"),
             )
         else:
-            if db_updated is None or (remote_updated is not None and remote_updated > db_updated):
+            if db_updated is None:
+                update_mod_metadata_after_success(
+                    server.id,
+                    workshop_id,
+                    remote_updated.isoformat() if remote_updated else None,
+                )
+                logger.info(
+                    "Workshop-Mod %s (%s) auf Server %s lokal vorhanden; fehlende DB-Baseline wurde gesetzt.",
+                    workshop_id,
+                    mod.name or "",
+                    getattr(server, "id", "?"),
+                )
+                continue
+            if remote_updated is not None and remote_updated > db_updated:
                 action = "update"
                 reason = "newer_version_available"
                 logger.info(
@@ -936,7 +952,7 @@ def update_mod_metadata_after_success(
         else:
             mod.last_updated = now
 
-        mod.installed_version = remote_updated or now.isoformat()
+        mod.installed_version = int(mod.last_updated.timestamp()) if mod.last_updated else int(now.timestamp())
 
         db.commit()
         logger.info(

@@ -399,9 +399,12 @@ def run_steamcmd_workshop_download(
 
     live_output: list[str] = []
 
+    from services.mod_install_status_service import record_mod_download_output
+
     def _live_log(line: str) -> None:
         safe_line = _redact(line, secrets_to_redact)
         _bounded_log_buffer_append(live_output, safe_line)
+        record_mod_download_output(server_id, workshop_item_id, safe_line)
         _append_console_log(server_id, safe_line)
 
     uid, gid = docker_service.container_runtime_uid_gid()
@@ -722,6 +725,16 @@ class GamePlugin(ABC):
             if not needed:
                 return {"ok": True, "applied": 0, "message": "keine Workshop-Mod-Updates nötig"}
 
+            from services.mod_install_status_service import (
+                mark_mod_failed,
+                mark_mod_installed,
+                mark_mod_installing,
+                mark_mod_pending,
+            )
+
+            for u in needed:
+                mark_mod_pending(server.id, u.get("workshop_id", ""), u.get("action", "update"))
+
             _append_console_log(
                 server.id,
                 f"[MSM] Starte Workshop-Mod-Updates/Installationen für {len(needed)} Mod(s) "
@@ -740,6 +753,7 @@ class GamePlugin(ABC):
                     f"[MSM]   → {action.upper()}: Workshop-Mod {wid} ({name})\n"
                 )
                 try:
+                    mark_mod_installing(server.id, wid, action)
                     mod_res = self.install_mod(server, wid)
                     success = (
                         isinstance(mod_res, dict)
@@ -751,6 +765,7 @@ class GamePlugin(ABC):
                         updater.update_mod_metadata_after_success(
                             server.id, wid, u.get("remote_updated")
                         )
+                        mark_mod_installed(server.id, wid)
                         applied += 1
                         _append_console_log(
                             server.id, f"[MSM]     ✓ {wid} erfolgreich verarbeitet.\n"
@@ -762,11 +777,13 @@ class GamePlugin(ABC):
                             else str(mod_res)
                         )
                         errors.append(f"{wid}: {err}")
+                        mark_mod_failed(server.id, wid)
                         _append_console_log(
                             server.id, f"[MSM]     ✗ {wid} fehlgeschlagen: {err}\n"
                         )
                 except Exception as exc:  # pragma: no cover - defensiv
                     errors.append(f"{wid}: {exc}")
+                    mark_mod_failed(server.id, wid)
                     _append_console_log(
                         server.id, f"[MSM]     ✗ {wid} Exception während install_mod: {exc}\n"
                     )

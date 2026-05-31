@@ -141,9 +141,23 @@ async def lifespan(app: FastAPI):
     # Migration: Mod enabled-Spalte
     if 'mods' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('mods')]
-        if 'enabled' not in cols:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            if 'enabled' not in cols:
                 conn.execute(text("ALTER TABLE mods ADD COLUMN enabled BOOLEAN DEFAULT true"))
+            if 'install_status' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN install_status VARCHAR(24) NOT NULL DEFAULT 'installed'"))
+            if 'install_action' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN install_action VARCHAR(24)"))
+            if 'install_progress' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN install_progress INTEGER"))
+            if 'install_eta_seconds' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN install_eta_seconds INTEGER"))
+            if 'install_started_at' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN install_started_at DATETIME"))
+            if 'install_completed_at' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN install_completed_at DATETIME"))
+            if 'install_error' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN install_error TEXT"))
 
     # Migration: Backup name-Spalte
     if 'backups' in inspector.get_table_names():

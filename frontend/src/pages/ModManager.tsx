@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ChevronDown,
@@ -18,6 +18,7 @@ import {
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
+import { getModInstallPresentation, hasActiveModInstall } from '@/services/modInstallStatus'
 
 interface Mod {
   id: number
@@ -29,6 +30,13 @@ interface Mod {
   load_order: number | null
   enabled: boolean
   dependencies_json: string | null
+  install_status: string
+  install_action: string | null
+  install_progress: number | null
+  install_eta_seconds: number | null
+  install_started_at: string | null
+  install_completed_at: string | null
+  install_error: string | null
 }
 
 interface SteamMod {
@@ -81,26 +89,42 @@ export function ModManager({ serverId }: ModManagerProps) {
   // Drag & drop fuer Load-Order
   const dragId = useRef<number | null>(null)
 
+  const loadMods = useCallback(
+    async (options?: { silent?: boolean }) => {
+      try {
+        const data = await api<Mod[]>(`/mods/${serverId}`)
+        setMods(data)
+      } catch (err: unknown) {
+        if (!options?.silent) {
+          toast.error(err instanceof Error ? err.message : t('mods.loadError'))
+        }
+      } finally {
+        if (!options?.silent) {
+          setLoading(false)
+        }
+      }
+    },
+    [serverId, t],
+  )
+
   useEffect(() => {
+    setLoading(true)
     void loadMods()
-  }, [serverId])
+  }, [loadMods])
+
+  useEffect(() => {
+    if (!mods.some(hasActiveModInstall)) return
+    const intervalId = window.setInterval(() => {
+      void loadMods({ silent: true })
+    }, 2500)
+    return () => window.clearInterval(intervalId)
+  }, [loadMods, mods])
 
   useEffect(() => {
     if (browserCache[browserTab]) return // schon geladen — nicht neu fetchen
     void loadBrowserTab(browserTab, 1, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [browserTab])
-
-  const loadMods = async () => {
-    try {
-      const data = await api<Mod[]>(`/mods/${serverId}`)
-      setMods(data)
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : t('mods.loadError'))
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const loadBrowserTab = async (tab: BrowserTab, page: number, append: boolean) => {
     setBrowserLoading(true)
@@ -281,6 +305,12 @@ export function ModManager({ serverId }: ModManagerProps) {
   const displayedMods = isSearchMode ? steamResults : browserEntry?.mods ?? []
   const showLoadMoreBrowser = !isSearchMode && !!browserEntry?.hasMore
   const showLoadMoreSearch = isSearchMode && steamHasMore
+  const statusBadgeClass = {
+    success: 'msm-badge-success',
+    warning: 'msm-badge-warning',
+    info: 'msm-badge-info',
+    error: 'msm-badge-error',
+  } as const
 
   const renderSteamModCard = (mod: SteamMod) => {
     const isAdded = mods.some((m) => m.workshop_id === mod.publishedfileid)
@@ -401,7 +431,9 @@ export function ModManager({ serverId }: ModManagerProps) {
               </p>
             </div>
           ) : (
-            visibleInstalled.map((mod) => (
+            visibleInstalled.map((mod) => {
+              const installStatus = getModInstallPresentation(mod, t)
+              return (
               <div
                 key={mod.id}
                 className={`msm-card p-4 transition-opacity ${mod.enabled ? '' : 'opacity-60'}`}
@@ -432,6 +464,26 @@ export function ModManager({ serverId }: ModManagerProps) {
                         <span>
                           {t('mods.loadOrder')}: {mod.load_order}
                         </span>
+                      )}
+                    </div>
+                    <div className="mt-2 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={statusBadgeClass[installStatus.kind]}>
+                          {installStatus.label}
+                        </span>
+                        {installStatus.detail && (
+                          <span className="text-xs text-on-surface-variant font-body-md">
+                            {installStatus.detail}
+                          </span>
+                        )}
+                      </div>
+                      {installStatus.showProgress && (
+                        <div className="h-1.5 w-full max-w-md overflow-hidden rounded-full bg-surface-container-high border border-outline-variant">
+                          <div
+                            className="h-full rounded-full bg-primary transition-[width] duration-500"
+                            style={{ width: `${installStatus.progress ?? 0}%` }}
+                          />
+                        </div>
                       )}
                     </div>
                   </div>
@@ -469,7 +521,8 @@ export function ModManager({ serverId }: ModManagerProps) {
                   </div>
                 </div>
               </div>
-            ))
+              )
+            })
           )}
           {hasMoreInstalled && (
             <button

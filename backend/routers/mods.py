@@ -7,11 +7,11 @@ from schemas import ModResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from games import get_plugin
 from services.install_update_lock_service import (
-    INSTALL_UPDATE_ALREADY_RUNNING,
     release_install_update_lock,
-    try_acquire_install_update_lock,
     acquire_install_update_lock_blocking,
 )
+from services.mod_install_status_service import mark_mod_failed, mark_mod_installed, mark_mod_installing
+from games import updater
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,12 +28,20 @@ def install_mod_bg(server_id: int, workshop_id: str):
             return
         plugin = get_plugin(server.game_type)
         if not plugin or not plugin.supports_mods:
+            mark_mod_failed(server_id, workshop_id)
             return
 
         # Blockierenden Lock erwerben, um parallele SteamCMD-Aufrufe zu serialisieren
         acquire_install_update_lock_blocking(server.id, "mod_install")
         try:
-            plugin.install_mod(server, workshop_id)
+            mark_mod_installing(server.id, workshop_id, "install")
+            result = plugin.install_mod(server, workshop_id)
+            success = isinstance(result, dict) and result.get("ok", True) is not False and "error" not in result
+            if success:
+                updater.update_mod_metadata_after_success(server.id, workshop_id)
+                mark_mod_installed(server.id, workshop_id)
+            else:
+                mark_mod_failed(server.id, workshop_id)
         finally:
             release_install_update_lock(server.id)
     except Exception as exc:
@@ -75,6 +83,9 @@ def subscribe_mod(
         name=name,
         load_order=max_order,
         auto_update=True,
+        install_status="pending" if plugin and plugin.supports_mods else "installed",
+        install_action="install" if plugin and plugin.supports_mods else None,
+        install_progress=0 if plugin and plugin.supports_mods else 100,
     )
     db.add(mod)
     db.commit()

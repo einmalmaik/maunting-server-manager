@@ -458,7 +458,22 @@
     "updateSettingFailed": "Einstellung fehlgeschlagen",
     "reorderFailed": "Neusortierung fehlgeschlagen",
     "steamSearchError": "Steam-Suche fehlgeschlagen",
-    "loadMore": "Mehr anzeigen"
+    "loadMore": "Mehr anzeigen",
+    "statusPending": "Pending",
+    "statusUpdatePending": "Update pending",
+    "statusPendingHint": "Wartet in der Installationswarteschlange.",
+    "statusInstalling": "Wird geladen",
+    "statusUpdating": "Update lädt",
+    "statusInstalled": "Installiert",
+    "statusError": "Fehler",
+    "statusErrorHint": "Installation fehlgeschlagen.",
+    "etaCalculating": "Restzeit wird berechnet.",
+    "etaAlmostDone": "Fast fertig.",
+    "etaLessThanMinute": "Unter 1 Minute verbleibend.",
+    "etaMinutes_one": "Ca. 1 Minute verbleibend.",
+    "etaMinutes_other": "Ca. {{count}} Minuten verbleibend.",
+    "etaHours_one": "Ca. 1 Stunde verbleibend.",
+    "etaHours_other": "Ca. {{count}} Stunden verbleibend."
   },
   "files": {
     "title": "Datei-Manager",
