@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
 import { Logo } from '@/components/Logo';
-import { Card } from '../components/ui/Card';
+import { Card } from '@/components/ui/Card';
+import { LegalFooter } from '@/components/LegalFooter';
 
 export function Privacy() {
   const { isAuthenticated } = useAuthStore();
@@ -11,16 +12,16 @@ export function Privacy() {
   const { t } = useTranslation();
 
   const cardContent = (
-    <Card className="p-8 space-y-6 bg-surface-container-high border-border">
+    <Card className="p-8 space-y-6">
       <section>
-        <h2 className="text-xl font-semibold mb-3 text-foreground">1. Grundprinzip</h2>
+        <h2 className="text-xl font-semibold mb-3 text-primary">1. Grundprinzip</h2>
         <p className="text-on-surface-variant leading-relaxed">
           Der Maunting Server Manager ist nach dem Prinzip der maximalen Datensparsamkeit entwickelt. Wir speichern keine Metadaten, keine Tracking-Daten und nutzen keine Analytics-Dienste. Diese Instanz wird eigenverantwortlich gehostet.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold mb-3 text-foreground">2. Gespeicherte Daten</h2>
+        <h2 className="text-xl font-semibold mb-3 text-primary">2. Gespeicherte Daten</h2>
         <p className="text-on-surface-variant leading-relaxed mb-2">
           Wir speichern ausschließlich die Daten, die für den Betrieb Ihres Accounts zwingend erforderlich sind:
         </p>
@@ -30,7 +31,7 @@ export function Privacy() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold mb-3 text-foreground">3. Cookies</h2>
+        <h2 className="text-xl font-semibold mb-3 text-primary">3. Cookies</h2>
         <p className="text-on-surface-variant leading-relaxed mb-2">
           Es werden ausschließlich technisch notwendige Cookies gesetzt:
         </p>
@@ -42,14 +43,14 @@ export function Privacy() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold mb-3 text-foreground">4. Weitergabe an Dritte</h2>
+        <h2 className="text-xl font-semibold mb-3 text-primary">4. Weitergabe an Dritte</h2>
         <p className="text-on-surface-variant leading-relaxed">
           Es erfolgt keine Weitergabe von Daten an Dritte. Alle Daten verbleiben lokal auf dem Server dieser Instanz.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold mb-3 text-foreground">5. Recht auf Löschung</h2>
+        <h2 className="text-xl font-semibold mb-3 text-primary">5. Recht auf Löschung</h2>
         <p className="text-on-surface-variant leading-relaxed">
           Sie haben jederzeit das Recht, Ihren Account zu löschen. Bei einer Löschung werden alle mit Ihrem Account verknüpften personenbezogenen Daten unwiderruflich aus der Datenbank entfernt.
         </p>
@@ -61,7 +62,6 @@ export function Privacy() {
     return (
       <div className="min-h-screen bg-background text-on-surface flex flex-col items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
         <div className="absolute inset-0 msm-deep-grid opacity-50" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-4xl my-8">
           <div className="flex items-center justify-between mb-8">
@@ -82,6 +82,7 @@ export function Privacy() {
           </div>
           <h1 className="text-3xl font-headline font-bold mb-8">Datenschutzerklärung</h1>
           {cardContent}
+          <LegalFooter className="mt-8" />
         </div>
       </div>
     );
@@ -89,9 +90,14 @@ export function Privacy() {
 
   return (
     <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6">
-      <h1 className="text-3xl font-headline font-bold mb-8">Datenschutzerklärung</h1>
+      <div className="mb-8 flex items-center gap-3">
+        <Logo size="sm" />
+        <div>
+          <h1 className="text-3xl font-headline font-bold text-on-surface">Datenschutzerklärung</h1>
+          <p className="font-mono text-xs text-on-surface-variant">Maunting Server Manager</p>
+        </div>
+      </div>
       {cardContent}
     </div>
   );
 }
-

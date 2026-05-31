@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Shield, Mail, KeyRound, Check, Save, AlertTriangle, Copy } from 'lucide-react'
 
 export function Profile() {
@@ -169,11 +170,9 @@ export function Profile() {
             <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
               {t('profile.currentPassword')}
             </label>
-            <input
-              type="password"
+            <PasswordInput
               value={pwdForm.current}
               onChange={(e) => setPwdForm({ ...pwdForm, current: e.target.value })}
-              className="msm-input"
               required
             />
           </div>
@@ -181,11 +180,9 @@ export function Profile() {
             <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
               {t('profile.newPassword')}
             </label>
-            <input
-              type="password"
+            <PasswordInput
               value={pwdForm.new}
               onChange={(e) => setPwdForm({ ...pwdForm, new: e.target.value })}
-              className="msm-input"
               required
               minLength={8}
             />
@@ -194,11 +191,9 @@ export function Profile() {
             <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
               {t('profile.confirmPassword')}
             </label>
-            <input
-              type="password"
+            <PasswordInput
               value={pwdForm.confirm}
               onChange={(e) => setPwdForm({ ...pwdForm, confirm: e.target.value })}
-              className="msm-input"
               required
               minLength={8}
             />

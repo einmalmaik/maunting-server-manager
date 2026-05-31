@@ -6,6 +6,8 @@ import { useAuthStore } from '@/stores/authStore'
 import type { User } from '@/types'
 import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
+import { ErrorMessage } from '@/components/ui/ErrorMessage'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Shield, ArrowRight, Globe, KeyRound, Mail, Check } from 'lucide-react'
 
 export function Login() {
@@ -116,8 +118,6 @@ export function Login() {
   return (
     <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
       <div className="absolute inset-0 msm-deep-grid opacity-50" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
-      <div className="absolute top-20 right-20 w-64 h-64 bg-cyan-glow blur-[80px] rounded-full pointer-events-none opacity-40" />
 
       <div className="relative z-10 w-full max-w-md">
         <div className="flex justify-end mb-4">
@@ -203,11 +203,7 @@ export function Login() {
                   />
                 </div>
 
-                {error && (
-                  <div className="msm-alert-error text-sm">
-                    {error}
-                  </div>
-                )}
+                <ErrorMessage message={error} className="text-sm" />
 
                 <button
                   type="submit"
@@ -279,20 +275,14 @@ export function Login() {
               />
             </div>
 
-            <div>
-              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                {t('auth.password')}
-              </label>
-              <input
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                className="msm-input"
-                placeholder="••••••••"
-                required
-                disabled={requires2FA}
-              />
-            </div>
+            <PasswordInput
+              label={t('auth.password') || 'Passwort'}
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              placeholder="••••••••"
+              required
+              disabled={requires2FA}
+            />
 
             {requires2FA && (
               <>
@@ -328,11 +318,7 @@ export function Login() {
               </>
             )}
 
-            {error && (
-              <div className="msm-alert-error text-sm">
-                {error}
-              </div>
-            )}
+            <ErrorMessage message={error} className="text-sm" />
 
             <button
               type="submit"

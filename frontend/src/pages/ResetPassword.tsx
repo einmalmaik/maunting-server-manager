@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
+import { ErrorMessage } from '@/components/ui/ErrorMessage'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Shield, Check, X, ArrowRight } from 'lucide-react'
 
 export function ResetPassword() {
@@ -54,7 +56,6 @@ export function ResetPassword() {
   return (
     <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
       <div className="absolute inset-0 msm-deep-grid opacity-50" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-secondary/10 blur-[120px] rounded-full pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-md">
         <div className="flex items-center justify-center gap-3 mb-8">
@@ -115,40 +116,24 @@ export function ResetPassword() {
 
           {(status === 'idle' || status === 'submitting') && (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                  {t('auth.password')}
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="msm-input"
-                  placeholder="••••••••"
-                  required
-                  minLength={8}
-                />
-              </div>
+              <PasswordInput
+                label={t('auth.password') || 'Passwort'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                minLength={8}
+              />
 
-              <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                  {t('auth.confirmPassword')}
-                </label>
-                <input
-                  type="password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  className="msm-input"
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
+              <PasswordInput
+                label={t('auth.confirmPassword') || 'Passwort bestätigen'}
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
 
-              {message && (
-                <div className="msm-alert-error text-sm">
-                  {message}
-                </div>
-              )}
+              <ErrorMessage message={message} className="text-sm" />
 
               <button
                 type="submit"

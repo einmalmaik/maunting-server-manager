@@ -8,6 +8,7 @@ import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { useAuthStore } from '@/stores/authStore'
 import { ServerPermissionsPanel } from '@/components/ServerPermissionsPanel'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
 
@@ -156,11 +157,9 @@ export function Users() {
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                 {t('auth.password')}
               </label>
-              <input
-                type="password"
+              <PasswordInput
                 value={createForm.password}
                 onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-                className="msm-input"
                 required
                 minLength={8}
               />

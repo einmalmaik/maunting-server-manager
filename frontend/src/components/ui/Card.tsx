@@ -10,10 +10,8 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
       <div
         ref={ref}
         className={`
-          rounded-xl border border-border bg-card text-card-foreground
-          shadow-panel backdrop-blur-sm
+          msm-card text-card-foreground
           transition-all duration-200
-          hover:border-ring/30
           ${className}
         `}
         {...props}
@@ -30,7 +28,7 @@ export const CardHeader = ({ className = '', children, ...props }: React.HTMLAtt
 )
 
 export const CardTitle = ({ className = '', children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
-  <h3 className={`text-lg font-semibold leading-none tracking-tight text-foreground ${className}`} {...props}>{children}</h3>
+  <h3 className={`text-lg font-semibold leading-none text-foreground ${className}`} {...props}>{children}</h3>
 )
 
 export const CardDescription = ({ className = '', children, ...props }: React.HTMLAttributes<HTMLParagraphElement>) => (

@@ -650,7 +650,8 @@
     "serverUpdateAvailable": "Server-Aktualisierung verfügbar für {{name}}",
     "modUpdateAvailable": "Mod-Aktualisierung verfügbar für {{mod}} auf Server {{server}}",
     "activeLabel": "E-Mail-Benachrichtigungen: aktiv",
-    "inactiveLabel": "E-Mail-Benachrichtigungen: deaktiviert"
+    "inactiveLabel": "E-Mail-Benachrichtigungen: deaktiviert",
+    "updateFailed": "Benachrichtigungseinstellung konnte nicht gespeichert werden."
   },
   "updater": {
     "manualConfigsRestored": "Manuelle Konfigurationen wurden automatisch wiederhergestellt.",

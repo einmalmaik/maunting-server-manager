@@ -650,7 +650,8 @@
     "serverUpdateAvailable": "Server update available for {{name}}",
     "modUpdateAvailable": "Mod update available for {{mod}} on server {{server}}",
     "activeLabel": "Email notifications: active",
-    "inactiveLabel": "Email notifications: disabled"
+    "inactiveLabel": "Email notifications: disabled",
+    "updateFailed": "Could not save notification setting."
   },
   "updater": {
     "manualConfigsRestored": "Manual configuration files were automatically restored.",

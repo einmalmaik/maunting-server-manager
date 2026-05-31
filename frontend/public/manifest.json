@@ -4,25 +4,37 @@
   "description": "Modular game server management panel for Conan Exiles UE5 and DayZ",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0e1a",
-  "theme_color": "#5eead4",
+  "background_color": "#071013",
+  "theme_color": "#071013",
   "orientation": "portrait-primary",
   "scope": "/",
   "icons": [
     {
-      "src": "/icon-192x192.png",
+      "src": "/pwa-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "maskable any"
+      "purpose": "any"
     },
     {
-      "src": "/icon-512x512.png",
+      "src": "/pwa-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "maskable any"
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "categories": ["utilities", "productivity"],
-  "lang": "en",
+  "lang": "de",
   "dir": "ltr"
 }

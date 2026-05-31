@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { Logo } from '@/components/Logo'
 import { Globe, Bell, Menu, User, LogOut } from 'lucide-react'
 import { api } from '@/api/client'
+import { toast } from '@/stores/toastStore'
 
 export function Topbar() {
   const { t, i18n } = useTranslation()
@@ -59,8 +60,8 @@ export function Topbar() {
         // Optimistisches State-Update: kein Reload, kein MIME-Problem.
         updateUser({ email_notifications: next })
         setNotificationsEnabled(next)
-      } catch (err: any) {
-        console.error(err)
+      } catch {
+        toast.error(t('notifications.updateFailed'))
       }
     }
   }
@@ -99,21 +100,13 @@ export function Topbar() {
             aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
             className="p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary"
           >
-            <div className="bell-wrapper" style={{ position: 'relative', display: 'inline-flex' }}>
+            <div className="relative inline-flex">
               <Bell className="w-[18px] h-[18px]" />
               <span
-                className="bell-status-dot"
+                className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border-2 border-background ${
+                  notificationsEnabled ? 'bg-status-success' : 'bg-status-destructive'
+                }`}
                 aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
-                style={{
-                  position: 'absolute',
-                  top: '-2px',
-                  right: '-2px',
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  border: '2px solid #101417',
-                  backgroundColor: notificationsEnabled ? '#22c55e' : '#ef4444',
-                }}
               ></span>
             </div>
           </button>

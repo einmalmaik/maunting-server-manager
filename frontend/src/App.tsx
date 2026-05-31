@@ -6,6 +6,7 @@ import { PublicOnlyRoute } from './components/PublicOnlyRoute'
 import { RequirePermission } from './components/RequirePermission'
 import { ToastContainer } from './components/ui/ToastContainer'
 import { ConfirmDialog } from './components/ui/ConfirmDialog'
+import { Loader } from './components/ui/Loader'
 
 const SetupWizard = lazy(() => import('./pages/SetupWizard').then(module => ({ default: module.SetupWizard })))
 const Login = lazy(() => import('./pages/Login').then(module => ({ default: module.Login })))
@@ -37,19 +38,13 @@ function App() {
   }, [])
 
   if (setupRequired === null) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
+    return <Loader fullScreen label="Maunting Server Manager" />
   }
 
   if (setupRequired) {
     return (
       <Suspense fallback={
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        </div>
+        <Loader fullScreen label="Maunting Server Manager" />
       }>
         <SetupWizard onComplete={() => setSetupRequired(false)} />
       </Suspense>
@@ -59,9 +54,7 @@ function App() {
   return (
     <>
       <Suspense fallback={
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        </div>
+        <Loader fullScreen label="Maunting Server Manager" />
       }>
         <Routes>
         {/* Oeffentliche Auth-Routen — nur fuer nicht-eingeloggte User */}

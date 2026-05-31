@@ -69,7 +69,7 @@ export function Sidebar() {
         <div className="px-4 mb-6">
           <NavLink
             to="/servers"
-            className="w-full bg-primary text-on-primary font-label-md text-label-md py-3 rounded-md hover:shadow-primary-glow-hover transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+            className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2"
           >
             <Plus className="w-4 h-4" />
             {t('servers.create', 'Server erstellen')}

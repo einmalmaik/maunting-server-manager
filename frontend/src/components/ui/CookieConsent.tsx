@@ -33,8 +33,8 @@ export function CookieConsent() {
             setIsSettingsOpen(true);
         };
 
-        window.addEventListener('singra:open-cookie-settings', handleOpenSettings);
-        return () => window.removeEventListener('singra:open-cookie-settings', handleOpenSettings);
+        window.addEventListener('msm:open-cookie-settings', handleOpenSettings);
+        return () => window.removeEventListener('msm:open-cookie-settings', handleOpenSettings);
     }, []);
 
     const dismissBanner = () => {

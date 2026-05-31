@@ -1,7 +1,9 @@
 import { LOGO_CONFIG } from '@/config/logo'
+import { useState } from 'react'
 
 interface LogoProps {
   size?: 'sm' | 'md' | 'lg'
+  className?: string
 }
 
 const sizeClasses = {
@@ -13,32 +15,33 @@ const sizeClasses = {
 /**
  * Central Logo component.
  *
- * Displays the configured logo image and falls back to the text
- * placeholder "M" when the image fails to load (e.g. file not present).
+ * Displays the configured MSM logo and falls back to "MSM" when the image
+ * fails to load.
  *
  * Scaling is handled purely via CSS — no JS resize logic.
  */
-export function Logo({ size = 'md' }: LogoProps) {
+export function Logo({ size = 'md', className = '' }: LogoProps) {
+  const [failed, setFailed] = useState(false)
   const cls = sizeClasses[size]
 
   return (
-    <div className={`${cls} relative flex-shrink-0`}>
-      <img
-        src={LOGO_CONFIG.src}
-        alt={LOGO_CONFIG.alt}
-        className={`${cls} object-contain block rounded-md`}
-        onError={(e) => {
-          e.currentTarget.style.display = 'none'
-          const fallback = e.currentTarget.nextElementSibling as HTMLElement | null
-          if (fallback) fallback.style.display = 'flex'
-        }}
-      />
-      <div
-        className={`${cls} absolute inset-0 rounded-md bg-primary items-center justify-center text-on-primary font-headline text-headline-md font-extrabold hidden`}
-        aria-hidden="true"
-      >
-        M
-      </div>
+    <div className={`${cls} relative flex-shrink-0 ${className}`}>
+      {!failed ? (
+        <img
+          src={LOGO_CONFIG.src}
+          alt={LOGO_CONFIG.alt}
+          className={`${cls} block object-contain drop-shadow-[0_0_12px_hsl(190_92%_62%_/_0.28)]`}
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <div
+          className={`${cls} flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-[10px] font-bold text-primary`}
+          aria-label={LOGO_CONFIG.alt}
+          role="img"
+        >
+          MSM
+        </div>
+      )}
     </div>
   )
 }

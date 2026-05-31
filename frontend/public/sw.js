@@ -4,7 +4,8 @@ const CACHE_NAME = 'msm-v1';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
-  '/favicon.svg',
+  '/favicon.ico',
+  '/logo.png',
   // Add other static assets as needed
 ];
 

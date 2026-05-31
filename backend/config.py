@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     setup_completed_file: Path = Path("/opt/msm/.setup_completed")
 
     # Logo — absolute URL used in email templates.
-    # Falls back to panel_url + /logo.svg when empty.
+    # Falls back to panel_url + /logo.png when empty.
     logo_url: str = ""
 
     # Redis (fuer verteiltes Rate-Limiting via slowapi)
