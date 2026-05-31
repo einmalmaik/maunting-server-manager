@@ -407,8 +407,11 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
         try:
             shutil.rmtree(install_dir)
             dir_removed = True
-        except OSError:
-            pass
+        except OSError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Abbruch (Atomar): Install-Verzeichnis konnte nicht gelöscht werden. Bitte behebe die Berechtigungen (z. B. chown/chmod) oder lösche den Ordner manuell, bevor du den Server im Panel entfernst: {e}"
+            )
 
     # 4. Backup-Verzeichnis (Files) löschen - DB-Cascade räumt Records
     backup_dir = f"/opt/msm/backups/{server.id}"
@@ -417,8 +420,11 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
         try:
             shutil.rmtree(backup_dir)
             backups_removed = True
-        except OSError:
-            pass
+        except OSError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Abbruch (Atomar): Backup-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
+            )
 
     # 5. MSM-Console-Log-Verzeichnis räumen
     console_log_dir = os.path.join(
@@ -429,8 +435,11 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     if os.path.exists(console_log_dir):
         try:
             shutil.rmtree(console_log_dir)
-        except OSError:
-            pass
+        except OSError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Abbruch (Atomar): Console-Log-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
+            )
 
     # 6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
     db.delete(server)
