@@ -105,7 +105,7 @@ class TestAcceptServer:
             assert args[1] == "DOCKER-USER"
             assert args[2] == "1"
             assert "ACCEPT" in args
-            assert "-d" in args
+            assert "--ctorigdst" in args
             assert "1.2.3.4" in args
 
     def test_idempotent_when_rule_present(self):
