@@ -131,32 +131,16 @@ def ensure_baseline_drop(
     range_start: int = PORT_RANGE_START,
     range_end: int = PORT_RANGE_END,
 ) -> bool:
-    """Stellt sicher, dass am ENDE von DOCKER-USER ein DROP fuer die
-    MSM-Port-Range steht (UDP + TCP).
+    """No-op: DOCKER-USER baseline DROP is disabled.
 
-    Idempotent: existiert die Regel schon, passiert nichts.
+    The old global DROP for the full MSM range caused externally reachable
+    game servers to fail in confusing ways when the per-server RETURN rule was
+    missing, stale, or ordered incorrectly. MSM already publishes ports on the
+    configured bind IP, so keeping the global backstop is more harmful than
+    useful on this host.
     """
-    if not _iptables_available() or not _chain_exists():
-        logger.info("iptables/DOCKER-USER nicht verfuegbar — Defense-in-Depth uebersprungen.")
-        return False
-
-    for protocol, comment in (
-        ("udp", _BASELINE_COMMENT_UDP),
-        ("tcp", _BASELINE_COMMENT_TCP),
-    ):
-        rule = [
-            _DOCKER_USER_CHAIN,
-            "-p", protocol,
-            "--dport", f"{range_start}:{range_end}",
-            "-m", "comment", "--comment", comment,
-            "-j", "DROP",
-        ]
-        if _rule_exists(rule):
-            continue
-        result = _run_iptables("-A", *rule)
-        if result is None or result.returncode != 0:
-            return False
-    return True
+    logger.info("DOCKER-USER baseline DROP disabled; relying on explicit bind IPs.")
+    return False
 
 
 def accept_server(
