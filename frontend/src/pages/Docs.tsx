@@ -137,11 +137,9 @@ export function Docs() {
     "runtime": {
       "image": "node:20-alpine",
       "env": {
-        "NODE_ENV": "production",
-        "DISCORD_TOKEN": "{DISCORD_TOKEN}",
-        "PREFIX": "!"
+        "NODE_ENV": "production"
       },
-      "startup": "npm install && node index.js"
+      "startup": "sh start.sh"
     },
     "ports": [],
     "source": {

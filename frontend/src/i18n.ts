@@ -41,5 +41,14 @@ i18n
     parseMissingKeyHandler: (key: string) => key,
   })
 
+if (typeof document !== 'undefined') {
+  i18n.on('languageChanged', (lng) => {
+    const meta = supportedLocales.find((l) => l.code === lng)
+    const dir = meta?.direction || 'ltr'
+    document.documentElement.dir = dir
+    document.documentElement.lang = lng
+  })
+}
+
 export default i18n
 
