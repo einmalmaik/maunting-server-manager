@@ -42,3 +42,5 @@ CLOUD.md
 /frontend/dist
 *.tar
 /backend/venv-wsl
+/.refact
+backend/maunting-server-manager.code-workspace
