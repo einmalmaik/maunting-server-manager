@@ -8,7 +8,7 @@ const detector = new LanguageDetector()
 detector.addDetector({
   name: 'customConsentDetector',
   lookup() {
-    return getPersistedLocale()
+    return getPersistedLocale() ?? undefined
   },
   cacheUserLanguage(lng) {
     setPersistedLocale(lng)

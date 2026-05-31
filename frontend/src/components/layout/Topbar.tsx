@@ -25,14 +25,6 @@ export function Topbar() {
     }
   }, [user?.email_notifications])
 
-  const toggleLang = () => {
-    const currentIndex = supportedLocales.findIndex(l => l.code === i18n.language)
-    const nextIndex = (currentIndex + 1) % supportedLocales.length
-    const next = supportedLocales[nextIndex]?.code || 'en'
-    i18n.changeLanguage(next)
-  }
-
-
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -88,14 +80,22 @@ export function Topbar() {
 
         {/* Right Actions */}
         <div className="flex items-center gap-4">
-          {/* Language Toggle */}
-          <button
-            onClick={toggleLang}
-            className="hidden sm:flex items-center gap-1.5 font-label-md text-xs text-on-surface-variant hover:text-primary transition-colors"
-          >
-            <Globe className="w-3.5 h-3.5" />
-            {i18n.language.toUpperCase()}
-          </button>
+          {/* Language Selector Dropdown */}
+          <div className="hidden sm:flex items-center gap-1.5 text-on-surface-variant hover:text-primary transition-colors relative">
+            <Globe className="w-3.5 h-3.5 absolute left-1.5 pointer-events-none" />
+            <select
+              value={i18n.language}
+              onChange={(e) => i18n.changeLanguage(e.target.value)}
+              className="bg-transparent border-0 text-xs font-label-md pl-6 pr-4 py-1.5 cursor-pointer focus:outline-none focus:ring-0 text-on-surface-variant hover:text-primary transition-colors appearance-none"
+              style={{ paddingRight: '1rem' }}
+            >
+              {supportedLocales.map((locale) => (
+                <option key={locale.code} value={locale.code} className="bg-surface-container-high text-on-surface">
+                  {locale.nativeLabel}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Notifications Toggle */}
           <button
