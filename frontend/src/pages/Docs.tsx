@@ -260,6 +260,19 @@ export function Docs() {
               <FieldRow field="source.http" type="object" required={false}>{t('docs.reference.sourceHttp')}</FieldRow>
               <FieldRow field="source.manual" type="object" required={false}>{t('docs.reference.sourceManual')}</FieldRow>
             </FieldTable>
+
+            <h3 className="font-bold text-primary mt-6 mb-2">mods</h3>
+            <FieldTable>
+              <FieldRow field="mods.supportsMods" type="boolean" required={false}>{t('docs.reference.modsSupportsMods')}</FieldRow>
+              <FieldRow field="mods.supportsSteamWorkshop" type="boolean" required={false}>{t('docs.reference.modsSupportsSteamWorkshop')}</FieldRow>
+              <FieldRow field="mods.workshopAppId" type="string" required={false}>{t('docs.reference.modsWorkshopAppId')}</FieldRow>
+              <FieldRow field="mods.filterTags" type="list" required={false}>{t('docs.reference.modsFilterTags')}</FieldRow>
+              <FieldRow field="mods.modInjection" type="enum" required={false}>{t('docs.reference.modsModInjection')}</FieldRow>
+              <FieldRow field="mods.modStartupArgumentFormat" type="string" required={false}>{t('docs.reference.modsModStartupArgumentFormat')}</FieldRow>
+              <FieldRow field="mods.modListFilePath" type="string" required={false}>{t('docs.reference.modsModListFilePath')}</FieldRow>
+              <FieldRow field="mods.modListContent" type="enum" required={false}>{t('docs.reference.modsModListContent')}</FieldRow>
+              <FieldRow field="mods.postInstall" type="list" required={false}>{t('docs.reference.modsPostInstall')}</FieldRow>
+            </FieldTable>
           </section>
 
           <section id="docs-howto" className="msm-card p-6 scroll-mt-20">

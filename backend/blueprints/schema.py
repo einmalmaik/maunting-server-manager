@@ -830,6 +830,8 @@ COMMENTED_TEMPLATE_DE: str = """{
   "ports": [
     // Deklariert die benötigten Ports. Die UI fragt diese beim Server-Erstellen ab.
     // Erlaubte Rollen: game, query, rcon, voice, web, custom
+    // Dieselbe Standardrolle darf einmal pro Protokoll vorkommen, z.B. query/udp + query/tcp.
+    // MSM speichert daraus eindeutige Rollen: query, query_2, ...
     {
       "name": "game",
       "protocol": "udp"
@@ -907,6 +909,8 @@ COMMENTED_TEMPLATE_EN: str = """{
   "ports": [
     // Declares the required ports. The UI will prompt the user for these during server creation.
     // Allowed roles: game, query, rcon, voice, web, custom
+    // The same standard role may appear once per protocol, e.g. query/udp + query/tcp.
+    // MSM stores these as unique roles: query, query_2, ...
     {
       "name": "game",
       "protocol": "udp"

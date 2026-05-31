@@ -29,6 +29,7 @@ Steam Workshop wird über `mods` aktiviert:
   "supportsMods": true,
   "supportsSteamWorkshop": true,
   "workshopAppId": "221100",
+  "filterTags": ["Enhanced"],
   "modInjection": "startupArg",
   "modStartupArgumentFormat": "-mod={mods};",
   "modListFilePath": null,
@@ -36,6 +37,8 @@ Steam Workshop wird über `mods` aktiviert:
   "postInstall": []
 }
 ```
+
+`filterTags` (optional, Liste von Strings, max. 10 Tags) definiert Tags, nach denen die Mod-Suche und -Auflistung im Steam Workshop gefiltert wird. Das Feld verhindert, dass inkompatible Versionen gemischt angezeigt werden (z. B. Legacy- und Enhanced-Mods bei Conan Exiles). Erlaubte Zeichen in Tags sind Alphanumerisch, Leerzeichen, `_`, `-` und `+` (max. 64 Zeichen pro Tag).
 
 `modInjection=startupArg` setzt aktive Workshop-IDs in `{MOD_ARG}` ein.
 
@@ -147,6 +150,44 @@ Beispiel:
 ```
 
 Wenn ein Port-Token leer ist, wird dieser Patch übersprungen.
+
+## Ports und Protokolle
+
+`ports` beschreibt fachliche Port-Rollen und das Protokoll, das Docker und UFW
+öffnen müssen:
+
+```json
+{
+  "ports": [
+    { "name": "game", "protocol": "udp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "query", "protocol": "tcp" },
+    { "name": "rcon", "protocol": "tcp" }
+  ]
+}
+```
+
+`name` ist die fachliche Rolle, nicht das Protokoll. `protocol` ist verbindlich.
+Wenn ein Spiel denselben Port über UDP und TCP braucht, deklariere dieselbe Rolle
+zweimal mit unterschiedlichen Protokollen. MSM legt daraus intern eindeutige
+Port-Rollen an: der erste `query`-Eintrag bleibt `query`, der zweite wird
+`query_2`. Bei gleicher fachlicher Rolle teilt die automatische Vergabe den Port
+über unterschiedliche Protokolle, z. B. `28015/udp` und `28015/tcp`.
+
+Wichtig:
+
+- Gleiche Rolle + gleiches Protokoll ist für Standardrollen nicht erlaubt.
+- Gleiche Rolle + anderes Protokoll ist erlaubt und wird getrennt in Docker und
+  UFW freigegeben.
+- Das Netzwerk-Panel darf das Protokoll nachträglich ändern; der gespeicherte
+  Serverzustand gewinnt dann gegenüber dem Blueprint-Default.
+- `custom`-Ports behalten ihre eigene Nummerierung: `custom_1`, `custom_2`, ...
+
+Für Platzhalter gilt weiter: `{QUERY_PORT}` referenziert die erste fachliche
+`query`-Rolle. Zusätzliche Standardrollen wie `query_2` sind für Docker/UFW und
+das Netzwerk-Panel relevant; Startup-Argumente müssen bei mehreren getrennten
+CLI-Parametern aktuell über passende Standard- oder `custom`-Ports modelliert
+werden.
 
 ## Wine-Kompatibilität für Windows-Server
 
