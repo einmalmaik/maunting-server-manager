@@ -1,14 +1,14 @@
 {
   "version": 1,
   "meta": {
-    "id": "scum_server2",
-    "name": "SCUM2",
+    "id": "scum_server",
+    "name": "SCUM",
     "category": "steam_game",
     "author": "Community",
     "description": "Open World Survival - SCUM Dedicated Server via SteamCMD (AppID 3792580). Runs on Windows via Proton."
   },
   "runtime": {
-    "image": "ghcr.io/parkervcp/yolks:wine_latest",
+    "image": "ghcr.io/parkervcp/yolks:wine_10",
     "workdir": "/home/container",
     "user": null,
     "env": {
