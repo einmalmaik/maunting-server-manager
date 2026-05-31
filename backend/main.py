@@ -153,9 +153,9 @@ async def lifespan(app: FastAPI):
             if 'install_eta_seconds' not in cols:
                 conn.execute(text("ALTER TABLE mods ADD COLUMN install_eta_seconds INTEGER"))
             if 'install_started_at' not in cols:
-                conn.execute(text("ALTER TABLE mods ADD COLUMN install_started_at DATETIME"))
+                conn.execute(text("ALTER TABLE mods ADD COLUMN install_started_at TIMESTAMP"))
             if 'install_completed_at' not in cols:
-                conn.execute(text("ALTER TABLE mods ADD COLUMN install_completed_at DATETIME"))
+                conn.execute(text("ALTER TABLE mods ADD COLUMN install_completed_at TIMESTAMP"))
             if 'install_error' not in cols:
                 conn.execute(text("ALTER TABLE mods ADD COLUMN install_error TEXT"))
 
