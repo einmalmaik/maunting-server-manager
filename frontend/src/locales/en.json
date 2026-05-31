@@ -50,7 +50,10 @@
       "category": "Category",
       "source": "Source",
       "actions": "Actions"
-    }
+    },
+    "docsBannerTitle": "Host custom blueprints & Discord bots",
+    "docsBannerText": "Do you want to host your own Discord bot or open-source software via GitHub ZIP? Read our How-To guide in the documentation.",
+    "docsBannerBtn": "Read Guide"
   },
   "docs": {
     "pageTitle": "Blueprint Documentation",
@@ -125,7 +128,11 @@
       "h1": "How do I enable Steam Workshop?",
       "b1": "Set supportsMods=true, supportsSteamWorkshop=true, and add the workshopAppId in the 'mods' object. Set modInjection to 'startupArg' or 'file', depending on how the game loads mods.",
       "h2": "How do I patch a configuration file?",
-      "b2": "Use 'runtime.configPatches'. Required fields per patch: type (currently only 'ini'), file (relative path), section (INI section, e.g. 'Server'), key, and value. Port placeholders are allowed in value ({GAME_PORT} etc.) — but NOT {ENV.<KEY>} or {MOD_ARG}, as those are only valid in the startup command."
+      "b2": "Use 'runtime.configPatches'. Required fields per patch: type (currently only 'ini'), file (relative path), section (INI section, e.g. 'Server'), key, and value. Port placeholders are allowed in value ({GAME_PORT} etc.) — but NOT {ENV.<KEY>} or {MOD_ARG}, as those are only valid in the startup command.",
+      "h3": "How do I host Discord bots or other open-source software (GitHub)?",
+      "b3": "You have two options: 1) Docker-Only (Recommended): Set 'source.type' to 'dockerOnly' and specify your Docker image in 'runtime.image'. You can define token/keys in 'runtime.env' using placeholders like '{DISCORD_TOKEN}' so the panel displays configuration fields in the UI. 2) HTTP Source: Set 'source.type' to 'http' and specify the GitHub ZIP URL (e.g., 'https://github.com/owner/repo/archive/refs/heads/main.zip'). The panel automatically follows redirects and downloads the latest version from GitHub whenever you click 'Update Server', preserving your custom config files.",
+      "b3_extra": "MSM's automatic updater will preserve your configuration files: Typical config extensions like .json, .env, .toml, .yaml, .yml, .ini, .cfg, or .txt (under 2MB in size, outside of system/data directories) are backed up temporarily during updates/reinstalls and restored automatically.",
+      "botExampleTitle": "Example: Discord Bot Blueprint (GitHub ZIP download & auto-update)"
     },
     "troubleshooting": {
       "err1Title": "Invalid JSON",

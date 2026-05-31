@@ -125,6 +125,33 @@ export function Docs() {
     "source": { "type": "dockerOnly" }
   }
 
+  const botExample = {
+    "version": 1,
+    "meta": {
+      "id": "custom_discord_bot",
+      "name": "Custom Discord Bot",
+      "category": "bot",
+      "author": "Your Name",
+      "description": "Discord Bot loaded from a GitHub repository ZIP archive."
+    },
+    "runtime": {
+      "image": "node:20-alpine",
+      "env": {
+        "NODE_ENV": "production",
+        "DISCORD_TOKEN": "{DISCORD_TOKEN}",
+        "PREFIX": "!"
+      },
+      "startup": "npm install && node index.js"
+    },
+    "ports": [],
+    "source": {
+      "type": "http",
+      "http": {
+        "url": "https://github.com/owner/repo/archive/refs/heads/main.zip"
+      }
+    }
+  }
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
       <div className="flex items-center gap-3 mb-2">
@@ -283,6 +310,16 @@ export function Docs() {
             
             <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.h2')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b2')}</p>
+
+            <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.h3')}</h3>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b3')}</p>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b3_extra')}</p>
+            <div className="mt-4">
+              <span className="font-semibold text-xs text-on-surface-variant block mb-1">
+                {t('docs.howto.botExampleTitle')}
+              </span>
+              <CodeBlock example={botExample} />
+            </div>
           </section>
 
           <section id="docs-troubleshooting" className="msm-card p-6 scroll-mt-20">

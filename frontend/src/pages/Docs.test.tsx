@@ -61,6 +61,13 @@ describe('Docs page', () => {
     expect(minimalSection?.textContent).toContain('"id": "minimal_server"')
   })
 
+  it('renders the bot example JSON code block', () => {
+    const { container } = renderDocs()
+    const howtoSection = container.querySelector('#docs-howto')
+    expect(howtoSection?.textContent).toContain('"id": "custom_discord_bot"')
+    expect(howtoSection?.textContent).toContain('"category": "bot"')
+  })
+
   it('links to the Blueprints page for upload / replace / delete', () => {
     renderDocs()
     const link = screen.getByTestId('docs-link-blueprints') as HTMLAnchorElement

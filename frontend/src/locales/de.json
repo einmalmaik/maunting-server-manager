@@ -50,7 +50,10 @@
       "category": "Kategorie",
       "source": "Quelle",
       "actions": "Aktionen"
-    }
+    },
+    "docsBannerTitle": "Eigene Blueprints & Discord-Bots hosten",
+    "docsBannerText": "Möchtest du einen eigenen Discord-Bot oder Open-Source-Software per GitHub-ZIP hosten? Lies unsere How-To Anleitung in der Dokumentation.",
+    "docsBannerBtn": "Anleitung lesen"
   },
   "docs": {
     "pageTitle": "Blueprint-Dokumentation",
@@ -125,7 +128,11 @@
       "h1": "Wie aktiviere ich Steam Workshop?",
       "b1": "Setze im 'mods'-Objekt supportsMods=true, supportsSteamWorkshop=true und trage die workshopAppId ein. Stelle modInjection auf 'startupArg' oder 'file', je nachdem, wie das Spiel Mods lädt.",
       "h2": "Wie patche ich eine Konfigurationsdatei?",
-      "b2": "Nutze 'runtime.configPatches'. Pflichtfelder pro Patch: type (derzeit nur 'ini'), file (relativer Pfad zur Datei), section (INI-Sektion, z. B. 'Server'), key (Schlüssel) und value (Wert). Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.) — aber KEIN {ENV.<KEY>} und KEIN {MOD_ARG}, da diese nur im startup-Befehl sinnvoll sind."
+      "b2": "Nutze 'runtime.configPatches'. Pflichtfelder pro Patch: type (derzeit nur 'ini'), file (relativer Pfad zur Datei), section (INI-Sektion, z. B. 'Server'), key (Schlüssel) und value (Wert). Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.) — aber KEIN {ENV.<KEY>} und KEIN {MOD_ARG}, da diese nur im startup-Befehl sinnvoll sind.",
+      "h3": "Wie hoste ich Discord-Bots oder andere Open-Source-Software (GitHub)?",
+      "b3": "Du hast zwei Möglichkeiten: 1) Docker-Only (Empfohlen): Stelle 'source.type' auf 'dockerOnly' und gib dein Docker-Image unter 'runtime.image' an. Die Token/Keys kannst du über 'runtime.env' als Platzhalter wie '{DISCORD_TOKEN}' definieren, sodass das Panel Eingabefelder im UI anzeigt. 2) HTTP-Source: Trage unter 'source.type' den Wert 'http' ein und gib die GitHub-ZIP-URL (z. B. 'https://github.com/owner/repo/archive/refs/heads/main.zip') an. Das Panel folgt Redirects automatisch und lädt bei jedem Klick auf 'Server aktualisieren' die neueste Version von GitHub herunter, wobei deine Configs geschützt bleiben.",
+      "b3_extra": "Hierbei schützt der automatische Updater von MSM deine Konfigurationsdateien: Alle typischen Config-Dateiendungen wie .json, .env, .toml, .yaml, .yml, .ini, .cfg oder .txt (unter 2MB Größe, außerhalb von Systemordnern) werden vor dem Herunterladen temporär gesichert und danach wiederhergestellt.",
+      "botExampleTitle": "Beispiel: Discord-Bot Blueprint (GitHub ZIP-Download & Auto-Update)"
     },
     "troubleshooting": {
       "err1Title": "Ungültiges JSON",
