@@ -116,7 +116,7 @@ def _comment_for(name: str, role: str) -> str:
 
 def open_ports(
     name: str,
-    game_port: int | None,
+    game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None = None,
     rcon_port: int | None = None,
 ) -> bool:
@@ -124,8 +124,8 @@ def open_ports(
 
     Args:
         name: Server-Name (fliesst in den Kommentar).
-        game_port: Haupt-Game-Port (UDP). Wenn ``None`` oder 0 → wird ueber-
-            sprungen.
+        game_port: Haupt-Game-Port (UDP) ODER Liste von ``(port, protocol, role)``-Tupeln.
+            Wenn ``None`` oder 0 → wird uebersprungen.
         query_port: optionaler Query-Port (UDP).
         rcon_port: optionaler RCon-Port (TCP).
 
@@ -135,6 +135,13 @@ def open_ports(
     """
     if not _ufw_available():
         return False
+
+    if isinstance(game_port, list):
+        for port, protocol, role in game_port:
+            if port:
+                _allow(port, protocol, _comment_for(name, role))
+        return True
+
     if game_port:
         _allow(game_port, "udp", _comment_for(name, "game"))
     if query_port:
@@ -145,13 +152,20 @@ def open_ports(
 
 
 def close_ports(
-    game_port: int | None,
+    game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None = None,
     rcon_port: int | None = None,
 ) -> bool:
     """Schliesst (idempotent) die UFW-Regeln eines Servers."""
     if not _ufw_available():
         return False
+
+    if isinstance(game_port, list):
+        for port, protocol, _ in game_port:
+            if port:
+                _delete(port, protocol)
+        return True
+
     if game_port:
         _delete(game_port, "udp")
     if query_port:

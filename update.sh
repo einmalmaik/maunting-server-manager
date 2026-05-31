@@ -451,6 +451,26 @@ if [[ -f "$PANEL_UNIT" ]] && grep -q 'ProtectHome=true' "$PANEL_UNIT"; then
     ok "Panel-Service ProtectHome deaktiviert"
 fi
 
+# ── Rootless Docker reparieren: UDP Source-IP Fix (slirp4netns) ──
+# Rootless Docker's default 'builtin' port driver drops Source-IPs for UDP connections.
+# This prevents games like DayZ or Ark from functioning properly. We force slirp4netns.
+if ! command -v slirp4netns &>/dev/null; then
+    log "Installiere slirp4netns für UDP Source-IP Erhalt..."
+    apt-get install -y -qq slirp4netns 2>/dev/null || true
+fi
+if id "msm" &>/dev/null; then
+    MSM_UID=$(id -u "msm")
+    MSM_OVERRIDE_CONF="/opt/msm/.config/systemd/user/docker.service.d/override.conf"
+    if ! su - msm -c "grep -q 'DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=slirp4netns' $MSM_OVERRIDE_CONF 2>/dev/null"; then
+        log "Konfiguriere Rootless Docker für Source-IP Erhalt bei UDP (slirp4netns)..."
+        su - msm -c "mkdir -p /opt/msm/.config/systemd/user/docker.service.d && echo -e '[Service]\nEnvironment=\"DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=slirp4netns\"' > $MSM_OVERRIDE_CONF" 2>/dev/null || true
+        if $SYSTEMD_AVAILABLE; then
+            su - msm -c "export XDG_RUNTIME_DIR=/run/user/${MSM_UID}; systemctl --user daemon-reload && systemctl --user restart docker.service" 2>/dev/null || true
+            ok "Rootless Docker mit slirp4netns neugestartet"
+        fi
+    fi
+fi
+
 # ── Service neustarten ──
 log "Starte Services neu..."
 if $SYSTEMD_AVAILABLE; then

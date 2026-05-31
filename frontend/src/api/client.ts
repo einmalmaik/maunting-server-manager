@@ -132,6 +132,9 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       } catch {
         message = text
       }
+      if (message) {
+        message = i18n.t(message)
+      }
     }
     throw new Error(message || res.statusText || `HTTP ${res.status}`)
   }

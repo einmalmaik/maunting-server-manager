@@ -13,6 +13,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -167,6 +168,93 @@ class TestBrowseReadWrite:
         assert res.status_code == 200
         assert res.json()["content"] == '{"port": 1234}'
 
+    def test_write_nested_scum_ini_path(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        server_with_dir: Server,
+    ):
+        path = "SCUM/Saved/Config/WindowsServer/ServerSettings.ini"
+        res = client.put(
+            f"/api/files/{server_with_dir.id}/write?path={path}",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"content": "ServerName=SCUM"},
+        )
+
+        assert res.status_code == 200
+        target = Path(server_with_dir.install_dir) / "SCUM" / "Saved" / "Config" / "WindowsServer" / "ServerSettings.ini"
+        assert target.read_text(encoding="utf-8") == "ServerName=SCUM"
+
+    def test_write_repairs_permissions_after_permission_error(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        server_with_dir: Server,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        original_write_text = Path.write_text
+        attempts = 0
+
+        def flaky_write_text(self: Path, *args, **kwargs):
+            nonlocal attempts
+            if self.name == "locked.ini":
+                attempts += 1
+                if attempts == 1:
+                    raise PermissionError(13, "Permission denied", str(self))
+            return original_write_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", flaky_write_text)
+
+        with patch("routers.files._repair_install_permissions", return_value={"ok": True}) as mock_repair:
+            res = client.put(
+                f"/api/files/{server_with_dir.id}/write?path=locked.ini",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+                json={"content": "ServerName=SCUM"},
+            )
+
+        assert res.status_code == 200
+        mock_repair.assert_called_once_with(server_with_dir.install_dir)
+        assert attempts == 2
+        assert (Path(server_with_dir.install_dir) / "locked.ini").read_text(encoding="utf-8") == "ServerName=SCUM"
+
+    def test_write_reports_failed_permission_repair(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        server_with_dir: Server,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        original_write_text = Path.write_text
+
+        def locked_write_text(self: Path, *args, **kwargs):
+            if self.name == "locked.ini":
+                raise PermissionError(13, "Permission denied", str(self))
+            return original_write_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", locked_write_text)
+
+        with patch(
+            "routers.files._repair_install_permissions",
+            return_value={"ok": False, "error": "repair failed"},
+        ):
+            res = client.put(
+                f"/api/files/{server_with_dir.id}/write?path=locked.ini",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+                json={"content": "ServerName=SCUM"},
+            )
+
+        assert res.status_code == 500
+        detail = res.json()["detail"]
+        assert "Permission denied" in detail
+        assert "Rechte-Reparatur fehlgeschlagen" in detail
+        assert "repair failed" in detail
+
     def test_read_oversized_file_rejected(
         self, client: TestClient, owner_cookies: dict, server_with_dir: Server
     ):
@@ -178,6 +266,43 @@ class TestBrowseReadWrite:
             cookies=owner_cookies,
         )
         assert res.status_code == 413
+
+    def test_permission_repair_is_scoped_to_server_root(self, server_with_dir: Server):
+        from routers.files import _repair_install_permissions
+        from services.docker_service import (
+            PERMISSION_REPAIR_CAPS,
+            PERMISSION_REPAIR_CONTAINER_DIR,
+            PERMISSION_REPAIR_IMAGE,
+        )
+
+        with patch("routers.files.docker_service.host_uid_gid", return_value=(1001, 1002)), \
+             patch("routers.files.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
+            result = _repair_install_permissions(server_with_dir.install_dir)
+
+        assert result == {"ok": True}
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["image"] == PERMISSION_REPAIR_IMAGE
+        assert kwargs["entrypoint"] == "bash"
+        assert kwargs["user"] == "0:0"
+        assert kwargs["cap_adds"] == PERMISSION_REPAIR_CAPS
+        assert kwargs["volumes"][0].host_path == str(Path(server_with_dir.install_dir).resolve(strict=False))
+        assert kwargs["volumes"][0].container_path == PERMISSION_REPAIR_CONTAINER_DIR
+        script = kwargs["command"][1]
+        assert f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type f" in script
+        assert "chmod a+rwX" in script
+        assert "chown" not in script
+
+    def test_file_permission_repair_does_not_change_runtime_owner(self, server_with_dir: Server):
+        from routers.files import _repair_install_permissions
+
+        with patch("routers.files.docker_service.host_uid_gid", return_value=(1001, 1002)), \
+             patch("routers.files.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
+            result = _repair_install_permissions(server_with_dir.install_dir)
+
+        assert result == {"ok": True}
+        script = mock_run.call_args.kwargs["command"][1]
+        assert "chmod a+rwX" in script
+        assert "chown" not in script
 
 
 # ── Upload (Single-Shot) + Blocked Extensions ─────────────────────────────

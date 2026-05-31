@@ -4,7 +4,107 @@ import { api } from '@/api/client'
 import { Server, GameInfo } from '@/types'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Server as ServerIcon, Activity, Users } from 'lucide-react'
+import { Server as ServerIcon, Activity, MemoryStick, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react'
+
+interface ServiceStatus {
+  status: 'ok' | 'degraded' | 'error'
+  detail: string
+}
+
+interface HealthResponse {
+  overall: 'ok' | 'degraded' | 'error'
+  services: {
+    docker: ServiceStatus
+    caddy: ServiceStatus
+    database: ServiceStatus
+  }
+  checked_in_ms: number
+}
+
+function ServiceDot({ status }: { status: 'ok' | 'degraded' | 'error' }) {
+  if (status === 'ok') return <span className="inline-block w-2 h-2 rounded-full bg-status-success" />
+  if (status === 'degraded') return <span className="inline-block w-2 h-2 rounded-full bg-status-warning" />
+  return <span className="inline-block w-2 h-2 rounded-full bg-status-destructive" />
+}
+
+function SystemStatusCard() {
+  const { t } = useTranslation()
+  const [health, setHealth] = useState<HealthResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api<HealthResponse>('/system/health')
+      .then(setHealth)
+      .catch(() => setHealth(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const serviceNames: Record<string, string> = {
+    docker: t('dashboard.systemServices.docker'),
+    caddy: t('dashboard.systemServices.caddy'),
+    database: t('dashboard.systemServices.database'),
+  }
+
+  const overallLabel = loading
+    ? t('dashboard.systemChecking')
+    : health === null
+      ? t('dashboard.statusError')
+      : health.overall === 'ok'
+        ? t('dashboard.allSystemsOperational')
+        : health.overall === 'degraded'
+          ? t('dashboard.systemDegraded')
+          : t('dashboard.systemError')
+
+  const overallColor = loading || health === null
+    ? 'text-on-surface-variant'
+    : health.overall === 'ok'
+      ? 'text-status-success'
+      : health.overall === 'degraded'
+        ? 'text-status-warning'
+        : 'text-status-destructive'
+
+  const OverallIcon = loading
+    ? Loader2
+    : health === null || (health.overall === 'error')
+      ? XCircle
+      : health.overall === 'degraded'
+        ? AlertTriangle
+        : CheckCircle2
+
+  return (
+    <div className="msm-card p-5">
+      <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-3">
+        {t('dashboard.system')}
+      </p>
+      <div className="flex items-center gap-2 mb-4">
+        <OverallIcon className={`w-5 h-5 ${overallColor} ${loading ? 'animate-spin' : ''}`} />
+        <span className={`font-headline text-body-lg font-bold ${overallColor}`}>{overallLabel}</span>
+      </div>
+      {health && (
+        <div className="space-y-2">
+          {Object.entries(health.services).map(([key, svc]) => (
+            <div key={key} className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ServiceDot status={svc.status} />
+                <span className="font-body-md text-sm text-on-surface-variant">
+                  {serviceNames[key] ?? key}
+                </span>
+              </div>
+              <span className="font-mono-sm text-xs text-on-surface-variant/60 truncate max-w-[120px]" title={svc.detail}>
+                {svc.detail}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {!loading && !health && (
+        <p className="font-body-md text-sm text-status-destructive/80">
+          {t('dashboard.systemError')}
+        </p>
+      )}
+    </div>
+  )
+}
 
 export function Dashboard() {
   const { t } = useTranslation()
@@ -49,6 +149,7 @@ export function Dashboard() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Server-Zähler */}
         <div className="msm-card p-5">
           <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
             {t('dashboard.servers')}
@@ -65,32 +166,33 @@ export function Dashboard() {
           </div>
         </div>
 
+        {/* Unterstützte Spiele — kompakt */}
         <div className="msm-card p-5">
           <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
             {t('dashboard.supportedGames')}
           </p>
           <span className="font-headline text-display-sm text-primary">{games.length}</span>
-          <div className="flex flex-wrap gap-2 mt-3">
-            {games.map((g) => (
-              <span
-                key={g.id}
-                className="font-mono-sm text-mono-sm px-2 py-0.5 rounded-full border border-outline text-on-surface-variant"
-              >
-                {g.name}
-              </span>
-            ))}
-          </div>
+          {games.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-3 max-h-20 overflow-hidden">
+              {games.slice(0, 6).map((g) => (
+                <span
+                  key={g.id}
+                  className="font-mono-sm text-mono-sm px-2 py-0.5 rounded-full border border-outline text-on-surface-variant text-xs"
+                >
+                  {g.name}
+                </span>
+              ))}
+              {games.length > 6 && (
+                <span className="font-mono-sm text-mono-sm px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant text-xs">
+                  +{games.length - 6}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="msm-card p-5">
-          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
-            {t('dashboard.system')}
-          </p>
-          <span className="font-headline text-display-sm text-status-success">OK</span>
-          <p className="font-body-md text-sm text-on-surface-variant mt-2">
-            {t('dashboard.allSystemsOperational')}
-          </p>
-        </div>
+        {/* Echter Systemstatus */}
+        <SystemStatusCard />
       </div>
 
       {/* Empty State */}
@@ -145,7 +247,7 @@ export function Dashboard() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-on-surface-variant">
-                  <Users className="w-3.5 h-3.5" />
+                  <MemoryStick className="w-3.5 h-3.5" />
                   <span className="font-body-md">
                     RAM: {server.ram_limit_mb ? `${server.ram_limit_mb} MB` : t('common.unlimited')}
                   </span>

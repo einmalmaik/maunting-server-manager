@@ -138,6 +138,7 @@ def finish_install(server_id: int, result: dict) -> None:
     # (zirkulärer Import via games.__init__).
     from database import SessionLocal
     from models import Server
+    from services.install_update_lock_service import release_install_update_lock
 
     db = SessionLocal()
     try:
@@ -157,6 +158,7 @@ def finish_install(server_id: int, result: dict) -> None:
         logger.warning("finish_install failed for server %s: %s", server_id, e)
         db.rollback()
     finally:
+        release_install_update_lock(server_id)
         db.close()
 
 
@@ -226,6 +228,42 @@ def _redact(text: str, secrets_to_redact: list[str]) -> str:
     return text
 
 
+def classify_steamcmd_failure(output: str, fallback_error: str = "") -> dict[str, str] | None:
+    """Map known SteamCMD failure markers to safe structured errors.
+
+    The message intentionally names causes as possible and ``nicht verifiziert``:
+    SteamCMD output alone does not prove whether disk, quota, permissions,
+    platform metadata, or concurrent access was the root cause.
+    """
+    text = f"{output}\n{fallback_error}".lower()
+    if "0x202" in text:
+        return {
+            "error_code": "steamcmd_update_state_0x202",
+            "error": (
+                "SteamCMD meldet App-State 0x202 nach dem Update-Job. "
+                "Mögliche Ursachen (nicht verifiziert): unvollständige App-Konfiguration, "
+                "Plattenplatz/Quota, Berechtigungen oder paralleler Zugriff auf Install-/Cache-Daten."
+            ),
+        }
+    if "missing configuration" in text:
+        return {
+            "error_code": "steamcmd_missing_configuration",
+            "error": (
+                "SteamCMD meldet Missing Configuration. Mögliche Ursachen "
+                "(nicht verifiziert): fehlende/inkompatible App-Metadaten, falsche Plattform, "
+                "Account-/Lizenzproblem, Plattenplatz/Quota oder paralleler Zugriff."
+            ),
+        }
+    return None
+
+
+def _bounded_log_buffer_append(buffer: list[str], line: str, *, max_chars: int = 20000) -> None:
+    buffer.append(line)
+    total = sum(len(part) for part in buffer)
+    while buffer and total > max_chars:
+        total -= len(buffer.pop(0))
+
+
 def run_steamcmd_install(
     *,
     server_id: int,
@@ -256,8 +294,10 @@ def run_steamcmd_install(
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]
+        secrets_to_redact = [password]
     else:
         login_args = ["+login", "anonymous"]
+        secrets_to_redact = []
 
     steam_args: list[str] = []
     if platform:
@@ -273,38 +313,44 @@ def run_steamcmd_install(
 
     _append_console_log(server_id, f"[MSM] SteamCMD startet für App {app_id} (Docker)\n")
 
-    uid, gid = docker_service.host_uid_gid()
+    uid, gid = docker_service.container_runtime_uid_gid()
     chown_uid, chown_gid = uid, gid
+
+    live_output: list[str] = []
+
+    def _live_log(line: str) -> None:
+        """Callback für Live-Streaming: redact Secrets, dann in Console-Log schreiben."""
+        safe_line = _redact(line, secrets_to_redact)
+        _bounded_log_buffer_append(live_output, safe_line)
+        _append_console_log(server_id, safe_line)
+
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
         command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
-        # Explizit Container-Root: das `:root`-Image hat /home/steam Mode 700
-        # für den steam-User. Files werden im bash-Wrapper nach dem Run auf
-        # {uid}:{gid} ge-chown't, damit der Panel-User sie danach lesen kann.
         user="0:0",
-        # Nach --cap-drop=ALL die minimal nötigen Caps wiederherstellen, damit
-        # Container-Root nicht von Linux-DAC eingeschränkt wird (sonst greift
-        # Mode-700 auch für root, weil CAP_DAC_OVERRIDE fehlt).
         cap_adds=STEAMCMD_CAPS,
         entrypoint="bash",
-        # SteamCMD legt Cache/Auth in $HOME ab. Auf /data umleiten, damit der
-        # Cache zwischen Runs persistent im Bind-Mount landet (kein Vollredownload).
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
+        log_callback=_live_log,
     )
 
-    # SteamCMD-Output ins Console-Log spiegeln — IMMER, egal ob ok oder Fehler.
-    # Passwort niemals ins Log schreiben (Defense-in-Depth).
-    secrets_to_redact: list[str] = []
-    if use_authenticated_login:
-        secrets_to_redact.append(SteamAccountService.get_decrypted_password())
+    # Bei Live-Streaming ist out leer (— wurde bereits live geschrieben).
+    # Fallback für den Fall, dass der Stream unterbrochen wurde.
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
     if out:
         _append_console_log(server_id, _redact(out, secrets_to_redact))
     if result["ok"]:
         _append_console_log(server_id, f"\n[MSM] SteamCMD abgeschlossen (App {app_id}).\n")
     else:
+        classified = classify_steamcmd_failure(
+            "".join(live_output) + out,
+            str(result.get("error") or ""),
+        )
+        if classified:
+            result = {**result, **classified}
+            _append_console_log(server_id, f"\n[MSM] SteamCMD Diagnose: {classified['error']}\n")
         _append_console_log(server_id, f"\n[MSM] SteamCMD fehlgeschlagen: {result['error']}\n")
     return result
 
@@ -336,8 +382,10 @@ def run_steamcmd_workshop_download(
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]
+        secrets_to_redact = [password]
     else:
         login_args = ["+login", "anonymous"]
+        secrets_to_redact = []
 
     steam_args: list[str] = [
         "+force_install_dir", CONTAINER_DATA_DIR,
@@ -348,7 +396,18 @@ def run_steamcmd_workshop_download(
     _append_console_log(
         server_id, f"[MSM] SteamCMD Workshop-Download: app={workshop_app_id} item={workshop_item_id}\n"
     )
-    uid, gid = docker_service.host_uid_gid()
+
+    live_output: list[str] = []
+
+    from services.mod_install_status_service import record_mod_download_output
+
+    def _live_log(line: str) -> None:
+        safe_line = _redact(line, secrets_to_redact)
+        _bounded_log_buffer_append(live_output, safe_line)
+        record_mod_download_output(server_id, workshop_item_id, safe_line)
+        _append_console_log(server_id, safe_line)
+
+    uid, gid = docker_service.container_runtime_uid_gid()
     chown_uid, chown_gid = uid, gid
     result = docker_service.run_ephemeral(
         image=STEAMCMD_IMAGE,
@@ -359,14 +418,19 @@ def run_steamcmd_workshop_download(
         entrypoint="bash",
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
+        log_callback=_live_log,
     )
-    secrets_to_redact: list[str] = []
-    if use_authenticated_login:
-        secrets_to_redact.append(SteamAccountService.get_decrypted_password())
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
     if out:
         _append_console_log(server_id, _redact(out, secrets_to_redact))
     if not result["ok"]:
+        classified = classify_steamcmd_failure(
+            "".join(live_output) + out,
+            str(result.get("error") or ""),
+        )
+        if classified:
+            result = {**result, **classified}
+            _append_console_log(server_id, f"\n[MSM] SteamCMD Diagnose: {classified['error']}\n")
         _append_console_log(
             server_id, f"\n[MSM] Workshop-Download fehlgeschlagen: {result['error']}\n"
         )
@@ -519,6 +583,9 @@ class GamePlugin(ABC):
     def container_workdir(self, server) -> str:
         return CONTAINER_DATA_DIR
 
+    def container_uid_gid(self, server) -> tuple[int, int]:
+        return docker_service.container_runtime_uid_gid()
+
     def container_tmpfs_paths(self, server) -> list[str]:
         return ["/tmp"] if self.container_needs_tmpfs else []
 
@@ -658,6 +725,16 @@ class GamePlugin(ABC):
             if not needed:
                 return {"ok": True, "applied": 0, "message": "keine Workshop-Mod-Updates nötig"}
 
+            from services.mod_install_status_service import (
+                mark_mod_failed,
+                mark_mod_installed,
+                mark_mod_installing,
+                mark_mod_pending,
+            )
+
+            for u in needed:
+                mark_mod_pending(server.id, u.get("workshop_id", ""), u.get("action", "update"))
+
             _append_console_log(
                 server.id,
                 f"[MSM] Starte Workshop-Mod-Updates/Installationen für {len(needed)} Mod(s) "
@@ -676,6 +753,7 @@ class GamePlugin(ABC):
                     f"[MSM]   → {action.upper()}: Workshop-Mod {wid} ({name})\n"
                 )
                 try:
+                    mark_mod_installing(server.id, wid, action)
                     mod_res = self.install_mod(server, wid)
                     success = (
                         isinstance(mod_res, dict)
@@ -687,6 +765,7 @@ class GamePlugin(ABC):
                         updater.update_mod_metadata_after_success(
                             server.id, wid, u.get("remote_updated")
                         )
+                        mark_mod_installed(server.id, wid)
                         applied += 1
                         _append_console_log(
                             server.id, f"[MSM]     ✓ {wid} erfolgreich verarbeitet.\n"
@@ -698,11 +777,13 @@ class GamePlugin(ABC):
                             else str(mod_res)
                         )
                         errors.append(f"{wid}: {err}")
+                        mark_mod_failed(server.id, wid)
                         _append_console_log(
                             server.id, f"[MSM]     ✗ {wid} fehlgeschlagen: {err}\n"
                         )
                 except Exception as exc:  # pragma: no cover - defensiv
                     errors.append(f"{wid}: {exc}")
+                    mark_mod_failed(server.id, wid)
                     _append_console_log(
                         server.id, f"[MSM]     ✗ {wid} Exception während install_mod: {exc}\n"
                     )
@@ -767,16 +848,23 @@ class GamePlugin(ABC):
                 server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
             )
 
-        # Image bei Bedarf vorziehen — KISS, scheitert nicht hart bei Offline
-        pull_result = docker_service.pull(self.docker_image)
-        if not pull_result["ok"]:
-            _append_console_log(
-                server.id, f"[MSM] Hinweis: Pull für {self.docker_image} fehlgeschlagen, nutze lokales Image\n"
-            )
-
-        uid, gid = docker_service.host_uid_gid()
+        uid, gid = self.container_uid_gid(server)
         run_user = f"{uid}:{gid}"
         name = container_name_for(server.id)
+        volume_binds = self.build_volume_binds(server)
+
+        for volume in volume_binds:
+            if volume.read_only:
+                continue
+            repair = docker_service.repair_bind_mount_permissions(
+                volume.host_path,
+                container_path=volume.container_path,
+                owner_uid_gid=(uid, gid),
+            )
+            if not repair.get("ok"):
+                err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
+                _append_console_log(server.id, f"[MSM] Permission-Repair fehlgeschlagen: {err}\n")
+                return {"error": err}
 
         result = docker_service.run_container(
             name=name,
@@ -784,7 +872,7 @@ class GamePlugin(ABC):
             command=self.build_container_command(server),
             env=self.build_container_env(server),
             ports=port_publishes,
-            volumes=self.build_volume_binds(server),
+            volumes=volume_binds,
             cpu_limit_percent=server.cpu_limit_percent,
             ram_limit_mb=server.ram_limit_mb,
             user=run_user,

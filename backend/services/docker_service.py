@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
 import socket
 import subprocess
 from dataclasses import dataclass
@@ -23,12 +24,12 @@ from typing import Any, AsyncIterator
 
 try:
     import docker
-    from docker.errors import APIError, DockerException, NotFound
+    from docker.errors import APIError, DockerException, ImageNotFound, NotFound
     from docker.models.containers import Container
     from docker.types import LogConfig
 except ImportError:  # pragma: no cover - exercised on systems before deps install
     docker = None  # type: ignore[assignment]
-    APIError = DockerException = NotFound = Exception  # type: ignore[misc,assignment]
+    APIError = DockerException = ImageNotFound = NotFound = Exception  # type: ignore[misc,assignment]
     Container = Any  # type: ignore[misc,assignment]
     LogConfig = None  # type: ignore[assignment]
 
@@ -47,8 +48,18 @@ _SYSTEM_ENV = {
 _LOG_CONFIG = {"max-size": "10m", "max-file": "3"}
 _HARDENING_CAP_DROP = ["ALL"]
 _HARDENING_SECURITY_OPT = ["no-new-privileges"]
+PERMISSION_REPAIR_IMAGE = "cm2network/steamcmd:root"
+PERMISSION_REPAIR_CONTAINER_DIR = "/data"
+PERMISSION_REPAIR_CAPS = ["CHOWN", "FOWNER", "DAC_OVERRIDE", "DAC_READ_SEARCH"]
 _CLIENT: Any | None = None
 _DOCKER_AVAILABLE: bool | None = None
+
+
+class _ImageUnavailable(RuntimeError):
+    def __init__(self, image: str, pull_error: str | None = None) -> None:
+        self.image = image
+        suffix = f" (Pull fehlgeschlagen: {pull_error})" if pull_error else ""
+        super().__init__(f"Docker-Image nicht verfügbar: {image}{suffix}")
 
 
 @dataclass(frozen=True)
@@ -126,6 +137,35 @@ def _safe_error(exc: BaseException) -> str:
         return "Zeitueberschreitung bei der Kommunikation mit dem Docker Daemon"
         
     return "Systemfehler bei Container-Operation"
+
+
+def _safe_pull_error(exc: BaseException) -> str:
+    text = str(exc).strip()
+    if not text:
+        return "Docker Pull fehlgeschlagen"
+    detail = " ".join(text.split())[:240]
+
+    text_lower = text.lower()
+    if "no such host" in text_lower or "temporary failure in name resolution" in text_lower:
+        return "Registry/DNS nicht erreichbar"
+    if "connection refused" in text_lower or "connection reset" in text_lower:
+        return "Registry-Verbindung abgelehnt oder unterbrochen"
+    if "timeout" in text_lower or "i/o timeout" in text_lower or "context deadline exceeded" in text_lower:
+        return "Zeitueberschreitung beim Registry-Zugriff"
+    if "certificate" in text_lower or "x509" in text_lower:
+        return "TLS/Zertifikatsfehler beim Registry-Zugriff"
+    if "unauthorized" in text_lower or "authentication required" in text_lower:
+        return "Registry-Authentifizierung erforderlich"
+    if "denied" in text_lower or "insufficient_scope" in text_lower:
+        return "Registry-Zugriff verweigert"
+    if "no matching manifest" in text_lower or "no match for platform" in text_lower:
+        return "Image existiert, aber nicht fuer die Docker-Host-Plattform"
+    if "manifest unknown" in text_lower or "not found" in text_lower:
+        return f"Image oder Tag in der Registry nicht gefunden: {detail}"
+    if "toomanyrequests" in text_lower or "rate limit" in text_lower:
+        return "Registry-Rate-Limit erreicht"
+
+    return detail
 
 
 def _get_client(force: bool = False) -> tuple[Any | None, str | None]:
@@ -215,6 +255,46 @@ def _tmpfs_dict(tmpfs_paths: list[str] | None) -> dict[str, str] | None:
     return {path: "rw,size=64m,mode=1777" for path in tmpfs_paths}
 
 
+def _split_image_ref(image: str) -> tuple[str, str | None]:
+    if "@" in image:
+        return image, None
+    last_slash = image.rfind("/")
+    last_colon = image.rfind(":")
+    if last_colon > last_slash:
+        return image[:last_colon], image[last_colon + 1:]
+    return image, None
+
+
+def _pull_image(client: Any, image: str) -> None:
+    repository, tag = _split_image_ref(image)
+    stream = client.api.pull(repository, tag=tag, stream=True, decode=True, auth_config={})
+    for event in stream:
+        if not isinstance(event, dict):
+            continue
+        error = event.get("error")
+        if not error:
+            detail = event.get("errorDetail")
+            if isinstance(detail, dict):
+                error = detail.get("message")
+        if error:
+            raise DockerException(str(error))
+
+
+def _ensure_image_available(client: Any, image: str) -> None:
+    pull_error = None
+    try:
+        _pull_image(client, image)
+        return
+    except (DockerException, OSError) as exc:
+        pull_error = _safe_pull_error(exc)
+        logger.warning("docker image pull failed for %s: %s", image, pull_error)
+
+    try:
+        client.images.get(image)
+    except (ImageNotFound, NotFound, DockerException, OSError) as exc:
+        raise _ImageUnavailable(image, pull_error) from exc
+
+
 def is_available() -> bool:
     """Public-API: ist Rootless Docker nutzbar?"""
     return _check_docker(force=True)
@@ -225,11 +305,12 @@ def pull(image: str) -> dict:
     if error:
         return error
     try:
-        client.images.pull(image)
+        _pull_image(client, image)
         return {"ok": True, "stdout": "", "stderr": ""}
     except (DockerException, OSError) as exc:
-        logger.warning("docker pull failed")
-        return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
+        pull_error = _safe_pull_error(exc)
+        logger.warning("docker pull failed for %s: %s", image, pull_error)
+        return {"ok": False, "error": f"Docker Pull fehlgeschlagen: {pull_error}", "stdout": "", "stderr": ""}
 
 
 def exists(name: str) -> bool:
@@ -304,6 +385,11 @@ def run_container(
         return error
 
     try:
+        _ensure_image_available(client, image)
+    except _ImageUnavailable as exc:
+        return {"ok": False, "error": str(exc), "stdout": "", "stderr": ""}
+
+    try:
         existing = client.containers.get(name)
     except NotFound:
         existing = None
@@ -362,8 +448,15 @@ def run_ephemeral(
     entrypoint: str | None = None,
     cap_adds: list[str] | None = None,
     timeout: int = 1800,
+    log_callback: Any | None = None,
 ) -> dict:
-    """Fuehrt einen einmaligen Containerlauf aus und entfernt den Container danach."""
+    """Fuehrt einen einmaligen Containerlauf aus und entfernt den Container danach.
+
+    Wenn ``log_callback`` angegeben ist (Callable, nimmt einen str), werden
+    Container-Logs zeilenweise waehrend der Ausfuehrung an diesen Callback
+    weitergeleitet. So sieht der User den Fortschritt live statt erst am Ende.
+    Sicherheit: callback bekommt nur fertig dekodierte Zeilen, keine rohen bytes.
+    """
 
     client, error = _client_or_error()
     if error:
@@ -384,10 +477,33 @@ def run_ephemeral(
     kwargs = {key: value for key, value in kwargs.items() if value is not None}
     container = None
     try:
+        _ensure_image_available(client, image)
         container = client.containers.run(**kwargs)
+
+        if log_callback is not None:
+            # Live-Streaming: Logs zeilenweise lesen und an Callback senden.
+            # container.logs(stream=True, follow=True) liefert einen Generator
+            # ueber bytes-Chunks (eine Zeile pro Chunk bei Docker JSON-Log).
+            # Timeout via container.wait() parallel nicht moeglich; wir nutzen
+            # stattdessen den Generator mit einem separaten wait nach Abschluss.
+            try:
+                for chunk in container.logs(stream=True, follow=True, stdout=True, stderr=True):
+                    line = _decode(chunk).rstrip("\r\n")
+                    if line:
+                        log_callback(line + "\n")
+            except Exception as stream_exc:
+                logger.warning("Live-Log-Stream unterbrochen fuer ephemeral container: %s", stream_exc)
+
         wait_result = container.wait(timeout=timeout)
-        stdout = _decode(container.logs(stdout=True, stderr=False))
-        stderr = _decode(container.logs(stdout=False, stderr=True))
+        if log_callback is None:
+            # Kein Streaming — Output am Ende sammeln (alter Pfad)
+            stdout = _decode(container.logs(stdout=True, stderr=False))
+            stderr = _decode(container.logs(stdout=False, stderr=True))
+        else:
+            # Logs wurden bereits live gestreamt; fuer ok/error-Bestimmung
+            # brauchen wir nur den Exit-Code (logs koennen leer sein).
+            stdout = ""
+            stderr = ""
         status_code = int(wait_result.get("StatusCode", 1))
         if status_code != 0:
             return {
@@ -397,6 +513,8 @@ def run_ephemeral(
                 "stderr": stderr,
             }
         return {"ok": True, "stdout": stdout, "stderr": stderr}
+    except _ImageUnavailable as exc:
+        return {"ok": False, "error": str(exc), "stdout": "", "stderr": ""}
     except (DockerException, OSError) as exc:
         logger.warning("docker ephemeral run failed")
         return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
@@ -653,3 +771,60 @@ def is_rootless() -> bool:
     if not hasattr(os, "getuid"):
         return False
     return os.getuid() != 0
+
+
+def container_runtime_uid_gid() -> tuple[int, int]:
+    """UID:GID, mit der Game-Server im Container laufen.
+
+    Alle Installer, Repairs und Game-Container muessen denselben numerischen
+    Owner fuer Bind-Mount-Dateien verwenden. Unter Rootless Docker kann dieser
+    Owner auf dem Host eine Subuid/Subgid sein; der Panel-Prozess bekommt Zugriff
+    ueber die gesetzten Server-Verzeichnis-Rechte, nicht ueber Ownership.
+    """
+    return host_uid_gid()
+
+
+def repair_bind_mount_permissions(
+    host_path: str,
+    *,
+    container_path: str = PERMISSION_REPAIR_CONTAINER_DIR,
+    owner_uid_gid: tuple[int, int] | None = None,
+    timeout: int = 600,
+) -> dict:
+    """Normalisiert Owner/Rechte eines Server-Bind-Mounts im Container-Kontext.
+
+    Ziel:
+    - Wenn owner_uid_gid gesetzt ist, wird der Game-Prozess Owner der Dateien
+      (wichtig fuer Wine-/Home-Verzeichnisse).
+    - Panel kann weiterhin Dateien anlegen/bearbeiten (ueber a+rwX im isolierten
+      Server-Verzeichnis).
+    - Symlinks werden nicht verfolgt; nur der Link selbst wird gechowned.
+    """
+    base = os.path.realpath(host_path)
+    if not os.path.isdir(base):
+        return {"ok": False, "error": "Server-Verzeichnis existiert nicht", "stdout": "", "stderr": ""}
+
+    target = shlex.quote(container_path.rstrip("/") or PERMISSION_REPAIR_CONTAINER_DIR)
+    script_parts = [
+        "set -e",
+        f"find {target} -xdev -type d -exec chmod a+rwX {{}} +",
+        f"find {target} -xdev -type f -exec chmod a+rwX {{}} +",
+    ]
+    if owner_uid_gid is not None:
+        uid, gid = owner_uid_gid
+        owner = f"{int(uid)}:{int(gid)}"
+        script_parts.extend([
+            f"find {target} -xdev -type d -exec chown {owner} {{}} +",
+            f"find {target} -xdev -type f -exec chown {owner} {{}} +",
+            f"find {target} -xdev -type l -exec chown -h {owner} {{}} +",
+        ])
+    script = "; ".join(script_parts)
+    return run_ephemeral(
+        image=PERMISSION_REPAIR_IMAGE,
+        command=["-c", script],
+        volumes=[VolumeBind(base, target, read_only=False)],
+        user="0:0",
+        entrypoint="bash",
+        cap_adds=PERMISSION_REPAIR_CAPS,
+        timeout=timeout,
+    )

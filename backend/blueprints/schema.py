@@ -155,6 +155,7 @@ _ALLOWED_STARTUP_TOKENS: frozenset[str] = frozenset({
     "WEB_PORT",
     "INSTALL_DIR",
     "MOD_ARG",
+    "BIND_IP",
 })
 
 # Tokens, die in ``runtime.env``-Werten substituiert werden duerfen.
@@ -169,6 +170,7 @@ _ALLOWED_ENV_VALUE_TOKENS: frozenset[str] = frozenset({
     "RCON_PORT",
     "VOICE_PORT",
     "WEB_PORT",
+    "BIND_IP",
 })
 
 _ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -184,6 +186,16 @@ _ALLOWED_WORKSHOP_PATH_TOKENS: frozenset[str] = frozenset({
     "WORKSHOP_ID",
     "BASENAME",
 })
+
+
+def _is_allowed_port_token(token: str, allowed_base: frozenset[str]) -> bool:
+    if token in allowed_base:
+        return True
+    if token.startswith("CUSTOM_PORT_"):
+        suffix = token[12:]
+        return suffix.isdigit()
+    return False
+
 
 
 def _is_safe_relative_path(value: str) -> bool:
@@ -270,6 +282,7 @@ class BlueprintRuntime(BaseModel):
 
     image: str = Field(min_length=1, max_length=256)
     workdir: str | None = Field(default=None, max_length=512)
+    user: str | None = Field(default=None, max_length=32)
     env: dict[str, str] = Field(default_factory=dict)
     startup: str = Field(min_length=1, max_length=2048)
     configPatches: list["BlueprintConfigPatch"] = Field(default_factory=list, max_length=32)
@@ -293,6 +306,18 @@ class BlueprintRuntime(BaseModel):
             raise ValueError("runtime.workdir muss absoluter Container-Pfad sein.")
         if "\x00" in v or ".." in v.split("/"):
             raise ValueError("runtime.workdir enthaelt unsichere Komponenten.")
+        return v
+
+    @field_validator("user")
+    @classmethod
+    def _check_user(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        if not re.fullmatch(r"[1-9]\d{0,9}:[1-9]\d{0,9}", v):
+            raise ValueError("runtime.user muss numerisch im Format '<uid>:<gid>' sein und darf nicht root sein.")
+        uid, gid = (int(part) for part in v.split(":", 1))
+        if uid <= 0 or gid <= 0:
+            raise ValueError("runtime.user darf nicht root (0) sein.")
         return v
 
     @field_validator("env")
@@ -326,10 +351,10 @@ class BlueprintRuntime(BaseModel):
                     raise ValueError(
                         f"runtime.env['{key}']: Token '{{{token}}}' hat unzulaessige Syntax."
                     )
-                if token not in _ALLOWED_ENV_VALUE_TOKENS:
+                if not _is_allowed_port_token(token, _ALLOWED_ENV_VALUE_TOKENS):
                     raise ValueError(
                         f"runtime.env['{key}']: Token '{{{token}}}' nicht erlaubt "
-                        f"(erlaubt in Env-Werten: {sorted(_ALLOWED_ENV_VALUE_TOKENS)})."
+                        f"(erlaubt in Env-Werten: {sorted(_ALLOWED_ENV_VALUE_TOKENS)} + CUSTOM_PORT_<N>)."
                     )
         return v
 
@@ -361,10 +386,10 @@ class BlueprintRuntime(BaseModel):
                         f"runtime.startup: ENV-Token '{{{token}}}' ungueltig."
                     )
                 continue
-            if token not in _ALLOWED_STARTUP_TOKENS:
+            if not _is_allowed_port_token(token, _ALLOWED_STARTUP_TOKENS):
                 raise ValueError(
                     f"runtime.startup: Token '{{{token}}}' nicht in der Whitelist "
-                    f"({sorted(_ALLOWED_STARTUP_TOKENS)} + ENV.<KEY>)."
+                    f"({sorted(_ALLOWED_STARTUP_TOKENS)} + ENV.<KEY> + CUSTOM_PORT_<N>)."
                 )
         return v
 
@@ -518,11 +543,24 @@ class BlueprintMods(BaseModel):
     supportsMods: bool = False
     supportsSteamWorkshop: bool = False
     workshopAppId: str | None = None
+    filterTags: list[str] = Field(default_factory=list, max_length=10)
     modInjection: BlueprintModInjection = BlueprintModInjection.NONE
     modStartupArgumentFormat: str | None = Field(default=None, max_length=256)
     modListFilePath: str | None = Field(default=None, max_length=512)
     modListContent: BlueprintModListContent = BlueprintModListContent.WORKSHOP_IDS
     postInstall: list["BlueprintWorkshopFileAction"] = Field(default_factory=list, max_length=32)
+
+    @field_validator("filterTags")
+    @classmethod
+    def _check_filter_tags(cls, v: list[str]) -> list[str]:
+        for tag in v:
+            if not tag or len(tag) > 64:
+                raise ValueError("Ein filterTag darf nicht leer und maximal 64 Zeichen lang sein.")
+            if not re.fullmatch(r"[a-zA-Z0-9_\-\+ ]+", tag):
+                raise ValueError(
+                    f"filterTag '{tag}' enthält ungültige Zeichen (erlaubt: Alphanumerisch, Leerzeichen, _, -, +)."
+                )
+        return v
 
     @field_validator("workshopAppId")
     @classmethod
@@ -668,7 +706,7 @@ class BlueprintConfigPatch(BaseModel):
             raise ValueError("runtime.configPatches.value enthaelt verbotene Zeichen.")
         for match in _TOKEN_FIND_RE.finditer(v):
             token = match.group(1)
-            if token not in _ALLOWED_CONFIG_VALUE_TOKENS:
+            if not _is_allowed_port_token(token, _ALLOWED_CONFIG_VALUE_TOKENS):
                 raise ValueError(
                     f"runtime.configPatches.value: Token '{{{token}}}' nicht erlaubt."
                 )
@@ -699,6 +737,8 @@ class Blueprint(BaseModel):
     def _check_ports_unique(cls, v: list[BlueprintPort]) -> list[BlueprintPort]:
         seen: set[tuple[str, str]] = set()
         for p in v:
+            if p.name == BlueprintPortName.CUSTOM:
+                continue
             key = (p.name.value, p.protocol.value)
             if key in seen:
                 raise ValueError(
@@ -723,11 +763,19 @@ def load_blueprint_dict(data: dict[str, Any]) -> Blueprint:
         raise BlueprintValidationError.from_pydantic(exc) from exc
 
 
+def _strip_json_comments(text: str) -> str:
+    """Entfernt // und /* */ Kommentare aus JSON, ohne Strings zu beschaedigen."""
+    # Pattern ueberspringt Strings ("...") und matcht Kommentare
+    pattern = r'(?:"(?:\\.|[^"\\])*")|(?P<comment>//[^\n]*|/\*.*?\*/)'
+    return re.sub(pattern, lambda m: "" if m.group("comment") else m.group(0), text, flags=re.DOTALL)
+
+
 def load_blueprint_file(path: Path | str) -> Blueprint:
     """Liest + parst + validiert eine ``.blueprint.json``-Datei."""
     p = Path(path)
     try:
         raw = p.read_text(encoding="utf-8")
+        raw = _strip_json_comments(raw)
     except OSError as exc:
         raise BlueprintValidationError(
             f"Blueprint-Datei {p} nicht lesbar: {exc}"
@@ -749,44 +797,160 @@ def load_blueprint_file(path: Path | str) -> Blueprint:
 # ── Downloadbares Template ────────────────────────────────────────────────
 
 
-EMPTY_TEMPLATE: dict[str, Any] = {
-    "version": SUPPORTED_BLUEPRINT_VERSION,
-    "meta": {
-        "id": "",
-        "name": "",
-        "category": "steam_game",
-        "author": "",
-        "description": "",
-    },
+COMMENTED_TEMPLATE_DE: str = """{
+  "version": 1,
+  "meta": {
+    // Eindeutige ID (nur Kleinbuchstaben, Zahlen, Unterstrich). Dateiname muss <id>.blueprint.json sein.
+    "id": "my_custom_server",
+    // Name, der in der UI (z.B. im Dropdown) angezeigt wird.
+    "name": "Mein Eigener Server",
+    // Kategorie: steam_game, non_steam_game, voice_server, bot
+    "category": "non_steam_game",
+    "author": "Community",
+    // Optionale Beschreibung für die UI
+    "description": "Ein Blueprint-Template für einen neuen Server."
+  },
     "runtime": {
-        "image": "",
-        "workdir": "/data",
-        "env": {},
-        "startup": "",
-        "configPatches": [],
+    // Das Docker-Image, das gestartet wird (Pflichtfeld).
+    "image": "ubuntu:24.04",
+    // Arbeitsverzeichnis im Container
+    "workdir": "/data",
+    // Optional: numerischer Container-User, z.B. "1000:1000" fuer Pterodactyl/Wine-Images
+    "user": null,
+    // Umgebungsvariablen. Erlaubte Platzhalter in Werten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}
+    "env": {
+      "SERVER_PORT": "{GAME_PORT}",
+      "DEBUG_MODE": "false"
     },
-    "ports": [
-        {"name": "game", "protocol": "udp"},
-    ],
-    "source": {
-        "type": "steam",
-        "steam": {
-            "appId": "",
-            "platform": "linux",
-            "compatibility": "native",
-            "requiresLogin": False,
-        },
-        "http": None,
-        "manual": None,
-    },
-    "mods": {
-        "supportsMods": False,
-        "supportsSteamWorkshop": False,
-        "workshopAppId": None,
-        "modInjection": "none",
-        "modStartupArgumentFormat": None,
-        "modListFilePath": None,
-        "modListContent": "workshopIds",
-        "postInstall": [],
-    },
+    // Startbefehl. Erlaubte Platzhalter: {GAME_PORT}, {INSTALL_DIR}, {ENV.SERVER_PORT} etc. Keine Shell-Metazeichen!
+    "startup": "./start_server.sh --port {GAME_PORT}",
+    // Dateien, die vor dem Start automatisch gepatcht werden sollen (z.B. INI-Dateien)
+    "configPatches": []
+  },
+  "ports": [
+    // Deklariert die benötigten Ports. Die UI fragt diese beim Server-Erstellen ab.
+    // Erlaubte Rollen: game, query, rcon, voice, web, custom
+    // Dieselbe Standardrolle darf einmal pro Protokoll vorkommen, z.B. query/udp + query/tcp.
+    // MSM speichert daraus eindeutige Rollen: query, query_2, ...
+    {
+      "name": "game",
+      "protocol": "udp"
+    }
+  ],
+  "source": {
+    // Woher kommen die Server-Dateien? Erlaubte Typen: steam, http, dockerOnly, manualUpload
+    "type": "dockerOnly"
+    
+    // Beispiel fuer Steam (entkommentieren und type auf "steam" setzen):
+    /*
+    "steam": {
+      "appId": "2394010",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false
+    }
+    */
+    
+    // Beispiel fuer HTTP-Download (entkommentieren und type auf "http" setzen):
+    /*
+    "http": {
+      "url": "https://example.com/server-files.zip",
+      "archiveType": "zip",
+      "extractTo": "."
+    }
+    */
+  },
+  "mods": {
+    // Falls Steam Workshop unterstuetzt wird, auf true setzen und workshopAppId eintragen.
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    // Optionale Tags zur Filterung der Workshop-Suche
+    "filterTags": [],
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  }
 }
+"""
+
+COMMENTED_TEMPLATE_EN: str = """{
+  "version": 1,
+  "meta": {
+    // Unique ID (lowercase letters, numbers, underscores only). Filename must be <id>.blueprint.json.
+    "id": "my_custom_server",
+    // Name displayed in the UI (e.g., in the server creation dropdown).
+    "name": "My Custom Server",
+    // Category: steam_game, non_steam_game, voice_server, bot
+    "category": "non_steam_game",
+    "author": "Community",
+    // Optional description for the UI
+    "description": "A blueprint template for a new server."
+  },
+    "runtime": {
+    // The Docker image to execute (required field).
+    "image": "ubuntu:24.04",
+    // Working directory inside the container
+    "workdir": "/data",
+    // Optional numeric container user, e.g. "1000:1000" for Pterodactyl/Wine images
+    "user": null,
+    // Environment variables. Allowed placeholders in values: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}
+    "env": {
+      "SERVER_PORT": "{GAME_PORT}",
+      "DEBUG_MODE": "false"
+    },
+    // Startup command. Allowed placeholders: {GAME_PORT}, {INSTALL_DIR}, {ENV.SERVER_PORT} etc. No shell meta-characters!
+    "startup": "./start_server.sh --port {GAME_PORT}",
+    // Files that should be automatically patched before startup (e.g., INI files)
+    "configPatches": []
+  },
+  "ports": [
+    // Declares the required ports. The UI will prompt the user for these during server creation.
+    // Allowed roles: game, query, rcon, voice, web, custom
+    // The same standard role may appear once per protocol, e.g. query/udp + query/tcp.
+    // MSM stores these as unique roles: query, query_2, ...
+    {
+      "name": "game",
+      "protocol": "udp"
+    }
+  ],
+  "source": {
+    // Where do the server files come from? Allowed types: steam, http, dockerOnly, manualUpload
+    "type": "dockerOnly"
+    
+    // Example for Steam (uncomment and set type to "steam"):
+    /*
+    "steam": {
+      "appId": "2394010",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false
+    }
+    */
+    
+    // Example for HTTP download (uncomment and set type to "http"):
+    /*
+    "http": {
+      "url": "https://example.com/server-files.zip",
+      "archiveType": "zip",
+      "extractTo": "."
+    }
+    */
+  },
+  "mods": {
+    // If Steam Workshop is supported, set to true and provide the workshopAppId.
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    // Optional tags to filter workshop search
+    "filterTags": [],
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  }
+}
+"""

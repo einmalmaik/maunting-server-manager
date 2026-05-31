@@ -60,6 +60,9 @@
     "supportsMods": true,
     "supportsSteamWorkshop": true,
     "workshopAppId": "440900",
+    "filterTags": [
+      "Enhanced"
+    ],
     "modInjection": "file",
     "modStartupArgumentFormat": null,
     "modListFilePath": "ConanSandbox/Mods/modlist.txt",

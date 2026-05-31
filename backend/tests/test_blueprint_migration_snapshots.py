@@ -19,13 +19,14 @@ from games.blueprint_plugin import BlueprintPlugin
 
 # Server-Stubs — wir brauchen keinen DB-Round-Trip, weil
 # build_container_command nur server.game_port/query_port/rcon_port liest.
-def _stub_server(game_port=None, query_port=None, rcon_port=None) -> SimpleNamespace:
+def _stub_server(game_port=None, query_port=None, rcon_port=None, public_bind_ip=None) -> SimpleNamespace:
     return SimpleNamespace(
         id=1,
         install_dir="/tmp/srv",
         game_port=game_port,
         query_port=query_port,
         rcon_port=rcon_port,
+        public_bind_ip=public_bind_ip,
     )
 
 

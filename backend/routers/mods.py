@@ -1,16 +1,53 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import get_db, SessionLocal
 from models import Mod, Server, User
 from schemas import ModResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from games import get_plugin
+from services.install_update_lock_service import (
+    release_install_update_lock,
+    acquire_install_update_lock_blocking,
+)
+from services.mod_install_status_service import mark_mod_failed, mark_mod_installed, mark_mod_installing
+from games import updater
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mods", tags=["mods"])
 
 
+def install_mod_bg(server_id: int, workshop_id: str):
+    db = SessionLocal()
+    try:
+        server = db.query(Server).filter(Server.id == server_id).first()
+        if not server:
+            logger.error("Server %s nicht gefunden in Background Task", server_id)
+            return
+        plugin = get_plugin(server.game_type)
+        if not plugin or not plugin.supports_mods:
+            mark_mod_failed(server_id, workshop_id)
+            return
 
+        # Blockierenden Lock erwerben, um parallele SteamCMD-Aufrufe zu serialisieren
+        acquire_install_update_lock_blocking(server.id, "mod_install")
+        try:
+            mark_mod_installing(server.id, workshop_id, "install")
+            result = plugin.install_mod(server, workshop_id)
+            success = isinstance(result, dict) and result.get("ok", True) is not False and "error" not in result
+            if success:
+                updater.update_mod_metadata_after_success(server.id, workshop_id)
+                mark_mod_installed(server.id, workshop_id)
+            else:
+                mark_mod_failed(server.id, workshop_id)
+        finally:
+            release_install_update_lock(server.id)
+    except Exception as exc:
+        logger.exception("Fehler bei Hintergrund-Mod-Installation für Server %s (workshop_id: %s)", server_id, workshop_id)
+    finally:
+        db.close()
 
 
 @router.get("/{server_id}", response_model=list[ModResponse])
@@ -20,15 +57,24 @@ def list_mods(server_id: int, db: Session = Depends(get_db), user: User = Depend
 
 
 @router.post("/{server_id}", response_model=ModResponse)
-def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)):
+def subscribe_mod(
+    server_id: int,
+    workshop_id: str,
+    background_tasks: BackgroundTasks,
+    name: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
     require_server_permission(user, server_id, db, "server.mods.write")
-    existing = db.query(Mod).filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Mod bereits abonniert")
-
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+
+    existing = db.query(Mod).filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Mod bereits abonniert")
 
     max_order = db.query(Mod).filter(Mod.server_id == server_id).count()
     mod = Mod(
@@ -37,15 +83,17 @@ def subscribe_mod(server_id: int, workshop_id: str, name: str | None = None, db:
         name=name,
         load_order=max_order,
         auto_update=True,
+        install_status="pending" if plugin and plugin.supports_mods else "installed",
+        install_action="install" if plugin and plugin.supports_mods else None,
+        install_progress=0 if plugin and plugin.supports_mods else 100,
     )
     db.add(mod)
     db.commit()
     db.refresh(mod)
 
-    # Mod via SteamCMD im Hintergrund installieren
-    plugin = get_plugin(server.game_type)
+    # Mod via SteamCMD installieren (in den Hintergrund auslagern, um nicht zu blockieren)
     if plugin and plugin.supports_mods:
-        plugin.install_mod(server, workshop_id)
+        background_tasks.add_task(install_mod_bg, server.id, workshop_id)
 
     return mod
 

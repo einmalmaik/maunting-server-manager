@@ -26,6 +26,7 @@ import { Backups } from "./Backups";
 import { ServerConsolePanel } from "@/components/server/ServerConsolePanel";
 import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
 import type { GameInfo, Server } from "@/types";
+import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 
 type TabKey = "files" | "console" | "mods" | "restarts" | "backups";
 const VALID_TABS: TabKey[] = [
@@ -119,6 +120,8 @@ export function ServerDetail() {
     game_port: "",
     query_port: "",
     rcon_port: "",
+    ports: {} as Record<string, string>,
+    protocols: {} as Record<string, string>,
   });
   const { interfaces } = useHostInterfaces();
 
@@ -150,11 +153,21 @@ export function ServerDetail() {
 
   useEffect(() => {
     if (server && showEditNetwork) {
+      const initialPorts: Record<string, string> = {};
+      const initialProtocols: Record<string, string> = {};
+      server.ports?.forEach((p) => {
+        initialProtocols[p.role] = p.protocol;
+        if (p.role !== 'game' && p.role !== 'query' && p.role !== 'rcon') {
+          initialPorts[p.role] = p.port ? String(p.port) : "";
+        }
+      });
       setNetworkForm({
         public_bind_ip: server.public_bind_ip || "",
         game_port: server.game_port ? String(server.game_port) : "",
         query_port: server.query_port ? String(server.query_port) : "",
         rcon_port: server.rcon_port ? String(server.rcon_port) : "",
+        ports: initialPorts,
+        protocols: initialProtocols,
       });
     }
   }, [server, showEditNetwork]);
@@ -232,21 +245,46 @@ export function ServerDetail() {
         const current = server?.[field] ? String(server[field]) : "";
         return networkForm[field] !== current;
       };
-      if (portChanged("game_port")) {
-        body.game_port = networkForm.game_port
-          ? parseInt(networkForm.game_port)
-          : null;
+
+      let customPortsChanged = false;
+      let protocolsChanged = false;
+      server?.ports?.forEach((p) => {
+        if ((networkForm.protocols[p.role] || p.protocol) !== p.protocol) {
+          protocolsChanged = true;
+        }
+        if (p.role !== 'game' && p.role !== 'query' && p.role !== 'rcon') {
+          const current = p.port ? String(p.port) : "";
+          if ((networkForm.ports[p.role] || "") !== current) {
+            customPortsChanged = true;
+          }
+        }
+      });
+
+      if (portChanged("game_port") || portChanged("query_port") || portChanged("rcon_port") || customPortsChanged || protocolsChanged) {
+        const portsPayload: Record<string, number | null> = {};
+        const protocolsPayload: Record<string, string> = {};
+        portsPayload["game"] = networkForm.game_port ? parseInt(networkForm.game_port) : null;
+        portsPayload["query"] = networkForm.query_port ? parseInt(networkForm.query_port) : null;
+        portsPayload["rcon"] = networkForm.rcon_port ? parseInt(networkForm.rcon_port) : null;
+        if (networkForm.protocols.game) protocolsPayload.game = networkForm.protocols.game;
+        if (networkForm.protocols.query) protocolsPayload.query = networkForm.protocols.query;
+        if (networkForm.protocols.rcon) protocolsPayload.rcon = networkForm.protocols.rcon;
+        
+        Object.keys(networkForm.ports).forEach((role) => {
+          const val = networkForm.ports[role];
+          portsPayload[role] = val ? parseInt(val) : null;
+        });
+        Object.keys(networkForm.protocols).forEach((role) => {
+          protocolsPayload[role] = networkForm.protocols[role];
+        });
+
+        body.ports = portsPayload;
+        body.port_protocols = protocolsPayload;
+        body.game_port = portsPayload["game"];
+        body.query_port = portsPayload["query"];
+        body.rcon_port = portsPayload["rcon"];
       }
-      if (portChanged("query_port")) {
-        body.query_port = networkForm.query_port
-          ? parseInt(networkForm.query_port)
-          : null;
-      }
-      if (portChanged("rcon_port")) {
-        body.rcon_port = networkForm.rcon_port
-          ? parseInt(networkForm.rcon_port)
-          : null;
-      }
+
       if (Object.keys(body).length === 0) {
         setShowEditNetwork(false);
         return;
@@ -373,8 +411,18 @@ export function ServerDetail() {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h1 className="font-headline text-headline-sm text-primary">
+            <h1 className="font-headline text-headline-sm text-primary flex items-center gap-2">
               {server.name}
+              <span 
+                className="text-xs font-mono px-2 py-0.5 rounded bg-surface-container-highest border border-outline text-on-surface-variant cursor-pointer hover:bg-surface-container hover:text-on-surface transition-colors"
+                title="Copy Container ID"
+                onClick={() => {
+                  navigator.clipboard.writeText(`msm-srv-${server.id}`);
+                  toast.success("Container ID copied!");
+                }}
+              >
+                msm-srv-{server.id}
+              </span>
             </h1>
             <p className="font-body-md text-sm text-on-surface-variant">
               {gameName(server.game_type)}
@@ -572,39 +620,67 @@ export function ServerDetail() {
               )}
             </p>
           </div>
-          <div>
-            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
-              {t("servers.gamePort")}
-            </p>
-            <p className="font-headline text-display-sm text-primary">
-              {server.game_port ?? "-"}{" "}
-              <span className="text-sm font-body-md text-on-surface-variant">
-                UDP
-              </span>
-            </p>
-          </div>
-          <div>
-            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
-              {t("servers.queryPort")}
-            </p>
-            <p className="font-headline text-display-sm text-primary">
-              {server.query_port ?? "-"}{" "}
-              <span className="text-sm font-body-md text-on-surface-variant">
-                UDP
-              </span>
-            </p>
-          </div>
-          <div>
-            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
-              {t("servers.rconPort")}
-            </p>
-            <p className="font-headline text-display-sm text-primary">
-              {server.rcon_port ?? "-"}{" "}
-              <span className="text-sm font-body-md text-on-surface-variant">
-                TCP
-              </span>
-            </p>
-          </div>
+          {server.ports && server.ports.length > 0 ? (
+            server.ports.map((p) => {
+              const baseRole = labelRole(p.role);
+              const label = baseRole === 'game'
+                ? t('servers.gamePort')
+                : baseRole === 'query'
+                ? t('servers.queryPort')
+                : baseRole === 'rcon'
+                ? t('servers.rconPort')
+                : `${p.role.replace('_', ' ').toUpperCase()}`;
+              return (
+                <div key={`${p.role}-${p.protocol}`}>
+                  <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
+                    {label}
+                  </p>
+                  <p className="font-headline text-display-sm text-primary">
+                    {p.port ?? "-"}{" "}
+                    <span className="text-sm font-body-md text-on-surface-variant">
+                      {p.protocol.toUpperCase()}
+                    </span>
+                  </p>
+                </div>
+              );
+            })
+          ) : (
+            <>
+              <div>
+                <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
+                  {t("servers.gamePort")}
+                </p>
+                <p className="font-headline text-display-sm text-primary">
+                  {server.game_port ?? "-"}{" "}
+                  <span className="text-sm font-body-md text-on-surface-variant">
+                    UDP
+                  </span>
+                </p>
+              </div>
+              <div>
+                <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
+                  {t("servers.queryPort")}
+                </p>
+                <p className="font-headline text-display-sm text-primary">
+                  {server.query_port ?? "-"}{" "}
+                  <span className="text-sm font-body-md text-on-surface-variant">
+                    UDP
+                  </span>
+                </p>
+              </div>
+              <div>
+                <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
+                  {t("servers.rconPort")}
+                </p>
+                <p className="font-headline text-display-sm text-primary">
+                  {server.rcon_port ?? "-"}{" "}
+                  <span className="text-sm font-body-md text-on-surface-variant">
+                    TCP
+                  </span>
+                </p>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -694,62 +770,92 @@ export function ServerDetail() {
                   {t("servers.bindIp.hint")}
                 </p>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t("servers.gamePort")}
-                  </label>
-                  <input
-                    type="number"
-                    min={1024}
-                    max={65535}
-                    value={networkForm.game_port}
-                    onChange={(e) =>
-                      setNetworkForm({
-                        ...networkForm,
-                        game_port: e.target.value,
-                      })
-                    }
-                    className="msm-input"
-                  />
-                </div>
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t("servers.queryPort")}
-                  </label>
-                  <input
-                    type="number"
-                    min={1024}
-                    max={65535}
-                    value={networkForm.query_port}
-                    onChange={(e) =>
-                      setNetworkForm({
-                        ...networkForm,
-                        query_port: e.target.value,
-                      })
-                    }
-                    className="msm-input"
-                  />
-                </div>
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t("servers.rconPort")}
-                  </label>
-                  <input
-                    type="number"
-                    min={1024}
-                    max={65535}
-                    value={networkForm.rcon_port}
-                    onChange={(e) =>
-                      setNetworkForm({
-                        ...networkForm,
-                        rcon_port: e.target.value,
-                      })
-                    }
-                    className="msm-input"
-                  />
-                </div>
-              </div>
+              {(() => {
+                const portDefs = gameInfo?.ports ?? [
+                  { name: 'game', protocol: 'udp' },
+                  { name: 'query', protocol: 'udp' },
+                  { name: 'rcon', protocol: 'tcp' },
+                ]
+                const mappedPorts = portDefs.length > 0
+                  ? mapBlueprintPorts(portDefs)
+                  : (server.ports ?? []).map((p) => ({
+                      name: 'custom' as const,
+                      protocol: p.protocol as 'tcp' | 'udp',
+                      mappedRole: p.role,
+                    }));
+                if (mappedPorts.length === 0) return null
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {mappedPorts.map((p) => {
+                      const role = p.mappedRole;
+                      const isLegacy = role === 'game' || role === 'query' || role === 'rcon';
+                      const val = isLegacy
+                        ? (role === 'game' ? networkForm.game_port : role === 'query' ? networkForm.query_port : networkForm.rcon_port)
+                        : (networkForm.ports[role] || '');
+                      const protocol = networkForm.protocols[role] || p.protocol;
+                      
+                      const baseRole = labelRole(role);
+                      const label = baseRole === 'game'
+                        ? t('servers.gamePort')
+                        : baseRole === 'query'
+                        ? t('servers.queryPort')
+                        : baseRole === 'rcon'
+                        ? t('servers.rconPort')
+                        : `${role.replace('_', ' ').toUpperCase()} (${p.protocol.toUpperCase()})`;
+
+                      return (
+                        <div key={role}>
+                          <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                            {label}
+                          </label>
+                          <div className="grid grid-cols-[minmax(0,1fr)_5.5rem] gap-2">
+                            <input
+                              type="number"
+                              min={1024}
+                              max={65535}
+                              value={val}
+                              onChange={(e) => {
+                                if (isLegacy) {
+                                  const fieldKey = role === 'game' ? 'game_port' : role === 'query' ? 'query_port' : 'rcon_port';
+                                  setNetworkForm({ ...networkForm, [fieldKey]: e.target.value });
+                                } else {
+                                  setNetworkForm({
+                                    ...networkForm,
+                                    ports: {
+                                      ...networkForm.ports,
+                                      [role]: e.target.value,
+                                    },
+                                  });
+                                }
+                              }}
+                              className="msm-input"
+                              placeholder={t('servers.portAuto')}
+                            />
+                            <select
+                              aria-label={`${label} protocol`}
+                              className="msm-input px-2"
+                              value={protocol}
+                              onChange={(e) =>
+                                setNetworkForm({
+                                  ...networkForm,
+                                  protocols: {
+                                    ...networkForm.protocols,
+                                    [role]: e.target.value,
+                                  },
+                                })
+                              }
+                            >
+                              <option value="udp">UDP</option>
+                              <option value="tcp">TCP</option>
+                            </select>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"

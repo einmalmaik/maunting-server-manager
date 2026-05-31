@@ -13,9 +13,11 @@ from pathlib import Path
 import pytest
 
 from blueprints.schema import (
-    EMPTY_TEMPLATE,
+    COMMENTED_TEMPLATE_DE,
+    COMMENTED_TEMPLATE_EN,
     Blueprint,
     BlueprintValidationError,
+    _strip_json_comments,
     load_blueprint_dict,
     load_blueprint_file,
 )
@@ -75,13 +77,30 @@ def test_minimal_blueprint_is_valid() -> None:
     assert bp.source.type.value == "steam"
 
 
-def test_empty_template_round_trip() -> None:
-    """Das Default-Template hat leere Strings — es darf NICHT validieren
-    (User soll bewusst Felder ausfuellen). Stattdessen testen wir, dass eine
-    minimal ausgefuellte Variante davon validiert."""
-    template = deepcopy(EMPTY_TEMPLATE)
+def test_runtime_user_accepts_numeric_non_root_uid_gid() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["user"] = "1000:1000"
+    bp = load_blueprint_dict(d)
+    assert bp.runtime.user == "1000:1000"
+
+
+@pytest.mark.parametrize("user", ["0:0", "0:1000", "1000:0", "container", "1000", "1000:container"])
+def test_runtime_user_rejects_root_or_non_numeric_user(user: str) -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["user"] = user
     with pytest.raises(BlueprintValidationError):
-        load_blueprint_dict(template)
+        load_blueprint_dict(d)
+
+
+def test_commented_template_validates() -> None:
+    """Das ausgelieferte kommentierte Template muss, nach Entfernen der
+    Kommentare, ein gueltiges JSON und eine gueltige Blueprint sein."""
+    for tmpl in [COMMENTED_TEMPLATE_DE, COMMENTED_TEMPLATE_EN]:
+        clean_json = _strip_json_comments(tmpl)
+        raw = json.loads(clean_json)
+        bp = load_blueprint_dict(raw)
+        assert bp.meta.id == "my_custom_server"
+        assert bp.runtime.image == "ubuntu:24.04"
 
 
 # ── Shell-Metas ───────────────────────────────────────────────────────────
@@ -253,11 +272,39 @@ def test_workshop_app_id_required_when_workshop_on() -> None:
         load_blueprint_dict(d)
 
 
+def test_mods_filter_tags_validation() -> None:
+    d = _minimal_valid_dict()
+    # 1) Gültiger Fall
+    d["mods"] = {
+        "supportsMods": True,
+        "supportsSteamWorkshop": True,
+        "workshopAppId": "440900",
+        "filterTags": ["Enhanced", "Another-Tag+1"],
+        "modInjection": "none",
+    }
+    bp = load_blueprint_dict(d)
+    assert bp.effective_mods().filterTags == ["Enhanced", "Another-Tag+1"]
+
+    # 2) Ungültiger Tag (verbotene Sonderzeichen)
+    d["mods"]["filterTags"] = ["Enhanced!"]
+    with pytest.raises(BlueprintValidationError) as exc:
+        load_blueprint_dict(d)
+    assert any("ungültige Zeichen" in e for e in exc.value.errors)
+
+    # 3) Zu langer Tag
+    d["mods"]["filterTags"] = ["A" * 65]
+    with pytest.raises(BlueprintValidationError) as exc:
+        load_blueprint_dict(d)
+    assert any("maximal 64" in e for e in exc.value.errors)
+
+
 def test_template_is_valid_json() -> None:
-    # EMPTY_TEMPLATE muss zumindest serialisierbar sein.
-    payload = json.dumps(EMPTY_TEMPLATE)
-    assert "version" in payload
-    assert "modInjection" in payload
+    # COMMENTED_TEMPLATE muss nach dem Strippen serialisierbar sein.
+    for tmpl in [COMMENTED_TEMPLATE_DE, COMMENTED_TEMPLATE_EN]:
+        clean_json = _strip_json_comments(tmpl)
+        payload = json.loads(clean_json)
+        assert "version" in payload
+        assert "modInjection" in payload["mods"]
 
 
 # ── Manual Upload ──────────────────────────────────────────────────────────
@@ -339,3 +386,17 @@ def test_steam_requires_login_default_false() -> None:
     bp = load_blueprint_dict(d)
     assert bp.source.steam is not None
     assert bp.source.steam.requiresLogin is False
+
+
+def test_allows_multiple_custom_ports_with_same_protocol() -> None:
+    d = _minimal_valid_dict()
+    d["ports"] = [
+        {"name": "game", "protocol": "udp"},
+        {"name": "custom", "protocol": "udp"},
+        {"name": "custom", "protocol": "udp"},
+        {"name": "custom", "protocol": "tcp"},
+    ]
+
+    bp = load_blueprint_dict(d)
+
+    assert [p.name.value for p in bp.ports] == ["game", "custom", "custom", "custom"]

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Eraser, Send, Terminal } from 'lucide-react'
+import { Check, Copy, Eraser, Send, Terminal } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { toast } from '@/stores/toastStore'
@@ -10,8 +10,35 @@ interface Props {
 }
 
 type LineTone = 'error' | 'warn' | 'success' | 'info' | 'default'
+type ConsoleLogLine = {
+  marker: number
+  text: string
+}
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g
+const MAX_LOG_LINES = 2000
+
+function clearMarkerKey(serverId: number): string {
+  return `msm.console.clearThrough.${serverId}`
+}
+
+function readClearMarker(serverId: number): number {
+  try {
+    const raw = window.localStorage.getItem(clearMarkerKey(serverId))
+    const parsed = raw ? Number.parseInt(raw, 10) : 0
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+  } catch {
+    return 0
+  }
+}
+
+function writeClearMarker(serverId: number, seq: number): void {
+  try {
+    window.localStorage.setItem(clearMarkerKey(serverId), String(seq))
+  } catch {
+    // Private mode / quota issues should not break console use.
+  }
+}
 
 // ZENTRALE Mapping-Funktion für Farbkodierung (KISS + wartbar).
 // Alle Regex-Patterns AN EINER STELLE. Verwendet existierende Design-Token-Klassen
@@ -46,6 +73,31 @@ export function colorizeOutput(line: string): string {
   return LINE_CLASS[tone]
 }
 
+export function displayConsoleLine(line: string, language: string): string {
+  const cleaned = cleanLine(line)
+  if (!language.toLowerCase().startsWith('en') || !cleaned.startsWith('[MSM]')) {
+    return cleaned
+  }
+
+  const replacements: Array<[RegExp, string | ((match: RegExpMatchArray) => string)]> = [
+    [/^\[MSM\] Hinweis: Pull für (.+) fehlgeschlagen, nutze lokales Image$/, (m) => `[MSM] Notice: Pull for ${m[1]} failed, using local image`],
+    [/^\[MSM\] Container (.+) gestartet$/, (m) => `[MSM] Container ${m[1]} started`],
+    [/^\[MSM\] Container (.+) gestoppt$/, (m) => `[MSM] Container ${m[1]} stopped`],
+    [/^\[MSM\] Container-Start fehlgeschlagen: (.+)$/, (m) => `[MSM] Container start failed: ${m[1]}`],
+    [/^\[MSM\] SteamCMD startet für App (.+) \(Docker\)$/, (m) => `[MSM] SteamCMD starting for app ${m[1]} (Docker)`],
+    [/^\[MSM\] SteamCMD abgeschlossen \(App (.+)\)\.$/, (m) => `[MSM] SteamCMD completed (app ${m[1]}).`],
+    [/^\[MSM\] SteamCMD fehlgeschlagen: (.+)$/, (m) => `[MSM] SteamCMD failed: ${m[1]}`],
+    [/^\[MSM\] Rootless Docker Daemon not running for user msm - Live-Container-Logs deaktiviert\.$/, '[MSM] Rootless Docker Daemon not running for user msm - live container logs disabled.'],
+  ]
+
+  for (const [pattern, replacement] of replacements) {
+    const match = cleaned.match(pattern)
+    if (!match) continue
+    return typeof replacement === 'function' ? replacement(match) : replacement
+  }
+  return cleaned
+}
+
 /** Server-Konsole als eigener Tab.
  *
  *  - **Direktanzeige ohne Reload:** Live-Stream (EventSource) startet sofort beim Mount
@@ -57,34 +109,63 @@ export function colorizeOutput(line: string): string {
  *  - Farbkodierung wartbar zentral (keine verteilte Einzellogik).
  */
 export function ServerConsolePanel({ serverId }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('server.console.write', serverId)
-  const [logs, setLogs] = useState<string[]>([])
-  const [hideAbove, setHideAbove] = useState(0)
+  const [logs, setLogs] = useState<ConsoleLogLine[]>([])
+  const [hiddenThrough, setHiddenThrough] = useState(() => readClearMarker(serverId))
+  const [streamVersion, setStreamVersion] = useState(0)
   const [inputValue, setInputValue] = useState('')
   const [sending, setSending] = useState(false)
+  const [copiedLogs, setCopiedLogs] = useState(false)
+  const nextSeqRef = useRef(0)
+  const bufferRef = useRef<string[]>([])
+  const activeStreamRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    activeStreamRef.current = streamVersion
+    nextSeqRef.current = 0
+    bufferRef.current = []
+    setLogs([])
+    const clearMarker = readClearMarker(serverId)
+    nextSeqRef.current = clearMarker
+    setHiddenThrough(clearMarker)
+
     // EventSource sendet automatisch Cookies (same-origin) und reconnectet bei
     // Netzwerk-Aussetzern. Keine zusaetzliche Polling-Logik noetig.
-    const url = `/api/servers/${serverId}/console/stream`
+    const url = clearMarker > 0
+      ? `/api/servers/${serverId}/console/stream?after=${clearMarker}`
+      : `/api/servers/${serverId}/console/stream`
     const es = new EventSource(url)
+    const streamToken = streamVersion
     
     // BATCHING FIX: UI-Freeze verhindern
-    let buffer: string[] = []
-    
     es.onmessage = (ev) => {
-      buffer.push(ev.data)
+      if (activeStreamRef.current !== streamToken) return
+      const eventMarker = Number.parseInt(ev.lastEventId || '', 10)
+      const marker = Number.isFinite(eventMarker) && eventMarker > 0
+        ? eventMarker
+        : nextSeqRef.current + 1
+      nextSeqRef.current = Math.max(nextSeqRef.current, marker)
+      bufferRef.current.push(JSON.stringify({ marker, text: ev.data }))
     }
     
     const flushInterval = setInterval(() => {
-      if (buffer.length > 0) {
-        const toFlush = buffer
-        buffer = []
+      if (activeStreamRef.current !== streamToken) return
+      if (bufferRef.current.length > 0) {
+        const toFlush = bufferRef.current
+        bufferRef.current = []
         setLogs((prev) => {
-          const next = [...prev, ...toFlush]
-          return next.length > 2000 ? next.slice(-2000) : next
+          const mapped = toFlush.map((item) => {
+            try {
+              return JSON.parse(item) as ConsoleLogLine
+            } catch {
+              nextSeqRef.current += 1
+              return { marker: nextSeqRef.current, text: item }
+            }
+          })
+          const next = [...prev, ...mapped]
+          return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
         })
       }
     }, 50) // Alle 50ms gebatcht in den React-State flushen
@@ -96,11 +177,11 @@ export function ServerConsolePanel({ serverId }: Props) {
       clearInterval(flushInterval)
       es.close()
     }
-  }, [serverId])
+  }, [serverId, streamVersion])
 
   const visibleLogs = useMemo(
-    () => logs.slice(hideAbove),
-    [logs, hideAbove],
+    () => logs.filter((line) => line.marker > hiddenThrough),
+    [logs, hiddenThrough],
   )
 
   useEffect(() => {
@@ -129,6 +210,29 @@ export function ServerConsolePanel({ serverId }: Props) {
     }
   }
 
+  const clearConsole = () => {
+    bufferRef.current = []
+    const seq = nextSeqRef.current
+    setHiddenThrough(seq)
+    writeClearMarker(serverId, seq)
+    setLogs([])
+    setStreamVersion((current) => current + 1)
+  }
+
+  const copyVisibleLogs = async () => {
+    const text = visibleLogs
+      .map((line) => displayConsoleLine(line.text, i18n.language))
+      .join('\n')
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedLogs(true)
+      window.setTimeout(() => setCopiedLogs(false), 1500)
+    } catch {
+      toast.error(t('servers.consoleCopyFailed'))
+    }
+  }
+
   return (
     <div className="msm-card">
       <div className="p-5 border-b border-outline flex items-center justify-between gap-3 flex-wrap">
@@ -136,14 +240,27 @@ export function ServerConsolePanel({ serverId }: Props) {
           <Terminal className="w-4 h-4 text-on-surface-variant" />
           <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
         </div>
-        <button
-          onClick={() => setHideAbove(logs.length)}
-          className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
-          title={t('servers.consoleClearTitle')}
-        >
-          <Eraser className="w-3.5 h-3.5" />
-          {t('servers.consoleClear')}
-        </button>
+        <div className="inline-flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void copyVisibleLogs()}
+            disabled={visibleLogs.length === 0}
+            className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+            title={t('servers.consoleCopyTitle')}
+          >
+            {copiedLogs ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            {copiedLogs ? t('common.copied') : t('servers.consoleCopy')}
+          </button>
+          <button
+            type="button"
+            onClick={clearConsole}
+            className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
+            title={t('servers.consoleClearTitle')}
+          >
+            <Eraser className="w-3.5 h-3.5" />
+            {t('servers.consoleClear')}
+          </button>
+        </div>
       </div>
       <div className="p-5">
         <div
@@ -154,8 +271,8 @@ export function ServerConsolePanel({ serverId }: Props) {
             <span className="text-on-surface-variant">{t('servers.noLogs')}</span>
           ) : (
             visibleLogs.map((line, i) => (
-              <div key={i} className={colorizeOutput(line)}>
-                {cleanLine(line) || '\u00A0'}
+              <div key={`${line.marker}-${i}`} className={colorizeOutput(line.text)}>
+                {displayConsoleLine(line.text, i18n.language) || '\u00A0'}
               </div>
             ))
           )}

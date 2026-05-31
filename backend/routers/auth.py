@@ -12,7 +12,7 @@ from cookies import _set_auth_cookies, _clear_auth_cookies
 from database import get_db
 from dependencies import get_current_user, get_current_owner, verify_csrf
 from models import User, EmailVerification
-from schemas import LoginRequest, TokenResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest
+from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest
 from schemas import ResendVerificationRequest
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest
 from services import AuthService, EmailService
@@ -27,9 +27,20 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 logger = logging.getLogger(__name__)
 
+REGISTER_VERIFICATION_PURPOSE = "register"
+LOGIN_VERIFICATION_PURPOSE = "login"
+LOGIN_ACCEPTED_VERIFICATION_PURPOSES = [REGISTER_VERIFICATION_PURPOSE, LOGIN_VERIFICATION_PURPOSE]
+
 
 def _log_smtp_missing(email: str) -> None:
     logger.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s nicht versendet.", email)
+
+
+def _set_login_session(response: Response, db: Session, user: User) -> None:
+    access_token = AuthService.create_access_token({"sub": user.username, "user_id": user.id, "jti": str(uuid.uuid4())})
+    refresh_token = AuthService.create_refresh_token(db, user.id)
+    csrf_token = AuthService.create_csrf_token()
+    _set_auth_cookies(response, access_token, refresh_token, csrf_token)
 
 
 @router.get("/setup-status")
@@ -92,7 +103,7 @@ async def setup_resend(req: OwnerSetupRequest, db: Session = Depends(get_db)) ->
     if not user or user.email_verified:
         raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
 
-    code = EmailVerificationService.create_verification(db, req.email, "setup")
+    code = EmailVerificationService.create_verification(db, req.email, LOGIN_VERIFICATION_PURPOSE)
     if EmailService.is_configured():
         await EmailService.send_verification_code_email(req.email, user.username, code)
     else:
@@ -112,7 +123,7 @@ async def resend_verification(req: ResendVerificationRequest, db: Session = Depe
     if not user or user.email_verified:
         raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
 
-    code = EmailVerificationService.create_verification(db, req.email, "setup")
+    code = EmailVerificationService.create_verification(db, req.email, LOGIN_VERIFICATION_PURPOSE)
     if EmailService.is_configured():
         await EmailService.send_verification_code_email(req.email, user.username, code)
     else:
@@ -125,8 +136,8 @@ async def resend_verification(req: ResendVerificationRequest, db: Session = Depe
     return {"message": "Code erneut gesendet"}
 
 
-@router.post("/register", response_model=UserResponse, status_code=201)
-async def register(req: UserCreate, db: Session = Depends(get_db)) -> User:
+@router.post("/register", response_model=RegistrationResponse, status_code=201)
+async def register(req: UserCreate, db: Session = Depends(get_db)) -> dict:
     if AuthService.get_user_by_username(db, req.username):
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
@@ -139,13 +150,77 @@ async def register(req: UserCreate, db: Session = Depends(get_db)) -> User:
         user.role_id = default_role.id
     db.commit()
     
-    code = EmailVerificationService.create_verification(db, user.email, "setup")
+    code = EmailVerificationService.create_verification(db, user.email, REGISTER_VERIFICATION_PURPOSE)
     if EmailService.is_configured():
         await EmailService.send_verification_code_email(user.email, user.username, code)
     else:
         _log_smtp_missing(user.email)
         
-    return user
+    return {"email": user.email, "requires_verification": True}
+
+
+@router.post("/register-verify", response_model=TokenResponse)
+def register_verify(
+    req: SetupVerifyRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = AuthService.get_user_by_email(db, req.email)
+    if not user:
+        raise HTTPException(status_code=400, detail="Ungueltige E-Mail")
+    if user.email_verified:
+        raise HTTPException(status_code=400, detail="Bereits verifiziert")
+
+    valid = EmailVerificationService.verify_code(db, req.email, REGISTER_VERIFICATION_PURPOSE, req.code)
+    if not valid:
+        raise HTTPException(status_code=400, detail="Ungueltiger oder abgelaufener Code")
+
+    user.email_verified = True
+    db.commit()
+    _set_login_session(response, db, user)
+    return {"access_token": "", "token_type": "bearer", "requires_2fa": False, "requires_verification": False}
+
+
+@router.post("/login-verify", response_model=TokenResponse)
+def login_verify(
+    req: LoginVerifyRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = AuthService.get_user_by_username(db, req.username)
+    if not user or not AuthService.verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Ungueltige Anmeldedaten")
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="Account deaktiviert")
+    if user.email_verified:
+        raise HTTPException(status_code=400, detail="Bereits verifiziert")
+
+    valid = EmailVerificationService.verify_code_for_purposes(
+        db,
+        user.email,
+        LOGIN_ACCEPTED_VERIFICATION_PURPOSES,
+        req.code,
+    )
+    if not valid:
+        raise HTTPException(status_code=400, detail="Ungueltiger oder abgelaufener Code")
+
+    user.email_verified = True
+    db.commit()
+
+    if user.two_factor_enabled:
+        if not req.otp_code:
+            return {"access_token": "", "token_type": "", "requires_2fa": True, "requires_verification": False, "email": user.email}
+        secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted) if user.two_factor_secret_encrypted else None
+        if not secret:
+            raise HTTPException(status_code=401, detail="2FA-Secret nicht gefunden")
+        totp = pyotp.TOTP(secret)
+        if not totp.verify(req.otp_code):
+            backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
+            if not backup_valid:
+                raise HTTPException(status_code=401, detail="Ungueltiger 2FA-Code oder Backup-Code")
+
+    _set_login_session(response, db, user)
+    return {"access_token": "", "token_type": "bearer", "requires_2fa": False, "requires_verification": False}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -163,11 +238,15 @@ async def login(
         raise HTTPException(status_code=401, detail="Account deaktiviert")
 
     if not user.email_verified:
-        # Neuen Verifizierungscode generieren und senden
-        code = EmailVerificationService.create_verification(db, user.email, "setup")
-        if EmailService.is_configured():
+        has_pending_code = EmailVerificationService.has_active_verification(
+            db,
+            user.email,
+            LOGIN_ACCEPTED_VERIFICATION_PURPOSES,
+        )
+        code = None if has_pending_code else EmailVerificationService.create_verification(db, user.email, LOGIN_VERIFICATION_PURPOSE)
+        if code and EmailService.is_configured():
             await EmailService.send_verification_code_email(user.email, user.username, code)
-        else:
+        elif code:
             _log_smtp_missing(user.email)
         return {"access_token": "", "token_type": "", "requires_2fa": False, "requires_verification": True, "email": user.email}
 
@@ -186,11 +265,7 @@ async def login(
             if not backup_valid:
                 raise HTTPException(status_code=401, detail="Ungueltiger 2FA-Code oder Backup-Code")
 
-    access_token = AuthService.create_access_token({"sub": user.username, "user_id": user.id, "jti": str(uuid.uuid4())})
-    refresh_token = AuthService.create_refresh_token(db, user.id)
-    csrf_token = AuthService.create_csrf_token()
-
-    _set_auth_cookies(response, access_token, refresh_token, csrf_token)
+    _set_login_session(response, db, user)
 
     # Sicherheitsbenachrichtigung bei Login
     if EmailService.is_configured() and user.email_notifications:

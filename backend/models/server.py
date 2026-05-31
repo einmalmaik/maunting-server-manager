@@ -49,9 +49,54 @@ class Server(Base):
     disk_limit_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Netzwerk — Ports (automatisch vergeben, aber überschreibbar)
-    game_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    query_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    rcon_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ports: Mapped[list["ServerPort"]] = relationship(
+        "ServerPort", back_populates="server", cascade="all, delete-orphan"
+    )
+
+    def set_port(self, role: str, port: int | None, protocol: str = "udp") -> None:
+        if port is None:
+            self.ports = [p for p in self.ports if p.role != role]
+            return
+        for p in self.ports:
+            if p.role == role:
+                p.port = port
+                p.protocol = protocol
+                return
+        from models.server_port import ServerPort
+        self.ports.append(ServerPort(role=role, port=port, protocol=protocol))
+
+    @property
+    def game_port(self) -> int | None:
+        for p in self.ports:
+            if p.role == "game":
+                return p.port
+        return None
+
+    @game_port.setter
+    def game_port(self, val: int | None) -> None:
+        self.set_port("game", val, "udp")
+
+    @property
+    def query_port(self) -> int | None:
+        for p in self.ports:
+            if p.role == "query":
+                return p.port
+        return None
+
+    @query_port.setter
+    def query_port(self, val: int | None) -> None:
+        self.set_port("query", val, "udp")
+
+    @property
+    def rcon_port(self) -> int | None:
+        for p in self.ports:
+            if p.role == "rcon":
+                return p.port
+        return None
+
+    @rcon_port.setter
+    def rcon_port(self, val: int | None) -> None:
+        self.set_port("rcon", val, "tcp")
 
     # Optional: bestimmte Host-IP, an die Container-Ports gebunden werden.
     # None = alle Interfaces (Docker-Default 0.0.0.0). Empfehlung im UI:

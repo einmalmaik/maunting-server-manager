@@ -153,3 +153,40 @@ Status: active
     def test_returns_zero_when_ufw_missing(self):
         with patch("services.firewall_service._ufw_available", return_value=False):
             assert fw.cleanup_legacy_msm_ranges() == 0
+
+
+class TestDynamicPortsList:
+    def test_open_ports_list(self):
+        ports = [
+            (27015, "udp", "game"),
+            (27016, "udp", "query"),
+            (27017, "tcp", "rcon"),
+            (28000, "udp", "custom_1"),
+        ]
+        with patch("services.firewall_service._ufw_available", return_value=True), \
+             patch("services.firewall_service.subprocess.run", return_value=_stub_run()) as run:
+            assert fw.open_ports("srv", ports) is True
+
+        calls = [tuple(c.args[0]) for c in run.call_args_list]
+        assert any("27015/udp" in c for c in calls)
+        assert any("27016/udp" in c for c in calls)
+        assert any("27017/tcp" in c for c in calls)
+        assert any("28000/udp" in c for c in calls)
+
+    def test_close_ports_list(self):
+        ports = [
+            (27015, "udp", "game"),
+            (27016, "udp", "query"),
+            (27017, "tcp", "rcon"),
+            (28000, "udp", "custom_1"),
+        ]
+        with patch("services.firewall_service._ufw_available", return_value=True), \
+             patch("services.firewall_service.subprocess.run", return_value=_stub_run()) as run:
+            assert fw.close_ports(ports) is True
+
+        calls = [tuple(c.args[0]) for c in run.call_args_list]
+        assert any("delete" in c and "27015/udp" in c for c in calls)
+        assert any("delete" in c and "27016/udp" in c for c in calls)
+        assert any("delete" in c and "27017/tcp" in c for c in calls)
+        assert any("delete" in c and "28000/udp" in c for c in calls)
+

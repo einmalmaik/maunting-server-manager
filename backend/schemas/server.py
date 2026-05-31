@@ -55,8 +55,31 @@ def _validate_restart_times(value: str | None) -> str | None:
     return ",".join(parts)
 
 
+def _validate_port_protocols(value: dict[str, str] | None) -> dict[str, str] | None:
+    if value is None:
+        return None
+    normalized: dict[str, str] = {}
+    for role, protocol in value.items():
+        if not role or not isinstance(role, str):
+            raise ValueError("Port-Rolle ist ungueltig.")
+        proto = protocol.strip().lower()
+        if proto not in {"tcp", "udp"}:
+            raise ValueError("Port-Protokoll muss tcp oder udp sein.")
+        normalized[role] = proto
+    return normalized
+
+
 # cpu_limit_percent erlaubt Werte > 100 (200 % = 2 Cores). Limit 3200 % = 32 Cores
 # als pragmatische Obergrenze.
+
+
+class ServerPortResponse(BaseModel):
+    role: str
+    port: int | None
+    protocol: str
+
+    class Config:
+        from_attributes = True
 
 
 class ServerCreate(BaseModel):
@@ -74,6 +97,7 @@ class ServerCreate(BaseModel):
     game_port: int | None = Field(None, ge=1024, le=65535)
     query_port: int | None = Field(None, ge=1024, le=65535)
     rcon_port: int | None = Field(None, ge=1024, le=65535)
+    ports: dict[str, int | None] | None = None
 
     # Host-IP, an die die Container-Ports gebunden werden. Wenn leer, vergibt
     # der Router automatisch die erste Public-IP des Hosts (siehe
@@ -103,6 +127,8 @@ class ServerUpdate(BaseModel):
     game_port: int | None = Field(None, ge=1024, le=65535)
     query_port: int | None = Field(None, ge=1024, le=65535)
     rcon_port: int | None = Field(None, ge=1024, le=65535)
+    ports: dict[str, int | None] | None = None
+    port_protocols: dict[str, str] | None = None
     public_bind_ip: str | None = Field(None, max_length=64)
 
     @field_validator("public_bind_ip")
@@ -114,6 +140,11 @@ class ServerUpdate(BaseModel):
     @classmethod
     def _check_restart_times(cls, v: str | None) -> str | None:
         return _validate_restart_times(v)
+
+    @field_validator("port_protocols")
+    @classmethod
+    def _check_port_protocols(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        return _validate_port_protocols(v)
 
 
 class ServerResponse(BaseModel):
@@ -137,6 +168,7 @@ class ServerResponse(BaseModel):
     query_port: int | None
     rcon_port: int | None
     public_bind_ip: str | None
+    ports: list[ServerPortResponse] = Field(default_factory=list)
     created_at: datetime
 
     class Config:

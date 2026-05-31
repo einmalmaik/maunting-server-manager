@@ -6,6 +6,7 @@ import { toast } from '@/stores/toastStore'
 import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { Server, GameInfo } from '@/types'
+import { labelRole, mapBlueprintPorts } from '@/utils/portRoles'
 import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive } from 'lucide-react'
 
 export function Servers() {
@@ -27,6 +28,7 @@ export function Servers() {
     game_port: '',
     query_port: '',
     rcon_port: '',
+    ports: {} as Record<string, string>,
     public_bind_ip: '',
   })
 
@@ -63,6 +65,24 @@ export function Servers() {
     e.preventDefault()
     setCreating(true)
     try {
+      const portsPayload: Record<string, number | null> = {}
+      const selectedGame = games.find((g) => g.id === form.game_type)
+      const portDefs = selectedGame?.ports ?? [
+        { name: 'game', protocol: 'udp' },
+        { name: 'query', protocol: 'udp' },
+        { name: 'rcon', protocol: 'tcp' },
+      ]
+      mapBlueprintPorts(portDefs).forEach((p) => {
+        const role = p.mappedRole
+        let valStr = ''
+        if (role === 'game') valStr = form.game_port
+        else if (role === 'query') valStr = form.query_port
+        else if (role === 'rcon') valStr = form.rcon_port
+        else valStr = form.ports[role] || ''
+        
+        portsPayload[role] = valStr ? parseInt(valStr) : null
+      })
+
       await api<Server>('/servers', {
         method: 'POST',
         body: JSON.stringify({
@@ -74,6 +94,7 @@ export function Servers() {
           game_port: form.game_port ? parseInt(form.game_port) : null,
           query_port: form.query_port ? parseInt(form.query_port) : null,
           rcon_port: form.rcon_port ? parseInt(form.rcon_port) : null,
+          ports: portsPayload,
           public_bind_ip: form.public_bind_ip || null,
         }),
       })
@@ -87,6 +108,7 @@ export function Servers() {
         game_port: '',
         query_port: '',
         rcon_port: '',
+        ports: {},
         public_bind_ip: defaultBindIp || '',
       })
       fetchServers()
@@ -247,7 +269,7 @@ export function Servers() {
                   <input
                     type="number"
                     min={10}
-                    max={100}
+                    max={3200}
                     value={form.cpu_limit_percent}
                     onChange={(e) => setForm({ ...form, cpu_limit_percent: e.target.value })}
                     className="msm-input"
@@ -315,37 +337,55 @@ export function Servers() {
                   { name: 'query', protocol: 'udp' },
                   { name: 'rcon', protocol: 'tcp' },
                 ]
-                const roleToField: Record<string, 'game_port' | 'query_port' | 'rcon_port'> = {
-                  game: 'game_port',
-                  query: 'query_port',
-                  rcon: 'rcon_port',
-                }
-                const portRoles = portDefs.filter((p) => roleToField[p.name])
-                if (portRoles.length === 0) return null
+                if (portDefs.length === 0) return null
+                
+                const mappedPorts = mapBlueprintPorts(portDefs)
+
                 return (
                   <div className="grid grid-cols-3 gap-3" data-testid="port-fields">
-                    {portRoles.map((p) => {
-                      const fieldKey = roleToField[p.name]
-                      const labelKey =
-                        p.name === 'game'
-                          ? 'servers.gamePort'
-                          : p.name === 'query'
-                          ? 'servers.queryPort'
-                          : 'servers.rconPort'
+                    {mappedPorts.map((p) => {
+                      const role = p.mappedRole
+                      const isLegacy = role === 'game' || role === 'query' || role === 'rcon'
+                      const val = isLegacy
+                        ? (role === 'game' ? form.game_port : role === 'query' ? form.query_port : form.rcon_port)
+                        : (form.ports[role] || '')
+                      
+                      const baseRole = labelRole(role)
+                      const label = baseRole === 'game'
+                        ? t('servers.gamePort')
+                        : baseRole === 'query'
+                        ? t('servers.queryPort')
+                        : baseRole === 'rcon'
+                        ? t('servers.rconPort')
+                        : `${role.replace('_', ' ').toUpperCase()} (${p.protocol.toUpperCase()})`
+
                       return (
-                        <div key={p.name}>
+                        <div key={role}>
                           <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                            {t(labelKey)}
+                            {label}
                           </label>
                           <input
                             type="number"
                             min={1024}
                             max={65535}
-                            value={form[fieldKey]}
-                            onChange={(e) => setForm({ ...form, [fieldKey]: e.target.value })}
+                            value={val}
+                            onChange={(e) => {
+                              if (isLegacy) {
+                                const fieldKey = role === 'game' ? 'game_port' : role === 'query' ? 'query_port' : 'rcon_port'
+                                setForm({ ...form, [fieldKey]: e.target.value })
+                              } else {
+                                setForm({
+                                  ...form,
+                                  ports: {
+                                    ...form.ports,
+                                    [role]: e.target.value,
+                                  },
+                                })
+                              }
+                            }}
                             className="msm-input"
                             placeholder={t('servers.portAuto')}
-                            data-testid={`port-input-${p.name}`}
+                            data-testid={`port-input-${role}`}
                           />
                         </div>
                       )

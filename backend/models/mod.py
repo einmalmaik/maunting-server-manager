@@ -19,5 +19,12 @@ class Mod(Base):
     auto_update: Mapped[bool] = mapped_column(Boolean, default=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     dependencies_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of workshop IDs
+    install_status: Mapped[str] = mapped_column(String(24), default="installed", nullable=False)
+    install_action: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    install_progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    install_eta_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    install_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    install_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    install_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     server: Mapped["Server"] = relationship("Server", back_populates="mods")

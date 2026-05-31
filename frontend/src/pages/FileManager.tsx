@@ -7,6 +7,7 @@ import { xml } from '@codemirror/lang-xml'
 import { markdown } from '@codemirror/lang-markdown'
 import { StreamLanguage } from '@codemirror/language'
 import { properties as iniMode } from '@codemirror/legacy-modes/mode/properties'
+import { search } from '@codemirror/search'
 import { EditorView } from '@codemirror/view'
 import {
   ChevronRight,
@@ -737,6 +738,7 @@ export function FileManager({ serverId }: FileManagerProps) {
               extensions={[
                 ...editorLanguage,
                 EditorView.lineWrapping,
+                search({ top: true }),
               ]}
               basicSetup={{
                 lineNumbers: true,

@@ -40,6 +40,32 @@ class EmailVerificationService:
         return plain_code
 
     @staticmethod
+    def create_verification_if_needed(db: Session, email: str, purpose: str) -> str | None:
+        """Erstellt nur dann einen Code, wenn kein gueltiger unverbrauchter Code existiert."""
+        if EmailVerificationService.has_active_verification(db, email, [purpose]):
+            return None
+
+        return EmailVerificationService.create_verification(db, email, purpose)
+
+    @staticmethod
+    def has_active_verification(db: Session, email: str, purposes: list[str]) -> bool:
+        """Prueft, ob fuer eine E-Mail ein gueltiger unverbrauchter Code existiert."""
+        return db.query(EmailVerification).filter(
+            EmailVerification.email == email,
+            EmailVerification.purpose.in_(purposes),
+            EmailVerification.verified == False,
+            EmailVerification.expires_at > datetime.now(timezone.utc),
+        ).first() is not None
+
+    @staticmethod
+    def verify_code_for_purposes(db: Session, email: str, purposes: list[str], code: str) -> bool:
+        """Prueft einen Code gegen mehrere erlaubte Zwecke."""
+        for purpose in purposes:
+            if EmailVerificationService.verify_code(db, email, purpose, code):
+                return True
+        return False
+
+    @staticmethod
     def verify_code(db: Session, email: str, purpose: str, code: str) -> bool:
         """Prueft einen Verifikations-Code. Gibt True zurueck wenn gueltig."""
         code_hash = EmailVerificationService._hash_code(code)

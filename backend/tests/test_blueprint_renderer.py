@@ -221,3 +221,44 @@ def test_env_value_shell_meta_rejected_by_schema() -> None:
             "source": {"type": "steam", "steam": {"appId": "1", "platform": "linux", "compatibility": "native"}},
             "mods": None,
         })
+
+
+# ── {BIND_IP} Token ────────────────────────────────────────────────────────
+
+
+def test_bind_ip_substituted_in_startup() -> None:
+    """{BIND_IP} wird mit der uebergebenen Host-IP ersetzt."""
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/server -port={GAME_PORT} -MULTIHOME={BIND_IP}"
+    ))
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 27015, "query": None, "rcon": None},
+        bind_ip="5.180.252.214",
+    )
+    assert argv == ["/data/server", "-port=27015", "-MULTIHOME=5.180.252.214"]
+
+
+def test_bind_ip_none_drops_arg() -> None:
+    """Wenn bind_ip nicht gesetzt ist, wird das argv-Element gedroppt."""
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/server -port={GAME_PORT} -MULTIHOME={BIND_IP}"
+    ))
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 27015, "query": None, "rcon": None},
+        bind_ip=None,
+    )
+    assert argv == ["/data/server", "-port=27015"]
+
+
+def test_bind_ip_in_env_values() -> None:
+    """{BIND_IP} wird in render_env_values korrekt substituiert."""
+    out = render_env_values(
+        {"BIND": "{BIND_IP}", "PORT": "{GAME_PORT}"},
+        ports={"game": 27015, "query": None, "rcon": None},
+        bind_ip="1.2.3.4",
+    )
+    assert out == {"BIND": "1.2.3.4", "PORT": "27015"}

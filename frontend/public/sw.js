@@ -8,30 +8,34 @@ const STATIC_ASSETS = [
   // Add other static assets as needed
 ];
 
-// Install event - cache static assets
+// Install event - cache static assets and skip waiting to activate immediately
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => cache.addAll(STATIC_ASSETS))
   );
 });
 
-// Activate event - clean up old caches
+// Activate event - clean up old caches and claim clients immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+    Promise.all([
+      caches.keys().then((cacheNames) => {
+        return Promise.all(
+          cacheNames.map((cacheName) => {
+            if (cacheName !== CACHE_NAME) {
+              return caches.delete(cacheName);
+            }
+          })
+        );
+      }),
+      self.clients.claim()
+    ])
   );
 });
 
-// Fetch event - serve from cache when offline
+// Fetch event - Network-First for HTML/navigation, Cache-First for others
 self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (event.request.method !== 'GET') return;
@@ -39,17 +43,36 @@ self.addEventListener('fetch', (event) => {
   // Skip API calls - always try network
   if (event.request.url.includes('/api/')) return;
   
-  event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Return cached version or fetch from network
-        return response || fetch(event.request)
-          .catch(() => {
-            // Return offline fallback for HTML requests
-            if (event.request.headers.get('accept')?.includes('text/html')) {
-              return caches.match('/');
-            }
-          });
-      })
-  );
+  const isHtmlRequest = event.request.mode === 'navigate' || 
+                        event.request.headers.get('accept')?.includes('text/html');
+  
+  if (isHtmlRequest) {
+    // Network-First strategy: always fetch the latest HTML from the network first
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          // If response is valid, update the cache with the new HTML
+          if (response && response.status === 200) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseClone);
+            });
+          }
+          return response;
+        })
+        .catch(() => {
+          // Fallback to cache if network fails (offline)
+          return caches.match(event.request) || caches.match('/');
+        })
+    );
+  } else {
+    // Cache-First strategy for static assets
+    event.respondWith(
+      caches.match(event.request)
+        .then((response) => {
+          // Return cached version if found, otherwise fetch from network
+          return response || fetch(event.request);
+        })
+    );
+  }
 });

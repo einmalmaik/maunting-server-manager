@@ -11,6 +11,7 @@ import pytest
 
 from services import docker_service
 from services.docker_service import PortPublish, VolumeBind
+from games.base import GamePlugin, ServerStatus
 
 
 def _ok(stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
@@ -44,6 +45,92 @@ class TestDockerHost:
         monkeypatch.setenv("DOCKER_HOST", "unix:///run/user/9999/docker.sock")
         with patch.object(docker_service.settings, "docker_host", "unix:///run/user/1001/docker.sock"):
             assert docker_service.resolve_docker_host() == "unix:///run/user/1001/docker.sock"
+
+    def test_pull_reports_registry_failure_cause(self):
+        client = MagicMock()
+        client.api.pull.side_effect = docker_service.DockerException(
+            "Get https://ghcr.io/v2/: dial tcp: lookup ghcr.io: no such host"
+        )
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:wine_staging")
+
+        assert result == {
+            "ok": False,
+            "error": "Docker Pull fehlgeschlagen: Registry/DNS nicht erreichbar",
+            "stdout": "",
+            "stderr": "",
+        }
+
+    def test_pull_reports_platform_manifest_mismatch_before_not_found(self):
+        client = MagicMock()
+        client.api.pull.side_effect = docker_service.DockerException(
+            "no matching manifest for linux/arm64 in the manifest list entries: "
+            "no match for platform in manifest: not found"
+        )
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:wine_staging")
+
+        assert result == {
+            "ok": False,
+            "error": "Docker Pull fehlgeschlagen: Image existiert, aber nicht fuer die Docker-Host-Plattform",
+            "stdout": "",
+            "stderr": "",
+        }
+
+    def test_pull_preserves_short_manifest_not_found_detail(self):
+        client = MagicMock()
+        client.api.pull.side_effect = docker_service.DockerException(
+            "manifest unknown: failed to resolve reference ghcr.io/ptero-eggs/yolks:typo"
+        )
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:typo")
+
+        assert result == {
+            "ok": False,
+            "error": (
+                "Docker Pull fehlgeschlagen: Image oder Tag in der Registry nicht gefunden: "
+                "manifest unknown: failed to resolve reference ghcr.io/ptero-eggs/yolks:typo"
+            ),
+            "stdout": "",
+            "stderr": "",
+        }
+
+    def test_pull_reports_stream_error(self):
+        client = MagicMock()
+        client.api.pull.return_value = [
+            {"status": "Pulling from ptero-eggs/yolks"},
+            {"error": "manifest unknown: failed to resolve reference"},
+        ]
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:typo")
+
+        assert result == {
+            "ok": False,
+            "error": (
+                "Docker Pull fehlgeschlagen: Image oder Tag in der Registry nicht gefunden: "
+                "manifest unknown: failed to resolve reference"
+            ),
+            "stdout": "",
+            "stderr": "",
+        }
+
+    def test_pull_does_not_inspect_after_successful_stream(self):
+        client = MagicMock()
+        client.api.pull.return_value = [
+            {"status": "Pulling from ptero-eggs/yolks"},
+            {"status": "Digest: sha256:abc"},
+        ]
+        client.images.get.side_effect = docker_service.NotFound("No such image")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.pull("ghcr.io/ptero-eggs/yolks:wine_staging")
+
+        assert result == {"ok": True, "stdout": "", "stderr": ""}
+        client.images.get.assert_not_called()
 
 
 class TestRunContainer:
@@ -85,6 +172,61 @@ class TestRunContainer:
         assert kwargs["memswap_limit"] == "4096m"
         assert kwargs["user"] == "1000:1000"
         assert kwargs["working_dir"] == "/data"
+        client.api.pull.assert_called_once_with(
+            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+        )
+        calls = [call[0] for call in client.mock_calls]
+        assert calls.index("api.pull") < calls.index("containers.run")
+
+    def test_run_container_uses_local_image_when_pull_fails(self):
+        client = MagicMock()
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/ptero-eggs/yolks:wine_staging",
+                command=["x"],
+                env={},
+                volumes=[],
+            )
+
+        assert result["ok"] is True
+        client.api.pull.assert_called_once_with(
+            "ghcr.io/ptero-eggs/yolks", tag="wine_staging", stream=True, decode=True, auth_config={}
+        )
+        client.images.get.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
+        client.containers.run.assert_called_once()
+
+    def test_run_container_fails_clearly_when_remote_and_local_image_missing(self):
+        client = MagicMock()
+        existing = MagicMock()
+        image = "ghcr.io/ptero-eggs/yolks:wine_staging"
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
+        client.images.get.side_effect = docker_service.NotFound("missing image")
+        client.containers.get.return_value = existing
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image=image,
+                command=["x"],
+                env={},
+                volumes=[],
+            )
+
+        assert result == {
+            "ok": False,
+            "error": f"Docker-Image nicht verfügbar: {image} (Pull fehlgeschlagen: registry offline)",
+            "stdout": "",
+            "stderr": "",
+        }
+        client.containers.get.assert_not_called()
+        client.containers.run.assert_not_called()
+        existing.remove.assert_not_called()
 
     def test_bind_ip_in_port_publish(self):
         client = MagicMock()
@@ -132,6 +274,87 @@ class TestRunContainer:
         assert client.containers.run.call_args.kwargs["ports"] == {"80/tcp": [8080, 443]}
 
 
+class _StartPlugin(GamePlugin):
+    game_id = "start-test"
+    game_name = "Start Test"
+    docker_image = "img"
+
+    def install(self, server) -> dict:
+        return {"ok": True}
+
+    def build_container_command(self, server) -> list[str]:
+        return ["./start.sh"]
+
+    def build_port_publishes(self, server) -> list[PortPublish]:
+        return []
+
+    def build_volume_binds(self, server) -> list[VolumeBind]:
+        return [VolumeBind(server.install_dir, "/home/container", read_only=False)]
+
+    def container_workdir(self, server) -> str:
+        return "/home/container"
+
+    def get_status(self, server) -> ServerStatus:
+        return ServerStatus(status="stopped")
+
+    def get_logs(self, server, lines: int = 100) -> str:
+        return ""
+
+    def get_config_schema(self) -> list:
+        return []
+
+    def get_config_files(self) -> list[dict]:
+        return []
+
+
+class TestGamePluginStartPermissions:
+    def test_start_repairs_bind_mount_before_running_container(self, tmp_path):
+        plugin = _StartPlugin()
+        server = SimpleNamespace(
+            id=42,
+            install_dir=str(tmp_path),
+            cpu_limit_percent=None,
+            ram_limit_mb=None,
+        )
+
+        with patch("services.docker_service.is_available", return_value=True), \
+             patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1002)), \
+             patch("games.base.docker_service.repair_bind_mount_permissions", return_value={"ok": True}) as mock_repair, \
+             patch("games.base.docker_service.run_container", return_value={"ok": True, "stdout": "", "stderr": ""}) as mock_run:
+            result = plugin.start(server)
+
+        assert result["message"] == "Server gestartet"
+        mock_repair.assert_called_once_with(
+            str(tmp_path),
+            container_path="/home/container",
+            owner_uid_gid=(1001, 1002),
+        )
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["user"] == "1001:1002"
+        assert kwargs["volumes"] == [VolumeBind(str(tmp_path), "/home/container", read_only=False)]
+
+    def test_start_stops_before_container_run_when_permission_repair_fails(self, tmp_path):
+        plugin = _StartPlugin()
+        server = SimpleNamespace(
+            id=43,
+            install_dir=str(tmp_path),
+            cpu_limit_percent=None,
+            ram_limit_mb=None,
+        )
+
+        with patch("services.docker_service.is_available", return_value=True), \
+             patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1002)), \
+             patch(
+                 "games.base.docker_service.repair_bind_mount_permissions",
+                 return_value={"ok": False, "error": "repair failed"},
+             ), \
+             patch("games.base.docker_service.run_container") as mock_run:
+            result = plugin.start(server)
+
+        assert result == {"error": "repair failed"}
+        mock_run.assert_not_called()
+
+
 
 class TestLifecycle:
     def test_stop_returns_ok_when_not_exists(self):
@@ -167,6 +390,33 @@ class TestHostUidGid:
         assert isinstance(gid, int)
 
 
+class TestBindMountPermissionRepair:
+    def test_repair_chowns_only_when_runtime_owner_is_explicit(self, tmp_path):
+        with patch("services.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
+            result = docker_service.repair_bind_mount_permissions(
+                str(tmp_path),
+                container_path="/home/container",
+                owner_uid_gid=(1000, 1000),
+            )
+
+        assert result == {"ok": True}
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["volumes"] == [VolumeBind(str(tmp_path), "/home/container", read_only=False)]
+        script = kwargs["command"][1]
+        assert "chmod a+rwX" in script
+        assert "chown 1000:1000" in script
+        assert "chown -h 1000:1000" in script
+
+    def test_repair_without_runtime_owner_preserves_existing_owner(self, tmp_path):
+        with patch("services.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
+            result = docker_service.repair_bind_mount_permissions(str(tmp_path))
+
+        assert result == {"ok": True}
+        script = mock_run.call_args.kwargs["command"][1]
+        assert "chmod a+rwX" in script
+        assert "chown" not in script
+
+
 class TestEphemeralRun:
     def test_ephemeral_run_captures_output_and_removes_container(self):
         client = MagicMock()
@@ -193,6 +443,77 @@ class TestEphemeralRun:
         assert kwargs["security_opt"] == ["no-new-privileges"]
         assert kwargs["volumes"] == {"/opt/msm/servers/1": {"bind": "/data", "mode": "rw"}}
         container.remove.assert_called_once_with(force=True)
+        client.api.pull.assert_called_once_with(
+            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+        )
+
+    def test_ephemeral_run_uses_local_image_when_pull_fails(self):
+        client = MagicMock()
+        container = MagicMock()
+        container.wait.return_value = {"StatusCode": 0}
+        container.logs.side_effect = [b"done\n", b""]
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.run.return_value = container
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_ephemeral(
+                image="cm2network/steamcmd:root",
+                command=["true"],
+                volumes=[],
+                env={},
+            )
+
+        assert result["ok"] is True
+        client.api.pull.assert_called_once_with(
+            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+        )
+        client.images.get.assert_called_once_with("cm2network/steamcmd:root")
+        client.containers.run.assert_called_once()
+
+    def test_ephemeral_run_fails_clearly_when_remote_and_local_image_missing(self):
+        client = MagicMock()
+        image = "cm2network/steamcmd:root"
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
+        client.images.get.side_effect = docker_service.NotFound("missing image")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_ephemeral(
+                image=image,
+                command=["true"],
+                volumes=[],
+                env={},
+            )
+
+        assert result == {
+            "ok": False,
+            "error": f"Docker-Image nicht verfügbar: {image} (Pull fehlgeschlagen: registry offline)",
+            "stdout": "",
+            "stderr": "",
+        }
+        client.containers.run.assert_not_called()
+
+    def test_unavailable_image_classifies_pull_auth_failure(self):
+        client = MagicMock()
+        image = "ghcr.io/ptero-eggs/yolks:wine_staging"
+        client.api.pull.side_effect = docker_service.DockerException("unauthorized: authentication required")
+        client.images.get.side_effect = docker_service.NotFound("missing image")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image=image,
+                command=["x"],
+                env={},
+                volumes=[],
+            )
+
+        assert result == {
+            "ok": False,
+            "error": f"Docker-Image nicht verfügbar: {image} (Pull fehlgeschlagen: Registry-Authentifizierung erforderlich)",
+            "stdout": "",
+            "stderr": "",
+        }
 
     def test_ephemeral_run_failure_preserves_stdout_stderr(self):
         client = MagicMock()
@@ -213,6 +534,34 @@ class TestEphemeralRun:
         assert result["error"] == "stderr details"
         assert result["stdout"] == "stdout details\n"
         assert result["stderr"] == "stderr details\n"
+        container.remove.assert_called_once_with(force=True)
+
+    def test_ephemeral_run_streams_live_logs_to_callback(self):
+        client = MagicMock()
+        container = MagicMock()
+        container.wait.return_value = {"StatusCode": 0}
+        container.logs.return_value = iter([
+            b"Update state (0x61) downloading, progress: 68.94\n",
+            b"Update state (0x81) verifying update, progress: 10.24\n",
+        ])
+        client.containers.run.return_value = container
+        lines: list[str] = []
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_ephemeral(
+                image="cm2network/steamcmd:root",
+                command=["true"],
+                volumes=[],
+                env={},
+                log_callback=lines.append,
+            )
+
+        assert result == {"ok": True, "stdout": "", "stderr": ""}
+        assert lines == [
+            "Update state (0x61) downloading, progress: 68.94\n",
+            "Update state (0x81) verifying update, progress: 10.24\n",
+        ]
+        container.logs.assert_called_once_with(stream=True, follow=True, stdout=True, stderr=True)
         container.remove.assert_called_once_with(force=True)
 
     def test_cap_adds_are_passed_to_sdk(self):
@@ -304,6 +653,7 @@ class TestSteamCMDHelpers:
         from games.base import STEAMCMD_BIN, STEAMCMD_CAPS, run_steamcmd_install
 
         with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.is_rootless", return_value=False), \
              patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
             mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
             run_steamcmd_install(server_id=1, install_dir=str(tmp_path), app_id="223350")
@@ -324,6 +674,7 @@ class TestSteamCMDHelpers:
         from games.base import STEAMCMD_CAPS, run_steamcmd_workshop_download
 
         with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.is_rootless", return_value=False), \
              patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
             mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
             run_steamcmd_workshop_download(
@@ -343,6 +694,7 @@ class TestSteamCMDHelpers:
         from games.base import run_steamcmd_install
 
         with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.is_rootless", return_value=False), \
              patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
             mock_eph.return_value = {"ok": True, "stdout": "", "stderr": ""}
             run_steamcmd_install(
@@ -355,3 +707,14 @@ class TestSteamCMDHelpers:
         script = mock_eph.call_args.kwargs["command"][1]
         assert "rm -rf /" in script
         assert script.count("chown -R 1001:1001 /data") == 1
+
+    def test_steamcmd_install_chowns_runtime_user_in_rootless_docker(self, tmp_path):
+        from games.base import run_steamcmd_install
+
+        with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1002)):
+            mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
+            run_steamcmd_install(server_id=1, install_dir=str(tmp_path), app_id="223350")
+
+        script = mock_eph.call_args.kwargs["command"][1]
+        assert "chown -R 1001:1002 /data" in script

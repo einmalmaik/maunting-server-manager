@@ -1,15 +1,23 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import { useAuthStore } from '@/stores/authStore'
+import type { User } from '@/types'
 import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
-import { Shield, ArrowRight, Check } from 'lucide-react'
+import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
 
 export function Register() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { setUser, setAuthenticated } = useAuthStore()
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [requiresVerification, setRequiresVerification] = useState(false)
+  const [registeredEmail, setRegisteredEmail] = useState('')
+  const [verifyCode, setVerifyCode] = useState('')
+  const [pendingUser, setPendingUser] = useState<User | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({ username: '', email: '', password: '', confirm: '' })
 
@@ -28,7 +36,7 @@ export function Register() {
 
     setSubmitting(true)
     try {
-      await api('/auth/register', {
+      const res = await api<{ email: string; requires_verification: boolean }>('/auth/register', {
         method: 'POST',
         body: JSON.stringify({
           username: form.username,
@@ -36,9 +44,33 @@ export function Register() {
           password: form.password,
         }),
       })
-      setSuccess(true)
+      setRegisteredEmail(res.email)
+      setRequiresVerification(res.requires_verification)
+      setForm({ username: '', email: res.email, password: '', confirm: '' })
     } catch (err: any) {
       setError(err.message || t('auth.registerFailed'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setSubmitting(true)
+
+    try {
+      await api('/auth/register-verify', {
+        method: 'POST',
+        body: JSON.stringify({ email: registeredEmail, code: verifyCode }),
+      })
+      const user = await api<User>('/auth/me')
+      setPendingUser(user)
+      setVerifyCode('')
+      setRequiresVerification(false)
+      setSuccess(true)
+    } catch (err: any) {
+      setError(err.message || t('setup.verificationFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -58,15 +90,20 @@ export function Register() {
               {t('auth.registerSuccess')}
             </h2>
             <p className="font-body-md text-sm text-on-surface-variant mb-6">
-              {t('auth.verifyEmailHint')}
+              {t('auth.verifiedAndSignedIn')}
             </p>
-            <Link
-              to="/login"
+            <button
+              type="button"
+              onClick={() => {
+                setUser(pendingUser)
+                setAuthenticated(true)
+                navigate('/')
+              }}
               className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
             >
-              {t('auth.goToLogin')}
+              {t('auth.continue')}
               <ArrowRight className="w-4 h-4" />
-            </Link>
+            </button>
           </div>
         </div>
       </div>
@@ -93,6 +130,70 @@ export function Register() {
         </div>
 
         <div className="msm-card p-8">
+          {requiresVerification ? (
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-6">
+                <Mail className="w-8 h-8 text-secondary" />
+              </div>
+              <h2 className="font-headline text-headline-md text-primary mb-3">
+                {t('setup.verifyEmail')}
+              </h2>
+              <p className="font-body-md text-body-md text-on-surface-variant mb-2 max-w-sm mx-auto">
+                {t('setup.verifyEmailDesc', { email: registeredEmail })}
+              </p>
+              <p className="font-mono-sm text-mono-sm text-on-surface-variant mb-8">
+                {t('setup.codeExpires')}
+              </p>
+
+              <form onSubmit={handleVerify} className="space-y-4 max-w-xs mx-auto">
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('auth.verificationCode')}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\d{6}"
+                    maxLength={6}
+                    value={verifyCode}
+                    onChange={(e) => setVerifyCode(e.target.value)}
+                    className="msm-input text-center text-2xl tracking-[0.5em] font-mono"
+                    placeholder="000000"
+                    required
+                  />
+                </div>
+
+                {error && (
+                  <div className="msm-alert-error text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={submitting || verifyCode.length !== 6}
+                  className="msm-btn-primary w-full py-3 disabled:opacity-50"
+                >
+                  {submitting ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      {t('common.loading')}
+                    </span>
+                  ) : (
+                    t('auth.verifyNow')
+                  )}
+                </button>
+
+                <Link
+                  to="/login"
+                  className="text-sm text-secondary hover:text-mint-accent transition-colors"
+                >
+                  {t('auth.goToLogin')}
+                </Link>
+              </form>
+            </div>
+          ) : (
+            <>
           <div className="text-center mb-6">
             <div className="w-12 h-12 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto mb-4">
               <Shield className="w-6 h-6 text-secondary" />
@@ -194,6 +295,8 @@ export function Register() {
               {t('auth.hasAccount')}
             </Link>
           </div>
+            </>
+          )}
         </div>
 
         <VersionFooter />

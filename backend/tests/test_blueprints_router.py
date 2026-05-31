@@ -63,7 +63,8 @@ def test_template_downloadable(client: TestClient, user_cookies: dict) -> None:
     response = client.get("/api/blueprints/template", cookies=user_cookies)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
-    data = json.loads(response.text)
+    from blueprints.schema import _strip_json_comments
+    data = json.loads(_strip_json_comments(response.text))
     assert data["version"] == 1
     assert "meta" in data and "runtime" in data and "ports" in data
 

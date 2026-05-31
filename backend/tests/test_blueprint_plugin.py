@@ -31,6 +31,8 @@ class _FakeServer:
     query_port: int | None = None
     rcon_port: int | None = 25579
     public_bind_ip: str | None = "192.0.2.10"
+    cpu_limit_percent: int | None = None
+    ram_limit_mb: int | None = None
 
 
 def _mc_paper_blueprint() -> dict:
@@ -84,6 +86,80 @@ def test_build_port_publishes_skips_unassigned_roles() -> None:
     assert {p.host_port for p in publishes} == {25566, 25579}
 
 
+def test_build_port_publishes_maps_ordered_custom_ports() -> None:
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["ports"] = [
+        {"name": "game", "protocol": "udp"},
+        {"name": "custom", "protocol": "udp"},
+        {"name": "custom", "protocol": "tcp"},
+    ]
+    bp_dict["runtime"]["startup"] = (
+        "/start -game={GAME_PORT} -voice={CUSTOM_PORT_1} -query2={CUSTOM_PORT_2}"
+    )
+    bp = load_blueprint_dict(bp_dict)
+    plugin = BlueprintPlugin(bp)
+    server = _FakeServer(game_port=27015, rcon_port=None)
+    server.ports = [
+        SimpleNamespace(role="game", port=27015, protocol="udp"),
+        SimpleNamespace(role="custom_1", port=27016, protocol="udp"),
+        SimpleNamespace(role="custom_2", port=27017, protocol="tcp"),
+    ]
+
+    publishes = plugin.build_port_publishes(server)
+    by_role_port = {(p.host_port, p.protocol) for p in publishes}
+
+    assert by_role_port == {
+        (27015, "udp"),
+        (27016, "udp"),
+        (27017, "tcp"),
+    }
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        assert plugin.build_container_command(server) == [
+            "/start",
+            "-game=27015",
+            "-voice=27016",
+            "-query2=27017",
+        ]
+
+
+def test_build_port_publishes_uses_server_protocol_override() -> None:
+    bp = load_blueprint_dict(_mc_paper_blueprint())
+    plugin = BlueprintPlugin(bp)
+    server = _FakeServer()
+    server.ports = [
+        SimpleNamespace(role="game", port=25566, protocol="udp"),
+        SimpleNamespace(role="rcon", port=25579, protocol="tcp"),
+    ]
+
+    publishes = plugin.build_port_publishes(server)
+    by_port = {p.host_port: p for p in publishes}
+
+    assert by_port[25566].protocol == "udp"
+    assert by_port[25579].protocol == "tcp"
+
+
+def test_build_port_publishes_same_role_tcp_and_udp() -> None:
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["ports"] = [
+        {"name": "query", "protocol": "udp"},
+        {"name": "query", "protocol": "tcp"},
+    ]
+    bp = load_blueprint_dict(bp_dict)
+    plugin = BlueprintPlugin(bp)
+    server = _FakeServer(query_port=28015, rcon_port=None)
+    server.ports = [
+        SimpleNamespace(role="query", port=28015, protocol="udp"),
+        SimpleNamespace(role="query_2", port=28015, protocol="tcp"),
+    ]
+
+    publishes = plugin.build_port_publishes(server)
+
+    assert {(p.host_port, p.protocol) for p in publishes} == {
+        (28015, "udp"),
+        (28015, "tcp"),
+    }
+
+
 def test_build_container_env_substitutes_port_tokens() -> None:
     """``SERVER_PORT={GAME_PORT}`` muss zu der konkreten Portnummer werden."""
     bp = load_blueprint_dict(_mc_paper_blueprint())
@@ -93,6 +169,120 @@ def test_build_container_env_substitutes_port_tokens() -> None:
     assert env["RCON_PORT"] == "25579"
     assert env["EULA"] == "TRUE"
     assert env["TYPE"] == "PAPER"
+
+
+def test_runtime_workdir_controls_mount_workdir_and_install_dir_token() -> None:
+    """Blueprint-Images wie Pterodactyl-Yolks erwarten die Dateien unter
+    ``/home/container``. Dann muss MSM den Server-Ordner auch dort mounten und
+    ``{INSTALL_DIR}`` auf denselben Container-Pfad rendern.
+    """
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["runtime"]["workdir"] = "/home/container"
+    bp_dict["runtime"]["startup"] = "{INSTALL_DIR}/start.sh"
+    bp = load_blueprint_dict(bp_dict)
+    plugin = BlueprintPlugin(bp)
+    server = _FakeServer(install_dir="/srv/msm/server-1")
+
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        assert plugin.build_container_command(server) == ["/home/container/start.sh"]
+
+    volumes = plugin.build_volume_binds(server)
+    assert len(volumes) == 1
+    assert volumes[0].host_path == "/srv/msm/server-1"
+    assert volumes[0].container_path == "/home/container"
+    assert volumes[0].read_only is False
+    assert plugin.container_workdir(server) == "/home/container"
+    assert plugin.container_uid_gid(server) == (1000, 1000)
+
+
+def test_runtime_user_overrides_blueprint_container_uid_gid() -> None:
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["runtime"]["user"] = "1234:1235"
+    bp = load_blueprint_dict(bp_dict)
+    plugin = BlueprintPlugin(bp)
+
+    assert plugin.container_uid_gid(_FakeServer()) == (1234, 1235)
+
+
+def test_windows_steam_compatibility_wraps_exe_with_wine() -> None:
+    """``platform=windows`` steuert nur SteamCMD. Fuer den Container-Start
+    braucht eine .exe einen Windows-Kompatibilitaetsrunner.
+    """
+    bp_dict = {
+        "version": 1,
+        "meta": {"id": "windows_test", "name": "Windows Test", "category": "steam_game"},
+        "runtime": {
+            "image": "ghcr.io/ptero-eggs/yolks:wine_staging",
+            "workdir": "/home/container",
+            "env": {"MAX_PLAYERS": "64"},
+            "startup": "./Server/Binaries/Win64/GameServer.exe -port={GAME_PORT} -MaxPlayers={ENV.MAX_PLAYERS}",
+        },
+        "ports": [{"name": "game", "protocol": "udp"}],
+        "source": {
+            "type": "steam",
+            "steam": {
+                "appId": "123",
+                "platform": "windows",
+                "compatibility": "proton",
+                "requiresLogin": False,
+            },
+        },
+        "mods": None,
+    }
+    plugin = BlueprintPlugin(load_blueprint_dict(bp_dict))
+
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        argv = plugin.build_container_command(_FakeServer(game_port=7777))
+
+    assert argv == [
+        "wine",
+        "./Server/Binaries/Win64/GameServer.exe",
+        "-port=7777",
+        "-MaxPlayers=64",
+    ]
+    assert plugin.container_uid_gid(_FakeServer()) == (1000, 1000)
+
+
+def test_wine_blueprint_start_repairs_home_container_for_runtime_user(tmp_path) -> None:
+    bp_dict = {
+        "version": 1,
+        "meta": {"id": "scum_like_windows_test", "name": "SCUM Like", "category": "steam_game"},
+        "runtime": {
+            "image": "ghcr.io/ptero-eggs/yolks:wine_staging",
+            "workdir": "/home/container",
+            "env": {},
+            "startup": "./Server.exe -port={GAME_PORT}",
+        },
+        "ports": [{"name": "game", "protocol": "udp"}],
+        "source": {
+            "type": "steam",
+            "steam": {
+                "appId": "3792580",
+                "platform": "windows",
+                "compatibility": "wine",
+                "requiresLogin": False,
+            },
+        },
+        "mods": None,
+    }
+    plugin = BlueprintPlugin(load_blueprint_dict(bp_dict))
+    server = _FakeServer(id=99, install_dir=str(tmp_path), game_port=7777)
+
+    with patch("games.base.docker_service.is_available", return_value=True), \
+         patch("games.base.docker_service.repair_bind_mount_permissions", return_value={"ok": True}) as mock_repair, \
+         patch("games.base.docker_service.run_container", return_value={"ok": True, "stdout": "", "stderr": ""}) as mock_run, \
+         patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        result = plugin.start(server)
+
+    assert result["message"] == "Server gestartet"
+    mock_repair.assert_called_once_with(
+        str(tmp_path),
+        container_path="/home/container",
+        owner_uid_gid=(1000, 1000),
+    )
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs["user"] == "1000:1000"
+    assert kwargs["workdir"] == "/home/container"
 
 
 def test_docker_only_install_writes_console_feedback(tmp_path, monkeypatch) -> None:

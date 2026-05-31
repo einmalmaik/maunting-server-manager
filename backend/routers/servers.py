@@ -25,8 +25,14 @@ from services.docker_iptables_service import revoke_server as iptables_revoke_se
 from services.firewall_service import close_ports, open_ports
 from services.network_interfaces_service import default_bind_ip, list_host_interfaces
 from services.port_allocation_service import PortConflictError, allocate_ports
+from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.scheduler_service import sync_server_restart_schedule
 from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
+from services.install_update_lock_service import (
+    INSTALL_UPDATE_ALREADY_RUNNING,
+    release_install_update_lock,
+    try_acquire_install_update_lock,
+)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -47,6 +53,43 @@ _UPDATE_CACHE_TTL_SECONDS = 300
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
 
+def _port_requirements_for_server(server: Server, protocol_overrides: dict[str, str] | None = None) -> list[tuple[str, str]]:
+    plugin = get_plugin(server.game_type)
+    bp = plugin.get_blueprint() if plugin else None
+    if bp:
+        requirements = blueprint_port_requirements(bp.ports)
+    else:
+        requirements = [
+            ("game", "udp"),
+            ("query", "udp"),
+            ("rcon", "tcp"),
+        ]
+
+    current_protocols = {
+        p.role: normalize_port_protocol(p.protocol)
+        for p in getattr(server, "ports", []) or []
+    }
+    overrides = {
+        role: normalize_port_protocol(protocol)
+        for role, protocol in (protocol_overrides or {}).items()
+    }
+
+    return [
+        (role, overrides.get(role, current_protocols.get(role, proto)))
+        for role, proto in requirements
+    ]
+
+
+def _install_update_busy_error() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": INSTALL_UPDATE_ALREADY_RUNNING,
+            "message": f"errors.{INSTALL_UPDATE_ALREADY_RUNNING}",
+        },
+    )
+
+
 
 
 
@@ -60,16 +103,33 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
 
     base_dir = os.path.abspath(settings.servers_dir)
 
-    # Bind-IP und Ports zuerst validieren (keine Seiteneffekte auf FS oder DB).
-    # 127.0.0.1 / 0.0.0.0 verboten (Validator + hier).
+    plugin = get_plugin(req.game_type)
+    bp = plugin.get_blueprint() if plugin else None
+
+    # Map blueprint ports to stable, unique requirements [(role, protocol)].
+    port_requirements = blueprint_port_requirements(bp.ports) if bp else [
+        ("game", "udp"),
+        ("query", "udp"),
+        ("rcon", "tcp"),
+    ]
+
+    # Overrides mapping
+    requested_ports = dict(req.ports or {})
+    if req.game_port is not None:
+        requested_ports["game"] = req.game_port
+    if req.query_port is not None:
+        requested_ports["query"] = req.query_port
+    if req.rcon_port is not None:
+        requested_ports["rcon"] = req.rcon_port
+
     bind_ip = req.public_bind_ip or default_bind_ip()
     try:
-        game_port, query_port, rcon_port = allocate_ports(
+        allocated = allocate_ports(
             db,
-            requested_game_port=req.game_port,
-            requested_query_port=req.query_port,
-            requested_rcon_port=req.rcon_port,
+            exclude_server_id=None,
             bind_ip=bind_ip or "0.0.0.0",
+            port_requirements=port_requirements,
+            requested_ports=requested_ports,
         )
     except PortConflictError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -77,6 +137,13 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+    if isinstance(allocated, tuple) and len(allocated) == 3 and all(isinstance(x, int) for x in allocated):
+        allocated = [
+            ("game", allocated[0], "udp"),
+            ("query", allocated[1], "udp"),
+            ("rcon", allocated[2], "tcp"),
+        ]
 
     # Placeholder-Row zuerst einfügen, um stabile PK (server.id) zu erhalten.
     # Danach install_dir = f".../{game_type}_{id}" - kollisionsfrei über alle Zeit,
@@ -94,63 +161,89 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         cpu_limit_percent=req.cpu_limit_percent,
         ram_limit_mb=req.ram_limit_mb,
         disk_limit_gb=req.disk_limit_gb,
-        game_port=game_port,
-        query_port=query_port,
-        rcon_port=rcon_port,
         public_bind_ip=bind_ip,
     )
     db.add(server)
     db.commit()
     db.refresh(server)
 
-    install_dir = os.path.join(base_dir, f"{req.game_type}_{server.id}")
-
-    # Vorheriges Verzeichnis auf Host prüfen (verwaist von abgebrochenem Install,
-    # manuellem Eingriff oder root-owned SteamCMD-Artifact). Saubere 409 statt
-    # mysteriösem EPERM auf chmod.
-    if os.path.exists(install_dir):
-        db.delete(server)
-        db.commit()
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Server-Verzeichnis existiert bereits auf dem Host: {install_dir}. "
-                "Möglicherweise verwaist aus einem vorherigen (fehlgeschlagenen) "
-                "Installationsversuch. Bitte manuell aufräumen oder Support kontaktieren."
-            ),
-        )
-
-    # Verzeichnis anlegen - wird vom Panel-User (`msm`) angelegt und ist von dort
-    # rw, während der Container das Volume mit derselben UID/GID mountet (siehe
-    # docker_service.host_uid_gid()). Kein useradd, kein chown via sudo nötig.
-    # exist_ok=False ist jetzt sicher (Guard oben).
-    try:
-        os.makedirs(install_dir, exist_ok=False)
-        os.chmod(install_dir, 0o777)
-    except OSError as e:
-        # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
-        db.delete(server)
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
-
-    # install_dir endgültig setzen + persistieren.
-    server.install_dir = install_dir
-    db.commit()
-    db.refresh(server)
-
-    # Stabilen Container-Namen cachen (Debug/Audit).
-    server.container_name = container_name_for(server.id)
-    db.commit()
-    db.refresh(server)
-
-    # Auto-Install: Plugin startet Installation im Hintergrund.
-    # Firewall-Regeln werden ERST beim Start angelegt (Lifecycle-Kopplung).
-    plugin = get_plugin(req.game_type)
+    install_lock_acquired = False
     if plugin:
-        server.status = "installing"
-        server.status_message = "Installation gestartet"
+        install_lock_acquired = try_acquire_install_update_lock(
+            server.id, "install"
+        )
+        if not install_lock_acquired:
+            db.delete(server)
+            db.commit()
+            raise _install_update_busy_error()
+
+    install_started = False
+    try:
+        from models.server_port import ServerPort
+        for role, port_val, proto in allocated:
+            db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
         db.commit()
-        plugin.install(server)
+        db.refresh(server)
+
+        install_dir = os.path.join(base_dir, f"{req.game_type}_{server.id}")
+
+        # Vorheriges Verzeichnis auf Host prüfen (verwaist von abgebrochenem Install,
+        # manuellem Eingriff oder root-owned SteamCMD-Artifact). Saubere 409 statt
+        # mysteriösem EPERM auf chmod.
+        if os.path.exists(install_dir):
+            db.delete(server)
+            db.commit()
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Server-Verzeichnis existiert bereits auf dem Host: {install_dir}. "
+                    "Möglicherweise verwaist aus einem vorherigen (fehlgeschlagenen) "
+                    "Installationsversuch. Bitte manuell aufräumen oder Support kontaktieren."
+                ),
+            )
+
+        # Verzeichnis anlegen - wird vom Panel-User (`msm`) angelegt. Vor jedem
+        # Container-Start normalisiert docker_service.repair_bind_mount_permissions()
+        # Owner/Rechte im Container-Kontext, damit Runtime (z. B. Wine) und Panel
+        # konsistent auf dieselben Dateien zugreifen können.
+        # exist_ok=False ist jetzt sicher (Guard oben).
+        try:
+            os.makedirs(install_dir, exist_ok=False)
+            os.chmod(install_dir, 0o777)
+        except OSError as e:
+            # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
+            db.delete(server)
+            db.commit()
+            raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
+
+        # install_dir endgültig setzen + persistieren.
+        server.install_dir = install_dir
+        db.commit()
+        db.refresh(server)
+
+        # Stabilen Container-Namen cachen (Debug/Audit).
+        server.container_name = container_name_for(server.id)
+        db.commit()
+        db.refresh(server)
+
+        # Auto-Install: Plugin startet Installation im Hintergrund.
+        # Firewall-Regeln werden ERST beim Start angelegt (Lifecycle-Kopplung).
+        plugin = get_plugin(req.game_type)
+        if plugin:
+            server.status = "installing"
+            server.status_message = "Installation gestartet"
+            db.commit()
+            try:
+                result = plugin.install(server)
+            except Exception:
+                raise HTTPException(status_code=500, detail="Installation konnte nicht gestartet werden")
+            if "error" in result:
+                raise HTTPException(status_code=500, detail=result["error"])
+            install_started = True
+    except Exception:
+        if install_lock_acquired and not install_started:
+            release_install_update_lock(server.id)
+        raise
 
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_installed_notification(user.email, user.username, server.name)
@@ -175,11 +268,11 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
-    old_ports = (server.game_port, server.query_port, server.rcon_port)
+    old_ports = [(p.port, p.protocol, p.role) for p in server.ports]
     old_bind_ip = server.public_bind_ip
 
     payload = req.model_dump(exclude_unset=True)
-    port_fields = {"game_port", "query_port", "rcon_port"}
+    port_fields = {"game_port", "query_port", "rcon_port", "ports", "port_protocols"}
     resource_fields = {"cpu_limit_percent", "ram_limit_mb", "disk_limit_gb"}
     changed_ports = port_fields & set(payload.keys())
     bind_ip_changed = "public_bind_ip" in payload and payload["public_bind_ip"] != old_bind_ip
@@ -191,16 +284,33 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
     # ── Port-/Bind-Aenderung: validieren ──
     if changed_ports:
-        # Bind-IP fuer den Host-Check: neue Vorgabe (falls mitgegeben) oder Bestand.
+        port_requirements = _port_requirements_for_server(
+            server,
+            protocol_overrides=req.port_protocols,
+        )
+
+        current_ports = {p.role: p.port for p in server.ports}
+        requested_ports = dict(req.ports or {})
+        
+        if req.game_port is not None:
+            requested_ports["game"] = req.game_port
+        if req.query_port is not None:
+            requested_ports["query"] = req.query_port
+        if req.rcon_port is not None:
+            requested_ports["rcon"] = req.rcon_port
+
+        for role, _ in port_requirements:
+            if role not in requested_ports:
+                requested_ports[role] = current_ports.get(role)
+
         bind_ip_for_check = payload.get("public_bind_ip", old_bind_ip) or "0.0.0.0"
         try:
-            new_game, new_query, new_rcon = allocate_ports(
+            allocated = allocate_ports(
                 db,
-                requested_game_port=req.game_port if req.game_port is not None else server.game_port,
-                requested_query_port=req.query_port if req.query_port is not None else server.query_port,
-                requested_rcon_port=req.rcon_port if req.rcon_port is not None else server.rcon_port,
                 exclude_server_id=server.id,
                 bind_ip=bind_ip_for_check,
+                port_requirements=port_requirements,
+                requested_ports=requested_ports,
             )
         except PortConflictError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -209,17 +319,23 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
-        # Werte überschreiben (damit setattr korrekt arbeitet)
-        if req.game_port is not None:
-            req.game_port = new_game
-        if req.query_port is not None:
-            req.query_port = new_query
-        if req.rcon_port is not None:
-            req.rcon_port = new_rcon
+        if isinstance(allocated, tuple) and len(allocated) == 3 and all(isinstance(x, int) for x in allocated):
+            allocated = [
+                ("game", allocated[0], "udp"),
+                ("query", allocated[1], "udp"),
+                ("rcon", allocated[2], "tcp"),
+            ]
+
+        from models.server_port import ServerPort
+        db.query(ServerPort).filter(ServerPort.server_id == server.id).delete()
+        for role, port_val, proto in allocated:
+            db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
+        db.commit()
 
     # Standard-Update
     for key, val in payload.items():
-        setattr(server, key, val)
+        if key not in ("game_port", "query_port", "rcon_port", "ports", "port_protocols"):
+            setattr(server, key, val)
     db.commit()
     db.refresh(server)
 
@@ -234,24 +350,21 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         was_running = plugin is not None and docker_service.is_running(container_name_for(server.id))
 
         if was_running:
-            close_ports(
-                game_port=old_ports[0] or 0,
-                query_port=old_ports[1],
-                rcon_port=old_ports[2],
-            )
+            close_ports(old_ports)
             iptables_revoke_server(
                 server.name,
                 old_bind_ip or "",
-                old_ports[0] or 0, old_ports[1], old_ports[2],
+                old_ports,
             )
             # Container stoppen - Plugin.start() legt ihn mit den neuen Ports/
             # Bind-Werten frisch an.
             plugin.stop(server)
-            open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
+            new_ports = [(p.port, p.protocol, p.role) for p in server.ports]
+            open_ports(server.name, new_ports)
             iptables_accept_server(
                 server.name,
                 server.public_bind_ip or "",
-                server.game_port, server.query_port, server.rcon_port,
+                new_ports,
             )
             plugin.start(server)
 
@@ -282,26 +395,32 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     docker_service.remove(container, force=True)
 
     # 2. Firewall- und iptables-Regeln schließen
-    close_ports(
-        game_port=server.game_port or 0,
-        query_port=server.query_port,
-        rcon_port=server.rcon_port,
-    )
+    ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+    close_ports(ports_list)
     iptables_revoke_server(
         server.name,
         server.public_bind_ip or "",
-        server.game_port, server.query_port, server.rcon_port,
+        ports_list,
     )
 
     # 3. Install-Verzeichnis physisch löschen
     install_dir = server.install_dir
     dir_removed = False
     if install_dir and os.path.exists(install_dir):
+        repair = docker_service.repair_bind_mount_permissions(install_dir)
+        if not repair.get("ok"):
+            logger.warning(
+                "Install-Verzeichnis-Rechte konnten vor Delete nicht normalisiert werden: %s",
+                repair.get("error") or "unbekannter Fehler",
+            )
         try:
             shutil.rmtree(install_dir)
             dir_removed = True
-        except OSError:
-            pass
+        except OSError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Abbruch (Atomar): Install-Verzeichnis konnte nicht gelöscht werden. Bitte behebe die Berechtigungen (z. B. chown/chmod) oder lösche den Ordner manuell, bevor du den Server im Panel entfernst: {e}"
+            )
 
     # 4. Backup-Verzeichnis (Files) löschen - DB-Cascade räumt Records
     backup_dir = f"/opt/msm/backups/{server.id}"
@@ -310,8 +429,11 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
         try:
             shutil.rmtree(backup_dir)
             backups_removed = True
-        except OSError:
-            pass
+        except OSError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Abbruch (Atomar): Backup-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
+            )
 
     # 5. MSM-Console-Log-Verzeichnis räumen
     console_log_dir = os.path.join(
@@ -322,8 +444,11 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     if os.path.exists(console_log_dir):
         try:
             shutil.rmtree(console_log_dir)
-        except OSError:
-            pass
+        except OSError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Abbruch (Atomar): Console-Log-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
+            )
 
     # 6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
     db.delete(server)
@@ -401,43 +526,67 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
 
     lock = get_server_lifecycle_lock(server.id)
     async with lock:
-        # Firewall-Regeln öffnen vor Container-Start.
-        open_ports(server.name, server.game_port, server.query_port, server.rcon_port)
-        iptables_accept_server(
-            server.name,
-            server.public_bind_ip,
-            server.game_port, server.query_port, server.rcon_port,
-        )
-
-        # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
-        # async-Route blockieren sie den gesamten Uvicorn-Event-Loop - alle anderen
-        # Requests hängen mit. Daher in einen Threadpool auslagern.
-
-        # Updater-Hook vor jedem Start (vor allem für Workshop-Mod-Checks nach Neustart)
-        # Optional: Auch im normalen Start-Pfad Workshop-Mod-Updates ausführen (KISS,
-        # falls ein Server lange stand und in der Zwischenzeit Mod-Updates auf Steam
-        # erschienen sind). Primär aber der Restart-Pfad (wie Server-Datei-Updates).
+        mod_updates: list[dict] = []
         try:
             plugin.prepare_for_updates(server)
-
-            # Optionale Execution im direkten Start (neben dem Pflicht-Restart-Pfad)
             mod_updates = plugin.check_for_mod_updates(server)
-            if mod_updates:
-                _append_console_log(
-                    server.id,
-                    f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt – "
-                    "führe Download via install_mod/run_steamcmd_workshop_download aus...\n"
-                )
-                mod_res = await asyncio.to_thread(
-                    plugin.perform_workshop_mod_updates, server
-                )
-                if not mod_res.get("ok", False):
+        except Exception as exc:
+            _append_console_log(
+                server.id,
+                f"[MSM] prepare_for_updates / Mod-Update-Check beim Start fehlgeschlagen (nicht kritisch): {exc}\n",
+            )
+            mod_updates = []
+
+        update_lock_acquired = False
+        if mod_updates:
+            update_lock_acquired = try_acquire_install_update_lock(
+                server.id, "start_update"
+            )
+            if not update_lock_acquired:
+                raise _install_update_busy_error()
+
+        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+        try:
+            # Firewall-Regeln öffnen vor Container-Start.
+            open_ports(server.name, ports_list)
+            iptables_accept_server(
+                server.name,
+                server.public_bind_ip,
+                ports_list,
+            )
+
+            # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
+            # async-Route blockieren sie den gesamten Uvicorn-Event-Loop - alle anderen
+            # Requests hängen mit. Daher in einen Threadpool auslagern.
+
+            # Updater-Hook vor jedem Start (vor allem für Workshop-Mod-Checks nach Neustart)
+            # Optional: Auch im normalen Start-Pfad Workshop-Mod-Updates ausführen (KISS,
+            # falls ein Server lange stand und in der Zwischenzeit Mod-Updates auf Steam
+            # erschienen sind). Primär aber der Restart-Pfad (wie Server-Datei-Updates).
+            try:
+                # Optionale Execution im direkten Start (neben dem Pflicht-Restart-Pfad)
+                if mod_updates:
                     _append_console_log(
                         server.id,
-                        f"[MSM] Workshop-Mod-Update beim Start hatte Probleme (nicht kritisch): {mod_res.get('error') or mod_res}\n"
+                        f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt – "
+                        "führe Download via install_mod/run_steamcmd_workshop_download aus...\n"
                     )
-        except Exception as exc:
-            _append_console_log(server.id, f"[MSM] prepare_for_updates / Mod-Update beim Start fehlgeschlagen (nicht kritisch): {exc}\n")
+                    mod_res = await asyncio.to_thread(
+                        plugin.perform_workshop_mod_updates, server
+                    )
+                    if not mod_res.get("ok", False):
+                        _append_console_log(
+                            server.id,
+                            f"[MSM] Workshop-Mod-Update beim Start hatte Probleme (nicht kritisch): {mod_res.get('error') or mod_res}\n"
+                        )
+            except Exception as exc:
+                _append_console_log(
+                    server.id,
+                    f"[MSM] prepare_for_updates / Mod-Update beim Start fehlgeschlagen (nicht kritisch): {exc}\n",
+                )
+        finally:
+            if update_lock_acquired:
+                release_install_update_lock(server.id)
 
         db.refresh(server)
 
@@ -457,11 +606,11 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
         result = await asyncio.to_thread(plugin.start, server)
         if "error" in result:
             # Container-Start fehlgeschlagen - Firewall-Regeln wieder schließen.
-            close_ports(server.game_port, server.query_port, server.rcon_port)
+            close_ports(ports_list)
             iptables_revoke_server(
                 server.name,
                 server.public_bind_ip,
-                server.game_port, server.query_port, server.rcon_port,
+                ports_list,
             )
             raise HTTPException(status_code=500, detail=result["error"])
         server.status = "running"
@@ -498,11 +647,12 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
         db.commit()
 
         # Firewall- und iptables-Regeln nach Container-Stop schließen.
-        close_ports(server.game_port, server.query_port, server.rcon_port)
+        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
+        close_ports(ports_list)
         iptables_revoke_server(
             server.name,
             server.public_bind_ip or "",
-            server.game_port, server.query_port, server.rcon_port,
+            ports_list,
         )
 
     if EmailService.is_configured() and user.email_notifications:
@@ -697,11 +847,18 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    server.status = "installing"
-    server.status_message = "Installation gestartet"
-    db.commit()
-    result = plugin.install(server)
+    if not try_acquire_install_update_lock(server.id, "install"):
+        raise _install_update_busy_error()
+    try:
+        server.status = "installing"
+        server.status_message = "Installation gestartet"
+        db.commit()
+        result = plugin.install(server)
+    except Exception:
+        release_install_update_lock(server.id)
+        raise HTTPException(status_code=500, detail="Installation konnte nicht gestartet werden")
     if "error" in result:
+        release_install_update_lock(server.id)
         raise HTTPException(status_code=500, detail=result["error"])
     return {"message": "Installation gestartet", **result}
 
@@ -710,6 +867,7 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
 async def server_console_stream(
     server_id: int,
     request: Request,
+    after: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
@@ -740,7 +898,7 @@ async def server_console_stream(
     log_path = _console_log_path(server.id)
 
     return StreamingResponse(
-        _console_event_stream(request, container, log_path),
+        _console_event_stream(request, container, log_path, after_bytes=after),
         media_type="text/event-stream",
         headers={
             # Nginx/Caddy-Buffering aus, sonst sieht der Client nichts bis zum Flush.
@@ -750,16 +908,23 @@ async def server_console_stream(
     )
 
 
-def _sse_data(line: str) -> str:
+def _sse_data(line: str, event_id: int | None = None) -> str:
     """Eine Logzeile als SSE ``data:``-Frame kodieren.
 
     Mehrzeilige Werte werden zeilenweise als mehrere ``data:``-Felder
     geschickt - das ist die SSE-Spezifikation für Newlines im Payload.
     """
-    return "".join(f"data: {part}\n" for part in line.split("\n")) + "\n"
+    prefix = f"id: {event_id}\n" if event_id is not None else ""
+    return prefix + "".join(f"data: {part}\n" for part in line.split("\n")) + "\n"
 
 
-async def _console_event_stream(request: Request, container: str, log_path: str):
+async def _console_event_stream(
+    request: Request,
+    container: str,
+    log_path: str,
+    *,
+    after_bytes: int | None = None,
+):
     """Generator für den Console-SSE-Stream.
 
     DESIGN-RATIONALE (explizite KISS-Ausnahme, dokumentiert per AGENTS §1.5 + general-3 review):
@@ -777,18 +942,22 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
     """
 
     # 1. Initial-Backlog senden (Install-/Lifecycle-Historie).
-    initial_bytes = 0
+    initial_bytes = max(after_bytes or 0, 0)
     if os.path.exists(log_path):
         try:
             with open(log_path, "rb") as f:
+                f.seek(initial_bytes)
                 content_bytes = f.read()
-            initial_bytes = len(content_bytes)
-            for line in content_bytes.decode("utf-8", errors="replace").splitlines():
-                yield _sse_data(line)
+            pos = initial_bytes
+            for raw_line in content_bytes.splitlines(keepends=True):
+                pos += len(raw_line)
+                line = raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace")
+                yield _sse_data(line, pos)
+            initial_bytes = pos
         except OSError:
             # Datei verschwand zwischen exists() und open() - kein Problem,
             # Live-Tail fängt neue Schreibvorgänge.
-            initial_bytes = 0
+            initial_bytes = max(after_bytes or 0, 0)
 
     # 2. Live-Quellen einrichten.
     queue: asyncio.Queue[str] = asyncio.Queue()
@@ -814,8 +983,11 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
                 pos = size
             except OSError:
                 continue
-            for line in chunk.decode("utf-8", errors="replace").splitlines():
-                await queue.put(line)
+            read_pos = pos - len(chunk)
+            for raw_line in chunk.splitlines(keepends=True):
+                read_pos += len(raw_line)
+                line = raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace")
+                await queue.put(_sse_data(line, read_pos))
 
     async def _tail_docker():
         """Streame Live-Container-Stdout/Stderr (oder melde, dass Docker fehlt).
@@ -828,15 +1000,17 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
         """
         if not docker_service.is_available():
             await queue.put(
-                "[MSM] Rootless Docker Daemon not running for user msm - Live-Container-Logs deaktiviert."
+                _sse_data(
+                    "[MSM] Rootless Docker Daemon not running for user msm - Live-Container-Logs deaktiviert."
+                )
             )
             return
-        tail = 200
+        tail = 0 if after_bytes is not None else 200
         while True:
             saw_line = False
             async for line in docker_service.stream_logs(container, tail=tail):
                 saw_line = True
-                await queue.put(line)
+                await queue.put(_sse_data(line))
             if saw_line:
                 tail = 0
             await asyncio.sleep(1.0)
@@ -851,12 +1025,12 @@ async def _console_event_stream(request: Request, container: str, log_path: str)
             if await request.is_disconnected():
                 break
             try:
-                line = await asyncio.wait_for(queue.get(), timeout=15.0)
+                frame = await asyncio.wait_for(queue.get(), timeout=15.0)
             except asyncio.TimeoutError:
                 # SSE-Keepalive - verhindert dass Proxies die Verbindung kappen.
                 yield ": keepalive\n\n"
                 continue
-            yield _sse_data(line)
+            yield frame
     finally:
         for task in tasks:
             task.cancel()

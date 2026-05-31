@@ -34,6 +34,15 @@
     "deleteConfirm": "Löschen",
     "deleteSuccess": "Blueprint „{{id}}\" gelöscht.",
     "deleteFailed": "Löschen fehlgeschlagen.",
+    "search": "Blueprint suchen …",
+    "filterAll": "Alle",
+    "filterNative": "Nativ",
+    "filterCommunity": "Community",
+    "filterCategory": "Kategorie",
+    "noResults": "Keine Blueprints gefunden.",
+    "tagSteam": "Steam",
+    "tagHttp": "HTTP",
+    "tagDocker": "Docker",
     "columns": {
       "name": "Name",
       "id": "ID",
@@ -52,75 +61,89 @@
     "copiedExample": "Kopiert",
     "manageBlueprints": "Zur Blueprint-Verwaltung",
     "manageBlueprintsHint": "Hochladen, Ersetzen und Löschen von Blueprints geschieht auf der Seite „Blueprints\".",
-    "sections": {
-      "intro": {
-        "title": "Was ist eine Blueprint?",
-        "body": "Eine Blueprint ist eine reine JSON-Definition für einen Server-Typ — also z. B. „DayZ-Server\" oder „Minecraft-Server\", noch nicht der laufende Server selbst. Sie sagt dem Panel, welches Docker-Image genutzt wird, welche Ports der Server braucht, wie er startet und woher die Server-Dateien kommen (Steam, HTTPS-Download, fertiges Image oder manuell). Aus einer Blueprint können beliebig viele Server-Instanzen erstellt werden. Blueprints enthalten niemals Skripte oder Hooks — sie werden vor dem Start streng validiert."
-      },
-      "workflow": {
-        "title": "Der Ablauf in MSM",
-        "body": "So funktioniert MSM von oben nach unten:\n\n1. Server-Typ (Blueprint) auswählen oder selbst anlegen und hochladen.\n2. Auf der Server-Seite „Server erstellen\" klicken und die Blueprint im Spiel-Dropdown wählen.\n3. Name, Host-IP, Ports und Limits (CPU/RAM/Disk) eintragen.\n4. Server installieren (lädt die Spiel-Dateien über Steam oder HTTPS) und starten.\n\nDanach übernimmt MSM Konsole, Backups, Mods, Datei-Manager und Logs — die Blueprint ist nur die Vorlage."
-      },
-      "addServer": {
-        "title": "Einen Server (Instanz) hinzufügen",
-        "body": "Wenn die passende Blueprint schon vorhanden ist:\n\n1. „Server\" im Menü öffnen.\n2. Auf „Server erstellen\" klicken.\n3. Spiel wählen — die Auswahl basiert auf den registrierten Blueprints (native + community).\n4. Name vergeben und Host-IP wählen. Es muss ein konkretes Interface sein, nie 0.0.0.0 (sonst würde Docker die UFW-Regeln umgehen).\n5. Optional Game-/Query-/RCon-Port eintragen oder auf „auto\" lassen.\n6. CPU-/RAM-/Disk-Limits setzen (leer = unbegrenzt).\n7. Erstellen und im Detail auf „Installieren\" klicken.\n\nIst das Spiel nicht über Steam erhältlich, lädt MSM den Build über den in der Blueprint hinterlegten HTTPS-Link."
-      },
-      "addBlueprintSteam": {
-        "title": "Blueprint anlegen: Steam-Spiel",
-        "body": "Du brauchst die Steam-AppID des Dedicated-Servers (z. B. via SteamDB).\n\n1. Oben „Blueprint-Template herunterladen\" und die Datei öffnen.\n2. Felder ausfüllen:\n   • meta.id — kurzer Slug wie „my-rust\". Darf nicht mit einer nativen Blueprint kollidieren.\n   • meta.name / meta.description — Anzeigewerte im Spiel-Dropdown.\n   • runtime.image — passendes Docker-Image (z. B. ein steamcmd-basiertes).\n   • runtime.startup — argv-Template, z. B. \"./RustDedicated +server.port {GAME_PORT} +server.queryport {QUERY_PORT}\".\n   • ports — deklariere die Rollen, die der Server braucht (game/query/rcon, je tcp oder udp).\n   • source.type = „steam\"; setze source.steam.appId, platform (linux/windows) und compatibility (native/proton).\n   • Optional mods: supportsSteamWorkshop=true, workshopAppId und modInjection.\n3. Datei als <id>.blueprint.json speichern (Dateiname muss exakt zu meta.id passen).\n4. Unten „Blueprint hochladen\" klicken — die Blueprint erscheint sofort im Spiel-Dropdown."
-      },
-      "addBlueprintCustom": {
-        "title": "Blueprint anlegen: Nicht-Steam (HTTP / Docker / Custom)",
-        "body": "Für Spiele ohne Steam oder mit eigenem Build legt source.type fest, wie MSM den Server installiert:\n\n• HTTP-Quelle (Build liegt als ZIP/Tarball auf einem HTTPS-Server):\n  source.type = „http\", source.http.url = HTTPS-URL, optional source.http.sha256 zur Integritätsprüfung. MSM streamt das Archiv direkt ins Install-Verzeichnis (5 GiB Hard-Cap, Zip-Slip- und Zip-Bomb-Schutz).\n\n• Docker-only (alles ist schon im Image):\n  source.type = „dockerOnly\". Es gibt keinen Install-Schritt — das Image wird direkt gestartet.\n\n• Custom (manuelle Installation):\n  source.type = „custom\". Die Server-Dateien müssen vor dem Start manuell ins Install-Verzeichnis (z. B. per Datei-Manager).\n\nRuntime, ports und (optional) mods werden genauso ausgefüllt wie bei einer Steam-Blueprint. Anschließend wieder als <id>.blueprint.json speichern und „Blueprint hochladen\" klicken."
-      },
-      "location": {
-        "title": "Wo liegen Blueprints?",
-        "body": "Native Blueprints werden mit dem Panel ausgeliefert (read-only, im Repository).\nCommunity-Blueprints liegen unter /opt/msm/blueprints/community/ und überleben Panel-Updates.\nDateinamen folgen dem Schema <id>.blueprint.json und müssen exakt zu meta.id passen."
-      },
-      "schema": {
-        "title": "JSON-Schema im Überblick",
-        "body": "Jede Blueprint hat dieselben Top-Level-Objekte. Das tut jedes davon:\n\n• meta — id, name, category, author, description. Bestimmt Anzeige und Filter im Panel.\n• runtime — Docker-Image, Startup-Template (argv) und Umgebungsvariablen für den Container.\n• ports — Liste aus Rolle (game/query/rcon/voice/web/custom) und Protokoll (tcp/udp). Konkrete Portnummern kommen erst beim Server-Erstellen.\n• source — Woher die Server-Daten kommen: steam, http, dockerOnly oder custom.\n• mods (optional) — schaltet die Workshop-/Mod-UI frei und legt fest, wie Mods an den Server übergeben werden."
-      },
-      "runtime": {
-        "title": "runtime — Image, Startup, Env",
-        "body": "runtime.image: das Docker-Image, das MSM für den Container nutzt.\nruntime.env: zusätzliche Umgebungsvariablen, die als {ENV.NAME} in der Startup-Zeile verfügbar sind.\nruntime.startup: ein argv-Template. Der Renderer tokenisiert den String zuerst mit shlex.split und ersetzt dann nur erlaubte Platzhalter:\n\n• {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}\n• {INSTALL_DIR}, {MOD_ARG}\n• {ENV.MEINE_VAR} für eigene Variablen aus runtime.env\n\nShell-Substitution ($, Backticks, $(...), ${...}) wird bei der Validierung abgelehnt. Mod-IDs mit Semikolon können niemals ein neues argv-Element erzeugen — sie bleiben literal."
-      },
-      "ports": {
-        "title": "ports — Rollen statt Nummern",
-        "body": "Blueprints deklarieren nur Port-Rollen, keine konkreten Nummern. Beim Server-Erstellen rendert die UI pro Rolle ein Eingabefeld, in dem die tatsächliche Portnummer gesetzt wird.\n\nRollen: game, query, rcon, voice, web, custom.\nProtokolle: tcp, udp."
-      },
-      "source": {
-        "title": "source — Woher kommt der Server?",
-        "body": "Wähle genau eine Strategie:\n\n• steam — appId, platform (linux/windows), compatibility (native/proton). MSM lädt den Server über SteamCMD.\n• http — HTTPS-URL plus optional sha256 zur Integritätsprüfung. Das Archiv wird ins Install-Verzeichnis gestreamt.\n• dockerOnly — das Docker-Image enthält den Server bereits, kein separater Install-Schritt.\n• custom — manuelle Installation. Du musst die Server-Daten selbst ins Install-Verzeichnis legen, bevor du startest."
-      },
-      "httpSecurity": {
-        "title": "HTTP-Source-Sicherheit",
-        "body": "HTTP-Downloads sind HTTPS-only und gehen direkt ins Install-Verzeichnis (5 GiB Hard-Cap). Der Downloader\n\n• lehnt Redirects auf private/Loopback-IPs ab (SSRF-Schutz),\n• verwirft Symlink-/Hardlink-Members im Archiv,\n• validiert jeden Member-Pfad gegen das Install-Verzeichnis (Zip-Slip-Schutz),\n• erzwingt 10 GiB Decompressed-Cap mit 1:100-Ratio pro Member (Zip-/Tar-Bomb-Schutz).\n\nsource.http.sha256 prüft die Datei vor dem Entpacken auf Integrität — empfohlen für jeden externen Download."
-      },
-      "mods": {
-        "title": "mods & Steam Workshop",
-        "body": "supportsSteamWorkshop=true schaltet die Workshop-UI für diesen Server-Typ frei und verlangt workshopAppId.\n\nmodInjection entscheidet, wie das Panel Mods an den Server übergibt:\n\n• none — Mod-System aus.\n• startupArg — modStartupArgumentFormat landet als argv-Element im Startup-Befehl.\n• file — Workshop-Modliste wird nach modListFilePath geschrieben. Der Pfad wird gegen install_dir validiert — Escape-Pfade sind nicht möglich.\n\nmodListContent steuert den Inhalt einer Datei-Modliste:\n\n• workshopIds — eine Workshop-ID pro Zeile.\n• postInstallTargetBasenames — Dateinamen der Ziele aus mods.postInstall."
-      },
-      "workshopActions": {
-        "title": "mods.postInstall — Workshop-Dateien anordnen",
-        "body": "mods.postInstall beschreibt sichere Dateiaktionen nach einem erfolgreichen Steam-Workshop-Download. Damit lassen sich Spiele abbilden, die Mods nicht direkt aus steamapps/workshop/content laden.\n\nErlaubte Operationen:\n\n• copy — Datei in einen Zielpfad unter install_dir kopieren.\n• symlink — Datei oder Verzeichnis unter install_dir verlinken.\n\nErlaubte Pfad-Tokens: {WORKSHOP_APP_ID}, {WORKSHOP_ID}, {BASENAME}. Source darf Globs wie **/*.pak verwenden. Wenn source ein Glob ist, muss target {BASENAME} enthalten. Absolute Pfade, .. und unbekannte Tokens werden abgelehnt.\n\nBeispiele:\n\n• DayZ: Workshop-Mod-Verzeichnis nach {WORKSHOP_ID} symlinken und *.bikey nach keys/{BASENAME} symlinken.\n• Conan Exiles: **/*.pak nach ConanSandbox/Mods/{BASENAME} kopieren."
-      },
-      "configPatches": {
-        "title": "runtime.configPatches — Dateien vor dem Start patchen",
-        "body": "runtime.configPatches schreibt sichere Konfigurationswerte vor jedem Containerstart. Aktuell unterstützt MSM type=ini. Das ersetzt frühere spiel-spezifische Python-Hooks für Fälle, in denen ein Server Ports aus INI-Dateien statt nur aus CLI-Argumenten liest.\n\nFelder:\n\n• file — relativer Pfad unter install_dir.\n• section — INI-Section ohne Klammern.\n• key — zu setzender Schlüssel.\n• value — Wert oder Port-Token.\n\nErlaubte value-Tokens: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Wenn ein verwendeter Port leer ist, wird dieser Patch übersprungen. Andere Keys und Sections in der Datei bleiben erhalten."
-      },
-      "import": {
-        "title": "Blueprint hochladen, ersetzen oder löschen",
-        "body": "Owner oder Accounts mit panel.settings.write verwalten Blueprints auf der Seite „Blueprints\" im Menü links:\n\n• Hochladen — neue .blueprint.json-Datei einfügen. Validierung gegen dasselbe Schema wie native Blueprints.\n• Ersetzen — Community-Blueprints überschreiben. Die hochgeladene Datei muss dieselbe meta.id tragen.\n• Löschen — Community-Blueprints entfernen. Native Blueprints sind hart geschützt und können weder ersetzt noch gelöscht werden.\n\nAlternativ per API: POST /api/blueprints/import (Create + Update) und DELETE /api/blueprints/{id} mit CSRF-Token. Nach erfolgreichem Import erscheint die Blueprint sofort im Spiel-Dropdown der Server-Erstellung."
-      },
-      "exampleMinecraftVersion": {
-        "title": "Beispiel: Minecraft-Version wechseln",
-        "body": "Native Minecraft-Blueprints sind read-only (Version „LATEST\"). Für eine fixe Version klonst du die Blueprint einmal als Community:\n\n1. Auf der Seite „Blueprints\" die gewünschte Native-Variante herunterladen (z. B. minecraft_paper).\n2. In der JSON nur meta.id (eindeutiger Slug), meta.name und runtime.env.VERSION ändern — alles andere bleibt.\n3. Datei als <neue-id>.blueprint.json speichern und über „Blueprints → Neu hochladen\" einspielen.\n\nGültige VERSION-Werte (für itzg/minecraft-server): LATEST, SNAPSHOT, eine konkrete Version wie 1.20.4. TYPE bestimmt die Server-Variante (VANILLA, PAPER, SPIGOT, PURPUR, FABRIC, FORGE, NEOFORGE, SPONGEVANILLA). Beachte: Mods/Plugins sind nicht zwischen Major-Versionen kompatibel — eine eigene Blueprint pro Version macht das sichtbar."
-      },
-      "exampleWine": {
-        "title": "Beispiel: Windows-Server in Wine starten",
-        "body": "Manche Spiele bieten nur ein Windows-Binary an. Für einen Wine-basierten Server schreibst du eine Custom-Blueprint mit dockerOnly-Source: ein Image, das Wine + die Server-Binaries bereits enthält (selbst gebaut, niemals ein zufälliges Image aus dem Netz).\n\nZu beachten:\n\n• Der Wine-Prefix (~/.wine) muss persistent sein — er liegt im Bind-Mount unter /data.\n• Kein X-Server: setze DISPLAY=:0 nur, wenn du wirklich eine Xvfb-Instanz im Image laufen lässt.\n• Headless: das Server-Binary darf keine GUI öffnen.\n• Konsole-Eingabe (z. B. EULA-Bestätigung) funktioniert nur, weil MSM den Container mit --interactive startet — schreibe direkt im Konsole-Tab.\n\nDas folgende Beispiel startet einen generischen Windows-Server in einem selbst gebauten Wine-Image. Anpassen: meta.id, runtime.image (eigene Registry), runtime.startup."
-      }
+    "toc": {
+      "intro": "Was ist eine Blueprint?",
+      "quickstart": "Quickstart: In 4 Schritten zum Server",
+      "minimal": "Minimalbeispiel",
+      "reference": "Feldreferenz",
+      "howto": "How-To Guides",
+      "troubleshooting": "Troubleshooting"
+    },
+    "intro": {
+      "body": "Eine Blueprint ist eine reine JSON-Definition für einen Server-Typ — also z. B. „DayZ-Server\" oder „Minecraft-Server\", noch nicht der laufende Server selbst. Sie sagt dem Panel, welches Docker-Image genutzt wird, welche Ports der Server braucht, wie er startet und woher die Server-Dateien kommen (Steam, HTTPS-Download, fertiges Image oder manuell). Aus einer Blueprint können beliebig viele Server-Instanzen erstellt werden.\n\nBlueprints enthalten niemals Skripte oder Hooks — sie werden vor dem Start streng vom Panel validiert. Dadurch bleibt das System sicher und performant."
+    },
+    "quickstart": {
+      "p1": "So erstellst du deinen ersten eigenen Server-Typ (Community Blueprint):",
+      "s1": "Lade das Blueprint-Template über den Button oben herunter.",
+      "s2": "Öffne die Datei (z.B. my_custom_server.blueprint.json) in einem Editor und passe die Werte an. Lass die Kommentare (//) gerne stehen – das Panel ignoriert sie beim Upload automatisch.",
+      "s3": "Gehe im Menü auf „Blueprints\" und klicke auf „Neu hochladen\".",
+      "s4": "Gehe zu „Server\", klicke „Server erstellen\" – dein neues Spiel taucht nun im Dropdown auf!",
+      "alertTitle": "Wichtig: Dateiname = ID",
+      "alertBody": "Der Dateiname muss zwingend mit der meta.id übereinstimmen (z.B. meta.id = \"rust_server\" -> Datei: rust_server.blueprint.json)."
+    },
+    "minimal": {
+      "body": "Das kleinste funktionierende Beispiel für einen Server, der ohne externe Dateien direkt aus einem Docker-Image startet."
+    },
+    "reference": {
+      "body": "Alle Felder werden beim Upload streng gegen das Pydantic-Schema des Backends validiert.",
+      "yes": "Ja",
+      "no": "Nein",
+      "metaId": "Eindeutiger Identifier (a-z, 0-9, _). Darf nicht mit nativen Blueprints kollidieren.",
+      "metaName": "Anzeigename in der UI.",
+      "metaCategory": "steam_game, non_steam_game, voice_server, bot.",
+      "metaAuthor": "Ersteller der Blueprint.",
+      "metaDescription": "Kurze Beschreibung für das UI-Dropdown.",
+      "runtimeImage": "Gültiges Docker-Image (z.B. ubuntu:24.04).",
+      "runtimeWorkdir": "Arbeitsverzeichnis im Container.",
+      "runtimeEnv": "Umgebungsvariablen als Key-Value-Dict. Werte dürfen Port-Platzhalter enthalten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Kein {INSTALL_DIR} oder {ENV.<KEY>} in env-Werten.",
+      "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen (z. B. {ENV.SERVER_NAME}). Verbotene Zeichen: $, Backtick.",
+      "runtimeConfigPatches": "Liste von Konfigurations-Patches, die vor dem Start angewendet werden. Jeder Patch muss type, file, section, key und value enthalten.",
+      "configPatchFields": "↳ configPatches[ ] — Felder",
+      "configPatchType": "Patch-Typ. Derzeit einziger gültiger Wert: ini.",
+      "configPatchFile": "Relativer Pfad zur Datei, z. B. Config/Server.ini. Keine absoluten Pfade und kein '..'.",
+      "configPatchSection": "INI-Sektion, z. B. ServerSettings.",
+      "configPatchKey": "Schlüssel innerhalb der Sektion.",
+      "configPatchValue": "Wert. Erlaubt sind Port-Platzhalter: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Nicht erlaubt: {ENV.<KEY>}, {MOD_ARG}, {INSTALL_DIR}.",
+      "portsDesc": "Deklariere nur die benötigten Port-Rollen. Konkrete Nummern weist der User beim Erstellen zu. Dieselbe Standardrolle darf einmal pro Protokoll vorkommen, z. B. query/udp und query/tcp; MSM speichert daraus eindeutige Rollen wie query und query_2.",
+      "portsName": "Rollen: game, query, rcon, voice, web, custom. name ist die fachliche Rolle, nicht das Protokoll.",
+      "portsProtocol": "tcp oder udp. Das Protokoll bestimmt Docker-Mapping und Firewall-Freigabe und kann im Netzwerk-Panel nachträglich geändert werden.",
+      "sourceType": "steam, http, dockerOnly, manualUpload.",
+      "sourceSteam": "Definiert appId, platform (linux/windows) und compatibility (native/proton).",
+      "sourceHttp": "HTTPS-URL zum Server-Archiv (zip/tar).",
+      "sourceManual": "Liste der benötigten Dateien, wenn User diese manuell hochladen müssen.",
+      "modsSupportsMods": "Aktiviert den Mod-Manager-Tab für diesen Server.",
+      "modsSupportsSteamWorkshop": "Aktiviert Steam Workshop Integration.",
+      "modsWorkshopAppId": "Steam App-ID des Workshops (z. B. 440900 für Conan Exiles).",
+      "modsFilterTags": "Liste von Tags, nach denen die Mod-Suche im Workshop gefiltert wird (z. B. [\"Enhanced\"]). Max. 10 Tags (Alphanumerisch, Leerzeichen, _ , - , +).",
+      "modsModInjection": "Art der Mod-Lademethode (startupArg, file, none).",
+      "modsModStartupArgumentFormat": "Format des Startup-Arguments (z. B. -mod={mods};).",
+      "modsModListFilePath": "Dateipfad der Modliste (z. B. ConanSandbox/Mods/modlist.txt).",
+      "modsModListContent": "Format der Einträge in der Modliste (workshopIds, postInstallTargetBasenames).",
+      "modsPostInstall": "Liste von Dateioperationen, die nach Mod-Downloads ausgeführt werden."
+    },
+    "howto": {
+      "h1": "Wie aktiviere ich Steam Workshop?",
+      "b1": "Setze im 'mods'-Objekt supportsMods=true, supportsSteamWorkshop=true und trage die workshopAppId ein. Stelle modInjection auf 'startupArg' oder 'file', je nachdem, wie das Spiel Mods lädt.",
+      "h2": "Wie patche ich eine Konfigurationsdatei?",
+      "b2": "Nutze 'runtime.configPatches'. Pflichtfelder pro Patch: type (derzeit nur 'ini'), file (relativer Pfad zur Datei), section (INI-Sektion, z. B. 'Server'), key (Schlüssel) und value (Wert). Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.) — aber KEIN {ENV.<KEY>} und KEIN {MOD_ARG}, da diese nur im startup-Befehl sinnvoll sind."
+    },
+    "troubleshooting": {
+      "err1Title": "Ungültiges JSON",
+      "err1Body": "Das Panel entfernt zwar // Kommentare, aber bei Syntax-Fehlern (wie fehlenden Kommas) schlägt der Upload fehl. Nutze einen JSON-Linter.",
+      "err2Title": "Verbotene Shell-Zeichen in 'startup'",
+      "err2Body": "Der Befehl in runtime.startup darf keine Shell-Substitutionen oder Kontrolloperatoren enthalten ($, Backticks, $(), ${}, &&, ||). Das Panel tokenisiert den Befehl strikt als Liste, um Command-Injections zu verhindern.",
+      "err3Title": "Unsichere Pfade",
+      "err3Body": "Alle Pfade in configPatches, modListen und extractTo müssen relativ zum Server-Verzeichnis sein. Absolute Pfade (/etc) oder Ausbrüche (../) werden abgelehnt.",
+      "err4Title": "Docker-Image nicht verfügbar / Image oder Tag nicht gefunden",
+      "err4Body": "Prüfe runtime.image exakt inklusive Tag. ghcr.io/ptero-eggs/yolks:wine ist z. B. ein anderer Tag als ghcr.io/ptero-eggs/yolks:wine_staging. Teste als msm-User: docker pull <image> mit DOCKER_HOST auf den Rootless-Docker-Socket.",
+      "err5Title": "failed to extract layer ... to overlayfs",
+      "err5Body": "Docker hat das Image gefunden, scheitert aber beim Entpacken. Meist ist die Partition voll. Prüfe DockerRootDir mit docker info, danach df -h und df -ih auf diesem Pfad. Für große Wine-/Game-Images sollten mindestens 10-20 GB frei sein.",
+      "err6Title": "Rootless Docker Daemon not running for user msm",
+      "err6Body": "Der Rootless-Docker-Daemon des Panel-Users läuft nicht oder der Socket ist nicht erreichbar. Prüfe als msm-User systemctl --user status docker und ob DOCKER_HOST auf unix:///run/user/<msm_uid>/docker.sock zeigt.",
+      "err7Title": "public_bind_ip fehlt oder ist 0.0.0.0",
+      "err7Body": "MSM blockiert den Start, wenn Docker auf alle Interfaces binden würde. Setze im Server-Detail eine konkrete Host-IP. Das schützt die Firewall-Regeln vor unbeabsichtigter Umgehung.",
+      "err8Title": "Steam-Account nicht konfiguriert",
+      "err8Body": "Einige Steam-Server oder Workshop-Downloads benötigen einen globalen Steam-Login. Hinterlege den Account unter Einstellungen. Passwörter werden nicht in Logs oder Toasts ausgegeben."
     }
   },
   "servers": {
@@ -145,6 +168,9 @@
     "console": "Konsole",
     "consoleClear": "Leeren",
     "consoleClearTitle": "Aktuelle Konsole lokal ausblenden (Server-Logs bleiben erhalten)",
+    "consoleCopy": "Kopieren",
+    "consoleCopyTitle": "Sichtbare Konsolenzeilen kopieren",
+    "consoleCopyFailed": "Konsolenlog konnte nicht kopiert werden.",
     "consolePlaceholder": "Befehl eingeben…",
     "consoleSend": "Senden",
     "consoleInputFailed": "Eingabe konnte nicht zugestellt werden.",
@@ -297,6 +323,17 @@
     "supportedGames": "Unterstützte Spiele",
     "system": "Systemstatus",
     "allSystemsOperational": "Alle Systeme funktionsfähig",
+    "systemDegraded": "Eingeschränkt – optionale Komponente fehlt",
+    "systemError": "Fehler – kritische Komponente nicht erreichbar",
+    "systemChecking": "Prüfe Systemstatus …",
+    "systemServices": {
+      "docker": "Docker",
+      "caddy": "Caddy",
+      "database": "Datenbank"
+    },
+    "statusOk": "OK",
+    "statusDegraded": "Eingeschränkt",
+    "statusError": "Fehler",
     "noServers": "Keine Server vorhanden",
     "createFirstServer": "Erstelle deinen ersten Server, um loszulegen.",
     "createServer": "Server erstellen"
@@ -322,11 +359,13 @@
     "registerSuccess": "Registrierung erfolgreich",
     "verifyEmailHint": "Bitte prüfe deine E-Mails und verifiziere deine Adresse.",
     "goToLogin": "Zur Anmeldung",
+    "continue": "Weiter",
     "passwordMismatch": "Passwörter stimmen nicht überein.",
     "passwordTooShort": "Passwort muss mindestens 8 Zeichen haben.",
     "emailNotVerified": "E-Mail nicht verifiziert",
     "verifyNow": "Jetzt verifizieren",
     "verifiedSuccess": "E-Mail verifiziert. Melde dich jetzt an.",
+    "verifiedAndSignedIn": "Deine E-Mail wurde verifiziert. Deine Sitzung ist aktiv.",
     "verificationCode": "Verifizierungscode",
     "resendCode": "Code erneut senden"
   },
@@ -419,7 +458,22 @@
     "updateSettingFailed": "Einstellung fehlgeschlagen",
     "reorderFailed": "Neusortierung fehlgeschlagen",
     "steamSearchError": "Steam-Suche fehlgeschlagen",
-    "loadMore": "Mehr anzeigen"
+    "loadMore": "Mehr anzeigen",
+    "statusPending": "Pending",
+    "statusUpdatePending": "Update pending",
+    "statusPendingHint": "Wartet in der Installationswarteschlange.",
+    "statusInstalling": "Wird geladen",
+    "statusUpdating": "Update lädt",
+    "statusInstalled": "Installiert",
+    "statusError": "Fehler",
+    "statusErrorHint": "Installation fehlgeschlagen.",
+    "etaCalculating": "Restzeit wird berechnet.",
+    "etaAlmostDone": "Fast fertig.",
+    "etaLessThanMinute": "Unter 1 Minute verbleibend.",
+    "etaMinutes_one": "Ca. 1 Minute verbleibend.",
+    "etaMinutes_other": "Ca. {{count}} Minuten verbleibend.",
+    "etaHours_one": "Ca. 1 Stunde verbleibend.",
+    "etaHours_other": "Ca. {{count}} Stunden verbleibend."
   },
   "files": {
     "title": "Datei-Manager",
@@ -585,7 +639,8 @@
   },
   "errors": {
     "RATE_LIMITED": "Zu viele Anfragen. Bitte warte einen Moment.",
-    "SESSION_EXPIRED": "Sitzung abgelaufen. Bitte melde dich erneut an."
+    "SESSION_EXPIRED": "Sitzung abgelaufen. Bitte melde dich erneut an.",
+    "install_update_already_running": "Es läuft bereits eine Installation oder Aktualisierung. Bitte warte, bis dieser Job abgeschlossen ist."
   },
   "notifications": {
     "disable": "E-Mail-Benachrichtigungen deaktivieren",
@@ -617,6 +672,8 @@
     "error": "Fehler",
     "success": "Erfolg",
     "close": "Schließen",
+    "copy": "Kopieren",
+    "copied": "Kopiert",
     "confirm": "Bestätigen",
     "back": "Zurück",
     "refresh": "Aktualisieren",

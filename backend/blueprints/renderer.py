@@ -23,6 +23,8 @@ from .schema import (
     BlueprintModInjection,
     BlueprintValidationError,
     _ALLOWED_ENV_VALUE_TOKENS,
+    _ALLOWED_STARTUP_TOKENS,
+    _is_allowed_port_token,
 )
 
 
@@ -60,6 +62,7 @@ def render_env_values(
     env: Mapping[str, str],
     *,
     ports: Mapping[str, int | None],
+    bind_ip: str | None = None,
 ) -> dict[str, str]:
     """Substituiert Port-Tokens in den Werten von ``runtime.env``.
 
@@ -77,10 +80,19 @@ def render_env_values(
         "VOICE_PORT": "" if not ports.get("voice") else str(ports["voice"]),
         "WEB_PORT": "" if not ports.get("web") else str(ports["web"]),
     }
+    for k, v in ports.items():
+        if k not in ("game", "query", "rcon", "voice", "web"):
+            if k.startswith("custom_"):
+                num = k.split("_", 1)[1]
+                ports_map[f"CUSTOM_PORT_{num}"] = str(v) if v else ""
+            else:
+                ports_map[f"{k.upper()}_PORT"] = str(v) if v else ""
 
     def _sub(match: re.Match[str]) -> str:
         token = match.group(1)
-        if token not in _ALLOWED_ENV_VALUE_TOKENS:
+        if token == "BIND_IP":
+            return bind_ip or ""
+        if not _is_allowed_port_token(token, _ALLOWED_ENV_VALUE_TOKENS):
             raise BlueprintValidationError(
                 f"Env-Wert-Token '{{{token}}}' ist nicht in der Whitelist."
             )
@@ -97,6 +109,7 @@ def render_argv(
     *,
     install_dir: str,
     ports: Mapping[str, int | None],
+    bind_ip: str | None = None,
     active_mod_ids: list[str] | None = None,
     extra_env: Mapping[str, str] | None = None,
 ) -> list[str]:
@@ -136,6 +149,13 @@ def render_argv(
         "VOICE_PORT": "" if not ports.get("voice") else str(ports["voice"]),
         "WEB_PORT": "" if not ports.get("web") else str(ports["web"]),
     }
+    for k, v in ports.items():
+        if k not in ("game", "query", "rcon", "voice", "web"):
+            if k.startswith("custom_"):
+                num = k.split("_", 1)[1]
+                ports_map[f"CUSTOM_PORT_{num}"] = str(v) if v else ""
+            else:
+                ports_map[f"{k.upper()}_PORT"] = str(v) if v else ""
     mod_arg = build_mod_arg(blueprint, list(active_mod_ids or []))
 
     env_values: dict[str, str] = dict(extra_env or {})
@@ -152,11 +172,15 @@ def render_argv(
                 value = install_dir
             elif token == "MOD_ARG":
                 value = mod_arg
+            elif token == "BIND_IP":
+                value = bind_ip or ""
             elif token in ports_map:
                 value = ports_map[token]
             elif token.startswith("ENV."):
                 key = token.split(".", 1)[1]
                 value = env_values.get(key, "")
+            elif _is_allowed_port_token(token, _ALLOWED_STARTUP_TOKENS):
+                value = ""
             else:
                 raise BlueprintValidationError(
                     f"Unbekanntes Startup-Token '{{{token}}}' beim Rendern."

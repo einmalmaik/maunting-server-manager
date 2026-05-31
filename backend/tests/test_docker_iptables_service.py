@@ -19,56 +19,10 @@ def _ok(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
 
 
 class TestBaselineDrop:
-    def test_skipped_when_iptables_missing(self):
-        with patch("services.docker_iptables_service._run_iptables", return_value=None):
+    def test_disabled_no_op(self):
+        with patch("services.docker_iptables_service._run_iptables") as run:
             assert dis.ensure_baseline_drop() is False
-
-    def test_skipped_when_docker_user_chain_missing(self):
-        # version-check OK, chain check non-zero
-        responses = iter([_ok(), _ok(returncode=1)])
-        with patch(
-            "services.docker_iptables_service._run_iptables",
-            side_effect=lambda *a, **kw: next(responses),
-        ):
-            assert dis.ensure_baseline_drop() is False
-
-    def test_adds_both_protocols_when_missing(self):
-        # version-check OK, chain exists, both checks miss, both inserts OK.
-        responses = iter([
-            _ok(),                       # _iptables_available (-version)
-            _ok(),                       # _chain_exists (-L)
-            _ok(returncode=1),           # _rule_exists udp baseline
-            _ok(),                       # -A udp
-            _ok(returncode=1),           # _rule_exists tcp baseline
-            _ok(),                       # -A tcp
-        ])
-        with patch(
-            "services.docker_iptables_service._run_iptables",
-            side_effect=lambda *a, **kw: next(responses),
-        ) as run:
-            assert dis.ensure_baseline_drop() is True
-
-        # Pruefe: ein Insert fuer udp + ein Insert fuer tcp wurden aufgerufen.
-        appended = [c.args for c in run.call_args_list if c.args and c.args[0] == "-A"]
-        assert any("udp" in args for args in appended)
-        assert any("tcp" in args for args in appended)
-
-    def test_skips_when_rule_already_present(self):
-        responses = iter([
-            _ok(),               # -version
-            _ok(),               # -L
-            _ok(returncode=0),   # _rule_exists udp → bereits da
-            _ok(returncode=0),   # _rule_exists tcp → bereits da
-        ])
-        with patch(
-            "services.docker_iptables_service._run_iptables",
-            side_effect=lambda *a, **kw: next(responses),
-        ) as run:
-            assert dis.ensure_baseline_drop() is True
-
-        # Kein -A-Call darf passieren
-        appended = [c.args for c in run.call_args_list if c.args and c.args[0] == "-A"]
-        assert appended == []
+            run.assert_not_called()
 
 
 # ── accept_server / revoke_server ────────────────────────────────────────
@@ -104,9 +58,7 @@ class TestAcceptServer:
         for args in inserts:
             assert args[1] == "DOCKER-USER"
             assert args[2] == "1"
-            assert "ACCEPT" in args
-            assert "-d" in args
-            assert "1.2.3.4" in args
+            assert "RETURN" in args
 
     def test_idempotent_when_rule_present(self):
         responses = iter([
@@ -171,3 +123,65 @@ class TestRevokeServer:
             assert dis.accept_server("srv", "1.2.3.4", 27015, None, None) is True
         inserts = [c.args for c in run.call_args_list if c.args and c.args[0] == "-I"]
         assert len(inserts) == 1
+
+
+class TestDynamicIptablesPortsList:
+    def test_accept_server_ports_list(self):
+        ports = [
+            (27015, "udp", "game"),
+            (27016, "udp", "query"),
+            (27017, "tcp", "rcon"),
+            (28000, "udp", "custom_1"),
+        ]
+        responses = iter([
+            _ok(),                   # iptables -version
+            _ok(),                   # iptables -L DOCKER-USER
+            _ok(returncode=1),       # exists game
+            _ok(),                   # -I game
+            _ok(returncode=1),       # exists query
+            _ok(),                   # -I query
+            _ok(returncode=1),       # exists rcon
+            _ok(),                   # -I rcon
+            _ok(returncode=1),       # exists custom_1
+            _ok(),                   # -I custom_1
+        ])
+        with patch(
+            "services.docker_iptables_service._run_iptables",
+            side_effect=lambda *a, **kw: next(responses),
+        ) as run:
+            assert dis.accept_server("srv", "1.2.3.4", ports) is True
+
+        inserts = [c.args for c in run.call_args_list if c.args and c.args[0] == "-I"]
+        assert len(inserts) == 4
+        dports = {args[args.index("--dport") + 1] for args in inserts}
+        assert dports == {"27015", "27016", "27017", "28000"}
+
+    def test_revoke_server_ports_list(self):
+        ports = [
+            (27015, "udp", "game"),
+            (27016, "udp", "query"),
+            (27017, "tcp", "rcon"),
+            (28000, "udp", "custom_1"),
+        ]
+        responses = iter([
+            _ok(), _ok(),
+            _ok(returncode=0),  # exists game
+            _ok(),              # -D game
+            _ok(returncode=0),  # exists query
+            _ok(),              # -D query
+            _ok(returncode=0),  # exists rcon
+            _ok(),              # -D rcon
+            _ok(returncode=0),  # exists custom_1
+            _ok(),              # -D custom_1
+        ])
+        with patch(
+            "services.docker_iptables_service._run_iptables",
+            side_effect=lambda *a, **kw: next(responses),
+        ) as run:
+            assert dis.revoke_server("srv", "1.2.3.4", ports) is True
+
+        deletes = [c.args for c in run.call_args_list if c.args and c.args[0] == "-D"]
+        assert len(deletes) == 4
+        dports = {args[args.index("--dport") + 1] for args in deletes}
+        assert dports == {"27015", "27016", "27017", "28000"}
+

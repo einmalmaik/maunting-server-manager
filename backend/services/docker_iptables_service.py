@@ -131,38 +131,22 @@ def ensure_baseline_drop(
     range_start: int = PORT_RANGE_START,
     range_end: int = PORT_RANGE_END,
 ) -> bool:
-    """Stellt sicher, dass am ENDE von DOCKER-USER ein DROP fuer die
-    MSM-Port-Range steht (UDP + TCP).
+    """No-op: DOCKER-USER baseline DROP is disabled.
 
-    Idempotent: existiert die Regel schon, passiert nichts.
+    The old global DROP for the full MSM range caused externally reachable
+    game servers to fail in confusing ways when the per-server RETURN rule was
+    missing, stale, or ordered incorrectly. MSM already publishes ports on the
+    configured bind IP, so keeping the global backstop is more harmful than
+    useful on this host.
     """
-    if not _iptables_available() or not _chain_exists():
-        logger.info("iptables/DOCKER-USER nicht verfuegbar — Defense-in-Depth uebersprungen.")
-        return False
-
-    for protocol, comment in (
-        ("udp", _BASELINE_COMMENT_UDP),
-        ("tcp", _BASELINE_COMMENT_TCP),
-    ):
-        rule = [
-            _DOCKER_USER_CHAIN,
-            "-p", protocol,
-            "--dport", f"{range_start}:{range_end}",
-            "-m", "comment", "--comment", comment,
-            "-j", "DROP",
-        ]
-        if _rule_exists(rule):
-            continue
-        result = _run_iptables("-A", *rule)
-        if result is None or result.returncode != 0:
-            return False
-    return True
+    logger.info("DOCKER-USER baseline DROP disabled; relying on explicit bind IPs.")
+    return False
 
 
 def accept_server(
     name: str,
     bind_ip: str,
-    game_port: int | None,
+    game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None = None,
     rcon_port: int | None = None,
 ) -> bool:
@@ -179,7 +163,7 @@ def accept_server(
 def revoke_server(
     name: str,
     bind_ip: str,
-    game_port: int | None,
+    game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None = None,
     rcon_port: int | None = None,
 ) -> bool:
@@ -196,32 +180,38 @@ def _apply_server_rules(
     action: str,  # "insert" oder "delete"
     name: str,
     bind_ip: str,
-    game_port: int | None,
+    game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None,
     rcon_port: int | None,
 ) -> bool:
-    """Insert oder Delete fuer alle drei Ports."""
+    """Insert oder Delete fuer alle Ports."""
     if not bind_ip:
         logger.warning(
             "accept_server/revoke_server fuer '%s' ohne bind_ip — uebersprungen.", name,
         )
         return False
+
+    ports_to_process: list[tuple[int | None, str, str]]
+    if isinstance(game_port, list):
+        ports_to_process = game_port
+    else:
+        ports_to_process = [
+            (game_port, "udp", "game"),
+            (query_port, "udp", "query"),
+            (rcon_port, "tcp", "rcon"),
+        ]
+
     ok = True
-    for port, protocol, role in (
-        (game_port, "udp", "game"),
-        (query_port, "udp", "query"),
-        (rcon_port, "tcp", "rcon"),
-    ):
+    for port, protocol, role in ports_to_process:
         if not port:
             continue
         comment = f"{_COMMENT_PREFIX}:{_safe(name)}:{role}"
         rule = [
             _DOCKER_USER_CHAIN,
-            "-d", bind_ip,
             "-p", protocol,
             "--dport", str(port),
             "-m", "comment", "--comment", comment,
-            "-j", "ACCEPT",
+            "-j", "RETURN",
         ]
         if action == "insert":
             # Skip wenn schon vorhanden (idempotent).

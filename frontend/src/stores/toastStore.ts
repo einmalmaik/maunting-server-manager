@@ -19,9 +19,11 @@ export const useToastStore = create<ToastState>((set) => ({
   addToast: (message, type = 'error') => {
     const id = ++_nextId
     set((s) => ({ toasts: [...s.toasts, { id, message, type }] }))
-    setTimeout(() => {
-      set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
-    }, 5000)
+    if (type === 'success') {
+      setTimeout(() => {
+        set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
+      }, 5000)
+    }
   },
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }))

@@ -27,7 +27,7 @@ from blueprints.renderer import render_env_values
 from blueprints.schema import (
     BlueprintConfigPatchType,
     BlueprintModListContent,
-    BlueprintPortProtocol,
+    BlueprintSteamCompatibility,
     BlueprintSourceType,
     BlueprintWorkshopFileOperation,
 )
@@ -43,7 +43,8 @@ from games.base import (
     run_steamcmd_workshop_download,
 )
 from games.ini_utils import set_ini_value
-from services.docker_service import PortPublish
+from services.docker_service import PortPublish, VolumeBind
+from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.steam_account_service import SteamAccountService
 
 
@@ -173,20 +174,67 @@ class BlueprintPlugin(GamePlugin):
     # ─ Container ──────────────────────────────────────────────────────────
 
     def _server_ports(self, server) -> dict[str, int | None]:
-        return {
+        res = {
             "game": server.game_port,
             "query": server.query_port,
             "rcon": server.rcon_port,
         }
+        ports_list = getattr(server, "ports", None) or []
+        for p in ports_list:
+            res[p.role] = p.port
+        return res
+
+    def _runtime_data_dir(self) -> str:
+        return self._blueprint.runtime.workdir or CONTAINER_DATA_DIR
+
+    def container_uid_gid(self, server) -> tuple[int, int]:
+        runtime_user = self._blueprint.runtime.user
+        if runtime_user:
+            uid, gid = runtime_user.split(":", 1)
+            return int(uid), int(gid)
+        image = self._blueprint.runtime.image.lower()
+        if self._runtime_data_dir() == "/home/container" or "ptero-eggs/yolks" in image:
+            return 1000, 1000
+        return super().container_uid_gid(server)
+
+    def _uses_windows_compat_runtime(self) -> bool:
+        bp = self._blueprint
+        if bp.source.type != BlueprintSourceType.STEAM or bp.source.steam is None:
+            return False
+        return bp.source.steam.compatibility in (
+            BlueprintSteamCompatibility.WINE,
+            BlueprintSteamCompatibility.PROTON,
+        )
 
     def build_container_command(self, server) -> list[str]:
-        return render_argv(
+        argv = render_argv(
             self._blueprint,
-            install_dir=CONTAINER_DATA_DIR,
+            install_dir=self._runtime_data_dir(),
             ports=self._server_ports(server),
+            bind_ip=server.public_bind_ip or None,
             active_mod_ids=active_mod_ids(server),
             extra_env=self._blueprint.runtime.env,
         )
+        if not argv or not self._uses_windows_compat_runtime():
+            return argv
+        first = Path(argv[0]).name.lower()
+        if first in {"wine", "wine64", "proton"}:
+            return argv
+        if argv[0].lower().endswith(".exe"):
+            return ["wine", *argv]
+        return argv
+
+    def build_volume_binds(self, server) -> list[VolumeBind]:
+        return [
+            VolumeBind(
+                host_path=server.install_dir,
+                container_path=self._runtime_data_dir(),
+                read_only=False,
+            )
+        ]
+
+    def container_workdir(self, server) -> str:
+        return self._runtime_data_dir()
 
     def build_container_env(self, server) -> dict[str, str]:
         # Port-Tokens in Env-Werten aufloesen (z. B. ``SERVER_PORT={GAME_PORT}``
@@ -194,6 +242,7 @@ class BlueprintPlugin(GamePlugin):
         return render_env_values(
             self._blueprint.runtime.env,
             ports=self._server_ports(server),
+            bind_ip=server.public_bind_ip or None,
         )
 
     def prepare_runtime(self, server) -> None:
@@ -206,6 +255,13 @@ class BlueprintPlugin(GamePlugin):
             "VOICE_PORT": ports.get("voice"),
             "WEB_PORT": ports.get("web"),
         }
+        for k, v in ports.items():
+            if k not in ("game", "query", "rcon", "voice", "web"):
+                if k.startswith("custom_"):
+                    num = k.split("_", 1)[1]
+                    values[f"CUSTOM_PORT_{num}"] = v
+                else:
+                    values[f"{k.upper()}_PORT"] = v
 
         for patch in self._blueprint.runtime.configPatches:
             if patch.type != BlueprintConfigPatchType.INI:
@@ -240,15 +296,16 @@ class BlueprintPlugin(GamePlugin):
         """
         bind_ip = _require_bind_ip(server)
         port_map: dict[str, int | None] = self._server_ports(server)
+        protocols = {
+            p.role: normalize_port_protocol(p.protocol)
+            for p in (getattr(server, "ports", None) or [])
+        }
         out: list[PortPublish] = []
-        for port_def in self._blueprint.ports:
-            role = port_def.name.value
+        for role, blueprint_protocol in blueprint_port_requirements(self._blueprint.ports):
             host_port = port_map.get(role)
             if not host_port:
                 continue
-            protocol = (
-                "tcp" if port_def.protocol == BlueprintPortProtocol.TCP else "udp"
-            )
+            protocol = protocols.get(role, blueprint_protocol)
             out.append(PortPublish(host_port, host_port, protocol, bind_ip))
         return out
 
@@ -275,7 +332,7 @@ class BlueprintPlugin(GamePlugin):
         return {
             "workshop_id": bp_mods.workshopAppId,
             "dependency_resolution": False,
-            "required_tags": [],
+            "required_tags": bp_mods.filterTags,
         }
 
     def install_mod(self, server, workshop_id: str) -> dict:

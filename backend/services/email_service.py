@@ -204,16 +204,6 @@ class EmailService:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _verification_email_html(cls, username: str, url: str) -> str:
-        content = f"""<h1 class="headline" style="margin:0 0 12px 0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:24px;font-weight:700;color:{cls.CYAN_ACCENT};line-height:1.3;">E-Mail verifizieren</h1>
-<p style="margin:0 0 8px 0;font-size:15px;color:{cls.PRIMARY_TEXT};line-height:1.6;">Hallo <strong>{username}</strong>,</p>
-<p style="margin:0 0 20px 0;font-size:15px;color:{cls.SECONDARY_TEXT};line-height:1.6;">bitte bestätige deine E-Mail-Adresse, um dein Konto zu aktivieren. Klicke dazu auf den Button:</p>
-{cls._cta_button(url, 'E-Mail verifizieren')}
-<p style="margin:28px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};line-height:1.5;text-align:center;">Falls der Button nicht funktioniert, kopiere diesen Link in deinen Browser:<br><a href="{url}" style="color:{cls.ACCENT_COLOR};text-decoration:none;word-break:break-all;">{url}</a></p>
-<p style="margin:20px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};line-height:1.5;text-align:center;">Falls du dich nicht registriert hast, ignoriere diese E-Mail.</p>"""
-        return cls._base_template("E-Mail verifizieren", content)
-
-    @classmethod
     def _password_reset_email_html(cls, username: str, url: str) -> str:
         content = f"""<h1 class="headline" style="margin:0 0 12px 0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:24px;font-weight:700;color:{cls.CYAN_ACCENT};line-height:1.3;">Passwort zurücksetzen</h1>
 <p style="margin:0 0 8px 0;font-size:15px;color:{cls.PRIMARY_TEXT};line-height:1.6;">Hallo <strong>{username}</strong>,</p>
@@ -226,7 +216,7 @@ class EmailService:
     @classmethod
     def _verification_code_email_html(cls, username: str, code: str) -> str:
         content = f"""<h1 class="headline" style="margin:0 0 12px 0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:24px;font-weight:700;color:{cls.CYAN_ACCENT};line-height:1.3;">Verifizierungscode</h1>
-<p style="margin:0 0 8px 0;font-size:15px;color:{cls.PRIMARY_TEXT};line-height:1.6;">Hallo <strong>{username}</strong>,</p>
+<p style="margin:0 0 8px 0;font-size:15px;color:{cls.PRIMARY_TEXT};line-height:1.6;">Hallo,</p>
 <p style="margin:0 0 20px 0;font-size:15px;color:{cls.SECONDARY_TEXT};line-height:1.6;">gib den folgenden Code ein, um deine E-Mail-Adresse zu bestätigen:</p>
 {cls._code_box(code)}
 <p style="margin:24px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};line-height:1.5;text-align:center;">Der Code ist <strong>10 Minuten</strong> gültig.</p>
@@ -236,22 +226,6 @@ class EmailService:
     # ------------------------------------------------------------------
     # Public senders
     # ------------------------------------------------------------------
-
-    @staticmethod
-    async def send_verification_email(to: str, username: str, token: str) -> bool:
-        url = f"{settings.panel_url}/verify-email?token={token}"
-        subject = "Maunting Server Manager — E-Mail verifizieren"
-        body = f"""Hallo {username},
-
-bitte verifiziere deine E-Mail-Adresse:
-{url}
-
-Falls du dich nicht registriert hast, ignoriere diese E-Mail.
-
-Maunting Server Manager
-"""
-        html = EmailService._verification_email_html(username, url)
-        return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
     async def send_password_reset_email(to: str, username: str, token: str) -> bool:
@@ -272,7 +246,7 @@ Maunting Server Manager
     @staticmethod
     async def send_verification_code_email(to: str, username: str, code: str) -> bool:
         subject = "Maunting Server Manager — Verifizierungscode"
-        body = f"""Hallo {username},
+        body = f"""Hallo,
 
 Dein Verifizierungscode lautet:
 
