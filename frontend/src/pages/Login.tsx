@@ -9,6 +9,7 @@ import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Shield, ArrowRight, Globe, KeyRound, Mail, Check } from 'lucide-react'
+import { supportedLocales } from '@/config/locales'
 
 export function Login() {
   const { t, i18n } = useTranslation()
@@ -111,9 +112,12 @@ export function Login() {
   }
 
   const toggleLang = () => {
-    const next = i18n.language === 'de' ? 'en' : 'de'
+    const currentIndex = supportedLocales.findIndex(l => l.code === i18n.language)
+    const nextIndex = (currentIndex + 1) % supportedLocales.length
+    const next = supportedLocales[nextIndex]?.code || 'en'
     i18n.changeLanguage(next)
   }
+
 
   return (
     <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">

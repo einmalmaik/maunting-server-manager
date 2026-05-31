@@ -635,7 +635,18 @@
     "backupCodes": "Backup Codes",
     "generateBackupCodes": "Generate Backup Codes",
     "backupCodesWarning": "Save these codes securely. They cannot replace 2FA, only serve as emergency login.",
-    "otpRequired": "2FA code required"
+    "otpRequired": "2FA code required",
+    "notVerified": "Not verified",
+    "2faQrCode": "2FA QR Code",
+    "deleteAccountTitle": "Delete Account",
+    "deleteAccountSubtitle": "Permanently delete your personal account and all associated data.",
+    "ownerCannotDelete": "As the system owner, you cannot delete your account to prevent a total lockout.",
+    "deleteAccountBtn": "Delete Account ...",
+    "deleteAccountWarningTitle": "Warning: This action is irreversible!",
+    "deleteAccountWarningText": "All your personal settings, active sessions, 2FA registrations, and custom permissions will be permanently and completely deleted. Running game servers will remain untouched, but you will lose all access to them.",
+    "confirmPasswordLabel": "Confirm with your current password",
+    "confirmOtpLabel": "Current 6-digit 2FA code (no backup code)",
+    "deleteAccountFinalBtn": "Delete Account Permanently"
   },
   "errors": {
     "RATE_LIMITED": "Too many requests. Please wait a moment.",

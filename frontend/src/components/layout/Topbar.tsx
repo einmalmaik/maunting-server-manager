@@ -7,6 +7,7 @@ import { Logo } from '@/components/Logo'
 import { Globe, Bell, Menu, User, LogOut } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { supportedLocales } from '@/config/locales'
 
 export function Topbar() {
   const { t, i18n } = useTranslation()
@@ -25,9 +26,12 @@ export function Topbar() {
   }, [user?.email_notifications])
 
   const toggleLang = () => {
-    const next = i18n.language === 'de' ? 'en' : 'de'
+    const currentIndex = supportedLocales.findIndex(l => l.code === i18n.language)
+    const nextIndex = (currentIndex + 1) % supportedLocales.length
+    const next = supportedLocales[nextIndex]?.code || 'en'
     i18n.changeLanguage(next)
   }
+
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {

@@ -12,7 +12,7 @@ from cookies import _set_auth_cookies, _clear_auth_cookies
 from database import get_db
 from dependencies import get_current_user, get_current_owner, verify_csrf
 from models import User, EmailVerification
-from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest
+from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest
 from schemas import ResendVerificationRequest
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest
 from services import AuthService, EmailService
@@ -439,10 +439,37 @@ def reset_password(
         raise HTTPException(status_code=400, detail="Ungültiger oder abgelaufener Token")
     AuthService.reset_password(db, user, req.new_password)
     return {"message": "Passwort zurückgesetzt"}
+@router.delete("/delete-account")
+def delete_account(
+    req: DeleteAccountRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Eigenes Konto loeschen. Erfordert Passwort und aktuellen 2FA-Code (falls 2FA aktiv)."""
+    # 1. Passwort verifizieren
+    if not AuthService.verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Passwort ungültig")
 
+    # 2. 2FA verifizieren (falls aktiv)
+    if user.two_factor_enabled:
+        if not req.otp_code:
+            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
+        if not AuthService.verify_current_2fa_code(user, req.otp_code):
+            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
 
+    # 3. Owner-Sperre: Owner-Account darf nicht geloescht werden
+    if user.is_owner:
+        raise HTTPException(status_code=403, detail="Owner-Account kann nicht gelöscht werden")
 
+    # 4. Atomar loeschen
+    AuthService.delete_account_atomically(db, user)
 
+    # 5. Cookies loeschen
+    _clear_auth_cookies(response)
+
+    return {"message": "Account gelöscht"}
 
 @router.post("/2fa/setup")
 def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:

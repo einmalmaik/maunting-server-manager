@@ -635,7 +635,18 @@
     "backupCodes": "Backup-Codes",
     "generateBackupCodes": "Backup-Codes generieren",
     "backupCodesWarning": "Speichere diese Codes sicher ab. Sie können 2FA nicht ersetzen, sondern nur als Notfall-Login.",
-    "otpRequired": "2FA-Code erforderlich"
+    "otpRequired": "2FA-Code erforderlich",
+    "notVerified": "Nicht verifiziert",
+    "2faQrCode": "2FA QR Code",
+    "deleteAccountTitle": "Konto löschen",
+    "deleteAccountSubtitle": "Lösche dein persönliches Konto und alle damit verbundenen Daten unwiderruflich.",
+    "ownerCannotDelete": "Als System-Owner kannst du dein Konto nicht löschen, um einen vollständigen Lockout zu verhindern.",
+    "deleteAccountBtn": "Konto löschen ...",
+    "deleteAccountWarningTitle": "Achtung: Dies ist eine irreversible Aktion!",
+    "deleteAccountWarningText": "Alle deine persönlichen Einstellungen, Sessions, 2FA-Registrierungen und Berechtigungen werden dauerhaft und vollständig gelöscht. Laufende Game-Server bleiben unberührt, aber du verlierst jeglichen Zugriff darauf.",
+    "confirmPasswordLabel": "Aktuelles Passwort zur Bestätigung",
+    "confirmOtpLabel": "Aktueller 6-stelliger 2FA-Code (kein Backup-Code)",
+    "deleteAccountFinalBtn": "Konto unwiderruflich löschen"
   },
   "errors": {
     "RATE_LIMITED": "Zu viele Anfragen. Bitte warte einen Moment.",

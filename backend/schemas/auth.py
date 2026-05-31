@@ -49,3 +49,9 @@ class ChangePasswordRequest(BaseModel):
 class ChangeEmailRequest(BaseModel):
     email: str = Field(..., pattern=r"^[^@]+@[^@]+\.[^@]+$")
     otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(..., min_length=1)
+    otp_code: str | None = Field(None, pattern=r"^\d{6}$")
+

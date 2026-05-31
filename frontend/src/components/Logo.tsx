@@ -30,12 +30,12 @@ export function Logo({ size = 'md', className = '' }: LogoProps) {
         <img
           src={LOGO_CONFIG.src}
           alt={LOGO_CONFIG.alt}
-          className={`${cls} block object-contain drop-shadow-[0_0_12px_hsl(190_92%_62%_/_0.28)]`}
+          className={`${cls} block object-cover rounded-full border border-primary/20 drop-shadow-[0_0_12px_hsl(190_92%_62%_/_0.28)]`}
           onError={() => setFailed(true)}
         />
       ) : (
         <div
-          className={`${cls} flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-[10px] font-bold text-primary`}
+          className={`${cls} flex items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-[10px] font-bold text-primary`}
           aria-label={LOGO_CONFIG.alt}
           role="img"
         >

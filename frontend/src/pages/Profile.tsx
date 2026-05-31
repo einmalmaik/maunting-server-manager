@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
@@ -7,10 +8,16 @@ import { Shield, Mail, KeyRound, Check, Save, AlertTriangle, Copy } from 'lucide
 
 export function Profile() {
   const { t } = useTranslation()
-  const { user, setUser } = useAuthStore()
+  const navigate = useNavigate()
+  const { user, setUser, logout } = useAuthStore()
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  const [deleteState, setDeleteState] = useState<'idle' | 'first-confirmed' | 'deleting' | 'success'>('idle')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [confirmOtp, setConfirmOtp] = useState('')
+  const [errorMsg, setErrorMsg] = useState('')
 
   const [pwdForm, setPwdForm] = useState({
     current: '',
@@ -149,7 +156,7 @@ export function Profile() {
             {user?.email_verified === false && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-status-error/10 text-status-error border border-status-error/30 mt-1">
                 <AlertTriangle className="w-3 h-3" />
-                Nicht verifiziert
+                {t('profile.notVerified', 'Nicht verifiziert')}
               </span>
             )}
           </div>
@@ -286,7 +293,7 @@ export function Profile() {
               <div className="flex flex-col items-center gap-4">
                 <img
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(faUri)}`}
-                  alt="2FA QR Code"
+                  alt={t('profile.2faQrCode', '2FA QR Code')}
                   className="rounded-lg border border-outline-variant"
                 />
                 <p className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-high px-3 py-1.5 rounded border border-outline-variant select-all">
@@ -377,7 +384,7 @@ export function Profile() {
                   <button
                     onClick={() => navigator.clipboard.writeText(code)}
                     className="text-on-surface-variant hover:text-primary transition-colors"
-                    title="Kopieren"
+                    title={t('common.copy', 'Kopieren')}
                   >
                     <Copy className="w-3.5 h-3.5" />
                   </button>
@@ -385,6 +392,134 @@ export function Profile() {
               ))}
             </div>
           </div>
+        )}
+      </div>
+
+      {/* Account loeschen */}
+      <div className="msm-card p-6 border border-status-error/35">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-full bg-status-error/10 flex items-center justify-center">
+            <AlertTriangle className="w-5 h-5 text-status-error" />
+          </div>
+          <div className="flex-1">
+            <h2 className="font-headline text-headline-sm text-status-error">{t('profile.deleteAccountTitle')}</h2>
+            <p className="font-body-md text-sm text-on-surface-variant mt-1">
+              {t('profile.deleteAccountSubtitle')}
+            </p>
+          </div>
+        </div>
+
+        {user?.is_owner ? (
+          <div className="msm-alert-warning text-sm mb-4">
+            {t('profile.ownerCannotDelete')}
+          </div>
+        ) : (
+          <>
+            {deleteState === 'idle' && (
+              <button
+                onClick={() => setDeleteState('first-confirmed')}
+                className="msm-btn-danger px-4 py-2"
+              >
+                {t('profile.deleteAccountBtn')}
+              </button>
+            )}
+
+            {deleteState !== 'idle' && deleteState !== 'success' && (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  setErrorMsg('')
+                  setDeleteState('deleting')
+                  try {
+                    await api('/auth/delete-account', {
+                      method: 'DELETE',
+                      body: JSON.stringify({
+                        password: confirmPassword,
+                        otp_code: user?.two_factor_enabled ? confirmOtp : null,
+                      }),
+                    })
+                    setDeleteState('success')
+                    await logout()
+                    navigate('/login', { replace: true })
+                  } catch (err: any) {
+                    setErrorMsg(err.message)
+                    setDeleteState('first-confirmed')
+                  }
+                }}
+                className="space-y-4 border-t border-outline-variant/30 pt-4"
+              >
+                <div className="p-4 bg-status-error/5 border border-status-error/20 rounded-lg">
+                  <p className="font-label-md text-sm text-status-error font-medium mb-1">
+                    {t('profile.deleteAccountWarningTitle')}
+                  </p>
+                  <p className="font-body-md text-xs text-on-surface-variant">
+                    {t('profile.deleteAccountWarningText')}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('profile.confirmPasswordLabel')}
+                  </label>
+                  <PasswordInput
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    disabled={deleteState === 'deleting'}
+                  />
+                </div>
+
+                {user?.two_factor_enabled && (
+                  <div>
+                    <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                      {t('profile.confirmOtpLabel')}
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="\d{6}"
+                      maxLength={6}
+                      value={confirmOtp}
+                      onChange={(e) => setConfirmOtp(e.target.value)}
+                      className="msm-input"
+                      placeholder="000000"
+                      required
+                      disabled={deleteState === 'deleting'}
+                    />
+                  </div>
+                )}
+
+                {errorMsg && <div className="msm-alert-error text-sm">{errorMsg}</div>}
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="submit"
+                    disabled={deleteState === 'deleting'}
+                    className="msm-btn-danger px-4 py-2 inline-flex items-center gap-2"
+                  >
+                    {deleteState === 'deleting' ? (
+                      <span className="w-4 h-4 border-2 border-on-error border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      t('profile.deleteAccountFinalBtn')
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteState('idle')
+                      setConfirmPassword('')
+                      setConfirmOtp('')
+                      setErrorMsg('')
+                    }}
+                    disabled={deleteState === 'deleting'}
+                    className="msm-btn-secondary px-4 py-2"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                </div>
+              </form>
+            )}
+          </>
         )}
       </div>
     </div>

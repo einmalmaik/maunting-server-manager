@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { supportedLocales } from '@/config/locales'
 
 interface PanelSettings {
   panel_url: string
@@ -227,8 +228,11 @@ export function Settings() {
                 }}
                 className="msm-input"
               >
-                <option value="de">Deutsch</option>
-                <option value="en">English</option>
+                {supportedLocales.map((locale) => (
+                  <option key={locale.code} value={locale.code}>
+                    {locale.nativeLabel}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
