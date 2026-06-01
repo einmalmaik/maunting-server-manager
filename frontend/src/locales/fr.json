@@ -603,7 +603,10 @@
     "fixedTimes": "Heures de redémarrage",
     "addTime": "Ajouter du temps",
     "saved": "Plan de redémarrage enregistré.",
-    "maxTimesReached": "Max. 12 fois atteint"
+    "maxTimesReached": "Max. 12 fois atteint",
+    "lastAutoAttempt": "Dernière tentative automatique",
+    "lastAutoRestart": "Dernier redémarrage automatique",
+    "nextAutoRestart": "Prochain redémarrage automatique"
   },
   "settings": {
     "title": "Paramètres",
@@ -730,7 +733,9 @@
   },
   "serverDetail": {
     "limit": "Limite",
-    "free": "gratuit"
+    "free": "gratuit",
+    "uptime": "Durée de fonctionnement",
+    "sinceLastStart": "Depuis le dernier démarrage"
   },
   "Passwort ungültig": "Mot de passe invalide",
   "2FA-Code erforderlich": "Code 2FA requis",

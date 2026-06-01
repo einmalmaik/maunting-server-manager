@@ -603,7 +603,10 @@
     "fixedTimes": "Mulai ulang waktu",
     "addTime": "Tambahkan waktu",
     "saved": "Jadwal mulai ulang disimpan.",
-    "maxTimesReached": "Maks. 12 kali tercapai"
+    "maxTimesReached": "Maks. 12 kali tercapai",
+    "lastAutoAttempt": "Upaya otomatis terakhir",
+    "lastAutoRestart": "Mulai ulang otomatis terakhir",
+    "nextAutoRestart": "Mulai ulang otomatis berikutnya"
   },
   "settings": {
     "title": "Pengaturan",
@@ -730,7 +733,9 @@
   },
   "serverDetail": {
     "limit": "Batasi",
-    "free": "gratis"
+    "free": "gratis",
+    "uptime": "Uptime",
+    "sinceLastStart": "Sejak mulai terakhir"
   },
   "Passwort ungültig": "Kata sandi tidak valid",
   "2FA-Code erforderlich": "Diperlukan kode 2FA",

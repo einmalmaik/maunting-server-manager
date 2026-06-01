@@ -372,7 +372,7 @@ def test_native_hytale_uses_official_downloader_http_source() -> None:
     assert bp.runtime.startup == "/entrypoint.sh"
     assert bp.runtime.env["STARTUP"] == "./start.sh"
     assert bp.runtime.env["SERVER_PORT"] == "{GAME_PORT}"
-    assert bp.runtime.env["JAVA_TOOL_OPTIONS"] == "-Dio.netty.native.workdir=/home/container"
+    assert bp.runtime.env["JAVA_TOOL_OPTIONS"] == "-Dio.netty.native.workdir=/home/container -Djava.io.tmpdir=/home/container"
 
 
 def _native_plugin(blueprint_id: str) -> BlueprintPlugin:

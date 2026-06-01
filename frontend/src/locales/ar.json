@@ -603,7 +603,10 @@
     "fixedTimes": "مرات إعادة التشغيل",
     "addTime": "أضف الوقت",
     "saved": "تم حفظ جدول إعادة التشغيل.",
-    "maxTimesReached": "ماكس. وصلت 12 مرة"
+    "maxTimesReached": "ماكس. وصلت 12 مرة",
+    "lastAutoAttempt": "آخر محاولة تلقائية",
+    "lastAutoRestart": "آخر إعادة تشغيل تلقائية",
+    "nextAutoRestart": "إعادة التشغيل التلقائية التالية"
   },
   "settings": {
     "title": "الإعدادات",
@@ -730,7 +733,9 @@
   },
   "serverDetail": {
     "limit": "الحد",
-    "free": "مجانا"
+    "free": "مجانا",
+    "uptime": "وقت التشغيل",
+    "sinceLastStart": "منذ آخر تشغيل"
   },
   "Passwort ungültig": "كلمة المرور غير صالحة",
   "2FA-Code erforderlich": "مطلوب رمز 2FA",

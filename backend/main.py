@@ -308,6 +308,25 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Hintergrund-Log-Collector fuer alle laufenden Server starten
+    from models import Server
+    from services.console_stream_service import ensure_console_logger
+    from games.base import container_name_for
+
+    db = SessionLocal()
+    try:
+        running_servers = db.query(Server).filter(Server.status == "running").all()
+        for srv in running_servers:
+            c_name = container_name_for(srv.id)
+            ensure_console_logger(srv.id, c_name)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Konnte Hintergrund-Log-Collectors beim App-Startup nicht initialisieren: %s", exc
+        )
+    finally:
+        db.close()
+
     yield
 
     # Shutdown

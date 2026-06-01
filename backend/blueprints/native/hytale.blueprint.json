@@ -17,7 +17,7 @@
       "AUTOMATIC_UPDATE": "1",
       "PATCHLINE": "release",
       "ASSET_PACK": "Assets.zip",
-      "JAVA_TOOL_OPTIONS": "-Dio.netty.native.workdir=/home/container",
+      "JAVA_TOOL_OPTIONS": "-Dio.netty.native.workdir=/home/container -Djava.io.tmpdir=/home/container",
       "DISABLE_SENTRY": "1",
       "ACCEPT_EARLY_PLUGINS": "0",
       "LEVERAGE_AHEAD_OF_TIME_CACHE": "1",

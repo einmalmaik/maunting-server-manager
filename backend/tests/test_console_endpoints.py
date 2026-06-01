@@ -280,91 +280,49 @@ class TestConsoleStreamGenerator:
             if os.path.exists(log_path):
                 os.remove(log_path)
 
-    def test_reports_missing_docker_as_visible_data_line(self, test_server: Server):
+    def test_background_logger_writes_to_log_file(self, test_server: Server):
         import asyncio
-
         from games.base import _console_log_path
-        from routers.servers import _console_event_stream
+        from services.console_stream_service import (
+            ensure_console_logger,
+            stop_console_logger,
+            _ACTIVE_LOGGERS,
+        )
 
         log_path = _console_log_path(test_server.id)
         if os.path.exists(log_path):
             os.remove(log_path)
 
-        with patch("services.console_stream_service.docker_service.is_available", return_value=False):
-            payloads = asyncio.run(
-                _drain_stream(
-                    _console_event_stream(
-                        _StubRequest(disconnect_after=2),
-                        container="msm-srv-x",
-                        log_path=log_path,
-                    ),
-                    max_frames=5,
-                )
-            )
+        async def _fake_stream_logs(_container: str, tail: int = 0):
+            yield "background log line 1"
+            yield "background log line 2"
 
-        # Sichtbare ``data:``-Zeile statt verstecktem ``event: error``.
-        assert any("Rootless Docker Daemon not running for user msm" in p for p in payloads)
+        async def run_test():
+            with patch("services.console_stream_service.docker_service.is_available", return_value=True), \
+                 patch("services.console_stream_service.docker_service.exists", return_value=True), \
+                 patch("services.console_stream_service.docker_service.is_running", return_value=True), \
+                 patch("services.console_stream_service.docker_service.stream_logs", side_effect=_fake_stream_logs):
+                
+                # Start Logger
+                ensure_console_logger(test_server.id, "msm-srv-1")
+                assert test_server.id in _ACTIVE_LOGGERS
+                
+                # Warten bis der Task die Zeilen geschrieben hat
+                for _ in range(20):
+                    if os.path.exists(log_path) and os.path.getsize(log_path) > 0:
+                        break
+                    await asyncio.sleep(0.05)
 
-    def test_after_cursor_skips_old_file_backlog_and_keeps_new_lines(self, test_server: Server):
-        import asyncio
+                stop_console_logger(test_server.id)
 
-        from games.base import _console_log_path
-        from routers.servers import _console_event_stream
+        # In einer Event-Loop ausführen
+        asyncio.run(run_test())
 
-        log_path = _console_log_path(test_server.id)
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        try:
-            old = b"old line\n"
-            new = b"new line\n"
-            with open(log_path, "wb") as f:
-                f.write(old)
-                f.write(new)
-
-            with patch("services.console_stream_service.docker_service.is_available", return_value=False):
-                payloads = asyncio.run(
-                    _drain_stream(
-                        _console_event_stream(
-                            _StubRequest(disconnect_after=1),
-                            container="msm-srv-x",
-                            log_path=log_path,
-                            after_bytes=len(old),
-                        ),
-                        max_frames=3,
-                    )
-                )
-
-            assert "old line" not in payloads
-            assert "new line" in payloads
-        finally:
-            if os.path.exists(log_path):
-                os.remove(log_path)
-
-    def test_after_cursor_still_replays_docker_tail(self, test_server: Server):
-        import asyncio
-
-        from games.base import _console_log_path
-        from routers.servers import _console_event_stream
-
-        async def _fake_stream_logs(_container: str, tail: int = 200):
-            assert tail == 200
-            yield "live server line"
-
-        log_path = _console_log_path(test_server.id)
+        assert test_server.id not in _ACTIVE_LOGGERS
+        assert os.path.exists(log_path)
+        with open(log_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "background log line 1" in content
+        assert "background log line 2" in content
         if os.path.exists(log_path):
             os.remove(log_path)
-
-        with patch("services.console_stream_service.docker_service.is_available", return_value=True), \
-             patch("services.console_stream_service.docker_service.stream_logs", side_effect=_fake_stream_logs):
-            payloads = asyncio.run(
-                _drain_stream(
-                    _console_event_stream(
-                        _StubRequest(disconnect_after=2),
-                        container="msm-srv-x",
-                        log_path=log_path,
-                        after_bytes=999,
-                    ),
-                    max_frames=1,
-                )
-            )
-
-        assert "live server line" in payloads

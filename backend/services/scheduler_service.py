@@ -452,7 +452,9 @@ async def _background_update_check_task() -> None:
                     async with get_server_lifecycle_lock(server.id):
                         db.refresh(server)
                         if server.status not in ("running", "starting", "stopping"):
-                            mod_res = plugin.perform_workshop_mod_updates(server)
+                            mod_res = await asyncio.to_thread(
+                                plugin.perform_workshop_mod_updates, server
+                            )
                             if not mod_res.get("ok", False):
                                 _append_console_log(
                                     server.id,

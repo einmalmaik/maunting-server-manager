@@ -29,7 +29,7 @@ from services.port_allocation_service import PortConflictError, allocate_ports
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.scheduler_service import sync_server_restart_schedule
 from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
-from services.console_stream_service import console_event_stream
+from services.console_stream_service import console_event_stream, ensure_console_logger, stop_console_logger
 from services.install_update_lock_service import (
     INSTALL_UPDATE_ALREADY_RUNNING,
     release_install_update_lock,
@@ -632,6 +632,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
         server.status = "running"
         server.last_started_at = _utcnow()
         db.commit()
+        ensure_console_logger(server.id, container_name_for(server.id))
         if EmailService.is_configured() and user.email_notifications:
             await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestartet")
         return {"message": "Start-Befehl gesendet", "status": server.status, **result}
@@ -655,6 +656,7 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
         # AUFGABE 4A: transient status VOR Docker-Operation (für Echtzeit-Feedback)
         server.status = "stopping"
         db.commit()
+        stop_console_logger(server.id)
         # Siehe start_server: docker stop ist synchron und kann bis zum
         # Graceful-Timeout dauern. Threadpool hält den Event-Loop frei.
         result = await asyncio.to_thread(plugin.stop, server)

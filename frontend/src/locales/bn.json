@@ -603,7 +603,10 @@
     "fixedTimes": "রিস্টার্ট বার",
     "addTime": "সময় যোগ করুন",
     "saved": "রিস্টার্টের সময়সূচী সংরক্ষিত।",
-    "maxTimesReached": "সর্বোচ্চ 12 বার পৌঁছেছে"
+    "maxTimesReached": "সর্বোচ্চ 12 বার পৌঁছেছে",
+    "lastAutoAttempt": "সর্বশেষ স্বয়ংক্রিয় প্রচেষ্টা",
+    "lastAutoRestart": "সর্বশেষ স্বয়ংক্রিয় পুনরায় আরম্ভ",
+    "nextAutoRestart": "পরবর্তী স্বয়ংক্রিয় পুনরায় আরম্ভ"
   },
   "settings": {
     "title": "সেটিংস",
@@ -730,7 +733,9 @@
   },
   "serverDetail": {
     "limit": "সীমা",
-    "free": "বিনামূল্যে"
+    "free": "বিনামূল্যে",
+    "uptime": "চলমান সময়",
+    "sinceLastStart": "সর্বশেষ শুরুর পর থেকে"
   },
   "Passwort ungültig": "অবৈধ পাসওয়ার্ড",
   "2FA-Code erforderlich": "2FA কোড প্রয়োজন",

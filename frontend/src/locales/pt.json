@@ -603,7 +603,10 @@
     "fixedTimes": "Tempos de reinicialização",
     "addTime": "Adicionar tempo",
     "saved": "Programação de reinicialização salva.",
-    "maxTimesReached": "Máx. 12 vezes alcançado"
+    "maxTimesReached": "Máx. 12 vezes alcançado",
+    "lastAutoAttempt": "Última tentativa automática",
+    "lastAutoRestart": "Último reinício automático",
+    "nextAutoRestart": "Próximo reinício automático"
   },
   "settings": {
     "title": "Configurações",
@@ -730,7 +733,9 @@
   },
   "serverDetail": {
     "limit": "Limite",
-    "free": "grátis"
+    "free": "grátis",
+    "uptime": "Tempo de atividade",
+    "sinceLastStart": "Desde o último início"
   },
   "Passwort ungültig": "Senha inválida",
   "2FA-Code erforderlich": "Código 2FA necessário",
