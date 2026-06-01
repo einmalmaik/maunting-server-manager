@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Clock, Copy, Eraser, Search, Send, Terminal } from 'lucide-react'
+import { Check, Clock, Copy, Search, Send, Terminal } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { toast } from '@/stores/toastStore'
@@ -28,27 +28,7 @@ const ANSI_RE = /\x1b\[[0-9;]*m/g
 const URL_RE = /(https?:\/\/[^\s<>"']+)/g
 const MAX_LOG_LINES = 2000
 
-function clearMarkerKey(serverId: number): string {
-  return `msm.console.clearThrough.${serverId}`
-}
 
-function readClearMarker(serverId: number): number {
-  try {
-    const raw = window.localStorage.getItem(clearMarkerKey(serverId))
-    const parsed = raw ? Number.parseInt(raw, 10) : 0
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
-  } catch {
-    return 0
-  }
-}
-
-function writeClearMarker(serverId: number, seq: number): void {
-  try {
-    window.localStorage.setItem(clearMarkerKey(serverId), String(seq))
-  } catch {
-    // Private mode / quota issues should not break console use.
-  }
-}
 
 // ZENTRALE Mapping-Funktion für Farbkodierung (KISS + wartbar).
 // Alle Regex-Patterns AN EINER STELLE. Verwendet existierende Design-Token-Klassen
@@ -190,15 +170,13 @@ export function ServerConsolePanel({ serverId }: Props) {
   const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('server.console.write', serverId)
   const [logs, setLogs] = useState<ConsoleLogLine[]>([])
-  const [hiddenThrough, setHiddenThrough] = useState(() => readClearMarker(serverId))
   const [timeFormat, setTimeFormat] = useState<PanelTimeFormat>('24h')
-  const [streamVersion, setStreamVersion] = useState(0)
+
   const [inputValue, setInputValue] = useState('')
   const [sending, setSending] = useState(false)
   const [copiedLogs, setCopiedLogs] = useState(false)
   const nextSeqRef = useRef(0)
   const bufferRef = useRef<string[]>([])
-  const activeStreamRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Neue States fuer verbesserte UI/UX
@@ -219,22 +197,13 @@ export function ServerConsolePanel({ serverId }: Props) {
   }, [])
 
   useEffect(() => {
-    activeStreamRef.current = streamVersion
     nextSeqRef.current = 0
     bufferRef.current = []
     setLogs([])
-    const clearMarker = readClearMarker(serverId)
-    nextSeqRef.current = clearMarker
-    setHiddenThrough(clearMarker)
-
-    const url = clearMarker > 0
-      ? `/api/servers/${serverId}/console/stream?after=${clearMarker}`
-      : `/api/servers/${serverId}/console/stream`
+    const url = `/api/servers/${serverId}/console/stream`
     const es = new EventSource(url)
-    const streamToken = streamVersion
     
     es.onmessage = (ev) => {
-      if (activeStreamRef.current !== streamToken) return
       const eventMarker = Number.parseInt(ev.lastEventId || '', 10)
       const marker = Number.isFinite(eventMarker) && eventMarker > 0
         ? eventMarker
@@ -244,7 +213,6 @@ export function ServerConsolePanel({ serverId }: Props) {
     }
     
     const flushInterval = setInterval(() => {
-      if (activeStreamRef.current !== streamToken) return
       if (bufferRef.current.length > 0) {
         const toFlush = bufferRef.current
         bufferRef.current = []
@@ -276,20 +244,15 @@ export function ServerConsolePanel({ serverId }: Props) {
       clearInterval(flushInterval)
       es.close()
     }
-  }, [serverId, streamVersion])
-
-  const visibleLogs = useMemo(
-    () => logs.filter((line) => line.marker > hiddenThrough),
-    [logs, hiddenThrough],
-  )
+  }, [serverId])
 
   const filteredLogs = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    if (!query) return visibleLogs
-    return visibleLogs.filter((line) =>
+    if (!query) return logs
+    return logs.filter((line) =>
       displayConsoleLine(line.text, i18n.language).toLowerCase().includes(query)
     )
-  }, [visibleLogs, searchQuery, i18n.language])
+  }, [logs, searchQuery, i18n.language])
 
   useEffect(() => {
     if (scrollRef.current && autoscroll) {
@@ -373,18 +336,9 @@ export function ServerConsolePanel({ serverId }: Props) {
     }
   }
 
-  const clearConsole = () => {
-    bufferRef.current = []
-    const seq = nextSeqRef.current
-    setHiddenThrough(seq)
-    writeClearMarker(serverId, seq)
-    setLogs([])
-    setStreamVersion((current) => current + 1)
-  }
-
   const copyVisibleLogs = async () => {
     const query = searchQuery.trim().toLowerCase()
-    const targetLogs = query ? filteredLogs : visibleLogs
+    const targetLogs = query ? filteredLogs : logs
     const text = targetLogs
       .map((line) => {
         const time = showTimestamps ? formatConsoleTime(line.timestamp, timeFormat, i18n.language) : ''
@@ -445,15 +399,6 @@ export function ServerConsolePanel({ serverId }: Props) {
           >
             {copiedLogs ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
             {copiedLogs ? t('common.copied') : t('servers.consoleCopy')}
-          </button>
-          <button
-            type="button"
-            onClick={clearConsole}
-            className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
-            title={t('servers.consoleClearTitle')}
-          >
-            <Eraser className="w-3.5 h-3.5" />
-            {t('servers.consoleClear')}
           </button>
         </div>
       </div>

@@ -173,8 +173,6 @@
     "logs": "Journaux",
     "noLogs": "Aucun journal disponible pour l'instant.",
     "console": "Console",
-    "consoleClear": "Effacer",
-    "consoleClearTitle": "Masquer localement la sortie actuelle de la console (les journaux du serveur sont conservés)",
     "consoleCopy": "Copier",
     "consoleCopyTitle": "Copier les lignes de console visibles",
     "consoleCopyFailed": "Impossible de copier le journal de la console.",

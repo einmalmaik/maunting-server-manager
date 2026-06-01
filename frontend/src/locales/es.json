@@ -173,8 +173,6 @@
     "logs": "Registros",
     "noLogs": "Aún no hay registros disponibles.",
     "console": "Consola",
-    "consoleClear": "Borrar",
-    "consoleClearTitle": "Ocultar la salida actual de la consola localmente (se conservan los registros del servidor)",
     "consoleCopy": "Copiar",
     "consoleCopyTitle": "Copiar líneas visibles de la consola",
     "consoleCopyFailed": "No se pudo copiar el registro de la consola.",

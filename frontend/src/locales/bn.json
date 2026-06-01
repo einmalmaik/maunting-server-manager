@@ -173,8 +173,6 @@
     "logs": "লগ",
     "noLogs": "কোন লগ এখনও উপলব্ধ.",
     "console": "কনসোল",
-    "consoleClear": "পরিষ্কার",
-    "consoleClearTitle": "স্থানীয়ভাবে বর্তমান কনসোল আউটপুট লুকান (সার্ভার লগ সংরক্ষিত আছে)",
     "consoleCopy": "কপি",
     "consoleCopyTitle": "দৃশ্যমান কনসোল লাইন অনুলিপি করুন",
     "consoleCopyFailed": "কনসোল লগ কপি করা যায়নি.",

@@ -178,8 +178,6 @@
     "logs": "Logs",
     "noLogs": "Noch keine Logs verfügbar.",
     "console": "Konsole",
-    "consoleClear": "Leeren",
-    "consoleClearTitle": "Aktuelle Konsole lokal ausblenden (Server-Logs bleiben erhalten)",
     "consoleCopy": "Kopieren",
     "consoleCopyTitle": "Sichtbare Konsolenzeilen kopieren",
     "consoleCopyFailed": "Konsolenlog konnte nicht kopiert werden.",

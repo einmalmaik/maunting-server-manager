@@ -173,8 +173,6 @@
     "logs": "日志",
     "noLogs": "尚无可用日志。",
     "console": "安慰",
-    "consoleClear": "清除",
-    "consoleClearTitle": "在本地隐藏当前控制台输出（保留服务器日志）",
     "consoleCopy": "复制",
     "consoleCopyTitle": "复制可见的控制台行",
     "consoleCopyFailed": "无法复制控制台日志。",

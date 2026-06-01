@@ -178,8 +178,6 @@
     "logs": "Logs",
     "noLogs": "No logs available yet.",
     "console": "Console",
-    "consoleClear": "Clear",
-    "consoleClearTitle": "Hide the current console output locally (server logs are preserved)",
     "consoleCopy": "Copy",
     "consoleCopyTitle": "Copy visible console lines",
     "consoleCopyFailed": "Could not copy console log.",

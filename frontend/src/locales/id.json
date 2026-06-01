@@ -173,8 +173,6 @@
     "logs": "Log",
     "noLogs": "Belum ada log yang tersedia.",
     "console": "Menghibur",
-    "consoleClear": "Jelas",
-    "consoleClearTitle": "Sembunyikan keluaran konsol saat ini secara lokal (log server disimpan)",
     "consoleCopy": "Salin",
     "consoleCopyTitle": "Salin baris konsol yang terlihat",
     "consoleCopyFailed": "Tidak dapat menyalin log konsol.",
