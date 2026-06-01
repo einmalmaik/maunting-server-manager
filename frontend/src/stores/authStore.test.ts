@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useAuthStore } from './authStore'
+import { usePermissionsStore } from './permissionsStore'
 import * as client from '@/api/client'
 
 vi.mock('@/api/client', () => ({
@@ -8,10 +9,9 @@ vi.mock('@/api/client', () => ({
 
 describe('authStore', () => {
   beforeEach(() => {
-    // Reset store to initial state
-    const store = useAuthStore.getState()
-    store.setUser(null)
-    store.setAuthenticated(false)
+    useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: true })
+    usePermissionsStore.setState({ me: null, isLoading: false, error: null })
+    vi.mocked(client.api).mockReset()
   })
 
   describe('initial state', () => {
@@ -32,7 +32,15 @@ describe('authStore', () => {
   describe('checkAuth', () => {
     it('should authenticate on successful /auth/me', async () => {
       const mockUser = { id: 1, username: 'test', is_owner: true }
-      vi.mocked(client.api).mockResolvedValueOnce(mockUser)
+      vi.mocked(client.api)
+        .mockResolvedValueOnce(mockUser)
+        .mockResolvedValueOnce({
+          is_owner: true,
+          role_id: null,
+          role_name: null,
+          global_keys: [],
+          server_keys: {},
+        })
 
       const store = useAuthStore.getState()
       await store.checkAuth()
@@ -80,6 +88,28 @@ describe('authStore', () => {
 
       expect(useAuthStore.getState().isAuthenticated).toBe(false)
       expect(useAuthStore.getState().user).toBeNull()
+    })
+  })
+
+  describe('finishLogin', () => {
+    it('sets auth state and loads permissions for route guards', async () => {
+      const mockUser = { id: 1, username: 'test', is_owner: true }
+      const mockPermissions = {
+        is_owner: true,
+        role_id: null,
+        role_name: null,
+        global_keys: [],
+        server_keys: {},
+      }
+      vi.mocked(client.api).mockResolvedValueOnce(mockPermissions)
+
+      await useAuthStore.getState().finishLogin(mockUser as any)
+
+      expect(useAuthStore.getState().user).toEqual(mockUser)
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().isLoading).toBe(false)
+      expect(usePermissionsStore.getState().me).toEqual(mockPermissions)
+      expect(client.api).toHaveBeenCalledWith('/permissions/me')
     })
   })
 

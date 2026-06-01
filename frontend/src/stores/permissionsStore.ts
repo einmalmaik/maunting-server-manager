@@ -5,6 +5,7 @@ import type { MePermissions } from '@/types/permissions'
 interface PermissionsState {
   me: MePermissions | null
   isLoading: boolean
+  error: string | null
   refresh: () => Promise<void>
   reset: () => void
 }
@@ -17,16 +18,17 @@ interface PermissionsState {
 export const usePermissionsStore = create<PermissionsState>((set) => ({
   me: null,
   isLoading: false,
+  error: null,
 
   refresh: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       const me = await rbacApi.me()
-      set({ me, isLoading: false })
+      set({ me, isLoading: false, error: null })
     } catch {
-      set({ me: null, isLoading: false })
+      set({ me: null, isLoading: false, error: 'PERMISSIONS_LOAD_FAILED' })
     }
   },
 
-  reset: () => set({ me: null, isLoading: false }),
+  reset: () => set({ me: null, isLoading: false, error: null }),
 }))

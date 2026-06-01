@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProtectedRoute } from './ProtectedRoute'
 import { PublicOnlyRoute } from './PublicOnlyRoute'
 import { useAuthStore } from '@/stores/authStore'
+import { usePermissionsStore } from '@/stores/permissionsStore'
 import * as client from '@/api/client'
 
 vi.mock('@/api/client', () => ({
@@ -11,9 +12,8 @@ vi.mock('@/api/client', () => ({
 }))
 
 function resetStore() {
-  const store = useAuthStore.getState()
-  store.setUser(null)
-  store.setAuthenticated(false)
+  useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: true })
+  usePermissionsStore.setState({ me: null, isLoading: false, error: null })
 }
 
 function TestApp({ initialPath = '/' }: { initialPath?: string }) {
@@ -71,8 +71,11 @@ describe('ProtectedRoute', () => {
 
   it('should render protected content when authenticated', async () => {
     // Directly set authenticated state (checkAuth flow is tested in authStore.test.ts)
-    useAuthStore.getState().setUser({ id: 1, username: 'test', is_owner: true } as any)
-    useAuthStore.getState().setAuthenticated(true)
+    useAuthStore.setState({
+      user: { id: 1, username: 'test', is_owner: true } as any,
+      isAuthenticated: true,
+      isLoading: false,
+    })
 
     render(<TestApp />)
 
@@ -89,8 +92,11 @@ describe('PublicOnlyRoute', () => {
   })
 
   it('should redirect to / when already authenticated', async () => {
-    useAuthStore.getState().setUser({ id: 1, username: 'test', is_owner: true } as any)
-    useAuthStore.getState().setAuthenticated(true)
+    useAuthStore.setState({
+      user: { id: 1, username: 'test', is_owner: true } as any,
+      isAuthenticated: true,
+      isLoading: false,
+    })
 
     render(<PublicApp initialPath="/login" />)
 

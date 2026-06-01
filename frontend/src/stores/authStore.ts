@@ -9,6 +9,7 @@ interface AuthState {
   isAuthenticated: boolean
   setUser: (user: User | null) => void
   setAuthenticated: (val: boolean) => void
+  finishLogin: (user: User) => Promise<void>
   updateUser: (patch: Partial<User>) => void
   logout: () => Promise<void>
   checkAuth: () => Promise<void>
@@ -22,6 +23,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   setUser: (user) => set({ user }),
 
   setAuthenticated: (val) => set({ isAuthenticated: val }),
+
+  finishLogin: async (user) => {
+    set({ user, isAuthenticated: true, isLoading: false })
+    await usePermissionsStore.getState().refresh()
+  },
 
   updateUser: (patch) => set((state) => ({
     user: state.user ? { ...state.user, ...patch } : null,

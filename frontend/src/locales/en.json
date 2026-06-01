@@ -12,6 +12,14 @@
     "docs": "Help",
     "logout": "Logout"
   },
+  "routes": {
+    "forbiddenTitle": "No access",
+    "forbiddenBody": "You do not have permission to open this page.",
+    "notFoundTitle": "Page not found",
+    "notFoundBody": "This route is not registered in the panel.",
+    "errorTitle": "Permissions could not be loaded",
+    "errorBody": "Reload the page. If the problem remains, check the connection to the panel."
+  },
   "blueprints": {
     "pageTitle": "Manage blueprints",
     "pageSubtitle": "View, download, replace or delete native and community blueprints.",

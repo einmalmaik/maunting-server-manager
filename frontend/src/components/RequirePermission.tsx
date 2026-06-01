@@ -1,56 +1,70 @@
-import { useEffect, useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { Loader } from '@/components/ui/Loader'
+import { resolveRouteAccessState } from '@/services/routeAccess'
 
-/** Maximale Wartezeit auf das initiale Permissions-Laden, bevor zur Startseite
- * redirected wird. Schuetzt vor unendlichem Spinner, falls
- * `/api/me/permissions` bei valider Session aus irgendeinem Grund nie
- * antwortet (z.B. 500 ohne Body, oder transienter Netzwerkfehler ohne
- * Retry). 5s ist grosszuegig genug fuer einen lokalen API-Call.
- */
-const PERMISSIONS_LOAD_TIMEOUT_MS = 5000
-
-/** Route-Level-Guard: rendert children nur, wenn der User mindestens eine der
- * angegebenen Permissions besitzt (oder Owner ist).
+/** Route-Level-Guard: renders children only for allowed routes.
  *
- * KISS: kein Toast, kein 403-Banner — wer keine Berechtigung hat, wird zur
- * Startseite redirected. Sidebar versteckt die Routen bereits; dies hier ist
- * die Absicherung gegen Direkt-URLs und Bookmarks.
+ * No dashboard fallback: loading, forbidden and error stay explicit so RBAC
+ * failures are not hidden as navigation.
  */
 export function RequirePermission({
-  keys,
+  routeKey,
   children,
 }: {
-  keys: string | string[]
-  children: React.ReactNode
+  routeKey: string
+  children?: React.ReactNode
 }) {
   const me = usePermissionsStore((s) => s.me)
-  const [timedOut, setTimedOut] = useState(false)
+  const isLoading = usePermissionsStore((s) => s.isLoading)
+  const error = usePermissionsStore((s) => s.error)
+  const refresh = usePermissionsStore((s) => s.refresh)
+  const accessState = resolveRouteAccessState({ routeKey, me, isLoading, error })
 
-  // Sicherheits-Timeout: wenn Permissions nach 5s noch nicht da sind, kein
-  // ewiger Spinner — redirect zur Startseite (Dashboard braucht keine
-  // spezifische Permission).
   useEffect(() => {
-    if (me) return
-    const handle = setTimeout(() => setTimedOut(true), PERMISSIONS_LOAD_TIMEOUT_MS)
-    return () => clearTimeout(handle)
-  }, [me])
+    if (accessState === 'loading' && !isLoading) {
+      void refresh()
+    }
+  }, [accessState, isLoading, refresh])
 
-  if (!me) {
-    if (timedOut) return <Navigate to="/" replace />
+  if (accessState === 'allowed') return <>{children}</>
+
+  if (accessState === 'loading') {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader label="Maunting Server Manager" />
       </div>
     )
   }
-  if (me.is_owner) return <>{children}</>
 
-  const list = Array.isArray(keys) ? keys : [keys]
-  const allowed = list.some((k) => me.global_keys.includes(k))
-  if (!allowed) {
-    return <Navigate to="/" replace />
-  }
-  return <>{children}</>
+  return <RouteAccessMessage state={accessState} />
+}
+
+function RouteAccessMessage({ state }: { state: 'forbidden' | 'notFound' | 'error' }) {
+  const { t } = useTranslation()
+  const copy = {
+    forbidden: {
+      title: t('routes.forbiddenTitle', 'Kein Zugriff'),
+      body: t('routes.forbiddenBody', 'Dir fehlt die Berechtigung für diese Seite.'),
+    },
+    notFound: {
+      title: t('routes.notFoundTitle', 'Seite nicht gefunden'),
+      body: t('routes.notFoundBody', 'Diese Route ist im Panel nicht registriert.'),
+    },
+    error: {
+      title: t('routes.errorTitle', 'Berechtigungen konnten nicht geladen werden'),
+      body: t(
+        'routes.errorBody',
+        'Bitte lade die Seite erneut. Wenn das Problem bleibt, prüfe die Verbindung zum Panel.',
+      ),
+    },
+  }[state]
+
+  return (
+    <section className="msm-card max-w-2xl p-6" role={state === 'error' ? 'alert' : 'status'}>
+      <h1 className="font-headline text-headline-sm text-primary">{copy.title}</h1>
+      <p className="font-body-md text-body-md text-on-surface-variant mt-2">{copy.body}</p>
+    </section>
+  )
 }

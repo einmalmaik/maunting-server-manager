@@ -12,6 +12,14 @@
     "docs": "Hilfe",
     "logout": "Abmelden"
   },
+  "routes": {
+    "forbiddenTitle": "Kein Zugriff",
+    "forbiddenBody": "Dir fehlt die Berechtigung für diese Seite.",
+    "notFoundTitle": "Seite nicht gefunden",
+    "notFoundBody": "Diese Route ist im Panel nicht registriert.",
+    "errorTitle": "Berechtigungen konnten nicht geladen werden",
+    "errorBody": "Bitte lade die Seite erneut. Wenn das Problem bleibt, prüfe die Verbindung zum Panel."
+  },
   "blueprints": {
     "pageTitle": "Blueprints verwalten",
     "pageSubtitle": "Native und Community-Blueprints einsehen, herunterladen, ersetzen oder löschen.",

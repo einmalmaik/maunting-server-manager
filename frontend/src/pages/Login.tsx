@@ -14,7 +14,7 @@ import { supportedLocales } from '@/config/locales'
 export function Login() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
-  const { setUser, setAuthenticated } = useAuthStore()
+  const { finishLogin } = useAuthStore()
   const [error, setError] = useState('')
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
@@ -55,8 +55,7 @@ export function Login() {
       }
 
       const user = await api<User>('/auth/me')
-      setUser(user)
-      setAuthenticated(true)
+      await finishLogin(user)
       navigate('/')
     } catch (err: any) {
       setError(err.message || t('auth.loginFailed'))
@@ -161,9 +160,8 @@ export function Login() {
               </p>
               <button
                 onClick={() => {
-                  setUser(pendingVerifiedUser)
-                  setAuthenticated(true)
-                  navigate('/')
+                  if (!pendingVerifiedUser) return
+                  void finishLogin(pendingVerifiedUser).then(() => navigate('/'))
                 }}
                 className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
               >

@@ -13,7 +13,7 @@ import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
 export function Register() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { setUser, setAuthenticated } = useAuthStore()
+  const { finishLogin } = useAuthStore()
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [requiresVerification, setRequiresVerification] = useState(false)
@@ -96,9 +96,8 @@ export function Register() {
             <button
               type="button"
               onClick={() => {
-                setUser(pendingUser)
-                setAuthenticated(true)
-                navigate('/')
+                if (!pendingUser) return
+                void finishLogin(pendingUser).then(() => navigate('/'))
               }}
               className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
             >

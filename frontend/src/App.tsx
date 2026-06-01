@@ -74,7 +74,7 @@ function App() {
           <Route
             path="users"
             element={
-              <RequirePermission keys={['users.read', 'users.manage']}>
+              <RequirePermission routeKey="users">
                 <Users />
               </RequirePermission>
             }
@@ -82,7 +82,7 @@ function App() {
           <Route
             path="roles"
             element={
-              <RequirePermission keys="roles.manage">
+              <RequirePermission routeKey="roles">
                 <Roles />
               </RequirePermission>
             }
@@ -90,7 +90,7 @@ function App() {
           <Route
             path="settings"
             element={
-              <RequirePermission keys="panel.settings.read">
+              <RequirePermission routeKey="settings">
                 <Settings />
               </RequirePermission>
             }
@@ -101,11 +101,12 @@ function App() {
           <Route
             path="blueprints"
             element={
-              <RequirePermission keys="panel.settings.read">
+              <RequirePermission routeKey="blueprints">
                 <Blueprints />
               </RequirePermission>
             }
           />
+          <Route path="*" element={<RequirePermission routeKey="missing-route" />} />
         </Route>
       </Routes>
       </Suspense>
