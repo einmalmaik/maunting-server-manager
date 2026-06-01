@@ -59,7 +59,7 @@ def _minimal_valid_dict() -> dict:
 def test_native_dayz_validates() -> None:
     blueprint = load_blueprint_file(_NATIVE_DIR / "dayz.blueprint.json")
     assert blueprint.meta.id == "dayz"
-    assert blueprint.runtime.image == "ghcr.io/parkervcp/yolks:steamcmd"
+    assert blueprint.runtime.image == "ghcr.io/parkervcp/steamcmd:debian"
     assert "-profiles=profiles" in blueprint.runtime.startup
     assert "-profiles=/data/profiles" not in blueprint.runtime.startup
     assert blueprint.runtime.ensureDirs == ["profiles"]

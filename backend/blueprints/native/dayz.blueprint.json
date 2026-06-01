@@ -8,7 +8,7 @@
     "description": "DayZ Linux Dedicated Server (App-ID 223350, Workshop 221100). Benötigt einen konfigurierten globalen Steam-Account unter Settings (Steam Guard muss deaktiviert sein)."
   },
   "runtime": {
-    "image": "ghcr.io/parkervcp/yolks:steamcmd",
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
     "workdir": "/data",
     "env": {},
     "startup": "./DayZServer -config=serverDZ.cfg -port={GAME_PORT} -BEpath=battleye -profiles=profiles -dologs -adminlog -netlog -freezecheck {MOD_ARG}",
