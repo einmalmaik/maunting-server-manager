@@ -396,6 +396,18 @@ def test_dayz_blueprint_post_install_symlinks_mod_and_keys(tmp_path) -> None:
     assert result == {}
 
 
+def test_prepare_runtime_creates_blueprint_ensure_dirs(tmp_path) -> None:
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["runtime"]["ensureDirs"] = ["profiles", "logs/runtime"]
+    plugin = BlueprintPlugin(load_blueprint_dict(bp_dict))
+    server = _FakeServer(id=77, install_dir=str(tmp_path))
+
+    plugin.prepare_runtime(server)
+
+    assert (tmp_path / "profiles").is_dir()
+    assert (tmp_path / "logs" / "runtime").is_dir()
+
+
 def test_dayz_blueprint_cleanup_removes_mod_symlinks_and_workshop_cache(tmp_path) -> None:
     plugin = _native_plugin("dayz")
     server = _FakeServer(id=77, install_dir=str(tmp_path))

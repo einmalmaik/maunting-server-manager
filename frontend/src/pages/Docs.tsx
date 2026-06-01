@@ -167,7 +167,8 @@ export function Docs() {
       "image": "cm2network/steamcmd:root",
       "workdir": "/data",
       "env": {},
-      "startup": "/data/DayZServer -profiles=/data/profiles -port={GAME_PORT}"
+      "startup": "/data/DayZServer -config=serverDZ.cfg -port={GAME_PORT} -BEpath=battleye -profiles=profiles -dologs -adminlog -netlog -freezecheck",
+      "ensureDirs": ["profiles"]
     },
     "ports": [
       { "name": "game", "protocol": "udp" },
@@ -341,6 +342,9 @@ export function Docs() {
               <FieldRow field="runtime.workdir" type="string" required={false}>{t('docs.reference.runtimeWorkdir')}</FieldRow>
               <FieldRow field="runtime.env" type="dict" required={false}>{t('docs.reference.runtimeEnv')}</FieldRow>
               <FieldRow field="runtime.startup" type="string" required={true}>{t('docs.reference.runtimeStartup')}</FieldRow>
+              <FieldRow field="runtime.ensureDirs" type="list" required={false}>
+                {t('docs.reference.runtimeEnsureDirs', 'Relative directories created inside the server directory before each start. Useful for profile, log, cache, or runtime folders expected by startup arguments.')}
+              </FieldRow>
               <FieldRow field="runtime.configPatches" type="list" required={false}>{t('docs.reference.runtimeConfigPatches')}</FieldRow>
             </FieldTable>
 

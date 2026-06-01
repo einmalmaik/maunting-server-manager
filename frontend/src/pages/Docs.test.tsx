@@ -68,6 +68,12 @@ describe('Docs page', () => {
     expect(howtoSection?.textContent).toContain('"category": "bot"')
   })
 
+  it('documents startup-created runtime directories', () => {
+    renderDocs()
+    expect(screen.getByText('runtime.ensureDirs')).toBeInTheDocument()
+    expect(screen.getByText(/Relative directories created inside the server directory/)).toBeInTheDocument()
+  })
+
   it('links to the Blueprints page for upload / replace / delete', () => {
     renderDocs()
     const link = screen.getByTestId('docs-link-blueprints') as HTMLAnchorElement

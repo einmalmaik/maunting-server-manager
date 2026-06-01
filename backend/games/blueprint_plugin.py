@@ -247,6 +247,11 @@ class BlueprintPlugin(GamePlugin):
 
     def prepare_runtime(self, server) -> None:
         base = Path(server.install_dir).resolve()
+        for rel_path in self._blueprint.runtime.ensureDirs:
+            target = (base / rel_path).resolve()
+            target.relative_to(base)
+            target.mkdir(parents=True, exist_ok=True)
+
         ports = self._server_ports(server)
         values = {
             "GAME_PORT": ports.get("game"),

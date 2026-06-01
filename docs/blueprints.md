@@ -100,7 +100,8 @@ konfiguriert sein.
     "image": "cm2network/steamcmd:root",
     "workdir": "/data",
     "env": {},
-    "startup": "/data/DayZServer -profiles=/data/profiles -port={GAME_PORT}"
+    "startup": "/data/DayZServer -config=serverDZ.cfg -port={GAME_PORT} -BEpath=battleye -profiles=profiles -dologs -adminlog -netlog -freezecheck",
+    "ensureDirs": ["profiles"]
   },
   "ports": [
     { "name": "game", "protocol": "udp" },
@@ -291,7 +292,13 @@ Beispiel Conan Exiles:
 
 Wenn `source` ein Glob ist, muss `target` `{BASENAME}` enthalten.
 
-## Runtime-Config-Patches
+## Runtime-Verzeichnisse und Config-Patches
+
+`runtime.ensureDirs` legt vor jedem Containerstart relative Ordner innerhalb
+des Server-Verzeichnisses an. Das ist für Spiele gedacht, die Profile-, Log-,
+Cache- oder Runtime-Verzeichnisse per Startargument erwarten, aber nicht immer
+selbst zuverlässig anlegen. Pfade sind strikt relativ, absolute Pfade und `..`
+werden abgelehnt.
 
 `runtime.configPatches` patcht Dateien vor jedem Containerstart. Jeder Patch
 braucht die Pflichtfelder `type`, `file`, `section`, `key` und `value`.

@@ -40,10 +40,19 @@ def test_dayz_no_mods_matches_legacy_argv() -> None:
     server = _stub_server(game_port=2302)
     with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
         argv = plugin.build_container_command(server)
-    # NOTE: -profiles=/data/profiles is the new intentional baseline (standard DayZ practice;
-    # see dayz.blueprint.json). The snapshot contract was deliberately evolved; this is NOT a regression.
-    # Decision: keep the profiles flag (improves server file layout, matches community hosting docs).
-    assert argv == ["/data/DayZServer", "-profiles=/data/profiles", "-port=2302"]
+    # NOTE: DayZ Linux documents -profiles=profiles relative to the server workdir.
+    # MSM creates install_dir/profiles before start so the bind-mount path exists.
+    assert argv == [
+        "/data/DayZServer",
+        "-config=serverDZ.cfg",
+        "-port=2302",
+        "-BEpath=battleye",
+        "-profiles=profiles",
+        "-dologs",
+        "-adminlog",
+        "-netlog",
+        "-freezecheck",
+    ]
 
 
 def test_dayz_with_mods_matches_legacy_argv() -> None:
@@ -51,7 +60,18 @@ def test_dayz_with_mods_matches_legacy_argv() -> None:
     server = _stub_server(game_port=2302)
     with patch("games.blueprint_plugin.active_mod_ids", return_value=["12345", "67890"]):
         argv = plugin.build_container_command(server)
-    assert argv == ["/data/DayZServer", "-profiles=/data/profiles", "-port=2302", "-mod=12345;67890;"]
+    assert argv == [
+        "/data/DayZServer",
+        "-config=serverDZ.cfg",
+        "-port=2302",
+        "-BEpath=battleye",
+        "-profiles=profiles",
+        "-dologs",
+        "-adminlog",
+        "-netlog",
+        "-freezecheck",
+        "-mod=12345;67890;",
+    ]
 
 
 def test_dayz_without_game_port_omits_port_arg() -> None:
@@ -59,7 +79,16 @@ def test_dayz_without_game_port_omits_port_arg() -> None:
     server = _stub_server(game_port=None)
     with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
         argv = plugin.build_container_command(server)
-    assert argv == ["/data/DayZServer", "-profiles=/data/profiles"]
+    assert argv == [
+        "/data/DayZServer",
+        "-config=serverDZ.cfg",
+        "-BEpath=battleye",
+        "-profiles=profiles",
+        "-dologs",
+        "-adminlog",
+        "-netlog",
+        "-freezecheck",
+    ]
 
 
 def test_conan_full_argv_matches_legacy() -> None:

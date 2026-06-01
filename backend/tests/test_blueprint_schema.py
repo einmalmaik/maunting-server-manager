@@ -60,6 +60,9 @@ def test_native_dayz_validates() -> None:
     blueprint = load_blueprint_file(_NATIVE_DIR / "dayz.blueprint.json")
     assert blueprint.meta.id == "dayz"
     assert blueprint.runtime.image == "cm2network/steamcmd:root"
+    assert "-profiles=profiles" in blueprint.runtime.startup
+    assert "-profiles=/data/profiles" not in blueprint.runtime.startup
+    assert blueprint.runtime.ensureDirs == ["profiles"]
     assert blueprint.effective_mods().modInjection.value == "startupArg"
 
 
@@ -82,6 +85,28 @@ def test_runtime_user_accepts_numeric_non_root_uid_gid() -> None:
     d["runtime"]["user"] = "1000:1000"
     bp = load_blueprint_dict(d)
     assert bp.runtime.user == "1000:1000"
+
+
+def test_runtime_ensure_dirs_accepts_safe_relative_paths() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["ensureDirs"] = ["profiles", "logs/runtime"]
+    bp = load_blueprint_dict(d)
+    assert bp.runtime.ensureDirs == ["profiles", "logs/runtime"]
+
+
+@pytest.mark.parametrize("path", ["/profiles", "../profiles", "profiles/../x", "profiles\\x", "", "~/.dayz"])
+def test_runtime_ensure_dirs_rejects_unsafe_paths(path: str) -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["ensureDirs"] = [path]
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
+def test_runtime_ensure_dirs_rejects_duplicates() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["ensureDirs"] = ["profiles", "profiles"]
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
 
 
 @pytest.mark.parametrize("user", ["0:0", "0:1000", "1000:0", "container", "1000", "1000:container"])

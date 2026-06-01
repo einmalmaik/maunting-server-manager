@@ -285,6 +285,7 @@ class BlueprintRuntime(BaseModel):
     user: str | None = Field(default=None, max_length=32)
     env: dict[str, str] = Field(default_factory=dict)
     startup: str = Field(min_length=1, max_length=2048)
+    ensureDirs: list[str] = Field(default_factory=list, max_length=16)
     configPatches: list["BlueprintConfigPatch"] = Field(default_factory=list, max_length=32)
 
     @field_validator("image")
@@ -391,6 +392,21 @@ class BlueprintRuntime(BaseModel):
                     f"runtime.startup: Token '{{{token}}}' nicht in der Whitelist "
                     f"({sorted(_ALLOWED_STARTUP_TOKENS)} + ENV.<KEY> + CUSTOM_PORT_<N>)."
                 )
+        return v
+
+    @field_validator("ensureDirs")
+    @classmethod
+    def _check_ensure_dirs(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        for path in v:
+            if not _is_safe_relative_path(path):
+                raise ValueError(
+                    f"runtime.ensureDirs enthält unsicheren Pfad '{path}' "
+                    "(absolute/'..'-Pfade sind verboten)."
+                )
+            if path in seen:
+                raise ValueError(f"runtime.ensureDirs: Duplikat '{path}'.")
+            seen.add(path)
         return v
 
 
@@ -824,6 +840,8 @@ COMMENTED_TEMPLATE_DE: str = """{
     },
     // Startbefehl. Erlaubte Platzhalter: {GAME_PORT}, {INSTALL_DIR}, {ENV.SERVER_PORT} etc. Keine Shell-Metazeichen!
     "startup": "./start_server.sh --port {GAME_PORT}",
+    // Relative Ordner, die MSM vor jedem Start im Server-Verzeichnis anlegt (z.B. profile/log dirs)
+    "ensureDirs": [],
     // Dateien, die vor dem Start automatisch gepatcht werden sollen (z.B. INI-Dateien)
     "configPatches": []
   },
@@ -903,6 +921,8 @@ COMMENTED_TEMPLATE_EN: str = """{
     },
     // Startup command. Allowed placeholders: {GAME_PORT}, {INSTALL_DIR}, {ENV.SERVER_PORT} etc. No shell meta-characters!
     "startup": "./start_server.sh --port {GAME_PORT}",
+    // Relative directories MSM creates in the server directory before each start (e.g. profile/log dirs)
+    "ensureDirs": [],
     // Files that should be automatically patched before startup (e.g., INI files)
     "configPatches": []
   },
