@@ -352,8 +352,9 @@ export function Docs() {
             <FieldTable>
               <FieldRow field="type" type="enum" required={true}>{t('docs.reference.configPatchType')}</FieldRow>
               <FieldRow field="file" type="string" required={true}>{t('docs.reference.configPatchFile')}</FieldRow>
-              <FieldRow field="section" type="string" required={true}>{t('docs.reference.configPatchSection')}</FieldRow>
-              <FieldRow field="key" type="string" required={true}>{t('docs.reference.configPatchKey')}</FieldRow>
+              <FieldRow field="section" type="string" required={false}>{t('docs.reference.configPatchSection')}</FieldRow>
+              <FieldRow field="key" type="string" required={false}>{t('docs.reference.configPatchKey')}</FieldRow>
+              <FieldRow field="regex" type="string" required={false}>{t('docs.reference.configPatchRegex')}</FieldRow>
               <FieldRow field="value" type="string" required={true}>{t('docs.reference.configPatchValue')}</FieldRow>
             </FieldTable>
 

@@ -43,7 +43,7 @@ def test_dayz_no_mods_matches_legacy_argv() -> None:
     # NOTE: DayZ Linux documents -profiles=profiles relative to the server workdir.
     # MSM creates install_dir/profiles before start so the bind-mount path exists.
     assert argv == [
-        "/data/DayZServer",
+        "./DayZServer",
         "-config=serverDZ.cfg",
         "-port=2302",
         "-BEpath=battleye",
@@ -61,7 +61,7 @@ def test_dayz_with_mods_matches_legacy_argv() -> None:
     with patch("games.blueprint_plugin.active_mod_ids", return_value=["12345", "67890"]):
         argv = plugin.build_container_command(server)
     assert argv == [
-        "/data/DayZServer",
+        "./DayZServer",
         "-config=serverDZ.cfg",
         "-port=2302",
         "-BEpath=battleye",
@@ -80,7 +80,7 @@ def test_dayz_without_game_port_omits_port_arg() -> None:
     with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
         argv = plugin.build_container_command(server)
     assert argv == [
-        "/data/DayZServer",
+        "./DayZServer",
         "-config=serverDZ.cfg",
         "-BEpath=battleye",
         "-profiles=profiles",

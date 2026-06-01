@@ -126,6 +126,7 @@ class BlueprintModListContent(str, Enum):
 
 class BlueprintConfigPatchType(str, Enum):
     INI = "ini"
+    REGEX = "regex"
 
 
 # ── Helpers (statisch genug fuer KISS) ─────────────────────────────────────
@@ -697,8 +698,9 @@ class BlueprintConfigPatch(BaseModel):
 
     type: BlueprintConfigPatchType
     file: str = Field(min_length=1, max_length=512)
-    section: str = Field(min_length=1, max_length=128)
-    key: str = Field(min_length=1, max_length=128)
+    section: str | None = Field(default=None, max_length=128)
+    key: str | None = Field(default=None, max_length=128)
+    regex: str | None = Field(default=None, max_length=512)
     value: str = Field(min_length=1, max_length=512)
 
     @field_validator("file")
@@ -710,9 +712,24 @@ class BlueprintConfigPatch(BaseModel):
 
     @field_validator("section", "key")
     @classmethod
-    def _check_ini_name(cls, v: str) -> str:
+    def _check_ini_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         if "\x00" in v or "\n" in v or "\r" in v or "[" in v or "]" in v or "=" in v:
             raise ValueError("INI-Section/Key enthaelt verbotene Zeichen.")
+        return v
+
+    @field_validator("regex")
+    @classmethod
+    def _check_regex(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if "\x00" in v or "\n" in v or "\r" in v:
+            raise ValueError("regex enthaelt verbotene Zeichen.")
+        try:
+            re.compile(v)
+        except re.error as e:
+            raise ValueError(f"Ungueltiger regulaerer Ausdruck: {e}")
         return v
 
     @field_validator("value")
@@ -727,6 +744,24 @@ class BlueprintConfigPatch(BaseModel):
                     f"runtime.configPatches.value: Token '{{{token}}}' nicht erlaubt."
                 )
         return v
+
+    @model_validator(mode="after")
+    def _check_fields(self) -> "BlueprintConfigPatch":
+        if self.type == BlueprintConfigPatchType.INI:
+            if self.section is None or self.section == "":
+                raise ValueError("Fuer den Patch-Typ 'ini' ist das Feld 'section' erforderlich.")
+            if self.key is None or self.key == "":
+                raise ValueError("Fuer den Patch-Typ 'ini' ist das Feld 'key' erforderlich.")
+            if self.regex is not None:
+                raise ValueError("Fuer den Patch-Typ 'ini' darf das Feld 'regex' nicht gesetzt sein.")
+        elif self.type == BlueprintConfigPatchType.REGEX:
+            if self.regex is None or self.regex == "":
+                raise ValueError("Fuer den Patch-Typ 'regex' ist das Feld 'regex' erforderlich.")
+            if self.section is not None:
+                raise ValueError("Fuer den Patch-Typ 'regex' darf das Feld 'section' nicht gesetzt sein.")
+            if self.key is not None:
+                raise ValueError("Fuer den Patch-Typ 'regex' darf das Feld 'key' nicht gesetzt sein.")
+        return self
 
 
 class Blueprint(BaseModel):

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import shutil
 import threading
 from pathlib import Path
@@ -269,8 +270,6 @@ class BlueprintPlugin(GamePlugin):
                     values[f"{k.upper()}_PORT"] = v
 
         for patch in self._blueprint.runtime.configPatches:
-            if patch.type != BlueprintConfigPatchType.INI:
-                continue
             target = (base / patch.file).resolve()
             target.relative_to(base)
             value = patch.value
@@ -284,7 +283,23 @@ class BlueprintPlugin(GamePlugin):
                     value = value.replace(placeholder, str(port))
             if skip:
                 continue
-            set_ini_value(str(target), patch.section, patch.key, value)
+
+            if patch.type == BlueprintConfigPatchType.INI:
+                assert patch.section is not None
+                assert patch.key is not None
+                set_ini_value(str(target), patch.section, patch.key, value)
+            elif patch.type == BlueprintConfigPatchType.REGEX:
+                assert patch.regex is not None
+                if target.exists():
+                    try:
+                        content = target.read_text(encoding="utf-8")
+                        new_content = re.sub(patch.regex, value, content)
+                        target.write_text(new_content, encoding="utf-8")
+                    except Exception as e:
+                        _append_console_log(
+                            server.id,
+                            f"[MSM] Regex-Patching fuer {patch.file} fehlgeschlagen: {e}\n",
+                        )
 
     def build_port_publishes(self, server) -> list[PortPublish]:
         """Port-Publishes aus der Blueprint statt UDP-Hartkodierung.

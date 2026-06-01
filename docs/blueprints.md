@@ -300,9 +300,36 @@ Cache- oder Runtime-Verzeichnisse per Startargument erwarten, aber nicht immer
 selbst zuverlässig anlegen. Pfade sind strikt relativ, absolute Pfade und `..`
 werden abgelehnt.
 
-`runtime.configPatches` patcht Dateien vor jedem Containerstart. Jeder Patch
-braucht die Pflichtfelder `type`, `file`, `section`, `key` und `value`.
-Aktuell ist nur `type=ini` unterstützt.
+`runtime.configPatches` patcht Dateien vor jedem Containerstart. Es unterstützt zwei Typen:
+
+### 1. Sektion-basiert (`type=ini`)
+Für klassische INI-Dateien. Jeder Patch braucht die Felder `type`, `file`, `section`, `key` und `value`.
+
+Beispiel:
+```json
+{
+  "type": "ini",
+  "file": "ConanSandbox/Saved/Config/LinuxServer/Engine.ini",
+  "section": "URL",
+  "key": "Port",
+  "value": "{GAME_PORT}"
+}
+```
+
+### 2. Regex-basiert (`type=regex`)
+Für alle anderen Textdateien (z. B. Bohemia-`.cfg`, `.properties`, `.txt`, `.json`). Sucht und ersetzt Muster per regulärem Ausdruck. Jeder Patch braucht die Felder `type`, `file`, `regex` und `value` (`section` und `key` dürfen hier nicht angegeben werden). 
+
+Im `value`-Feld können reguläre Backreferences (z. B. `\\g<1>`) und Port-Platzhalter verwendet werden.
+
+Beispiel (DayZ `serverDZ.cfg`):
+```json
+{
+  "type": "regex",
+  "file": "serverDZ.cfg",
+  "regex": "(steamQueryPort\\s*=\\s*)\\d+;",
+  "value": "\\g<1>{QUERY_PORT};"
+}
+```
 
 Erlaubte Tokens in `value`:
 
@@ -316,18 +343,6 @@ Erlaubte Tokens in `value`:
 Nicht erlaubt in `value` sind `{INSTALL_DIR}`, `{MOD_ARG}` und `{ENV.<KEY>}`.
 Diese Tokens gelten nur für `runtime.startup` beziehungsweise gar nicht für
 Config-Patches.
-
-Beispiel:
-
-```json
-{
-  "type": "ini",
-  "file": "ConanSandbox/Saved/Config/LinuxServer/Engine.ini",
-  "section": "URL",
-  "key": "Port",
-  "value": "{GAME_PORT}"
-}
-```
 
 Wenn ein Port-Token leer ist, wird dieser Patch übersprungen.
 
