@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { Card } from '@/components/ui/Card';
-import { LegalFooter } from '@/components/LegalFooter';
+import { VersionFooter } from '@/components/VersionFooter';
 
 export function Privacy() {
   const { isAuthenticated } = useAuthStore();
@@ -82,7 +82,7 @@ export function Privacy() {
           </div>
           <h1 className="text-3xl font-headline font-bold mb-8">Datenschutzerklärung</h1>
           {cardContent}
-          <LegalFooter className="mt-8" />
+          <VersionFooter className="mt-8" />
         </div>
       </div>
     );
