@@ -10,9 +10,13 @@
   "runtime": {
     "image": "ghcr.io/parkervcp/steamcmd:debian",
     "workdir": "/data",
-    "env": {},
+    "env": {
+      "HOME": "/data",
+      "LD_LIBRARY_PATH": ".:./linux64:/usr/lib32:/usr/lib/x86_64-linux-gnu"
+    },
     "startup": "./DayZServer -config=serverDZ.cfg -port={GAME_PORT} -BEpath=battleye -profiles=profiles -dologs -adminlog -netlog -freezecheck {MOD_ARG}",
-    "ensureDirs": ["profiles"],
+    "ensureDirs": ["profiles", "battleye", "keys"],
+    "requiredFiles": ["DayZServer", "serverDZ.cfg"],
     "configPatches": [
       {
         "type": "regex",

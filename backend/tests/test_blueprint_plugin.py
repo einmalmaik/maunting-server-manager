@@ -396,6 +396,68 @@ def test_dayz_blueprint_post_install_symlinks_mod_and_keys(tmp_path) -> None:
     assert result == {}
 
 
+def test_dayz_blueprint_renders_runtime_env_command_and_dirs(tmp_path) -> None:
+    plugin = _native_plugin("dayz")
+    server = _FakeServer(id=77, install_dir=str(tmp_path), game_port=2302, query_port=27016)
+    server.ports = [
+        SimpleNamespace(role="game", port=2302, protocol="udp"),
+        SimpleNamespace(role="query", port=27016, protocol="udp"),
+        SimpleNamespace(role="rcon", port=2305, protocol="tcp"),
+    ]
+    (tmp_path / "DayZServer").write_text("server", encoding="utf-8")
+    (tmp_path / "serverDZ.cfg").write_text("steamQueryPort = 27016;", encoding="utf-8")
+
+    plugin.prepare_runtime(server)
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        command = plugin.build_container_command(server)
+    env = plugin.build_container_env(server)
+
+    assert command[0] == "./DayZServer"
+    assert "-port=2302" in command
+    assert "-profiles=profiles" in command
+    assert plugin.container_workdir(server) == "/data"
+    assert env["HOME"] == "/data"
+    assert "./linux64" in env["LD_LIBRARY_PATH"]
+    assert (tmp_path / "profiles").is_dir()
+    assert (tmp_path / "battleye").is_dir()
+    assert (tmp_path / "keys").is_dir()
+
+
+def test_dayz_blueprint_runtime_preflight_rejects_missing_required_files(tmp_path) -> None:
+    plugin = _native_plugin("dayz")
+    server = _FakeServer(id=77, install_dir=str(tmp_path), game_port=2302, query_port=27016)
+
+    try:
+        plugin.prepare_runtime(server)
+        raise AssertionError("prepare_runtime should reject incomplete DayZ installs")
+    except RuntimeError as exc:
+        message = str(exc)
+
+    assert "Runtime-Dateien fehlen" in message
+    assert "DayZServer" in message
+    assert "serverDZ.cfg" in message
+    assert str(tmp_path) not in message
+
+
+def test_dayz_start_does_not_run_container_when_required_files_missing(tmp_path) -> None:
+    plugin = _native_plugin("dayz")
+    server = _FakeServer(id=77, install_dir=str(tmp_path), game_port=2302, query_port=27016)
+    server.ports = [
+        SimpleNamespace(role="game", port=2302, protocol="udp"),
+        SimpleNamespace(role="query", port=27016, protocol="udp"),
+        SimpleNamespace(role="rcon", port=2305, protocol="tcp"),
+    ]
+
+    with patch("games.base.docker_service.is_available", return_value=True), \
+         patch("games.base.docker_service.run_container") as run_container:
+        result = plugin.start(server)
+
+    assert "error" in result
+    assert "Runtime-Dateien fehlen" in result["error"]
+    assert str(tmp_path) not in result["error"]
+    run_container.assert_not_called()
+
+
 def test_prepare_runtime_creates_blueprint_ensure_dirs(tmp_path) -> None:
     bp_dict = _mc_paper_blueprint()
     bp_dict["runtime"]["ensureDirs"] = ["profiles", "logs/runtime"]

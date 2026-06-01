@@ -201,6 +201,30 @@ class TestRunContainer:
         client.images.get.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
         client.containers.run.assert_called_once()
 
+    def test_run_container_reports_immediate_exit_with_code_and_logs(self):
+        client = MagicMock()
+        container = MagicMock()
+        container.id = "abc"
+        container.attrs = {"State": {"Status": "exited", "ExitCode": 127}}
+        container.logs.return_value = b"./DayZServer: error while loading shared libraries\n"
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = container
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)), \
+             patch("services.docker_service.time.sleep"):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/parkervcp/steamcmd:debian",
+                command=["./DayZServer"],
+                startup_check_seconds=2.0,
+            )
+
+        assert result["ok"] is False
+        assert result["exit_code"] == 127
+        assert "Exit-Code 127" in result["error"]
+        assert "loading shared libraries" in result["error"]
+        container.reload.assert_called_once()
+
     def test_run_container_fails_clearly_when_remote_and_local_image_missing(self):
         client = MagicMock()
         existing = MagicMock()

@@ -237,6 +237,8 @@
       "installing": "wird installiert",
       "updating": "wird aktualisiert",
       "error": "Fehler",
+      "failed": "Fehlgeschlagen",
+      "queued": "In Warteschlange",
       "awaiting_files": "wartet auf Dateien",
       "stopping": "Wird gestoppt...",
       "restarting": "Wird neu gestartet..."

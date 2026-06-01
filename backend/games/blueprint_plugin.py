@@ -301,6 +301,19 @@ class BlueprintPlugin(GamePlugin):
                             f"[MSM] Regex-Patching fuer {patch.file} fehlgeschlagen: {e}\n",
                         )
 
+        missing_required_files: list[str] = []
+        for rel_path in self._blueprint.runtime.requiredFiles:
+            target = (base / rel_path).resolve()
+            target.relative_to(base)
+            if not target.is_file():
+                missing_required_files.append(rel_path)
+        if missing_required_files:
+            files = ", ".join(missing_required_files)
+            raise RuntimeError(
+                f"Runtime-Dateien fehlen: {files}. Installation unvollstaendig; "
+                "bitte Server neu installieren und Steam-Account/App-Zugriff pruefen."
+            )
+
     def build_port_publishes(self, server) -> list[PortPublish]:
         """Port-Publishes aus der Blueprint statt UDP-Hartkodierung.
 

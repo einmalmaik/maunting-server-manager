@@ -264,9 +264,11 @@ def classify_steamcmd_failure(output: str, fallback_error: str = "") -> dict[str
         return {
             "error_code": "steamcmd_missing_configuration",
             "error": (
-                "SteamCMD meldet Missing Configuration. Mögliche Ursachen "
-                "(nicht verifiziert): fehlende/inkompatible App-Metadaten, falsche Plattform, "
-                "Account-/Lizenzproblem, Plattenplatz/Quota oder paralleler Zugriff."
+                "SteamCMD meldet Missing Configuration. Prüfe bei loginpflichtigen "
+                "Steam-Spielen zuerst, ob im Panel ein Steam-Account hinterlegt ist "
+                "und dieser Account Zugriff auf die Server-App hat. Weitere mögliche "
+                "Ursachen (nicht verifiziert): fehlende/inkompatible App-Metadaten, "
+                "falsche Plattform, Plattenplatz/Quota oder paralleler Zugriff."
             ),
         }
     return None
@@ -309,7 +311,7 @@ def run_steamcmd_install(
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]
-        secrets_to_redact = [password]
+        secrets_to_redact = [username, password]
     else:
         login_args = ["+login", "anonymous"]
         secrets_to_redact = []
@@ -397,7 +399,7 @@ def run_steamcmd_workshop_download(
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]
-        secrets_to_redact = [password]
+        secrets_to_redact = [username, password]
     else:
         login_args = ["+login", "anonymous"]
         secrets_to_redact = []
@@ -862,6 +864,7 @@ class GamePlugin(ABC):
             _append_console_log(
                 server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
             )
+            return {"error": str(e)}
 
         uid, gid = self.container_uid_gid(server)
         run_user = f"{uid}:{gid}"
@@ -894,6 +897,7 @@ class GamePlugin(ABC):
             workdir=self.container_workdir(server),
             read_only_rootfs=self.container_read_only_rootfs,
             tmpfs_paths=self.container_tmpfs_paths(server),
+            startup_check_seconds=2.0,
         )
         if not result["ok"]:
             _append_console_log(server.id, f"[MSM] Container-Start fehlgeschlagen: {result['error']}\n")

@@ -1,4 +1,3 @@
-import asyncio
 import os
 import shutil
 import threading
@@ -28,7 +27,11 @@ from services.network_interfaces_service import default_bind_ip, list_host_inter
 from services.port_allocation_service import PortConflictError, allocate_ports
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.scheduler_service import sync_server_restart_schedule
-from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
+from services.server_lifecycle_service import (
+    LifecycleNotification,
+    queue_lifecycle_operation,
+    should_preserve_lifecycle_status,
+)
 from services.console_stream_service import console_event_stream
 from services.install_update_lock_service import (
     INSTALL_UPDATE_ALREADY_RUNNING,
@@ -540,101 +543,12 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
                 ),
             )
 
-    lock = get_server_lifecycle_lock(server.id)
-    async with lock:
-        mod_updates: list[dict] = []
-        try:
-            plugin.prepare_for_updates(server)
-            mod_updates = plugin.check_for_mod_updates(server)
-        except Exception as exc:
-            _append_console_log(
-                server.id,
-                f"[MSM] prepare_for_updates / Mod-Update-Check beim Start fehlgeschlagen (nicht kritisch): {exc}\n",
-            )
-            mod_updates = []
-
-        update_lock_acquired = False
-        if mod_updates:
-            update_lock_acquired = try_acquire_install_update_lock(
-                server.id, "start_update"
-            )
-            if not update_lock_acquired:
-                raise _install_update_busy_error()
-
-        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
-        try:
-            # Firewall-Regeln öffnen vor Container-Start.
-            open_ports(server.name, ports_list)
-            iptables_accept_server(
-                server.name,
-                server.public_bind_ip,
-                ports_list,
-            )
-
-            # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
-            # async-Route blockieren sie den gesamten Uvicorn-Event-Loop - alle anderen
-            # Requests hängen mit. Daher in einen Threadpool auslagern.
-
-            # Updater-Hook vor jedem Start (vor allem für Workshop-Mod-Checks nach Neustart)
-            # Optional: Auch im normalen Start-Pfad Workshop-Mod-Updates ausführen (KISS,
-            # falls ein Server lange stand und in der Zwischenzeit Mod-Updates auf Steam
-            # erschienen sind). Primär aber der Restart-Pfad (wie Server-Datei-Updates).
-            try:
-                # Optionale Execution im direkten Start (neben dem Pflicht-Restart-Pfad)
-                if mod_updates:
-                    _append_console_log(
-                        server.id,
-                        f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt – "
-                        "führe Download via install_mod/run_steamcmd_workshop_download aus...\n"
-                    )
-                    mod_res = await asyncio.to_thread(
-                        plugin.perform_workshop_mod_updates, server
-                    )
-                    if not mod_res.get("ok", False):
-                        _append_console_log(
-                            server.id,
-                            f"[MSM] Workshop-Mod-Update beim Start hatte Probleme (nicht kritisch): {mod_res.get('error') or mod_res}\n"
-                        )
-            except Exception as exc:
-                _append_console_log(
-                    server.id,
-                    f"[MSM] prepare_for_updates / Mod-Update beim Start fehlgeschlagen (nicht kritisch): {exc}\n",
-                )
-        finally:
-            if update_lock_acquired:
-                release_install_update_lock(server.id)
-
-        db.refresh(server)
-
-        # Pre-Start-Backup (best-effort, nach Permission + Lock, vor docker run)
-        if server.backup_on_start:
-            from services.backup_service import run_backup
-            try:
-                run_backup(server.id, db, timeout_seconds=300)
-            except Exception:
-                logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
-                # NO Hard-Fail: Server startet trotzdem (best-effort)
-
-        # AUFGABE 4A: transient status VOR Docker-Operation
-        server.status = "starting"
-        db.commit()
-
-        result = await asyncio.to_thread(plugin.start, server)
-        if "error" in result:
-            # Container-Start fehlgeschlagen - Firewall-Regeln wieder schließen.
-            close_ports(ports_list)
-            iptables_revoke_server(
-                server.name,
-                server.public_bind_ip,
-                ports_list,
-            )
-            raise HTTPException(status_code=500, detail=result["error"])
-        server.status = "running"
-        server.last_started_at = _utcnow()
-        db.commit()
-        if EmailService.is_configured() and user.email_notifications:
-            await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestartet")
-        return {"message": "Start-Befehl gesendet", "status": server.status, **result}
+    return queue_lifecycle_operation(
+        db,
+        server,
+        "start",
+        LifecycleNotification(user.email, user.username, user.email_notifications),
+    )
 
 
 @router.post("/{server_id}/stop")
@@ -647,35 +561,12 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
 
-    # WICHTIG: Lock mit start/restart teilen (via get_server_lifecycle_lock).
-    # Verhindert Race auf stop + close/revoke vs. concurrent start/restart/firewall.
-    # Früher fehlte hier jeder Lock → TOCTOU mit Restart-Pfad.
-    lock = get_server_lifecycle_lock(server.id)
-    async with lock:
-        # AUFGABE 4A: transient status VOR Docker-Operation (für Echtzeit-Feedback)
-        server.status = "stopping"
-        db.commit()
-        # Siehe start_server: docker stop ist synchron und kann bis zum
-        # Graceful-Timeout dauern. Threadpool hält den Event-Loop frei.
-        result = await asyncio.to_thread(plugin.stop, server)
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
-        server.status = "stopped"
-        server.last_started_at = None
-        db.commit()
-
-        # Firewall- und iptables-Regeln nach Container-Stop schließen.
-        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
-        close_ports(ports_list)
-        iptables_revoke_server(
-            server.name,
-            server.public_bind_ip or "",
-            ports_list,
-        )
-
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestoppt")
-    return {"message": "Stop-Befehl gesendet", "status": server.status, **result}
+    return queue_lifecycle_operation(
+        db,
+        server,
+        "stop",
+        LifecycleNotification(user.email, user.username, user.email_notifications),
+    )
 
 
 @router.post("/{server_id}/restart")
@@ -687,11 +578,12 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    # AUFGABE 4A: transient now set only inside locked service (before first docker stop) for consistency with stop/start + to avoid duplicate commit / small TOCTOU (review Issue 5/10)
-    result = await restart_server_with_updates(db, server)
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_server_status_notification(user.email, user.username, server.name, "neugestartet")
-    return result
+    return queue_lifecycle_operation(
+        db,
+        server,
+        "restart",
+        LifecycleNotification(user.email, user.username, user.email_notifications),
+    )
 
 
 @router.post("/{server_id}/kill")
@@ -704,23 +596,12 @@ async def kill_server(server_id: int, db: Session = Depends(get_db), user: User 
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
-    lock = get_server_lifecycle_lock(server.id)
-    async with lock:
-        from games.base import container_name_for
-        from services import docker_service
-        container = container_name_for(server.id)
-        # AUFGABE fix (review Issue 1/2 + Security Finding 1): transient "stopping" (reuses existing amber/disable UI logic for in-flight kill; KISS no new i18n/statusClasses) + commit BEFORE docker remove (prevents stale "running" on hang, matches stop/start/restart invariant). Result checked; error before any final DB mutation (no false success).
-        server.status = "stopping"
-        db.commit()
-        result = docker_service.remove(container, force=True)
-        if isinstance(result, dict) and "error" in result:
-            raise HTTPException(status_code=500, detail="Erzwungenes Beenden fehlgeschlagen")
-        server.status = "stopped"
-        server.status_message = "Erzwungen beendet"
-        server.last_started_at = None
-        db.commit()
-
-    return {"message": "Server wurde erzwungen beendet"}
+    return queue_lifecycle_operation(
+        db,
+        server,
+        "kill",
+        LifecycleNotification(user.email, user.username, user.email_notifications),
+    )
 
 
 def _disk_free_mb(path: str) -> int | None:
@@ -831,9 +712,9 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
             **_server_restart_status_fields(server),
         }
     plugin_status = plugin.get_status(server)
-    # installing/updating/error nicht ueberschreiben - Background-Thread oder
-    # Admin setzen den Status selbst zurueck, wenn die Operation abgeschlossen ist
-    if server.status not in ("installing", "updating", "error"):
+    # installing/updating/error/failed nicht ueberschreiben. Laufende Lifecycle-
+    # Jobs behalten ihre transienten Stati, bis der Background-Worker finalisiert.
+    if server.status not in ("installing", "updating", "error", "failed") and not should_preserve_lifecycle_status(server.id, server.status):
         server.status = plugin_status.status
         server.status_message = plugin_status.message or ""
         if plugin_status.status == "running" and plugin_status.started_at is not None:

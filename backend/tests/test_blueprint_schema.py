@@ -62,7 +62,10 @@ def test_native_dayz_validates() -> None:
     assert blueprint.runtime.image == "ghcr.io/parkervcp/steamcmd:debian"
     assert "-profiles=profiles" in blueprint.runtime.startup
     assert "-profiles=/data/profiles" not in blueprint.runtime.startup
-    assert blueprint.runtime.ensureDirs == ["profiles"]
+    assert blueprint.runtime.ensureDirs == ["profiles", "battleye", "keys"]
+    assert blueprint.runtime.requiredFiles == ["DayZServer", "serverDZ.cfg"]
+    assert blueprint.runtime.env["HOME"] == "/data"
+    assert "./linux64" in blueprint.runtime.env["LD_LIBRARY_PATH"]
     assert blueprint.effective_mods().modInjection.value == "startupArg"
 
 
@@ -105,6 +108,28 @@ def test_runtime_ensure_dirs_rejects_unsafe_paths(path: str) -> None:
 def test_runtime_ensure_dirs_rejects_duplicates() -> None:
     d = _minimal_valid_dict()
     d["runtime"]["ensureDirs"] = ["profiles", "profiles"]
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
+def test_runtime_required_files_accepts_safe_relative_paths() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["requiredFiles"] = ["server.bin", "cfg/server.cfg"]
+    bp = load_blueprint_dict(d)
+    assert bp.runtime.requiredFiles == ["server.bin", "cfg/server.cfg"]
+
+
+@pytest.mark.parametrize("path", ["/server", "../server", "cfg/../server", "cfg\\server", "", "~/.secret"])
+def test_runtime_required_files_rejects_unsafe_paths(path: str) -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["requiredFiles"] = [path]
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
+def test_runtime_required_files_rejects_duplicates() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["requiredFiles"] = ["server.bin", "server.bin"]
     with pytest.raises(BlueprintValidationError):
         load_blueprint_dict(d)
 

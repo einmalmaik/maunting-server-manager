@@ -19,6 +19,7 @@ import os
 import shlex
 import socket
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
@@ -374,6 +375,7 @@ def run_container(
     tmpfs_paths: list[str] | None = None,
     extra_args: list[str] | None = None,
     detach: bool = True,
+    startup_check_seconds: float = 0.0,
 ) -> dict:
     """Startet einen langlebigen Game-Server-Container."""
 
@@ -431,6 +433,25 @@ def run_container(
     try:
         container = client.containers.run(**kwargs)
         container_id = getattr(container, "id", "") if detach else ""
+        if detach and startup_check_seconds > 0:
+            time.sleep(startup_check_seconds)
+            container.reload()
+            state = container.attrs.get("State", {})
+            status = state.get("Status")
+            if status in {"exited", "dead"}:
+                exit_code = int(state.get("ExitCode") or 0)
+                logs = _decode(container.logs(tail=80, stdout=True, stderr=True)).strip()
+                detail = f"Container wurde direkt nach dem Start beendet (Exit-Code {exit_code})."
+                if logs:
+                    detail = f"{detail} Letzte Logs: {logs[:700]}"
+                return {
+                    "ok": False,
+                    "error": detail[:1000],
+                    "stdout": f"{container_id}\n" if container_id else "",
+                    "stderr": "",
+                    "exit_code": exit_code,
+                    "logs": logs[-4000:],
+                }
         return {"ok": True, "stdout": f"{container_id}\n" if container_id else "", "stderr": ""}
     except (DockerException, OSError) as exc:
         logger.warning("docker container run failed")

@@ -287,6 +287,7 @@ class BlueprintRuntime(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     startup: str = Field(min_length=1, max_length=2048)
     ensureDirs: list[str] = Field(default_factory=list, max_length=16)
+    requiredFiles: list[str] = Field(default_factory=list, max_length=16)
     configPatches: list["BlueprintConfigPatch"] = Field(default_factory=list, max_length=32)
 
     @field_validator("image")
@@ -407,6 +408,21 @@ class BlueprintRuntime(BaseModel):
                 )
             if path in seen:
                 raise ValueError(f"runtime.ensureDirs: Duplikat '{path}'.")
+            seen.add(path)
+        return v
+
+    @field_validator("requiredFiles")
+    @classmethod
+    def _check_required_files(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        for path in v:
+            if not _is_safe_relative_path(path):
+                raise ValueError(
+                    f"runtime.requiredFiles enthält unsicheren Pfad '{path}' "
+                    "(absolute/'..'-Pfade sind verboten)."
+                )
+            if path in seen:
+                raise ValueError(f"runtime.requiredFiles: Duplikat '{path}'.")
             seen.add(path)
         return v
 
@@ -877,6 +893,8 @@ COMMENTED_TEMPLATE_DE: str = """{
     "startup": "./start_server.sh --port {GAME_PORT}",
     // Relative Ordner, die MSM vor jedem Start im Server-Verzeichnis anlegt (z.B. profile/log dirs)
     "ensureDirs": [],
+    // Relative Dateien, die nach Installation vor einem Container-Start vorhanden sein muessen
+    "requiredFiles": [],
     // Dateien, die vor dem Start automatisch gepatcht werden sollen (z.B. INI-Dateien)
     "configPatches": []
   },
@@ -958,6 +976,8 @@ COMMENTED_TEMPLATE_EN: str = """{
     "startup": "./start_server.sh --port {GAME_PORT}",
     // Relative directories MSM creates in the server directory before each start (e.g. profile/log dirs)
     "ensureDirs": [],
+    // Relative files that must exist after installation before the container can start
+    "requiredFiles": [],
     // Files that should be automatically patched before startup (e.g., INI files)
     "configPatches": []
   },

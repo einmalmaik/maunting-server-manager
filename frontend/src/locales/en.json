@@ -237,6 +237,8 @@
       "installing": "installing",
       "updating": "updating",
       "error": "error",
+      "failed": "failed",
+      "queued": "queued",
       "awaiting_files": "awaiting files",
       "stopping": "Stopping...",
       "restarting": "Restarting..."

@@ -10,11 +10,14 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from models import Server
 from services.server_lifecycle_service import (
     get_server_lifecycle_lock,
+    queue_lifecycle_operation,
+    reset_lifecycle_jobs_for_tests,
     restart_server_with_updates,
 )
 
@@ -48,3 +51,49 @@ def test_restart_server_with_updates_raises_on_unsupported_game_type():
 
     assert exc.value.status_code == 400
     assert "nicht unterstützt" in str(exc.value.detail)
+
+
+def test_queue_lifecycle_operation_returns_before_worker_runs():
+    fake_server = Server(id=10, game_type="dayz", status="running")
+    fake_db = MagicMock(spec=Session)
+
+    with patch("services.server_lifecycle_service._start_lifecycle_thread") as start_thread:
+        result = queue_lifecycle_operation(fake_db, fake_server, "stop")
+
+    assert result == {
+        "message": "Lifecycle-Aktion wurde queued",
+        "status": "queued",
+        "operation": "stop",
+    }
+    assert fake_server.status == "queued"
+    fake_db.commit.assert_called_once()
+    start_thread.assert_called_once()
+    reset_lifecycle_jobs_for_tests()
+
+
+def test_queue_lifecycle_operation_blocks_parallel_action_for_same_server():
+    fake_server = Server(id=11, game_type="dayz", status="running")
+    fake_db = MagicMock(spec=Session)
+
+    with patch("services.server_lifecycle_service._start_lifecycle_thread"):
+        queue_lifecycle_operation(fake_db, fake_server, "stop")
+        with pytest.raises(HTTPException) as exc:
+            queue_lifecycle_operation(fake_db, fake_server, "kill")
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "server_lifecycle_already_running"
+    reset_lifecycle_jobs_for_tests()
+
+
+def test_restart_server_with_updates_blocks_when_lifecycle_job_is_active():
+    fake_server = Server(id=12, game_type="dayz", status="running")
+    fake_db = MagicMock(spec=Session)
+
+    with patch("services.server_lifecycle_service._start_lifecycle_thread"):
+        queue_lifecycle_operation(fake_db, fake_server, "stop")
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(restart_server_with_updates(fake_db, fake_server))
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "server_lifecycle_already_running"
+    reset_lifecycle_jobs_for_tests()
