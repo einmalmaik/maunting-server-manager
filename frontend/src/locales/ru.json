@@ -173,8 +173,6 @@
     "logs": "Журналы",
     "noLogs": "Журналы пока недоступны.",
     "console": "Консоль",
-    "consoleClear": "Очистить",
-    "consoleClearTitle": "Скрыть текущий вывод консоли локально (логи сервера сохраняются)",
     "consoleCopy": "Копировать",
     "consoleCopyTitle": "Копировать видимые строки консоли",
     "consoleCopyFailed": "Не удалось скопировать журнал консоли.",
@@ -603,7 +601,10 @@
     "fixedTimes": "Время перезапуска",
     "addTime": "Добавить время",
     "saved": "График перезапуска сохранен.",
-    "maxTimesReached": "Макс. 12 раз достигнуто"
+    "maxTimesReached": "Макс. 12 раз достигнуто",
+    "lastAutoAttempt": "Последняя автопопытка",
+    "lastAutoRestart": "Последний автоперезапуск",
+    "nextAutoRestart": "Следующий автоперезапуск"
   },
   "settings": {
     "title": "Настройки",
@@ -730,7 +731,9 @@
   },
   "serverDetail": {
     "limit": "Лимит",
-    "free": "бесплатно"
+    "free": "бесплатно",
+    "uptime": "Время работы",
+    "sinceLastStart": "С последнего запуска"
   },
   "Passwort ungültig": "Неверный пароль",
   "2FA-Code erforderlich": "Требуется код 2FA",

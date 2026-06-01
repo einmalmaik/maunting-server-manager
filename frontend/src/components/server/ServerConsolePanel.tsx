@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Copy, Eraser, Send, Terminal } from 'lucide-react'
+import { Check, Clock, Copy, Search, Send, Terminal } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { toast } from '@/stores/toastStore'
+import { type PanelTimeFormat } from '@/utils/timeFormat'
 
 interface Props {
   serverId: number
@@ -13,32 +14,21 @@ type LineTone = 'error' | 'warn' | 'success' | 'info' | 'default'
 type ConsoleLogLine = {
   marker: number
   text: string
+  timestamp: string | null
+  source: 'msm' | 'docker' | 'unknown'
+}
+type ConsoleFrame = {
+  line?: string
+  text?: string
+  timestamp?: string
+  source?: 'msm' | 'docker'
 }
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g
+const URL_RE = /(https?:\/\/[^\s<>"']+)/g
 const MAX_LOG_LINES = 2000
 
-function clearMarkerKey(serverId: number): string {
-  return `msm.console.clearThrough.${serverId}`
-}
 
-function readClearMarker(serverId: number): number {
-  try {
-    const raw = window.localStorage.getItem(clearMarkerKey(serverId))
-    const parsed = raw ? Number.parseInt(raw, 10) : 0
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
-  } catch {
-    return 0
-  }
-}
-
-function writeClearMarker(serverId: number, seq: number): void {
-  try {
-    window.localStorage.setItem(clearMarkerKey(serverId), String(seq))
-  } catch {
-    // Private mode / quota issues should not break console use.
-  }
-}
 
 // ZENTRALE Mapping-Funktion für Farbkodierung (KISS + wartbar).
 // Alle Regex-Patterns AN EINER STELLE. Verwendet existierende Design-Token-Klassen
@@ -69,12 +59,18 @@ export const LINE_CLASS: Record<LineTone, string> = {
 /** Zentrale colorizeOutput: liefert die passende Token-Klasse für die Zeile (sicher für React-Text). */
 export function colorizeOutput(line: string): string {
   const cleaned = cleanLine(line)
+  if (cleaned.startsWith('> ')) {
+    return 'text-accent font-semibold italic'
+  }
   const tone = LINE_PATTERNS.find(([pattern]) => pattern.test(cleaned))?.[1] ?? 'default'
   return LINE_CLASS[tone]
 }
 
 export function displayConsoleLine(line: string, language: string): string {
   const cleaned = cleanLine(line)
+  if (cleaned.startsWith('> ')) {
+    return cleaned
+  }
   if (!language.toLowerCase().startsWith('en') || !cleaned.startsWith('[MSM]')) {
     return cleaned
   }
@@ -98,77 +94,148 @@ export function displayConsoleLine(line: string, language: string): string {
   return cleaned
 }
 
-/** Server-Konsole als eigener Tab.
- *
- *  - **Direktanzeige ohne Reload:** Live-Stream (EventSource) startet sofort beim Mount
- *    (Tab-Oeffnen). Backend liefert KOMPLETTEN MSM-Log-Backlog SOFORT + docker logs --follow
- *    (inkl. --tail Buffer bei Container-Start fuer automatischen Re-Buffer).
- *  - Zentrale colorizeOutput (eine Stelle, alle Regex) mit DNA-Token-Klassen
- *    (destructive/warning/success/secondary) + Player-Events (joined/left...).
- *  - **Eingabe:** sichtbar nur mit Permission `server.console.write`. ...
- *  - Farbkodierung wartbar zentral (keine verteilte Einzellogik).
- */
+function parseConsoleFrame(raw: string): Omit<ConsoleLogLine, 'marker'> {
+  try {
+    const parsed = JSON.parse(raw) as ConsoleFrame
+    return {
+      text: parsed.line ?? parsed.text ?? raw,
+      timestamp: parsed.timestamp ?? null,
+      source: parsed.source ?? 'unknown',
+    }
+  } catch {
+    return { text: raw, timestamp: null, source: 'unknown' }
+  }
+}
+
+function formatConsoleTime(value: string | null, format: PanelTimeFormat, locale: string): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: format === '12h',
+  }).format(date)
+}
+
+function splitUrlToken(token: string): { href: string; suffix: string } {
+  const match = token.match(/^(.+?)([),.;:!?]*)$/)
+  return { href: match?.[1] ?? token, suffix: match?.[2] ?? '' }
+}
+
+function renderLineContent(line: ConsoleLogLine, language: string, timeFormat: PanelTimeFormat, showTimestamps: boolean) {
+  const display = displayConsoleLine(line.text, language)
+  const time = showTimestamps ? formatConsoleTime(line.timestamp, timeFormat, language) : ''
+  const withTime = time ? `[${time}] ${display}` : display
+  const parts = withTime.split(URL_RE)
+  return parts.map((part, index) => {
+    if (!part.match(URL_RE)) return <span key={index}>{part}</span>
+    const { href, suffix } = splitUrlToken(part)
+    return (
+      <span key={index}>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="underline decoration-secondary/70 underline-offset-2 hover:text-primary">
+          {href}
+        </a>
+        {suffix}
+      </span>
+    )
+  })
+}
+
+interface ConsoleLogLineDisplayProps {
+  line: ConsoleLogLine
+  language: string
+  timeFormat: PanelTimeFormat
+  showTimestamps: boolean
+}
+
+const ConsoleLogLineDisplay = React.memo(function ConsoleLogLineDisplay({
+  line,
+  language,
+  timeFormat,
+  showTimestamps,
+}: ConsoleLogLineDisplayProps) {
+  if (!displayConsoleLine(line.text, language)) {
+    return <div className={colorizeOutput(line.text)}>{'\u00A0'}</div>
+  }
+  return (
+    <div className={colorizeOutput(line.text)}>
+      {renderLineContent(line, language, timeFormat, showTimestamps)}
+    </div>
+  )
+})
+
 export function ServerConsolePanel({ serverId }: Props) {
   const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('server.console.write', serverId)
   const [logs, setLogs] = useState<ConsoleLogLine[]>([])
-  const [hiddenThrough, setHiddenThrough] = useState(() => readClearMarker(serverId))
-  const [streamVersion, setStreamVersion] = useState(0)
+  const [timeFormat, setTimeFormat] = useState<PanelTimeFormat>('24h')
+
   const [inputValue, setInputValue] = useState('')
   const [sending, setSending] = useState(false)
   const [copiedLogs, setCopiedLogs] = useState(false)
   const nextSeqRef = useRef(0)
   const bufferRef = useRef<string[]>([])
-  const activeStreamRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  // Neue States fuer verbesserte UI/UX
+  const [autoscroll, setAutoscroll] = useState(true)
+  const [hasNewLines, setHasNewLines] = useState(false)
+  const [history, setHistory] = useState<string[]>([])
+  const [historyIndex, setHistoryIndex] = useState<number>(-1)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showTimestamps, setShowTimestamps] = useState(true)
+
+  const autoscrollRef = useRef(true)
+  autoscrollRef.current = autoscroll
+
   useEffect(() => {
-    activeStreamRef.current = streamVersion
+    api<{ time_format: PanelTimeFormat }>('/settings')
+      .then((data) => setTimeFormat(data.time_format === '12h' ? '12h' : '24h'))
+      .catch(() => setTimeFormat('24h'))
+  }, [])
+
+  useEffect(() => {
     nextSeqRef.current = 0
     bufferRef.current = []
     setLogs([])
-    const clearMarker = readClearMarker(serverId)
-    nextSeqRef.current = clearMarker
-    setHiddenThrough(clearMarker)
-
-    // EventSource sendet automatisch Cookies (same-origin) und reconnectet bei
-    // Netzwerk-Aussetzern. Keine zusaetzliche Polling-Logik noetig.
-    const url = clearMarker > 0
-      ? `/api/servers/${serverId}/console/stream?after=${clearMarker}`
-      : `/api/servers/${serverId}/console/stream`
+    const url = `/api/servers/${serverId}/console/stream`
     const es = new EventSource(url)
-    const streamToken = streamVersion
     
-    // BATCHING FIX: UI-Freeze verhindern
     es.onmessage = (ev) => {
-      if (activeStreamRef.current !== streamToken) return
       const eventMarker = Number.parseInt(ev.lastEventId || '', 10)
       const marker = Number.isFinite(eventMarker) && eventMarker > 0
         ? eventMarker
         : nextSeqRef.current + 1
       nextSeqRef.current = Math.max(nextSeqRef.current, marker)
-      bufferRef.current.push(JSON.stringify({ marker, text: ev.data }))
+      bufferRef.current.push(JSON.stringify({ marker, raw: ev.data }))
     }
     
     const flushInterval = setInterval(() => {
-      if (activeStreamRef.current !== streamToken) return
       if (bufferRef.current.length > 0) {
         const toFlush = bufferRef.current
         bufferRef.current = []
+        
+        if (!autoscrollRef.current) {
+          setHasNewLines(true)
+        }
+
         setLogs((prev) => {
           const mapped = toFlush.map((item) => {
             try {
-              return JSON.parse(item) as ConsoleLogLine
+              const parsed = JSON.parse(item) as { marker: number; raw: string }
+              return { marker: parsed.marker, ...parseConsoleFrame(parsed.raw) }
             } catch {
               nextSeqRef.current += 1
-              return { marker: nextSeqRef.current, text: item }
+              return { marker: nextSeqRef.current, ...parseConsoleFrame(item) }
             }
           })
           const next = [...prev, ...mapped]
           return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
         })
       }
-    }, 50) // Alle 50ms gebatcht in den React-State flushen
+    }, 50)
 
     es.onerror = () => {
       // Stille: Browser reconnected automatisch.
@@ -177,25 +244,62 @@ export function ServerConsolePanel({ serverId }: Props) {
       clearInterval(flushInterval)
       es.close()
     }
-  }, [serverId, streamVersion])
+  }, [serverId])
 
-  const visibleLogs = useMemo(
-    () => logs.filter((line) => line.marker > hiddenThrough),
-    [logs, hiddenThrough],
-  )
+  const filteredLogs = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return logs
+    return logs.filter((line) =>
+      displayConsoleLine(line.text, i18n.language).toLowerCase().includes(query)
+    )
+  }, [logs, searchQuery, i18n.language])
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && autoscroll) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [visibleLogs])
+  }, [filteredLogs, autoscroll])
+
+  const handleScroll = () => {
+    if (!scrollRef.current) return
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
+    setAutoscroll(isAtBottom)
+    if (isAtBottom) {
+      setHasNewLines(false)
+    }
+  }
+
+  const scrollToBottom = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      setAutoscroll(true)
+      setHasNewLines(false)
+    }
+  }
 
   const sendInput = async () => {
     const line = inputValue
     if (!line.trim()) return
     setSending(true)
-    // Eingabefeld sofort leeren — auch wenn der POST fehlschlaegt, soll der
-    // User nicht den Eindruck haben, dass das Feld haengt.
+    
+    // Command History updaten
+    setHistory((prev) => [line, ...prev.filter((item) => item !== line)].slice(0, 50))
+    setHistoryIndex(-1)
+
+    // Echo lokal hinzufügen
+    const nextSeq = nextSeqRef.current + 1
+    nextSeqRef.current = nextSeq
+    setLogs((prev) => [
+      ...prev,
+      {
+        marker: nextSeq,
+        text: `> ${line}`,
+        timestamp: new Date().toISOString(),
+        source: 'msm',
+      },
+    ])
+
     setInputValue('')
     try {
       await api<{ ok: boolean }>(`/servers/${serverId}/console/input`, {
@@ -210,18 +314,37 @@ export function ServerConsolePanel({ serverId }: Props) {
     }
   }
 
-  const clearConsole = () => {
-    bufferRef.current = []
-    const seq = nextSeqRef.current
-    setHiddenThrough(seq)
-    writeClearMarker(serverId, seq)
-    setLogs([])
-    setStreamVersion((current) => current + 1)
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (history.length === 0) return
+      const nextIndex = historyIndex + 1
+      if (nextIndex < history.length) {
+        setHistoryIndex(nextIndex)
+        setInputValue(history[nextIndex])
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const nextIndex = historyIndex - 1
+      if (nextIndex >= 0) {
+        setHistoryIndex(nextIndex)
+        setInputValue(history[nextIndex])
+      } else {
+        setHistoryIndex(-1)
+        setInputValue('')
+      }
+    }
   }
 
   const copyVisibleLogs = async () => {
-    const text = visibleLogs
-      .map((line) => displayConsoleLine(line.text, i18n.language))
+    const query = searchQuery.trim().toLowerCase()
+    const targetLogs = query ? filteredLogs : logs
+    const text = targetLogs
+      .map((line) => {
+        const time = showTimestamps ? formatConsoleTime(line.timestamp, timeFormat, i18n.language) : ''
+        const display = displayConsoleLine(line.text, i18n.language)
+        return time ? `[${time}] ${display}` : display
+      })
       .join('\n')
     if (!text) return
     try {
@@ -240,41 +363,75 @@ export function ServerConsolePanel({ serverId }: Props) {
           <Terminal className="w-4 h-4 text-on-surface-variant" />
           <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
         </div>
+
+        {/* Suchfeld */}
+        <div className="flex-1 max-w-xs md:mx-4 my-1">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-on-surface-variant" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Logs durchsuchen..."
+              className="w-full bg-surface-container-lowest border border-outline rounded-md pl-8 pr-3 py-1.5 font-mono text-xs text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+        </div>
+
         <div className="inline-flex items-center gap-2">
+          {/* Zeitstempel umschalten */}
+          <button
+            type="button"
+            onClick={() => setShowTimestamps(!showTimestamps)}
+            className={`msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 ${showTimestamps ? 'bg-secondary/15 text-primary border-primary/20' : ''}`}
+            title="Zeitstempel umschalten"
+          >
+            <Clock className="w-3.5 h-3.5" />
+            {showTimestamps ? 'Zeitstempel an' : 'Zeitstempel aus'}
+          </button>
+          
           <button
             type="button"
             onClick={() => void copyVisibleLogs()}
-            disabled={visibleLogs.length === 0}
+            disabled={filteredLogs.length === 0}
             className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
             title={t('servers.consoleCopyTitle')}
           >
             {copiedLogs ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
             {copiedLogs ? t('common.copied') : t('servers.consoleCopy')}
           </button>
-          <button
-            type="button"
-            onClick={clearConsole}
-            className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
-            title={t('servers.consoleClearTitle')}
-          >
-            <Eraser className="w-3.5 h-3.5" />
-            {t('servers.consoleClear')}
-          </button>
         </div>
       </div>
       <div className="p-5">
-        <div
-          ref={scrollRef}
-          className="bg-surface-container-lowest border border-outline rounded-md p-4 h-[calc(100vh-380px)] min-h-[420px] overflow-auto font-mono text-xs whitespace-pre-wrap [&::-webkit-scrollbar]:hidden [scrollbar-width:none]"
-        >
-          {visibleLogs.length === 0 ? (
-            <span className="text-on-surface-variant">{t('servers.noLogs')}</span>
-          ) : (
-            visibleLogs.map((line, i) => (
-              <div key={`${line.marker}-${i}`} className={colorizeOutput(line.text)}>
-                {displayConsoleLine(line.text, i18n.language) || '\u00A0'}
-              </div>
-            ))
+        <div className="relative">
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="bg-surface-container-lowest border border-outline rounded-md p-4 h-[calc(100vh-380px)] min-h-[420px] overflow-auto font-mono text-xs whitespace-pre-wrap"
+          >
+            {filteredLogs.length === 0 ? (
+              <span className="text-on-surface-variant">{t('servers.noLogs')}</span>
+            ) : (
+              filteredLogs.map((line, i) => (
+                <ConsoleLogLineDisplay
+                  key={`${line.marker}-${i}`}
+                  line={line}
+                  language={i18n.language}
+                  timeFormat={timeFormat}
+                  showTimestamps={showTimestamps}
+                />
+              ))
+            )}
+          </div>
+
+          {hasNewLines && (
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              className="absolute bottom-4 right-6 bg-primary text-on-primary hover:bg-primary/90 px-3.5 py-2 rounded-full text-xs font-semibold shadow-lg inline-flex items-center gap-1.5 transition-all duration-200 animate-bounce"
+            >
+              Neue Zeilen vorhanden ↓
+            </button>
           )}
         </div>
 
@@ -291,6 +448,7 @@ export function ServerConsolePanel({ serverId }: Props) {
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder={t('servers.consolePlaceholder')}
               disabled={sending}
               maxLength={1024}

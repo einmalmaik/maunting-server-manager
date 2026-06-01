@@ -173,8 +173,6 @@
     "logs": "Registros",
     "noLogs": "Aún no hay registros disponibles.",
     "console": "Consola",
-    "consoleClear": "Borrar",
-    "consoleClearTitle": "Ocultar la salida actual de la consola localmente (se conservan los registros del servidor)",
     "consoleCopy": "Copiar",
     "consoleCopyTitle": "Copiar líneas visibles de la consola",
     "consoleCopyFailed": "No se pudo copiar el registro de la consola.",
@@ -603,7 +601,10 @@
     "fixedTimes": "Tiempos de reinicio",
     "addTime": "Agregar tiempo",
     "saved": "Horario de reinicio guardado.",
-    "maxTimesReached": "Máx. 12 veces alcanzado"
+    "maxTimesReached": "Máx. 12 veces alcanzado",
+    "lastAutoAttempt": "Último intento automático",
+    "lastAutoRestart": "Último reinicio automático",
+    "nextAutoRestart": "Siguiente reinicio automático"
   },
   "settings": {
     "title": "Configuración",
@@ -730,7 +731,9 @@
   },
   "serverDetail": {
     "limit": "Límite",
-    "free": "gratis"
+    "free": "gratis",
+    "uptime": "Tiempo de actividad",
+    "sinceLastStart": "Desde el último inicio"
   },
   "Passwort ungültig": "Contraseña no válida",
   "2FA-Code erforderlich": "Se requiere código 2FA",

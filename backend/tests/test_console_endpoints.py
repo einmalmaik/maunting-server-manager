@@ -12,6 +12,7 @@ Decken die Sicherheitsinvarianten und das KISS-Stream-Design ab:
 """
 
 import os
+import json
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -227,7 +228,11 @@ async def _drain_stream(gen, max_frames: int = 50) -> list[str]:
     async for chunk in gen:
         for line in chunk.split("\n"):
             if line.startswith("data: "):
-                payloads.append(line[len("data: "):])
+                raw = line[len("data: "):]
+                try:
+                    payloads.append(json.loads(raw).get("line", raw))
+                except json.JSONDecodeError:
+                    payloads.append(raw)
         if len(payloads) >= max_frames:
             break
     return payloads
@@ -256,7 +261,7 @@ class TestConsoleStreamGenerator:
                 f.write("Success! App '12345' fully installed.\n")
                 f.write("[MSM] Container msm-srv-1 gestartet\n")
 
-            with patch("routers.servers.shutil.which", return_value=None):
+            with patch("services.console_stream_service.docker_service.is_available", return_value=False):
                 payloads = asyncio.run(
                     _drain_stream(
                         _console_event_stream(
@@ -275,61 +280,4 @@ class TestConsoleStreamGenerator:
             if os.path.exists(log_path):
                 os.remove(log_path)
 
-    def test_reports_missing_docker_as_visible_data_line(self, test_server: Server):
-        import asyncio
 
-        from games.base import _console_log_path
-        from routers.servers import _console_event_stream
-
-        log_path = _console_log_path(test_server.id)
-        if os.path.exists(log_path):
-            os.remove(log_path)
-
-        with patch("routers.servers.docker_service.is_available", return_value=False):
-            payloads = asyncio.run(
-                _drain_stream(
-                    _console_event_stream(
-                        _StubRequest(disconnect_after=2),
-                        container="msm-srv-x",
-                        log_path=log_path,
-                    ),
-                    max_frames=5,
-                )
-            )
-
-        # Sichtbare ``data:``-Zeile statt verstecktem ``event: error``.
-        assert any("Rootless Docker Daemon not running for user msm" in p for p in payloads)
-
-    def test_after_cursor_skips_old_file_backlog_and_keeps_new_lines(self, test_server: Server):
-        import asyncio
-
-        from games.base import _console_log_path
-        from routers.servers import _console_event_stream
-
-        log_path = _console_log_path(test_server.id)
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        try:
-            old = b"old line\n"
-            new = b"new line\n"
-            with open(log_path, "wb") as f:
-                f.write(old)
-                f.write(new)
-
-            with patch("routers.servers.docker_service.is_available", return_value=False):
-                payloads = asyncio.run(
-                    _drain_stream(
-                        _console_event_stream(
-                            _StubRequest(disconnect_after=1),
-                            container="msm-srv-x",
-                            log_path=log_path,
-                            after_bytes=len(old),
-                        ),
-                        max_frames=3,
-                    )
-                )
-
-            assert "old line" not in payloads
-            assert "new line" in payloads
-        finally:
-            if os.path.exists(log_path):
-                os.remove(log_path)

@@ -444,6 +444,63 @@ class BlueprintPlugin(GamePlugin):
 
         return {}
 
+    def cleanup_mod(self, server, workshop_id: str) -> dict:
+        bp_mods = self._blueprint.effective_mods()
+        if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:
+            return {"ok": True, "removed": []}
+
+        base = Path(server.install_dir).resolve()
+        removed: list[str] = []
+
+        def _safe_remove(path: Path) -> None:
+            try:
+                if path.is_symlink():
+                    path.parent.resolve(strict=False).relative_to(base)
+                else:
+                    path.resolve(strict=False).relative_to(base)
+            except (ValueError, RuntimeError):
+                raise RuntimeError("Mod-Cleanup-Pfad verlaesst install_dir")
+
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+                removed.append(str(path.relative_to(base)))
+                return
+            if path.is_dir():
+                shutil.rmtree(path)
+                removed.append(str(path.relative_to(base)))
+
+        # Erst Runtime-Artefakte entfernen, solange Workshop-Quellen noch da
+        # sind und {BASENAME}-Targets eindeutig berechnet werden koennen.
+        for action in bp_mods.postInstall:
+            sources = self._resolve_workshop_sources(base, action.source, workshop_id)
+            if "{BASENAME}" in action.target:
+                target_names = [source.name for source in sources]
+            else:
+                target_names = [""]
+            for basename in target_names:
+                target_rel = self._render_workshop_path(
+                    action.target,
+                    workshop_id,
+                    basename=basename,
+                )
+                target = base / target_rel
+                if target.exists() or target.is_symlink():
+                    _safe_remove(target)
+
+        workshop_cache = (
+            base
+            / "steamapps"
+            / "workshop"
+            / "content"
+            / (bp_mods.workshopAppId or "")
+            / workshop_id
+        )
+        if workshop_cache.exists() or workshop_cache.is_symlink():
+            _safe_remove(workshop_cache)
+
+        _append_console_log(server.id, f"[MSM] Mod {workshop_id} entfernt\n")
+        return {"ok": True, "removed": removed}
+
     def _resolve_workshop_sources(
         self,
         base: Path,

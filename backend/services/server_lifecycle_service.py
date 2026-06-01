@@ -1,12 +1,14 @@
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from games import get_plugin
-from games.base import _append_console_log
+from games.base import _append_console_log, container_name_for
 from models import Server
+
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
@@ -19,6 +21,10 @@ from services.install_update_lock_service import (
 logger = logging.getLogger(__name__)
 
 _LIFECYCLE_LOCKS: dict[int, asyncio.Lock] = {}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def get_server_lifecycle_lock(server_id: int) -> asyncio.Lock:
@@ -164,6 +170,7 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
         )
 
         server.status = "running"
+        server.last_started_at = _utcnow()
         db.commit()
         return {
             "message": "Restart-Befehl gesendet",

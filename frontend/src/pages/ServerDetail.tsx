@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowLeft,
+  Clock,
   Download,
   FileText,
   HardDrive,
@@ -27,6 +28,7 @@ import { ServerConsolePanel } from "@/components/server/ServerConsolePanel";
 import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
+import { UptimeDisplay } from "@/components/server/UptimeDisplay";
 
 type TabKey = "files" | "console" | "mods" | "restarts" | "backups";
 const VALID_TABS: TabKey[] = [
@@ -41,6 +43,8 @@ interface ServerStatus {
   status?: string;
   cpu_percent?: number | null;
   ram_mb?: number | null;
+  uptime_seconds?: number | null;
+  started_at?: string | null;
   disk_used_mb?: number | null;
   disk_free_mb?: number | null;
   cpu_limit_percent?: number | null;
@@ -150,6 +154,8 @@ export function ServerDetail() {
     const handle = setInterval(fetchAll, 5000);
     return () => clearInterval(handle);
   }, [serverId]);
+
+
 
   useEffect(() => {
     if (server && showEditNetwork) {
@@ -543,7 +549,7 @@ export function ServerDetail() {
       </div>
 
       {/* Stats (CPU / RAM / Disk) — Player-Stat ist absichtlich entfernt (KISS, kein A2S) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="msm-card p-5">
           <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
             CPU
@@ -587,6 +593,20 @@ export function ServerDetail() {
               : status?.disk_free_mb != null
                 ? `${formatMb(status.disk_free_mb)} ${t("serverDetail.free")}`
                 : t("common.unlimited")}
+          </p>
+        </div>
+        <div className="msm-card p-5">
+          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2 inline-flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5" />
+            {t("serverDetail.uptime", { defaultValue: "Uptime" })}
+          </p>
+          <p className="font-headline text-display-sm text-primary">
+            <UptimeDisplay server={server} label="" />
+          </p>
+          <p className="font-body-md text-xs text-on-surface-variant mt-1">
+            {effectiveStatus === "running"
+              ? t("serverDetail.sinceLastStart", { defaultValue: "Seit letztem Start" })
+              : t(`servers.status.${effectiveStatus}`, { defaultValue: effectiveStatus })}
           </p>
         </div>
       </div>

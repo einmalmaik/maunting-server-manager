@@ -173,8 +173,6 @@
     "logs": "日志",
     "noLogs": "尚无可用日志。",
     "console": "安慰",
-    "consoleClear": "清除",
-    "consoleClearTitle": "在本地隐藏当前控制台输出（保留服务器日志）",
     "consoleCopy": "复制",
     "consoleCopyTitle": "复制可见的控制台行",
     "consoleCopyFailed": "无法复制控制台日志。",
@@ -603,7 +601,10 @@
     "fixedTimes": "重启次数",
     "addTime": "添加时间",
     "saved": "已保存重新启动计划。",
-    "maxTimesReached": "最大。达到12次"
+    "maxTimesReached": "最大。达到12次",
+    "lastAutoAttempt": "上次自动尝试",
+    "lastAutoRestart": "上次自动重启",
+    "nextAutoRestart": "下次自动重启"
   },
   "settings": {
     "title": "设置",
@@ -730,7 +731,9 @@
   },
   "serverDetail": {
     "limit": "限制",
-    "free": "免费"
+    "free": "免费",
+    "uptime": "运行时间",
+    "sinceLastStart": "自上次启动以来"
   },
   "Passwort ungültig": "密码无效",
   "2FA-Code erforderlich": "需要 2FA 代码",

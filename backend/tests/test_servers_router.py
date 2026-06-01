@@ -1,4 +1,5 @@
 """Tests for servers router: CRUD, permissions, CSRF."""
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -207,9 +208,11 @@ class TestServerStatusDiskFields:
         # Plugin-Status mocken (kein echter Docker im Test)
         with patch("routers.servers.get_plugin") as mock_get_plugin:
             from games.base import ServerStatus
+            started_at = datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc)
             mock_plugin = mock_get_plugin.return_value
             mock_plugin.get_status.return_value = ServerStatus(
-                status="stopped", cpu_percent=None, ram_mb=None, disk_mb=None,
+                status="running", cpu_percent=None, ram_mb=None, disk_mb=None,
+                uptime_seconds=60, started_at=started_at,
             )
             response = client.get(
                 f"/api/servers/{test_server.id}/status",
@@ -228,6 +231,10 @@ class TestServerStatusDiskFields:
         assert data["disk_free_mb"] is None or isinstance(data["disk_free_mb"], int)
         # Disk-MB fällt auf den DB-Wert zurück, wenn das Plugin None liefert
         assert data["disk_mb"] == 456
+        assert data["uptime_seconds"] == 60
+        assert data["started_at"].startswith("2026-06-01T10:00:00")
+        db.refresh(test_server)
+        assert test_server.last_started_at is not None
 
 
 class TestManualUploadStartPreCheck:

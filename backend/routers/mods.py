@@ -135,8 +135,22 @@ def unsubscribe_mod(server_id: int, mod_id: int, db: Session = Depends(get_db), 
     mod = db.query(Mod).filter(Mod.id == mod_id, Mod.server_id == server_id).first()
     if not mod:
         raise HTTPException(status_code=404, detail="Mod nicht gefunden")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if server:
+        plugin = get_plugin(server.game_type)
+        if plugin and plugin.supports_mods:
+            try:
+                result = plugin.cleanup_mod(server, mod.workshop_id)
+                if isinstance(result, dict) and result.get("ok") is False:
+                    logger.warning("Mod-Cleanup gab False zurück fuer Server %s, Mod %s", server_id, mod.workshop_id)
+            except Exception as e:
+                logger.warning("Mod-Cleanup fehlgeschlagen fuer Server %s, Mod %s: %s", server_id, mod.workshop_id, e)
     db.delete(mod)
     db.commit()
+    if server:
+        plugin = get_plugin(server.game_type)
+        if plugin and plugin.supports_mods:
+            plugin.update_modlist(server)
     return {"message": "Mod entfernt"}
 
 
@@ -145,9 +159,10 @@ def reorder_mods(server_id: int, order: list[int], db: Session = Depends(get_db)
     require_server_permission(user, server_id, db, "server.mods.write")
     mods = db.query(Mod).filter(Mod.server_id == server_id).all()
     mod_map = {m.id: m for m in mods}
+    if len(order) != len(mod_map) or len(set(order)) != len(order) or set(order) != set(mod_map):
+        raise HTTPException(status_code=400, detail="Ungueltige Mod-Ladereihenfolge")
     for idx, mod_id in enumerate(order):
-        if mod_id in mod_map:
-            mod_map[mod_id].load_order = idx
+        mod_map[mod_id].load_order = idx
     db.commit()
     # Write updated modlist to game config (Helper ist Blueprint-driven).
     server = db.query(Server).filter(Server.id == server_id).first()

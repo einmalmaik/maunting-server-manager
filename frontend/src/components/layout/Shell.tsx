@@ -1,7 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
-import { LegalFooter } from '@/components/LegalFooter'
+import { VersionFooter } from '@/components/VersionFooter'
 
 export function Shell() {
   return (
@@ -20,7 +20,7 @@ export function Shell() {
             <Outlet />
           </div>
 
-          <LegalFooter className="relative z-10 mt-12 border-t border-outline-variant/30 pt-4" />
+          <VersionFooter />
         </main>
       </div>
     </div>

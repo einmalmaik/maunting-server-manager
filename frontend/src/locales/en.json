@@ -178,8 +178,6 @@
     "logs": "Logs",
     "noLogs": "No logs available yet.",
     "console": "Console",
-    "consoleClear": "Clear",
-    "consoleClearTitle": "Hide the current console output locally (server logs are preserved)",
     "consoleCopy": "Copy",
     "consoleCopyTitle": "Copy visible console lines",
     "consoleCopyFailed": "Could not copy console log.",
@@ -578,7 +576,10 @@
     "fixedTimes": "Restart times",
     "addTime": "Add time",
     "saved": "Restart schedule saved.",
-    "maxTimesReached": "Max. 12 times reached"
+    "maxTimesReached": "Max. 12 times reached",
+    "lastAutoAttempt": "Last automatic attempt",
+    "lastAutoRestart": "Last automatic restart",
+    "nextAutoRestart": "Next automatic restart"
   },
   "settings": {
     "title": "Settings",
@@ -705,7 +706,9 @@
   },
   "serverDetail": {
     "limit": "Limit",
-    "free": "free"
+    "free": "free",
+    "uptime": "Uptime",
+    "sinceLastStart": "Since last start"
   },
   "Passwort ungültig": "Invalid password",
   "2FA-Code erforderlich": "2FA code required",

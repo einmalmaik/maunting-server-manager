@@ -173,8 +173,6 @@
     "logs": "Log",
     "noLogs": "Belum ada log yang tersedia.",
     "console": "Menghibur",
-    "consoleClear": "Jelas",
-    "consoleClearTitle": "Sembunyikan keluaran konsol saat ini secara lokal (log server disimpan)",
     "consoleCopy": "Salin",
     "consoleCopyTitle": "Salin baris konsol yang terlihat",
     "consoleCopyFailed": "Tidak dapat menyalin log konsol.",
@@ -603,7 +601,10 @@
     "fixedTimes": "Mulai ulang waktu",
     "addTime": "Tambahkan waktu",
     "saved": "Jadwal mulai ulang disimpan.",
-    "maxTimesReached": "Maks. 12 kali tercapai"
+    "maxTimesReached": "Maks. 12 kali tercapai",
+    "lastAutoAttempt": "Upaya otomatis terakhir",
+    "lastAutoRestart": "Mulai ulang otomatis terakhir",
+    "nextAutoRestart": "Mulai ulang otomatis berikutnya"
   },
   "settings": {
     "title": "Pengaturan",
@@ -730,7 +731,9 @@
   },
   "serverDetail": {
     "limit": "Batasi",
-    "free": "gratis"
+    "free": "gratis",
+    "uptime": "Uptime",
+    "sinceLastStart": "Sejak mulai terakhir"
   },
   "Passwort ungültig": "Kata sandi tidak valid",
   "2FA-Code erforderlich": "Diperlukan kode 2FA",

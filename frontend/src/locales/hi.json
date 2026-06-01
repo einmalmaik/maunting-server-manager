@@ -173,8 +173,6 @@
     "logs": "लॉग",
     "noLogs": "अभी तक कोई लॉग उपलब्ध नहीं है.",
     "console": "सांत्वना देना",
-    "consoleClear": "स्पष्ट",
-    "consoleClearTitle": "वर्तमान कंसोल आउटपुट को स्थानीय रूप से छुपाएं (सर्वर लॉग संरक्षित हैं)",
     "consoleCopy": "प्रतिलिपि",
     "consoleCopyTitle": "दृश्यमान कंसोल पंक्तियाँ कॉपी करें",
     "consoleCopyFailed": "कंसोल लॉग की प्रतिलिपि नहीं बनाई जा सकी.",
@@ -603,7 +601,10 @@
     "fixedTimes": "पुनरारंभ समय",
     "addTime": "समय जोड़ें",
     "saved": "पुनरारंभ शेड्यूल सहेजा गया.",
-    "maxTimesReached": "अधिकतम. 12 बार पहुंचे"
+    "maxTimesReached": "अधिकतम. 12 बार पहुंचे",
+    "lastAutoAttempt": "अंतिम स्वचालित प्रयास",
+    "lastAutoRestart": "अंतिम स्वचालित पुनरारंभ",
+    "nextAutoRestart": "अगला स्वचालित पुनरारंभ"
   },
   "settings": {
     "title": "सेटिंग्स",
@@ -730,7 +731,9 @@
   },
   "serverDetail": {
     "limit": "सीमा",
-    "free": "निःशुल्क"
+    "free": "निःशुल्क",
+    "uptime": "अपटाइम",
+    "sinceLastStart": "पिछली शुरुआत से"
   },
   "Passwort ungültig": "अमान्य पासवर्ड",
   "2FA-Code erforderlich": "2FA कोड आवश्यक है",

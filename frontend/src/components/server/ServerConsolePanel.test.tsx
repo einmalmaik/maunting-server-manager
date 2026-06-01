@@ -73,6 +73,13 @@ describe('ServerConsolePanel', () => {
       },
     })
     fetchSpy = vi.spyOn(global, 'fetch')
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => Promise.resolve({ time_format: '24h' }),
+      text: () => Promise.resolve('{"time_format":"24h"}'),
+    } as Response)
   })
 
   afterEach(() => {
@@ -116,8 +123,9 @@ describe('ServerConsolePanel', () => {
     fireEvent.change(input, { target: { value: '/auth login device' } })
     fireEvent.submit(screen.getByTestId('console-input-form'))
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled())
-    const [url, options] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    const calls = fetchSpy.mock.calls as Array<[string, RequestInit]>
+    await waitFor(() => expect(calls.some((call) => String(call[0]).includes('/console/input'))).toBe(true))
+    const [url, options] = calls.find((call) => String(call[0]).includes('/console/input')) as [string, RequestInit]
     expect(url).toBe('/api/servers/42/console/input')
     expect(options.method).toBe('POST')
     expect(options.credentials).toBe('include')
@@ -136,58 +144,26 @@ describe('ServerConsolePanel', () => {
     })
   })
 
-  it('keeps the console cleared after remount while showing new lines', async () => {
-    setMe(ownerMe)
-    const { unmount } = render(<ServerConsolePanel serverId={42} />)
-    let es = FakeEventSource.instances[0]
-    es.onmessage?.({ data: 'old line 1' } as MessageEvent)
-    es.onmessage?.({ data: 'old line 2' } as MessageEvent)
-    await waitFor(() => {
-      expect(screen.getByText('old line 1')).toBeInTheDocument()
-      expect(screen.getByText('old line 2')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: /clear/i }))
-    await waitFor(() => {
-      expect(screen.queryByText('old line 1')).toBeNull()
-      expect(screen.queryByText('old line 2')).toBeNull()
-      expect(screen.getByText('No logs available yet.')).toBeInTheDocument()
-    })
-
-    unmount()
-    render(<ServerConsolePanel serverId={42} />)
-    es = FakeEventSource.instances[FakeEventSource.instances.length - 1]
-    expect(es.url).toBe('/api/servers/42/console/stream?after=2')
-    es.onmessage?.({ data: 'old line 1', lastEventId: '1' } as MessageEvent)
-    es.onmessage?.({ data: 'old line 2', lastEventId: '2' } as MessageEvent)
-    es.onmessage?.({ data: 'new line after clear', lastEventId: '3' } as MessageEvent)
-
-    await waitFor(() => {
-      expect(screen.queryByText('old line 1')).toBeNull()
-      expect(screen.queryByText('old line 2')).toBeNull()
-      expect(screen.getByText('new line after clear')).toBeInTheDocument()
-    })
-  })
-
-  it('drops buffered lines that arrived just before clear was clicked', async () => {
+  it('renders http links from JSON console frames safely', async () => {
     setMe(ownerMe)
     render(<ServerConsolePanel serverId={42} />)
     const es = FakeEventSource.instances[0]
-    es.onmessage?.({ data: 'buffered old line' } as MessageEvent)
+    es.onmessage?.({
+      data: JSON.stringify({
+        line: 'Open https://example.invalid/auth.',
+        timestamp: '2026-06-01T12:00:00Z',
+        source: 'docker',
+      }),
+      lastEventId: '1',
+    } as MessageEvent)
 
-    fireEvent.click(screen.getByRole('button', { name: /clear/i }))
-    await new Promise((resolve) => setTimeout(resolve, 80))
-    expect(screen.queryByText('buffered old line')).toBeNull()
-
-    es.onmessage?.({ data: 'stale line from old stream' } as MessageEvent)
-    expect(screen.queryByText('stale line from old stream')).toBeNull()
-
-    const nextEs = FakeEventSource.instances[FakeEventSource.instances.length - 1]
-    nextEs.onmessage?.({ data: 'fresh line' } as MessageEvent)
     await waitFor(() => {
-      expect(screen.getByText('fresh line')).toBeInTheDocument()
+      const link = screen.getByRole('link', { name: 'https://example.invalid/auth' })
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     })
   })
+
 
   it('copies visible console lines', async () => {
     setMe(ownerMe)

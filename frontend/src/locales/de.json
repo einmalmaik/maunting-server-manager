@@ -178,8 +178,6 @@
     "logs": "Logs",
     "noLogs": "Noch keine Logs verfügbar.",
     "console": "Konsole",
-    "consoleClear": "Leeren",
-    "consoleClearTitle": "Aktuelle Konsole lokal ausblenden (Server-Logs bleiben erhalten)",
     "consoleCopy": "Kopieren",
     "consoleCopyTitle": "Sichtbare Konsolenzeilen kopieren",
     "consoleCopyFailed": "Konsolenlog konnte nicht kopiert werden.",
@@ -578,7 +576,10 @@
     "fixedTimes": "Restart-Zeiten",
     "addTime": "Zeit hinzufügen",
     "saved": "Restart-Zeitplan gespeichert.",
-    "maxTimesReached": "Maximum von 12 Zeiten erreicht"
+    "maxTimesReached": "Maximum von 12 Zeiten erreicht",
+    "lastAutoAttempt": "Letzter Versuch",
+    "lastAutoRestart": "Letzter Auto-Restart",
+    "nextAutoRestart": "Nächster Auto-Restart"
   },
   "settings": {
     "title": "Einstellungen",
@@ -705,7 +706,9 @@
   },
   "serverDetail": {
     "limit": "Limit",
-    "free": "frei"
+    "free": "frei",
+    "uptime": "Uptime",
+    "sinceLastStart": "Seit letztem Start"
   },
   "Passwort ungültig": "Passwort ungültig",
   "2FA-Code erforderlich": "2FA-Code erforderlich",

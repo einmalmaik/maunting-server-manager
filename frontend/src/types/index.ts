@@ -23,6 +23,12 @@ export interface Server {
   restart_interval_hours: number | null
   restart_time_utc: string | null
   restart_times_utc: string | null
+  last_auto_restart_attempt_at: string | null
+  last_auto_restart_completed_at: string | null
+  last_auto_restart_status: string | null
+  next_auto_restart_at: string | null
+  started_at: string | null
+  uptime_seconds: number | null
   cpu_limit_percent: number | null
   ram_limit_mb: number | null
   disk_limit_gb: number | null

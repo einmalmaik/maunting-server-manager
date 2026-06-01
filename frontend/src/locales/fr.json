@@ -173,8 +173,6 @@
     "logs": "Journaux",
     "noLogs": "Aucun journal disponible pour l'instant.",
     "console": "Console",
-    "consoleClear": "Effacer",
-    "consoleClearTitle": "Masquer localement la sortie actuelle de la console (les journaux du serveur sont conservés)",
     "consoleCopy": "Copier",
     "consoleCopyTitle": "Copier les lignes de console visibles",
     "consoleCopyFailed": "Impossible de copier le journal de la console.",
@@ -603,7 +601,10 @@
     "fixedTimes": "Heures de redémarrage",
     "addTime": "Ajouter du temps",
     "saved": "Plan de redémarrage enregistré.",
-    "maxTimesReached": "Max. 12 fois atteint"
+    "maxTimesReached": "Max. 12 fois atteint",
+    "lastAutoAttempt": "Dernière tentative automatique",
+    "lastAutoRestart": "Dernier redémarrage automatique",
+    "nextAutoRestart": "Prochain redémarrage automatique"
   },
   "settings": {
     "title": "Paramètres",
@@ -730,7 +731,9 @@
   },
   "serverDetail": {
     "limit": "Limite",
-    "free": "gratuit"
+    "free": "gratuit",
+    "uptime": "Durée de fonctionnement",
+    "sinceLastStart": "Depuis le dernier démarrage"
   },
   "Passwort ungültig": "Mot de passe invalide",
   "2FA-Code erforderlich": "Code 2FA requis",

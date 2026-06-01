@@ -5,7 +5,8 @@ import { api } from '@/api/client'
 import { Server, GameInfo } from '@/types'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Server as ServerIcon, Activity, MemoryStick, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react'
+import { Server as ServerIcon, Activity, MemoryStick, CheckCircle2, AlertTriangle, XCircle, Loader2, Clock } from 'lucide-react'
+import { UptimeDisplay } from '@/components/server/UptimeDisplay'
 
 interface ServiceStatus {
   status: 'ok' | 'degraded' | 'error'
@@ -257,6 +258,12 @@ export function Dashboard() {
                     RAM: {server.ram_limit_mb ? `${server.ram_limit_mb} MB` : t('common.unlimited')}
                   </span>
                 </div>
+                {server.status === 'running' && (
+                  <div className="flex items-center gap-2 text-on-surface-variant col-span-2">
+                    <Clock className="w-3.5 h-3.5" />
+                    <UptimeDisplay server={server} label={t('serverDetail.uptime', { defaultValue: 'Uptime' })} />
+                  </div>
+                )}
               </div>
             </Link>
           ))}

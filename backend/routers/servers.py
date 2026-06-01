@@ -3,6 +3,7 @@ import os
 import shutil
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -28,6 +29,7 @@ from services.port_allocation_service import PortConflictError, allocate_ports
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.scheduler_service import sync_server_restart_schedule
 from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
+from services.console_stream_service import console_event_stream
 from services.install_update_lock_service import (
     INSTALL_UPDATE_ALREADY_RUNNING,
     release_install_update_lock,
@@ -51,6 +53,20 @@ _UPDATE_CACHE_TTL_SECONDS = 300
 
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _server_restart_status_fields(server: Server) -> dict:
+    return {
+        "started_at": server.last_started_at,
+        "last_auto_restart_attempt_at": server.last_auto_restart_attempt_at,
+        "last_auto_restart_completed_at": server.last_auto_restart_completed_at,
+        "last_auto_restart_status": server.last_auto_restart_status,
+        "next_auto_restart_at": server.next_auto_restart_at,
+    }
 
 
 def _port_requirements_for_server(server: Server, protocol_overrides: dict[str, str] | None = None) -> list[tuple[str, str]]:
@@ -614,6 +630,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
             )
             raise HTTPException(status_code=500, detail=result["error"])
         server.status = "running"
+        server.last_started_at = _utcnow()
         db.commit()
         if EmailService.is_configured() and user.email_notifications:
             await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestartet")
@@ -644,6 +661,7 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
         if "error" in result:
             raise HTTPException(status_code=500, detail=result["error"])
         server.status = "stopped"
+        server.last_started_at = None
         db.commit()
 
         # Firewall- und iptables-Regeln nach Container-Stop schließen.
@@ -699,6 +717,7 @@ async def kill_server(server_id: int, db: Session = Depends(get_db), user: User 
             raise HTTPException(status_code=500, detail="Erzwungenes Beenden fehlgeschlagen")
         server.status = "stopped"
         server.status_message = "Erzwungen beendet"
+        server.last_started_at = None
         db.commit()
 
     return {"message": "Server wurde erzwungen beendet"}
@@ -800,7 +819,7 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
             "cpu_percent": None,
             "ram_mb": None,
             "disk_mb": disk_used,
-            "uptime_seconds": None,
+            "uptime_seconds": server.uptime_seconds,
             "cpu_limit_percent": server.cpu_limit_percent,
             "ram_limit_mb": server.ram_limit_mb,
             "disk_limit_gb": server.disk_limit_gb,
@@ -809,6 +828,7 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
             "server_file_update_available": update_info["server_file_update_available"],
             "server_file_update_reason": update_info["server_file_update_reason"],
             "mod_updates_available": update_info["mod_updates_available"],
+            **_server_restart_status_fields(server),
         }
     plugin_status = plugin.get_status(server)
     # installing/updating/error nicht ueberschreiben - Background-Thread oder
@@ -816,6 +836,10 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
     if server.status not in ("installing", "updating", "error"):
         server.status = plugin_status.status
         server.status_message = plugin_status.message or ""
+        if plugin_status.status == "running" and plugin_status.started_at is not None:
+            server.last_started_at = plugin_status.started_at
+        elif plugin_status.status != "running":
+            server.last_started_at = None
     db.commit()
     return {
         "id": server.id,
@@ -835,6 +859,7 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
         "server_file_update_available": update_info["server_file_update_available"],
         "server_file_update_reason": update_info["server_file_update_reason"],
         "mod_updates_available": update_info["mod_updates_available"],
+        **_server_restart_status_fields(server),
     }
 
 
@@ -925,120 +950,8 @@ async def _console_event_stream(
     *,
     after_bytes: int | None = None,
 ):
-    """Generator für den Console-SSE-Stream.
-
-    DESIGN-RATIONALE (explizite KISS-Ausnahme, dokumentiert per AGENTS §1.5 + general-3 review):
-    - Ziel: "Direkt volle History beim Tab-Öffnen + autom. Re-Buffer bei Container-Start" OHNE Tab-Switch.
-    - MSM-Logdatei = Single Source für alle [MSM] Lifecycle/Install-Events (zentral, persistent über Restarts).
-    - Docker --follow --tail 200 (dann 0) = komplementärer Container-Stdout für Game-Logs beim Start (keine Garantie auf Dupe-Freiheit, aber praktisch ok).
-    - Dual-Task + Queue + inner reconnect/terminate-Handling + Keepalive nötig, weil:
-      a) File-Poll für Events die NICHT im Container-Log landen.
-      b) Docker-Logs bei Start frischen Tail braucht, später live.
-      c) Rotation, disconnect, subprocess races müssen sauber sein (kein Leak bei vielen Consoles).
-    - Einfachere Alternative (ein Tail, oder nur docker, oder tail -f via shell) würde Feature oder Robustheit verlieren.
-    - Keine Pipeline/Orchestrator (verboten per examples.md); expliziter Generator mit 2 Tasks.
-    - Tests (test_console_endpoints) + runtime decken Grundpfad; volle E2E mit realem Game-Container ist env-limitiert.
-    Siehe auch ServerConsolePanel.tsx (EventSource Mount) und AGENTS KISS: "Kann ich simpler ohne Feature-Verlust?" - hier dokumentiert nein.
-    """
-
-    # 1. Initial-Backlog senden (Install-/Lifecycle-Historie).
-    initial_bytes = max(after_bytes or 0, 0)
-    if os.path.exists(log_path):
-        try:
-            with open(log_path, "rb") as f:
-                f.seek(initial_bytes)
-                content_bytes = f.read()
-            pos = initial_bytes
-            for raw_line in content_bytes.splitlines(keepends=True):
-                pos += len(raw_line)
-                line = raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace")
-                yield _sse_data(line, pos)
-            initial_bytes = pos
-        except OSError:
-            # Datei verschwand zwischen exists() und open() - kein Problem,
-            # Live-Tail fängt neue Schreibvorgänge.
-            initial_bytes = max(after_bytes or 0, 0)
-
-    # 2. Live-Quellen einrichten.
-    queue: asyncio.Queue[str] = asyncio.Queue()
-
-    async def _tail_file():
-        """Poll die MSM-Logdatei alle 250 ms auf neue Bytes (Lifecycle/Install)."""
-        pos = initial_bytes
-        while True:
-            await asyncio.sleep(0.25)
-            try:
-                size = os.path.getsize(log_path)
-            except OSError:
-                continue
-            if size < pos:
-                # Datei wurde rotiert/geleert → von vorn beginnen.
-                pos = 0
-            if size <= pos:
-                continue
-            try:
-                with open(log_path, "rb") as f:
-                    f.seek(pos)
-                    chunk = f.read(size - pos)
-                pos = size
-            except OSError:
-                continue
-            read_pos = pos - len(chunk)
-            for raw_line in chunk.splitlines(keepends=True):
-                read_pos += len(raw_line)
-                line = raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace")
-                await queue.put(_sse_data(line, read_pos))
-
-    async def _tail_docker():
-        """Streame Live-Container-Stdout/Stderr (oder melde, dass Docker fehlt).
-
-        `tail=200` als historischer Backlog des Container-Outputs -
-        komplementaer zum MSM-Logdatei-Backlog (Install/Lifecycle), keine
-        Duplikate. Fehlende Container/Rootless-Docker-Verbindung sind kein
-        Fehler: dann bleibt der Stream einfach still und liefert nur
-        File-Lifecycle-Events.
-        """
-        if not docker_service.is_available():
-            await queue.put(
-                _sse_data(
-                    "[MSM] Rootless Docker Daemon not running for user msm - Live-Container-Logs deaktiviert."
-                )
-            )
-            return
-        tail = 0 if after_bytes is not None else 200
-        while True:
-            saw_line = False
-            async for line in docker_service.stream_logs(container, tail=tail):
-                saw_line = True
-                await queue.put(_sse_data(line))
-            if saw_line:
-                tail = 0
-            await asyncio.sleep(1.0)
-
-    tasks = [
-        asyncio.create_task(_tail_file()),
-        asyncio.create_task(_tail_docker()),
-    ]
-
-    try:
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                frame = await asyncio.wait_for(queue.get(), timeout=15.0)
-            except asyncio.TimeoutError:
-                # SSE-Keepalive - verhindert dass Proxies die Verbindung kappen.
-                yield ": keepalive\n\n"
-                continue
-            yield frame
-    finally:
-        for task in tasks:
-            task.cancel()
-        for task in tasks:
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):
-                pass
+    async for frame in console_event_stream(request, container, log_path, after_bytes=after_bytes):
+        yield frame
 
 
 class ConsoleInputBody(BaseModel):
