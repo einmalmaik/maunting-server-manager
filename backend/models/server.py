@@ -29,6 +29,10 @@ class Server(Base):
     restart_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     restart_time_utc: Mapped[str | None] = mapped_column(String(8), nullable=True)  # HH:MM
     restart_times_utc: Mapped[str | None] = mapped_column(String(256), nullable=True)  # HH:MM,HH:MM
+    last_auto_restart_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_auto_restart_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_auto_restart_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    last_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Backup-Scheduling
     # Hinweis für zukünftige Erweiterung (analog zu Restart):
@@ -115,3 +119,26 @@ class Server(Base):
     )
     backups: Mapped[list["Backup"]] = relationship("Backup", back_populates="server", cascade="all, delete-orphan")
     mods: Mapped[list["Mod"]] = relationship("Mod", back_populates="server", cascade="all, delete-orphan")
+
+    @property
+    def started_at(self) -> datetime | None:
+        return self.last_started_at
+
+    @property
+    def uptime_seconds(self) -> int | None:
+        if self.status != "running" or not self.last_started_at:
+            return None
+        started = self.last_started_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        return max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+
+    @property
+    def next_auto_restart_at(self) -> datetime | None:
+        if not self.auto_restart:
+            return None
+        try:
+            from services.scheduler_service import get_next_restart_run_time
+            return get_next_restart_run_time(self.id)
+        except Exception:
+            return None

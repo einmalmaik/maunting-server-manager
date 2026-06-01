@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -19,6 +20,10 @@ from services.install_update_lock_service import (
 logger = logging.getLogger(__name__)
 
 _LIFECYCLE_LOCKS: dict[int, asyncio.Lock] = {}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def get_server_lifecycle_lock(server_id: int) -> asyncio.Lock:
@@ -164,6 +169,7 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
         )
 
         server.status = "running"
+        server.last_started_at = _utcnow()
         db.commit()
         return {
             "message": "Restart-Befehl gesendet",

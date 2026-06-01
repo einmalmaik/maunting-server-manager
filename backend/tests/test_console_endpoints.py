@@ -12,6 +12,7 @@ Decken die Sicherheitsinvarianten und das KISS-Stream-Design ab:
 """
 
 import os
+import json
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -227,7 +228,11 @@ async def _drain_stream(gen, max_frames: int = 50) -> list[str]:
     async for chunk in gen:
         for line in chunk.split("\n"):
             if line.startswith("data: "):
-                payloads.append(line[len("data: "):])
+                raw = line[len("data: "):]
+                try:
+                    payloads.append(json.loads(raw).get("line", raw))
+                except json.JSONDecodeError:
+                    payloads.append(raw)
         if len(payloads) >= max_frames:
             break
     return payloads
@@ -256,7 +261,7 @@ class TestConsoleStreamGenerator:
                 f.write("Success! App '12345' fully installed.\n")
                 f.write("[MSM] Container msm-srv-1 gestartet\n")
 
-            with patch("routers.servers.shutil.which", return_value=None):
+            with patch("services.console_stream_service.docker_service.is_available", return_value=False):
                 payloads = asyncio.run(
                     _drain_stream(
                         _console_event_stream(
@@ -285,7 +290,7 @@ class TestConsoleStreamGenerator:
         if os.path.exists(log_path):
             os.remove(log_path)
 
-        with patch("routers.servers.docker_service.is_available", return_value=False):
+        with patch("services.console_stream_service.docker_service.is_available", return_value=False):
             payloads = asyncio.run(
                 _drain_stream(
                     _console_event_stream(
@@ -315,7 +320,7 @@ class TestConsoleStreamGenerator:
                 f.write(old)
                 f.write(new)
 
-            with patch("routers.servers.docker_service.is_available", return_value=False):
+            with patch("services.console_stream_service.docker_service.is_available", return_value=False):
                 payloads = asyncio.run(
                     _drain_stream(
                         _console_event_stream(
@@ -333,3 +338,33 @@ class TestConsoleStreamGenerator:
         finally:
             if os.path.exists(log_path):
                 os.remove(log_path)
+
+    def test_after_cursor_still_replays_docker_tail(self, test_server: Server):
+        import asyncio
+
+        from games.base import _console_log_path
+        from routers.servers import _console_event_stream
+
+        async def _fake_stream_logs(_container: str, tail: int = 200):
+            assert tail == 200
+            yield "live server line"
+
+        log_path = _console_log_path(test_server.id)
+        if os.path.exists(log_path):
+            os.remove(log_path)
+
+        with patch("services.console_stream_service.docker_service.is_available", return_value=True), \
+             patch("services.console_stream_service.docker_service.stream_logs", side_effect=_fake_stream_logs):
+            payloads = asyncio.run(
+                _drain_stream(
+                    _console_event_stream(
+                        _StubRequest(disconnect_after=2),
+                        container="msm-srv-x",
+                        log_path=log_path,
+                        after_bytes=999,
+                    ),
+                    max_frames=1,
+                )
+            )
+
+        assert "live server line" in payloads

@@ -372,6 +372,7 @@ def test_native_hytale_uses_official_downloader_http_source() -> None:
     assert bp.runtime.startup == "/entrypoint.sh"
     assert bp.runtime.env["STARTUP"] == "./start.sh"
     assert bp.runtime.env["SERVER_PORT"] == "{GAME_PORT}"
+    assert bp.runtime.env["JAVA_TOOL_OPTIONS"] == "-Dio.netty.native.workdir=/home/container"
 
 
 def _native_plugin(blueprint_id: str) -> BlueprintPlugin:
@@ -393,8 +394,26 @@ def test_dayz_blueprint_post_install_symlinks_mod_and_keys(tmp_path) -> None:
         result = plugin.install_mod(server, "12345")
 
     assert result == {}
-    assert (tmp_path / "12345").is_symlink()
-    assert (tmp_path / "keys" / "test.bikey").is_symlink()
+
+
+def test_dayz_blueprint_cleanup_removes_mod_symlinks_and_workshop_cache(tmp_path) -> None:
+    plugin = _native_plugin("dayz")
+    server = _FakeServer(id=77, install_dir=str(tmp_path))
+    workshop_dir = tmp_path / "steamapps" / "workshop" / "content" / "221100" / "12345"
+    keys_dir = workshop_dir / "keys"
+    keys_dir.mkdir(parents=True)
+    key = keys_dir / "test.bikey"
+    key.write_text("key", encoding="utf-8")
+    (tmp_path / "keys").mkdir()
+    os.symlink(workshop_dir, tmp_path / "12345", target_is_directory=True)
+    os.symlink(key, tmp_path / "keys" / "test.bikey")
+
+    result = plugin.cleanup_mod(server, "12345")
+
+    assert result["ok"] is True
+    assert not (tmp_path / "12345").exists()
+    assert not (tmp_path / "keys" / "test.bikey").exists()
+    assert not workshop_dir.exists()
 
 
 def test_conan_blueprint_post_install_copies_paks_and_formats_modlist(tmp_path) -> None:

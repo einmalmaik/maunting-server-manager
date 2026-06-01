@@ -73,6 +73,13 @@ describe('ServerConsolePanel', () => {
       },
     })
     fetchSpy = vi.spyOn(global, 'fetch')
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => Promise.resolve({ time_format: '24h' }),
+      text: () => Promise.resolve('{"time_format":"24h"}'),
+    } as Response)
   })
 
   afterEach(() => {
@@ -116,8 +123,9 @@ describe('ServerConsolePanel', () => {
     fireEvent.change(input, { target: { value: '/auth login device' } })
     fireEvent.submit(screen.getByTestId('console-input-form'))
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled())
-    const [url, options] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    const calls = fetchSpy.mock.calls as Array<[string, RequestInit]>
+    await waitFor(() => expect(calls.some((call) => String(call[0]).includes('/console/input'))).toBe(true))
+    const [url, options] = calls.find((call) => String(call[0]).includes('/console/input')) as [string, RequestInit]
     expect(url).toBe('/api/servers/42/console/input')
     expect(options.method).toBe('POST')
     expect(options.credentials).toBe('include')
@@ -133,6 +141,26 @@ describe('ServerConsolePanel', () => {
     await waitFor(() => {
       expect(screen.getByText('Starting server...')).toBeInTheDocument()
       expect(screen.getByText('Listening on port 25565')).toBeInTheDocument()
+    })
+  })
+
+  it('renders http links from JSON console frames safely', async () => {
+    setMe(ownerMe)
+    render(<ServerConsolePanel serverId={42} />)
+    const es = FakeEventSource.instances[0]
+    es.onmessage?.({
+      data: JSON.stringify({
+        line: 'Open https://example.invalid/auth.',
+        timestamp: '2026-06-01T12:00:00Z',
+        source: 'docker',
+      }),
+      lastEventId: '1',
+    } as MessageEvent)
+
+    await waitFor(() => {
+      const link = screen.getByRole('link', { name: 'https://example.invalid/auth' })
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     })
   })
 

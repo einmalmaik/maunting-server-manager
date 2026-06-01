@@ -7,6 +7,7 @@ Simple, reliable, and extensible.
 
 import logging
 from typing import Optional
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -60,6 +61,27 @@ def start_scheduler():
     _ensure_background_update_check_job()
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def get_next_restart_run_time(server_id: int) -> datetime | None:
+    """Liefert den naechsten APScheduler-Run fuer einen Server-Restart."""
+    scheduler = get_scheduler()
+    next_run = None
+    for job in scheduler.get_jobs():
+        if job.id == f"restart_server_{server_id}" or job.id.startswith(f"restart_cron_server_{server_id}_"):
+            run_time = getattr(job, "next_run_time", None)
+            if run_time is None:
+                continue
+            if run_time.tzinfo is None:
+                run_time = run_time.replace(tzinfo=timezone.utc)
+            run_time = run_time.astimezone(timezone.utc)
+            if next_run is None or run_time < next_run:
+                next_run = run_time
+    return next_run
+
+
 def stop_scheduler():
     """Stop the scheduler."""
     global _scheduler
@@ -77,11 +99,16 @@ async def _restart_server_task(server_id: int) -> None:
         server = db.query(Server).filter(Server.id == server_id).first()
         if not server:
             return
+        server.last_auto_restart_attempt_at = _utcnow()
+        server.last_auto_restart_status = "running"
+        db.commit()
 
         # Kein früher Status-Check mehr außerhalb des Locks (TOCTOU-Race mit manual stop/start).
         # Der zentrale restart_server_with_updates (mit einheitlichem Lifecycle-Lock) ist
         # autoritativ und führt stop+firewall immer sicher aus (idempotent bei nicht-laufend).
         await restart_server_with_updates(db, server)
+        server.last_auto_restart_completed_at = _utcnow()
+        server.last_auto_restart_status = "success"
 
         audit = AuditLog(
             user_id=None,
@@ -93,6 +120,13 @@ async def _restart_server_task(server_id: int) -> None:
         db.add(audit)
         db.commit()
     except Exception as e:
+        try:
+            server = db.query(Server).filter(Server.id == server_id).first()
+            if server:
+                server.last_auto_restart_status = "failed"
+                db.commit()
+        except Exception:
+            db.rollback()
         import logging
         logging.warning("Auto-restart failed for server %s: %s", server_id, e)
     finally:

@@ -133,6 +133,14 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE servers ADD COLUMN disk_usage_mb INTEGER"))
             if 'restart_times_utc' not in cols:
                 conn.execute(text("ALTER TABLE servers ADD COLUMN restart_times_utc VARCHAR(256)"))
+            if 'last_auto_restart_attempt_at' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN last_auto_restart_attempt_at TIMESTAMP"))
+            if 'last_auto_restart_completed_at' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN last_auto_restart_completed_at TIMESTAMP"))
+            if 'last_auto_restart_status' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN last_auto_restart_status VARCHAR(16)"))
+            if 'last_started_at' not in cols:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN last_started_at TIMESTAMP"))
             # Phase 1 — Legacy-Spalte linux_user entfernen (Server laufen jetzt
             # in Docker-Containern, kein POSIX-User-pro-Server mehr).
             if 'linux_user' in cols:

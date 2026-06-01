@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Plus, Save, Trash2 } from 'lucide-react'
+import { CalendarClock, CheckCircle2, Plus, Save, Trash2, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { toast } from '@/stores/toastStore'
 import type { Server } from '@/types'
-import { formatPanelTime, type PanelTimeFormat } from '@/utils/timeFormat'
+import { formatPanelDateTime, formatPanelTime, type PanelTimeFormat } from '@/utils/timeFormat'
 
 interface Props {
   server: Server
@@ -21,7 +21,7 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
 })
 
 export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('server.config.write', serverId)
   const [timeFormat, setTimeFormat] = useState<PanelTimeFormat>('24h')
   const [enabled, setEnabled] = useState(server.auto_restart)
@@ -86,6 +86,38 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
       </div>
 
       <div className="msm-card p-5 space-y-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-outline pb-5">
+          <div className="border-l border-outline pl-3">
+            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2 inline-flex items-center gap-2">
+              <CalendarClock className="w-3.5 h-3.5" />
+              {t('restarts.lastAutoAttempt', { defaultValue: 'Letzter Versuch' })}
+            </p>
+            <p className="font-body-md text-sm text-on-surface">
+              {formatPanelDateTime(server.last_auto_restart_attempt_at, timeFormat, i18n.language)}
+            </p>
+          </div>
+          <div className="border-l border-outline pl-3">
+            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
+              {t('restarts.lastAutoRestart', { defaultValue: 'Letzter Auto-Restart' })}
+            </p>
+            <p className="font-body-md text-sm text-on-surface">
+              {formatPanelDateTime(server.last_auto_restart_completed_at, timeFormat, i18n.language)}
+            </p>
+          </div>
+          <div className="border-l border-outline pl-3">
+            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
+              {t('restarts.nextAutoRestart', { defaultValue: 'Nächster Auto-Restart' })}
+            </p>
+            <div className="flex items-center gap-2">
+              {server.last_auto_restart_status === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-status-success" />}
+              {server.last_auto_restart_status === 'failed' && <XCircle className="w-3.5 h-3.5 text-status-destructive" />}
+              <p className="font-body-md text-sm text-on-surface">
+                {formatPanelDateTime(server.next_auto_restart_at, timeFormat, i18n.language)}
+              </p>
+            </div>
+          </div>
+        </div>
+
         <label className="inline-flex items-center gap-3 cursor-pointer">
           <span className={`relative w-10 h-6 rounded-full transition-colors ${enabled ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
             <input

@@ -17,13 +17,14 @@
       "AUTOMATIC_UPDATE": "1",
       "PATCHLINE": "release",
       "ASSET_PACK": "Assets.zip",
+      "JAVA_TOOL_OPTIONS": "-Dio.netty.native.workdir=/home/container",
       "DISABLE_SENTRY": "1",
       "ACCEPT_EARLY_PLUGINS": "0",
       "LEVERAGE_AHEAD_OF_TIME_CACHE": "1",
       "USE_PERSISTENT_AUTHENTICATION": "DISABLED",
       "MEMORY_OVERHEAD": "0"
     },
-    "startup": "bash ./start.sh"
+    "startup": "/entrypoint.sh"
   },
   "ports": [
     { "name": "game", "protocol": "udp" }

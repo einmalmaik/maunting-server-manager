@@ -160,6 +160,12 @@ class ServerResponse(BaseModel):
     restart_interval_hours: int | None
     restart_time_utc: str | None
     restart_times_utc: str | None
+    last_auto_restart_attempt_at: datetime | None = None
+    last_auto_restart_completed_at: datetime | None = None
+    last_auto_restart_status: str | None = None
+    next_auto_restart_at: datetime | None = None
+    started_at: datetime | None = None
+    uptime_seconds: int | None = None
     cpu_limit_percent: int | None
     ram_limit_mb: int | None
     disk_limit_gb: int | None
@@ -183,6 +189,11 @@ class ServerStatusResponse(BaseModel):
     ram_mb: int | None
     disk_mb: int | None
     uptime_seconds: int | None
+    started_at: datetime | None = None
+    last_auto_restart_attempt_at: datetime | None = None
+    last_auto_restart_completed_at: datetime | None = None
+    last_auto_restart_status: str | None = None
+    next_auto_restart_at: datetime | None = None
     # Soft-Limits (auch wenn ohne Limit-Wert anzeigen) — Frontend kann
     # belegt/limit-Verhältnis darstellen und Frei-Speicher des Hosts zeigen.
     cpu_limit_percent: int | None = None

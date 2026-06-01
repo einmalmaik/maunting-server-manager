@@ -4,6 +4,7 @@ import { Check, Copy, Eraser, Send, Terminal } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { toast } from '@/stores/toastStore'
+import { type PanelTimeFormat } from '@/utils/timeFormat'
 
 interface Props {
   serverId: number
@@ -13,9 +14,18 @@ type LineTone = 'error' | 'warn' | 'success' | 'info' | 'default'
 type ConsoleLogLine = {
   marker: number
   text: string
+  timestamp: string | null
+  source: 'msm' | 'docker' | 'unknown'
+}
+type ConsoleFrame = {
+  line?: string
+  text?: string
+  timestamp?: string
+  source?: 'msm' | 'docker'
 }
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g
+const URL_RE = /(https?:\/\/[^\s<>"']+)/g
 const MAX_LOG_LINES = 2000
 
 function clearMarkerKey(serverId: number): string {
@@ -98,6 +108,55 @@ export function displayConsoleLine(line: string, language: string): string {
   return cleaned
 }
 
+function parseConsoleFrame(raw: string): Omit<ConsoleLogLine, 'marker'> {
+  try {
+    const parsed = JSON.parse(raw) as ConsoleFrame
+    return {
+      text: parsed.line ?? parsed.text ?? raw,
+      timestamp: parsed.timestamp ?? null,
+      source: parsed.source ?? 'unknown',
+    }
+  } catch {
+    return { text: raw, timestamp: null, source: 'unknown' }
+  }
+}
+
+function formatConsoleTime(value: string | null, format: PanelTimeFormat, locale: string): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: format === '12h',
+  }).format(date)
+}
+
+function splitUrlToken(token: string): { href: string; suffix: string } {
+  const match = token.match(/^(.+?)([),.;:!?]*)$/)
+  return { href: match?.[1] ?? token, suffix: match?.[2] ?? '' }
+}
+
+function renderLineContent(line: ConsoleLogLine, language: string, timeFormat: PanelTimeFormat) {
+  const display = displayConsoleLine(line.text, language)
+  const time = formatConsoleTime(line.timestamp, timeFormat, language)
+  const withTime = time ? `[${time}] ${display}` : display
+  const parts = withTime.split(URL_RE)
+  return parts.map((part, index) => {
+    if (!part.match(URL_RE)) return <span key={index}>{part}</span>
+    const { href, suffix } = splitUrlToken(part)
+    return (
+      <span key={index}>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="underline decoration-secondary/70 underline-offset-2 hover:text-primary">
+          {href}
+        </a>
+        {suffix}
+      </span>
+    )
+  })
+}
+
 /** Server-Konsole als eigener Tab.
  *
  *  - **Direktanzeige ohne Reload:** Live-Stream (EventSource) startet sofort beim Mount
@@ -113,6 +172,7 @@ export function ServerConsolePanel({ serverId }: Props) {
   const canWrite = useHasPermission('server.console.write', serverId)
   const [logs, setLogs] = useState<ConsoleLogLine[]>([])
   const [hiddenThrough, setHiddenThrough] = useState(() => readClearMarker(serverId))
+  const [timeFormat, setTimeFormat] = useState<PanelTimeFormat>('24h')
   const [streamVersion, setStreamVersion] = useState(0)
   const [inputValue, setInputValue] = useState('')
   const [sending, setSending] = useState(false)
@@ -121,6 +181,12 @@ export function ServerConsolePanel({ serverId }: Props) {
   const bufferRef = useRef<string[]>([])
   const activeStreamRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    api<{ time_format: PanelTimeFormat }>('/settings')
+      .then((data) => setTimeFormat(data.time_format === '12h' ? '12h' : '24h'))
+      .catch(() => setTimeFormat('24h'))
+  }, [])
 
   useEffect(() => {
     activeStreamRef.current = streamVersion
@@ -147,7 +213,7 @@ export function ServerConsolePanel({ serverId }: Props) {
         ? eventMarker
         : nextSeqRef.current + 1
       nextSeqRef.current = Math.max(nextSeqRef.current, marker)
-      bufferRef.current.push(JSON.stringify({ marker, text: ev.data }))
+      bufferRef.current.push(JSON.stringify({ marker, raw: ev.data }))
     }
     
     const flushInterval = setInterval(() => {
@@ -158,10 +224,11 @@ export function ServerConsolePanel({ serverId }: Props) {
         setLogs((prev) => {
           const mapped = toFlush.map((item) => {
             try {
-              return JSON.parse(item) as ConsoleLogLine
+              const parsed = JSON.parse(item) as { marker: number; raw: string }
+              return { marker: parsed.marker, ...parseConsoleFrame(parsed.raw) }
             } catch {
               nextSeqRef.current += 1
-              return { marker: nextSeqRef.current, text: item }
+              return { marker: nextSeqRef.current, ...parseConsoleFrame(item) }
             }
           })
           const next = [...prev, ...mapped]
@@ -221,7 +288,11 @@ export function ServerConsolePanel({ serverId }: Props) {
 
   const copyVisibleLogs = async () => {
     const text = visibleLogs
-      .map((line) => displayConsoleLine(line.text, i18n.language))
+      .map((line) => {
+        const time = formatConsoleTime(line.timestamp, timeFormat, i18n.language)
+        const display = displayConsoleLine(line.text, i18n.language)
+        return time ? `[${time}] ${display}` : display
+      })
       .join('\n')
     if (!text) return
     try {
@@ -272,7 +343,9 @@ export function ServerConsolePanel({ serverId }: Props) {
           ) : (
             visibleLogs.map((line, i) => (
               <div key={`${line.marker}-${i}`} className={colorizeOutput(line.text)}>
-                {displayConsoleLine(line.text, i18n.language) || '\u00A0'}
+                {displayConsoleLine(line.text, i18n.language)
+                  ? renderLineContent(line, i18n.language, timeFormat)
+                  : '\u00A0'}
               </div>
             ))
           )}

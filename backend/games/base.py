@@ -23,6 +23,7 @@ import shlex
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from services import docker_service
@@ -80,6 +81,7 @@ class ServerStatus:
     ram_mb: int | None = None
     disk_mb: int | None = None
     uptime_seconds: int | None = None
+    started_at: datetime | None = None
     message: str | None = None
 
 
@@ -97,6 +99,19 @@ def _map_container_status(docker_status: str) -> str:
         return "starting"
     # exited, dead, created, removing, paused -> stopped
     return "stopped"
+
+
+def _parse_docker_started_at(value: str | None) -> datetime | None:
+    if not value or value.startswith("0001-01-01"):
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
 
 
 # ── Console-Logging (MSM-eigene Log-Datei pro Server) ──────────────────────
@@ -906,6 +921,10 @@ class GamePlugin(ABC):
 
         is_running = state["status"] == "running"
         live_stats = docker_service.stats(name) if is_running else None
+        started_at = _parse_docker_started_at(state.get("started_at")) if is_running else None
+        uptime_seconds = None
+        if started_at is not None:
+            uptime_seconds = max(0, int((datetime.now(timezone.utc) - started_at).total_seconds()))
 
         msg = None
         if state.get("oom_killed"):
@@ -916,7 +935,8 @@ class GamePlugin(ABC):
             cpu_percent=(live_stats or {}).get("cpu_percent"),
             ram_mb=(live_stats or {}).get("ram_mb"),
             disk_mb=None,  # Disk wird zentral im Scheduler-Job ermittelt
-            uptime_seconds=None,
+            uptime_seconds=uptime_seconds,
+            started_at=started_at,
             message=msg,
         )
 
@@ -944,6 +964,14 @@ class GamePlugin(ABC):
         if not self.supports_mods:
             return {"error": "Mod-Installation nicht unterstützt"}
         return {"error": "Mod-Installation nicht implementiert"}
+
+    def cleanup_mod(self, server, workshop_id: str) -> dict:
+        """Entfernt game-spezifische Mod-Artefakte.
+
+        Default ist no-op, weil nur Blueprint-Plugins wissen, welche
+        Workshop-Dateien/Symlinks/Kopien sie angelegt haben.
+        """
+        return {"ok": True, "removed": []}
 
     def get_mod_support(self) -> dict | None:
         if self.supports_mods:
