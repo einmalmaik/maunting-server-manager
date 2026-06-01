@@ -28,7 +28,7 @@ import { ServerConsolePanel } from "@/components/server/ServerConsolePanel";
 import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
-import { formatDurationSeconds } from "@/utils/timeFormat";
+import { UptimeDisplay } from "@/components/server/UptimeDisplay";
 
 type TabKey = "files" | "console" | "mods" | "restarts" | "backups";
 const VALID_TABS: TabKey[] = [
@@ -93,7 +93,6 @@ export function ServerDetail() {
   const [games, setGames] = useState<GameInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
 
   // Stabiler Badge-State (KISS-Fix fuer Polling/Cache-Race-Flicker):
   // Badge (nur Server-Updates via Blueprint) bleibt sichtbar, sobald einmal true,
@@ -156,10 +155,7 @@ export function ServerDetail() {
     return () => clearInterval(handle);
   }, [serverId]);
 
-  useEffect(() => {
-    const handle = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(handle);
-  }, []);
+
 
   useEffect(() => {
     if (server && showEditNetwork) {
@@ -382,17 +378,6 @@ export function ServerDetail() {
   }
 
   const effectiveStatus = optimisticStatus || server.status;
-  const uptimeLabel = (() => {
-    if (effectiveStatus !== "running") return "-";
-    const startedAt = status?.started_at || server.started_at;
-    if (startedAt) {
-      const started = new Date(startedAt).getTime();
-      if (!Number.isNaN(started)) {
-        return formatDurationSeconds(Math.max(0, Math.floor((now - started) / 1000)));
-      }
-    }
-    return formatDurationSeconds(status?.uptime_seconds ?? server.uptime_seconds);
-  })();
 
   // KISS: Install vs Reinstall Button-Logik + Update-Badge (genau nach Spec)
   // - Keine Server-Dateien (awaiting_files oder Disk <= 0) → servers.install
@@ -616,7 +601,7 @@ export function ServerDetail() {
             {t("serverDetail.uptime", { defaultValue: "Uptime" })}
           </p>
           <p className="font-headline text-display-sm text-primary">
-            {uptimeLabel}
+            <UptimeDisplay server={server} label="" />
           </p>
           <p className="font-body-md text-xs text-on-surface-variant mt-1">
             {effectiveStatus === "running"

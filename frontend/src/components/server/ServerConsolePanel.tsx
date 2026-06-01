@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, Clock, Copy, Eraser, Search, Send, Terminal } from 'lucide-react'
 import { api } from '@/api/client'
@@ -162,6 +162,29 @@ function renderLineContent(line: ConsoleLogLine, language: string, timeFormat: P
     )
   })
 }
+
+interface ConsoleLogLineDisplayProps {
+  line: ConsoleLogLine
+  language: string
+  timeFormat: PanelTimeFormat
+  showTimestamps: boolean
+}
+
+const ConsoleLogLineDisplay = React.memo(function ConsoleLogLineDisplay({
+  line,
+  language,
+  timeFormat,
+  showTimestamps,
+}: ConsoleLogLineDisplayProps) {
+  if (!displayConsoleLine(line.text, language)) {
+    return <div className={colorizeOutput(line.text)}>{'\u00A0'}</div>
+  }
+  return (
+    <div className={colorizeOutput(line.text)}>
+      {renderLineContent(line, language, timeFormat, showTimestamps)}
+    </div>
+  )
+})
 
 export function ServerConsolePanel({ serverId }: Props) {
   const { t, i18n } = useTranslation()
@@ -445,11 +468,13 @@ export function ServerConsolePanel({ serverId }: Props) {
               <span className="text-on-surface-variant">{t('servers.noLogs')}</span>
             ) : (
               filteredLogs.map((line, i) => (
-                <div key={`${line.marker}-${i}`} className={colorizeOutput(line.text)}>
-                  {displayConsoleLine(line.text, i18n.language)
-                    ? renderLineContent(line, i18n.language, timeFormat, showTimestamps)
-                    : '\u00A0'}
-                </div>
+                <ConsoleLogLineDisplay
+                  key={`${line.marker}-${i}`}
+                  line={line}
+                  language={i18n.language}
+                  timeFormat={timeFormat}
+                  showTimestamps={showTimestamps}
+                />
               ))
             )}
           </div>

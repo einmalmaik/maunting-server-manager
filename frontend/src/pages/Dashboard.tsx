@@ -6,7 +6,7 @@ import { Server, GameInfo } from '@/types'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Server as ServerIcon, Activity, MemoryStick, CheckCircle2, AlertTriangle, XCircle, Loader2, Clock } from 'lucide-react'
-import { formatDurationSeconds } from '@/utils/timeFormat'
+import { UptimeDisplay } from '@/components/server/UptimeDisplay'
 
 interface ServiceStatus {
   status: 'ok' | 'degraded' | 'error'
@@ -114,7 +114,6 @@ export function Dashboard() {
   const [servers, setServers] = useState<Server[]>([])
   const [games, setGames] = useState<GameInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     Promise.all([
@@ -129,22 +128,7 @@ export function Dashboard() {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [])
-
   const runningCount = servers.filter((s) => s.status === 'running').length
-  const uptimeFor = (server: Server): string => {
-    if (server.status !== 'running') return '-'
-    if (server.started_at) {
-      const started = new Date(server.started_at).getTime()
-      if (!Number.isNaN(started)) {
-        return formatDurationSeconds(Math.max(0, Math.floor((now - started) / 1000)))
-      }
-    }
-    return formatDurationSeconds(server.uptime_seconds)
-  }
 
   if (loading) {
     return (
@@ -277,9 +261,7 @@ export function Dashboard() {
                 {server.status === 'running' && (
                   <div className="flex items-center gap-2 text-on-surface-variant col-span-2">
                     <Clock className="w-3.5 h-3.5" />
-                    <span className="font-body-md">
-                      {t('serverDetail.uptime', { defaultValue: 'Uptime' })}: {uptimeFor(server)}
-                    </span>
+                    <UptimeDisplay server={server} label={t('serverDetail.uptime', { defaultValue: 'Uptime' })} />
                   </div>
                 )}
               </div>

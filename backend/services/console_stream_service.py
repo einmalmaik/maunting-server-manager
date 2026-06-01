@@ -12,8 +12,7 @@ from games.base import _append_console_log, _console_log_path
 
 logger = logging.getLogger(__name__)
 
-# Cache für aktive Hintergrund-Logger
-_ACTIVE_LOGGERS: dict[int, asyncio.Task] = {}
+
 
 
 def _utc_iso() -> str:
@@ -39,56 +38,6 @@ def _sse_console_frame(
     return f"{prefix}data: {payload}\n\n"
 
 
-async def _log_collector(server_id: int, container_name: str) -> None:
-    """Hintergrund-Logger, der den docker logs stream liest und in console.log schreibt."""
-    logger.info(f"Hintergrund-Log-Collector gestartet fuer Server {server_id} ({container_name})")
-    try:
-        while True:
-            # Prüfen, ob der Container überhaupt läuft/existiert
-            if not docker_service.is_running(container_name):
-                break
-            
-            try:
-                # tail=0, da wir nur neue Logzeilen ab jetzt sichern wollen, um Duplikate zu vermeiden
-                async for line in docker_service.stream_logs(container_name, tail=0):
-                    _append_console_log(server_id, line + "\n")
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logger.warning(f"Log-Stream fuer Server {server_id} unterbrochen: {e}")
-            
-            # Kurz warten vor dem nächsten Reconnect-Versuch, falls er noch läuft
-            await asyncio.sleep(2.0)
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        logger.warning(f"Log-Collector fuer Server {server_id} gestoppt wegen Fehler: {e}")
-    finally:
-        _ACTIVE_LOGGERS.pop(server_id, None)
-        logger.info(f"Hintergrund-Log-Collector beendet fuer Server {server_id} ({container_name})")
-
-
-def ensure_console_logger(server_id: int, container_name: str) -> None:
-    """Stellt sicher, dass der Hintergrund-Log-Collector fuer den Server aktiv ist."""
-    if not docker_service.is_available() or not docker_service.exists(container_name):
-        return
-    if server_id in _ACTIVE_LOGGERS:
-        # Falls der Task beendet wurde, aber noch im Dict ist
-        if not _ACTIVE_LOGGERS[server_id].done():
-            return
-    
-    # Task im Hintergrund starten
-    task = asyncio.create_task(_log_collector(server_id, container_name))
-    _ACTIVE_LOGGERS[server_id] = task
-
-
-def stop_console_logger(server_id: int) -> None:
-    """Stoppt den Hintergrund-Log-Collector fuer den Server."""
-    task = _ACTIVE_LOGGERS.pop(server_id, None)
-    if task:
-        task.cancel()
-
-
 async def console_event_stream(
     request: Request,
     container: str,
@@ -97,25 +46,35 @@ async def console_event_stream(
     after_bytes: int | None = None,
     docker_tail_lines: int = 200,
 ) -> AsyncIterator[str]:
-    """SSE-Generator fuer Console-Backlog + live nachfolgende console.log-Datei."""
+    """SSE-Generator fuer Console-Backlog + live nachfolgende Container-Logs.
+
+    Liest zunaechst die Lifecycle-Logs aus der statischen `log_path`
+    und startet dann parallele Tasks fuer Datei-Tailing und Docker-Log-Streaming.
+    Behebt OOM-Gefahr beim ersten Auslesen der statischen Datei.
+    """
 
     initial_bytes = max(after_bytes or 0, 0)
     queue: asyncio.Queue[str] = asyncio.Queue()
 
+    # Statische MSM-Lifecycle-Logs iterativ einlesen (OOM-Fix)
     if os.path.exists(log_path):
         try:
             with open(log_path, "rb") as f:
                 f.seek(initial_bytes)
-                content_bytes = f.read()
-            pos = initial_bytes
-            for raw_line in content_bytes.splitlines(keepends=True):
-                pos += len(raw_line)
-                line = raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace")
-                yield _sse_console_frame(line=line, source="msm", event_id=pos)
-            initial_bytes = pos
+                pos = initial_bytes
+                while True:
+                    chunk = f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    for raw_line in chunk.splitlines(keepends=True):
+                        pos += len(raw_line)
+                        line = raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace")
+                        yield _sse_console_frame(line=line, source="msm", event_id=pos)
+                initial_bytes = pos
         except OSError:
             initial_bytes = max(after_bytes or 0, 0)
 
+    # Task 1: Tail MSM-Lifecycle-Logs
     async def _tail_file() -> None:
         pos = initial_bytes
         while True:
@@ -141,7 +100,20 @@ async def console_event_stream(
                 line = raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace")
                 await queue.put(_sse_console_frame(line=line, source="msm", event_id=read_pos))
 
-    task = asyncio.create_task(_tail_file())
+    # Task 2: Live Docker Stream (stateless)
+    async def _tail_docker() -> None:
+        try:
+            if not docker_service.is_running(container):
+                return
+            async for line in docker_service.stream_logs(container, tail=docker_tail_lines):
+                await queue.put(_sse_console_frame(line=line, source="game"))
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning("Docker tailing failed for %s: %s", container, e)
+
+    file_task = asyncio.create_task(_tail_file())
+    docker_task = asyncio.create_task(_tail_docker())
 
     try:
         while True:
@@ -154,8 +126,10 @@ async def console_event_stream(
                 continue
             yield frame
     finally:
-        task.cancel()
+        file_task.cancel()
+        docker_task.cancel()
         try:
-            await task
+            await file_task
+            await docker_task
         except (asyncio.CancelledError, Exception):
             pass

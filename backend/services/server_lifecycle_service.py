@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from games import get_plugin
 from games.base import _append_console_log, container_name_for
 from models import Server
-from services.console_stream_service import ensure_console_logger, stop_console_logger
+
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
@@ -105,7 +105,6 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
                 ports_list,
             )
 
-            stop_console_logger(server.id)
             stop_result = await asyncio.to_thread(plugin.stop, server)
             if "error" in stop_result:
                 raise HTTPException(status_code=500, detail=stop_result["error"])
@@ -173,7 +172,6 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
         server.status = "running"
         server.last_started_at = _utcnow()
         db.commit()
-        ensure_console_logger(server.id, container_name_for(server.id))
         return {
             "message": "Restart-Befehl gesendet",
             "status": server.status,
