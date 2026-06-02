@@ -498,6 +498,15 @@
     "statusInstalled": "Installiert",
     "statusError": "Fehler",
     "statusErrorHint": "Installation fehlgeschlagen.",
+    "statusMissing": "Fehlt",
+    "statusMissingHint": "Mod-Dateien fehlen und werden beim nächsten sicheren Update installiert.",
+    "statusOutdated": "Veraltet",
+    "statusOutdatedHint": "Für diese Mod wurde ein Workshop-Update erkannt.",
+    "statusUnknown": "Unbekannt",
+    "statusUnknownHint": "Der Update-Status konnte nicht verlässlich geprüft werden.",
+    "statusUnknownNoSteamKeyHint": "Steam API-Key fehlt; Metadaten können nicht geprüft werden.",
+    "statusFailed": "Fehlgeschlagen",
+    "statusFailedHint": "Die letzte Mod-Aktion ist fehlgeschlagen.",
     "etaCalculating": "Restzeit wird berechnet.",
     "etaAlmostDone": "Fast fertig.",
     "etaLessThanMinute": "Unter 1 Minute verbleibend.",
@@ -695,7 +704,12 @@
   "errors": {
     "RATE_LIMITED": "Zu viele Anfragen. Bitte warte einen Moment.",
     "SESSION_EXPIRED": "Sitzung abgelaufen. Bitte melde dich erneut an.",
-    "install_update_already_running": "Es läuft bereits eine Installation oder Aktualisierung. Bitte warte, bis dieser Job abgeschlossen ist."
+    "install_update_already_running": "Es läuft bereits eine Installation oder Aktualisierung. Bitte warte, bis dieser Job abgeschlossen ist.",
+    "steam_api_key_missing": "Steam API-Key fehlt. Workshop-Suche und Live-Metadaten sind erst nach Konfiguration verfügbar.",
+    "steam_api_unavailable": "Steam API ist nicht erreichbar oder der API-Key ist ungültig.",
+    "steam_search_failed": "Steam-Suche fehlgeschlagen.",
+    "steam_load_failed": "Steam-Daten konnten nicht geladen werden.",
+    "invalid_workshop_id": "Ungültige Workshop-ID."
   },
   "notifications": {
     "disable": "E-Mail-Benachrichtigungen deaktivieren",

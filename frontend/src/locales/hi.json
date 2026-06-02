@@ -511,6 +511,15 @@
     "statusInstalled": "स्थापित",
     "statusError": "त्रुटि",
     "statusErrorHint": "स्थापना विफल.",
+    "statusMissing": "गुम",
+    "statusMissingHint": "मॉड फ़ाइलें गुम हैं और अगले सुरक्षित अपडेट में इंस्टॉल होंगी.",
+    "statusOutdated": "पुराना",
+    "statusOutdatedHint": "इस मॉड के लिए Workshop अपडेट मिला.",
+    "statusUnknown": "अज्ञात",
+    "statusUnknownHint": "अपडेट स्थिति भरोसेमंद रूप से जांची नहीं जा सकी.",
+    "statusUnknownNoSteamKeyHint": "Steam API key गुम है; मेटाडेटा जांचा नहीं जा सकता.",
+    "statusFailed": "विफल",
+    "statusFailedHint": "अंतिम मॉड कार्रवाई विफल हुई.",
     "etaCalculating": "शेष समय की गणना.",
     "etaAlmostDone": "लगभग पूरा हो गया.",
     "etaLessThanMinute": "1 मिनट से भी कम समय शेष है.",
@@ -708,7 +717,12 @@
   "errors": {
     "RATE_LIMITED": "बहुत सारे अनुरोध. कृपया कुछ देर इंतज़ार करें।",
     "SESSION_EXPIRED": "सत्र समाप्त हुआ। कृपया पुनः साइन इन करें.",
-    "install_update_already_running": "कोई इंस्टालेशन या अपडेट पहले से ही चल रहा है. कृपया उस कार्य के समाप्त होने तक प्रतीक्षा करें."
+    "install_update_already_running": "कोई इंस्टालेशन या अपडेट पहले से ही चल रहा है. कृपया उस कार्य के समाप्त होने तक प्रतीक्षा करें.",
+    "steam_api_key_missing": "Steam API key गुम है. कॉन्फ़िगरेशन के बाद Workshop खोज और मेटाडेटा उपलब्ध होंगे.",
+    "steam_api_unavailable": "Steam API उपलब्ध नहीं है या API key अमान्य है.",
+    "steam_search_failed": "Steam खोज विफल हुई.",
+    "steam_load_failed": "Steam डेटा लोड नहीं हो सका.",
+    "invalid_workshop_id": "अमान्य Workshop ID."
   },
   "notifications": {
     "disable": "ईमेल सूचनाएं अक्षम करें",

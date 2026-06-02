@@ -511,6 +511,15 @@
     "statusInstalled": "Instalado",
     "statusError": "error",
     "statusErrorHint": "La instalación falló.",
+    "statusMissing": "Falta",
+    "statusMissingHint": "Faltan archivos del mod y se instalarán en la próxima actualización segura.",
+    "statusOutdated": "Desactualizado",
+    "statusOutdatedHint": "Se detectó una actualización de Workshop para este mod.",
+    "statusUnknown": "Desconocido",
+    "statusUnknownHint": "No se pudo comprobar el estado de actualización de forma fiable.",
+    "statusUnknownNoSteamKeyHint": "Falta la clave de Steam API; no se pueden comprobar metadatos.",
+    "statusFailed": "Fallido",
+    "statusFailedHint": "La última acción del mod falló.",
     "etaCalculating": "Calculando el tiempo restante.",
     "etaAlmostDone": "Casi terminado.",
     "etaLessThanMinute": "Queda menos de 1 minuto.",
@@ -708,7 +717,12 @@
   "errors": {
     "RATE_LIMITED": "Demasiadas solicitudes. Espere un momento.",
     "SESSION_EXPIRED": "La sesión expiró. Por favor inicia sesión nuevamente.",
-    "install_update_already_running": "Ya se está ejecutando una instalación o actualización. Espere hasta que el trabajo haya terminado."
+    "install_update_already_running": "Ya se está ejecutando una instalación o actualización. Espere hasta que el trabajo haya terminado.",
+    "steam_api_key_missing": "Falta la clave de Steam API. La búsqueda de Workshop y los metadatos estarán disponibles después de configurarla.",
+    "steam_api_unavailable": "Steam API no está disponible o la clave no es válida.",
+    "steam_search_failed": "La búsqueda de Steam falló.",
+    "steam_load_failed": "No se pudieron cargar los datos de Steam.",
+    "invalid_workshop_id": "ID de Workshop no válido."
   },
   "notifications": {
     "disable": "Desactivar notificaciones por correo electrónico",

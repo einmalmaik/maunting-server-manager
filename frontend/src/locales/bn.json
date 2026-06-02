@@ -511,6 +511,15 @@
     "statusInstalled": "ইনস্টল করা হয়েছে",
     "statusError": "ত্রুটি",
     "statusErrorHint": "ইনস্টলেশন ব্যর্থ হয়েছে.",
+    "statusMissing": "অনুপস্থিত",
+    "statusMissingHint": "মড ফাইল অনুপস্থিত এবং পরবর্তী নিরাপদ আপডেটে ইনস্টল হবে.",
+    "statusOutdated": "পুরনো",
+    "statusOutdatedHint": "এই মডের জন্য Workshop আপডেট পাওয়া গেছে.",
+    "statusUnknown": "অজানা",
+    "statusUnknownHint": "আপডেট স্ট্যাটাস নির্ভরযোগ্যভাবে পরীক্ষা করা যায়নি.",
+    "statusUnknownNoSteamKeyHint": "Steam API key নেই; মেটাডেটা পরীক্ষা করা যায় না.",
+    "statusFailed": "ব্যর্থ",
+    "statusFailedHint": "শেষ মড অ্যাকশন ব্যর্থ হয়েছে.",
     "etaCalculating": "বাকি সময় গণনা.",
     "etaAlmostDone": "প্রায় শেষ।",
     "etaLessThanMinute": "১ মিনিটেরও কম বাকি।",
@@ -708,7 +717,12 @@
   "errors": {
     "RATE_LIMITED": "অনেক অনুরোধ. একটি মুহূর্ত অপেক্ষা করুন.",
     "SESSION_EXPIRED": "সেশনের মেয়াদ শেষ। আবার সাইন ইন করুন.",
-    "install_update_already_running": "একটি ইনস্টলেশন বা আপডেট ইতিমধ্যেই চলছে৷ সেই কাজ শেষ না হওয়া পর্যন্ত অপেক্ষা করুন."
+    "install_update_already_running": "একটি ইনস্টলেশন বা আপডেট ইতিমধ্যেই চলছে৷ সেই কাজ শেষ না হওয়া পর্যন্ত অপেক্ষা করুন.",
+    "steam_api_key_missing": "Steam API key নেই. কনফিগারেশনের পরে Workshop অনুসন্ধান এবং মেটাডেটা পাওয়া যাবে.",
+    "steam_api_unavailable": "Steam API অনুপলব্ধ বা API key অবৈধ.",
+    "steam_search_failed": "Steam অনুসন্ধান ব্যর্থ হয়েছে.",
+    "steam_load_failed": "Steam ডেটা লোড করা যায়নি.",
+    "invalid_workshop_id": "অবৈধ Workshop ID."
   },
   "notifications": {
     "disable": "ইমেল বিজ্ঞপ্তি নিষ্ক্রিয়",

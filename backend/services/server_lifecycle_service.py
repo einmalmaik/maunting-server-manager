@@ -260,11 +260,67 @@ def _ports(server: Server) -> list[tuple[int, str, str]]:
     return [(p.port, p.protocol, p.role) for p in server.ports]
 
 
+def _uses_steam_source(plugin) -> bool:
+    try:
+        bp = plugin.get_blueprint()
+        return bool(bp and bp.source.type.value == "steam")
+    except Exception:
+        return False
+
+
+def _check_server_file_update(server: Server, plugin, operation: str) -> dict:
+    try:
+        return plugin.check_for_server_file_update(server)
+    except Exception as exc:
+        _append_console_log(
+            server.id,
+            f"[MSM] Server-Datei-Update-Check während {operation} fehlgeschlagen "
+            f"(nicht kritisch): {exc}\n",
+        )
+        logger.warning("Server-Datei-Update-Check für Server %s fehlgeschlagen: %s", server.id, exc)
+        return {"action": "none", "reason": "error"}
+
+
+def _server_file_update_needed(update_check: dict | None) -> bool:
+    return bool(update_check and update_check.get("action") == "update")
+
+
+def _run_server_file_update_if_needed(
+    server: Server,
+    plugin,
+    operation: str,
+    *,
+    update_check: dict | None = None,
+) -> None:
+    is_steam = _uses_steam_source(plugin)
+    if not is_steam and not _server_file_update_needed(update_check):
+        return
+    if is_steam:
+        _append_console_log(server.id, "[MSM] Running SteamCMD server validate...\n")
+    else:
+        _append_console_log(server.id, "[MSM] Running checked server file update...\n")
+    result = plugin.perform_server_file_update(server)
+    if result.get("ok", False):
+        message = "Server files validated by SteamCMD." if is_steam else "Server file update finished."
+        _append_console_log(server.id, f"[MSM] {message}\n")
+        return
+    label = "SteamCMD server validate" if is_steam else "Server file update"
+    _append_console_log(
+        server.id,
+        f"[MSM] {label} had problems during {operation}; start continues: "
+        f"{result.get('error') or result}\n",
+    )
+
+
 def _run_start(db: Session, server: Server, plugin) -> None:
     _ensure_bind_ip(server)
     mod_updates: list[dict] = []
+    needs_server_validate = _uses_steam_source(plugin)
+    server_update_check: dict | None = None
     try:
         plugin.prepare_for_updates(server)
+        if not needs_server_validate:
+            server_update_check = _check_server_file_update(server, plugin, "start")
         mod_updates = plugin.check_for_mod_updates(server)
     except Exception as exc:
         _append_console_log(
@@ -275,7 +331,7 @@ def _run_start(db: Session, server: Server, plugin) -> None:
 
     update_lock_acquired = False
     try:
-        if mod_updates:
+        if needs_server_validate or _server_file_update_needed(server_update_check) or mod_updates:
             update_lock_acquired = try_acquire_install_update_lock(server.id, "start_update")
             if not update_lock_acquired:
                 raise HTTPException(
@@ -286,15 +342,13 @@ def _run_start(db: Session, server: Server, plugin) -> None:
                     },
                 )
 
-        ports_list = _ports(server)
-        open_ports(server.name, ports_list)
-        iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+        _run_server_file_update_if_needed(server, plugin, "start", update_check=server_update_check)
 
         if mod_updates:
             _append_console_log(
                 server.id,
                 f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt - "
-                "fuehre Download via install_mod/run_steamcmd_workshop_download aus...\n",
+                "führe gebündelten Workshop-Download aus...\n",
             )
             mod_res = plugin.perform_workshop_mod_updates(server, only_auto_update=True)
             if not mod_res.get("ok", False):
@@ -314,11 +368,14 @@ def _run_start(db: Session, server: Server, plugin) -> None:
         try:
             run_backup(server.id, db, timeout_seconds=300)
         except Exception:
-            logger.warning("Pre-Start-Backup fehlgeschlagen fuer Server %s (details redacted for security)", server.id)
+            logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
 
     result = plugin.start(server)
+    except Exception:
+        close_ports(ports_list)
+        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        raise
     if "error" in result:
-        ports_list = _ports(server)
         close_ports(ports_list)
         iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         raise HTTPException(status_code=500, detail=result["error"])
@@ -357,23 +414,24 @@ def _run_kill(db: Session, server: Server) -> None:
 
 def _run_restart(db: Session, server: Server, plugin) -> None:
     _ensure_bind_ip(server)
-    server_update: dict = {}
     mod_updates: list[dict] = []
+    needs_server_validate = _uses_steam_source(plugin)
+    server_update_check: dict | None = None
     try:
         plugin.prepare_for_updates(server)
-        server_update = plugin.check_for_server_file_update(server)
+        if not needs_server_validate:
+            server_update_check = _check_server_file_update(server, plugin, "restart")
         mod_updates = plugin.check_for_mod_updates(server)
     except Exception as exc:
         _append_console_log(
             server.id,
-            f"[MSM] Updater-Check waehrend Restart fehlgeschlagen (nicht kritisch): {exc}\n",
+            f"[MSM] Updater-Check während Restart fehlgeschlagen (nicht kritisch): {exc}\n",
         )
         logger.warning("Updater-Check beim Restart von Server %s fehlgeschlagen: %s", server.id, exc)
 
     update_lock_acquired = False
     try:
-        needs_update_job = server_update.get("action") == "update" or bool(mod_updates)
-        if needs_update_job:
+        if needs_server_validate or _server_file_update_needed(server_update_check) or bool(mod_updates):
             update_lock_acquired = try_acquire_install_update_lock(server.id, "restart_update")
             if not update_lock_acquired:
                 raise HTTPException(
@@ -392,25 +450,13 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
         if "error" in stop_result:
             raise HTTPException(status_code=500, detail=stop_result["error"])
 
-        if server_update.get("action") == "update":
-            _append_console_log(
-                server.id,
-                f"[MSM] Server-Datei-Update erkannt ({server_update.get('reason')}). "
-                "Update wird vor dem Container-Start ausgefuehrt.\n",
-            )
-            update_res = plugin.perform_server_file_update(server)
-            if not update_res.get("ok", False):
-                _append_console_log(
-                    server.id,
-                    f"[MSM] Server-Datei-Update fehlgeschlagen (Restart wird fortgesetzt): "
-                    f"{update_res.get('error') or update_res}\n",
-                )
+        _run_server_file_update_if_needed(server, plugin, "restart", update_check=server_update_check)
 
         if mod_updates:
             _append_console_log(
                 server.id,
-                f"[MSM] {len(mod_updates)} Workshop-Mod(s) benoetigen Update/Installation. "
-                "Download laeuft vor dem Container-Start.\n",
+                f"[MSM] {len(mod_updates)} Workshop-Mod(s) benötigen Update/Installation. "
+                "Download läuft vor dem Container-Start.\n",
             )
             mod_res = plugin.perform_workshop_mod_updates(server, only_auto_update=True)
             if not mod_res.get("ok", False):
@@ -430,15 +476,21 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
         try:
             run_backup(server.id, db, timeout_seconds=300)
         except Exception:
-            logger.warning("Pre-Start-Backup fehlgeschlagen fuer Server %s (details redacted for security)", server.id)
-
-    start_result = plugin.start(server)
-    if "error" in start_result:
-        raise HTTPException(status_code=500, detail=start_result["error"])
+            logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
 
     ports_list = _ports(server)
     open_ports(server.name, ports_list)
     iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    try:
+        start_result = plugin.start(server)
+    except Exception:
+        close_ports(ports_list)
+        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        raise
+    if "error" in start_result:
+        close_ports(ports_list)
+        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        raise HTTPException(status_code=500, detail=start_result["error"])
 
     server.status = "running"
     server.status_message = None

@@ -6,11 +6,20 @@ Caches responses to respect rate limits.
 """
 
 import json
+import logging
 import httpx
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import os
+
+logger = logging.getLogger(__name__)
+
+
+class SteamApiUnavailable(RuntimeError):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 @dataclass
@@ -79,7 +88,7 @@ class SteamService:
     ) -> List[SteamModInfo]:
         """Search workshop mods via Steam Web API QueryFiles."""
         if not self.api_key:
-            return []
+            raise SteamApiUnavailable("steam_api_key_missing")
         
         cache_key = f"search_{appid}_{query}_{page}_{per_page}"
         cached = self._get_cache(cache_key)
@@ -125,15 +134,13 @@ class SteamService:
             return mods
             
         except Exception as e:
-            print(f"Steam API search error: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
+            logger.warning("Steam API search failed: %s", type(e).__name__)
+            raise SteamApiUnavailable("steam_api_unavailable") from e
     
     async def get_mod_details(self, appid: str, publishedfileid: str) -> Optional[SteamModInfo]:
         """Get detailed information for a specific mod."""
         if not self.api_key:
-            return None
+            raise SteamApiUnavailable("steam_api_key_missing")
         
         cache_key = f"details_{appid}_{publishedfileid}"
         cached = self._get_cache(cache_key)
@@ -169,10 +176,8 @@ class SteamService:
             return None
             
         except Exception as e:
-            print(f"Steam API details error: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+            logger.warning("Steam API details failed: %s", type(e).__name__)
+            raise SteamApiUnavailable("steam_api_unavailable") from e
     
     def _parse_mod_data(self, mod_data: Dict[str, Any]) -> SteamModInfo:
         """Parse Steam API response into SteamModInfo."""
@@ -225,7 +230,7 @@ class SteamService:
         page: 1-basierte Seitennummer fuer Pagination ("Mehr anzeigen").
         """
         if not self.api_key:
-            return []
+            raise SteamApiUnavailable("steam_api_key_missing")
 
         sort_map = {
             "trending": self.SORT_TRENDING,
@@ -281,10 +286,8 @@ class SteamService:
             return mods
             
         except Exception as e:
-            print(f"Steam API popular mods error: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
+            logger.warning("Steam API popular mods failed: %s", type(e).__name__)
+            raise SteamApiUnavailable("steam_api_unavailable") from e
 
 
 # Global instance

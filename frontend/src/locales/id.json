@@ -511,6 +511,15 @@
     "statusInstalled": "Dipasang",
     "statusError": "Kesalahan",
     "statusErrorHint": "Instalasi gagal.",
+    "statusMissing": "Hilang",
+    "statusMissingHint": "File mod hilang dan akan diinstal pada pembaruan aman berikutnya.",
+    "statusOutdated": "Usang",
+    "statusOutdatedHint": "Pembaruan Workshop terdeteksi untuk mod ini.",
+    "statusUnknown": "Tidak diketahui",
+    "statusUnknownHint": "Status pembaruan tidak dapat diperiksa dengan andal.",
+    "statusUnknownNoSteamKeyHint": "Steam API key belum dikonfigurasi; metadata tidak dapat diperiksa.",
+    "statusFailed": "Gagal",
+    "statusFailedHint": "Aksi mod terakhir gagal.",
     "etaCalculating": "Menghitung sisa waktu.",
     "etaAlmostDone": "Hampir selesai.",
     "etaLessThanMinute": "Kurang dari 1 menit tersisa.",
@@ -708,7 +717,12 @@
   "errors": {
     "RATE_LIMITED": "Terlalu banyak permintaan. Mohon tunggu sebentar.",
     "SESSION_EXPIRED": "Sesi berakhir. Silakan masuk lagi.",
-    "install_update_already_running": "An installation or update is already running. Harap tunggu sampai pekerjaan itu selesai."
+    "install_update_already_running": "An installation or update is already running. Harap tunggu sampai pekerjaan itu selesai.",
+    "steam_api_key_missing": "Steam API key belum dikonfigurasi. Pencarian Workshop dan metadata tersedia setelah konfigurasi.",
+    "steam_api_unavailable": "Steam API tidak tersedia atau API key tidak valid.",
+    "steam_search_failed": "Pencarian Steam gagal.",
+    "steam_load_failed": "Data Steam tidak dapat dimuat.",
+    "invalid_workshop_id": "Workshop ID tidak valid."
   },
   "notifications": {
     "disable": "Nonaktifkan notifikasi email",

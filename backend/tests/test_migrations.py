@@ -120,6 +120,45 @@ def test_migration_idempotent_on_clean_schema():
     engine.dispose()
 
 
+def test_mod_update_status_columns_are_added_to_legacy_mods_schema():
+    tmpdir = tempfile.mkdtemp(prefix="msm-mod-mig-test-")
+    db_path = os.path.join(tmpdir, "msm.db")
+    db_url = f"sqlite:///{db_path}"
+
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE mods ("
+            "  id INTEGER PRIMARY KEY,"
+            "  server_id INTEGER NOT NULL,"
+            "  workshop_id VARCHAR(64) NOT NULL,"
+            "  install_status VARCHAR(24) NOT NULL DEFAULT 'installed'"
+            ")"
+        ))
+        conn.execute(text(
+            "INSERT INTO mods (id, server_id, workshop_id) VALUES (1, 7, '12345')"
+        ))
+
+    inspector = inspect(engine)
+    cols = [c["name"] for c in inspector.get_columns("mods")]
+
+    with engine.begin() as conn:
+        if "update_status" not in cols:
+            conn.execute(text("ALTER TABLE mods ADD COLUMN update_status VARCHAR(24) NOT NULL DEFAULT 'unknown'"))
+        if "update_reason" not in cols:
+            conn.execute(text("ALTER TABLE mods ADD COLUMN update_reason VARCHAR(128)"))
+        if "update_checked_at" not in cols:
+            conn.execute(text("ALTER TABLE mods ADD COLUMN update_checked_at TIMESTAMP"))
+
+    inspector = inspect(engine)
+    new_cols = {c["name"] for c in inspector.get_columns("mods")}
+    assert {"update_status", "update_reason", "update_checked_at"}.issubset(new_cols)
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT update_status FROM mods WHERE id=1")).first()
+    assert row.update_status == "unknown"
+    engine.dispose()
+
+
 # ── Phase 3 — RBAC: Legacy `permissions` → `server_permissions` ───────────────
 
 

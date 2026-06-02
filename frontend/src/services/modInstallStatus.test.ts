@@ -28,4 +28,16 @@ describe('modInstallStatus', () => {
     expect(getModInstallPresentation({ install_status: 'installing', install_progress: 130 }, t).progress).toBe(99)
     expect(getModInstallPresentation({ install_status: 'installing', install_progress: -4 }, t).progress).toBe(0)
   })
+
+  it('shows update status when no install job is active', () => {
+    expect(getModInstallPresentation({ install_status: 'installed', update_status: 'outdated' }, t).label).toBe(
+      'mods.statusOutdated',
+    )
+    expect(
+      getModInstallPresentation(
+        { install_status: 'installed', update_status: 'unknown', update_reason: 'steam_api_key_missing' },
+        t,
+      ).detail,
+    ).toBe('mods.statusUnknownNoSteamKeyHint')
+  })
 })

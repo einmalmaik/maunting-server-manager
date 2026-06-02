@@ -511,6 +511,15 @@
     "statusInstalled": "Установлено",
     "statusError": "Ошибка",
     "statusErrorHint": "Установка не удалась.",
+    "statusMissing": "Отсутствует",
+    "statusMissingHint": "Файлы мода отсутствуют и будут установлены при следующем безопасном обновлении.",
+    "statusOutdated": "Устарело",
+    "statusOutdatedHint": "Для этого мода найдено обновление Workshop.",
+    "statusUnknown": "Неизвестно",
+    "statusUnknownHint": "Статус обновления нельзя надежно проверить.",
+    "statusUnknownNoSteamKeyHint": "Ключ Steam API отсутствует; метаданные нельзя проверить.",
+    "statusFailed": "Сбой",
+    "statusFailedHint": "Последнее действие с модом завершилось ошибкой.",
     "etaCalculating": "Расчет оставшегося времени.",
     "etaAlmostDone": "Почти готово.",
     "etaLessThanMinute": "Осталось меньше 1 минуты.",
@@ -708,7 +717,12 @@
   "errors": {
     "RATE_LIMITED": "Слишком много запросов. Пожалуйста, подождите немного.",
     "SESSION_EXPIRED": "Сессия истекла. Пожалуйста, войдите еще раз.",
-    "install_update_already_running": "Установка или обновление уже запущено. Пожалуйста, подождите, пока эта работа не завершится."
+    "install_update_already_running": "Установка или обновление уже запущено. Пожалуйста, подождите, пока эта работа не завершится.",
+    "steam_api_key_missing": "Ключ Steam API отсутствует. Поиск Workshop и метаданные будут доступны после настройки.",
+    "steam_api_unavailable": "Steam API недоступен или ключ недействителен.",
+    "steam_search_failed": "Поиск Steam не удался.",
+    "steam_load_failed": "Не удалось загрузить данные Steam.",
+    "invalid_workshop_id": "Недействительный Workshop ID."
   },
   "notifications": {
     "disable": "Отключить уведомления по электронной почте",

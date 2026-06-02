@@ -511,6 +511,15 @@
     "statusInstalled": "已安装",
     "statusError": "错误",
     "statusErrorHint": "安装失败。",
+    "statusMissing": "缺失",
+    "statusMissingHint": "Mod 文件缺失，将在下一次安全更新时安装。",
+    "statusOutdated": "已过期",
+    "statusOutdatedHint": "检测到此 Mod 的 Workshop 更新。",
+    "statusUnknown": "未知",
+    "statusUnknownHint": "无法可靠检查更新状态。",
+    "statusUnknownNoSteamKeyHint": "缺少 Steam API key；无法检查元数据。",
+    "statusFailed": "失败",
+    "statusFailedHint": "上次 Mod 操作失败。",
     "etaCalculating": "计算剩余时间。",
     "etaAlmostDone": "快完成了。",
     "etaLessThanMinute": "还剩不到 1 分钟。",
@@ -708,7 +717,12 @@
   "errors": {
     "RATE_LIMITED": "请求太多。请稍等。",
     "SESSION_EXPIRED": "会话已过期。请重新登录。",
-    "install_update_already_running": "安装或更新已在运行。请等待该作业完成。"
+    "install_update_already_running": "安装或更新已在运行。请等待该作业完成。",
+    "steam_api_key_missing": "缺少 Steam API key。配置后可使用 Workshop 搜索和实时元数据。",
+    "steam_api_unavailable": "Steam API 不可用或 API key 无效。",
+    "steam_search_failed": "Steam 搜索失败。",
+    "steam_load_failed": "无法加载 Steam 数据。",
+    "invalid_workshop_id": "无效的 Workshop ID。"
   },
   "notifications": {
     "disable": "禁用电子邮件通知",

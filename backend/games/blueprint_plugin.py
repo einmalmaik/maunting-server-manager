@@ -41,7 +41,7 @@ from games.base import (
     active_mod_ids,
     finish_install,
     run_steamcmd_install,
-    run_steamcmd_workshop_download,
+    run_steamcmd_workshop_download_batch,
 )
 from games.ini_utils import set_ini_value
 from services.docker_service import PortPublish, VolumeBind
@@ -369,12 +369,18 @@ class BlueprintPlugin(GamePlugin):
         }
 
     def install_mod(self, server, workshop_id: str) -> dict:
+        return self.install_mods(server, [workshop_id])
+
+    def install_mods(self, server, workshop_ids: list[str]) -> dict:
         bp_mods = self._blueprint.effective_mods()
         if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:
             return {"error": "Steam Workshop nicht in dieser Blueprint aktiviert"}
         workshop_app_id = bp_mods.workshopAppId
         server_id = server.id
         install_dir = server.install_dir
+        clean_ids = [str(wid).strip() for wid in workshop_ids if str(wid).strip()]
+        if not clean_ids:
+            return {"ok": True, "applied": 0, "items": {}}
         requires_login = False
         if self._blueprint.source.type == BlueprintSourceType.STEAM and self._blueprint.source.steam:
             requires_login = self._blueprint.source.steam.requiresLogin
@@ -384,24 +390,36 @@ class BlueprintPlugin(GamePlugin):
         def _install():
             nonlocal result
             try:
-                download_res = run_steamcmd_workshop_download(
+                download_res = run_steamcmd_workshop_download_batch(
                     server_id=server_id,
                     install_dir=install_dir,
                     workshop_app_id=workshop_app_id,
-                    workshop_item_id=workshop_id,
+                    workshop_item_ids=clean_ids,
                     use_authenticated_login=requires_login,
                 )
-                if not download_res.get("ok", False):
-                    result = {"error": download_res.get("error", "Workshop-Download fehlgeschlagen")}
-                    return
-                action_res = self._run_workshop_post_install_actions(server, workshop_id)
-                if "error" in action_res:
-                    result = action_res
-                    return
-                # Nach jedem Mod-Install die Modliste re-generieren (falls Datei-
-                # injection); fuer startupArg ist das ein No-op.
+                items = download_res.get("items") if isinstance(download_res, dict) else {}
+                errors: list[str] = []
+                applied = 0
+                for wid in clean_ids:
+                    item = items.get(wid, {}) if isinstance(items, dict) else {}
+                    if not item.get("ok"):
+                        errors.append(f"{wid}: {item.get('error') or download_res.get('error') or 'Workshop-Download fehlgeschlagen'}")
+                        continue
+                    action_res = self._run_workshop_post_install_actions(server, wid)
+                    if "error" in action_res:
+                        errors.append(f"{wid}: {action_res['error']}")
+                        continue
+                    applied += 1
+                    _append_console_log(server.id, f"[MSM] Mod {wid} verarbeitet\n")
                 self.update_modlist(server)
-                _append_console_log(server.id, f"[MSM] Mod {workshop_id} verarbeitet\n")
+                result = {
+                    "ok": len(errors) == 0,
+                    "applied": applied,
+                    "errors": errors,
+                    "items": items,
+                }
+                if errors:
+                    result["error"] = "; ".join(errors)
             except Exception as exc:
                 result = {"error": str(exc)}
 

@@ -511,6 +511,15 @@
     "statusInstalled": "تم التثبيت",
     "statusError": "خطأ",
     "statusErrorHint": "فشل التثبيت.",
+    "statusMissing": "مفقود",
+    "statusMissingHint": "ملفات المود مفقودة وسيتم تثبيتها في التحديث الآمن التالي.",
+    "statusOutdated": "قديم",
+    "statusOutdatedHint": "تم اكتشاف تحديث Workshop لهذا المود.",
+    "statusUnknown": "غير معروف",
+    "statusUnknownHint": "تعذر التحقق من حالة التحديث بشكل موثوق.",
+    "statusUnknownNoSteamKeyHint": "مفتاح Steam API مفقود؛ لا يمكن فحص البيانات الوصفية.",
+    "statusFailed": "فشل",
+    "statusFailedHint": "فشل آخر إجراء للمود.",
     "etaCalculating": "حساب الوقت المتبقي.",
     "etaAlmostDone": "انتهى تقريبا.",
     "etaLessThanMinute": "متبقي أقل من دقيقة واحدة.",
@@ -708,7 +717,12 @@
   "errors": {
     "RATE_LIMITED": "طلبات كثيرة جدًا. من فضلك انتظر لحظة.",
     "SESSION_EXPIRED": "انتهت صلاحية الجلسة. الرجاء تسجيل الدخول مرة أخرى.",
-    "install_update_already_running": "التثبيت أو التحديث قيد التشغيل بالفعل. يرجى الانتظار حتى تنتهي هذه المهمة."
+    "install_update_already_running": "التثبيت أو التحديث قيد التشغيل بالفعل. يرجى الانتظار حتى تنتهي هذه المهمة.",
+    "steam_api_key_missing": "مفتاح Steam API مفقود. البحث في Workshop والبيانات الوصفية متاحة بعد الإعداد.",
+    "steam_api_unavailable": "Steam API غير متاح أو المفتاح غير صالح.",
+    "steam_search_failed": "فشل بحث Steam.",
+    "steam_load_failed": "تعذر تحميل بيانات Steam.",
+    "invalid_workshop_id": "معرف Workshop غير صالح."
   },
   "notifications": {
     "disable": "تعطيل إشعارات البريد الإلكتروني",

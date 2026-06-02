@@ -719,6 +719,54 @@ class TestSteamCMDHelpers:
         assert kwargs.get("cap_adds") == STEAMCMD_CAPS
         assert kwargs["env"].get("HOME") == "/data"
 
+    def test_workshop_batch_download_uses_one_ephemeral_container_for_many_mods(self, tmp_path):
+        from games.base import run_steamcmd_workshop_download_batch
+
+        item_ids = [str(1000 + i) for i in range(20)]
+
+        def mark_downloaded(**_kwargs):
+            for item_id in item_ids:
+                mod_dir = tmp_path / "steamapps" / "workshop" / "content" / "221100" / item_id
+                mod_dir.mkdir(parents=True, exist_ok=True)
+                (mod_dir / "mod.bin").write_text("synthetic", encoding="utf-8")
+            return {"ok": True, "stdout": "ok", "stderr": ""}
+
+        with patch("games.base.docker_service.run_ephemeral", side_effect=mark_downloaded) as mock_eph, \
+             patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
+            result = run_steamcmd_workshop_download_batch(
+                server_id=1,
+                install_dir=str(tmp_path),
+                workshop_app_id="221100",
+                workshop_item_ids=item_ids,
+            )
+
+        assert result["ok"] is True
+        assert result["applied"] == 20
+        mock_eph.assert_called_once()
+        script = mock_eph.call_args.kwargs["command"][1]
+        assert script.count("+workshop_download_item") == 20
+
+    def test_single_workshop_download_surfaces_item_error(self, tmp_path):
+        from games.base import run_steamcmd_workshop_download
+
+        with patch(
+            "games.base.run_steamcmd_workshop_download_batch",
+            return_value={
+                "ok": False,
+                "error": "batch_error",
+                "items": {"12345": {"ok": False, "error": "item_error"}},
+            },
+        ):
+            result = run_steamcmd_workshop_download(
+                server_id=1,
+                install_dir=str(tmp_path),
+                workshop_app_id="221100",
+                workshop_item_id="12345",
+            )
+
+        assert result["ok"] is False
+        assert result["error"] == "item_error"
+
     def test_bash_script_is_safely_quoted(self, tmp_path):
         from games.base import run_steamcmd_install
 

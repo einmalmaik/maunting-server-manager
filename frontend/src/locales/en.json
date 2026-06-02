@@ -498,6 +498,15 @@
     "statusInstalled": "Installed",
     "statusError": "Error",
     "statusErrorHint": "Installation failed.",
+    "statusMissing": "Missing",
+    "statusMissingHint": "Mod files are missing and will be installed during the next safe update.",
+    "statusOutdated": "Outdated",
+    "statusOutdatedHint": "A Workshop update was detected for this mod.",
+    "statusUnknown": "Unknown",
+    "statusUnknownHint": "The update status could not be checked reliably.",
+    "statusUnknownNoSteamKeyHint": "Steam API key is missing; metadata cannot be checked.",
+    "statusFailed": "Failed",
+    "statusFailedHint": "The last mod action failed.",
     "etaCalculating": "Calculating remaining time.",
     "etaAlmostDone": "Almost done.",
     "etaLessThanMinute": "Less than 1 minute remaining.",
@@ -695,7 +704,12 @@
   "errors": {
     "RATE_LIMITED": "Too many requests. Please wait a moment.",
     "SESSION_EXPIRED": "Session expired. Please sign in again.",
-    "install_update_already_running": "An installation or update is already running. Please wait until that job has finished."
+    "install_update_already_running": "An installation or update is already running. Please wait until that job has finished.",
+    "steam_api_key_missing": "Steam API key is missing. Workshop search and live metadata are available after configuration.",
+    "steam_api_unavailable": "Steam API is unavailable or the API key is invalid.",
+    "steam_search_failed": "Steam search failed.",
+    "steam_load_failed": "Steam data could not be loaded.",
+    "invalid_workshop_id": "Invalid Workshop ID."
   },
   "notifications": {
     "disable": "Disable email notifications",

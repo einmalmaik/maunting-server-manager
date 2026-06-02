@@ -39,6 +39,9 @@ interface Mod {
   install_started_at: string | null
   install_completed_at: string | null
   install_error: string | null
+  update_status: string
+  update_reason: string | null
+  update_checked_at: string | null
 }
 
 interface SteamMod {
@@ -470,7 +473,9 @@ export function ModManager({ serverId }: ModManagerProps) {
             visibleInstalled.map((mod) => {
               const installStatus = getModInstallPresentation(mod, t)
               const isInstalling = hasActiveModInstall(mod)
-              const hasPendingUpdate = mod.install_status === 'pending' && mod.install_action === 'update'
+              const hasPendingUpdate =
+                (mod.install_status === 'pending' && mod.install_action === 'update') ||
+                mod.update_status === 'outdated'
               return (
               <div
                 key={mod.id}

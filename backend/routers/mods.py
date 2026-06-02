@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -28,11 +29,19 @@ router = APIRouter(prefix="/api/mods", tags=["mods"])
 _MOD_UPDATE_CHECK_CACHE: dict[int, float] = {}
 _MOD_UPDATE_CHECK_TTL_SECONDS = 300
 _MOD_ACTIONS = {"install", "update", "reinstall"}
+_WORKSHOP_ID_RE = re.compile(r"^\d{1,20}$")
 
 
 def _safe_error(value: object) -> str:
     text = str(value or "Installation fehlgeschlagen").strip()
     return " ".join(text.split())[:500]
+
+
+def _validate_workshop_id(workshop_id: str) -> str:
+    value = str(workshop_id or "").strip()
+    if not _WORKSHOP_ID_RE.fullmatch(value):
+        raise HTTPException(status_code=400, detail="errors.invalid_workshop_id")
+    return value
 
 
 def _mark_update_candidates(db: Session, server_id: int, updates: list[dict]) -> None:
@@ -54,6 +63,8 @@ def _mark_update_candidates(db: Session, server_id: int, updates: list[dict]) ->
         mod.install_progress = 0
         mod.install_eta_seconds = None
         mod.install_error = None
+        mod.update_status = "missing" if action == "install" else "outdated"
+        mod.update_reason = str(update.get("reason") or action)
         changed = True
     if changed:
         db.commit()
@@ -135,6 +146,7 @@ def subscribe_mod(
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
     plugin = get_plugin(server.game_type)
 
+    workshop_id = _validate_workshop_id(workshop_id)
     existing = db.query(Mod).filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Mod bereits abonniert")
@@ -149,6 +161,8 @@ def subscribe_mod(
         install_status="pending" if plugin and plugin.supports_mods else "installed",
         install_action="install" if plugin and plugin.supports_mods else None,
         install_progress=0 if plugin and plugin.supports_mods else 100,
+        update_status="missing" if plugin and plugin.supports_mods else "up_to_date",
+        update_reason="missing" if plugin and plugin.supports_mods else None,
     )
     db.add(mod)
     db.commit()
@@ -199,6 +213,7 @@ def install_existing_mod(
     mod = db.query(Mod).filter(Mod.id == mod_id, Mod.server_id == server_id).first()
     if not mod:
         raise HTTPException(status_code=404, detail="Mod nicht gefunden")
+    _validate_workshop_id(mod.workshop_id)
     if mod.install_status == INSTALL_RUNNING:
         raise HTTPException(status_code=409, detail="Mod-Installation läuft bereits")
 
@@ -210,7 +225,10 @@ def install_existing_mod(
                 remote_updated = update.get("remote_updated")
                 break
         db.refresh(mod)
-        if not (mod.install_status == "pending" and mod.install_action == "update"):
+        if not (
+            (mod.install_status == "pending" and mod.install_action == "update")
+            or mod.update_status == "outdated"
+        ):
             raise HTTPException(status_code=400, detail="Kein Mod-Update verfügbar")
 
     mod.install_status = "pending"

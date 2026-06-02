@@ -7,6 +7,7 @@ are mocked so we test the orchestration and locking logic itself.
 """
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,6 +16,8 @@ from sqlalchemy.orm import Session
 
 from models import Server
 from services.server_lifecycle_service import (
+    _run_restart,
+    _run_start,
     get_server_lifecycle_lock,
     queue_lifecycle_operation,
     reset_lifecycle_jobs_for_tests,
@@ -97,3 +100,136 @@ def test_restart_server_with_updates_blocks_when_lifecycle_job_is_active():
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "server_lifecycle_already_running"
     reset_lifecycle_jobs_for_tests()
+
+
+def _steam_plugin():
+    class Plugin:
+        def __init__(self) -> None:
+            self.validate_calls = 0
+
+        def get_blueprint(self):
+            return SimpleNamespace(source=SimpleNamespace(type=SimpleNamespace(value="steam")))
+
+        def prepare_for_updates(self, server):
+            return None
+
+        def check_for_mod_updates(self, server):
+            return []
+
+        def perform_server_file_update(self, server):
+            self.validate_calls += 1
+            return {"ok": True}
+
+        def start(self, server):
+            return {"ok": True}
+
+        def stop(self, server):
+            return {"ok": True}
+
+    return Plugin()
+
+
+def _http_plugin(update_available: bool = True):
+    class Plugin:
+        def __init__(self) -> None:
+            self.check_calls = 0
+            self.update_calls = 0
+
+        def get_blueprint(self):
+            return SimpleNamespace(source=SimpleNamespace(type=SimpleNamespace(value="http")))
+
+        def prepare_for_updates(self, server):
+            return None
+
+        def check_for_server_file_update(self, server):
+            self.check_calls += 1
+            return {"action": "update" if update_available else "none"}
+
+        def check_for_mod_updates(self, server):
+            return []
+
+        def perform_server_file_update(self, server):
+            self.update_calls += 1
+            return {"ok": True}
+
+        def start(self, server):
+            return {"ok": True}
+
+        def stop(self, server):
+            return {"ok": True}
+
+    return Plugin()
+
+
+def test_start_always_runs_steam_validate_before_container_start():
+    server = Server(id=21, name="Steam", game_type="dayz", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
+    server.ports = []
+    db = MagicMock(spec=Session)
+    plugin = _steam_plugin()
+
+    with patch("services.server_lifecycle_service.try_acquire_install_update_lock", return_value=True), \
+         patch("services.server_lifecycle_service.release_install_update_lock"), \
+         patch("services.server_lifecycle_service.open_ports"), \
+         patch("services.server_lifecycle_service.close_ports"), \
+         patch("services.server_lifecycle_service.iptables_accept_server"), \
+         patch("services.server_lifecycle_service.iptables_revoke_server"):
+        _run_start(db, server, plugin)
+
+    assert plugin.validate_calls == 1
+    assert server.status == "running"
+
+
+def test_start_preserves_check_based_http_server_file_update():
+    server = Server(id=23, name="Http", game_type="custom", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
+    server.ports = []
+    db = MagicMock(spec=Session)
+    plugin = _http_plugin(update_available=True)
+
+    with patch("services.server_lifecycle_service.try_acquire_install_update_lock", return_value=True), \
+         patch("services.server_lifecycle_service.release_install_update_lock"), \
+         patch("services.server_lifecycle_service.open_ports"), \
+         patch("services.server_lifecycle_service.close_ports"), \
+         patch("services.server_lifecycle_service.iptables_accept_server"), \
+         patch("services.server_lifecycle_service.iptables_revoke_server"):
+        _run_start(db, server, plugin)
+
+    assert plugin.check_calls == 1
+    assert plugin.update_calls == 1
+    assert server.status == "running"
+
+
+def test_restart_preserves_check_based_http_server_file_update():
+    server = Server(id=24, name="Http", game_type="custom", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
+    server.ports = []
+    db = MagicMock(spec=Session)
+    plugin = _http_plugin(update_available=True)
+
+    with patch("services.server_lifecycle_service.try_acquire_install_update_lock", return_value=True), \
+         patch("services.server_lifecycle_service.release_install_update_lock"), \
+         patch("services.server_lifecycle_service.open_ports"), \
+         patch("services.server_lifecycle_service.close_ports"), \
+         patch("services.server_lifecycle_service.iptables_accept_server"), \
+         patch("services.server_lifecycle_service.iptables_revoke_server"):
+        _run_restart(db, server, plugin)
+
+    assert plugin.check_calls == 1
+    assert plugin.update_calls == 1
+    assert server.status == "running"
+
+
+def test_restart_always_runs_steam_validate_even_without_passive_update_action():
+    server = Server(id=22, name="Steam", game_type="dayz", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
+    server.ports = []
+    db = MagicMock(spec=Session)
+    plugin = _steam_plugin()
+
+    with patch("services.server_lifecycle_service.try_acquire_install_update_lock", return_value=True), \
+         patch("services.server_lifecycle_service.release_install_update_lock"), \
+         patch("services.server_lifecycle_service.open_ports"), \
+         patch("services.server_lifecycle_service.close_ports"), \
+         patch("services.server_lifecycle_service.iptables_accept_server"), \
+         patch("services.server_lifecycle_service.iptables_revoke_server"):
+        _run_restart(db, server, plugin)
+
+    assert plugin.validate_calls == 1
+    assert server.status == "running"

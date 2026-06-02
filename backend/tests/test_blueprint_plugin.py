@@ -389,11 +389,15 @@ def test_dayz_blueprint_post_install_symlinks_mod_and_keys(tmp_path) -> None:
     key = keys_dir / "test.bikey"
     key.write_text("key", encoding="utf-8")
 
-    with patch("games.blueprint_plugin.run_steamcmd_workshop_download", return_value={"ok": True}), \
+    with patch(
+        "games.blueprint_plugin.run_steamcmd_workshop_download_batch",
+        return_value={"ok": True, "items": {"12345": {"ok": True}}},
+    ), \
          patch.object(plugin, "update_modlist"):
         result = plugin.install_mod(server, "12345")
 
-    assert result == {}
+    assert result["ok"] is True
+    assert result["applied"] == 1
 
 
 def test_dayz_blueprint_renders_runtime_env_command_and_dirs(tmp_path) -> None:
@@ -500,11 +504,15 @@ def test_conan_blueprint_post_install_copies_paks_and_formats_modlist(tmp_path) 
     pak = workshop_dir / "Example.pak"
     pak.write_text("pak", encoding="utf-8")
 
-    with patch("games.blueprint_plugin.run_steamcmd_workshop_download", return_value={"ok": True}), \
+    with patch(
+        "games.blueprint_plugin.run_steamcmd_workshop_download_batch",
+        return_value={"ok": True, "items": {"999": {"ok": True}}},
+    ), \
          patch.object(plugin, "update_modlist"):
         result = plugin.install_mod(server, "999")
 
     copied = tmp_path / "ConanSandbox" / "Mods" / "Example.pak"
-    assert result == {}
+    assert result["ok"] is True
+    assert result["applied"] == 1
     assert copied.read_text(encoding="utf-8") == "pak"
     assert plugin.format_modlist_lines(server, [SimpleNamespace(workshop_id="999")]) == ["Example.pak"]

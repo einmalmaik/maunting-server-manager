@@ -85,13 +85,22 @@ def _grab_tcp_port() -> int:
     return port
 
 
+def _grab_udp_port() -> int:
+    """Reserviere einen freien UDP-Port und gib ihn zurueck (ohne ihn zu halten)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
 class TestCanBind:
     def test_free_port_can_bind_tcp(self):
         port = _grab_tcp_port()
         assert pcs._can_bind(port, "tcp", "127.0.0.1") is True
 
     def test_free_port_can_bind_udp(self):
-        port = _grab_tcp_port()  # genuegt, UDP-Bind ist unabhaengig
+        port = _grab_udp_port()
         assert pcs._can_bind(port, "udp", "127.0.0.1") is True
 
     def test_occupied_tcp_port_cannot_bind(self):
