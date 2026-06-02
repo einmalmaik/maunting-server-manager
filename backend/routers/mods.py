@@ -1,3 +1,6 @@
+import logging
+import time
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -10,16 +13,70 @@ from services.install_update_lock_service import (
     release_install_update_lock,
     acquire_install_update_lock_blocking,
 )
-from services.mod_install_status_service import mark_mod_failed, mark_mod_installed, mark_mod_installing
+from services.mod_install_status_service import (
+    INSTALL_RUNNING,
+    mark_mod_failed,
+    mark_mod_installed,
+    mark_mod_installing,
+)
 from games import updater
-import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mods", tags=["mods"])
 
+_MOD_UPDATE_CHECK_CACHE: dict[int, float] = {}
+_MOD_UPDATE_CHECK_TTL_SECONDS = 300
+_MOD_ACTIONS = {"install", "update", "reinstall"}
 
-def install_mod_bg(server_id: int, workshop_id: str):
+
+def _safe_error(value: object) -> str:
+    text = str(value or "Installation fehlgeschlagen").strip()
+    return " ".join(text.split())[:500]
+
+
+def _mark_update_candidates(db: Session, server_id: int, updates: list[dict]) -> None:
+    changed = False
+    for update in updates:
+        workshop_id = str(update.get("workshop_id") or "")
+        action = str(update.get("action") or "update")
+        if not workshop_id or action not in {"install", "update"}:
+            continue
+        mod = (
+            db.query(Mod)
+            .filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id)
+            .first()
+        )
+        if not mod or mod.install_status == INSTALL_RUNNING:
+            continue
+        mod.install_status = "pending"
+        mod.install_action = action
+        mod.install_progress = 0
+        mod.install_eta_seconds = None
+        mod.install_error = None
+        changed = True
+    if changed:
+        db.commit()
+
+
+def _refresh_mod_update_availability(db: Session, server: Server, plugin, *, force: bool = False) -> list[dict]:
+    if not plugin or not getattr(plugin, "supports_mods", False):
+        return []
+    now = time.time()
+    if not force and now - _MOD_UPDATE_CHECK_CACHE.get(server.id, 0) < _MOD_UPDATE_CHECK_TTL_SECONDS:
+        return []
+    _MOD_UPDATE_CHECK_CACHE[server.id] = now
+    try:
+        updates = plugin.check_for_mod_updates(server)
+    except Exception as exc:
+        logger.warning("Mod-Update-Check fehlgeschlagen fuer Server %s: %s", server.id, exc)
+        return []
+    if updates:
+        _mark_update_candidates(db, server.id, updates)
+    return updates
+
+
+def install_mod_bg(server_id: int, workshop_id: str, action: str = "install", remote_updated: str | None = None):
     db = SessionLocal()
     try:
         server = db.query(Server).filter(Server.id == server_id).first()
@@ -28,24 +85,26 @@ def install_mod_bg(server_id: int, workshop_id: str):
             return
         plugin = get_plugin(server.game_type)
         if not plugin or not plugin.supports_mods:
-            mark_mod_failed(server_id, workshop_id)
+            mark_mod_failed(server_id, workshop_id, "Steam Workshop nicht in diesem Spiel aktiviert")
             return
 
         # Blockierenden Lock erwerben, um parallele SteamCMD-Aufrufe zu serialisieren
         acquire_install_update_lock_blocking(server.id, "mod_install")
         try:
-            mark_mod_installing(server.id, workshop_id, "install")
+            mark_mod_installing(server.id, workshop_id, action)
             result = plugin.install_mod(server, workshop_id)
             success = isinstance(result, dict) and result.get("ok", True) is not False and "error" not in result
             if success:
-                updater.update_mod_metadata_after_success(server.id, workshop_id)
+                updater.update_mod_metadata_after_success(server.id, workshop_id, remote_updated)
                 mark_mod_installed(server.id, workshop_id)
             else:
-                mark_mod_failed(server.id, workshop_id)
+                err = result.get("error") if isinstance(result, dict) else result
+                mark_mod_failed(server.id, workshop_id, _safe_error(err))
         finally:
             release_install_update_lock(server.id)
     except Exception as exc:
         logger.exception("Fehler bei Hintergrund-Mod-Installation für Server %s (workshop_id: %s)", server_id, workshop_id)
+        mark_mod_failed(server_id, workshop_id, _safe_error(exc))
     finally:
         db.close()
 
@@ -53,6 +112,10 @@ def install_mod_bg(server_id: int, workshop_id: str):
 @router.get("/{server_id}", response_model=list[ModResponse])
 def list_mods(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     require_server_permission(user, server_id, db, "server.mods.read")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if server:
+        plugin = get_plugin(server.game_type)
+        _refresh_mod_update_availability(db, server, plugin)
     return db.query(Mod).filter(Mod.server_id == server_id).order_by(Mod.load_order.asc()).all()
 
 
@@ -95,6 +158,70 @@ def subscribe_mod(
     if plugin and plugin.supports_mods:
         background_tasks.add_task(install_mod_bg, server.id, workshop_id)
 
+    return mod
+
+
+@router.post("/{server_id}/check-updates", response_model=list[ModResponse])
+def check_mod_updates(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    require_server_permission(user, server_id, db, "server.mods.read")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    _refresh_mod_update_availability(db, server, plugin, force=True)
+    return db.query(Mod).filter(Mod.server_id == server_id).order_by(Mod.load_order.asc()).all()
+
+
+@router.post("/{server_id}/{mod_id}/install", response_model=ModResponse)
+def install_existing_mod(
+    server_id: int,
+    mod_id: int,
+    background_tasks: BackgroundTasks,
+    action: str = "reinstall",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    require_server_permission(user, server_id, db, "server.mods.write")
+    if action not in _MOD_ACTIONS:
+        raise HTTPException(status_code=400, detail="Ungueltige Mod-Aktion")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    if not plugin or not plugin.supports_mods:
+        raise HTTPException(status_code=400, detail="Steam Workshop nicht in diesem Spiel aktiviert")
+    mod = db.query(Mod).filter(Mod.id == mod_id, Mod.server_id == server_id).first()
+    if not mod:
+        raise HTTPException(status_code=404, detail="Mod nicht gefunden")
+    if mod.install_status == INSTALL_RUNNING:
+        raise HTTPException(status_code=409, detail="Mod-Installation läuft bereits")
+
+    remote_updated = mod.last_updated.isoformat() if action == "reinstall" and mod.last_updated else None
+    if action == "update":
+        updates = _refresh_mod_update_availability(db, server, plugin, force=True)
+        for update in updates:
+            if str(update.get("workshop_id")) == str(mod.workshop_id):
+                remote_updated = update.get("remote_updated")
+                break
+        db.refresh(mod)
+        if not (mod.install_status == "pending" and mod.install_action == "update"):
+            raise HTTPException(status_code=400, detail="Kein Mod-Update verfügbar")
+
+    mod.install_status = "pending"
+    mod.install_action = action
+    mod.install_progress = 0
+    mod.install_eta_seconds = None
+    mod.install_error = None
+    db.commit()
+    db.refresh(mod)
+
+    background_tasks.add_task(install_mod_bg, server.id, mod.workshop_id, action, remote_updated)
     return mod
 
 

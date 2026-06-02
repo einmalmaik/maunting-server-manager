@@ -137,7 +137,7 @@ def mark_mod_installed(server_id: int, workshop_id: str) -> None:
         db.close()
 
 
-def mark_mod_failed(server_id: int, workshop_id: str) -> None:
+def mark_mod_failed(server_id: int, workshop_id: str, error: str | None = None) -> None:
     db = SessionLocal()
     try:
         mod = _get_mod(db, server_id, workshop_id)
@@ -146,7 +146,7 @@ def mark_mod_failed(server_id: int, workshop_id: str) -> None:
         mod.install_status = INSTALL_ERROR
         mod.install_eta_seconds = None
         mod.install_completed_at = _now()
-        mod.install_error = "Installation fehlgeschlagen"
+        mod.install_error = (error or "Installation fehlgeschlagen")[:500]
         db.commit()
     finally:
         db.close()

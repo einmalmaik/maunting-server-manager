@@ -340,11 +340,15 @@ class TestGamePluginStartPermissions:
             cpu_limit_percent=None,
             ram_limit_mb=None,
         )
+        calls: list[str] = []
 
         with patch("services.docker_service.is_available", return_value=True), \
              patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1002)), \
-             patch("games.base.docker_service.repair_bind_mount_permissions", return_value={"ok": True}) as mock_repair, \
+             patch("games.base.docker_service.repair_bind_mount_permissions") as mock_repair, \
+             patch.object(plugin, "prepare_runtime") as mock_prepare, \
              patch("games.base.docker_service.run_container", return_value={"ok": True, "stdout": "", "stderr": ""}) as mock_run:
+            mock_repair.side_effect = lambda *args, **kwargs: calls.append("repair") or {"ok": True}
+            mock_prepare.side_effect = lambda srv: calls.append("prepare")
             result = plugin.start(server)
 
         assert result["message"] == "Server gestartet"
@@ -356,6 +360,7 @@ class TestGamePluginStartPermissions:
         kwargs = mock_run.call_args.kwargs
         assert kwargs["user"] == "1001:1002"
         assert kwargs["volumes"] == [VolumeBind(str(tmp_path), "/home/container", read_only=False)]
+        assert calls == ["repair", "prepare"]
 
     def test_start_stops_before_container_run_when_permission_repair_fails(self, tmp_path):
         plugin = _StartPlugin()

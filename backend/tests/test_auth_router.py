@@ -441,6 +441,36 @@ class Test2FABackupCodes:
         )
         assert res.status_code == 400
 
+    def test_backup_code_generation_replaces_old_codes(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+        import pyotp
+        from services.auth_service import AuthService as _AuthService
+        from services.backup_code_service import BackupCodeService
+
+        secret = pyotp.random_base32()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        owner_user.two_factor_enabled = True
+        db.commit()
+        csrf = owner_cookies.get("__Secure-csrf_token")
+
+        first = client.post(
+            "/api/auth/2fa/backup/generate",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        second = client.post(
+            "/api/auth/2fa/backup/generate",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        old_code = first.json()["codes"][0]
+        new_code = second.json()["codes"][0]
+        assert old_code != new_code
+        assert BackupCodeService.validate_backup_code(db, owner_user.id, old_code) is False
+        assert BackupCodeService.validate_backup_code(db, owner_user.id, new_code) is True
+
 
 class TestCsrfProtectionOnEndpoints:
     """Verify that state-changing endpoints require CSRF."""

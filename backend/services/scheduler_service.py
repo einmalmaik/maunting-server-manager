@@ -5,6 +5,7 @@ Manages scheduled tasks using APScheduler.
 Simple, reliable, and extensible.
 """
 
+import asyncio
 import logging
 from typing import Optional
 from datetime import datetime, timezone
@@ -381,8 +382,11 @@ async def _background_update_check_task() -> None:
     - Bei Fund (Mod-Updates oder Server-Datei-Update verfügbar):
       * Schreibt Eintrag in die MSM-Console-Log (sichtbar im UI-Console).
       * Setzt `server.status_message` mit Hinweis (passiv, rein informativ).
-    - NUR passiv: KEIN automatisches Update, KEIN Download, KEIN Container-Stop/Start.
-      Auch bei laufendem Server wird nur erkannt und gemeldet (User plant Restart selbst).
+      * Markiert betroffene Mods als pending, damit der Fallback-Button sichtbar ist.
+    - Workshop-Mods mit auto_update=True werden autonom geladen, wenn der Server
+      nicht läuft; bei laufendem Server bleibt der Pending-Status bis zum nächsten
+      Start/Restart oder manuellen Update.
+    - Server-Datei-Updates bleiben passiv: KEIN Container-Stop/Start.
     - Rate-Limit-sicher: alle 6 Stunden (UPDATE_CHECK_INTERVAL_HOURS).
     - Email-Benachrichtigungen (verdrahtet):
       * Nur wenn EmailService.is_configured() True.
@@ -439,11 +443,20 @@ async def _background_update_check_task() -> None:
                 # 1. Workshop-Mod-Updates werden autonom vorbereitet.
                 mod_updates = plugin.check_for_mod_updates(server)
                 if mod_updates:
+                    from services.mod_install_status_service import mark_mod_pending
+
+                    for mod_update in mod_updates:
+                        mark_mod_pending(
+                            server.id,
+                            mod_update.get("workshop_id", ""),
+                            mod_update.get("action", "update"),
+                        )
                     count = len(mod_updates)
                     _append_console_log(
                         server.id,
                         f"[MSM] Background-Check: {count} Workshop-Mod(s) benötigen Update/Installation "
-                        f"für Server '{server.name}'. Autonomer Download startet.\n"
+                        f"für Server '{server.name}'. Pending-Status wurde gesetzt; "
+                        "auto_update-Mods werden bei gestopptem Server oder beim nächsten Start/Restart geladen.\n"
                     )
                     logger.info(
                         "Background-Check: %d Mod-Update(s) für Server %s ('%s') gefunden.",
@@ -453,7 +466,7 @@ async def _background_update_check_task() -> None:
                         db.refresh(server)
                         if server.status not in ("running", "starting", "stopping"):
                             mod_res = await asyncio.to_thread(
-                                plugin.perform_workshop_mod_updates, server
+                                plugin.perform_workshop_mod_updates, server, only_auto_update=True
                             )
                             if not mod_res.get("ok", False):
                                 _append_console_log(

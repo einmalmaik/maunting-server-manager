@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from blueprints.schema import load_blueprint_dict
+from games.blueprint_plugin import BlueprintPlugin
 from games import updater
 from models import Mod
 from services.mod_install_status_service import (
@@ -149,3 +150,56 @@ def test_installed_mod_without_metadata_is_baselined_not_updated(db, test_server
     assert mod.last_updated is not None
     assert mod.installed_version is not None
     assert mod.install_status == "installed"
+
+
+def test_perform_workshop_mod_updates_only_applies_auto_update_mods(db, test_server, monkeypatch):
+    auto_mod = Mod(
+        server_id=test_server.id,
+        workshop_id="111",
+        name="Auto Mod",
+        load_order=0,
+        auto_update=True,
+        enabled=True,
+    )
+    manual_mod = Mod(
+        server_id=test_server.id,
+        workshop_id="222",
+        name="Manual Mod",
+        load_order=1,
+        auto_update=False,
+        enabled=True,
+    )
+    db.add_all([auto_mod, manual_mod])
+    db.commit()
+
+    blueprint = load_blueprint_dict(
+        {
+            "version": 1,
+            "meta": {"id": "test_bp", "name": "Test", "category": "steam_game"},
+            "runtime": {"image": "cm2network/steamcmd:root", "workdir": "/data", "env": {}, "startup": "/data/server"},
+            "ports": [{"name": "game", "protocol": "udp"}],
+            "source": {"type": "steam", "steam": {"appId": "12345", "platform": "linux"}},
+            "mods": {
+                "supportsMods": True,
+                "supportsSteamWorkshop": True,
+                "workshopAppId": "440900",
+                "modInjection": "startupArg",
+                "modStartupArgumentFormat": "-mod={mods}",
+            },
+        }
+    )
+    plugin = BlueprintPlugin(blueprint)
+    needed = [
+        {"workshop_id": "111", "name": "Auto Mod", "action": "update", "remote_updated": None},
+        {"workshop_id": "222", "name": "Manual Mod", "action": "update", "remote_updated": None},
+    ]
+    installed: list[str] = []
+    monkeypatch.setattr(plugin, "check_for_mod_updates", lambda _server: needed)
+    monkeypatch.setattr(plugin, "install_mod", lambda _server, workshop_id: installed.append(workshop_id) or {"ok": True})
+    monkeypatch.setattr(plugin, "update_modlist", lambda _server: None)
+
+    result = plugin.perform_workshop_mod_updates(test_server, only_auto_update=True)
+
+    assert result["ok"] is True
+    assert result["applied"] == 1
+    assert installed == ["111"]

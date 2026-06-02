@@ -415,6 +415,7 @@ def test_dayz_blueprint_renders_runtime_env_command_and_dirs(tmp_path) -> None:
     assert command[0] == "./DayZServer"
     assert "-port=2302" in command
     assert "-profiles=profiles" in command
+    assert plugin.container_uid_gid(server) == (1000, 1000)
     assert plugin.container_workdir(server) == "/data"
     assert env["HOME"] == "/data"
     assert "./linux64" in env["LD_LIBRARY_PATH"]
@@ -449,6 +450,7 @@ def test_dayz_start_does_not_run_container_when_required_files_missing(tmp_path)
     ]
 
     with patch("games.base.docker_service.is_available", return_value=True), \
+         patch("games.base.docker_service.repair_bind_mount_permissions", return_value={"ok": True}), \
          patch("games.base.docker_service.run_container") as run_container:
         result = plugin.start(server)
 

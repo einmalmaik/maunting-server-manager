@@ -4,10 +4,11 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Shield, Mail, KeyRound, Check, Save, AlertTriangle, Copy } from 'lucide-react'
+import { confirm } from '@/stores/confirmStore'
+import { Shield, Mail, KeyRound, Check, Save, AlertTriangle, Download, RotateCcw } from 'lucide-react'
 
 export function Profile() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { user, setUser, logout } = useAuthStore()
   const [error, setError] = useState('')
@@ -32,6 +33,66 @@ export function Profile() {
   const [faSecret, setFaSecret] = useState('')
   const [faUri, setFaUri] = useState('')
   const [backupCodes, setBackupCodes] = useState<string[]>([])
+
+  const buildBackupCodeFile = (codes: string[]) => {
+    const generatedAt = new Intl.DateTimeFormat(i18n.language, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date())
+
+    return [
+      t('profile.backupCodesFileTitle'),
+      '',
+      t('profile.backupCodesFileIntro'),
+      t('profile.backupCodesWarning'),
+      '',
+      `${t('profile.backupCodesFileUser')}: ${user?.email || user?.username || '-'}`,
+      `${t('profile.backupCodesFileGeneratedAt')}: ${generatedAt}`,
+      '',
+      ...codes,
+      '',
+      t('profile.backupCodesDownloadOnce'),
+    ].join('\n')
+  }
+
+  const downloadBackupCodes = () => {
+    if (backupCodes.length === 0) return
+    const blob = new Blob([buildBackupCodeFile(backupCodes)], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const date = new Date().toISOString().slice(0, 10)
+    link.href = url
+    link.download = `msm-backup-codes-${date}.txt`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    setBackupCodes([])
+    setSuccess(t('profile.backupCodesDownloaded'))
+    setTimeout(() => setSuccess(''), 5000)
+  }
+
+  const regenerateBackupCodes = async () => {
+    const ok = await confirm({
+      message: t('profile.regenerateBackupCodesConfirm'),
+      danger: true,
+      confirmText: t('profile.regenerateBackupCodes'),
+    })
+    if (!ok) return
+
+    setError('')
+    setSubmitting(true)
+    try {
+      const codesRes = await api<{ codes: string[] }>('/auth/2fa/backup/generate', { method: 'POST' })
+      setBackupCodes(codesRes.codes)
+      setSuccess(t('profile.backupCodesRegenerated'))
+      setTimeout(() => setSuccess(''), 5000)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -276,13 +337,23 @@ export function Profile() {
         )}
 
         {user?.two_factor_enabled && !show2FADisable && (
-          <button
-            onClick={() => setShow2FADisable(true)}
-            className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2"
-          >
-            <Shield className="w-4 h-4" />
-            {t('profile.2faDisable')}
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={regenerateBackupCodes}
+              disabled={submitting}
+              className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+            >
+              <RotateCcw className="w-4 h-4" />
+              {t('profile.regenerateBackupCodes')}
+            </button>
+            <button
+              onClick={() => setShow2FADisable(true)}
+              className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2"
+            >
+              <Shield className="w-4 h-4" />
+              {t('profile.2faDisable')}
+            </button>
+          </div>
         )}
 
         {/* 2FA Setup Flow */}
@@ -301,7 +372,10 @@ export function Profile() {
                 </p>
               </div>
             )}
-            <form onSubmit={handleEnable2FA} className="flex gap-3 max-w-xs">
+            <form onSubmit={handleEnable2FA} className="mx-auto flex max-w-xs flex-col gap-3">
+              <label className="font-body-md text-sm text-on-surface-variant text-center">
+                {t('profile.2faEnterCode')}
+              </label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -374,22 +448,18 @@ export function Profile() {
               <p className="font-label-md text-sm text-status-warning font-medium">{t('profile.backupCodes')}</p>
             </div>
             <p className="font-body-md text-xs text-on-surface-variant mb-3">{t('profile.backupCodesWarning')}</p>
-            <div className="grid grid-cols-2 gap-2">
-              {backupCodes.map((code, i) => (
-                <div
-                  key={i}
-                  className="font-mono text-sm bg-surface-container-high px-3 py-1.5 rounded border border-outline-variant flex items-center justify-between"
-                >
-                  <span>{code}</span>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(code)}
-                    className="text-on-surface-variant hover:text-primary transition-colors"
-                    title={t('common.copy', 'Kopieren')}
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+            <p className="font-body-md text-xs text-on-surface-variant mb-3">
+              {t('profile.backupCodesDownloadOnce')}
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={downloadBackupCodes}
+                className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                {t('profile.downloadBackupCodes')}
+              </button>
             </div>
           </div>
         )}

@@ -1,4 +1,6 @@
 """Tests for mods router: CRUD, permissions, CSRF."""
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -84,6 +86,152 @@ class TestUpdateMod:
             cookies=owner_cookies,
         )
         assert response.status_code == 403
+
+
+class TestModInstallActions:
+    def test_check_updates_marks_mod_update_pending(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        test_server: Server,
+        db: Session,
+    ):
+        mod = Mod(
+            server_id=test_server.id,
+            workshop_id="12345",
+            name="Needs Update",
+            load_order=0,
+            install_status="installed",
+            install_action=None,
+        )
+        db.add(mod)
+        db.commit()
+
+        with patch("routers.mods.get_plugin") as mock_get_plugin:
+            plugin = mock_get_plugin.return_value
+            plugin.supports_mods = True
+            plugin.check_for_mod_updates.return_value = [
+                {
+                    "workshop_id": "12345",
+                    "name": "Needs Update",
+                    "action": "update",
+                    "reason": "newer_version_available",
+                    "remote_updated": "2026-06-01T10:00:00+00:00",
+                }
+            ]
+            response = client.post(
+                f"/api/mods/{test_server.id}/check-updates",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        updated = next(item for item in data if item["workshop_id"] == "12345")
+        assert updated["install_status"] == "pending"
+        assert updated["install_action"] == "update"
+
+    def test_manual_update_requires_available_update(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        test_server: Server,
+        db: Session,
+    ):
+        mod = Mod(
+            server_id=test_server.id,
+            workshop_id="12345",
+            name="Current Mod",
+            load_order=0,
+            install_status="installed",
+        )
+        db.add(mod)
+        db.commit()
+        db.refresh(mod)
+
+        with patch("routers.mods.get_plugin") as mock_get_plugin:
+            plugin = mock_get_plugin.return_value
+            plugin.supports_mods = True
+            plugin.check_for_mod_updates.return_value = []
+            response = client.post(
+                f"/api/mods/{test_server.id}/{mod.id}/install?action=update",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 400
+        assert "Kein Mod-Update" in response.json()["detail"]
+
+    def test_manual_update_queues_existing_pending_update(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        test_server: Server,
+        db: Session,
+    ):
+        mod = Mod(
+            server_id=test_server.id,
+            workshop_id="12345",
+            name="Pending Update",
+            load_order=0,
+            install_status="pending",
+            install_action="update",
+        )
+        db.add(mod)
+        db.commit()
+        db.refresh(mod)
+
+        with patch("routers.mods.get_plugin") as mock_get_plugin, \
+             patch("routers.mods.install_mod_bg") as mock_bg:
+            plugin = mock_get_plugin.return_value
+            plugin.supports_mods = True
+            plugin.check_for_mod_updates.return_value = []
+            response = client.post(
+                f"/api/mods/{test_server.id}/{mod.id}/install?action=update",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["install_action"] == "update"
+        mock_bg.assert_called_once()
+
+    def test_reinstall_queues_without_available_update(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        test_server: Server,
+        db: Session,
+    ):
+        mod = Mod(
+            server_id=test_server.id,
+            workshop_id="12345",
+            name="Installed Mod",
+            load_order=0,
+            install_status="installed",
+        )
+        db.add(mod)
+        db.commit()
+        db.refresh(mod)
+
+        with patch("routers.mods.get_plugin") as mock_get_plugin, \
+             patch("routers.mods.install_mod_bg") as mock_bg:
+            plugin = mock_get_plugin.return_value
+            plugin.supports_mods = True
+            response = client.post(
+                f"/api/mods/{test_server.id}/{mod.id}/install?action=reinstall",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["install_status"] == "pending"
+        assert response.json()["install_action"] == "reinstall"
+        mock_bg.assert_called_once()
 
 
 class TestUnsubscribeMod:

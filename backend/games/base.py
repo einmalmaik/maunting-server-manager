@@ -701,7 +701,7 @@ class GamePlugin(ABC):
             # Niemals Exception nach oben werfen — Restart muss weiterlaufen
             return {"ok": False, "error": str(exc)}
 
-    def perform_workshop_mod_updates(self, server) -> dict:
+    def perform_workshop_mod_updates(self, server, *, only_auto_update: bool = False) -> dict:
         """
         Führt erkannte Workshop-Mod-Updates und -Neuinstallationen **synchron** aus.
 
@@ -739,6 +739,25 @@ class GamePlugin(ABC):
                 return {"ok": False, "error": "no_blueprint"}
 
             needed = self.check_for_mod_updates(server)
+            if only_auto_update and needed:
+                from database import SessionLocal
+                from models import Mod
+
+                db = SessionLocal()
+                try:
+                    auto_update_ids = {
+                        str(row.workshop_id)
+                        for row in db.query(Mod.workshop_id)
+                        .filter(
+                            Mod.server_id == server.id,
+                            Mod.enabled == True,  # noqa: E712
+                            Mod.auto_update == True,  # noqa: E712
+                        )
+                        .all()
+                    }
+                finally:
+                    db.close()
+                needed = [u for u in needed if str(u.get("workshop_id", "")) in auto_update_ids]
             if not needed:
                 return {"ok": True, "applied": 0, "message": "keine Workshop-Mod-Updates nötig"}
 
@@ -857,20 +876,14 @@ class GamePlugin(ABC):
             _append_console_log(server.id, f"[MSM] Start abgelehnt: {e}\n")
             return {"error": str(e)}
 
-        # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
-        try:
-            self.prepare_runtime(server)
-        except Exception as e:
-            _append_console_log(
-                server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
-            )
-            return {"error": str(e)}
-
         uid, gid = self.container_uid_gid(server)
         run_user = f"{uid}:{gid}"
         name = container_name_for(server.id)
         volume_binds = self.build_volume_binds(server)
 
+        # Rechte VOR Runtime-Patches/Preflight normalisieren. Wenn externe Tools
+        # root-/fremd-eigene Dateien erzeugen, darf prepare_runtime nicht schon
+        # an Permission-Denied scheitern, bevor MSM reparieren konnte.
         for volume in volume_binds:
             if volume.read_only:
                 continue
@@ -883,6 +896,15 @@ class GamePlugin(ABC):
                 err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
                 _append_console_log(server.id, f"[MSM] Permission-Repair fehlgeschlagen: {err}\n")
                 return {"error": err}
+
+        # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
+        try:
+            self.prepare_runtime(server)
+        except Exception as e:
+            _append_console_log(
+                server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
+            )
+            return {"error": str(e)}
 
         result = docker_service.run_container(
             name=name,

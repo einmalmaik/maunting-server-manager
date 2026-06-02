@@ -142,24 +142,30 @@ def _repair_install_permissions(install_dir: str) -> dict:
 
 
 def _write_text_with_permission_repair(server: Server, target: Path, content: str) -> None:
-    try:
+    def _write() -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+
+    _run_with_permission_repair(server, "Datei schreiben", _write)
+
+
+def _run_with_permission_repair(server: Server, action_name: str, action) -> None:
+    try:
+        action()
         return
     except PermissionError as first_error:
         repair = _repair_install_permissions(server.install_dir)
         if not repair.get("ok"):
             err = repair.get("error") or "unbekannter Fehler"
             raise PermissionError(
-                f"{first_error}; Rechte-Reparatur fehlgeschlagen: {err}"
+                f"{first_error}; Rechte-Reparatur vor '{action_name}' fehlgeschlagen: {err}"
             ) from first_error
 
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        action()
     except PermissionError as retry_error:
         raise PermissionError(
-            f"{retry_error}; Rechte-Reparatur wurde ausgeführt, Datei bleibt aber nicht beschreibbar"
+            f"{retry_error}; Rechte-Reparatur wurde ausgeführt, '{action_name}' bleibt aber nicht möglich"
         ) from retry_error
 
 
@@ -682,10 +688,13 @@ def delete_path(
         raise HTTPException(status_code=403, detail="Server-Stammverzeichnis kann nicht geloescht werden")
 
     try:
-        if target.is_dir():
-            shutil.rmtree(target)
-        else:
-            target.unlink()
+        def _delete() -> None:
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+
+        _run_with_permission_repair(server, "Pfad loeschen", _delete)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Loeschen fehlgeschlagen: {e}")
 
@@ -715,8 +724,11 @@ def rename_path(
         raise HTTPException(status_code=409, detail="Zielname existiert bereits")
 
     try:
-        target.rename(new_target)
-        _apply_permissions(server.install_dir, new_target)
+        def _rename() -> None:
+            target.rename(new_target)
+            _apply_permissions(server.install_dir, new_target)
+
+        _run_with_permission_repair(server, "Pfad umbenennen", _rename)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Umbenennen fehlgeschlagen: {e}")
 
@@ -770,8 +782,11 @@ def move_path(
         pass
 
     try:
-        shutil.move(str(source), str(target))
-        _apply_permissions(server.install_dir, target)
+        def _move() -> None:
+            shutil.move(str(source), str(target))
+            _apply_permissions(server.install_dir, target)
+
+        _run_with_permission_repair(server, "Pfad verschieben", _move)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Verschieben fehlgeschlagen: {e}")
 
@@ -817,8 +832,11 @@ def extract_archive(
 
     extract_dir = target.parent
     try:
-        safe_extract_archive(target, extract_dir, Path(server.install_dir).resolve())
-        _apply_permissions(server.install_dir, extract_dir)
+        def _extract() -> None:
+            safe_extract_archive(target, extract_dir, Path(server.install_dir).resolve())
+            _apply_permissions(server.install_dir, extract_dir)
+
+        _run_with_permission_repair(server, "Archiv entpacken", _extract)
     except ArchiveExtractError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except HTTPException:
