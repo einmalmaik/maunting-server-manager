@@ -202,8 +202,10 @@ def default_volume_binds(server) -> list[VolumeBind]:
 # ── SteamCMD-Installer im ephemeren Container ──────────────────────────────
 
 
-# Kuratiertes, gepflegtes SteamCMD-Image. Eine Pin auf einen festen Tag erfolgt
-# in einer Folge-Phase (Phase 5 wird Image+Tag pro Plugin-Egg konfigurierbar).
+# Fallback SteamCMD-Image, falls kein steamcmd_image aus dem Blueprint übergeben wird.
+# Blueprints definieren das Image in runtime.image (z. B. ghcr.io/parkervcp/steamcmd:debian
+# oder cm2network/steamcmd:root). Der Core hardcodet keine Images mehr.
+# Siehe BlueprintPlugin und apply_server_file_update: sie übergeben bp.runtime.image.
 STEAMCMD_IMAGE = "cm2network/steamcmd:root"
 # Pfad des steamcmd-Wrappers im Image. Wird in den bash-Aufruf eingesetzt.
 STEAMCMD_BIN = "/home/steam/steamcmd/steamcmd.sh"
@@ -290,6 +292,7 @@ def run_steamcmd_install(
     extra_args: list[str] | None = None,
     use_authenticated_login: bool = False,
     platform: str | None = None,
+    steamcmd_image: str | None = None,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
@@ -342,8 +345,9 @@ def run_steamcmd_install(
         _bounded_log_buffer_append(live_output, safe_line)
         _append_console_log(server_id, safe_line)
 
+    image = steamcmd_image or STEAMCMD_IMAGE
     result = docker_service.run_ephemeral(
-        image=STEAMCMD_IMAGE,
+        image=image,
         command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         user="0:0",
@@ -380,6 +384,7 @@ def run_steamcmd_workshop_download(
     workshop_app_id: str,
     workshop_item_id: str,
     use_authenticated_login: bool = False,
+    steamcmd_image: str | None = None,
 ) -> dict:
     """Kompatibler Single-Mod-Einstieg; intern ein Batch mit einer Mod."""
     result = run_steamcmd_workshop_download_batch(
@@ -388,6 +393,7 @@ def run_steamcmd_workshop_download(
         workshop_app_id=workshop_app_id,
         workshop_item_ids=[workshop_item_id],
         use_authenticated_login=use_authenticated_login,
+        steamcmd_image=steamcmd_image,
     )
     if not result.get("ok", False):
         item = (result.get("items") or {}).get(str(workshop_item_id), {})
@@ -406,6 +412,7 @@ def run_steamcmd_workshop_download_batch(
     batch_size: int = 25,
     timeout: int = 3600,
     retry: bool = True,
+    steamcmd_image: str | None = None,
 ) -> dict:
     """Lädt mehrere Workshop-Items in einer SteamCMD-Session.
 
@@ -465,8 +472,9 @@ def run_steamcmd_workshop_download_batch(
 
     uid, gid = docker_service.container_runtime_uid_gid()
     chown_uid, chown_gid = uid, gid
+    image = steamcmd_image or STEAMCMD_IMAGE
     result = docker_service.run_ephemeral(
-        image=STEAMCMD_IMAGE,
+        image=image,
         command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         user="0:0",
@@ -522,6 +530,7 @@ def run_steamcmd_workshop_download_batch(
             batch_size=batch_size,
             timeout=timeout,
             retry=False,
+            steamcmd_image=steamcmd_image,
         )
         retry_items = retry_result.get("items", {}) if isinstance(retry_result, dict) else {}
         for item_id in failed_ids:

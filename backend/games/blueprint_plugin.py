@@ -113,6 +113,7 @@ class BlueprintPlugin(GamePlugin):
                         app_id=app_id,
                         use_authenticated_login=requires_login,
                         platform=platform_str,
+                        steamcmd_image=bp.runtime.image,
                     ),
                     blueprint=bp,
                 )
@@ -412,6 +413,7 @@ class BlueprintPlugin(GamePlugin):
                         workshop_app_id=workshop_app_id,
                         workshop_item_ids=chunk,
                         use_authenticated_login=requires_login,
+                        steamcmd_image=self._blueprint.runtime.image,
                     )
                     items = download_res.get("items") if isinstance(download_res, dict) else {}
                     aggregated_items.update(items if isinstance(items, dict) else {})

@@ -60,6 +60,8 @@ cd /opt
 git clone https://github.com/einmalmaik/maunting-server-manager.git msm
 cd msm
 ```
+**Wichtig (Prod):** Die Installations- und Server-Daten liegen unter `/opt/msm/servers`, `/opt/msm/backups` etc.
+Führe auf dem Server **niemals** `git clean -fd` (oder ähnliche "aufräumen"-Befehle) im Clone-Verzeichnis aus – auch wenn Daten in Sub-Dirs liegen. Die `.gitignore` schützt die Laufzeit-Daten, aber manuelle Git-Clean-Befehle können trotzdem gefährlich sein. Immer erst mit `--dry-run` testen.
 
 ### Schritt 3: Installer starten
 
