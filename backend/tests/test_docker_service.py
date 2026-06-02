@@ -32,7 +32,7 @@ class TestDockerHost:
         with patch("services.docker_service.docker", MagicMock()), \
              patch.object(docker_service.settings, "docker_host", "unix:///run/user/1001/docker.sock"), \
              patch("services.docker_service.os.path.exists", return_value=False):
-            result = docker_service.pull("cm2network/steamcmd:root")
+            result = docker_service.pull("ghcr.io/parkervcp/steamcmd:debian")
 
         assert result == {
             "ok": False,
@@ -143,7 +143,7 @@ class TestRunContainer:
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             result = docker_service.run_container(
                 name="msm-srv-7",
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["/data/DayZServer", "-port=27015"],
                 env={"FOO": "bar"},
                 ports=[PortPublish(27015, 27015, "udp", None)],
@@ -156,7 +156,7 @@ class TestRunContainer:
 
         assert result["ok"] is True
         kwargs = client.containers.run.call_args.kwargs
-        assert kwargs["image"] == "cm2network/steamcmd:root"
+        assert kwargs["image"] == "ghcr.io/parkervcp/steamcmd:debian"
         assert kwargs["command"] == ["/data/DayZServer", "-port=27015"]
         assert kwargs["name"] == "msm-srv-7"
         assert kwargs["stdin_open"] is True
@@ -173,7 +173,7 @@ class TestRunContainer:
         assert kwargs["user"] == "1000:1000"
         assert kwargs["working_dir"] == "/data"
         client.api.pull.assert_called_once_with(
-            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+            "ghcr.io/parkervcp/steamcmd", tag="debian", stream=True, decode=True, auth_config={}
         )
         calls = [call[0] for call in client.mock_calls]
         assert calls.index("api.pull") < calls.index("containers.run")
@@ -456,7 +456,7 @@ class TestEphemeralRun:
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             result = docker_service.run_ephemeral(
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["+force_install_dir", "/data", "+login", "anonymous", "+app_update", "223350", "+quit"],
                 volumes=[VolumeBind("/opt/msm/servers/1", "/data", read_only=False)],
                 env={},
@@ -473,7 +473,7 @@ class TestEphemeralRun:
         assert kwargs["volumes"] == {"/opt/msm/servers/1": {"bind": "/data", "mode": "rw"}}
         container.remove.assert_called_once_with(force=True)
         client.api.pull.assert_called_once_with(
-            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+            "ghcr.io/parkervcp/steamcmd", tag="debian", stream=True, decode=True, auth_config={}
         )
 
     def test_ephemeral_run_uses_local_image_when_pull_fails(self):
@@ -487,7 +487,7 @@ class TestEphemeralRun:
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             result = docker_service.run_ephemeral(
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["true"],
                 volumes=[],
                 env={},
@@ -495,14 +495,14 @@ class TestEphemeralRun:
 
         assert result["ok"] is True
         client.api.pull.assert_called_once_with(
-            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+            "ghcr.io/parkervcp/steamcmd", tag="debian", stream=True, decode=True, auth_config={}
         )
-        client.images.get.assert_called_once_with("cm2network/steamcmd:root")
+        client.images.get.assert_called_once_with("ghcr.io/parkervcp/steamcmd:debian")
         client.containers.run.assert_called_once()
 
     def test_ephemeral_run_fails_clearly_when_remote_and_local_image_missing(self):
         client = MagicMock()
-        image = "cm2network/steamcmd:root"
+        image = "ghcr.io/parkervcp/steamcmd:debian"
         client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.side_effect = docker_service.NotFound("missing image")
 
@@ -578,7 +578,7 @@ class TestEphemeralRun:
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             result = docker_service.run_ephemeral(
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["true"],
                 volumes=[],
                 env={},
@@ -602,7 +602,7 @@ class TestEphemeralRun:
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             docker_service.run_ephemeral(
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["-c", "true"],
                 volumes=[],
                 env={},

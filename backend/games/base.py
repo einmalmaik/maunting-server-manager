@@ -202,11 +202,11 @@ def default_volume_binds(server) -> list[VolumeBind]:
 # ── SteamCMD-Installer im ephemeren Container ──────────────────────────────
 
 
-# Fallback SteamCMD-Image, falls kein steamcmd_image aus dem Blueprint übergeben wird.
-# Blueprints definieren das Image in runtime.image (z. B. ghcr.io/parkervcp/steamcmd:debian
-# oder cm2network/steamcmd:root). Der Core hardcodet keine Images mehr.
-# Siehe BlueprintPlugin und apply_server_file_update: sie übergeben bp.runtime.image.
-STEAMCMD_IMAGE = "cm2network/steamcmd:root"
+# Fallback SteamCMD-Image (für direkte Aufrufe / Tests / Legacy).
+# In Blueprint-Pfaden (Steam-Install, Workshop, Server-File-Update) wird immer
+# bp.runtime.image aus dem Blueprint verwendet (nie hardcoded im Core).
+# Empfohlen: ghcr.io/parkervcp/steamcmd:debian (stabiler als cm2network-Variante).
+STEAMCMD_IMAGE = "ghcr.io/parkervcp/steamcmd:debian"
 # Pfad des steamcmd-Wrappers im Image. Wird in den bash-Aufruf eingesetzt.
 STEAMCMD_BIN = "/home/steam/steamcmd/steamcmd.sh"
 # Caps, die wir nach `--cap-drop=ALL` für den SteamCMD-Lauf wieder brauchen:

@@ -8,8 +8,9 @@
     "description": "Conan Exiles Enhanced (UE5) Dedicated Server (App-ID 443030, Workshop 440900)."
   },
   "runtime": {
-    "image": "cm2network/steamcmd:root",
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
     "workdir": "/data",
+    "user": "1000:1000",
     "env": {},
     "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT}",
     "configPatches": [

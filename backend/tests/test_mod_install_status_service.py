@@ -125,7 +125,7 @@ def test_installed_mod_without_metadata_is_marked_unknown_not_updated(db, test_s
                 "description": "",
             },
             "runtime": {
-                "image": "cm2network/steamcmd:root",
+                "image": "ghcr.io/parkervcp/steamcmd:debian",
                 "workdir": "/data",
                 "env": {},
                 "startup": "/data/server -port={GAME_PORT}",
@@ -194,7 +194,7 @@ def test_installed_mod_without_metadata_stays_unknown_when_remote_metadata_exist
                 "description": "",
             },
             "runtime": {
-                "image": "cm2network/steamcmd:root",
+                "image": "ghcr.io/parkervcp/steamcmd:debian",
                 "workdir": "/data",
                 "env": {},
                 "startup": "/data/server -port={GAME_PORT}",
@@ -248,7 +248,7 @@ def test_perform_workshop_mod_updates_only_applies_auto_update_mods(db, test_ser
         {
             "version": 1,
             "meta": {"id": "test_bp", "name": "Test", "category": "steam_game"},
-            "runtime": {"image": "cm2network/steamcmd:root", "workdir": "/data", "env": {}, "startup": "/data/server"},
+            "runtime": {"image": "ghcr.io/parkervcp/steamcmd:debian", "workdir": "/data", "env": {}, "startup": "/data/server"},
             "ports": [{"name": "game", "protocol": "udp"}],
             "source": {"type": "steam", "steam": {"appId": "12345", "platform": "linux"}},
             "mods": {

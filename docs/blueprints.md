@@ -97,7 +97,7 @@ konfiguriert sein.
     "category": "steam_game"
   },
   "runtime": {
-    "image": "cm2network/steamcmd:root",
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
     "workdir": "/data",
     "env": {},
     "startup": "/data/DayZServer -config=serverDZ.cfg -port={GAME_PORT} -BEpath=battleye -profiles=profiles -dologs -adminlog -netlog -freezecheck",
