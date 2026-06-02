@@ -465,15 +465,34 @@ async def _background_update_check_task() -> None:
                     async with get_server_lifecycle_lock(server.id):
                         db.refresh(server)
                         if server.status not in ("running", "starting", "stopping"):
-                            mod_res = await asyncio.to_thread(
-                                plugin.perform_workshop_mod_updates, server, only_auto_update=True
+                            from services.install_update_lock_service import (
+                                try_acquire_install_update_lock,
+                                release_install_update_lock,
                             )
-                            if not mod_res.get("ok", False):
+                            lock_acquired = try_acquire_install_update_lock(
+                                server.id, "scheduler_mod_update"
+                            )
+                            if not lock_acquired:
                                 _append_console_log(
                                     server.id,
-                                    f"[MSM] Autonomes Workshop-Mod-Update fehlgeschlagen: "
-                                    f"{mod_res.get('error') or mod_res}\n",
+                                    "[MSM] Autonomes Workshop-Mod-Update übersprungen: "
+                                    "laufende Lifecycle-Operation.\n",
                                 )
+                            else:
+                                try:
+                                    mod_res = await asyncio.to_thread(
+                                        plugin.perform_workshop_mod_updates,
+                                        server,
+                                        only_auto_update=True,
+                                    )
+                                    if not mod_res.get("ok", False):
+                                        _append_console_log(
+                                            server.id,
+                                            f"[MSM] Autonomes Workshop-Mod-Update fehlgeschlagen: "
+                                            f"{mod_res.get('error') or mod_res}\n",
+                                        )
+                                finally:
+                                    release_install_update_lock(server.id)
 
                 # 2. Server-Datei-Update (Game-Binaries, passiv)
                 server_update = plugin.check_for_server_file_update(server)

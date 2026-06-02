@@ -260,14 +260,6 @@ def _ports(server: Server) -> list[tuple[int, str, str]]:
     return [(p.port, p.protocol, p.role) for p in server.ports]
 
 
-def _uses_steam_source(plugin) -> bool:
-    try:
-        bp = plugin.get_blueprint()
-        return bool(bp and bp.source.type.value == "steam")
-    except Exception:
-        return False
-
-
 def _check_server_file_update(server: Server, plugin, operation: str) -> dict:
     try:
         return plugin.check_for_server_file_update(server)
@@ -285,6 +277,22 @@ def _server_file_update_needed(update_check: dict | None) -> bool:
     return bool(update_check and update_check.get("action") == "update")
 
 
+def _source_update_strategy(plugin):
+    """Liefert die effektive Update-Strategie aus der Blueprint.
+
+    Provider-neutral: liest ``source.updateStrategy`` (Default pro Source-Type).
+    Kein Steam-only-Hardcode im Python-Core.
+    """
+    from blueprints.schema import BlueprintUpdateStrategy
+    try:
+        bp = plugin.get_blueprint()
+        if bp and bp.source is not None and hasattr(bp.source, "effective_update_strategy"):
+            return bp.source.effective_update_strategy()
+    except Exception as exc:
+        logger.debug("Blueprint-Lookup fuer Update-Strategie fehlgeschlagen: %s", exc)
+    return BlueprintUpdateStrategy.CHECK_BASED
+
+
 def _run_server_file_update_if_needed(
     server: Server,
     plugin,
@@ -292,34 +300,43 @@ def _run_server_file_update_if_needed(
     *,
     update_check: dict | None = None,
 ) -> None:
-    is_steam = _uses_steam_source(plugin)
-    if not is_steam and not _server_file_update_needed(update_check):
-        return
-    if is_steam:
-        _append_console_log(server.id, "[MSM] Running SteamCMD server validate...\n")
+    from blueprints.schema import BlueprintUpdateStrategy
+
+    strategy = _source_update_strategy(plugin)
+    if strategy == BlueprintUpdateStrategy.ALWAYS_VALIDATE:
+        effective_check = {"action": "update"}
+    elif strategy == BlueprintUpdateStrategy.CHECK_BASED:
+        effective_check = update_check
     else:
-        _append_console_log(server.id, "[MSM] Running checked server file update...\n")
-    result = plugin.perform_server_file_update(server)
-    if result.get("ok", False):
-        message = "Server files validated by SteamCMD." if is_steam else "Server file update finished."
-        _append_console_log(server.id, f"[MSM] {message}\n")
         return
-    label = "SteamCMD server validate" if is_steam else "Server file update"
+
+    if not _server_file_update_needed(effective_check):
+        return
     _append_console_log(
         server.id,
-        f"[MSM] {label} had problems during {operation}; start continues: "
+        f"[MSM] Server-Datei-Update wird durchgeführt (Strategie: {strategy.value})...\n",
+    )
+    result = plugin.perform_server_file_update(server)
+    if result.get("ok", False):
+        _append_console_log(server.id, "[MSM] Server-Datei-Update abgeschlossen.\n")
+        return
+    _append_console_log(
+        server.id,
+        f"[MSM] Server-Datei-Update hatte Probleme während {operation}; Start wird fortgesetzt: "
         f"{result.get('error') or result}\n",
     )
 
 
 def _run_start(db: Session, server: Server, plugin) -> None:
+    from blueprints.schema import BlueprintUpdateStrategy
+
     _ensure_bind_ip(server)
     mod_updates: list[dict] = []
-    needs_server_validate = _uses_steam_source(plugin)
     server_update_check: dict | None = None
+    strategy = _source_update_strategy(plugin)
     try:
         plugin.prepare_for_updates(server)
-        if not needs_server_validate:
+        if strategy != BlueprintUpdateStrategy.NONE:
             server_update_check = _check_server_file_update(server, plugin, "start")
         mod_updates = plugin.check_for_mod_updates(server)
     except Exception as exc:
@@ -331,7 +348,7 @@ def _run_start(db: Session, server: Server, plugin) -> None:
 
     update_lock_acquired = False
     try:
-        if needs_server_validate or _server_file_update_needed(server_update_check) or mod_updates:
+        if _server_file_update_needed(server_update_check) or mod_updates:
             update_lock_acquired = try_acquire_install_update_lock(server.id, "start_update")
             if not update_lock_acquired:
                 raise HTTPException(
@@ -370,7 +387,11 @@ def _run_start(db: Session, server: Server, plugin) -> None:
         except Exception:
             logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
 
-    result = plugin.start(server)
+    ports_list = _ports(server)
+    open_ports(server.name, ports_list)
+    iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    try:
+        result = plugin.start(server)
     except Exception:
         close_ports(ports_list)
         iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
@@ -413,13 +434,15 @@ def _run_kill(db: Session, server: Server) -> None:
 
 
 def _run_restart(db: Session, server: Server, plugin) -> None:
+    from blueprints.schema import BlueprintUpdateStrategy
+
     _ensure_bind_ip(server)
     mod_updates: list[dict] = []
-    needs_server_validate = _uses_steam_source(plugin)
     server_update_check: dict | None = None
+    strategy = _source_update_strategy(plugin)
     try:
         plugin.prepare_for_updates(server)
-        if not needs_server_validate:
+        if strategy != BlueprintUpdateStrategy.NONE:
             server_update_check = _check_server_file_update(server, plugin, "restart")
         mod_updates = plugin.check_for_mod_updates(server)
     except Exception as exc:
@@ -431,7 +454,7 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
 
     update_lock_acquired = False
     try:
-        if needs_server_validate or _server_file_update_needed(server_update_check) or bool(mod_updates):
+        if _server_file_update_needed(server_update_check) or bool(mod_updates):
             update_lock_acquired = try_acquire_install_update_lock(server.id, "restart_update")
             if not update_lock_acquired:
                 raise HTTPException(
@@ -498,6 +521,40 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     db.commit()
 
 
+def _restart_server_sync(server_id: int) -> dict:
+    """Synchroner Restart-Pfad für Auto-Restart (läuft in separatem Thread)."""
+    db = SessionLocal()
+    try:
+        server = db.query(Server).filter(Server.id == server_id).first()
+        if not server:
+            raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+        plugin = get_plugin(server.game_type)
+        if not plugin:
+            raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+
+        lock = get_server_lifecycle_thread_lock(server_id)
+        with lock:
+            _set_status(db, server, "restarting", None)
+            try:
+                _run_restart(db, server, plugin)
+            except Exception as exc:
+                db.rollback()
+                message = _safe_error_message(getattr(exc, "detail", exc))
+                server.status = "failed"
+                server.status_message = message
+                db.commit()
+                _append_console_log(server_id, f"[MSM] Lifecycle-restart fehlgeschlagen: {message}\n")
+                raise
+
+        return {
+            "message": "Restart-Befehl gesendet",
+            "status": server.status,
+        }
+    finally:
+        db.close()
+
+
 async def restart_server_with_updates(db: Session, server: Server) -> dict:
     """Restartet einen Server über den zentralen Lifecycle-Pfad.
 
@@ -505,13 +562,8 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
     Auto-Restart genutzt, damit Server-Datei-Updates, Mod-Updates, Firewall und
     iptables nicht auseinanderlaufen.
 
-    Auto-Restart bleibt async aufrufbar, nutzt aber denselben Thread-Lock und
-    dieselbe Restart-Implementierung wie manuelle Background-Jobs.
+    Auto-Restart nutzt asyncio.to_thread() um den Event Loop nicht zu blockieren.
     """
-    plugin = get_plugin(server.game_type)
-    if not plugin:
-        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-
     if not _mark_job_active(server.id):
         raise HTTPException(
             status_code=409,
@@ -521,27 +573,7 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
             },
         )
 
-    lock = get_server_lifecycle_thread_lock(server.id)
     try:
-        with lock:
-            db.refresh(server)
-            _set_status(db, server, "restarting", None)
-            try:
-                _run_restart(db, server, plugin)
-            except Exception as exc:
-                db.rollback()
-                db.refresh(server)
-                message = _safe_error_message(getattr(exc, "detail", exc))
-                server.status = "failed"
-                server.status_message = message
-                db.commit()
-                _append_console_log(server.id, f"[MSM] Lifecycle-restart fehlgeschlagen: {message}\n")
-                raise
-
-        db.refresh(server)
-        return {
-            "message": "Restart-Befehl gesendet",
-            "status": server.status,
-        }
+        return await asyncio.to_thread(_restart_server_sync, server.id)
     finally:
         _mark_job_done(server.id)

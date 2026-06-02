@@ -49,6 +49,16 @@ from services.port_role_service import blueprint_port_requirements, normalize_po
 from services.steam_account_service import SteamAccountService
 
 
+WORKSHOP_BATCH_SIZE = 25
+"""Max Workshop-Items pro SteamCMD-Aufruf.
+
+Begruendung: SteamCMD-CLI-Limit + getestete Stabilitaet. Groessere Batches
+fuehren zu Timeouts in ``+workshop_download_item``-Ketten. Chunks oberhalb
+dieses Limits lohnen selten: langer Lauf, schlechtere Fehler-Isolation pro
+Mod. Provider-neutraler Wert, gilt fuer jeden SteamCMD-gestuetzten Blueprint.
+"""
+
+
 class BlueprintPlugin(GamePlugin):
     """GamePlugin, das seine Metadaten ausschliesslich aus einer Blueprint liest."""
 
@@ -385,41 +395,48 @@ class BlueprintPlugin(GamePlugin):
         if self._blueprint.source.type == BlueprintSourceType.STEAM and self._blueprint.source.steam:
             requires_login = self._blueprint.source.steam.requiresLogin
 
+        chunks = [clean_ids[i:i + WORKSHOP_BATCH_SIZE] for i in range(0, len(clean_ids), WORKSHOP_BATCH_SIZE)]
+
         result: dict = {}
 
         def _install():
             nonlocal result
             try:
-                download_res = run_steamcmd_workshop_download_batch(
-                    server_id=server_id,
-                    install_dir=install_dir,
-                    workshop_app_id=workshop_app_id,
-                    workshop_item_ids=clean_ids,
-                    use_authenticated_login=requires_login,
-                )
-                items = download_res.get("items") if isinstance(download_res, dict) else {}
-                errors: list[str] = []
-                applied = 0
-                for wid in clean_ids:
-                    item = items.get(wid, {}) if isinstance(items, dict) else {}
-                    if not item.get("ok"):
-                        errors.append(f"{wid}: {item.get('error') or download_res.get('error') or 'Workshop-Download fehlgeschlagen'}")
-                        continue
-                    action_res = self._run_workshop_post_install_actions(server, wid)
-                    if "error" in action_res:
-                        errors.append(f"{wid}: {action_res['error']}")
-                        continue
-                    applied += 1
-                    _append_console_log(server.id, f"[MSM] Mod {wid} verarbeitet\n")
+                aggregated_items: dict = {}
+                aggregated_errors: list[str] = []
+                aggregated_applied = 0
+                for chunk in chunks:
+                    download_res = run_steamcmd_workshop_download_batch(
+                        server_id=server_id,
+                        install_dir=install_dir,
+                        workshop_app_id=workshop_app_id,
+                        workshop_item_ids=chunk,
+                        use_authenticated_login=requires_login,
+                    )
+                    items = download_res.get("items") if isinstance(download_res, dict) else {}
+                    aggregated_items.update(items if isinstance(items, dict) else {})
+                    for wid in chunk:
+                        item = items.get(wid, {}) if isinstance(items, dict) else {}
+                        if not item.get("ok"):
+                            aggregated_errors.append(
+                                f"{wid}: {item.get('error') or download_res.get('error') or 'Workshop-Download fehlgeschlagen'}"
+                            )
+                            continue
+                        action_res = self._run_workshop_post_install_actions(server, wid)
+                        if "error" in action_res:
+                            aggregated_errors.append(f"{wid}: {action_res['error']}")
+                            continue
+                        aggregated_applied += 1
+                        _append_console_log(server.id, f"[MSM] Mod {wid} verarbeitet\n")
                 self.update_modlist(server)
                 result = {
-                    "ok": len(errors) == 0,
-                    "applied": applied,
-                    "errors": errors,
-                    "items": items,
+                    "ok": len(aggregated_errors) == 0,
+                    "applied": aggregated_applied,
+                    "errors": aggregated_errors,
+                    "items": aggregated_items,
                 }
-                if errors:
-                    result["error"] = "; ".join(errors)
+                if aggregated_errors:
+                    result["error"] = "; ".join(aggregated_errors)
             except Exception as exc:
                 result = {"error": str(exc)}
 

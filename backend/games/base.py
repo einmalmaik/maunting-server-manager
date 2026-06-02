@@ -1002,13 +1002,32 @@ class GamePlugin(ABC):
         return {"message": "Server gestartet", "container": name}
 
     def stop(self, server) -> dict:
-        """Standard-Stop: Container graceful stoppen (30 s)."""
+        """Standard-Stop: Container graceful stoppen.
+
+        Grace-Period kommt aus dem Blueprint (``runtime.stopGracePeriodSeconds``,
+        Default 30s). Server mit persistenter Welt brauchen oft mehr Zeit
+        fuer Save- oder Snapshot-Workflows. Ein zu kurzer Timeout fuehrt
+        zu SIGKILL und potenziellem Datenverlust.
+        """
         name = container_name_for(server.id)
-        result = docker_service.stop(name, timeout=30)
+        timeout = self.stop_grace_period_seconds(server)
+        result = docker_service.stop(name, timeout=timeout)
         if not result["ok"]:
             return {"error": result["error"]}
         _append_console_log(server.id, f"[MSM] Container {name} gestoppt\n")
         return {"message": "Server gestoppt", "container": name}
+
+    def stop_grace_period_seconds(self, server) -> int:
+        """Blueprint-gesteuerter Grace-Period fuer Container-Stop.
+
+        Default 30s, ueberschreibbar pro Blueprint via
+        ``runtime.stopGracePeriodSeconds`` (5..600s). Plugins ohne Blueprint
+        nutzen den Default.
+        """
+        bp = self.get_blueprint()
+        if bp and bp.runtime and getattr(bp.runtime, "stopGracePeriodSeconds", None):
+            return int(bp.runtime.stopGracePeriodSeconds)
+        return 30
 
     def get_status(self, server) -> ServerStatus:
         """Liefert Live-Status aus Docker (Container-State + CPU/RAM via stats)."""
