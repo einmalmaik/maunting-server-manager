@@ -1003,6 +1003,7 @@ class GamePlugin(ABC):
             read_only_rootfs=self.container_read_only_rootfs,
             tmpfs_paths=self.container_tmpfs_paths(server),
             startup_check_seconds=2.0,
+            server_id=server.id,  # enables pull progress in console
         )
         if not result["ok"]:
             _append_console_log(server.id, f"[MSM] Container-Start fehlgeschlagen: {result['error']}\n")

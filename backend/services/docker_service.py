@@ -303,12 +303,27 @@ def _split_image_ref(image: str) -> tuple[str, str | None]:
     return image, None
 
 
-def _pull_image(client: Any, image: str) -> None:
+def _pull_image(client: Any, image: str, server_id: int | None = None) -> None:
     repository, tag = _split_image_ref(image)
     stream = client.api.pull(repository, tag=tag, stream=True, decode=True, auth_config={})
     for event in stream:
         if not isinstance(event, dict):
             continue
+
+        # Log pull progress to server console for visibility (especially long pulls for Wine/Proton etc.)
+        if server_id is not None:
+            try:
+                from games.base import _append_console_log
+                status = event.get("status", "")
+                progress = event.get("progress", "")
+                if status or progress:
+                    msg = f"[MSM] [image pull] {status}"
+                    if progress:
+                        msg += f" {progress}"
+                    _append_console_log(server_id, msg + "\n")
+            except Exception:
+                pass  # never break pull on logging
+
         error = event.get("error")
         if not error:
             detail = event.get("errorDetail")
@@ -318,10 +333,10 @@ def _pull_image(client: Any, image: str) -> None:
             raise DockerException(str(error))
 
 
-def _ensure_image_available(client: Any, image: str) -> None:
+def _ensure_image_available(client: Any, image: str, server_id: int | None = None) -> None:
     pull_error = None
     try:
-        _pull_image(client, image)
+        _pull_image(client, image, server_id=server_id)
         return
     except (DockerException, OSError) as exc:
         pull_error = _safe_pull_error(exc)
@@ -413,6 +428,7 @@ def run_container(
     extra_args: list[str] | None = None,
     detach: bool = True,
     startup_check_seconds: float = 0.0,
+    server_id: int | None = None,  # for pull progress logging to console during long image pulls
 ) -> dict:
     """Startet einen langlebigen Game-Server-Container."""
 
@@ -424,7 +440,7 @@ def run_container(
         return error
 
     try:
-        _ensure_image_available(client, image)
+        _ensure_image_available(client, image, server_id=server_id)
     except _ImageUnavailable as exc:
         return {"ok": False, "error": str(exc), "stdout": "", "stderr": ""}
 
