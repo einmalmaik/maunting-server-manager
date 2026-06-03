@@ -64,3 +64,4 @@ backend/data/
 .local/
 .local/share/docker/
 .local/share/containers/
+/backend/.mypy_cache
