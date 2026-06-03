@@ -588,7 +588,7 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
 
 @router.post("/{server_id}/kill")
 async def kill_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    """Erzwungenes Beenden (Docker force remove). Nur für running/stopping/restarting sichtbar im UI.
+    """Erzwungenes Beenden (Docker force remove). Als Notfall auch während start/restart nutzbar (emergency override des Job-Locks).
     Permission "server.kill" (Naming analog zu server.stop, nicht server.power.* für Code-Konsistenz mit bestehenden server.* Keys).
     """
     require_server_permission(user, server_id, db, "server.kill")
