@@ -57,3 +57,10 @@ backend/maunting-server-manager.code-workspace
 *.sqlite3
 backend/logs/
 backend/data/
+
+# Rootless Docker data for the msm user (HOME=/opt/msm on prod). 
+# git clean -fd would otherwise nuke containerd blobs / image layers if .local is untracked.
+# This is what caused the "blob not found" / lease content errors after accidental clean.
+.local/
+.local/share/docker/
+.local/share/containers/
