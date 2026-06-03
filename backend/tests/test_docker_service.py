@@ -137,6 +137,7 @@ class TestRunContainer:
     def test_builds_hardened_sdk_call(self):
         client = MagicMock()
         created = SimpleNamespace(id="abc123")
+        client.images.get.side_effect = docker_service.NotFound("missing")
         client.containers.get.side_effect = docker_service.NotFound("missing")
         client.containers.run.return_value = created
 
@@ -172,15 +173,19 @@ class TestRunContainer:
         assert kwargs["memswap_limit"] == "4096m"
         assert kwargs["user"] == "1000:1000"
         assert kwargs["working_dir"] == "/data"
+        client.images.get.assert_called_once_with("ghcr.io/parkervcp/steamcmd:debian")
         client.api.pull.assert_called_once_with(
             "ghcr.io/parkervcp/steamcmd", tag="debian", stream=True, decode=True, auth_config={}
         )
         calls = [call[0] for call in client.mock_calls]
-        assert calls.index("api.pull") < calls.index("containers.run")
+        assert calls.index("images.get") < calls.index("api.pull") < calls.index("containers.run")
 
-    def test_run_container_uses_local_image_when_pull_fails(self):
+    def test_run_container_skips_pull_when_image_present_locally(self):
+        """Fast-Path: Image ist bereits im lokalen Content-Store -> kein Registry-Roundtrip.
+
+        Spart 10-60s Wartezeit pro Restart bei grossen Images (Wine/Proton, parkervcp).
+        """
         client = MagicMock()
-        client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.return_value = SimpleNamespace(id="local-image")
         client.containers.get.side_effect = docker_service.NotFound("missing")
         client.containers.run.return_value = SimpleNamespace(id="abc")
@@ -195,10 +200,38 @@ class TestRunContainer:
             )
 
         assert result["ok"] is True
+        client.images.get.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
+        client.api.pull.assert_not_called()
+        client.containers.run.assert_called_once()
+
+    def test_run_container_uses_local_image_on_pull_failure_fallback(self):
+        """Fallback: Image fehlt lokal, Pull schlaegt fehl, aber Image ist zwischenzeitlich
+        verfuegbar (z. B. ein paralleler Job hat es gepullt). Dann darf der Container starten.
+        """
+        client = MagicMock()
+        client.images.get.side_effect = [
+            docker_service.NotFound("missing first"),
+            SimpleNamespace(id="raced-image"),
+        ]
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/ptero-eggs/yolks:wine_staging",
+                command=["x"],
+                env={},
+                volumes=[],
+            )
+
+        assert result["ok"] is True
+        assert client.images.get.call_count == 2
+        client.images.get.assert_any_call("ghcr.io/ptero-eggs/yolks:wine_staging")
         client.api.pull.assert_called_once_with(
             "ghcr.io/ptero-eggs/yolks", tag="wine_staging", stream=True, decode=True, auth_config={}
         )
-        client.images.get.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
         client.containers.run.assert_called_once()
 
     def test_run_container_reports_immediate_exit_with_code_and_logs(self):
@@ -452,6 +485,7 @@ class TestEphemeralRun:
         container = MagicMock()
         container.wait.return_value = {"StatusCode": 0}
         container.logs.side_effect = [b"done\n", b""]
+        client.images.get.side_effect = docker_service.NotFound("missing")
         client.containers.run.return_value = container
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
@@ -472,16 +506,17 @@ class TestEphemeralRun:
         assert kwargs["security_opt"] == ["no-new-privileges"]
         assert kwargs["volumes"] == {"/opt/msm/servers/1": {"bind": "/data", "mode": "rw"}}
         container.remove.assert_called_once_with(force=True)
+        client.images.get.assert_called_once_with("ghcr.io/parkervcp/steamcmd:debian")
         client.api.pull.assert_called_once_with(
             "ghcr.io/parkervcp/steamcmd", tag="debian", stream=True, decode=True, auth_config={}
         )
 
-    def test_ephemeral_run_uses_local_image_when_pull_fails(self):
+    def test_ephemeral_run_skips_pull_when_image_present_locally(self):
+        """Fast-Path fuer SteamCMD-Install-Container: kein Registry-Roundtrip wenn lokal vorhanden."""
         client = MagicMock()
         container = MagicMock()
         container.wait.return_value = {"StatusCode": 0}
         container.logs.side_effect = [b"done\n", b""]
-        client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.return_value = SimpleNamespace(id="local-image")
         client.containers.run.return_value = container
 
@@ -494,10 +529,8 @@ class TestEphemeralRun:
             )
 
         assert result["ok"] is True
-        client.api.pull.assert_called_once_with(
-            "ghcr.io/parkervcp/steamcmd", tag="debian", stream=True, decode=True, auth_config={}
-        )
         client.images.get.assert_called_once_with("ghcr.io/parkervcp/steamcmd:debian")
+        client.api.pull.assert_not_called()
         client.containers.run.assert_called_once()
 
     def test_ephemeral_run_fails_clearly_when_remote_and_local_image_missing(self):

@@ -334,6 +334,18 @@ def _pull_image(client: Any, image: str, server_id: int | None = None) -> None:
 
 
 def _ensure_image_available(client: Any, image: str, server_id: int | None = None) -> None:
+    # Fast path: image already in local Docker content store -> no registry roundtrip.
+    # Vermeidet 10-60s Wartezeit pro Restart bei grossen Images (Wine/Proton, parkervcp).
+    # Funktioniert generisch fuer alle Blueprints/Images - keine hardcodierten Listen.
+    # NotFound deckt ImageNotFound (Subklasse) ab.
+    try:
+        client.images.get(image)
+        return
+    except NotFound:
+        pass
+    except (DockerException, OSError) as exc:
+        logger.debug("docker local image check failed for %s: %s", image, exc)
+
     pull_error = None
     try:
         _pull_image(client, image, server_id=server_id)
@@ -344,7 +356,7 @@ def _ensure_image_available(client: Any, image: str, server_id: int | None = Non
 
     try:
         client.images.get(image)
-    except (ImageNotFound, NotFound, DockerException, OSError) as exc:
+    except (NotFound, DockerException, OSError) as exc:
         raise _ImageUnavailable(image, pull_error) from exc
 
 
