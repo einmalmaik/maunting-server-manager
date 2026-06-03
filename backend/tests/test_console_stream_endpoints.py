@@ -1,4 +1,4 @@
-"""Tests fuer den WebSocket-Konsolen-Endpoint + WS-Service.
+"""Tests fuer den WS-Konsolen-Endpoint + Console-Stream-Service.
 
 Deckt ab:
 - Auth via Cookie (gleich wie HTTP)
@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from models import Server, User
-from services import console_ws_service
+from services import console_stream_service
 
 
 # ── Service-Layer Tests (Mock-WebSocket, kein FastAPI) ─────────────────────
@@ -28,7 +28,7 @@ from services import console_ws_service
 class _MockWebSocket:
     """Minimaler WS-Mock fuer Service-Layer-Tests.
 
-    Reicht die wichtigsten Attribute + async-Methoden, die console_ws_service nutzt.
+    Reicht die wichtigsten Attribute + async-Methoden, die console_stream_service nutzt.
     """
 
     def __init__(self) -> None:
@@ -66,9 +66,9 @@ class _MockWebSocket:
 
 async def _run_briefly(ws: _MockWebSocket, server_id: int, log_path: str, last_id: int | None = None) -> None:
     """Startet connect() als Task, laesst es ~0.2s laufen, cancelt es dann."""
-    with patch.object(console_ws_service.docker_service, "is_running", return_value=False):
+    with patch.object(console_stream_service.docker_service, "is_running", return_value=False):
         task = asyncio.create_task(
-            console_ws_service.connect(
+            console_stream_service.connect(
                 ws, server_id=server_id, container=f"msm-srv-{server_id}", log_path=log_path, last_id=last_id
             )
         )
@@ -80,9 +80,9 @@ async def _run_briefly(ws: _MockWebSocket, server_id: int, log_path: str, last_i
             pass
 
 
-class TestConsoleWsService:
+class TestConsoleStreamService:
     def setup_method(self) -> None:
-        console_ws_service.reset_state_for_tests()
+        console_stream_service.reset_state_for_tests()
 
     def test_sends_backlog_on_cold_start(self, tmp_path):
         log_path = tmp_path / "console.log"
@@ -134,9 +134,9 @@ class TestConsoleWsService:
         ])
 
         async def _run() -> None:
-            with patch.object(console_ws_service.docker_service, "is_running", return_value=False):
+            with patch.object(console_stream_service.docker_service, "is_running", return_value=False):
                 task = asyncio.create_task(
-                    console_ws_service.connect(
+                    console_stream_service.connect(
                         ws, server_id=3, container="msm-srv-3", log_path="/nonexistent"
                     )
                 )
@@ -155,11 +155,11 @@ class TestConsoleWsService:
 # ── Endpoint-Layer Tests (TestClient, durch FastAPI) ───────────────────────
 
 
-class TestConsoleWsEndpoint:
+class TestConsoleStreamEndpoint:
     """Integration-Tests ueber den FastAPI TestClient (websocket_connect)."""
 
     def setup_method(self) -> None:
-        console_ws_service.reset_state_for_tests()
+        console_stream_service.reset_state_for_tests()
 
     def _origin(self, value: str) -> dict[str, str]:
         return {"origin": value}
@@ -226,7 +226,7 @@ class TestConsoleWsEndpoint:
         _append_console_log(test_server.id, f"{marker_b}\n")
         access = owner_cookies["__Secure-access_token"]
         received: list[dict] = []
-        with patch.object(console_ws_service.docker_service, "is_running", return_value=False):
+        with patch.object(console_stream_service.docker_service, "is_running", return_value=False):
             with client.websocket_connect(
                 f"/api/servers/{test_server.id}/console/ws",
                 cookies={"__Secure-access_token": access},

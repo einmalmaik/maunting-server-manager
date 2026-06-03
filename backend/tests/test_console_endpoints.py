@@ -1,18 +1,16 @@
-"""Tests fuer Live-Konsole: SSE-Stream + stdin-Eingabe.
+"""Tests fuer die Konsolen-Stdin-Eingabe.
 
-Decken die Sicherheitsinvarianten und das KISS-Stream-Design ab:
-- Stream-Endpoint verlangt ``server.console.read``.
-- Stream liefert zuerst den MSM-Logdatei-Backlog (Install/Lifecycle),
-  dann live Rootless-Docker-Logs zusammen mit neuen Datei-Eintraegen.
+Decken die Sicherheitsinvarianten und das KISS-Design ab:
 - Input-Endpoint verlangt ``server.console.write``.
 - Input-POST loggt den Inhalt NICHT (z. B. OAuth-Code).
 - ``send_stdin`` nutzt den Docker-SDK-Exec-Pfad mit dem korrekten Aufruf.
 - ``run_container`` startet den Container mit ``--interactive`` (sonst geht
   stdin nicht).
+
+Hinweis: Der Live-Stream-Pfad (WebSocket) hat eigene Tests in
+``test_console_stream_endpoints.py``.
 """
 
-import os
-import json
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -192,92 +190,5 @@ class TestConsoleInputEndpoint:
         # Keine einzelne Log-Zeile darf den Geheim-Wert enthalten.
         for record in caplog.records:
             assert secret not in record.getMessage()
-
-
-class TestConsoleStreamRBAC:
-    """SSE-Stream-Endpoint: nur mit ``server.console.read`` erreichbar."""
-
-    def test_rejects_user_without_console_read(
-        self,
-        client: TestClient,
-        user_cookies: dict,
-        test_server: Server,
-    ):
-        # KEIN ``user_permission``-Fixture — keine Server-Rechte.
-        response = client.get(
-            f"/api/servers/{test_server.id}/console/stream",
-            cookies=user_cookies,
-        )
-        assert response.status_code == 403
-
-
-class _StubRequest:
-    """Minimaler Request-Stub: kontrolliert, wann der Stream beendet wird."""
-
-    def __init__(self, disconnect_after: int = 1) -> None:
-        self._calls = 0
-        self._disconnect_after = disconnect_after
-
-    async def is_disconnected(self) -> bool:
-        self._calls += 1
-        return self._calls > self._disconnect_after
-
-
-async def _drain_stream(gen, max_frames: int = 50) -> list[str]:
-    payloads: list[str] = []
-    async for chunk in gen:
-        for line in chunk.split("\n"):
-            if line.startswith("data: "):
-                raw = line[len("data: "):]
-                try:
-                    payloads.append(json.loads(raw).get("line", raw))
-                except json.JSONDecodeError:
-                    payloads.append(raw)
-        if len(payloads) >= max_frames:
-            break
-    return payloads
-
-
-class TestConsoleStreamGenerator:
-    """Direkter Test des Stream-Generators — unabhängig von HTTP-Transport.
-
-    KISS-Invariante: die MSM-Console-Logdatei ist die single source of truth.
-    Backlog (Install-Output, Lifecycle-Events) wird sofort bei Verbindungs-
-    aufbau geliefert, damit die Konsole während Install **und** Betrieb
-    nie leer ist.
-    """
-
-    def test_replays_existing_msm_log_backlog(self, test_server: Server):
-        import asyncio
-
-        from games.base import _console_log_path
-        from routers.servers import _console_event_stream
-
-        log_path = _console_log_path(test_server.id)
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        try:
-            with open(log_path, "w", encoding="utf-8") as f:
-                f.write("[MSM] SteamCMD startet für App 12345 (Docker)\n")
-                f.write("Success! App '12345' fully installed.\n")
-                f.write("[MSM] Container msm-srv-1 gestartet\n")
-
-            with patch("services.console_stream_service.docker_service.is_available", return_value=False):
-                payloads = asyncio.run(
-                    _drain_stream(
-                        _console_event_stream(
-                            _StubRequest(disconnect_after=0),
-                            container="msm-srv-x",
-                            log_path=log_path,
-                        ),
-                        max_frames=10,
-                    )
-                )
-
-            assert "[MSM] SteamCMD startet für App 12345 (Docker)" in payloads
-            assert "Success! App '12345' fully installed." in payloads
-            assert "[MSM] Container msm-srv-1 gestartet" in payloads
-        finally:
-            if os.path.exists(log_path):
-                os.remove(log_path)
 
 

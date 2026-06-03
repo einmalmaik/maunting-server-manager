@@ -358,7 +358,7 @@ class BlueprintPlugin(GamePlugin):
 
     def get_logs(self, server, lines: int = 100) -> str:
         # Community-Blueprints haben kein vordefiniertes Logfile-Layout —
-        # die UI nutzt stattdessen den SSE-Console-Stream (MSM-Logdatei +
+        # die UI nutzt stattdessen den WS-Console-Stream (MSM-Logdatei +
         # Rootless-Docker-Logstream aus docker_service).
         return ""
 

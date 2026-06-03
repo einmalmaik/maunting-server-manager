@@ -27,7 +27,6 @@ from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
 from games import get_plugin
 from games.base import container_name_for, _console_log_path, _append_console_log
 from services import EmailService, docker_service
-from services.console_ws_service import connect as ws_connect
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
@@ -40,7 +39,7 @@ from services.server_lifecycle_service import (
     queue_lifecycle_operation,
     should_preserve_lifecycle_status,
 )
-from services.console_stream_service import console_event_stream
+from services.console_stream_service import connect as ws_connect
 from services.install_update_lock_service import (
     INSTALL_UPDATE_ALREADY_RUNNING,
     release_install_update_lock,
@@ -777,51 +776,6 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
     return {"message": "Installation gestartet", **result}
 
 
-@router.get("/{server_id}/console/stream")
-async def server_console_stream(
-    server_id: int,
-    request: Request,
-    after: int | None = None,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> StreamingResponse:
-    """Live-Stream der Console als Server-Sent Events.
-
-    Single Source of Truth (KISS): die MSM-Console-Logdatei
-    ``backend/logs/<server_id>/console.log``. Sie sammelt:
-
-    - Install-/Update-Output (SteamCMD, HTTP-Source, manuelle Hinweise)
-    - Lifecycle-Events (``[MSM] Container gestartet/gestoppt``, Fehler)
-    - Live-Container-Stdout/Stderr während der Server läuft (siehe unten)
-
-    Damit auch Live-Container-Output in dieselbe Datei landet, koppelt der
-    Endpoint den Rootless-Docker-Logstream aus ``docker_service``: dessen
-    Output wird parallel an den Stream geyielded. Die Datei bleibt der primäre
-    Backlog, Docker liefert nur die laufenden neuen Zeilen.
-
-    SSE statt WebSocket: unidirektional reicht, EventSource im Browser ohne
-    extra Lib. Auth via Cookie + ``server.console.read`` (CSRF entfällt bei
-    GET). Bei Client-Disconnect werden Subprozess + Hintergrund-Tasks sauber
-    beendet.
-    """
-    require_server_permission(user, server_id, db, "server.console.read")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    container = container_name_for(server.id)
-    log_path = _console_log_path(server.id)
-
-    return StreamingResponse(
-        _console_event_stream(request, container, log_path, after_bytes=after),
-        media_type="text/event-stream",
-        headers={
-            # Nginx/Caddy-Buffering aus, sonst sieht der Client nichts bis zum Flush.
-            "X-Accel-Buffering": "no",
-            "Cache-Control": "no-cache",
-        },
-    )
-
-
 # ── Erlaubte Origins fuer WebSocket-Upgrades ───────────────────────────────
 # Dieselbe Logik wie die CORS-Middleware: in Dev mehr, in Prod strikt.
 _WS_ALLOWED_ORIGINS: tuple[str, ...] = (
@@ -844,7 +798,7 @@ def _ws_origin_allowed(origin: str | None) -> bool:
 
 @router.websocket("/{server_id}/console/ws")
 async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
-    """WebSocket-Variante der Server-Konsole (Phase 1, parallel zum SSE-Endpoint).
+    """Live-Stream der Server-Konsole als WebSocket.
 
     Auth: Cookie-Auth im WS-Handshake (genauso wie beim HTTP-Pfad), danach
     Server-Permission ``server.console.read``. Origin-Check ersetzt den CSRF-Schutz
@@ -898,27 +852,6 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
     finally:
         if db.is_active:
             db.close()
-
-
-def _sse_data(line: str, event_id: int | None = None) -> str:
-    """Eine Logzeile als SSE ``data:``-Frame kodieren.
-
-    Mehrzeilige Werte werden zeilenweise als mehrere ``data:``-Felder
-    geschickt - das ist die SSE-Spezifikation für Newlines im Payload.
-    """
-    prefix = f"id: {event_id}\n" if event_id is not None else ""
-    return prefix + "".join(f"data: {part}\n" for part in line.split("\n")) + "\n"
-
-
-async def _console_event_stream(
-    request: Request,
-    container: str,
-    log_path: str,
-    *,
-    after_bytes: int | None = None,
-):
-    async for frame in console_event_stream(request, container, log_path, after_bytes=after_bytes):
-        yield frame
 
 
 class ConsoleInputBody(BaseModel):
