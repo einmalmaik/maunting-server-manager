@@ -392,6 +392,7 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     ports_list = _ports(server)
     open_ports(server.name, ports_list)
     iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         result = plugin.start(server)
     except Exception:
@@ -506,6 +507,7 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     ports_list = _ports(server)
     open_ports(server.name, ports_list)
     iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         start_result = plugin.start(server)
     except Exception:
