@@ -1,6 +1,13 @@
 // Service Worker for Maunting Server Manager PWA
 
-const CACHE_NAME = 'msm-v1';
+// CACHE_NAME muss bei jedem Release erhoeht werden, in dem sich statische
+// Assets aendern (neue JS-Bundles, neue Icons, ...). Sonst liefert der SW
+// nach einem Deploy die alten Bundles aus dem Cache und der Browser sieht
+// den neuen Code nicht. Konsequenz: alte Endpoints, kaputte UI, leere
+// Konsole weil das alte Bundle z. B. noch /console/stream (SSE) statt
+// /console/ws (WS) aufruft.
+// Bei Breaking-Endpoint-Aenderungen immer bumpten.
+const CACHE_NAME = 'msm-v2';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',

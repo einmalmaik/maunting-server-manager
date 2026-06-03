@@ -183,6 +183,10 @@ export function ServerConsolePanel({ serverId }: Props) {
   // ?last_id=<n> an den Server geschickt, damit nur verpasste Zeilen
   // nachgeliefert werden (statt komplettem Backlog).
   const lastServerIdRef = useRef<number | null>(null)
+  // Verbindungsstatus fuer sichtbares UI-Feedback ('connecting' zwischen
+  // Mount und erstem onopen, 'live' solange WS offen, 'reconnecting'
+  // nach Disconnect, 'failed' nach Ueberschreiten der Max-Attempts).
+  const [connStatus, setConnStatus] = useState<'connecting' | 'live' | 'reconnecting' | 'failed'>('connecting')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Neue States fuer verbesserte UI/UX
@@ -224,6 +228,12 @@ export function ServerConsolePanel({ serverId }: Props) {
       }
     }
 
+    // Max-Attempts: nach Ueberschreiten wird der Loop abgebrochen und der
+    // User ueber einen einmaligen Toast informiert. Ohne Cap wuerde der
+    // Client bei dauerhaft abgelehnter Verbindung (z. B. falscher Origin)
+    // alle 10s einen neuen WS-Handshake produzieren.
+    const MAX_RECONNECT_ATTEMPTS = 10
+
     const flushBuffer = () => {
       if (bufferRef.current.length === 0) return
       const toFlush = bufferRef.current
@@ -252,6 +262,17 @@ export function ServerConsolePanel({ serverId }: Props) {
 
     const scheduleReconnect = () => {
       if (cancelled) return
+      if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+        // Dauerhaft fehlgeschlagen: Loop abbrechen, einmalig toasten.
+        setConnStatus('failed')
+        toast.error(t('servers.consoleConnectionFailed'))
+        return
+      }
+      setConnStatus('reconnecting')
+      if (reconnectAttempt === 0) {
+        // Beim allerersten Reconnect (nicht jeder weitere) einen Hinweis-Toast.
+        toast.error(t('servers.consoleReconnecting'))
+      }
       // Backoff: 1s, 2s, 5s, 10s (cap).
       const delays = [1000, 2000, 5000, 10000]
       const delay = delays[Math.min(reconnectAttempt, delays.length - 1)]
@@ -261,6 +282,7 @@ export function ServerConsolePanel({ serverId }: Props) {
 
     const connect = () => {
       if (cancelled) return
+      setConnStatus('connecting')
       // Reconnect-Resume: letzte empfangene ID mitschicken, damit der Server
       // nur Zeilen mit id > last_id nochmal sendet (statt komplettem Backlog).
       const lastId = lastServerIdRef.current
@@ -272,6 +294,7 @@ export function ServerConsolePanel({ serverId }: Props) {
 
       ws.onopen = () => {
         reconnectAttempt = 0
+        setConnStatus('live')
         // 25s-Ping-Heartbeat haelt die Verbindung in Background-Tabs wach
         // (Browser schliessen sonst inaktive WS nach 60s).
         if (pingTimer !== null) window.clearInterval(pingTimer)
@@ -302,14 +325,20 @@ export function ServerConsolePanel({ serverId }: Props) {
         // Disconnect triggert onclose direkt. Beides ist OK.
       }
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         if (pingTimer !== null) {
           window.clearInterval(pingTimer)
           pingTimer = null
         }
-        if (!cancelled) {
-          scheduleReconnect()
+        if (cancelled) return
+        // 1008 = policy violation (z. B. Origin nicht erlaubt, Auth fehlt).
+        // In dem Fall ist Reconnect aussichtslos, direkt failed melden.
+        if (ev.code === 1008) {
+          setConnStatus('failed')
+          toast.error(t('servers.consoleConnectionRejected'))
+          return
         }
+        scheduleReconnect()
       }
     }
 
@@ -443,6 +472,22 @@ export function ServerConsolePanel({ serverId }: Props) {
         <div className="inline-flex items-center gap-3">
           <Terminal className="w-4 h-4 text-on-surface-variant" />
           <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
+          {connStatus !== 'live' && (
+            <span
+              data-testid="console-conn-status"
+              className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full border ${
+                connStatus === 'failed'
+                  ? 'text-status-destructive border-status-destructive/40 bg-status-destructive/10'
+                  : connStatus === 'reconnecting'
+                    ? 'text-status-warning border-status-warning/40 bg-status-warning/10'
+                    : 'text-on-surface-variant border-outline bg-surface-container-low'
+              }`}
+            >
+              {connStatus === 'connecting' && t('servers.consoleConnecting')}
+              {connStatus === 'reconnecting' && t('servers.consoleReconnecting')}
+              {connStatus === 'failed' && t('servers.consoleConnectionFailed')}
+            </span>
+          )}
         </div>
 
         {/* Suchfeld */}

@@ -72,7 +72,13 @@ def _utc_iso() -> str:
 
 
 def _get_state(server_id: int) -> _ServerState:
-    """Liefert (oder erstellt) den Per-Server State. Lock-frei, da dict.setdefault atomar ist."""
+    """Liefert (oder erstellt) den Per-Server State.
+
+    MUSS unter ``_STATES_LOCK`` aufgerufen werden — der get-then-create
+    auf ``_STATES`` ist nicht atomar, sodass zwei parallele Erstverbindungen
+    sonst jeweils ein eigenes ``_ServerState`` erzeugen und einander
+    ueberschreiben wuerden. Alle aktuellen Aufrufer halten den Lock bereits.
+    """
     state = _STATES.get(server_id)
     if state is None:
         state = _ServerState()
@@ -225,26 +231,24 @@ async def connect(
         for line in replay:
             await ws.send_text(_serialize(line))
 
-        def _on_line(text: str, source: str) -> None:
-            """Sync-Callback: speichert im Buffer und plant WS-Send als Task.
+        async def _on_line(text: str, source: str) -> None:
+            """Speichert die Zeile im Ring-Buffer (unter Lock) und schickt sie an den Client.
 
-            Wird in einem Sync-Context aufgerufen (file-tail) bzw. innerhalb der
-            docker-Stream-Coroutine. asyncio.create_task ist hier ok, weil wir
-            in einem laufenden Event-Loop sind.
+            Wird von zwei parallelen Tasks (_tail_file_loop + _tail_docker_loop)
+            aufgerufen. Der Lock schuetzt next_id und das deque.append, damit
+            bei reconnect-resume via ?last_id= keine Luecken entstehen.
             """
-            line = _Line(
-                id=state.next_id,
-                text=text,
-                source=source,
-                timestamp=_utc_iso(),
-            )
-            state.next_id += 1
-            state.lines.append(line)
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(_safe_send(ws, _serialize(line)))
-            except RuntimeError:
-                pass
+            async with _STATES_LOCK:
+                line = _Line(
+                    id=state.next_id,
+                    text=text,
+                    source=source,
+                    timestamp=_utc_iso(),
+                )
+                state.next_id += 1
+                state.lines.append(line)
+                payload = _serialize(line)
+            await _safe_send(ws, payload)
 
         async def _safe_send(ws_: WebSocket, payload: str) -> None:
             try:

@@ -4,11 +4,10 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './i18n'
 import './index.css'
-import { registerServiceWorker, initPWAInstallPrompt } from './utils/pwa'
+import { registerServiceWorker } from './utils/pwa'
 
 // Initialize PWA
 registerServiceWorker()
-initPWAInstallPrompt()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
