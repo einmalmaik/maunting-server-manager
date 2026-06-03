@@ -151,6 +151,139 @@ class TestConsoleStreamService:
         pong = [s for s in ws.sent if json.loads(s).get("action") == "pong"]
         assert len(pong) == 1
 
+    def test_docker_logs_arrive_after_late_container_start(self):
+        """User-Symptom: nach 'Start' sieht der User nur MSM-Lifecycle-Zeilen
+        und pong, aber keine Game-Logs. Ursache war ein One-Shot in
+        ``_tail_docker_loop``: wenn der Container beim Connect noch nicht
+        lief, ist die Loop still zurueckgekehrt, bevor der Container ready war.
+
+        Fix: Polling mit Backoff, danach stream_logs starten. Hier
+        verifizieren wir genau diesen Pfad: is_running ist zunaechst False,
+        wird nach einer Weile True, stream_logs liefert Zeilen, und die
+        landen via on_line (source='docker') am WS.
+        """
+        ws = _MockWebSocket()
+        # receive_text muss laenger blocken als der Test laeuft, damit die
+        # parallelen Tail-Tasks (file + docker) Zeit haben, Polling +
+        # stream_logs durchzuspielen. Default-Mock wirft nach 0.05s
+        # CancelledError, das cancelt die Tasks zu frueh.
+        async def _block_forever() -> None:
+            await asyncio.sleep(10)
+        ws.receive_text = AsyncMock(side_effect=_block_forever)
+
+        async def _fake_stream(_container, tail=200):
+            yield "Game-Server-Init"
+            yield "Listening on port 7777"
+            # Stream endet danach "normal" (Container stoppt spaeter)
+
+        # is_running: erst False, ab dem 2. Aufruf True
+        is_running_calls = {"n": 0}
+
+        def _is_running(_container: str) -> bool:
+            is_running_calls["n"] += 1
+            return is_running_calls["n"] >= 2
+
+        async def _run() -> None:
+            with patch.object(
+                console_stream_service.docker_service, "is_running", side_effect=_is_running
+            ), patch.object(
+                console_stream_service.docker_service, "stream_logs", side_effect=_fake_stream
+            ):
+                task = asyncio.create_task(
+                    console_stream_service.connect(
+                        ws,
+                        server_id=4,
+                        container="msm-srv-4",
+                        log_path="/nonexistent",
+                    )
+                )
+                # 0.5s Backoff ueberschreiten, damit is_running True wird
+                # und stream_logs ein paar Zeilen liefern kann.
+                await asyncio.sleep(0.7)
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        asyncio.run(_run())
+        docker_lines = [
+            json.loads(s) for s in ws.sent
+            if (lambda d: isinstance(d, dict) and d.get("source") == "docker")(json.loads(s))
+        ]
+        texts = [d["text"] for d in docker_lines]
+        assert "Game-Server-Init" in texts
+        assert "Listening on port 7777" in texts
+        # IDs muessen monoton wachsend sein (Ring-Buffer-Invariante).
+        ids = [d["id"] for d in docker_lines]
+        assert ids == sorted(ids)
+        assert len(set(ids)) == len(ids)
+
+    def test_docker_stream_resumes_after_normal_end(self):
+        """Wenn ``stream_logs`` regulaer endet (Container stoppt spaeter),
+        darf die Loop nicht stillschweigend enden — sonst sieht der User
+        nach einem Restart keine Game-Logs mehr.
+        """
+        ws = _MockWebSocket()
+        async def _block_forever() -> None:
+            await asyncio.sleep(10)
+        ws.receive_text = AsyncMock(side_effect=_block_forever)
+
+        # Zwei Phasen: stream #1 liefert eine Zeile, endet. Nach kurzer
+        # Pause wird is_running True (Container wieder hochgefahren) und
+        # stream #2 liefert eine weitere Zeile. Beide Zeilen muessen am WS
+        # ankommen.
+        stream_yielded = {"phase": 0}
+
+        async def _fake_stream(_container, tail=200):
+            if stream_yielded["phase"] == 0:
+                stream_yielded["phase"] = 1
+                yield "first-run-log"
+                return
+            stream_yielded["phase"] = 2
+            yield "after-restart-log"
+
+        is_running_calls = {"n": 0}
+
+        def _is_running(_container: str) -> bool:
+            is_running_calls["n"] += 1
+            # Phase 0 (Cold-Start): False.
+            # Phase 1 (nach 1s Pause in der Loop nach Stream-Ende): True.
+            # Phase 2 (nach 2. Stream-Ende): True.
+            return is_running_calls["n"] >= 2
+
+        async def _run() -> None:
+            with patch.object(
+                console_stream_service.docker_service, "is_running", side_effect=_is_running
+            ), patch.object(
+                console_stream_service.docker_service, "stream_logs", side_effect=_fake_stream
+            ):
+                task = asyncio.create_task(
+                    console_stream_service.connect(
+                        ws, server_id=5, container="msm-srv-5", log_path="/nonexistent"
+                    )
+                )
+                # Genug Zeit, damit die Loop beide Phasen durchlaeuft:
+                # - Phase 0: 0.5s Backoff (1. Aufruf, False)
+                # - Phase 1: 1.0s Pause in der Loop nach Stream-Ende (2. Aufruf, True)
+                # - stream #1 yields -> nach Loop 1.0s sleep
+                # - Phase 2: stream #2 yields
+                await asyncio.sleep(2.5)
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        asyncio.run(_run())
+        docker_lines = [
+            json.loads(s) for s in ws.sent
+            if (lambda d: isinstance(d, dict) and d.get("source") == "docker")(json.loads(s))
+        ]
+        texts = [d["text"] for d in docker_lines]
+        assert "first-run-log" in texts
+        assert "after-restart-log" in texts
+
 
 # ── Endpoint-Layer Tests (TestClient, durch FastAPI) ───────────────────────
 

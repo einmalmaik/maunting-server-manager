@@ -161,20 +161,40 @@ async def _tail_file_loop(log_path: str, state: _ServerState, on_line) -> None:
             if not raw_line:
                 continue
             text = raw_line.decode("utf-8", errors="replace")
-            on_line(text, "msm")
+            await on_line(text, "msm")
 
 
 async def _tail_docker_loop(container: str, on_line) -> None:
-    """Tail-Loop fuer `docker logs --follow`. Beendet sich, wenn der Container nicht laeuft."""
-    try:
-        if not docker_service.is_running(container):
-            return
-        async for text in docker_service.stream_logs(container, tail=200):
-            on_line(text, "docker")
-    except asyncio.CancelledError:
-        pass
-    except Exception as exc:
-        logger.warning("ws docker tailing failed for %s: %s", container, exc)
+    """Tail-Loop fuer `docker logs --follow` mit Polling auf Container-Readiness.
+
+    Wenn der Container beim WS-Connect noch nicht laeuft (typischer Fall:
+    User klickt Start und oeffnet die Konsole sofort), wartet die Loop
+    mit Backoff, bis der Container ready ist. Wenn `stream_logs` endet
+    (Container gestoppt, rootless-Daemon kurz weg, Recreate), pollt die
+    Loop ebenfalls neu, statt stillschweigend zu enden — sonst sieht der
+    User nach einem Restart keine Game-Logs mehr, obwohl der WS lebt.
+
+    Backoff: 0.5s -> 1.5s -> 5s (cap), damit ein abwesender Docker-Daemon
+    nicht in einer heissen Spin-Loop landet.
+    """
+    backoff = 0.5
+    while True:
+        try:
+            if not docker_service.is_running(container):
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 1.5, 5.0)
+                continue
+            backoff = 0.5
+            # stream_logs iteriert bis der Subprozess endet (Container stoppt,
+            # Daemon weg, Pipe kaputt). Danach zurueck zum Readiness-Check.
+            async for text in docker_service.stream_logs(container, tail=200):
+                await on_line(text, "docker")
+            await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("ws docker tailing failed for %s: %s", container, exc)
+            await asyncio.sleep(2.0)
 
 
 async def _close_safely(ws: WebSocket, code: int = 1000) -> None:
@@ -256,7 +276,9 @@ async def connect(
             except Exception as exc:
                 logger.debug("ws send failed (client disconnected?): %s", exc)
 
-        # Live-Phasen als parallele Tasks
+        # Live-Phasen als parallele Tasks. Beide laufen so lange, bis der
+        # Client disconnectet. _tail_docker_loop pollt selbst auf Container-
+        # Readiness, falls der Container beim Connect noch nicht laeuft.
         file_task = asyncio.create_task(_tail_file_loop(log_path, state, _on_line))
         docker_task = asyncio.create_task(_tail_docker_loop(container, _on_line))
 
