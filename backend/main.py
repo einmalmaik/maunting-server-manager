@@ -166,6 +166,12 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE mods ADD COLUMN install_completed_at TIMESTAMP"))
             if 'install_error' not in cols:
                 conn.execute(text("ALTER TABLE mods ADD COLUMN install_error TEXT"))
+            if 'update_status' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN update_status VARCHAR(24) NOT NULL DEFAULT 'unknown'"))
+            if 'update_reason' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN update_reason VARCHAR(128)"))
+            if 'update_checked_at' not in cols:
+                conn.execute(text("ALTER TABLE mods ADD COLUMN update_checked_at TIMESTAMP"))
 
     # Migration: Backup name-Spalte
     if 'backups' in inspector.get_table_names():

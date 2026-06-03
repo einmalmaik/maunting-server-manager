@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "Gerenciador de servidores assustadores"
   },
@@ -383,6 +383,7 @@
     "password": "Senha",
     "confirmPassword": "Confirmar senha",
     "otpCode": "Código 2FA (6 dígitos)",
+    "useBackupCode": "Usar código de backup",
     "signIn": "Entrar",
     "createAccount": "Criar conta",
     "verify2FA": "Verifique 2FA",
@@ -459,6 +460,14 @@
     "workshopId": "ID da oficina",
     "modName": "Nome (opcional)",
     "updateAvailable": "Atualização disponível",
+    "checkUpdates": "Verificar atualizações",
+    "updateCheckQueued": "Verificação concluída",
+    "updateCheckFailed": "Falha ao verificar atualizações",
+    "updateQueued": "Atualização do mod na fila",
+    "reinstall": "Reinstalar",
+    "reinstallQueued": "Reinstalação do mod na fila",
+    "confirmReinstall": "Reinstalar {{mod}} agora?",
+    "installActionFailed": "Ação do mod falhou",
     "updating": "Atualizando...",
     "lastChecked": "Última verificação",
     "loadOrder": "Ordem de carregamento",
@@ -502,6 +511,15 @@
     "statusInstalled": "Instalado",
     "statusError": "Erro",
     "statusErrorHint": "A instalação falhou.",
+    "statusMissing": "Ausente",
+    "statusMissingHint": "Arquivos do mod estão ausentes e serão instalados na próxima atualização segura.",
+    "statusOutdated": "Desatualizado",
+    "statusOutdatedHint": "Uma atualização do Workshop foi detectada para este mod.",
+    "statusUnknown": "Desconhecido",
+    "statusUnknownHint": "O status de atualização não pôde ser verificado com segurança.",
+    "statusUnknownNoSteamKeyHint": "A chave da Steam API está ausente; metadados não podem ser verificados.",
+    "statusFailed": "Falhou",
+    "statusFailedHint": "A última ação do mod falhou.",
     "etaCalculating": "Calculando o tempo restante.",
     "etaAlmostDone": "Quase pronto.",
     "etaLessThanMinute": "Falta menos de 1 minuto.",
@@ -673,6 +691,16 @@
     "backupCodes": "Códigos de backup",
     "generateBackupCodes": "Gerar códigos de backup",
     "backupCodesWarning": "Salve esses códigos com segurança. Eles não podem substituir o 2FA, servem apenas como login de emergência.",
+    "backupCodesDownloadOnce": "Você só pode baixar estes códigos de backup agora. Depois disso, eles serão removidos desta visualização.",
+    "downloadBackupCodes": "Baixar códigos de backup",
+    "backupCodesDownloaded": "Os códigos de backup foram baixados e removidos desta visualização.",
+    "regenerateBackupCodes": "Gerar novos códigos de backup",
+    "regenerateBackupCodesConfirm": "Os códigos de backup antigos serão excluídos completamente e substituídos por novos códigos. Continuar?",
+    "backupCodesRegenerated": "Novos códigos de backup foram gerados. Baixe-os agora como arquivo.",
+    "backupCodesFileTitle": "Maunting Server Manager - Códigos de backup",
+    "backupCodesFileIntro": "Estes códigos de backup servem como login de emergência se seu código 2FA não estiver disponível.",
+    "backupCodesFileUser": "Conta",
+    "backupCodesFileGeneratedAt": "Gerado em",
     "otpRequired": "Código 2FA necessário",
     "notVerified": "Não verificado",
     "2faQrCode": "Código QR 2FA",
@@ -689,7 +717,13 @@
   "errors": {
     "RATE_LIMITED": "Muitos pedidos. Por favor, espere um momento.",
     "SESSION_EXPIRED": "A sessão expirou. Faça login novamente.",
-    "install_update_already_running": "Uma instalação ou atualização já está em execução. Aguarde até que o trabalho termine."
+    "install_update_already_running": "Uma instalação ou atualização já está em execução. Aguarde até que o trabalho termine.",
+    "steam_api_key_missing": "A chave da Steam API está ausente. Busca no Workshop e metadados estarão disponíveis após a configuração.",
+    "steam_api_unavailable": "A Steam API está indisponível ou a chave é inválida.",
+    "steam_search_failed": "A busca da Steam falhou.",
+    "steam_load_failed": "Os dados da Steam não puderam ser carregados.",
+    "invalid_workshop_id": "ID do Workshop inválido.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "Desativar notificações por e-mail",
@@ -710,7 +744,13 @@
     "viewRelease": "Ver lançamento",
     "manualUpdateCommand": "Atualização no servidor:"
   },
-  "common": {
+"connection": {
+    "connecting": "Conectando…",
+    "reconnecting": "Conexão perdida — reconectando…",
+    "failed": "Falha na conexão. Recarregue a página.",
+    "rejected": "Conexão rejeitada (autenticação/origem/permissões ausentes)."
+  },
+    "common": {
     "unlimited": "ilimitado",
     "save": "Salvar",
     "cancel": "Cancelar",

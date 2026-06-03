@@ -236,6 +236,38 @@ class TestServerStatusDiskFields:
         db.refresh(test_server)
         assert test_server.last_started_at is not None
 
+    def test_status_preserves_queued_lifecycle_transition(
+        self,
+        client: TestClient,
+        owner_user: User,
+        owner_cookies: dict,
+        csrf_token: str,
+        test_server: Server,
+        db: Session,
+    ):
+        test_server.status = "running"
+        db.commit()
+        with patch("services.server_lifecycle_service._start_lifecycle_thread"):
+            queued = client.post(
+                f"/api/servers/{test_server.id}/stop",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert queued.status_code == 200
+
+        with patch("routers.servers.get_plugin") as mock_get_plugin:
+            from games.base import ServerStatus
+
+            mock_plugin = mock_get_plugin.return_value
+            mock_plugin.get_status.return_value = ServerStatus(status="stopped")
+            response = client.get(
+                f"/api/servers/{test_server.id}/status",
+                cookies=owner_cookies,
+            )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "queued"
+
 
 class TestManualUploadStartPreCheck:
     def test_start_blocks_when_files_missing(
@@ -293,18 +325,17 @@ class TestManualUploadStartPreCheck:
         (tmp_path / "server.jar").write_text("fake", encoding="utf-8")
 
         with patch("routers.servers.get_plugin") as mock_get_plugin, \
-             patch("routers.servers.open_ports"), \
-             patch("routers.servers.iptables_accept_server"), \
-             patch("routers.servers.asyncio.to_thread") as mock_thread:
+             patch("services.server_lifecycle_service._start_lifecycle_thread") as mock_thread:
             mock_plugin = mock_get_plugin.return_value
             mock_plugin.get_blueprint.return_value = bp
-            mock_thread.return_value = {"message": "started"}
             response = client.post(
                 f"/api/servers/{test_server.id}/start",
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
         assert response.status_code == 200
+        assert response.json()["status"] == "queued"
+        mock_thread.assert_called_once()
 
     def test_start_blocks_when_symlink_present(
         self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session, tmp_path
@@ -351,38 +382,47 @@ class TestKillServer:
     def test_kill_success_sets_stopped_and_calls_docker_force(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session):
         test_server.status = "running"
         db.commit()
-        with patch("routers.servers.docker_service.remove") as mock_remove:
-            mock_remove.return_value = {"ok": True}
+        with patch("services.server_lifecycle_service._start_lifecycle_thread") as mock_thread:
             response = client.post(
                 f"/api/servers/{test_server.id}/kill",
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
             assert response.status_code == 200
-            assert response.json()["message"] == "Server wurde erzwungen beendet"
-            mock_remove.assert_called_once()
-            args, kwargs = mock_remove.call_args
-            assert kwargs.get("force") is True or (len(args) > 1 and args[1] is True)
+            assert response.json()["status"] == "queued"
+            assert response.json()["operation"] == "kill"
+            mock_thread.assert_called_once()
             db.refresh(test_server)
-            assert test_server.status == "stopped"
-            assert test_server.status_message == "Erzwungen beendet"
+            assert test_server.status == "queued"
             # no secrets/paths in response (data minimization)
             assert "container" not in str(response.json()).lower()
 
-    def test_kill_error_on_docker_failure_no_db_mutation(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session):
+    def test_kill_overrides_active_job(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session):
+        """Kill hat einen 'emergency override': markiert den aktiven Job als
+        done, damit ein zweiter Kill nicht in der 409-Active-Job-Falle stecken
+        bleibt. Der erste Kill wird gequeued, der zweite ueberschreibt
+        ebenfalls (override-Verhalten).
+        """
         test_server.status = "running"
-        orig_status = test_server.status
         db.commit()
-        with patch("routers.servers.docker_service.remove") as mock_remove:
-            mock_remove.return_value = {"error": "daemon unavailable"}
+        with patch("services.server_lifecycle_service._start_lifecycle_thread"):
             response = client.post(
                 f"/api/servers/{test_server.id}/kill",
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
-            assert response.status_code == 500
+            assert response.status_code == 200
+            # Zweiter Kill: kein 409 weil der erste Kill-Active-Job durch
+            # den Override markiert wurde. Der zweite Kill wird ebenfalls
+            # gequeued und laeuft NACH dem ersten (kein echtes Interrupt).
+            second = client.post(
+                f"/api/servers/{test_server.id}/kill",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+            assert second.status_code == 200
             db.refresh(test_server)
-            assert test_server.status != "stopped"  # no final mutation on docker error (transient "stopping" may be left; poll corrects)
+            assert test_server.status == "queued"
 
     def test_kill_forbidden_without_permission(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_csrf_token: str):
         response = client.post(
@@ -407,26 +447,17 @@ class TestTransientStatusBeforeDocker:
     def test_stop_sets_stopping_before_plugin_stop_with_hanging_mock(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session):
         test_server.status = "running"
         db.commit()
-        observed_status = []
-        def hanging_stop(srv):
-            # DB spy: inspect committed state *before* this "slow" call returns
-            fresh = db.query(Server).filter(Server.id == srv.id).first()
-            observed_status.append(fresh.status if fresh else None)
-            # simulate hang (but return quickly for test)
-            return {"message": "stopped"}
         with patch("routers.servers.get_plugin") as mock_get_plugin, \
-             patch("routers.servers.asyncio.to_thread") as mock_thread, \
-             patch("routers.servers.close_ports"), patch("routers.servers.iptables_revoke_server"):
+             patch("services.server_lifecycle_service._start_lifecycle_thread"):
             mock_plugin = mock_get_plugin.return_value
-            mock_plugin.stop.side_effect = hanging_stop
-            mock_thread.side_effect = lambda f, *a, **k: f(*a, **k)
             response = client.post(
                 f"/api/servers/{test_server.id}/stop",
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
-        # Hanging mock + DB spy exercised the before-Docker commit path (may be "stopping" or final depending on mock timing in sqlite test session); full invariant proven by code + success path
-        assert response.status_code in (200, 500)
+        assert response.status_code == 200
+        db.refresh(test_server)
+        assert test_server.status == "queued"
 
     # Restart transient coverage is provided by the stop test pattern + direct code inspection of the locked service (the restart test was removed to avoid env-specific patch timing flakes in sqlite + to_thread while keeping the invariant proven for the feature).
 
@@ -439,9 +470,11 @@ from services.server_lifecycle_service import get_server_lifecycle_lock
 class TestLifecycleLockBasic:
     def test_lifecycle_lock_import_and_acquisition(self):
         """Exercises import of central service + per-id lock acquisition (KISS helper)."""
+        import threading
+
         lock = get_server_lifecycle_lock(4242)
         assert lock is not None
-        assert isinstance(lock, asyncio.Lock)
+        assert isinstance(lock, threading.Lock)
         # Re-acquire yields same instance (setdefault semantics)
         lock2 = get_server_lifecycle_lock(4242)
         assert lock is lock2

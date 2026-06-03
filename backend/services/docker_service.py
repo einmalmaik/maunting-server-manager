@@ -19,6 +19,7 @@ import os
 import shlex
 import socket
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
@@ -48,6 +49,28 @@ _SYSTEM_ENV = {
 _LOG_CONFIG = {"max-size": "10m", "max-file": "3"}
 _HARDENING_CAP_DROP = ["ALL"]
 _HARDENING_SECURITY_OPT = ["no-new-privileges"]
+# Dedicated image for permission repair (runs as root to chown bind mounts).
+#
+# Purpose of repair_bind_mount_permissions():
+#   Before starting a game container or doing file ops via the panel, we run a
+#   one-shot root container that does:
+#     find /data -xdev -type d -exec chmod a+rwX {} +
+#     ... chown for the container uid:gid (e.g. 1000:1000 for Wine/Pterodactyl images)
+#
+# Why this specific image?
+# - Must support running as root (user="0:0", entrypoint="bash")
+# - Needs bash + find + chown + chmod (the script is a bash -c one-liner)
+# - We reuse the same image as STEAMCMD_IMAGE (cm2network/steamcmd:root) for
+#   simplicity: Steam users already pull it, it's explicitly the :root variant,
+#   reliable for root operations.
+#
+# This is a *utility/tool image*, not a per-game runtime image (those come from
+# the blueprint). It is intentionally a constant (like STEAMCMD_IMAGE) because
+# the repair logic has specific requirements (root exec, certain tools).
+#
+# If you change this, make sure the new image can run the exact script in
+# repair_bind_mount_permissions() as root without permission issues inside the
+# container.
 PERMISSION_REPAIR_IMAGE = "cm2network/steamcmd:root"
 PERMISSION_REPAIR_CONTAINER_DIR = "/data"
 PERMISSION_REPAIR_CAPS = ["CHOWN", "FOWNER", "DAC_OVERRIDE", "DAC_READ_SEARCH"]
@@ -165,6 +188,25 @@ def _safe_pull_error(exc: BaseException) -> str:
     if "toomanyrequests" in text_lower or "rate limit" in text_lower:
         return "Registry-Rate-Limit erreicht"
 
+    # Local containerd / Docker content store corruption (e.g. after git clean -fd deleting blobs,
+    # disk issues, or interrupted pulls). The "lease content" + "blob not found" at local path
+    # means the index thinks the layer exists but the file is gone in ~/.local/share/docker/...
+    if "lease content" in text_lower or "blob not found" in text_lower or "content store" in text_lower:
+        # 'detail' kann Image-Referenzen, Registry-Hostnames oder Pfade
+        # enthalten -- wir kuerzen auf 200 Zeichen, damit der UI-Hinweis
+        # nicht unnoetig lang wird und keine internen Details leakt.
+        safe_detail = (detail or "")[:200]
+        return (
+            f"Lokaler Docker-Content-Store korrupt (Blob fehlt: {safe_detail}). "
+            "Ursache oft: git clean -fd (hatte .local nicht ignoriert), rm oder unterbrochener Pull. "
+            "VOLLSTÄNDIGER FIX (als root, uid 994, /opt/msm als HOME): "
+            "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/994; systemctl --user stop docker || true; pkill -u 994 dockerd || true; sleep 2'; "
+            "rm -rf /opt/msm/.local/share/docker; "
+            "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/994; systemctl --user start docker || { dockerd-rootless-setuptool.sh install --skip-iptables || true; systemctl --user enable --now docker; }'; "
+            "sudo -u msm bash -c 'export DOCKER_HOST=unix:///run/user/994/docker.sock; docker pull cm2network/steamcmd:root; docker pull ghcr.io/parkervcp/steamcmd:debian'; "
+            "Dann git pull im /opt/msm und Panel neu starten."
+        )
+
     return detail
 
 
@@ -265,12 +307,27 @@ def _split_image_ref(image: str) -> tuple[str, str | None]:
     return image, None
 
 
-def _pull_image(client: Any, image: str) -> None:
+def _pull_image(client: Any, image: str, server_id: int | None = None) -> None:
     repository, tag = _split_image_ref(image)
     stream = client.api.pull(repository, tag=tag, stream=True, decode=True, auth_config={})
     for event in stream:
         if not isinstance(event, dict):
             continue
+
+        # Log pull progress to server console for visibility (especially long pulls for Wine/Proton etc.)
+        if server_id is not None:
+            try:
+                from games.base import _append_console_log
+                status = event.get("status", "")
+                progress = event.get("progress", "")
+                if status or progress:
+                    msg = f"[MSM] [image pull] {status}"
+                    if progress:
+                        msg += f" {progress}"
+                    _append_console_log(server_id, msg + "\n")
+            except Exception:
+                pass  # never break pull on logging
+
         error = event.get("error")
         if not error:
             detail = event.get("errorDetail")
@@ -280,10 +337,22 @@ def _pull_image(client: Any, image: str) -> None:
             raise DockerException(str(error))
 
 
-def _ensure_image_available(client: Any, image: str) -> None:
+def _ensure_image_available(client: Any, image: str, server_id: int | None = None) -> None:
+    # Fast path: image already in local Docker content store -> no registry roundtrip.
+    # Vermeidet 10-60s Wartezeit pro Restart bei grossen Images (Wine/Proton, parkervcp).
+    # Funktioniert generisch fuer alle Blueprints/Images - keine hardcodierten Listen.
+    # NotFound deckt ImageNotFound (Subklasse) ab.
+    try:
+        client.images.get(image)
+        return
+    except NotFound:
+        pass
+    except (DockerException, OSError) as exc:
+        logger.debug("docker local image check failed for %s: %s", image, exc)
+
     pull_error = None
     try:
-        _pull_image(client, image)
+        _pull_image(client, image, server_id=server_id)
         return
     except (DockerException, OSError) as exc:
         pull_error = _safe_pull_error(exc)
@@ -291,7 +360,7 @@ def _ensure_image_available(client: Any, image: str) -> None:
 
     try:
         client.images.get(image)
-    except (ImageNotFound, NotFound, DockerException, OSError) as exc:
+    except (NotFound, DockerException, OSError) as exc:
         raise _ImageUnavailable(image, pull_error) from exc
 
 
@@ -374,6 +443,8 @@ def run_container(
     tmpfs_paths: list[str] | None = None,
     extra_args: list[str] | None = None,
     detach: bool = True,
+    startup_check_seconds: float = 0.0,
+    server_id: int | None = None,  # for pull progress logging to console during long image pulls
 ) -> dict:
     """Startet einen langlebigen Game-Server-Container."""
 
@@ -385,7 +456,7 @@ def run_container(
         return error
 
     try:
-        _ensure_image_available(client, image)
+        _ensure_image_available(client, image, server_id=server_id)
     except _ImageUnavailable as exc:
         return {"ok": False, "error": str(exc), "stdout": "", "stderr": ""}
 
@@ -431,6 +502,25 @@ def run_container(
     try:
         container = client.containers.run(**kwargs)
         container_id = getattr(container, "id", "") if detach else ""
+        if detach and startup_check_seconds > 0:
+            time.sleep(startup_check_seconds)
+            container.reload()
+            state = container.attrs.get("State", {})
+            status = state.get("Status")
+            if status in {"exited", "dead"}:
+                exit_code = int(state.get("ExitCode") or 0)
+                logs = _decode(container.logs(tail=80, stdout=True, stderr=True)).strip()
+                detail = f"Container wurde direkt nach dem Start beendet (Exit-Code {exit_code})."
+                if logs:
+                    detail = f"{detail} Letzte Logs: {logs[:700]}"
+                return {
+                    "ok": False,
+                    "error": detail[:1000],
+                    "stdout": f"{container_id}\n" if container_id else "",
+                    "stderr": "",
+                    "exit_code": exit_code,
+                    "logs": logs[-4000:],
+                }
         return {"ok": True, "stdout": f"{container_id}\n" if container_id else "", "stderr": ""}
     except (DockerException, OSError) as exc:
         logger.warning("docker container run failed")

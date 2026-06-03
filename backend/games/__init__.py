@@ -17,6 +17,7 @@ from .base import (
     container_name_for,
     run_steamcmd_install,
     run_steamcmd_workshop_download,
+    run_steamcmd_workshop_download_batch,
     write_workshop_modlist,
 )
 from .blueprint_plugin import BlueprintPlugin
@@ -87,5 +88,6 @@ __all__ = [
     "active_mod_ids",
     "run_steamcmd_install",
     "run_steamcmd_workshop_download",
+    "run_steamcmd_workshop_download_batch",
     "write_workshop_modlist",
 ]

@@ -8,6 +8,8 @@ import {
   HardDrive,
   Package,
   Plus,
+  RefreshCw,
+  RotateCcw,
   Search,
   Star,
   ToggleLeft,
@@ -37,6 +39,9 @@ interface Mod {
   install_started_at: string | null
   install_completed_at: string | null
   install_error: string | null
+  update_status: string
+  update_reason: string | null
+  update_checked_at: string | null
 }
 
 interface SteamMod {
@@ -240,6 +245,33 @@ export function ModManager({ serverId }: ModManagerProps) {
     }
   }
 
+  const checkModUpdates = async () => {
+    try {
+      const data = await api<Mod[]>(`/mods/${serverId}/check-updates`, { method: 'POST' })
+      setMods(data)
+      toast.success(t('mods.updateCheckQueued'))
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t('mods.updateCheckFailed'))
+    }
+  }
+
+  const installExistingMod = async (mod: Mod, action: 'update' | 'reinstall') => {
+    if (action === 'reinstall') {
+      const ok = await confirm({
+        message: t('mods.confirmReinstall', { mod: mod.name || `Workshop Mod ${mod.workshop_id}` }),
+        confirmText: t('mods.reinstall'),
+      })
+      if (!ok) return
+    }
+    try {
+      await api<Mod>(`/mods/${serverId}/${mod.id}/install?action=${action}`, { method: 'POST' })
+      await loadMods()
+      toast.success(action === 'update' ? t('mods.updateQueued') : t('mods.reinstallQueued'))
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t('mods.installActionFailed'))
+    }
+  }
+
   const patchModFlag = async (modId: number, flag: 'enabled', value: boolean) => {
     const params = new URLSearchParams({ [flag]: value ? 'true' : 'false' })
     await api<Mod>(`/mods/${serverId}/${modId}?${params.toString()}`, { method: 'PATCH' })
@@ -413,6 +445,13 @@ export function ModManager({ serverId }: ModManagerProps) {
               className="msm-input pl-10 text-sm"
             />
           </div>
+          <button
+            onClick={() => void checkModUpdates()}
+            className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            {t('mods.checkUpdates')}
+          </button>
         </div>
 
         <div className="space-y-2">
@@ -433,6 +472,10 @@ export function ModManager({ serverId }: ModManagerProps) {
           ) : (
             visibleInstalled.map((mod) => {
               const installStatus = getModInstallPresentation(mod, t)
+              const isInstalling = hasActiveModInstall(mod)
+              const hasPendingUpdate =
+                (mod.install_status === 'pending' && mod.install_action === 'update') ||
+                mod.update_status === 'outdated'
               return (
               <div
                 key={mod.id}
@@ -489,6 +532,26 @@ export function ModManager({ serverId }: ModManagerProps) {
                   </div>
 
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    {hasPendingUpdate && (
+                      <button
+                        onClick={() => void installExistingMod(mod, 'update')}
+                        disabled={isInstalling}
+                        className="msm-btn-primary px-3 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+                        title={t('mods.updateAvailable')}
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        {t('mods.updateAvailable')}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => void installExistingMod(mod, 'reinstall')}
+                      disabled={isInstalling}
+                      className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+                      title={t('mods.reinstall')}
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      {t('mods.reinstall')}
+                    </button>
                     <button
                       onClick={() => toggleEnabled(mod.id, mod.enabled)}
                       title={mod.enabled ? t('mods.disable') : t('mods.enable')}

@@ -51,7 +51,9 @@ def clean_db():
     limiter.reset()
     # Built-in Rollen (admin/user) bei jedem Test bereitstellen.
     from services.install_update_lock_service import reset_install_update_lock_for_tests
+    from services.server_lifecycle_service import reset_lifecycle_jobs_for_tests
     reset_install_update_lock_for_tests()
+    reset_lifecycle_jobs_for_tests()
     session = db_module.SessionLocal()
     try:
         ensure_system_roles(session)

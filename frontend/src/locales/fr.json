@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "Gestionnaire de serveur Maunting"
   },
@@ -383,6 +383,7 @@
     "password": "Mot de passe",
     "confirmPassword": "Confirmer le mot de passe",
     "otpCode": "Code 2FA (6 chiffres)",
+    "useBackupCode": "Utiliser un code de secours",
     "signIn": "Connectez-vous",
     "createAccount": "Créer un compte",
     "verify2FA": "Vérifier 2FA",
@@ -459,6 +460,14 @@
     "workshopId": "Identifiant de l'atelier",
     "modName": "Nom (facultatif)",
     "updateAvailable": "Mise à jour disponible",
+    "checkUpdates": "Vérifier les mises à jour",
+    "updateCheckQueued": "Vérification terminée",
+    "updateCheckFailed": "Échec de la vérification",
+    "updateQueued": "Mise à jour du mod en file",
+    "reinstall": "Réinstaller",
+    "reinstallQueued": "Réinstallation du mod en file",
+    "confirmReinstall": "Réinstaller {{mod}} maintenant ?",
+    "installActionFailed": "Action du mod échouée",
     "updating": "Mise à jour...",
     "lastChecked": "Dernière vérification",
     "loadOrder": "Ordre de chargement",
@@ -502,6 +511,15 @@
     "statusInstalled": "Installé",
     "statusError": "Erreur",
     "statusErrorHint": "L'installation a échoué.",
+    "statusMissing": "Manquant",
+    "statusMissingHint": "Les fichiers du mod manquent et seront installés lors de la prochaine mise à jour sûre.",
+    "statusOutdated": "Obsolète",
+    "statusOutdatedHint": "Une mise à jour Workshop a été détectée pour ce mod.",
+    "statusUnknown": "Inconnu",
+    "statusUnknownHint": "Le statut de mise à jour n'a pas pu être vérifié de manière fiable.",
+    "statusUnknownNoSteamKeyHint": "La clé Steam API manque; les métadonnées ne peuvent pas être vérifiées.",
+    "statusFailed": "Échec",
+    "statusFailedHint": "La dernière action du mod a échoué.",
     "etaCalculating": "Calcul du temps restant.",
     "etaAlmostDone": "Presque terminé.",
     "etaLessThanMinute": "Il reste moins d'une minute.",
@@ -673,6 +691,16 @@
     "backupCodes": "Codes de sauvegarde",
     "generateBackupCodes": "Générer des codes de sauvegarde",
     "backupCodesWarning": "Enregistrez ces codes en toute sécurité. Ils ne peuvent pas remplacer le 2FA, ils servent uniquement de connexion d’urgence.",
+    "backupCodesDownloadOnce": "Vous ne pouvez télécharger ces codes de secours que maintenant. Ils seront ensuite retirés de cette vue.",
+    "downloadBackupCodes": "Télécharger les codes de secours",
+    "backupCodesDownloaded": "Les codes de secours ont été téléchargés et retirés de cette vue.",
+    "regenerateBackupCodes": "Regénérer les codes de secours",
+    "regenerateBackupCodesConfirm": "Les anciens codes de secours seront entièrement supprimés et remplacés par de nouveaux codes. Continuer ?",
+    "backupCodesRegenerated": "De nouveaux codes de secours ont été générés. Téléchargez-les maintenant sous forme de fichier.",
+    "backupCodesFileTitle": "Maunting Server Manager - Codes de secours",
+    "backupCodesFileIntro": "Ces codes de secours servent de connexion d'urgence si votre code 2FA n'est pas disponible.",
+    "backupCodesFileUser": "Compte",
+    "backupCodesFileGeneratedAt": "Généré le",
     "otpRequired": "Code 2FA requis",
     "notVerified": "Non vérifié",
     "2faQrCode": "Code QR 2FA",
@@ -689,7 +717,13 @@
   "errors": {
     "RATE_LIMITED": "Trop de demandes. Veuillez patienter un instant.",
     "SESSION_EXPIRED": "Session expirée. Veuillez vous reconnecter.",
-    "install_update_already_running": "Une installation ou une mise à jour est déjà en cours. Veuillez attendre que ce travail soit terminé."
+    "install_update_already_running": "Une installation ou une mise à jour est déjà en cours. Veuillez attendre que ce travail soit terminé.",
+    "steam_api_key_missing": "La clé Steam API manque. La recherche Workshop et les métadonnées seront disponibles après configuration.",
+    "steam_api_unavailable": "Steam API est indisponible ou la clé est invalide.",
+    "steam_search_failed": "La recherche Steam a échoué.",
+    "steam_load_failed": "Les données Steam n'ont pas pu être chargées.",
+    "invalid_workshop_id": "ID Workshop invalide.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "Désactiver les notifications par e-mail",
@@ -710,7 +744,13 @@
     "viewRelease": "Voir la version",
     "manualUpdateCommand": "Mise à jour sur le serveur :"
   },
-  "common": {
+"connection": {
+    "connecting": "Connexion…",
+    "reconnecting": "Connexion perdue — reconnexion…",
+    "failed": "Échec de la connexion. Rechargez la page.",
+    "rejected": "Connexion refusée (auth/origine/autorisations manquantes)."
+  },
+    "common": {
     "unlimited": "illimité",
     "save": "Enregistrer",
     "cancel": "Annuler",

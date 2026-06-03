@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Check, Clock, Copy, Search, Send, Terminal } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { useWebSocket } from '@/hooks/useWebSocket'
 import { toast } from '@/stores/toastStore'
 import { type PanelTimeFormat } from '@/utils/timeFormat'
 
@@ -18,6 +19,7 @@ type ConsoleLogLine = {
   source: 'msm' | 'docker' | 'unknown'
 }
 type ConsoleFrame = {
+  id?: number
   line?: string
   text?: string
   timestamp?: string
@@ -94,13 +96,14 @@ export function displayConsoleLine(line: string, language: string): string {
   return cleaned
 }
 
-function parseConsoleFrame(raw: string): Omit<ConsoleLogLine, 'marker'> {
+function parseConsoleFrame(raw: string): Omit<ConsoleLogLine, 'marker'> & { id?: number } {
   try {
     const parsed = JSON.parse(raw) as ConsoleFrame
     return {
       text: parsed.line ?? parsed.text ?? raw,
       timestamp: parsed.timestamp ?? null,
       source: parsed.source ?? 'unknown',
+      id: typeof parsed.id === 'number' ? parsed.id : undefined,
     }
   } catch {
     return { text: raw, timestamp: null, source: 'unknown' }
@@ -177,6 +180,14 @@ export function ServerConsolePanel({ serverId }: Props) {
   const [copiedLogs, setCopiedLogs] = useState(false)
   const nextSeqRef = useRef(0)
   const bufferRef = useRef<string[]>([])
+  // Letzte vom Server empfangene Zeilen-ID. Wird bei Reconnect als
+  // ?last_id=<n> an den Server geschickt, damit nur verpasste Zeilen
+  // nachgeliefert werden (statt komplettem Backlog).
+  const lastServerIdRef = useRef<number | null>(null)
+  // Verbindungsstatus fuer sichtbares UI-Feedback ('connecting' zwischen
+  // Mount und erstem onopen, 'live' solange WS offen, 'reconnecting'
+  // nach Disconnect, 'failed' nach Ueberschreiten der Max-Attempts).
+  const [connStatus, setConnStatus] = useState<'connecting' | 'live' | 'reconnecting' | 'failed'>('connecting')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Neue States fuer verbesserte UI/UX
@@ -199,51 +210,81 @@ export function ServerConsolePanel({ serverId }: Props) {
   useEffect(() => {
     nextSeqRef.current = 0
     bufferRef.current = []
+    lastServerIdRef.current = null
     setLogs([])
-    const url = `/api/servers/${serverId}/console/stream`
-    const es = new EventSource(url)
-    
-    es.onmessage = (ev) => {
-      const eventMarker = Number.parseInt(ev.lastEventId || '', 10)
-      const marker = Number.isFinite(eventMarker) && eventMarker > 0
-        ? eventMarker
-        : nextSeqRef.current + 1
-      nextSeqRef.current = Math.max(nextSeqRef.current, marker)
-      bufferRef.current.push(JSON.stringify({ marker, raw: ev.data }))
-    }
-    
-    const flushInterval = setInterval(() => {
-      if (bufferRef.current.length > 0) {
-        const toFlush = bufferRef.current
-        bufferRef.current = []
-        
-        if (!autoscrollRef.current) {
-          setHasNewLines(true)
-        }
+  }, [serverId])
 
-        setLogs((prev) => {
-          const mapped = toFlush.map((item) => {
-            try {
-              const parsed = JSON.parse(item) as { marker: number; raw: string }
-              return { marker: parsed.marker, ...parseConsoleFrame(parsed.raw) }
-            } catch {
-              nextSeqRef.current += 1
-              return { marker: nextSeqRef.current, ...parseConsoleFrame(item) }
-            }
-          })
-          const next = [...prev, ...mapped]
-          return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
-        })
+  // WebSocket-Lifecycle (Connect, Reconnect mit Backoff, Heartbeat, Status,
+  // 1008-Reject, Max-Attempts) liegt komplett im useWebSocket-Hook. Was hier
+  // bleibt, ist Console-spezifisch: Buffer/Flush + Log-Parsing + Replay-Resume
+  // via last_id (in buildUrl injiziert).
+  //
+  // lastServerIdRef wird BEWUStT synchron in onMessage aktualisiert (nicht
+  // im 50ms-flushBuffer), damit ein Reconnect-URL-Build IMMER den aktuellen
+  // Stand hat -- auch wenn direkt nach einem Frame disconnectet wird (z. B.
+  // im Test unter Fake-Timern, oder bei sehr schnellen Disconnects).
+  // Das eigentliche Log-Rendering bleibt im flushBuffer (Batching fuer
+  // React-Renders).
+  const onRawMessage = (raw: string) => {
+    try {
+      const frame = parseConsoleFrame(raw)
+      if (typeof frame.id === 'number') {
+        lastServerIdRef.current = frame.id
+        nextSeqRef.current = Math.max(nextSeqRef.current, frame.id)
       }
-    }, 50)
+    } catch {
+      // Parse-Fehler werden im flushBuffer nochmal versucht; hier nur der
+      // last_id-Read, kein Batching noetig.
+    }
+    bufferRef.current.push(raw)
+  }
 
-    es.onerror = () => {
-      // Stille: Browser reconnected automatisch.
+  const flushBuffer = () => {
+    if (bufferRef.current.length === 0) return
+    const toFlush = bufferRef.current
+    bufferRef.current = []
+    if (!autoscrollRef.current) {
+      setHasNewLines(true)
     }
-    return () => {
-      clearInterval(flushInterval)
-      es.close()
-    }
+    setLogs((prev) => {
+      const mapped = toFlush.map((item) => {
+        try {
+          const frame = parseConsoleFrame(item)
+          const { id: _id, ...rest } = frame
+          const marker = typeof _id === 'number' ? _id : nextSeqRef.current + 1
+          return { marker, ...rest }
+        } catch {
+          nextSeqRef.current += 1
+          return { marker: nextSeqRef.current, ...parseConsoleFrame(item) }
+        }
+      })
+      const next = [...prev, ...mapped]
+      return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
+    })
+  }
+
+  useWebSocket({
+    buildUrl: () => {
+      const lastId = lastServerIdRef.current
+      return lastId !== null
+        ? `/api/servers/${serverId}/console/ws?last_id=${lastId}`
+        : `/api/servers/${serverId}/console/ws`
+    },
+    onMessage: onRawMessage,
+    onStatusChange: setConnStatus,
+    onError: (kind) => {
+      // Hook hat 'connecting'/'live'/'reconnecting'/'failed' schon via
+      // onStatusChange propagiert. Hier nur User-sichtbares Feedback.
+      if (kind === 'rejected') toast.error(t('connection.rejected'))
+      else if (kind === 'failed') toast.error(t('connection.failed'))
+      else if (kind === 'reconnecting') toast.error(t('connection.reconnecting'))
+    },
+    heartbeat: { payload: JSON.stringify({ action: 'ping' }) },
+  })
+
+  useEffect(() => {
+    const flushInterval = setInterval(flushBuffer, 50)
+    return () => clearInterval(flushInterval)
   }, [serverId])
 
   const filteredLogs = useMemo(() => {
@@ -362,6 +403,22 @@ export function ServerConsolePanel({ serverId }: Props) {
         <div className="inline-flex items-center gap-3">
           <Terminal className="w-4 h-4 text-on-surface-variant" />
           <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
+          {connStatus !== 'live' && (
+            <span
+              data-testid="console-conn-status"
+              className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full border ${
+                connStatus === 'failed'
+                  ? 'text-status-destructive border-status-destructive/40 bg-status-destructive/10'
+                  : connStatus === 'reconnecting'
+                    ? 'text-status-warning border-status-warning/40 bg-status-warning/10'
+                    : 'text-on-surface-variant border-outline bg-surface-container-low'
+              }`}
+            >
+              {connStatus === 'connecting' && t('servers.consoleConnecting')}
+              {connStatus === 'reconnecting' && t('servers.consoleReconnecting')}
+              {connStatus === 'failed' && t('servers.consoleConnectionFailed')}
+            </span>
+          )}
         </div>
 
         {/* Suchfeld */}

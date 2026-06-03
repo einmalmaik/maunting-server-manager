@@ -44,3 +44,23 @@ CLOUD.md
 /backend/venv-wsl
 /.refact
 backend/maunting-server-manager.code-workspace
+
+# Production runtime data (when the git working tree root on the server is /opt/msm or similar)
+# These MUST be protected so that `git clean -fd` (even on prod deploys) does not delete servers, DBs, logs or community blueprints.
+# Note: git clean -fd by default respects .gitignore and will NOT remove these.
+/servers/
+/backups/
+/blueprints/
+/.setup_completed
+*.db
+*.sqlite
+*.sqlite3
+backend/logs/
+backend/data/
+
+# Rootless Docker data for the msm user (HOME=/opt/msm on prod). 
+# git clean -fd would otherwise nuke containerd blobs / image layers if .local is untracked.
+# This is what caused the "blob not found" / lease content errors after accidental clean.
+.local/
+.local/share/docker/
+.local/share/containers/

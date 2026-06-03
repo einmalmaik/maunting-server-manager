@@ -17,6 +17,12 @@ INSTALL_RUNNING = "installing"
 INSTALL_DONE = "installed"
 INSTALL_ERROR = "error"
 
+UPDATE_MISSING = "missing"
+UPDATE_OUTDATED = "outdated"
+UPDATE_UP_TO_DATE = "up_to_date"
+UPDATE_UNKNOWN = "unknown"
+UPDATE_FAILED = "failed"
+
 _PROGRESS_RE = re.compile(r"progress:\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
 _BYTES_RE = re.compile(r"\((\d+)\s*/\s*(\d+)\)")
 
@@ -67,6 +73,26 @@ def mark_mod_pending(server_id: int, workshop_id: str, action: str = "install") 
         mod.install_started_at = None
         mod.install_completed_at = None
         mod.install_error = None
+        db.commit()
+    finally:
+        db.close()
+
+
+def mark_mod_update_status(
+    server_id: int,
+    workshop_id: str,
+    status: str,
+    reason: str | None = None,
+) -> None:
+    """Persistiert die Update-Lage separat vom Installationsfortschritt."""
+    db = SessionLocal()
+    try:
+        mod = _get_mod(db, server_id, workshop_id)
+        if mod is None:
+            return
+        mod.update_status = status
+        mod.update_reason = reason
+        mod.update_checked_at = _now()
         db.commit()
     finally:
         db.close()
@@ -132,12 +158,15 @@ def mark_mod_installed(server_id: int, workshop_id: str) -> None:
         mod.install_eta_seconds = 0
         mod.install_completed_at = _now()
         mod.install_error = None
+        mod.update_status = UPDATE_UP_TO_DATE
+        mod.update_reason = None
+        mod.update_checked_at = _now()
         db.commit()
     finally:
         db.close()
 
 
-def mark_mod_failed(server_id: int, workshop_id: str) -> None:
+def mark_mod_failed(server_id: int, workshop_id: str, error: str | None = None) -> None:
     db = SessionLocal()
     try:
         mod = _get_mod(db, server_id, workshop_id)
@@ -146,7 +175,16 @@ def mark_mod_failed(server_id: int, workshop_id: str) -> None:
         mod.install_status = INSTALL_ERROR
         mod.install_eta_seconds = None
         mod.install_completed_at = _now()
-        mod.install_error = "Installation fehlgeschlagen"
+        # Sanitize: error kann aus SteamCMD/Docker stammen und Newlines oder
+        # Steuerzeichen enthalten. Werden in der UI als Text gerendert (nicht
+        # als HTML), aber Newlines fuehren zu kaputten Zeilenumbruechen im
+        # Mod-Status-Bereich. Whitespace wird normalisiert, 500-Zeichen-Limit
+        # bleibt.
+        raw = (error or "Installation fehlgeschlagen").replace("\r", "").replace("\n", " ")
+        mod.install_error = " ".join(raw.split())[:500]
+        mod.update_status = UPDATE_FAILED
+        mod.update_reason = "install_failed"
+        mod.update_checked_at = _now()
         db.commit()
     finally:
         db.close()

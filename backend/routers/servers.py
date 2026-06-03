@@ -1,4 +1,3 @@
-import asyncio
 import os
 import shutil
 import threading
@@ -6,16 +5,23 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from config import settings
+from database import SessionLocal
 from database import get_db
 from models import Server, User
 from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
-from dependencies import get_current_user, require_global, require_server_permission, verify_csrf
+from dependencies import (
+    get_current_user,
+    get_current_user_for_ws,
+    require_global,
+    require_server_permission,
+    verify_csrf,
+)
 from services import permission_service
 from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
 from games import get_plugin
@@ -28,8 +34,12 @@ from services.network_interfaces_service import default_bind_ip, list_host_inter
 from services.port_allocation_service import PortConflictError, allocate_ports
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.scheduler_service import sync_server_restart_schedule
-from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
-from services.console_stream_service import console_event_stream
+from services.server_lifecycle_service import (
+    LifecycleNotification,
+    queue_lifecycle_operation,
+    should_preserve_lifecycle_status,
+)
+from services.console_stream_service import connect as ws_connect
 from services.install_update_lock_service import (
     INSTALL_UPDATE_ALREADY_RUNNING,
     release_install_update_lock,
@@ -540,101 +550,12 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
                 ),
             )
 
-    lock = get_server_lifecycle_lock(server.id)
-    async with lock:
-        mod_updates: list[dict] = []
-        try:
-            plugin.prepare_for_updates(server)
-            mod_updates = plugin.check_for_mod_updates(server)
-        except Exception as exc:
-            _append_console_log(
-                server.id,
-                f"[MSM] prepare_for_updates / Mod-Update-Check beim Start fehlgeschlagen (nicht kritisch): {exc}\n",
-            )
-            mod_updates = []
-
-        update_lock_acquired = False
-        if mod_updates:
-            update_lock_acquired = try_acquire_install_update_lock(
-                server.id, "start_update"
-            )
-            if not update_lock_acquired:
-                raise _install_update_busy_error()
-
-        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
-        try:
-            # Firewall-Regeln öffnen vor Container-Start.
-            open_ports(server.name, ports_list)
-            iptables_accept_server(
-                server.name,
-                server.public_bind_ip,
-                ports_list,
-            )
-
-            # Plugin-Aufrufe rufen blockierende Docker-Subprozesse auf. In einer
-            # async-Route blockieren sie den gesamten Uvicorn-Event-Loop - alle anderen
-            # Requests hängen mit. Daher in einen Threadpool auslagern.
-
-            # Updater-Hook vor jedem Start (vor allem für Workshop-Mod-Checks nach Neustart)
-            # Optional: Auch im normalen Start-Pfad Workshop-Mod-Updates ausführen (KISS,
-            # falls ein Server lange stand und in der Zwischenzeit Mod-Updates auf Steam
-            # erschienen sind). Primär aber der Restart-Pfad (wie Server-Datei-Updates).
-            try:
-                # Optionale Execution im direkten Start (neben dem Pflicht-Restart-Pfad)
-                if mod_updates:
-                    _append_console_log(
-                        server.id,
-                        f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt – "
-                        "führe Download via install_mod/run_steamcmd_workshop_download aus...\n"
-                    )
-                    mod_res = await asyncio.to_thread(
-                        plugin.perform_workshop_mod_updates, server
-                    )
-                    if not mod_res.get("ok", False):
-                        _append_console_log(
-                            server.id,
-                            f"[MSM] Workshop-Mod-Update beim Start hatte Probleme (nicht kritisch): {mod_res.get('error') or mod_res}\n"
-                        )
-            except Exception as exc:
-                _append_console_log(
-                    server.id,
-                    f"[MSM] prepare_for_updates / Mod-Update beim Start fehlgeschlagen (nicht kritisch): {exc}\n",
-                )
-        finally:
-            if update_lock_acquired:
-                release_install_update_lock(server.id)
-
-        db.refresh(server)
-
-        # Pre-Start-Backup (best-effort, nach Permission + Lock, vor docker run)
-        if server.backup_on_start:
-            from services.backup_service import run_backup
-            try:
-                run_backup(server.id, db, timeout_seconds=300)
-            except Exception:
-                logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
-                # NO Hard-Fail: Server startet trotzdem (best-effort)
-
-        # AUFGABE 4A: transient status VOR Docker-Operation
-        server.status = "starting"
-        db.commit()
-
-        result = await asyncio.to_thread(plugin.start, server)
-        if "error" in result:
-            # Container-Start fehlgeschlagen - Firewall-Regeln wieder schließen.
-            close_ports(ports_list)
-            iptables_revoke_server(
-                server.name,
-                server.public_bind_ip,
-                ports_list,
-            )
-            raise HTTPException(status_code=500, detail=result["error"])
-        server.status = "running"
-        server.last_started_at = _utcnow()
-        db.commit()
-        if EmailService.is_configured() and user.email_notifications:
-            await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestartet")
-        return {"message": "Start-Befehl gesendet", "status": server.status, **result}
+    return queue_lifecycle_operation(
+        db,
+        server,
+        "start",
+        LifecycleNotification(user.email, user.username, user.email_notifications),
+    )
 
 
 @router.post("/{server_id}/stop")
@@ -647,35 +568,12 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
 
-    # WICHTIG: Lock mit start/restart teilen (via get_server_lifecycle_lock).
-    # Verhindert Race auf stop + close/revoke vs. concurrent start/restart/firewall.
-    # Früher fehlte hier jeder Lock → TOCTOU mit Restart-Pfad.
-    lock = get_server_lifecycle_lock(server.id)
-    async with lock:
-        # AUFGABE 4A: transient status VOR Docker-Operation (für Echtzeit-Feedback)
-        server.status = "stopping"
-        db.commit()
-        # Siehe start_server: docker stop ist synchron und kann bis zum
-        # Graceful-Timeout dauern. Threadpool hält den Event-Loop frei.
-        result = await asyncio.to_thread(plugin.stop, server)
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
-        server.status = "stopped"
-        server.last_started_at = None
-        db.commit()
-
-        # Firewall- und iptables-Regeln nach Container-Stop schließen.
-        ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
-        close_ports(ports_list)
-        iptables_revoke_server(
-            server.name,
-            server.public_bind_ip or "",
-            ports_list,
-        )
-
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_server_status_notification(user.email, user.username, server.name, "gestoppt")
-    return {"message": "Stop-Befehl gesendet", "status": server.status, **result}
+    return queue_lifecycle_operation(
+        db,
+        server,
+        "stop",
+        LifecycleNotification(user.email, user.username, user.email_notifications),
+    )
 
 
 @router.post("/{server_id}/restart")
@@ -687,16 +585,17 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    # AUFGABE 4A: transient now set only inside locked service (before first docker stop) for consistency with stop/start + to avoid duplicate commit / small TOCTOU (review Issue 5/10)
-    result = await restart_server_with_updates(db, server)
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_server_status_notification(user.email, user.username, server.name, "neugestartet")
-    return result
+    return queue_lifecycle_operation(
+        db,
+        server,
+        "restart",
+        LifecycleNotification(user.email, user.username, user.email_notifications),
+    )
 
 
 @router.post("/{server_id}/kill")
 async def kill_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    """Erzwungenes Beenden (Docker force remove). Nur für running/stopping/restarting sichtbar im UI.
+    """Erzwungenes Beenden (Docker force remove). Als Notfall auch während start/restart nutzbar (emergency override des Job-Locks).
     Permission "server.kill" (Naming analog zu server.stop, nicht server.power.* für Code-Konsistenz mit bestehenden server.* Keys).
     """
     require_server_permission(user, server_id, db, "server.kill")
@@ -704,23 +603,12 @@ async def kill_server(server_id: int, db: Session = Depends(get_db), user: User 
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
-    lock = get_server_lifecycle_lock(server.id)
-    async with lock:
-        from games.base import container_name_for
-        from services import docker_service
-        container = container_name_for(server.id)
-        # AUFGABE fix (review Issue 1/2 + Security Finding 1): transient "stopping" (reuses existing amber/disable UI logic for in-flight kill; KISS no new i18n/statusClasses) + commit BEFORE docker remove (prevents stale "running" on hang, matches stop/start/restart invariant). Result checked; error before any final DB mutation (no false success).
-        server.status = "stopping"
-        db.commit()
-        result = docker_service.remove(container, force=True)
-        if isinstance(result, dict) and "error" in result:
-            raise HTTPException(status_code=500, detail="Erzwungenes Beenden fehlgeschlagen")
-        server.status = "stopped"
-        server.status_message = "Erzwungen beendet"
-        server.last_started_at = None
-        db.commit()
-
-    return {"message": "Server wurde erzwungen beendet"}
+    return queue_lifecycle_operation(
+        db,
+        server,
+        "kill",
+        LifecycleNotification(user.email, user.username, user.email_notifications),
+    )
 
 
 def _disk_free_mb(path: str) -> int | None:
@@ -831,9 +719,9 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
             **_server_restart_status_fields(server),
         }
     plugin_status = plugin.get_status(server)
-    # installing/updating/error nicht ueberschreiben - Background-Thread oder
-    # Admin setzen den Status selbst zurueck, wenn die Operation abgeschlossen ist
-    if server.status not in ("installing", "updating", "error"):
+    # installing/updating/error/failed nicht ueberschreiben. Laufende Lifecycle-
+    # Jobs behalten ihre transienten Stati, bis der Background-Worker finalisiert.
+    if server.status not in ("installing", "updating", "error", "failed") and not should_preserve_lifecycle_status(server.id, server.status):
         server.status = plugin_status.status
         server.status_message = plugin_status.message or ""
         if plugin_status.status == "running" and plugin_status.started_at is not None:
@@ -888,70 +776,82 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
     return {"message": "Installation gestartet", **result}
 
 
-@router.get("/{server_id}/console/stream")
-async def server_console_stream(
-    server_id: int,
-    request: Request,
-    after: int | None = None,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> StreamingResponse:
-    """Live-Stream der Console als Server-Sent Events.
+# ── Erlaubte Origins fuer WebSocket-Upgrades ───────────────────────────────
+# Dieselbe Logik wie die CORS-Middleware: in Dev mehr, in Prod strikt.
+_WS_ALLOWED_ORIGINS: tuple[str, ...] = (
+    settings.panel_url,
+    "http://localhost",
+    "http://localhost:5173",
+    "http://127.0.0.1",
+    "http://127.0.0.1:5173",
+)
 
-    Single Source of Truth (KISS): die MSM-Console-Logdatei
-    ``backend/logs/<server_id>/console.log``. Sie sammelt:
 
-    - Install-/Update-Output (SteamCMD, HTTP-Source, manuelle Hinweise)
-    - Lifecycle-Events (``[MSM] Container gestartet/gestoppt``, Fehler)
-    - Live-Container-Stdout/Stderr während der Server läuft (siehe unten)
-
-    Damit auch Live-Container-Output in dieselbe Datei landet, koppelt der
-    Endpoint den Rootless-Docker-Logstream aus ``docker_service``: dessen
-    Output wird parallel an den Stream geyielded. Die Datei bleibt der primäre
-    Backlog, Docker liefert nur die laufenden neuen Zeilen.
-
-    SSE statt WebSocket: unidirektional reicht, EventSource im Browser ohne
-    extra Lib. Auth via Cookie + ``server.console.read`` (CSRF entfällt bei
-    GET). Bei Client-Disconnect werden Subprozess + Hintergrund-Tasks sauber
-    beendet.
+def _ws_origin_allowed(origin: str | None) -> bool:
+    """Prueft den Origin-Header des WS-Upgrade-Requests. SameSite-Cookie + Origin-Check
+    ersetzen die fehlende CSRF-Pruefung (WS sind keine 'simple requests').
     """
-    require_server_permission(user, server_id, db, "server.console.read")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    container = container_name_for(server.id)
-    log_path = _console_log_path(server.id)
-
-    return StreamingResponse(
-        _console_event_stream(request, container, log_path, after_bytes=after),
-        media_type="text/event-stream",
-        headers={
-            # Nginx/Caddy-Buffering aus, sonst sieht der Client nichts bis zum Flush.
-            "X-Accel-Buffering": "no",
-            "Cache-Control": "no-cache",
-        },
-    )
+    if not origin:
+        return False
+    return origin.rstrip("/") in {o.rstrip("/") for o in _WS_ALLOWED_ORIGINS}
 
 
-def _sse_data(line: str, event_id: int | None = None) -> str:
-    """Eine Logzeile als SSE ``data:``-Frame kodieren.
+@router.websocket("/{server_id}/console/ws")
+async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
+    """Live-Stream der Server-Konsole als WebSocket.
 
-    Mehrzeilige Werte werden zeilenweise als mehrere ``data:``-Felder
-    geschickt - das ist die SSE-Spezifikation für Newlines im Payload.
+    Auth: Cookie-Auth im WS-Handshake (genauso wie beim HTTP-Pfad), danach
+    Server-Permission ``server.console.read``. Origin-Check ersetzt den CSRF-Schutz
+    fuer WS-Upgrades.
+
+    Optional ``?last_id=<n>`` Query-Param: Replay-Resume nach Reconnect — der
+    Server spult nur Zeilen mit id > last_id aus dem Ring-Buffer ab und macht
+    dann mit Live-Stream weiter. Ohne last_id wird der volle Backlog gesendet.
+
+    Frame-Format: JSON ``{"id": int, "ts": iso, "source": "msm"|"docker", "text": str}``.
+    Eingehende Frames: vorerst nur Heartbeat ``{"action": "ping"}`` -> ``{"action": "pong"}``.
+    Stdin laeuft weiterhin ueber ``POST /api/servers/{id}/console/input``.
     """
-    prefix = f"id: {event_id}\n" if event_id is not None else ""
-    return prefix + "".join(f"data: {part}\n" for part in line.split("\n")) + "\n"
+    origin = websocket.headers.get("origin")
+    if not _ws_origin_allowed(origin):
+        await websocket.close(code=1008)  # 1008 = "policy violation"
+        return
 
+    db = SessionLocal()
+    try:
+        try:
+            user = get_current_user_for_ws(websocket, db)
+            server = db.query(Server).filter(Server.id == server_id).first()
+            if not server:
+                await websocket.close(code=1008)
+                return
+            require_server_permission(user, server_id, db, "server.console.read")
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
+        finally:
+            db.close()
 
-async def _console_event_stream(
-    request: Request,
-    container: str,
-    log_path: str,
-    *,
-    after_bytes: int | None = None,
-):
-    async for frame in console_event_stream(request, container, log_path, after_bytes=after_bytes):
-        yield frame
+        container = container_name_for(server.id)
+        log_path = _console_log_path(server.id)
+        last_id_raw = websocket.query_params.get("last_id")
+        last_id: int | None = None
+        if last_id_raw is not None:
+            try:
+                last_id = int(last_id_raw)
+            except ValueError:
+                last_id = None
+
+        await ws_connect(
+            websocket,
+            server_id=server_id,
+            container=container,
+            log_path=log_path,
+            last_id=last_id,
+        )
+    finally:
+        if db.is_active:
+            db.close()
 
 
 class ConsoleInputBody(BaseModel):

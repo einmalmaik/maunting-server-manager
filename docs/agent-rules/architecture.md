@@ -397,7 +397,7 @@ Hartes Disk-Quota (XFS-Projekt-Quota oder Overlay-Quota) ist explizit Phase-2-Ma
 
 ### 12.4 SteamCMD
 
-Es gibt kein Host-`steamcmd` mehr. Installs und Workshop-Downloads laufen in ephemeren Containern (`cm2network/steamcmd:root`), die in `games/base.run_steamcmd_install()` und `run_steamcmd_workshop_download()` gekapselt sind. Das nutzt das gleiche Bind-Mount-Layout (`<install_dir>` → `/data`).
+Es gibt kein Host-`steamcmd` mehr. Installs und Workshop-Downloads laufen in ephemeren Containern (`cm2network/steamcmd:root`), die in `games/base.run_steamcmd_install()` und `run_steamcmd_workshop_download_batch()` gekapselt sind. Einzel-Mod-Aktionen nutzen denselben Batch-Helper mit einer Mod. Das nutzt das gleiche Bind-Mount-Layout (`<install_dir>` → `/data`).
 
 **Ausführungsmodell:**
 - Container läuft explizit als `--user 0:0` (Container-Root), weil das `:root`-Image `/home/steam` mit Mode 700 hat und SteamCMD sonst seinen eigenen Wrapper nicht ausführen kann.

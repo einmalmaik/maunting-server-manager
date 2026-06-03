@@ -73,11 +73,14 @@ function statusClasses(s: string | undefined): string {
     case "starting":
     case "stopping":
     case "restarting":
+    case "queued":
       return "bg-status-warning/10 border-status-warning/30 text-status-warning";
     case "installing":
     case "updating":
     case "awaiting_files":
       return "bg-status-warning/10 border-status-warning/30 text-status-warning";
+    case "failed":
+      return "bg-status-error/10 border-status-error/30 text-status-error";
     default:
       return "bg-status-error/10 border-status-error/30 text-status-error";
   }
@@ -467,7 +470,7 @@ export function ServerDetail() {
 
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
-        {effectiveStatus !== "running" && effectiveStatus !== "installing" && effectiveStatus !== "starting" && effectiveStatus !== "stopping" && effectiveStatus !== "restarting" && (
+        {effectiveStatus !== "running" && effectiveStatus !== "installing" && effectiveStatus !== "starting" && effectiveStatus !== "stopping" && effectiveStatus !== "restarting" && effectiveStatus !== "queued" && (
           <button
             onClick={() => doAction("start")}
             disabled={!!actionLoading || !server.public_bind_ip}
@@ -496,7 +499,7 @@ export function ServerDetail() {
         )}
         <button
           onClick={() => doAction("restart")}
-          disabled={!!actionLoading || ["installing", "starting", "stopping", "restarting"].includes(effectiveStatus)}
+          disabled={!!actionLoading || ["installing", "starting", "stopping", "restarting", "queued"].includes(effectiveStatus)}
           className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
         >
           <RefreshCw className="w-4 h-4" />
@@ -514,7 +517,7 @@ export function ServerDetail() {
             {actionLoading === "kill" ? t("common.loading") : t("servers.kill")}
           </button>
         )}
-        {effectiveStatus !== "installing" && (
+        {effectiveStatus !== "installing" && effectiveStatus !== "queued" && (
           <button
             onClick={handleInstall}
             disabled={!!actionLoading}

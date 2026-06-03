@@ -1,11 +1,14 @@
 export type ModInstallStatus = 'pending' | 'installing' | 'installed' | 'error'
 export type ModInstallAction = 'install' | 'update' | string
+export type ModUpdateStatus = 'missing' | 'outdated' | 'up_to_date' | 'unknown' | 'failed'
 
 export interface ModInstallState {
   install_status?: ModInstallStatus | string | null
   install_action?: ModInstallAction | null
   install_progress?: number | null
   install_eta_seconds?: number | null
+  update_status?: ModUpdateStatus | string | null
+  update_reason?: string | null
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
@@ -51,6 +54,50 @@ export function getModInstallPresentation(mod: ModInstallState, t: Translate): M
       kind: 'error',
       label: t('mods.statusError'),
       detail: t('mods.statusErrorHint'),
+      progress: null,
+      showProgress: false,
+    }
+  }
+
+  if (mod.update_status === 'missing') {
+    return {
+      kind: 'warning',
+      label: t('mods.statusMissing'),
+      detail: t('mods.statusMissingHint'),
+      progress: null,
+      showProgress: false,
+    }
+  }
+
+  if (mod.update_status === 'outdated') {
+    return {
+      kind: 'warning',
+      label: t('mods.statusOutdated'),
+      detail: t('mods.statusOutdatedHint'),
+      progress: null,
+      showProgress: false,
+    }
+  }
+
+  if (mod.update_status === 'unknown') {
+    return {
+      kind: 'info',
+      label: t('mods.statusUnknown'),
+      detail: t(
+        mod.update_reason === 'steam_api_key_missing'
+          ? 'mods.statusUnknownNoSteamKeyHint'
+          : 'mods.statusUnknownHint',
+      ),
+      progress: null,
+      showProgress: false,
+    }
+  }
+
+  if (mod.update_status === 'failed') {
+    return {
+      kind: 'error',
+      label: t('mods.statusFailed'),
+      detail: t('mods.statusFailedHint'),
       progress: null,
       showProgress: false,
     }

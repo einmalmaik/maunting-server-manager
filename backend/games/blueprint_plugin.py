@@ -41,12 +41,22 @@ from games.base import (
     active_mod_ids,
     finish_install,
     run_steamcmd_install,
-    run_steamcmd_workshop_download,
+    run_steamcmd_workshop_download_batch,
 )
 from games.ini_utils import set_ini_value
 from services.docker_service import PortPublish, VolumeBind
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.steam_account_service import SteamAccountService
+
+
+WORKSHOP_BATCH_SIZE = 25
+"""Max Workshop-Items pro SteamCMD-Aufruf.
+
+Begruendung: SteamCMD-CLI-Limit + getestete Stabilitaet. Groessere Batches
+fuehren zu Timeouts in ``+workshop_download_item``-Ketten. Chunks oberhalb
+dieses Limits lohnen selten: langer Lauf, schlechtere Fehler-Isolation pro
+Mod. Provider-neutraler Wert, gilt fuer jeden SteamCMD-gestuetzten Blueprint.
+"""
 
 
 class BlueprintPlugin(GamePlugin):
@@ -103,6 +113,8 @@ class BlueprintPlugin(GamePlugin):
                         app_id=app_id,
                         use_authenticated_login=requires_login,
                         platform=platform_str,
+                        # intentionally not passing steamcmd_image; use the dedicated STEAMCMD_IMAGE
+                        # which has the pre-installed binary at the expected path
                     ),
                     blueprint=bp,
                 )
@@ -301,6 +313,19 @@ class BlueprintPlugin(GamePlugin):
                             f"[MSM] Regex-Patching fuer {patch.file} fehlgeschlagen: {e}\n",
                         )
 
+        missing_required_files: list[str] = []
+        for rel_path in self._blueprint.runtime.requiredFiles:
+            target = (base / rel_path).resolve()
+            target.relative_to(base)
+            if not target.is_file():
+                missing_required_files.append(rel_path)
+        if missing_required_files:
+            files = ", ".join(missing_required_files)
+            raise RuntimeError(
+                f"Runtime-Dateien fehlen: {files}. Installation unvollstaendig; "
+                "bitte Server neu installieren und Steam-Account/App-Zugriff pruefen."
+            )
+
     def build_port_publishes(self, server) -> list[PortPublish]:
         """Port-Publishes aus der Blueprint statt UDP-Hartkodierung.
 
@@ -333,7 +358,7 @@ class BlueprintPlugin(GamePlugin):
 
     def get_logs(self, server, lines: int = 100) -> str:
         # Community-Blueprints haben kein vordefiniertes Logfile-Layout —
-        # die UI nutzt stattdessen den SSE-Console-Stream (MSM-Logdatei +
+        # die UI nutzt stattdessen den WS-Console-Stream (MSM-Logdatei +
         # Rootless-Docker-Logstream aus docker_service).
         return ""
 
@@ -356,39 +381,65 @@ class BlueprintPlugin(GamePlugin):
         }
 
     def install_mod(self, server, workshop_id: str) -> dict:
+        return self.install_mods(server, [workshop_id])
+
+    def install_mods(self, server, workshop_ids: list[str]) -> dict:
         bp_mods = self._blueprint.effective_mods()
         if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:
             return {"error": "Steam Workshop nicht in dieser Blueprint aktiviert"}
         workshop_app_id = bp_mods.workshopAppId
         server_id = server.id
         install_dir = server.install_dir
+        clean_ids = [str(wid).strip() for wid in workshop_ids if str(wid).strip()]
+        if not clean_ids:
+            return {"ok": True, "applied": 0, "items": {}}
         requires_login = False
         if self._blueprint.source.type == BlueprintSourceType.STEAM and self._blueprint.source.steam:
             requires_login = self._blueprint.source.steam.requiresLogin
+
+        chunks = [clean_ids[i:i + WORKSHOP_BATCH_SIZE] for i in range(0, len(clean_ids), WORKSHOP_BATCH_SIZE)]
 
         result: dict = {}
 
         def _install():
             nonlocal result
             try:
-                download_res = run_steamcmd_workshop_download(
-                    server_id=server_id,
-                    install_dir=install_dir,
-                    workshop_app_id=workshop_app_id,
-                    workshop_item_id=workshop_id,
-                    use_authenticated_login=requires_login,
-                )
-                if not download_res.get("ok", False):
-                    result = {"error": download_res.get("error", "Workshop-Download fehlgeschlagen")}
-                    return
-                action_res = self._run_workshop_post_install_actions(server, workshop_id)
-                if "error" in action_res:
-                    result = action_res
-                    return
-                # Nach jedem Mod-Install die Modliste re-generieren (falls Datei-
-                # injection); fuer startupArg ist das ein No-op.
+                aggregated_items: dict = {}
+                aggregated_errors: list[str] = []
+                aggregated_applied = 0
+                for chunk in chunks:
+                    download_res = run_steamcmd_workshop_download_batch(
+                        server_id=server_id,
+                        install_dir=install_dir,
+                        workshop_app_id=workshop_app_id,
+                        workshop_item_ids=chunk,
+                        use_authenticated_login=requires_login,
+                        # use dedicated tool image, not the runtime one
+                    )
+                    items = download_res.get("items") if isinstance(download_res, dict) else {}
+                    aggregated_items.update(items if isinstance(items, dict) else {})
+                    for wid in chunk:
+                        item = items.get(wid, {}) if isinstance(items, dict) else {}
+                        if not item.get("ok"):
+                            aggregated_errors.append(
+                                f"{wid}: {item.get('error') or download_res.get('error') or 'Workshop-Download fehlgeschlagen'}"
+                            )
+                            continue
+                        action_res = self._run_workshop_post_install_actions(server, wid)
+                        if "error" in action_res:
+                            aggregated_errors.append(f"{wid}: {action_res['error']}")
+                            continue
+                        aggregated_applied += 1
+                        _append_console_log(server.id, f"[MSM] Mod {wid} verarbeitet\n")
                 self.update_modlist(server)
-                _append_console_log(server.id, f"[MSM] Mod {workshop_id} verarbeitet\n")
+                result = {
+                    "ok": len(aggregated_errors) == 0,
+                    "applied": aggregated_applied,
+                    "errors": aggregated_errors,
+                    "items": aggregated_items,
+                }
+                if aggregated_errors:
+                    result["error"] = "; ".join(aggregated_errors)
             except Exception as exc:
                 result = {"error": str(exc)}
 

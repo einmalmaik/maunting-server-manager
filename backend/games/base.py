@@ -24,6 +24,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from services import docker_service
@@ -201,8 +202,12 @@ def default_volume_binds(server) -> list[VolumeBind]:
 # ── SteamCMD-Installer im ephemeren Container ──────────────────────────────
 
 
-# Kuratiertes, gepflegtes SteamCMD-Image. Eine Pin auf einen festen Tag erfolgt
-# in einer Folge-Phase (Phase 5 wird Image+Tag pro Plugin-Egg konfigurierbar).
+# Dedicated image for MSM's internal SteamCMD install/update/workshop steps.
+# It must have the steamcmd binary pre-installed at a known path (see STEAMCMD_BIN).
+# We use cm2network/steamcmd:root because it reliably contains /home/steam/steamcmd/steamcmd.sh
+# and supports running as root for the chown step.
+# Blueprints define their own runtime.image for the long-running game container (can be parkervcp etc.).
+# The install tool image is intentionally a fixed, known-good one (not taken from blueprint).
 STEAMCMD_IMAGE = "cm2network/steamcmd:root"
 # Pfad des steamcmd-Wrappers im Image. Wird in den bash-Aufruf eingesetzt.
 STEAMCMD_BIN = "/home/steam/steamcmd/steamcmd.sh"
@@ -264,9 +269,11 @@ def classify_steamcmd_failure(output: str, fallback_error: str = "") -> dict[str
         return {
             "error_code": "steamcmd_missing_configuration",
             "error": (
-                "SteamCMD meldet Missing Configuration. Mögliche Ursachen "
-                "(nicht verifiziert): fehlende/inkompatible App-Metadaten, falsche Plattform, "
-                "Account-/Lizenzproblem, Plattenplatz/Quota oder paralleler Zugriff."
+                "SteamCMD meldet Missing Configuration. Prüfe bei loginpflichtigen "
+                "Steam-Spielen zuerst, ob im Panel ein Steam-Account hinterlegt ist "
+                "und dieser Account Zugriff auf die Server-App hat. Weitere mögliche "
+                "Ursachen (nicht verifiziert): fehlende/inkompatible App-Metadaten, "
+                "falsche Plattform, Plattenplatz/Quota oder paralleler Zugriff."
             ),
         }
     return None
@@ -287,6 +294,7 @@ def run_steamcmd_install(
     extra_args: list[str] | None = None,
     use_authenticated_login: bool = False,
     platform: str | None = None,
+    steamcmd_image: str | None = None,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
@@ -309,7 +317,7 @@ def run_steamcmd_install(
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]
-        secrets_to_redact = [password]
+        secrets_to_redact = [username, password]
     else:
         login_args = ["+login", "anonymous"]
         secrets_to_redact = []
@@ -339,8 +347,9 @@ def run_steamcmd_install(
         _bounded_log_buffer_append(live_output, safe_line)
         _append_console_log(server_id, safe_line)
 
+    image = steamcmd_image or STEAMCMD_IMAGE
     result = docker_service.run_ephemeral(
-        image=STEAMCMD_IMAGE,
+        image=image,
         command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         user="0:0",
@@ -377,14 +386,53 @@ def run_steamcmd_workshop_download(
     workshop_app_id: str,
     workshop_item_id: str,
     use_authenticated_login: bool = False,
+    steamcmd_image: str | None = None,
 ) -> dict:
-    """Lädt ein Workshop-Item via ephemerem SteamCMD-Container.
+    """Kompatibler Single-Mod-Einstieg; intern ein Batch mit einer Mod."""
+    result = run_steamcmd_workshop_download_batch(
+        server_id=server_id,
+        install_dir=install_dir,
+        workshop_app_id=workshop_app_id,
+        workshop_item_ids=[workshop_item_id],
+        use_authenticated_login=use_authenticated_login,
+        steamcmd_image=steamcmd_image,
+    )
+    if not result.get("ok", False):
+        item = (result.get("items") or {}).get(str(workshop_item_id), {})
+        if item.get("error"):
+            return {**result, "ok": False, "error": item["error"]}
+    return result
 
-    Intelligent: SteamCMD validiert und holt nur Deltas. Kein erzwungenes
-    Vollredownload — das übernimmt SteamCMD selbst, sofern lokale Files
-    existieren.
+
+def run_steamcmd_workshop_download_batch(
+    *,
+    server_id: int,
+    install_dir: str,
+    workshop_app_id: str,
+    workshop_item_ids: list[str],
+    use_authenticated_login: bool = False,
+    batch_size: int = 25,
+    timeout: int = 3600,
+    retry: bool = True,
+    steamcmd_image: str | None = None,
+) -> dict:
+    """Lädt mehrere Workshop-Items in einer SteamCMD-Session.
+
+    SteamCMD entscheidet selbst, ob lokale Inhalte aktuell sind. MSM startet
+    höchstens einen Container pro Batch und prüft danach pro Mod den erwarteten
+    Workshop-Ordner, damit Fehler sichtbar einzelnen Mods zugeordnet werden.
     """
     from services.steam_account_service import SteamAccountService
+
+    item_ids = [str(item).strip() for item in workshop_item_ids if str(item).strip()]
+    if not item_ids:
+        return {"ok": True, "applied": 0, "items": {}, "message": "keine Workshop-Mods zu laden"}
+    if len(item_ids) > batch_size:
+        return {
+            "ok": False,
+            "error": f"Workshop-Batch zu gross ({len(item_ids)} > {batch_size})",
+            "items": {item_id: {"ok": False, "error": "batch_size_exceeded"} for item_id in item_ids},
+        }
 
     if use_authenticated_login:
         if not SteamAccountService.is_configured():
@@ -397,42 +445,46 @@ def run_steamcmd_workshop_download(
         username = SteamAccountService.get_username()
         password = SteamAccountService.get_decrypted_password()
         login_args = ["+login", username, password]
-        secrets_to_redact = [password]
+        secrets_to_redact = [username, password]
     else:
         login_args = ["+login", "anonymous"]
         secrets_to_redact = []
 
-    steam_args: list[str] = [
-        "+force_install_dir", CONTAINER_DATA_DIR,
-        *login_args,
-        "+workshop_download_item", workshop_app_id, workshop_item_id,
-        "+quit",
-    ]
+    steam_args: list[str] = ["+force_install_dir", CONTAINER_DATA_DIR, *login_args]
+    for item_id in item_ids:
+        steam_args.extend(["+workshop_download_item", workshop_app_id, item_id])
+    steam_args.append("+quit")
+
     _append_console_log(
-        server_id, f"[MSM] SteamCMD Workshop-Download: app={workshop_app_id} item={workshop_item_id}\n"
+        server_id,
+        f"[MSM] SteamCMD Workshop-Batch: app={workshop_app_id} mods={len(item_ids)}\n",
     )
 
     live_output: list[str] = []
 
-    from services.mod_install_status_service import record_mod_download_output
-
     def _live_log(line: str) -> None:
         safe_line = _redact(line, secrets_to_redact)
         _bounded_log_buffer_append(live_output, safe_line)
-        record_mod_download_output(server_id, workshop_item_id, safe_line)
         _append_console_log(server_id, safe_line)
+        # Per-Mod-Zuordnung des Downloads passiert ueber den Folder-Existenz-
+        # Check weiter unten (siehe ``items``-Dict-Build) -- das ist robuster
+        # als Substring-Matching (SteamCMD logt z. B. "Downloading item 12345"
+        # nur einmal pro Item, andere Zeilen wuerden mehreren Mods
+        # zugeordnet). Substring-Matching waere O(n*m) bei Batch-Groesse n
+        # und Log-Zeilen m und hat den oben genannten False-Positive-Fehler.
 
     uid, gid = docker_service.container_runtime_uid_gid()
     chown_uid, chown_gid = uid, gid
+    image = steamcmd_image or STEAMCMD_IMAGE
     result = docker_service.run_ephemeral(
-        image=STEAMCMD_IMAGE,
+        image=image,
         command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
         volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
         user="0:0",
         cap_adds=STEAMCMD_CAPS,
         entrypoint="bash",
         env={"HOME": CONTAINER_DATA_DIR},
-        timeout=3600,
+        timeout=timeout,
         log_callback=_live_log,
     )
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
@@ -447,9 +499,53 @@ def run_steamcmd_workshop_download(
             result = {**result, **classified}
             _append_console_log(server_id, f"\n[MSM] SteamCMD Diagnose: {classified['error']}\n")
         _append_console_log(
-            server_id, f"\n[MSM] Workshop-Download fehlgeschlagen: {result['error']}\n"
+            server_id, f"\n[MSM] Workshop-Batch fehlgeschlagen: {result['error']}\n"
         )
-    return result
+
+    items: dict[str, dict[str, object]] = {}
+    base = Path(install_dir).resolve()
+    for item_id in item_ids:
+        target = base / "steamapps" / "workshop" / "content" / workshop_app_id / item_id
+        installed = False
+        if target.exists():
+            try:
+                installed = any(target.iterdir())
+            except OSError:
+                installed = False
+        if result.get("ok") and installed:
+            items[item_id] = {"ok": True, "installed": True}
+        else:
+            error = result.get("error") or "Workshop-Download nicht verifiziert"
+            items[item_id] = {"ok": False, "installed": installed, "error": str(error)}
+
+    failed_ids = [item_id for item_id, item in items.items() if not item.get("ok")]
+    if retry and failed_ids:
+        _append_console_log(
+            server_id,
+            f"[MSM] Workshop-Batch retry for {len(failed_ids)} failed mod(s)...\n",
+        )
+        retry_result = run_steamcmd_workshop_download_batch(
+            server_id=server_id,
+            install_dir=install_dir,
+            workshop_app_id=workshop_app_id,
+            workshop_item_ids=failed_ids,
+            use_authenticated_login=use_authenticated_login,
+            batch_size=batch_size,
+            timeout=timeout,
+            retry=False,
+            steamcmd_image=steamcmd_image,
+        )
+        retry_items = retry_result.get("items", {}) if isinstance(retry_result, dict) else {}
+        for item_id in failed_ids:
+            if isinstance(retry_items, dict) and item_id in retry_items:
+                items[item_id] = retry_items[item_id]
+
+    return {
+        **result,
+        "ok": all(bool(item.get("ok")) for item in items.values()),
+        "applied": sum(1 for item in items.values() if item.get("ok")),
+        "items": items,
+    }
 
 
 # ── Mod-Helfer (Blueprint-getrieben) ───────────────────────────────────────
@@ -650,8 +746,9 @@ class GamePlugin(ABC):
 
     def check_for_server_file_update(self, server) -> dict:
         """
-        Prüft, ob Server-Dateien (Game-Binaries) aktualisiert werden sollten.
-        Wird **ausschließlich** vor Neustarts ausgeführt (nie zur Laufzeit).
+        Liefert passive Hinweise zu Server-Datei-Updates.
+        Für Steam entscheidet dieses Ergebnis nicht mehr über Start/Restart:
+        der Lifecycle führt SteamCMD-Validate für Steam-Blueprints immer aus.
         """
         try:
             bp = self.get_blueprint()
@@ -666,8 +763,8 @@ class GamePlugin(ABC):
         """
         Führt ein Server-Datei-Update (Game-Binaries) **synchron** aus.
 
-        Wird **ausschließlich** im Restart-Pfad (routers/servers.py) aufgerufen,
-        wenn check_for_server_file_update() ein Update meldet.
+        Wird im Lifecycle vor Start/Restart ausgeführt. Steam-Blueprints laufen
+        dabei immer durch SteamCMD-Validate; HTTP-Quellen bleiben checkbasiert.
 
         Garantiert:
         - Update läuft VOR plugin.start() (Container-Start)
@@ -683,7 +780,7 @@ class GamePlugin(ABC):
 
         Sicherheit (AGENTS.md):
         - Diese Methode fängt Fehler intern ab (siehe apply_).
-        - Restart darf unter KEINEN Umständen durch Server-Datei-Update scheitern.
+        - Lifecycle darf unter KEINEN Umständen durch Server-Datei-Update scheitern.
         - Keine Mod-Logik, kein Background, keine E-Mails.
 
         Rückgabe: {"ok": bool, ...} — siehe apply_server_file_update.
@@ -699,24 +796,23 @@ class GamePlugin(ABC):
             # Niemals Exception nach oben werfen — Restart muss weiterlaufen
             return {"ok": False, "error": str(exc)}
 
-    def perform_workshop_mod_updates(self, server) -> dict:
+    def perform_workshop_mod_updates(self, server, *, only_auto_update: bool = False) -> dict:
         """
         Führt erkannte Workshop-Mod-Updates und -Neuinstallationen **synchron** aus.
 
-        Aufruf: ausschließlich aus Restart-Pfad (routers/servers.py) und optional
-        direktem Start-Pfad, nachdem check_for_mod_updates() Handlungsbedarf gemeldet hat.
+        Aufruf: aus dem Lifecycle vor Start/Restart, nachdem check_for_mod_updates()
+        Handlungsbedarf gemeldet hat.
 
         Verwendete bestehende Funktionen (genau wie gefordert):
-        - self.install_mod(server, workshop_id): Game-spezifischer Einstieg (Plugins
-          überschreiben für Custom-Pfade etc.). Ruft intern run_steamcmd_workshop_download
-          (siehe base.py:306) auf, um den eigentlichen SteamCMD-Workshop-Download
-          durchzuführen (mit Login-Handling, Logging, chown etc.).
+        - self.install_mods(server, workshop_ids): Game-spezifischer Einstieg.
+          Ruft intern run_steamcmd_workshop_download_batch auf, um einen
+          gebündelten SteamCMD-Workshop-Download durchzuführen.
         - updater.update_mod_metadata_after_success(...): Setzt nach Erfolg
           korrekt Mod.last_updated (remote time_updated) + Mod.installed_version.
 
         Ablauf pro Mod:
         1. Console-Log (Transparenz).
-        2. install_mod aufrufen (blockierend, kann lange dauern).
+        2. install_mods aufrufen (blockierend, kann lange dauern).
         3. Bei Erfolg (kein "error" im Result): Metadaten-Update in DB.
         4. Am Ende: update_modlist(server) für Blueprints mit FILE-Injection.
 
@@ -737,6 +833,25 @@ class GamePlugin(ABC):
                 return {"ok": False, "error": "no_blueprint"}
 
             needed = self.check_for_mod_updates(server)
+            if only_auto_update and needed:
+                from database import SessionLocal
+                from models import Mod
+
+                db = SessionLocal()
+                try:
+                    auto_update_ids = {
+                        str(row.workshop_id)
+                        for row in db.query(Mod.workshop_id)
+                        .filter(
+                            Mod.server_id == server.id,
+                            Mod.enabled == True,  # noqa: E712
+                            Mod.auto_update == True,  # noqa: E712
+                        )
+                        .all()
+                    }
+                finally:
+                    db.close()
+                needed = [u for u in needed if str(u.get("workshop_id", "")) in auto_update_ids]
             if not needed:
                 return {"ok": True, "applied": 0, "message": "keine Workshop-Mod-Updates nötig"}
 
@@ -752,58 +867,48 @@ class GamePlugin(ABC):
 
             _append_console_log(
                 server.id,
-                f"[MSM] Starte Workshop-Mod-Updates/Installationen für {len(needed)} Mod(s) "
-                "(via install_mod + internes run_steamcmd_workshop_download vor Container-Start)...\n"
+                f"[MSM] Installing/updating {len(needed)} missing/outdated mod(s) in one SteamCMD batch...\n"
             )
 
             applied = 0
             errors: list[str] = []
+            by_id = {str(u.get("workshop_id", "")): u for u in needed if str(u.get("workshop_id", ""))}
+            for wid, u in by_id.items():
+                mark_mod_installing(server.id, wid, u.get("action", "update"))
+                _append_console_log(server.id, f"[MSM] Mod {wid}: queued ({u.get('action', 'update')})\n")
 
-            for u in needed:
-                wid = u.get("workshop_id", "")
-                name = u.get("name", wid)
-                action = u.get("action", "update")
-                _append_console_log(
-                    server.id,
-                    f"[MSM]   → {action.upper()}: Workshop-Mod {wid} ({name})\n"
-                )
-                try:
-                    mark_mod_installing(server.id, wid, action)
-                    mod_res = self.install_mod(server, wid)
-                    success = (
-                        isinstance(mod_res, dict)
-                        and mod_res.get("ok", True) is not False
-                        and "error" not in mod_res
-                    )
-                    if success:
-                        # Erfolg: Metadaten sofort in DB schreiben (last_updated + installed_version)
-                        updater.update_mod_metadata_after_success(
-                            server.id, wid, u.get("remote_updated")
-                        )
-                        mark_mod_installed(server.id, wid)
-                        applied += 1
-                        _append_console_log(
-                            server.id, f"[MSM]     ✓ {wid} erfolgreich verarbeitet.\n"
-                        )
-                    else:
-                        err = (
-                            (mod_res or {}).get("error", "unbekannter Fehler")
-                            if isinstance(mod_res, dict)
-                            else str(mod_res)
-                        )
-                        errors.append(f"{wid}: {err}")
-                        mark_mod_failed(server.id, wid)
-                        _append_console_log(
-                            server.id, f"[MSM]     ✗ {wid} fehlgeschlagen: {err}\n"
-                        )
-                except Exception as exc:  # pragma: no cover - defensiv
-                    errors.append(f"{wid}: {exc}")
-                    mark_mod_failed(server.id, wid)
-                    _append_console_log(
-                        server.id, f"[MSM]     ✗ {wid} Exception während install_mod: {exc}\n"
-                    )
+            fallback_single_installer = False
+            try:
+                installer = getattr(self, "install_mods", None)
+                if callable(installer):
+                    batch_res = installer(server, list(by_id.keys()))
+                else:
+                    fallback_single_installer = True
+                    batch_res = {"ok": True, "items": {}}
+                    for wid in by_id:
+                        single = self.install_mod(server, wid)
+                        if isinstance(single, dict) and ("error" in single or single.get("ok") is False):
+                            batch_res["ok"] = False
+                            batch_res["items"][wid] = {"ok": False, "error": single.get("error", "unbekannter Fehler")}
+                        else:
+                            batch_res["items"][wid] = {"ok": True}
+                items = batch_res.get("items", {}) if isinstance(batch_res, dict) else {}
+            except Exception as exc:  # pragma: no cover - defensiv
+                items = {wid: {"ok": False, "error": str(exc)} for wid in by_id}
 
-            # Mod-Liste für Injection aktualisieren (z. B. modlist.txt) – nach allen Downloads
+            for wid, u in by_id.items():
+                item = items.get(wid, {}) if isinstance(items, dict) else {}
+                if item.get("ok"):
+                    updater.update_mod_metadata_after_success(server.id, wid, u.get("remote_updated"))
+                    mark_mod_installed(server.id, wid)
+                    applied += 1
+                    _append_console_log(server.id, f"[MSM] Mod {wid}: installed\n")
+                else:
+                    err = str(item.get("error") or "Workshop-Download fehlgeschlagen")
+                    errors.append(f"{wid}: {err}")
+                    mark_mod_failed(server.id, wid, err)
+                    _append_console_log(server.id, f"[MSM] Mod {wid}: failed - {err}\n")
+
             try:
                 self.update_modlist(server)
             except Exception as exc:
@@ -855,19 +960,14 @@ class GamePlugin(ABC):
             _append_console_log(server.id, f"[MSM] Start abgelehnt: {e}\n")
             return {"error": str(e)}
 
-        # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
-        try:
-            self.prepare_runtime(server)
-        except Exception as e:
-            _append_console_log(
-                server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
-            )
-
         uid, gid = self.container_uid_gid(server)
         run_user = f"{uid}:{gid}"
         name = container_name_for(server.id)
         volume_binds = self.build_volume_binds(server)
 
+        # Rechte VOR Runtime-Patches/Preflight normalisieren. Wenn externe Tools
+        # root-/fremd-eigene Dateien erzeugen, darf prepare_runtime nicht schon
+        # an Permission-Denied scheitern, bevor MSM reparieren konnte.
         for volume in volume_binds:
             if volume.read_only:
                 continue
@@ -880,6 +980,15 @@ class GamePlugin(ABC):
                 err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
                 _append_console_log(server.id, f"[MSM] Permission-Repair fehlgeschlagen: {err}\n")
                 return {"error": err}
+
+        # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
+        try:
+            self.prepare_runtime(server)
+        except Exception as e:
+            _append_console_log(
+                server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
+            )
+            return {"error": str(e)}
 
         result = docker_service.run_container(
             name=name,
@@ -894,6 +1003,8 @@ class GamePlugin(ABC):
             workdir=self.container_workdir(server),
             read_only_rootfs=self.container_read_only_rootfs,
             tmpfs_paths=self.container_tmpfs_paths(server),
+            startup_check_seconds=2.0,
+            server_id=server.id,  # enables pull progress in console
         )
         if not result["ok"]:
             _append_console_log(server.id, f"[MSM] Container-Start fehlgeschlagen: {result['error']}\n")
@@ -904,13 +1015,32 @@ class GamePlugin(ABC):
         return {"message": "Server gestartet", "container": name}
 
     def stop(self, server) -> dict:
-        """Standard-Stop: Container graceful stoppen (30 s)."""
+        """Standard-Stop: Container graceful stoppen.
+
+        Grace-Period kommt aus dem Blueprint (``runtime.stopGracePeriodSeconds``,
+        Default 30s). Server mit persistenter Welt brauchen oft mehr Zeit
+        fuer Save- oder Snapshot-Workflows. Ein zu kurzer Timeout fuehrt
+        zu SIGKILL und potenziellem Datenverlust.
+        """
         name = container_name_for(server.id)
-        result = docker_service.stop(name, timeout=30)
+        timeout = self.stop_grace_period_seconds(server)
+        result = docker_service.stop(name, timeout=timeout)
         if not result["ok"]:
             return {"error": result["error"]}
         _append_console_log(server.id, f"[MSM] Container {name} gestoppt\n")
         return {"message": "Server gestoppt", "container": name}
+
+    def stop_grace_period_seconds(self, server) -> int:
+        """Blueprint-gesteuerter Grace-Period fuer Container-Stop.
+
+        Default 30s, ueberschreibbar pro Blueprint via
+        ``runtime.stopGracePeriodSeconds`` (5..600s). Plugins ohne Blueprint
+        nutzen den Default.
+        """
+        bp = self.get_blueprint()
+        if bp and bp.runtime and getattr(bp.runtime, "stopGracePeriodSeconds", None):
+            return int(bp.runtime.stopGracePeriodSeconds)
+        return 30
 
     def get_status(self, server) -> ServerStatus:
         """Liefert Live-Status aus Docker (Container-State + CPU/RAM via stats)."""

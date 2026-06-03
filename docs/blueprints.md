@@ -97,7 +97,7 @@ konfiguriert sein.
     "category": "steam_game"
   },
   "runtime": {
-    "image": "cm2network/steamcmd:root",
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
     "workdir": "/data",
     "env": {},
     "startup": "/data/DayZServer -config=serverDZ.cfg -port={GAME_PORT} -BEpath=battleye -profiles=profiles -dologs -adminlog -netlog -freezecheck",
@@ -345,6 +345,96 @@ Diese Tokens gelten nur für `runtime.startup` beziehungsweise gar nicht für
 Config-Patches.
 
 Wenn ein Port-Token leer ist, wird dieser Patch übersprungen.
+
+## Stop-Grace-Period und Update-Strategie (runtime + source)
+
+Diese beiden Felder sind provider-neutral und gelten für **alle** Blueprint-Quellen
+(Steam, HTTP, dockerOnly, manualUpload, custom). Steam und Workshop sind
+optionale Provider — der Blueprint-Core bleibt generisch.
+
+### stopGracePeriodSeconds (unter `runtime`)
+
+Legt fest, wie viele Sekunden Docker dem Container beim Stop (`docker stop --time N`)
+für einen sauberen Shutdown gibt, bevor SIGKILL folgt.
+
+- **Default**: 30
+- **Erlaubter Bereich** (Schema): 5 bis 600 Sekunden
+- **Verwendung**: Für Server mit persistenter Welt (z. B. DayZ, Conan) oft höher
+  setzen, damit Save- oder Snapshot-Operationen abgeschlossen werden können.
+  Zu kleiner Wert → Datenverlust-Risiko. Zu großer Wert → Restart dauert länger.
+
+Beispiel:
+
+```json
+"runtime": {
+  "image": "cm2network/steamcmd:root",
+  "startup": "...",
+  "stopGracePeriodSeconds": 120,
+  "ensureDirs": ["profiles"]
+}
+```
+
+**Kompatibilität**: Blueprints ohne das Feld verwenden den Default 30 s
+(Pydantic-Default). Kein Breaking-Change.
+
+### updateStrategy (unter `source`)
+
+Steuert, ob und wann vor einem Start oder Restart ein Server-Datei-Update
+durchgeführt wird (vor `plugin.start`, mit Schutz manueller Configs).
+
+Mögliche Werte:
+
+- `alwaysValidate`: Update wird bei jedem Start/Restart **unbedingt** ausgeführt
+  (bei Steam: `+app_update ... validate`). Garantiert frische Binaries, kann
+  auch ein Update erzwingen, wenn der passive Check "none" meldet.
+- `checkBased`: Nur updaten, wenn der passive Check (`updater.check_server_file_update`)
+  ein Update meldet. Spart teure Upstream-Calls bei stabilen Releases.
+- `none`: Kein Auto-Update durch MSM (z. B. dockerOnly, custom, manualUpload oder
+  wenn der Betreiber manuell pflegt).
+
+**Defaults pro Source-Typ** (wenn nicht explizit gesetzt):
+
+| Source-Typ       | Default          | Begründung |
+|------------------|------------------|------------|
+| steam            | alwaysValidate   | SteamCMD-Validate ist die einzige verlässliche Quelle für Binary-Aktualität. |
+| http             | checkBased       | HEAD + Last-Modified vs. lokale mtime (siehe `games/updater.py`). |
+| dockerOnly / custom / manualUpload | none | MSM verwaltet keine Dateien; Verantwortung liegt beim Image oder User. |
+
+Beispiele (explizites Override):
+
+```json
+"source": {
+  "type": "steam",
+  "steam": { "appId": "223350", "platform": "linux", "requiresLogin": true },
+  "updateStrategy": "checkBased"
+}
+```
+
+```json
+"source": {
+  "type": "http",
+  "http": { "url": "https://example.com/server.tar.gz", "archiveType": "tar.gz" },
+  "updateStrategy": "alwaysValidate"
+}
+```
+
+**Verhalten im Lifecycle**:
+- Start und Restart rufen `_source_update_strategy` (delegiert an
+  `BlueprintSource.effective_update_strategy`).
+- ALWAYS → force `{"action": "update"}`.
+- CHECK_BASED → nutze Ergebnis von `check_server_file_update`.
+- NONE → überspringe komplett.
+- Das eigentliche Update (falls nötig) läuft **vor** dem Container-Start,
+  mit Cache/Restore manueller Configs (siehe `games/updater.py:perform_install_with_protection`
+  und `apply_server_file_update`).
+
+**Fehler / Kompatibilität**:
+- Ungültiger Wert → `BlueprintValidationError` beim Laden (früh, bevor ein Job startet).
+- Alte Blueprints ohne Feld: exakt vorheriges Verhalten (rückwärts-kompatibel).
+- Explizites `alwaysValidate` auf einem `dockerOnly`-Blueprint: `perform` liefert
+  ein No-Op-Ergebnis ("nicht vorgesehen") — unschädlich, aber ungewöhnlich.
+- Der Core enthält **keinen** Steam-only-Hardcode mehr; alle Entscheidungen
+  gehen über die Blueprint-Daten (siehe `server_lifecycle_service._source_update_strategy`).
 
 ## Ports und Protokolle
 

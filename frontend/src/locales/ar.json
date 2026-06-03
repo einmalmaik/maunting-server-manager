@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "مدير خادم ماونتينج"
   },
@@ -383,6 +383,7 @@
     "password": "كلمة المرور",
     "confirmPassword": "تأكيد كلمة المرور",
     "otpCode": "رمز المصادقة الثنائية (2FA) (6 أرقام)",
+    "useBackupCode": "استخدم رمزًا احتياطيًا",
     "signIn": "تسجيل الدخول",
     "createAccount": "إنشاء حساب",
     "verify2FA": "التحقق من المصادقة الثنائية (2FA).",
@@ -459,6 +460,14 @@
     "workshopId": "معرف الورشة",
     "modName": "الاسم (اختياري)",
     "updateAvailable": "التحديث متاح",
+    "checkUpdates": "تحقق من التحديثات",
+    "updateCheckQueued": "اكتمل فحص التحديثات",
+    "updateCheckFailed": "فشل فحص التحديثات",
+    "updateQueued": "تم وضع تحديث المود في الانتظار",
+    "reinstall": "أعد التثبيت",
+    "reinstallQueued": "تم وضع إعادة تثبيت المود في الانتظار",
+    "confirmReinstall": "إعادة تثبيت {{mod}} الآن؟",
+    "installActionFailed": "فشل إجراء المود",
     "updating": "جارٍ التحديث...",
     "lastChecked": "آخر فحص",
     "loadOrder": "ترتيب التحميل",
@@ -502,6 +511,15 @@
     "statusInstalled": "تم التثبيت",
     "statusError": "خطأ",
     "statusErrorHint": "فشل التثبيت.",
+    "statusMissing": "مفقود",
+    "statusMissingHint": "ملفات المود مفقودة وسيتم تثبيتها في التحديث الآمن التالي.",
+    "statusOutdated": "قديم",
+    "statusOutdatedHint": "تم اكتشاف تحديث Workshop لهذا المود.",
+    "statusUnknown": "غير معروف",
+    "statusUnknownHint": "تعذر التحقق من حالة التحديث بشكل موثوق.",
+    "statusUnknownNoSteamKeyHint": "مفتاح Steam API مفقود؛ لا يمكن فحص البيانات الوصفية.",
+    "statusFailed": "فشل",
+    "statusFailedHint": "فشل آخر إجراء للمود.",
     "etaCalculating": "حساب الوقت المتبقي.",
     "etaAlmostDone": "انتهى تقريبا.",
     "etaLessThanMinute": "متبقي أقل من دقيقة واحدة.",
@@ -673,6 +691,16 @@
     "backupCodes": "رموز النسخ الاحتياطي",
     "generateBackupCodes": "إنشاء رموز النسخ الاحتياطي",
     "backupCodesWarning": "احفظ هذه الرموز بشكل آمن. لا يمكنهم استبدال المصادقة الثنائية (2FA)، بل تكون بمثابة تسجيل دخول للطوارئ فقط.",
+    "backupCodesDownloadOnce": "يمكنك تنزيل رموز النسخ الاحتياطي هذه الآن فقط. بعد ذلك ستتم إزالتها من هذا العرض.",
+    "downloadBackupCodes": "تنزيل رموز النسخ الاحتياطي",
+    "backupCodesDownloaded": "تم تنزيل رموز النسخ الاحتياطي وإزالتها من هذا العرض.",
+    "regenerateBackupCodes": "إعادة إنشاء رموز النسخ الاحتياطي",
+    "regenerateBackupCodesConfirm": "سيتم حذف رموز النسخ الاحتياطي القديمة بالكامل واستبدالها برموز جديدة. هل تريد المتابعة؟",
+    "backupCodesRegenerated": "تم إنشاء رموز نسخ احتياطي جديدة. قم بتنزيلها الآن كملف.",
+    "backupCodesFileTitle": "Maunting Server Manager - رموز النسخ الاحتياطي",
+    "backupCodesFileIntro": "هذه الرموز مخصصة لتسجيل الدخول في حالات الطوارئ إذا لم يكن رمز 2FA متاحًا.",
+    "backupCodesFileUser": "الحساب",
+    "backupCodesFileGeneratedAt": "تم الإنشاء في",
     "otpRequired": "مطلوب رمز 2FA",
     "notVerified": "لم يتم التحقق منها",
     "2faQrCode": "2FA رمز الاستجابة السريعة",
@@ -689,7 +717,13 @@
   "errors": {
     "RATE_LIMITED": "طلبات كثيرة جدًا. من فضلك انتظر لحظة.",
     "SESSION_EXPIRED": "انتهت صلاحية الجلسة. الرجاء تسجيل الدخول مرة أخرى.",
-    "install_update_already_running": "التثبيت أو التحديث قيد التشغيل بالفعل. يرجى الانتظار حتى تنتهي هذه المهمة."
+    "install_update_already_running": "التثبيت أو التحديث قيد التشغيل بالفعل. يرجى الانتظار حتى تنتهي هذه المهمة.",
+    "steam_api_key_missing": "مفتاح Steam API مفقود. البحث في Workshop والبيانات الوصفية متاحة بعد الإعداد.",
+    "steam_api_unavailable": "Steam API غير متاح أو المفتاح غير صالح.",
+    "steam_search_failed": "فشل بحث Steam.",
+    "steam_load_failed": "تعذر تحميل بيانات Steam.",
+    "invalid_workshop_id": "معرف Workshop غير صالح.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "تعطيل إشعارات البريد الإلكتروني",
@@ -710,7 +744,13 @@
     "viewRelease": "عرض الإصدار",
     "manualUpdateCommand": "التحديث على الخادم:"
   },
-  "common": {
+"connection": {
+    "connecting": "جارٍ الاتصال…",
+    "reconnecting": "فُقد الاتصال — إعادة الاتصال…",
+    "failed": "فشل الاتصال. يرجى إعادة تحميل الصفحة.",
+    "rejected": "رُفض الاتصال (المصادقة/الأصل/الأذونات مفقودة)."
+  },
+    "common": {
     "unlimited": "غير محدود",
     "save": "حفظ",
     "cancel": "إلغاء",

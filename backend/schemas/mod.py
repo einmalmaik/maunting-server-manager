@@ -20,6 +20,9 @@ class ModResponse(BaseModel):
     install_started_at: datetime | None
     install_completed_at: datetime | None
     install_error: str | None
+    update_status: str
+    update_reason: str | None
+    update_checked_at: datetime | None
 
     class Config:
         from_attributes = True

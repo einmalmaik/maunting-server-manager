@@ -12,10 +12,18 @@ from typing import List, Optional
 from database import get_db
 from models import Server, User
 from dependencies import get_current_user, require_server_permission
-from services.steam_service import get_steam_service, SteamModInfo
+from services.steam_service import SteamApiUnavailable, get_steam_service, SteamModInfo
 from games import get_plugin
 
 router = APIRouter(prefix="/api/steam", tags=["steam"])
+
+
+def _steam_api_error(exc: SteamApiUnavailable) -> HTTPException:
+    code = exc.code or "steam_api_unavailable"
+    return HTTPException(
+        status_code=503,
+        detail={"code": code, "message": f"errors.{code}"},
+    )
 
 
 
@@ -60,8 +68,10 @@ async def search_workshop_mods(
         
         return [_mod_to_dict(mod) for mod in mods]
         
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Suche fehlgeschlagen: {str(e)}")
+    except SteamApiUnavailable as e:
+        raise _steam_api_error(e)
+    except Exception:
+        raise HTTPException(status_code=500, detail="errors.steam_search_failed")
 
 
 @router.get("/workshop/popular")
@@ -106,8 +116,10 @@ async def get_popular_mods(
         
         return [_mod_to_dict(mod) for mod in mods]
         
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Laden fehlgeschlagen: {str(e)}")
+    except SteamApiUnavailable as e:
+        raise _steam_api_error(e)
+    except Exception:
+        raise HTTPException(status_code=500, detail="errors.steam_load_failed")
 
 
 @router.get("/workshop/mod/{publishedfileid}")
@@ -148,8 +160,10 @@ async def get_mod_details(
         
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Laden fehlgeschlagen: {str(e)}")
+    except SteamApiUnavailable as e:
+        raise _steam_api_error(e)
+    except Exception:
+        raise HTTPException(status_code=500, detail="errors.steam_load_failed")
 
 
 def _mod_to_dict(mod: SteamModInfo) -> dict:

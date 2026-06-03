@@ -129,11 +129,14 @@ export function Servers() {
       case 'starting':
       case 'stopping':
       case 'restarting':
+      case 'queued':
         return 'bg-status-warning/10 border-status-warning/30 text-status-warning'
       case 'installing':
       case 'updating':
       case 'awaiting_files':
         return 'bg-status-warning/10 border-status-warning/30 text-status-warning'
+      case 'failed':
+        return 'bg-status-error/10 border-status-error/30 text-status-error'
       default:
         return 'bg-status-error/10 border-status-error/30 text-status-error'
     }

@@ -114,6 +114,23 @@ class BlueprintModInjection(str, Enum):
     FILE = "file"
 
 
+class BlueprintUpdateStrategy(str, Enum):
+    """Provider-neutrale Update-Strategie pro Blueprint-Source.
+
+    - ``alwaysValidate``: Bei jedem Start/Restart wird das Install-Tool
+      unbedingt aufgerufen (Steam: ``app_update ... validate``; andere
+      Provider analog). Garantiert frische Binaries, kann Updates auch
+      erzwingen wenn der passive Check 'none' meldet.
+    - ``checkBased``: Nur updaten wenn der passive Update-Check ein
+      Update meldet. Spart teure Upstream-Calls fuer stabile Releases.
+    - ``none``: Source hat keinen Auto-Update-Mechanismus (dockerOnly,
+      custom, manualUpload).
+    """
+    ALWAYS_VALIDATE = "alwaysValidate"
+    CHECK_BASED = "checkBased"
+    NONE = "none"
+
+
 class BlueprintWorkshopFileOperation(str, Enum):
     COPY = "copy"
     SYMLINK = "symlink"
@@ -287,7 +304,9 @@ class BlueprintRuntime(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     startup: str = Field(min_length=1, max_length=2048)
     ensureDirs: list[str] = Field(default_factory=list, max_length=16)
+    requiredFiles: list[str] = Field(default_factory=list, max_length=16)
     configPatches: list["BlueprintConfigPatch"] = Field(default_factory=list, max_length=32)
+    stopGracePeriodSeconds: int = Field(default=30, ge=5, le=600)
 
     @field_validator("image")
     @classmethod
@@ -410,6 +429,21 @@ class BlueprintRuntime(BaseModel):
             seen.add(path)
         return v
 
+    @field_validator("requiredFiles")
+    @classmethod
+    def _check_required_files(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        for path in v:
+            if not _is_safe_relative_path(path):
+                raise ValueError(
+                    f"runtime.requiredFiles enthält unsicheren Pfad '{path}' "
+                    "(absolute/'..'-Pfade sind verboten)."
+                )
+            if path in seen:
+                raise ValueError(f"runtime.requiredFiles: Duplikat '{path}'.")
+            seen.add(path)
+        return v
+
 
 class BlueprintPort(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -525,6 +559,7 @@ class BlueprintSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: BlueprintSourceType
+    updateStrategy: BlueprintUpdateStrategy | None = None
     steam: BlueprintSteamSource | None = None
     http: BlueprintHttpSource | None = None
     manual: BlueprintManualSource | None = None
@@ -552,6 +587,26 @@ class BlueprintSource(BaseModel):
                     f"source.type={self.type.value} darf weder source.steam, source.http noch source.manual setzen."
                 )
         return self
+
+    def effective_update_strategy(self) -> BlueprintUpdateStrategy:
+        """Liefert die effektive Update-Strategie.
+
+        Default pro Source-Type:
+        - steam: ``alwaysValidate`` (SteamCMD validate ist die einzige
+          verlaessliche Quelle fuer Binary-Aktualitaet).
+        - http: ``checkBased`` (HEAD + Last-Modified).
+        - dockerOnly/custom/manualUpload: ``none`` (kein Auto-Update).
+        """
+        if self.updateStrategy is not None:
+            return self.updateStrategy
+        defaults = {
+            BlueprintSourceType.STEAM: BlueprintUpdateStrategy.ALWAYS_VALIDATE,
+            BlueprintSourceType.HTTP: BlueprintUpdateStrategy.CHECK_BASED,
+            BlueprintSourceType.DOCKER_ONLY: BlueprintUpdateStrategy.NONE,
+            BlueprintSourceType.CUSTOM: BlueprintUpdateStrategy.NONE,
+            BlueprintSourceType.MANUAL_UPLOAD: BlueprintUpdateStrategy.NONE,
+        }
+        return defaults[self.type]
 
 
 class BlueprintMods(BaseModel):
@@ -877,6 +932,11 @@ COMMENTED_TEMPLATE_DE: str = """{
     "startup": "./start_server.sh --port {GAME_PORT}",
     // Relative Ordner, die MSM vor jedem Start im Server-Verzeichnis anlegt (z.B. profile/log dirs)
     "ensureDirs": [],
+    // Relative Dateien, die nach Installation vor einem Container-Start vorhanden sein muessen
+    "requiredFiles": [],
+    // Grace-Period für docker stop (SIGTERM dann SIGKILL). Default 30s, 5..600 erlaubt.
+    // Höher bei persistenter Welt (Save/Snapshot), damit keine Daten verloren gehen.
+    "stopGracePeriodSeconds": 30,
     // Dateien, die vor dem Start automatisch gepatcht werden sollen (z.B. INI-Dateien)
     "configPatches": []
   },
@@ -892,7 +952,12 @@ COMMENTED_TEMPLATE_DE: str = """{
   ],
   "source": {
     // Woher kommen die Server-Dateien? Erlaubte Typen: steam, http, dockerOnly, manualUpload
-    "type": "dockerOnly"
+    "type": "dockerOnly",
+    // Optionale Update-Strategie (Default pro Typ: steam=alwaysValidate, http=checkBased, andere=none).
+    // alwaysValidate: bei jedem Start/Restart updaten (validate).
+    // checkBased: nur wenn passiver Check (Last-Modified / Steam) Update meldet.
+    // none: kein Auto-Update durch MSM.
+    "updateStrategy": null
     
     // Beispiel fuer Steam (entkommentieren und type auf "steam" setzen):
     /*
@@ -901,7 +966,8 @@ COMMENTED_TEMPLATE_DE: str = """{
       "platform": "linux",
       "compatibility": "native",
       "requiresLogin": false
-    }
+    },
+    "updateStrategy": "alwaysValidate"
     */
     
     // Beispiel fuer HTTP-Download (entkommentieren und type auf "http" setzen):
@@ -910,7 +976,8 @@ COMMENTED_TEMPLATE_DE: str = """{
       "url": "https://example.com/server-files.zip",
       "archiveType": "zip",
       "extractTo": "."
-    }
+    },
+    "updateStrategy": "checkBased"
     */
   },
   "mods": {
@@ -958,6 +1025,11 @@ COMMENTED_TEMPLATE_EN: str = """{
     "startup": "./start_server.sh --port {GAME_PORT}",
     // Relative directories MSM creates in the server directory before each start (e.g. profile/log dirs)
     "ensureDirs": [],
+    // Relative files that must exist after installation before the container can start
+    "requiredFiles": [],
+    // Grace-Period for docker stop (SIGTERM then SIGKILL). Default 30s, range 5..600.
+    // Raise for persistent-world servers (save/snapshot) to avoid data loss.
+    "stopGracePeriodSeconds": 30,
     // Files that should be automatically patched before startup (e.g., INI files)
     "configPatches": []
   },
@@ -973,7 +1045,12 @@ COMMENTED_TEMPLATE_EN: str = """{
   ],
   "source": {
     // Where do the server files come from? Allowed types: steam, http, dockerOnly, manualUpload
-    "type": "dockerOnly"
+    "type": "dockerOnly",
+    // Optional update strategy (defaults: steam=alwaysValidate, http=checkBased, others=none).
+    // alwaysValidate: force update on every start/restart (validate).
+    // checkBased: only if passive check (Last-Modified/Steam) reports an update.
+    // none: no auto file updates by MSM.
+    "updateStrategy": null
     
     // Example for Steam (uncomment and set type to "steam"):
     /*
@@ -982,7 +1059,8 @@ COMMENTED_TEMPLATE_EN: str = """{
       "platform": "linux",
       "compatibility": "native",
       "requiresLogin": false
-    }
+    },
+    "updateStrategy": "alwaysValidate"
     */
     
     // Example for HTTP download (uncomment and set type to "http"):
@@ -991,7 +1069,8 @@ COMMENTED_TEMPLATE_EN: str = """{
       "url": "https://example.com/server-files.zip",
       "archiveType": "zip",
       "extractTo": "."
-    }
+    },
+    "updateStrategy": "checkBased"
     */
   },
   "mods": {

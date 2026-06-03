@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "सर्वर मैनेजर स्थापित करना"
   },
@@ -383,6 +383,7 @@
     "password": "पासवर्ड",
     "confirmPassword": "पासवर्ड की पुष्टि करें",
     "otpCode": "2एफए कोड (6 अंक)",
+    "useBackupCode": "बैकअप कोड का उपयोग करें",
     "signIn": "साइन इन करें",
     "createAccount": "खाता बनाएँ",
     "verify2FA": "2FA सत्यापित करें",
@@ -459,6 +460,14 @@
     "workshopId": "कार्यशाला आईडी",
     "modName": "नाम (वैकल्पिक)",
     "updateAvailable": "उपलब्ध अद्यतन",
+    "checkUpdates": "अपडेट जांचें",
+    "updateCheckQueued": "अपडेट जांच पूरी हुई",
+    "updateCheckFailed": "अपडेट जांच विफल",
+    "updateQueued": "मॉड अपडेट कतार में है",
+    "reinstall": "फिर से इंस्टॉल करें",
+    "reinstallQueued": "मॉड रीइंस्टॉल कतार में है",
+    "confirmReinstall": "{{mod}} को अभी फिर से इंस्टॉल करें?",
+    "installActionFailed": "मॉड कार्रवाई विफल",
     "updating": "अद्यतन किया जा रहा है...",
     "lastChecked": "अंतिम बार जाँच की गई",
     "loadOrder": "ऑर्डर लोड करें",
@@ -502,6 +511,15 @@
     "statusInstalled": "स्थापित",
     "statusError": "त्रुटि",
     "statusErrorHint": "स्थापना विफल.",
+    "statusMissing": "गुम",
+    "statusMissingHint": "मॉड फ़ाइलें गुम हैं और अगले सुरक्षित अपडेट में इंस्टॉल होंगी.",
+    "statusOutdated": "पुराना",
+    "statusOutdatedHint": "इस मॉड के लिए Workshop अपडेट मिला.",
+    "statusUnknown": "अज्ञात",
+    "statusUnknownHint": "अपडेट स्थिति भरोसेमंद रूप से जांची नहीं जा सकी.",
+    "statusUnknownNoSteamKeyHint": "Steam API key गुम है; मेटाडेटा जांचा नहीं जा सकता.",
+    "statusFailed": "विफल",
+    "statusFailedHint": "अंतिम मॉड कार्रवाई विफल हुई.",
     "etaCalculating": "शेष समय की गणना.",
     "etaAlmostDone": "लगभग पूरा हो गया.",
     "etaLessThanMinute": "1 मिनट से भी कम समय शेष है.",
@@ -673,6 +691,16 @@
     "backupCodes": "बैकअप कोड",
     "generateBackupCodes": "बैकअप कोड जनरेट करें",
     "backupCodesWarning": "इन कोड को सुरक्षित रूप से सेव करें। वे 2FA को प्रतिस्थापित नहीं कर सकते, केवल आपातकालीन लॉगिन के रूप में कार्य करते हैं।",
+    "backupCodesDownloadOnce": "आप इन बैकअप कोड को केवल अभी डाउनलोड कर सकते हैं। इसके बाद वे इस दृश्य से हटा दिए जाएंगे।",
+    "downloadBackupCodes": "बैकअप कोड डाउनलोड करें",
+    "backupCodesDownloaded": "बैकअप कोड डाउनलोड हो गए और इस दृश्य से हटा दिए गए।",
+    "regenerateBackupCodes": "बैकअप कोड फिर से बनाएं",
+    "regenerateBackupCodesConfirm": "पुराने बैकअप कोड पूरी तरह हटा दिए जाएंगे और नए कोड से बदल दिए जाएंगे। जारी रखें?",
+    "backupCodesRegenerated": "नए बैकअप कोड बना दिए गए हैं। उन्हें अभी फ़ाइल के रूप में डाउनलोड करें।",
+    "backupCodesFileTitle": "Maunting Server Manager - बैकअप कोड",
+    "backupCodesFileIntro": "यदि आपका 2FA कोड उपलब्ध नहीं है, तो ये बैकअप कोड आपातकालीन लॉगिन के लिए हैं।",
+    "backupCodesFileUser": "अकाउंट",
+    "backupCodesFileGeneratedAt": "बनाया गया",
     "otpRequired": "2FA कोड आवश्यक है",
     "notVerified": "सत्यापित नहीं",
     "2faQrCode": "2एफए क्यूआर कोड",
@@ -689,7 +717,13 @@
   "errors": {
     "RATE_LIMITED": "बहुत सारे अनुरोध. कृपया कुछ देर इंतज़ार करें।",
     "SESSION_EXPIRED": "सत्र समाप्त हुआ। कृपया पुनः साइन इन करें.",
-    "install_update_already_running": "कोई इंस्टालेशन या अपडेट पहले से ही चल रहा है. कृपया उस कार्य के समाप्त होने तक प्रतीक्षा करें."
+    "install_update_already_running": "कोई इंस्टालेशन या अपडेट पहले से ही चल रहा है. कृपया उस कार्य के समाप्त होने तक प्रतीक्षा करें.",
+    "steam_api_key_missing": "Steam API key गुम है. कॉन्फ़िगरेशन के बाद Workshop खोज और मेटाडेटा उपलब्ध होंगे.",
+    "steam_api_unavailable": "Steam API उपलब्ध नहीं है या API key अमान्य है.",
+    "steam_search_failed": "Steam खोज विफल हुई.",
+    "steam_load_failed": "Steam डेटा लोड नहीं हो सका.",
+    "invalid_workshop_id": "अमान्य Workshop ID.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "ईमेल सूचनाएं अक्षम करें",
@@ -710,7 +744,13 @@
     "viewRelease": "रिलीज देखें",
     "manualUpdateCommand": "सर्वर पर अपडेट करें:"
   },
-  "common": {
+"connection": {
+    "connecting": "कनेक्ट हो रहा है…",
+    "reconnecting": "कनेक्शन टूट गया — पुनः कनेक्ट हो रहा है…",
+    "failed": "कनेक्शन विफल। कृपया पृष्ठ पुनः लोड करें।",
+    "rejected": "कनेक्शन अस्वीकृत (प्रमाणीकरण/उत्पत्ति/अनुमतियाँ अनुपलब्ध)।"
+  },
+    "common": {
     "unlimited": "असीमित",
     "save": "सहेजें",
     "cancel": "रद्द करें",

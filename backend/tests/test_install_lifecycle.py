@@ -430,7 +430,7 @@ class TestSteamCMDFullLogOnFailure:
 
                 def fake_run_ephemeral(**kwargs):
                     kwargs["log_callback"](
-                        "Update state (0x61) downloading, progress: 68.94 secret-pass\n"
+                        "Update state (0x61) downloading, progress: 68.94 steam-user secret-pass\n"
                     )
                     return {"ok": True, "stdout": "", "stderr": ""}
 
@@ -444,6 +444,7 @@ class TestSteamCMDFullLogOnFailure:
 
             log = self._read_console_log(test_server.id)
             assert "Update state (0x61) downloading, progress: 68.94" in log
+            assert "steam-user" not in log
             assert "secret-pass" not in log
             assert "***" in log
         finally:
@@ -462,7 +463,7 @@ class TestSteamCMDFullLogOnFailure:
 
                 def fake_run_ephemeral(**kwargs):
                     kwargs["log_callback"](
-                        "Error! App '3792580' state is 0x202 after update job secret-pass\n"
+                        "Error! App '3792580' state is 0x202 after update job steam-user secret-pass\n"
                     )
                     return {"ok": False, "error": "exit 7", "stdout": "", "stderr": ""}
 
@@ -478,6 +479,7 @@ class TestSteamCMDFullLogOnFailure:
             assert result["error_code"] == "steamcmd_update_state_0x202"
             assert "nicht verifiziert" in result["error"]
             log = self._read_console_log(test_server.id)
+            assert "steam-user" not in log
             assert "secret-pass" not in log
             assert "0x202" in log
             assert "nicht verifiziert" in log
@@ -504,6 +506,8 @@ class TestSteamCMDFullLogOnFailure:
                 )
 
             assert result["error_code"] == "steamcmd_missing_configuration"
+            assert "Steam-Account" in result["error"]
+            assert "Zugriff auf die Server-App" in result["error"]
             assert "nicht verifiziert" in result["error"]
         finally:
             self._clear_console_log(test_server.id)

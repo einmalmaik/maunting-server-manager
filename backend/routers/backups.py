@@ -181,10 +181,10 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
     if not os.path.exists(backup.filename):
         raise HTTPException(status_code=404, detail="Backup-Datei nicht gefunden")
 
-    from services.server_lifecycle_service import get_server_lifecycle_lock
+    from services.server_lifecycle_service import acquire_lock_async, get_server_lifecycle_lock
 
     lock = get_server_lifecycle_lock(server.id)
-    async with lock:
+    async with acquire_lock_async(lock):
         db.refresh(server)
 
         # Container stoppen, falls er läuft — Bind-Mount-Konsistenz

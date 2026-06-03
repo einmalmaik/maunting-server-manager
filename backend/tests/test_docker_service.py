@@ -32,7 +32,7 @@ class TestDockerHost:
         with patch("services.docker_service.docker", MagicMock()), \
              patch.object(docker_service.settings, "docker_host", "unix:///run/user/1001/docker.sock"), \
              patch("services.docker_service.os.path.exists", return_value=False):
-            result = docker_service.pull("cm2network/steamcmd:root")
+            result = docker_service.pull("ghcr.io/parkervcp/steamcmd:debian")
 
         assert result == {
             "ok": False,
@@ -137,13 +137,14 @@ class TestRunContainer:
     def test_builds_hardened_sdk_call(self):
         client = MagicMock()
         created = SimpleNamespace(id="abc123")
+        client.images.get.side_effect = docker_service.NotFound("missing")
         client.containers.get.side_effect = docker_service.NotFound("missing")
         client.containers.run.return_value = created
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             result = docker_service.run_container(
                 name="msm-srv-7",
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["/data/DayZServer", "-port=27015"],
                 env={"FOO": "bar"},
                 ports=[PortPublish(27015, 27015, "udp", None)],
@@ -156,7 +157,7 @@ class TestRunContainer:
 
         assert result["ok"] is True
         kwargs = client.containers.run.call_args.kwargs
-        assert kwargs["image"] == "cm2network/steamcmd:root"
+        assert kwargs["image"] == "ghcr.io/parkervcp/steamcmd:debian"
         assert kwargs["command"] == ["/data/DayZServer", "-port=27015"]
         assert kwargs["name"] == "msm-srv-7"
         assert kwargs["stdin_open"] is True
@@ -172,15 +173,19 @@ class TestRunContainer:
         assert kwargs["memswap_limit"] == "4096m"
         assert kwargs["user"] == "1000:1000"
         assert kwargs["working_dir"] == "/data"
+        client.images.get.assert_called_once_with("ghcr.io/parkervcp/steamcmd:debian")
         client.api.pull.assert_called_once_with(
-            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+            "ghcr.io/parkervcp/steamcmd", tag="debian", stream=True, decode=True, auth_config={}
         )
         calls = [call[0] for call in client.mock_calls]
-        assert calls.index("api.pull") < calls.index("containers.run")
+        assert calls.index("images.get") < calls.index("api.pull") < calls.index("containers.run")
 
-    def test_run_container_uses_local_image_when_pull_fails(self):
+    def test_run_container_skips_pull_when_image_present_locally(self):
+        """Fast-Path: Image ist bereits im lokalen Content-Store -> kein Registry-Roundtrip.
+
+        Spart 10-60s Wartezeit pro Restart bei grossen Images (Wine/Proton, parkervcp).
+        """
         client = MagicMock()
-        client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.return_value = SimpleNamespace(id="local-image")
         client.containers.get.side_effect = docker_service.NotFound("missing")
         client.containers.run.return_value = SimpleNamespace(id="abc")
@@ -195,11 +200,63 @@ class TestRunContainer:
             )
 
         assert result["ok"] is True
+        client.images.get.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
+        client.api.pull.assert_not_called()
+        client.containers.run.assert_called_once()
+
+    def test_run_container_uses_local_image_on_pull_failure_fallback(self):
+        """Fallback: Image fehlt lokal, Pull schlaegt fehl, aber Image ist zwischenzeitlich
+        verfuegbar (z. B. ein paralleler Job hat es gepullt). Dann darf der Container starten.
+        """
+        client = MagicMock()
+        client.images.get.side_effect = [
+            docker_service.NotFound("missing first"),
+            SimpleNamespace(id="raced-image"),
+        ]
+        client.api.pull.side_effect = docker_service.DockerException("registry offline")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/ptero-eggs/yolks:wine_staging",
+                command=["x"],
+                env={},
+                volumes=[],
+            )
+
+        assert result["ok"] is True
+        assert client.images.get.call_count == 2
+        client.images.get.assert_any_call("ghcr.io/ptero-eggs/yolks:wine_staging")
         client.api.pull.assert_called_once_with(
             "ghcr.io/ptero-eggs/yolks", tag="wine_staging", stream=True, decode=True, auth_config={}
         )
-        client.images.get.assert_called_once_with("ghcr.io/ptero-eggs/yolks:wine_staging")
         client.containers.run.assert_called_once()
+
+    def test_run_container_reports_immediate_exit_with_code_and_logs(self):
+        client = MagicMock()
+        container = MagicMock()
+        container.id = "abc"
+        container.attrs = {"State": {"Status": "exited", "ExitCode": 127}}
+        container.logs.return_value = b"./DayZServer: error while loading shared libraries\n"
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = container
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)), \
+             patch("services.docker_service.time.sleep"):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/parkervcp/steamcmd:debian",
+                command=["./DayZServer"],
+                startup_check_seconds=2.0,
+            )
+
+        assert result["ok"] is False
+        assert result["exit_code"] == 127
+        assert "Exit-Code 127" in result["error"]
+        assert "loading shared libraries" in result["error"]
+        container.reload.assert_called_once()
 
     def test_run_container_fails_clearly_when_remote_and_local_image_missing(self):
         client = MagicMock()
@@ -316,11 +373,15 @@ class TestGamePluginStartPermissions:
             cpu_limit_percent=None,
             ram_limit_mb=None,
         )
+        calls: list[str] = []
 
         with patch("services.docker_service.is_available", return_value=True), \
              patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1002)), \
-             patch("games.base.docker_service.repair_bind_mount_permissions", return_value={"ok": True}) as mock_repair, \
+             patch("games.base.docker_service.repair_bind_mount_permissions") as mock_repair, \
+             patch.object(plugin, "prepare_runtime") as mock_prepare, \
              patch("games.base.docker_service.run_container", return_value={"ok": True, "stdout": "", "stderr": ""}) as mock_run:
+            mock_repair.side_effect = lambda *args, **kwargs: calls.append("repair") or {"ok": True}
+            mock_prepare.side_effect = lambda srv: calls.append("prepare")
             result = plugin.start(server)
 
         assert result["message"] == "Server gestartet"
@@ -332,6 +393,7 @@ class TestGamePluginStartPermissions:
         kwargs = mock_run.call_args.kwargs
         assert kwargs["user"] == "1001:1002"
         assert kwargs["volumes"] == [VolumeBind(str(tmp_path), "/home/container", read_only=False)]
+        assert calls == ["repair", "prepare"]
 
     def test_start_stops_before_container_run_when_permission_repair_fails(self, tmp_path):
         plugin = _StartPlugin()
@@ -423,11 +485,12 @@ class TestEphemeralRun:
         container = MagicMock()
         container.wait.return_value = {"StatusCode": 0}
         container.logs.side_effect = [b"done\n", b""]
+        client.images.get.side_effect = docker_service.NotFound("missing")
         client.containers.run.return_value = container
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             result = docker_service.run_ephemeral(
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["+force_install_dir", "/data", "+login", "anonymous", "+app_update", "223350", "+quit"],
                 volumes=[VolumeBind("/opt/msm/servers/1", "/data", read_only=False)],
                 env={},
@@ -443,37 +506,36 @@ class TestEphemeralRun:
         assert kwargs["security_opt"] == ["no-new-privileges"]
         assert kwargs["volumes"] == {"/opt/msm/servers/1": {"bind": "/data", "mode": "rw"}}
         container.remove.assert_called_once_with(force=True)
+        client.images.get.assert_called_once_with("ghcr.io/parkervcp/steamcmd:debian")
         client.api.pull.assert_called_once_with(
-            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
+            "ghcr.io/parkervcp/steamcmd", tag="debian", stream=True, decode=True, auth_config={}
         )
 
-    def test_ephemeral_run_uses_local_image_when_pull_fails(self):
+    def test_ephemeral_run_skips_pull_when_image_present_locally(self):
+        """Fast-Path fuer SteamCMD-Install-Container: kein Registry-Roundtrip wenn lokal vorhanden."""
         client = MagicMock()
         container = MagicMock()
         container.wait.return_value = {"StatusCode": 0}
         container.logs.side_effect = [b"done\n", b""]
-        client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.return_value = SimpleNamespace(id="local-image")
         client.containers.run.return_value = container
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             result = docker_service.run_ephemeral(
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["true"],
                 volumes=[],
                 env={},
             )
 
         assert result["ok"] is True
-        client.api.pull.assert_called_once_with(
-            "cm2network/steamcmd", tag="root", stream=True, decode=True, auth_config={}
-        )
-        client.images.get.assert_called_once_with("cm2network/steamcmd:root")
+        client.images.get.assert_called_once_with("ghcr.io/parkervcp/steamcmd:debian")
+        client.api.pull.assert_not_called()
         client.containers.run.assert_called_once()
 
     def test_ephemeral_run_fails_clearly_when_remote_and_local_image_missing(self):
         client = MagicMock()
-        image = "cm2network/steamcmd:root"
+        image = "ghcr.io/parkervcp/steamcmd:debian"
         client.api.pull.side_effect = docker_service.DockerException("registry offline")
         client.images.get.side_effect = docker_service.NotFound("missing image")
 
@@ -549,7 +611,7 @@ class TestEphemeralRun:
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             result = docker_service.run_ephemeral(
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["true"],
                 volumes=[],
                 env={},
@@ -573,7 +635,7 @@ class TestEphemeralRun:
 
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             docker_service.run_ephemeral(
-                image="cm2network/steamcmd:root",
+                image="ghcr.io/parkervcp/steamcmd:debian",
                 command=["-c", "true"],
                 volumes=[],
                 env={},
@@ -689,6 +751,54 @@ class TestSteamCMDHelpers:
         assert kwargs.get("user") == "0:0"
         assert kwargs.get("cap_adds") == STEAMCMD_CAPS
         assert kwargs["env"].get("HOME") == "/data"
+
+    def test_workshop_batch_download_uses_one_ephemeral_container_for_many_mods(self, tmp_path):
+        from games.base import run_steamcmd_workshop_download_batch
+
+        item_ids = [str(1000 + i) for i in range(20)]
+
+        def mark_downloaded(**_kwargs):
+            for item_id in item_ids:
+                mod_dir = tmp_path / "steamapps" / "workshop" / "content" / "221100" / item_id
+                mod_dir.mkdir(parents=True, exist_ok=True)
+                (mod_dir / "mod.bin").write_text("synthetic", encoding="utf-8")
+            return {"ok": True, "stdout": "ok", "stderr": ""}
+
+        with patch("games.base.docker_service.run_ephemeral", side_effect=mark_downloaded) as mock_eph, \
+             patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
+            result = run_steamcmd_workshop_download_batch(
+                server_id=1,
+                install_dir=str(tmp_path),
+                workshop_app_id="221100",
+                workshop_item_ids=item_ids,
+            )
+
+        assert result["ok"] is True
+        assert result["applied"] == 20
+        mock_eph.assert_called_once()
+        script = mock_eph.call_args.kwargs["command"][1]
+        assert script.count("+workshop_download_item") == 20
+
+    def test_single_workshop_download_surfaces_item_error(self, tmp_path):
+        from games.base import run_steamcmd_workshop_download
+
+        with patch(
+            "games.base.run_steamcmd_workshop_download_batch",
+            return_value={
+                "ok": False,
+                "error": "batch_error",
+                "items": {"12345": {"ok": False, "error": "item_error"}},
+            },
+        ):
+            result = run_steamcmd_workshop_download(
+                server_id=1,
+                install_dir=str(tmp_path),
+                workshop_app_id="221100",
+                workshop_item_id="12345",
+            )
+
+        assert result["ok"] is False
+        assert result["error"] == "item_error"
 
     def test_bash_script_is_safely_quoted(self, tmp_path):
         from games.base import run_steamcmd_install

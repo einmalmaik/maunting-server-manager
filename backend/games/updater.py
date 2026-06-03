@@ -7,11 +7,10 @@ vollständig getrieben von Blueprint-Daten + bestehenden Helfern.
 Prüfprinzip (für alle Updater):
 1. Existiert die Ressource (Workshop-ID / App-ID / HTTP-Source)?
 2. Ist sie bereits installiert (lokale Pfade / DB-Row / Datei-Mtime)?
-3. Gibt es ein verfügbares Update (Steam time_updated > last_updated, ETag/Last-Modified)?
+3. Gibt es ein verfügbares Update (Steam time_updated > last_updated, Last-Modified)?
 4. Ist das Update bereits eingespielt?
-5. Lokal vorhandene Mods ohne alte DB-Baseline werden einmalig gebaselined,
-   damit frisch installierte Mods nicht beim nächsten Start erneut als Update
-   laufen.
+5. Lokal vorhandene Mods ohne verlässliche Metadaten werden als unknown markiert,
+   statt fälschlich als aktuell zu gelten.
 
 Nur fehlende/aktualisierte Ressourcen werden zurückgegeben (Bandbreiten-Optimierung).
 
@@ -19,7 +18,7 @@ Wiederverwendet:
 - backend/games/base.py (run_steamcmd_*, _query_active_mods, active_mod_ids)
 - backend/blueprints/schema.py (effective_mods, Blueprint)
 - backend/services/steam_service.py (get_mod_details für time_updated)
-- Keine neuen DB-Felder, keine neuen Abstraktionen.
+- Mod-Update-Lage wird getrennt vom Installationsfortschritt gespeichert.
 
 Sicherheit (AGENTS.md):
 - Keine Secrets in Logs (bestehende _redact wird später genutzt).
@@ -119,6 +118,16 @@ def _fetch_steam_mod_updated(app_id: str, workshop_id: str) -> datetime | None:
     return None
 
 
+def _has_steam_api_key() -> bool:
+    from config import settings as app_settings
+
+    return bool(
+        app_settings.steam_api_key
+        or os.getenv("MSM_STEAM_API_KEY", "")
+        or os.getenv("STEAM_API_KEY", "")
+    )
+
+
 def _fetch_http_last_modified(url: str) -> datetime | None:
     """
     Führt HEAD-Request auf die HTTP-Source aus und extrahiert Last-Modified
@@ -181,10 +190,10 @@ def check_workshop_mod_updates(
     ]
 
     Deterministisch & KISS:
-    - Keine Side-Effects außer Logging (kein DB-Schreiben, kein Download).
+    - Keine Downloads; Side-Effects nur persistierte Update-Lage je Mod.
     - Fehlende lokale Dateien → "install".
-    - Installiert + (kein last_updated oder remote > local) → "update".
-    - Bei fehlendem Steam-API-Key: konservativ (nur fehlende oder last_updated=None).
+    - Installiert + remote > local → "update".
+    - Fehlender/defekter Steam-API-Key → "unknown", kein Auto-Update.
     - Alle Zeiten als UTC-aware datetime, robuster Vergleich.
 
     Nutzt bestehende Helfer: _query_active_mods + effektive Blueprint-Mods.
@@ -197,6 +206,7 @@ def check_workshop_mod_updates(
 
     workshop_app_id = bp_mods.workshopAppId
     active_mods = _query_active_mods(server.id)  # bereits enabled=True, sortiert
+    has_api_key = _has_steam_api_key()
 
     results: list[dict[str, Any]] = []
 
@@ -226,15 +236,20 @@ def check_workshop_mod_updates(
         if db_updated is not None and db_updated.tzinfo is None:
             db_updated = db_updated.replace(tzinfo=timezone.utc)
 
-        # Remote via Steam API (passiv, nur Erkennung)
-        remote_updated = _fetch_steam_mod_updated(workshop_app_id, workshop_id)
+        # Remote via Steam API (passiv, nur Erkennung). Ohne Key darf der
+        # Basis-Start/Restart nicht scheitern; Status bleibt dann unknown.
+        remote_updated = _fetch_steam_mod_updated(workshop_app_id, workshop_id) if has_api_key else None
 
         action = "none"
         reason = "up_to_date"
+        update_status = "up_to_date"
+        update_reason: str | None = None
 
         if not is_installed:
             action = "install"
             reason = "missing"
+            update_status = "missing"
+            update_reason = "missing"
             logger.info(
                 "Workshop-Mod %s (%s) fehlt lokal auf Server %s.",
                 workshop_id,
@@ -243,21 +258,19 @@ def check_workshop_mod_updates(
             )
         else:
             if db_updated is None:
-                update_mod_metadata_after_success(
-                    server.id,
-                    workshop_id,
-                    remote_updated.isoformat() if remote_updated else None,
-                )
+                update_status = "unknown"
+                update_reason = "missing_local_metadata"
                 logger.info(
-                    "Workshop-Mod %s (%s) auf Server %s lokal vorhanden; fehlende DB-Baseline wurde gesetzt.",
+                    "Workshop-Mod %s (%s) auf Server %s lokal vorhanden, aber ohne lokale Metadaten-Baseline.",
                     workshop_id,
                     mod.name or "",
                     getattr(server, "id", "?"),
                 )
-                continue
-            if remote_updated is not None and remote_updated > db_updated:
+            if db_updated is not None and remote_updated is not None and remote_updated > db_updated:
                 action = "update"
                 reason = "newer_version_available"
+                update_status = "outdated"
+                update_reason = "newer_version_available"
                 logger.info(
                     "Workshop-Mod %s (%s) hat Update auf Server %s (remote=%s, db=%s).",
                     workshop_id,
@@ -266,6 +279,24 @@ def check_workshop_mod_updates(
                     remote_updated.isoformat() if remote_updated else "unbekannt",
                     db_updated.isoformat() if db_updated else "None",
                 )
+            elif remote_updated is None and has_api_key:
+                update_status = "unknown"
+                update_reason = "steam_metadata_unavailable"
+            elif remote_updated is None and not has_api_key:
+                update_status = "unknown"
+                update_reason = "steam_api_key_missing"
+
+        try:
+            from services.mod_install_status_service import mark_mod_update_status
+
+            mark_mod_update_status(server.id, workshop_id, update_status, update_reason)
+        except Exception as exc:  # pragma: no cover - defensive DB side-effect
+            logger.warning(
+                "Mod-Update-Status fuer Server %s, Mod %s konnte nicht gespeichert werden: %s",
+                getattr(server, "id", "?"),
+                workshop_id,
+                type(exc).__name__,
+            )
 
         results.append(
             {
@@ -277,6 +308,8 @@ def check_workshop_mod_updates(
                 "remote_updated": remote_updated.isoformat() if remote_updated else None,
                 "installed": is_installed,
                 "enabled": bool(getattr(mod, "enabled", True)),
+                "update_status": update_status,
+                "update_reason": update_reason,
             }
         )
 
@@ -300,7 +333,7 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
     nie auto-apply ohne Hook).
 
     Unterstützte Quellen (KISS):
-    - steam: Prüfung via appmanifest_*.acf (mtime + optionaler interner Timestamp)
+    - steam: keine passive Entscheidung; SteamCMD validate läuft im Start/Restart
     - http: HEAD-Request + Last-Modified Vergleich gegen max. lokale mtime
     - andere (dockerOnly etc.): immer "none" (keine MSM-Datei-Verantwortung)
 
@@ -367,48 +400,18 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
 
     server_id = getattr(server, "id", "?")
 
-    # ── Steam Source: Manifest-mtime als lokale Referenz (passiv, gut genug) ─
+    # ── Steam Source: kein lokales Manifest-Gate ────────────────────────────
     if src_type == "steam":
         steam_app_id = ""
         if bp_source.steam:
             steam_app_id = str(bp_source.steam.appId or "")
-
-        manifest_path = install_dir / "steamapps" / f"appmanifest_{steam_app_id}.acf"
-        local_mtime: datetime | None = None
-        local_ts = 0.0
-
-        if manifest_path.exists():
-            try:
-                stat = manifest_path.stat()
-                local_ts = stat.st_mtime
-                local_mtime = datetime.fromtimestamp(local_ts, tz=timezone.utc)
-                # Optional: Parse "LastUpdated" aus ACF (VDF-ähnlich, simple Heuristik)
-                try:
-                    content = manifest_path.read_text(encoding="utf-8", errors="ignore")
-                    # Suche nach "LastUpdated" "1234567890" oder buildid
-                    m = re.search(r'"LastUpdated"\s+"(\d+)"', content)
-                    if m:
-                        ts = int(m.group(1))
-                        if ts > 0:
-                            local_mtime = datetime.fromtimestamp(ts, tz=timezone.utc)
-                            local_ts = float(ts)
-                except Exception:
-                    pass  # Parse-Fehler ignorieren, mtime reicht
-            except OSError as exc:
-                logger.warning("Manifest-Stat fehlgeschlagen %s: %s", manifest_path, exc)
-
-        result["local_mtime"] = local_mtime.isoformat() if local_mtime else None
         result["details"] = (
             f"Steam-Source (App {steam_app_id or 'unbekannt'}): "
-            "Lokale mtime aus Manifest ermittelt. "
-            "Vollständige Update-Erkennung erfolgt durch SteamCMD validate beim Neustart."
+            "Keine passive Update-Entscheidung. SteamCMD validate läuft beim Start/Restart."
         )
-        # Für Steam: keine verlässliche remote-Zeit ohne Login/komplexe Queries.
-        # Aktion nur bei "missing" (oben). Sonst "none" – SteamCMD entscheidet.
         logger.debug(
-            "Server-Datei-Check (Steam) Server %s: local_mtime=%s",
+            "Server-Datei-Check (Steam) Server %s: kein passives Gate",
             server_id,
-            result["local_mtime"],
         )
         return result
 
@@ -554,7 +557,7 @@ def cache_manual_configs(server: Any, blueprint: Optional[Blueprint] = None) -> 
     - Cache liegt unter /tmp/msm-config-cache/<server_id>/
     - Rückgabe enthält Statistiken (wie viele Dateien gesichert wurden).
 
-    Wird vor jedem Reinstall (über /install) und vor Server-Datei-Updates (Restart-Pfad)
+    Wird vor jedem Reinstall (über /install) und vor Server-Datei-Updates im Lifecycle
     aufgerufen. Auch bei frischer Installation (leeres Verzeichnis) sicher: dann 0 Dateien.
     """
     install_dir = Path(server.install_dir)
@@ -687,7 +690,7 @@ def _protect_manual_configs_and_run(
     5. Abschluss-Log
 
     Wird von perform_install_with_protection (Reinstall-Pfade in Plugins) und
-    von apply_server_file_update (Restart-Pfad) genutzt → Single Source of Truth.
+    von apply_server_file_update (Lifecycle) genutzt → Single Source of Truth.
     """
     server_id = getattr(server, "id", None)
     if server_id is None:
@@ -777,11 +780,11 @@ def perform_install_with_protection(
     )
 
 
-# ── Server-Datei-Update-Ausführung (synchron, KISS, nur Restart-Pfad) ────────
+# ── Server-Datei-Update-Ausführung (synchron, KISS, Start/Restart-Pfad) ─────
 #
 # Diese Funktion ist der Kern der Ausführungslogik für Server-Datei-Updates.
-# Sie wird NUR über den Restart-Pfad getriggert (wenn check_for_server_file_update
-# "update" meldet). Update passiert IMMER vor dem Container-Start.
+# Steam-Blueprints rufen sie bei Start und Restart immer vor plugin.start() auf;
+# HTTP-Quellen bleiben passiv/checkbasiert.
 #
 # Nutzt jetzt _protect_manual_configs_and_run (Single Source of Truth für Protection).
 # Cache/Restore/Clear/Logs für manuelle Configs sind zentral implementiert.
@@ -799,14 +802,14 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
     3. Configs restore (restore_manual_configs) — selbst bei Update-Fehler
     4. Temporären Cache löschen
 
-    Aufruf: ausschließlich aus GamePlugin.perform_server_file_update (Restart-Pfad).
+    Aufruf: ausschließlich aus GamePlugin.perform_server_file_update.
     Wird via asyncio.to_thread(...) im Router aufgerufen → Event-Loop bleibt frei.
 
     AGENTS.md / KISS:
     - Keine neuen Manager-Klassen, keine Pipelines.
     - Wiederverwendung der bestehenden sync Install-Primitive.
     - Deutsche Kommentare + Logs.
-    - Fehler → nur Log + "ok": False; Caller (Restart) fährt trotzdem fort.
+    - Fehler → nur Log + "ok": False; Caller (Lifecycle) fährt trotzdem fort.
 
     Rückgabe-Dict enthält Details für Logging/Debug (nicht für UI-Status).
     """
@@ -856,6 +859,7 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 app_id=app_id,
                 use_authenticated_login=requires_login,
                 platform=platform_str,
+                # dedicated STEAMCMD_IMAGE for the tool (pre-baked binary), not the game's runtime image
             )
         elif source_type == BlueprintSourceType.HTTP:
             _append_console_log(
@@ -893,9 +897,9 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
 # ── Workshop-Mod-Update-Ausführung (Metadaten-Update nach erfolgreichem Download) ──
 #
 # KISS: Reine Hilfsfunktion ohne eigene Download-Logik (vermeidet Duplizierung).
-# Der tatsächliche Download/Install erfolgt über GamePlugin.install_mod(...)
-# (welches intern run_steamcmd_workshop_download verwendet, siehe base.py + Plugin-Overrides).
-# Diese Funktion wird NACH erfolgreichem install_mod im Restart-Pfad (und optional Start)
+# Der tatsächliche Download/Install erfolgt über GamePlugin.install_mods(...)
+# (welches intern run_steamcmd_workshop_download_batch verwendet, siehe base.py + Plugin-Overrides).
+# Diese Funktion wird nach erfolgreichem Batch-Install im Lifecycle
 # aufgerufen, um last_updated + installed_version korrekt zu setzen.
 # Keine neuen Abstraktionen, keine Manager, nur DB + Zeit-Handling.
 # AGENTS.md: Frische Session (Thread-sicher), defensiv, keine Secrets, Rollback bei Fehler.

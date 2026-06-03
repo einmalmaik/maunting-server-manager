@@ -60,6 +60,12 @@ cd /opt
 git clone https://github.com/einmalmaik/maunting-server-manager.git msm
 cd msm
 ```
+**Wichtig (Prod):** Die Installations- und Server-Daten liegen unter `/opt/msm/servers`, `/opt/msm/backups` etc.
+Führe auf dem Server **niemals** `git clean -fd` (oder ähnliche "aufräumen"-Befehle) im Clone-Verzeichnis aus – auch wenn Daten in Sub-Dirs liegen. Die `.gitignore` schützt die Laufzeit-Daten, aber manuelle Git-Clean-Befehle können trotzdem gefährlich sein. Immer erst mit `--dry-run` testen.
+
+Es gibt ein Hilfsskript `scripts/reset-msm-docker.sh` für den (hoffentlich nie wieder auftretenden) Notfall.
+
+**PS vom Entwickler (der das selbst mal um 2 Uhr nachts verbockt hat):** Ja, genau das ist mir passiert. Git clean hat den rootless Docker-Content-Store des msm-Users zerschossen (Blobs weg, "lease content" Horror). Nie wieder. Lernt aus meinen Schmerzen, Leute! 😂 Wenn's bei euch passiert: Es gibt jetzt `scripts/reset-msm-docker.sh` (als root ausführen). Danach git pull + Panel restart. Die .gitignore + Warnungen hier schützen euch (hoffentlich) davor.
 
 ### Schritt 3: Installer starten
 

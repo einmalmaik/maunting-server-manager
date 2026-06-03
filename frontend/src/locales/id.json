@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "Manajer Server Maunting"
   },
@@ -383,6 +383,7 @@
     "password": "Kata sandi",
     "confirmPassword": "Konfirmasi Kata Sandi",
     "otpCode": "Kode 2FA (6 digit)",
+    "useBackupCode": "Gunakan kode cadangan",
     "signIn": "Masuk",
     "createAccount": "Buat Akun",
     "verify2FA": "Verifikasi 2FA",
@@ -459,6 +460,14 @@
     "workshopId": "ID bengkel",
     "modName": "Nama (opsional)",
     "updateAvailable": "Pembaruan tersedia",
+    "checkUpdates": "Periksa pembaruan",
+    "updateCheckQueued": "Pemeriksaan pembaruan selesai",
+    "updateCheckFailed": "Pemeriksaan pembaruan gagal",
+    "updateQueued": "Pembaruan mod masuk antrean",
+    "reinstall": "Instal ulang",
+    "reinstallQueued": "Instal ulang mod masuk antrean",
+    "confirmReinstall": "Instal ulang {{mod}} sekarang?",
+    "installActionFailed": "Aksi mod gagal",
     "updating": "Memperbarui...",
     "lastChecked": "Terakhir diperiksa",
     "loadOrder": "Muat Pesanan",
@@ -502,6 +511,15 @@
     "statusInstalled": "Dipasang",
     "statusError": "Kesalahan",
     "statusErrorHint": "Instalasi gagal.",
+    "statusMissing": "Hilang",
+    "statusMissingHint": "File mod hilang dan akan diinstal pada pembaruan aman berikutnya.",
+    "statusOutdated": "Usang",
+    "statusOutdatedHint": "Pembaruan Workshop terdeteksi untuk mod ini.",
+    "statusUnknown": "Tidak diketahui",
+    "statusUnknownHint": "Status pembaruan tidak dapat diperiksa dengan andal.",
+    "statusUnknownNoSteamKeyHint": "Steam API key belum dikonfigurasi; metadata tidak dapat diperiksa.",
+    "statusFailed": "Gagal",
+    "statusFailedHint": "Aksi mod terakhir gagal.",
     "etaCalculating": "Menghitung sisa waktu.",
     "etaAlmostDone": "Hampir selesai.",
     "etaLessThanMinute": "Kurang dari 1 menit tersisa.",
@@ -673,6 +691,16 @@
     "backupCodes": "Kode Cadangan",
     "generateBackupCodes": "Hasilkan Kode Cadangan",
     "backupCodesWarning": "Simpan kode-kode ini dengan aman. Mereka tidak dapat menggantikan 2FA, hanya berfungsi sebagai login darurat.",
+    "backupCodesDownloadOnce": "Anda hanya dapat mengunduh kode cadangan ini sekarang. Setelah itu kode dihapus dari tampilan ini.",
+    "downloadBackupCodes": "Unduh kode cadangan",
+    "backupCodesDownloaded": "Kode cadangan diunduh dan dihapus dari tampilan ini.",
+    "regenerateBackupCodes": "Buat ulang kode cadangan",
+    "regenerateBackupCodesConfirm": "Kode cadangan lama akan dihapus sepenuhnya dan diganti dengan kode baru. Lanjutkan?",
+    "backupCodesRegenerated": "Kode cadangan baru telah dibuat. Unduh sekarang sebagai file.",
+    "backupCodesFileTitle": "Maunting Server Manager - Kode Cadangan",
+    "backupCodesFileIntro": "Kode cadangan ini adalah login darurat jika kode 2FA Anda tidak tersedia.",
+    "backupCodesFileUser": "Akun",
+    "backupCodesFileGeneratedAt": "Dibuat pada",
     "otpRequired": "Diperlukan kode 2FA",
     "notVerified": "Tidak terverifikasi",
     "2faQrCode": "Kode QR 2FA",
@@ -689,7 +717,13 @@
   "errors": {
     "RATE_LIMITED": "Terlalu banyak permintaan. Mohon tunggu sebentar.",
     "SESSION_EXPIRED": "Sesi berakhir. Silakan masuk lagi.",
-    "install_update_already_running": "An installation or update is already running. Harap tunggu sampai pekerjaan itu selesai."
+    "install_update_already_running": "An installation or update is already running. Harap tunggu sampai pekerjaan itu selesai.",
+    "steam_api_key_missing": "Steam API key belum dikonfigurasi. Pencarian Workshop dan metadata tersedia setelah konfigurasi.",
+    "steam_api_unavailable": "Steam API tidak tersedia atau API key tidak valid.",
+    "steam_search_failed": "Pencarian Steam gagal.",
+    "steam_load_failed": "Data Steam tidak dapat dimuat.",
+    "invalid_workshop_id": "Workshop ID tidak valid.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "Nonaktifkan notifikasi email",
@@ -710,7 +744,13 @@
     "viewRelease": "Lihat rilis",
     "manualUpdateCommand": "Pembaruan di server:"
   },
-  "common": {
+"connection": {
+    "connecting": "Menghubungkan…",
+    "reconnecting": "Koneksi terputus — menyambungkan ulang…",
+    "failed": "Koneksi gagal. Silakan muat ulang halaman.",
+    "rejected": "Koneksi ditolak (autentikasi/asal/izin tidak ada)."
+  },
+    "common": {
     "unlimited": "tidak terbatas",
     "save": "Simpan",
     "cancel": "Batalkan",

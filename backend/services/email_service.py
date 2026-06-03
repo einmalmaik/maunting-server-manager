@@ -383,9 +383,9 @@ Maunting Server Manager
     async def send_server_update_available_notification(to: str, username: str, server_name: str) -> bool:
         """Sendet E-Mail-Benachrichtigung, wenn ein Server-Datei-Update verfügbar ist.
 
-        Typischer Aufruf aus Hintergrund-Check-Job (Scheduler), nachdem
-        check_for_server_file_update() ein "update" gemeldet hat.
-        Kein automatisches Update, nur Hinweis.
+        Typischer Aufruf aus Hintergrund-Check-Job (Scheduler), wenn der
+        passive Check einen Hinweis meldet. Für Steam blockiert dieser Hinweis
+        keinen Start/Restart; SteamCMD-Validate läuft dort ohnehin.
         """
         subject = f"Maunting Server Manager — Server-Update verfügbar: {server_name}"
         body = f"""Hallo {username},

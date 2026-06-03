@@ -252,7 +252,8 @@ class TestBrowseReadWrite:
         assert res.status_code == 500
         detail = res.json()["detail"]
         assert "Permission denied" in detail
-        assert "Rechte-Reparatur fehlgeschlagen" in detail
+        assert "Rechte-Reparatur vor" in detail
+        assert "fehlgeschlagen" in detail
         assert "repair failed" in detail
 
     def test_read_oversized_file_rejected(
@@ -505,6 +506,41 @@ class TestMutations:
             headers={"X-CSRF-Token": csrf_token},
         )
         assert res.status_code in (403, 404)
+
+    def test_delete_repairs_permissions_after_permission_error(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        server_with_dir: Server,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        target = Path(server_with_dir.install_dir) / "locked.txt"
+        target.write_text("locked", encoding="utf-8")
+        original_unlink = Path.unlink
+        attempts = 0
+
+        def flaky_unlink(self: Path, *args, **kwargs):
+            nonlocal attempts
+            if self.name == "locked.txt":
+                attempts += 1
+                if attempts == 1:
+                    raise PermissionError(13, "Permission denied", str(self))
+            return original_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", flaky_unlink)
+
+        with patch("routers.files._repair_install_permissions", return_value={"ok": True}) as mock_repair:
+            res = client.delete(
+                f"/api/files/{server_with_dir.id}/delete?path=locked.txt",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert res.status_code == 200
+        mock_repair.assert_called_once_with(server_with_dir.install_dir)
+        assert attempts == 2
+        assert not target.exists()
 
 
 # ── Search ─────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "Монтирование менеджера сервера"
   },
@@ -383,6 +383,7 @@
     "password": "Пароль",
     "confirmPassword": "Подтвердите пароль",
     "otpCode": "Код 2FA (6 цифр)",
+    "useBackupCode": "Использовать резервный код",
     "signIn": "Войти",
     "createAccount": "Создать учетную запись",
     "verify2FA": "Подтвердить 2FA",
@@ -459,6 +460,14 @@
     "workshopId": "Идентификатор мастерской",
     "modName": "Имя (необязательно)",
     "updateAvailable": "Доступно обновление",
+    "checkUpdates": "Проверить обновления",
+    "updateCheckQueued": "Проверка обновлений завершена",
+    "updateCheckFailed": "Проверка обновлений не удалась",
+    "updateQueued": "Обновление мода поставлено в очередь",
+    "reinstall": "Переустановить",
+    "reinstallQueued": "Переустановка мода поставлена в очередь",
+    "confirmReinstall": "Переустановить {{mod}} сейчас?",
+    "installActionFailed": "Действие с модом не удалось",
     "updating": "Обновление...",
     "lastChecked": "Последняя проверка",
     "loadOrder": "Порядок загрузки",
@@ -502,6 +511,15 @@
     "statusInstalled": "Установлено",
     "statusError": "Ошибка",
     "statusErrorHint": "Установка не удалась.",
+    "statusMissing": "Отсутствует",
+    "statusMissingHint": "Файлы мода отсутствуют и будут установлены при следующем безопасном обновлении.",
+    "statusOutdated": "Устарело",
+    "statusOutdatedHint": "Для этого мода найдено обновление Workshop.",
+    "statusUnknown": "Неизвестно",
+    "statusUnknownHint": "Статус обновления нельзя надежно проверить.",
+    "statusUnknownNoSteamKeyHint": "Ключ Steam API отсутствует; метаданные нельзя проверить.",
+    "statusFailed": "Сбой",
+    "statusFailedHint": "Последнее действие с модом завершилось ошибкой.",
     "etaCalculating": "Расчет оставшегося времени.",
     "etaAlmostDone": "Почти готово.",
     "etaLessThanMinute": "Осталось меньше 1 минуты.",
@@ -673,6 +691,16 @@
     "backupCodes": "Резервные коды",
     "generateBackupCodes": "Генерация резервных кодов",
     "backupCodesWarning": "Сохраните эти коды в надежном месте. Они не могут заменить 2FA, а служат только для экстренного входа.",
+    "backupCodesDownloadOnce": "Вы можете скачать эти резервные коды только сейчас. После этого они будут удалены из этого вида.",
+    "downloadBackupCodes": "Скачать резервные коды",
+    "backupCodesDownloaded": "Резервные коды были скачаны и удалены из этого вида.",
+    "regenerateBackupCodes": "Создать новые резервные коды",
+    "regenerateBackupCodesConfirm": "Старые резервные коды будут полностью удалены и заменены новыми. Продолжить?",
+    "backupCodesRegenerated": "Новые резервные коды созданы. Скачайте их сейчас как файл.",
+    "backupCodesFileTitle": "Maunting Server Manager - Резервные коды",
+    "backupCodesFileIntro": "Эти резервные коды предназначены для экстренного входа, если ваш 2FA-код недоступен.",
+    "backupCodesFileUser": "Аккаунт",
+    "backupCodesFileGeneratedAt": "Создано",
     "otpRequired": "Требуется код 2FA",
     "notVerified": "Не проверено",
     "2faQrCode": "QR-код 2FA",
@@ -689,7 +717,13 @@
   "errors": {
     "RATE_LIMITED": "Слишком много запросов. Пожалуйста, подождите немного.",
     "SESSION_EXPIRED": "Сессия истекла. Пожалуйста, войдите еще раз.",
-    "install_update_already_running": "Установка или обновление уже запущено. Пожалуйста, подождите, пока эта работа не завершится."
+    "install_update_already_running": "Установка или обновление уже запущено. Пожалуйста, подождите, пока эта работа не завершится.",
+    "steam_api_key_missing": "Ключ Steam API отсутствует. Поиск Workshop и метаданные будут доступны после настройки.",
+    "steam_api_unavailable": "Steam API недоступен или ключ недействителен.",
+    "steam_search_failed": "Поиск Steam не удался.",
+    "steam_load_failed": "Не удалось загрузить данные Steam.",
+    "invalid_workshop_id": "Недействительный Workshop ID.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "Отключить уведомления по электронной почте",
@@ -710,7 +744,13 @@
     "viewRelease": "Посмотреть выпуск",
     "manualUpdateCommand": "Обновление на сервере:"
   },
-  "common": {
+"connection": {
+    "connecting": "Подключение…",
+    "reconnecting": "Соединение потеряно — переподключение…",
+    "failed": "Не удалось подключиться. Перезагрузите страницу.",
+    "rejected": "Соединение отклонено (аутентификация/источник/нет прав)."
+  },
+    "common": {
     "unlimited": "неограниченный",
     "save": "Сохранить",
     "cancel": "Отмена",

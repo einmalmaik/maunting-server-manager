@@ -21,7 +21,7 @@ def minimal_blueprint_dict() -> dict:
             "description": "",
         },
         "runtime": {
-            "image": "cm2network/steamcmd:root",
+            "image": "ghcr.io/parkervcp/steamcmd:debian",
             "workdir": "/data",
             "env": {},
             "startup": "/data/server -port={GAME_PORT}",

@@ -26,5 +26,8 @@ class Mod(Base):
     install_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     install_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     install_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    update_status: Mapped[str] = mapped_column(String(24), default="unknown", nullable=False)
+    update_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    update_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     server: Mapped["Server"] = relationship("Server", back_populates="mods")
