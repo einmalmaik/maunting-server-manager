@@ -172,12 +172,13 @@ def _safe_pull_error(exc: BaseException) -> str:
     if "lease content" in text_lower or "blob not found" in text_lower or "content store" in text_lower:
         return (
             f"Lokaler Docker-Content-Store korrupt (Blob fehlt: {detail}). "
-            "Ursache oft: git clean -fd, rm in .local/share/docker oder unterbrochener Pull. "
-            "Fix (als root): "
-            "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/$(id -u msm); systemctl --user stop docker || true; pkill -u $(id -u msm) dockerd || true'; "
-            "rm -rf /opt/msm/.local/share/docker/containerd/daemon/io.containerd.content.v1.content; "
-            "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/$(id -u msm); systemctl --user start docker'; "
-            "sudo -u msm bash -c 'export DOCKER_HOST=unix:///run/user/$(id -u msm)/docker.sock; docker pull ghcr.io/parkervcp/steamcmd:debian'"
+            "Ursache oft: git clean -fd (hatte .local nicht ignoriert), rm oder unterbrochener Pull. "
+            "VOLLSTÄNDIGER FIX (als root, uid 994, /opt/msm als HOME): "
+            "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/994; systemctl --user stop docker || true; pkill -u 994 dockerd || true; sleep 2'; "
+            "rm -rf /opt/msm/.local/share/docker; "
+            "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/994; systemctl --user start docker || { dockerd-rootless-setuptool.sh install --skip-iptables || true; systemctl --user enable --now docker; }'; "
+            "sudo -u msm bash -c 'export DOCKER_HOST=unix:///run/user/994/docker.sock; docker pull ghcr.io/parkervcp/steamcmd:debian; docker pull cm2network/steamcmd:root'; "
+            "Dann git pull im /opt/msm und Panel neu starten."
         )
 
     return detail
