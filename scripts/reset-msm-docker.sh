@@ -77,10 +77,10 @@ echo "Service (re)started."
 echo "[4/5] Pulling base images as ${MSM_USER} with correct DOCKER_HOST..."
 sudo -u "$MSM_USER" bash -c "
   export DOCKER_HOST=${MSM_DOCKER_HOST}
-  echo '  Pulling ghcr.io/parkervcp/steamcmd:debian ...'
-  docker pull ghcr.io/parkervcp/steamcmd:debian || echo '  (may be retried by MSM later)'
-  echo '  Pulling cm2network/steamcmd:root (legacy fallback) ...'
-  docker pull cm2network/steamcmd:root || echo '  (legacy, may fail if deprecated)'
+  echo '  Pulling cm2network/steamcmd:root (MSM dedicated SteamCMD tool image) ...'
+  docker pull cm2network/steamcmd:root || echo '  (may be retried by MSM later)'
+  echo '  Pulling ghcr.io/parkervcp/steamcmd:debian (for runtime in some blueprints) ...'
+  docker pull ghcr.io/parkervcp/steamcmd:debian || echo '  (optional for runtime)'
 " || true
 echo "Pulls attempted."
 
@@ -101,4 +101,4 @@ echo "New server installs and reinstalls should work again."
 echo "If you still see blob errors in MSM logs, the improved error message now contains these exact steps."
 echo ""
 echo "Lesson learned: NEVER git clean -fd on a prod deploy dir. --dry-run first. Always."
-echo "(This exact scenario once happened to the maintainer at 2am. You're not alone. xD)"
+echo "(This exact scenario once happened to the maintainer at 2am after git clean nuked the blobs. You're not alone. xD)"

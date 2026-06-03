@@ -286,8 +286,8 @@ setup_rootless_docker() {
         su - "$MSM_USER" -c "export XDG_RUNTIME_DIR=/run/user/${MSM_UID}; systemctl --user daemon-reload" 2>&1 | tee -a "$LOG_FILE" || true
         su - "$MSM_USER" -c "export XDG_RUNTIME_DIR=/run/user/${MSM_UID}; systemctl --user enable docker.service && systemctl --user start docker.service" 2>&1 | tee -a "$LOG_FILE" || \
             err "Rootless-Docker-User-Service konnte nicht gestartet werden"
-        log "Lade SteamCMD-Container-Image über Rootless Docker vor (ghcr.io/parkervcp/steamcmd:debian)..."
-        su - "$MSM_USER" -c "export DOCKER_HOST='${MSM_DOCKER_HOST}'; docker pull ghcr.io/parkervcp/steamcmd:debian" 2>&1 | tee -a "$LOG_FILE" || \
+        log "Lade SteamCMD-Container-Image über Rootless Docker vor (cm2network/steamcmd:root)..."
+        su - "$MSM_USER" -c "export DOCKER_HOST='${MSM_DOCKER_HOST}'; docker pull cm2network/steamcmd:root" 2>&1 | tee -a "$LOG_FILE" || \
             warn "Konnte SteamCMD-Image nicht vorziehen — wird beim ersten Server-Install nachgeholt."
     else
         warn "systemd nicht verfügbar. Rootless Docker wird vorbereitet, aber der User-Service kann nicht aktiviert werden."

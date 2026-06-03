@@ -113,7 +113,8 @@ class BlueprintPlugin(GamePlugin):
                         app_id=app_id,
                         use_authenticated_login=requires_login,
                         platform=platform_str,
-                        steamcmd_image=bp.runtime.image,
+                        # intentionally not passing steamcmd_image; use the dedicated STEAMCMD_IMAGE
+                        # which has the pre-installed binary at the expected path
                     ),
                     blueprint=bp,
                 )
@@ -413,7 +414,7 @@ class BlueprintPlugin(GamePlugin):
                         workshop_app_id=workshop_app_id,
                         workshop_item_ids=chunk,
                         use_authenticated_login=requires_login,
-                        steamcmd_image=self._blueprint.runtime.image,
+                        # use dedicated tool image, not the runtime one
                     )
                     items = download_res.get("items") if isinstance(download_res, dict) else {}
                     aggregated_items.update(items if isinstance(items, dict) else {})

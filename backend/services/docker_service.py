@@ -49,7 +49,10 @@ _SYSTEM_ENV = {
 _LOG_CONFIG = {"max-size": "10m", "max-file": "3"}
 _HARDENING_CAP_DROP = ["ALL"]
 _HARDENING_SECURITY_OPT = ["no-new-privileges"]
-PERMISSION_REPAIR_IMAGE = "ghcr.io/parkervcp/steamcmd:debian"
+# Dedicated image for permission repair (runs as root to chown bind mounts).
+# Any image with bash + find + chown that supports root exec works; we use the same
+# as STEAMCMD_IMAGE for simplicity (pre-installed, reliable).
+PERMISSION_REPAIR_IMAGE = "cm2network/steamcmd:root"
 PERMISSION_REPAIR_CONTAINER_DIR = "/data"
 PERMISSION_REPAIR_CAPS = ["CHOWN", "FOWNER", "DAC_OVERRIDE", "DAC_READ_SEARCH"]
 _CLIENT: Any | None = None
@@ -177,7 +180,7 @@ def _safe_pull_error(exc: BaseException) -> str:
             "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/994; systemctl --user stop docker || true; pkill -u 994 dockerd || true; sleep 2'; "
             "rm -rf /opt/msm/.local/share/docker; "
             "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/994; systemctl --user start docker || { dockerd-rootless-setuptool.sh install --skip-iptables || true; systemctl --user enable --now docker; }'; "
-            "sudo -u msm bash -c 'export DOCKER_HOST=unix:///run/user/994/docker.sock; docker pull ghcr.io/parkervcp/steamcmd:debian; docker pull cm2network/steamcmd:root'; "
+            "sudo -u msm bash -c 'export DOCKER_HOST=unix:///run/user/994/docker.sock; docker pull cm2network/steamcmd:root; docker pull ghcr.io/parkervcp/steamcmd:debian'; "
             "Dann git pull im /opt/msm und Panel neu starten."
         )
 

@@ -767,7 +767,7 @@ def perform_install_with_protection(
     Aufrufbeispiel in Plugins (innerhalb des Background-Threads):
         result = perform_install_with_protection(
             server,
-            lambda: run_steamcmd_install(server_id=..., ..., steamcmd_image=bp.runtime.image),
+            lambda: run_steamcmd_install(server_id=..., ...),
             blueprint=bp
         )
         finish_install(server_id, result)
@@ -859,7 +859,7 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 app_id=app_id,
                 use_authenticated_login=requires_login,
                 platform=platform_str,
-                steamcmd_image=blueprint.runtime.image,
+                # dedicated STEAMCMD_IMAGE for the tool (pre-baked binary), not the game's runtime image
             )
         elif source_type == BlueprintSourceType.HTTP:
             _append_console_log(
