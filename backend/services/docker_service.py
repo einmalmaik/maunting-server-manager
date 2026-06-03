@@ -50,8 +50,27 @@ _LOG_CONFIG = {"max-size": "10m", "max-file": "3"}
 _HARDENING_CAP_DROP = ["ALL"]
 _HARDENING_SECURITY_OPT = ["no-new-privileges"]
 # Dedicated image for permission repair (runs as root to chown bind mounts).
-# Any image with bash + find + chown that supports root exec works; we use the same
-# as STEAMCMD_IMAGE for simplicity (pre-installed, reliable).
+#
+# Purpose of repair_bind_mount_permissions():
+#   Before starting a game container or doing file ops via the panel, we run a
+#   one-shot root container that does:
+#     find /data -xdev -type d -exec chmod a+rwX {} +
+#     ... chown for the container uid:gid (e.g. 1000:1000 for Wine/Pterodactyl images)
+#
+# Why this specific image?
+# - Must support running as root (user="0:0", entrypoint="bash")
+# - Needs bash + find + chown + chmod (the script is a bash -c one-liner)
+# - We reuse the same image as STEAMCMD_IMAGE (cm2network/steamcmd:root) for
+#   simplicity: Steam users already pull it, it's explicitly the :root variant,
+#   reliable for root operations.
+#
+# This is a *utility/tool image*, not a per-game runtime image (those come from
+# the blueprint). It is intentionally a constant (like STEAMCMD_IMAGE) because
+# the repair logic has specific requirements (root exec, certain tools).
+#
+# If you change this, make sure the new image can run the exact script in
+# repair_bind_mount_permissions() as root without permission issues inside the
+# container.
 PERMISSION_REPAIR_IMAGE = "cm2network/steamcmd:root"
 PERMISSION_REPAIR_CONTAINER_DIR = "/data"
 PERMISSION_REPAIR_CAPS = ["CHOWN", "FOWNER", "DAC_OVERRIDE", "DAC_READ_SEARCH"]
