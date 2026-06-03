@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "Gerenciador de servidores assustadores"
   },
@@ -179,10 +179,6 @@
     "consolePlaceholder": "Digite o comando…",
     "consoleSend": "Enviar",
     "consoleInputFailed": "Não foi possível entregar a entrada.",
-    "consoleConnecting": "Conectando…",
-    "consoleReconnecting": "Conexão perdida — reconectando…",
-    "consoleConnectionFailed": "Falha na conexão. Recarregue a página.",
-    "consoleConnectionRejected": "Conexão rejeitada (autenticação/origem/permissões ausentes).",
     "gameLogs": "Registros de jogos",
     "install": "Instalar",
     "reinstall": "Reinstale",
@@ -748,7 +744,13 @@
     "viewRelease": "Ver lançamento",
     "manualUpdateCommand": "Atualização no servidor:"
   },
-  "common": {
+"connection": {
+    "connecting": "Conectando…",
+    "reconnecting": "Conexão perdida — reconectando…",
+    "failed": "Falha na conexão. Recarregue a página.",
+    "rejected": "Conexão rejeitada (autenticação/origem/permissões ausentes)."
+  },
+    "common": {
     "unlimited": "ilimitado",
     "save": "Salvar",
     "cancel": "Cancelar",

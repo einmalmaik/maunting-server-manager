@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "মাউন্টিং সার্ভার ম্যানেজার"
   },
@@ -179,10 +179,6 @@
     "consolePlaceholder": "কমান্ড টাইপ করুন...",
     "consoleSend": "পাঠান",
     "consoleInputFailed": "ইনপুট বিতরণ করা যায়নি.",
-    "consoleConnecting": "সংযুক্ত হচ্ছে…",
-    "consoleReconnecting": "সংযোগ হারানো হয়েছে — পুনঃ সংযোগ হচ্ছে…",
-    "consoleConnectionFailed": "সংযোগ ব্যর্থ। পৃষ্ঠা পুনরায় লোড করুন।",
-    "consoleConnectionRejected": "সংযোগ প্রত্যাখ্যাত (প্রমাণীকরণ/উৎস/অনুমতি অনুপস্থিত)।",
     "gameLogs": "খেলা লগ",
     "install": "ইনস্টল করুন",
     "reinstall": "পুনরায় ইনস্টল করুন",
@@ -748,7 +744,13 @@
     "viewRelease": "রিলিজ দেখুন",
     "manualUpdateCommand": "সার্ভারে আপডেট:"
   },
-  "common": {
+"connection": {
+    "connecting": "সংযুক্ত হচ্ছে…",
+    "reconnecting": "সংযোগ হারানো হয়েছে — পুনঃ সংযোগ হচ্ছে…",
+    "failed": "সংযোগ ব্যর্থ। পৃষ্ঠা পুনরায় লোড করুন।",
+    "rejected": "সংযোগ প্রত্যাখ্যাত (প্রমাণীকরণ/উৎস/অনুমতি অনুপস্থিত)।"
+  },
+    "common": {
     "unlimited": "সীমাহীন",
     "save": "সংরক্ষণ করুন",
     "cancel": "বাতিল করুন",

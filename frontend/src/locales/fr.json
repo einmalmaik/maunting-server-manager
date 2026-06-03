@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "Gestionnaire de serveur Maunting"
   },
@@ -179,10 +179,6 @@
     "consolePlaceholder": "Tapez la commande…",
     "consoleSend": "Envoyer",
     "consoleInputFailed": "L'entrée n'a pas pu être livrée.",
-    "consoleConnecting": "Connexion…",
-    "consoleReconnecting": "Connexion perdue — reconnexion…",
-    "consoleConnectionFailed": "Échec de la connexion. Rechargez la page.",
-    "consoleConnectionRejected": "Connexion refusée (auth/origine/autorisations manquantes).",
     "gameLogs": "Journaux de jeu",
     "install": "Installer",
     "reinstall": "Réinstaller",
@@ -748,7 +744,13 @@
     "viewRelease": "Voir la version",
     "manualUpdateCommand": "Mise à jour sur le serveur :"
   },
-  "common": {
+"connection": {
+    "connecting": "Connexion…",
+    "reconnecting": "Connexion perdue — reconnexion…",
+    "failed": "Échec de la connexion. Rechargez la page.",
+    "rejected": "Connexion refusée (auth/origine/autorisations manquantes)."
+  },
+    "common": {
     "unlimited": "illimité",
     "save": "Enregistrer",
     "cancel": "Annuler",

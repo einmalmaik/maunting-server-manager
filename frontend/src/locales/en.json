@@ -194,10 +194,6 @@
     "consolePlaceholder": "Type command…",
     "consoleSend": "Send",
     "consoleInputFailed": "Input could not be delivered.",
-    "consoleConnecting": "Connecting…",
-    "consoleReconnecting": "Connection lost — reconnecting…",
-    "consoleConnectionFailed": "Connection failed. Please reload the page.",
-    "consoleConnectionRejected": "Connection rejected (auth/origin/missing permissions).",
     "gameLogs": "Game Logs",
     "install": "Install",
     "reinstall": "Reinstall",
@@ -734,6 +730,12 @@
     "current": "Current",
     "viewRelease": "View release",
     "manualUpdateCommand": "Update on server:"
+  },
+  "connection": {
+    "connecting": "Connecting…",
+    "reconnecting": "Connection lost — reconnecting…",
+    "failed": "Connection failed. Please reload the page.",
+    "rejected": "Connection rejected (auth/origin/missing permissions)."
   },
   "common": {
     "unlimited": "unlimited",

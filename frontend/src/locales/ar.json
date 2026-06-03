@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "مدير خادم ماونتينج"
   },
@@ -179,10 +179,6 @@
     "consolePlaceholder": "اكتب الأمر…",
     "consoleSend": "أرسل",
     "consoleInputFailed": "لا يمكن تسليم الإدخال.",
-    "consoleConnecting": "جارٍ الاتصال…",
-    "consoleReconnecting": "فُقد الاتصال — إعادة الاتصال…",
-    "consoleConnectionFailed": "فشل الاتصال. يرجى إعادة تحميل الصفحة.",
-    "consoleConnectionRejected": "رُفض الاتصال (المصادقة/الأصل/الأذونات مفقودة).",
     "gameLogs": "سجلات اللعبة",
     "install": "تثبيت",
     "reinstall": "أعد التثبيت",
@@ -748,7 +744,13 @@
     "viewRelease": "عرض الإصدار",
     "manualUpdateCommand": "التحديث على الخادم:"
   },
-  "common": {
+"connection": {
+    "connecting": "جارٍ الاتصال…",
+    "reconnecting": "فُقد الاتصال — إعادة الاتصال…",
+    "failed": "فشل الاتصال. يرجى إعادة تحميل الصفحة.",
+    "rejected": "رُفض الاتصال (المصادقة/الأصل/الأذونات مفقودة)."
+  },
+    "common": {
     "unlimited": "غير محدود",
     "save": "حفظ",
     "cancel": "إلغاء",

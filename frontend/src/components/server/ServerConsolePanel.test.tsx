@@ -4,57 +4,8 @@ import { displayConsoleLine, ServerConsolePanel } from './ServerConsolePanel'
 import i18n from '@/i18n'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useToastStore } from '@/stores/toastStore'
+import { FakeWebSocket, installFakeWebSocket } from '@/test/fakeWebSocket'
 import type { MePermissions } from '@/types/permissions'
-
-/**
- * jsdom liefert kein natives WebSocket. Wir stub'en eine minimale Klasse, die
- * den Konstruktor und Lifecycle protokolliert. Tests koennen ueber
- * FakeWebSocket.instances[i] auf Instanzen zugreifen und mit .simulateMessage
- * Server-Frames simulieren oder .simulateClose fuer Reconnect-Tests.
- */
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  static CONNECTING = 0
-  static OPEN = 1
-  static CLOSING = 2
-  static CLOSED = 3
-
-  url: string
-  readyState: number = FakeWebSocket.CONNECTING
-  sent: string[] = []
-  onopen: ((ev: Event) => void) | null = null
-  onmessage: ((ev: MessageEvent) => void) | null = null
-  onerror: ((ev: Event) => void) | null = null
-  onclose: ((ev: CloseEvent) => void) | null = null
-
-  constructor(url: string) {
-    this.url = url
-    FakeWebSocket.instances.push(this)
-  }
-
-  send(data: string) {
-    this.sent.push(data)
-  }
-
-  close(code?: number) {
-    if (this.readyState === FakeWebSocket.CLOSED) return
-    this.readyState = FakeWebSocket.CLOSED
-    this.onclose?.({ code: code ?? 1000, reason: '' } as CloseEvent)
-  }
-
-  // Test-Helpers
-  simulateOpen() {
-    this.readyState = FakeWebSocket.OPEN
-    this.onopen?.({} as Event)
-  }
-  simulateMessage(data: unknown) {
-    this.onmessage?.({ data: typeof data === 'string' ? data : JSON.stringify(data) } as MessageEvent)
-  }
-  simulateClose(code = 1006) {
-    this.readyState = FakeWebSocket.CLOSED
-    this.onclose?.({ code, reason: '' } as CloseEvent)
-  }
-}
 
 const ownerMe: MePermissions = {
   is_owner: true,
@@ -79,7 +30,8 @@ function setMe(me: MePermissions | null) {
 }
 
 describe('ServerConsolePanel', () => {
-  let originalWebSocket: typeof WebSocket | undefined
+  let restoreWebSocket: () => void
+  let wsInstances: FakeWebSocket[]
   let fetchSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
@@ -87,9 +39,9 @@ describe('ServerConsolePanel', () => {
     setMe(null)
     useToastStore.setState({ toasts: [] })
     localStorage.clear()
-    FakeWebSocket.instances = []
-    originalWebSocket = (globalThis as { WebSocket?: typeof WebSocket }).WebSocket
-    ;(globalThis as { WebSocket?: unknown }).WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    const fake = installFakeWebSocket()
+    restoreWebSocket = fake.restore
+    wsInstances = fake.instances
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -106,15 +58,15 @@ describe('ServerConsolePanel', () => {
   })
 
   afterEach(() => {
-    ;(globalThis as { WebSocket?: unknown }).WebSocket = originalWebSocket
+    restoreWebSocket()
     fetchSpy.mockRestore()
   })
 
   it('opens a WebSocket against the WS endpoint', () => {
     setMe(ownerMe)
     render(<ServerConsolePanel serverId={42} />)
-    expect(FakeWebSocket.instances).toHaveLength(1)
-    const url = FakeWebSocket.instances[0].url
+    expect(wsInstances).toHaveLength(1)
+    const url = wsInstances[0].url
     expect(url).toMatch(/\/api\/servers\/42\/console\/ws$/)
   })
 
@@ -159,7 +111,7 @@ describe('ServerConsolePanel', () => {
   it('renders incoming WS log lines', async () => {
     setMe(ownerMe)
     render(<ServerConsolePanel serverId={42} />)
-    const ws = FakeWebSocket.instances[0]
+    const ws = wsInstances[0]
     act(() => { ws.simulateOpen() })
     act(() => {
       ws.simulateMessage({ text: 'Starting server...', source: 'docker', id: 1 })
@@ -176,7 +128,7 @@ describe('ServerConsolePanel', () => {
   it('renders http links from JSON console frames safely', async () => {
     setMe(ownerMe)
     render(<ServerConsolePanel serverId={42} />)
-    const ws = FakeWebSocket.instances[0]
+    const ws = wsInstances[0]
     ws.simulateOpen()
     ws.simulateMessage({
       text: 'Open https://example.invalid/auth.',
@@ -196,7 +148,7 @@ describe('ServerConsolePanel', () => {
   it('copies visible console lines', async () => {
     setMe(ownerMe)
     render(<ServerConsolePanel serverId={42} />)
-    const ws = FakeWebSocket.instances[0]
+    const ws = wsInstances[0]
     ws.simulateOpen()
     ws.simulateMessage({ text: 'first line', source: 'docker', id: 1 })
     ws.simulateMessage({ text: '[MSM] Container msm-srv-42 gestartet', source: 'msm', id: 2 })
@@ -221,7 +173,7 @@ describe('ServerConsolePanel', () => {
   it('renders color classes for ERROR/player/ANSI lines via WS', async () => {
     setMe(ownerMe)
     const { container } = render(<ServerConsolePanel serverId={42} />)
-    const ws = FakeWebSocket.instances[0]
+    const ws = wsInstances[0]
     ws.simulateOpen()
     ws.simulateMessage({ text: 'FATAL crash', source: 'docker', id: 1 })
     ws.simulateMessage({ text: 'Player bar joined the game', source: 'docker', id: 2 })
@@ -237,7 +189,7 @@ describe('ServerConsolePanel', () => {
   it('caps console logs at 2000 lines (invariant: append >2000 keeps len <=2000)', async () => {
     setMe(ownerMe)
     const { container } = render(<ServerConsolePanel serverId={42} />)
-    const ws = FakeWebSocket.instances[0]
+    const ws = wsInstances[0]
     ws.simulateOpen()
     for (let i = 0; i < 2100; i++) {
       ws.simulateMessage({ text: `log line ${i}`, source: 'docker', id: i + 1 })
@@ -254,7 +206,7 @@ describe('ServerConsolePanel', () => {
     try {
       setMe(ownerMe)
       render(<ServerConsolePanel serverId={42} />)
-      const ws1 = FakeWebSocket.instances[0]
+      const ws1 = wsInstances[0]
       ws1.simulateOpen()
       ws1.simulateMessage({ text: 'first', source: 'docker', id: 5 })
       ws1.simulateMessage({ text: 'second', source: 'docker', id: 6 })
@@ -266,7 +218,7 @@ describe('ServerConsolePanel', () => {
       })
 
       // Zweite WS-Instanz muss existieren und last_id=6 enthalten.
-      const ws2 = FakeWebSocket.instances[1]
+      const ws2 = wsInstances[1]
       expect(ws2).toBeDefined()
       expect(ws2.url).toContain('last_id=6')
     } finally {
@@ -277,7 +229,8 @@ describe('ServerConsolePanel', () => {
   it('does not include last_id query param on first connect', () => {
     setMe(ownerMe)
     render(<ServerConsolePanel serverId={42} />)
-    const ws = FakeWebSocket.instances[0]
+    const ws = wsInstances[0]
     expect(ws.url).not.toContain('last_id')
   })
 })
+

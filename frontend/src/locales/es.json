@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "Administrador del servidor de montaje"
   },
@@ -179,10 +179,6 @@
     "consolePlaceholder": "Escribe el comando…",
     "consoleSend": "enviar",
     "consoleInputFailed": "No se pudo entregar la entrada.",
-    "consoleConnecting": "Conectando…",
-    "consoleReconnecting": "Conexión perdida — reconectando…",
-    "consoleConnectionFailed": "Conexión fallida. Recarga la página.",
-    "consoleConnectionRejected": "Conexión rechazada (autenticación/origen/permisos faltantes).",
     "gameLogs": "Registros de juego",
     "install": "Instalar",
     "reinstall": "Reinstalar",
@@ -748,7 +744,13 @@
     "viewRelease": "Ver comunicado",
     "manualUpdateCommand": "Actualización en el servidor:"
   },
-  "common": {
+"connection": {
+    "connecting": "Conectando…",
+    "reconnecting": "Conexión perdida — reconectando…",
+    "failed": "Conexión fallida. Recarga la página.",
+    "rejected": "Conexión rechazada (autenticación/origen/permisos faltantes)."
+  },
+    "common": {
     "unlimited": "ilimitado",
     "save": "Guardar",
     "cancel": "Cancelar",

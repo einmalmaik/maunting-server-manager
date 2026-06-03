@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Check, Clock, Copy, Search, Send, Terminal } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { useWebSocket } from '@/hooks/useWebSocket'
 import { toast } from '@/stores/toastStore'
 import { type PanelTimeFormat } from '@/utils/timeFormat'
 
@@ -211,149 +212,79 @@ export function ServerConsolePanel({ serverId }: Props) {
     bufferRef.current = []
     lastServerIdRef.current = null
     setLogs([])
-    let cancelled = false
-    let ws: WebSocket | null = null
-    let reconnectTimer: number | null = null
-    let pingTimer: number | null = null
-    let reconnectAttempt = 0
+  }, [serverId])
 
-    const clearTimers = () => {
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer)
-        reconnectTimer = null
+  // WebSocket-Lifecycle (Connect, Reconnect mit Backoff, Heartbeat, Status,
+  // 1008-Reject, Max-Attempts) liegt komplett im useWebSocket-Hook. Was hier
+  // bleibt, ist Console-spezifisch: Buffer/Flush + Log-Parsing + Replay-Resume
+  // via last_id (in buildUrl injiziert).
+  //
+  // lastServerIdRef wird BEWUStT synchron in onMessage aktualisiert (nicht
+  // im 50ms-flushBuffer), damit ein Reconnect-URL-Build IMMER den aktuellen
+  // Stand hat -- auch wenn direkt nach einem Frame disconnectet wird (z. B.
+  // im Test unter Fake-Timern, oder bei sehr schnellen Disconnects).
+  // Das eigentliche Log-Rendering bleibt im flushBuffer (Batching fuer
+  // React-Renders).
+  const onRawMessage = (raw: string) => {
+    try {
+      const frame = parseConsoleFrame(raw)
+      if (typeof frame.id === 'number') {
+        lastServerIdRef.current = frame.id
+        nextSeqRef.current = Math.max(nextSeqRef.current, frame.id)
       }
-      if (pingTimer !== null) {
-        window.clearInterval(pingTimer)
-        pingTimer = null
-      }
+    } catch {
+      // Parse-Fehler werden im flushBuffer nochmal versucht; hier nur der
+      // last_id-Read, kein Batching noetig.
     }
+    bufferRef.current.push(raw)
+  }
 
-    // Max-Attempts: nach Ueberschreiten wird der Loop abgebrochen und der
-    // User ueber einen einmaligen Toast informiert. Ohne Cap wuerde der
-    // Client bei dauerhaft abgelehnter Verbindung (z. B. falscher Origin)
-    // alle 10s einen neuen WS-Handshake produzieren.
-    const MAX_RECONNECT_ATTEMPTS = 10
-
-    const flushBuffer = () => {
-      if (bufferRef.current.length === 0) return
-      const toFlush = bufferRef.current
-      bufferRef.current = []
-      if (!autoscrollRef.current) {
-        setHasNewLines(true)
-      }
-      setLogs((prev) => {
-        const mapped = toFlush.map((item) => {
-          try {
-            const parsed = JSON.parse(item) as { marker: number; raw: string; id?: number }
-            const frame = parseConsoleFrame(parsed.raw)
-            // Server-uebermittelte ID uebernehmen wenn vorhanden (WS liefert sie).
-            const marker = typeof frame.id === 'number' ? frame.id : parsed.marker
-            const { id: _id, ...rest } = frame
-            return { marker, ...rest }
-          } catch {
-            nextSeqRef.current += 1
-            return { marker: nextSeqRef.current, ...parseConsoleFrame(item) }
-          }
-        })
-        const next = [...prev, ...mapped]
-        return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
+  const flushBuffer = () => {
+    if (bufferRef.current.length === 0) return
+    const toFlush = bufferRef.current
+    bufferRef.current = []
+    if (!autoscrollRef.current) {
+      setHasNewLines(true)
+    }
+    setLogs((prev) => {
+      const mapped = toFlush.map((item) => {
+        try {
+          const frame = parseConsoleFrame(item)
+          const { id: _id, ...rest } = frame
+          const marker = typeof _id === 'number' ? _id : nextSeqRef.current + 1
+          return { marker, ...rest }
+        } catch {
+          nextSeqRef.current += 1
+          return { marker: nextSeqRef.current, ...parseConsoleFrame(item) }
+        }
       })
-    }
+      const next = [...prev, ...mapped]
+      return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
+    })
+  }
 
-    const scheduleReconnect = () => {
-      if (cancelled) return
-      if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
-        // Dauerhaft fehlgeschlagen: Loop abbrechen, einmalig toasten.
-        setConnStatus('failed')
-        toast.error(t('servers.consoleConnectionFailed'))
-        return
-      }
-      setConnStatus('reconnecting')
-      if (reconnectAttempt === 0) {
-        // Beim allerersten Reconnect (nicht jeder weitere) einen Hinweis-Toast.
-        toast.error(t('servers.consoleReconnecting'))
-      }
-      // Backoff: 1s, 2s, 5s, 10s (cap).
-      const delays = [1000, 2000, 5000, 10000]
-      const delay = delays[Math.min(reconnectAttempt, delays.length - 1)]
-      reconnectAttempt += 1
-      reconnectTimer = window.setTimeout(connect, delay)
-    }
-
-    const connect = () => {
-      if (cancelled) return
-      setConnStatus('connecting')
-      // Reconnect-Resume: letzte empfangene ID mitschicken, damit der Server
-      // nur Zeilen mit id > last_id nochmal sendet (statt komplettem Backlog).
+  useWebSocket({
+    buildUrl: () => {
       const lastId = lastServerIdRef.current
-      const url = lastId !== null
+      return lastId !== null
         ? `/api/servers/${serverId}/console/ws?last_id=${lastId}`
         : `/api/servers/${serverId}/console/ws`
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      ws = new WebSocket(`${proto}//${window.location.host}${url}`)
+    },
+    onMessage: onRawMessage,
+    onStatusChange: setConnStatus,
+    onError: (kind) => {
+      // Hook hat 'connecting'/'live'/'reconnecting'/'failed' schon via
+      // onStatusChange propagiert. Hier nur User-sichtbares Feedback.
+      if (kind === 'rejected') toast.error(t('connection.rejected'))
+      else if (kind === 'failed') toast.error(t('connection.failed'))
+      else if (kind === 'reconnecting') toast.error(t('connection.reconnecting'))
+    },
+    heartbeat: { payload: JSON.stringify({ action: 'ping' }) },
+  })
 
-      ws.onopen = () => {
-        reconnectAttempt = 0
-        setConnStatus('live')
-        // 25s-Ping-Heartbeat haelt die Verbindung in Background-Tabs wach
-        // (Browser schliessen sonst inaktive WS nach 60s).
-        if (pingTimer !== null) window.clearInterval(pingTimer)
-        pingTimer = window.setInterval(() => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            try { ws.send(JSON.stringify({ action: 'ping' })) } catch { /* ignore */ }
-          }
-        }, 25_000)
-      }
-
-      ws.onmessage = (ev) => {
-        const raw = typeof ev.data === 'string' ? ev.data : ''
-        if (!raw) return
-        try {
-          const frame = parseConsoleFrame(raw)
-          if (typeof frame.id === 'number') {
-            lastServerIdRef.current = frame.id
-            nextSeqRef.current = Math.max(nextSeqRef.current, frame.id)
-          }
-          bufferRef.current.push(JSON.stringify({ marker: frame.id ?? nextSeqRef.current + 1, raw }))
-        } catch {
-          bufferRef.current.push(raw)
-        }
-      }
-
-      ws.onerror = () => {
-        // Browser reconnected automatisch bei transienten Fehlern; bei hartem
-        // Disconnect triggert onclose direkt. Beides ist OK.
-      }
-
-      ws.onclose = (ev) => {
-        if (pingTimer !== null) {
-          window.clearInterval(pingTimer)
-          pingTimer = null
-        }
-        if (cancelled) return
-        // 1008 = policy violation (z. B. Origin nicht erlaubt, Auth fehlt).
-        // In dem Fall ist Reconnect aussichtslos, direkt failed melden.
-        if (ev.code === 1008) {
-          setConnStatus('failed')
-          toast.error(t('servers.consoleConnectionRejected'))
-          return
-        }
-        scheduleReconnect()
-      }
-    }
-
+  useEffect(() => {
     const flushInterval = setInterval(flushBuffer, 50)
-    connect()
-
-    return () => {
-      cancelled = true
-      clearInterval(flushInterval)
-      clearTimers()
-      if (ws) {
-        ws.onclose = null
-        try { ws.close() } catch { /* ignore */ }
-      }
-    }
+    return () => clearInterval(flushInterval)
   }, [serverId])
 
   const filteredLogs = useMemo(() => {

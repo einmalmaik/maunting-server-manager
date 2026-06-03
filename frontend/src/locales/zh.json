@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "安装服务器管理器"
   },
@@ -179,10 +179,6 @@
     "consolePlaceholder": "键入命令...",
     "consoleSend": "发送",
     "consoleInputFailed": "无法传送输入。",
-    "consoleConnecting": "正在连接…",
-    "consoleReconnecting": "连接已断开 — 正在重新连接…",
-    "consoleConnectionFailed": "连接失败。请重新加载页面。",
-    "consoleConnectionRejected": "连接被拒绝（身份验证/来源/权限缺失）。",
     "gameLogs": "游戏日志",
     "install": "安装",
     "reinstall": "重新安装",
@@ -748,7 +744,13 @@
     "viewRelease": "查看版本",
     "manualUpdateCommand": "服务器上的更新："
   },
-  "common": {
+"connection": {
+    "connecting": "正在连接…",
+    "reconnecting": "连接已断开 — 正在重新连接…",
+    "failed": "连接失败。请重新加载页面。",
+    "rejected": "连接被拒绝（身份验证/来源/权限缺失）。"
+  },
+    "common": {
     "unlimited": "无限",
     "save": "保存",
     "cancel": "取消",

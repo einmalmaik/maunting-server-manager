@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "सर्वर मैनेजर स्थापित करना"
   },
@@ -179,10 +179,6 @@
     "consolePlaceholder": "कमांड टाइप करें...",
     "consoleSend": "भेजें",
     "consoleInputFailed": "इनपुट डिलीवर नहीं किया जा सका.",
-    "consoleConnecting": "कनेक्ट हो रहा है…",
-    "consoleReconnecting": "कनेक्शन टूट गया — पुनः कनेक्ट हो रहा है…",
-    "consoleConnectionFailed": "कनेक्शन विफल। कृपया पृष्ठ पुनः लोड करें।",
-    "consoleConnectionRejected": "कनेक्शन अस्वीकृत (प्रमाणीकरण/उत्पत्ति/अनुमतियाँ अनुपलब्ध)।",
     "gameLogs": "गेम लॉग्स",
     "install": "स्थापित करें",
     "reinstall": "पुनः स्थापित करें",
@@ -748,7 +744,13 @@
     "viewRelease": "रिलीज देखें",
     "manualUpdateCommand": "सर्वर पर अपडेट करें:"
   },
-  "common": {
+"connection": {
+    "connecting": "कनेक्ट हो रहा है…",
+    "reconnecting": "कनेक्शन टूट गया — पुनः कनेक्ट हो रहा है…",
+    "failed": "कनेक्शन विफल। कृपया पृष्ठ पुनः लोड करें।",
+    "rejected": "कनेक्शन अस्वीकृत (प्रमाणीकरण/उत्पत्ति/अनुमतियाँ अनुपलब्ध)।"
+  },
+    "common": {
     "unlimited": "असीमित",
     "save": "सहेजें",
     "cancel": "रद्द करें",

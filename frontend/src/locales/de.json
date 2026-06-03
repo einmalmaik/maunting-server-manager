@@ -194,10 +194,6 @@
     "consolePlaceholder": "Befehl eingeben…",
     "consoleSend": "Senden",
     "consoleInputFailed": "Eingabe konnte nicht zugestellt werden.",
-    "consoleConnecting": "Verbinde…",
-    "consoleReconnecting": "Verbindung verloren — verbinde neu…",
-    "consoleConnectionFailed": "Verbindung fehlgeschlagen. Bitte Seite neu laden.",
-    "consoleConnectionRejected": "Verbindung abgelehnt (Auth/Origin/fehlende Rechte).",
     "gameLogs": "Game-Logs",
     "install": "Installieren",
     "reinstall": "Neu installieren",
@@ -734,6 +730,12 @@
     "current": "Aktuell",
     "viewRelease": "Release ansehen",
     "manualUpdateCommand": "Update auf dem Server:"
+  },
+  "connection": {
+    "connecting": "Verbinde…",
+    "reconnecting": "Verbindung verloren — verbinde neu…",
+    "failed": "Verbindung fehlgeschlagen. Bitte Seite neu laden.",
+    "rejected": "Verbindung abgelehnt (Auth/Origin/fehlende Rechte)."
   },
   "common": {
     "unlimited": "unbegrenzt",

@@ -1,4 +1,4 @@
-{
+﻿{
   "panel": {
     "title": "Manajer Server Maunting"
   },
@@ -179,10 +179,6 @@
     "consolePlaceholder": "Ketik perintah…",
     "consoleSend": "Kirim",
     "consoleInputFailed": "Masukan tidak dapat dikirimkan.",
-    "consoleConnecting": "Menghubungkan…",
-    "consoleReconnecting": "Koneksi terputus — menyambungkan ulang…",
-    "consoleConnectionFailed": "Koneksi gagal. Silakan muat ulang halaman.",
-    "consoleConnectionRejected": "Koneksi ditolak (autentikasi/asal/izin tidak ada).",
     "gameLogs": "Log Permainan",
     "install": "Instal",
     "reinstall": "Instal ulang",
@@ -748,7 +744,13 @@
     "viewRelease": "Lihat rilis",
     "manualUpdateCommand": "Pembaruan di server:"
   },
-  "common": {
+"connection": {
+    "connecting": "Menghubungkan…",
+    "reconnecting": "Koneksi terputus — menyambungkan ulang…",
+    "failed": "Koneksi gagal. Silakan muat ulang halaman.",
+    "rejected": "Koneksi ditolak (autentikasi/asal/izin tidak ada)."
+  },
+    "common": {
     "unlimited": "tidak terbatas",
     "save": "Simpan",
     "cancel": "Batalkan",
