@@ -1,8 +1,10 @@
 import asyncio
 import logging
 import threading
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from dataclasses import dataclass
+from typing import AsyncIterator
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -24,8 +26,14 @@ from services.install_update_lock_service import (
 
 logger = logging.getLogger(__name__)
 
-_LIFECYCLE_LOCKS: dict[int, asyncio.Lock] = {}
-_THREAD_LOCKS: dict[int, threading.Lock] = {}
+# Per-Server Serialisierungs-Lock. threading.Lock (nicht reentrant) damit
+# ein Lifecycle-Job sich nicht selbst nochmal greifen kann. Wird sowohl
+# aus Worker-Threads (Lifecycle-Worker) als auch aus async Pfaden
+# (Scheduler-Auto-Restart, Backup-Stop-Hook) via ``acquire_lock_async``
+# verwendet -- so gibt es pro Server NUR EIN Lock, das beide Pfade
+# serialisiert.
+_LIFECYCLE_LOCKS: dict[int, threading.Lock] = {}
+_LIFECYCLE_LOCKS_GUARD = threading.Lock()
 _ACTIVE_JOBS: set[int] = set()
 _ACTIVE_JOBS_LOCK = threading.Lock()
 
@@ -44,26 +52,39 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def get_server_lifecycle_lock(server_id: int) -> asyncio.Lock:
-    """Per-Server Lock für ALLE destruktiven Lifecycle-Operationen (start/stop/restart).
+def get_server_lifecycle_lock(server_id: int) -> threading.Lock:
+    """Per-Server Lock fuer ALLE destruktiven Lifecycle-Operationen.
 
-    Einheitliche Serialisierung verhindert TOCTOU-Races auf Firewall (UFW close/open)
-    und iptables (revoke/accept) sowie Docker-Container-Lifecycle.
-    Wird von restart_server_with_updates (manuell + Scheduler) UND start/stop in Routern genutzt.
-    KISS: eine Quelle, keine Manager-Klasse, keine neuen Abstraktionen.
+    Wird sowohl aus Worker-Threads (via ``with lock:``) als auch aus async
+    Pfaden (via ``async with acquire_lock_async(lock):``) verwendet. Ein
+    einzelner threading.Lock pro Server serialisiert manuelle Starts,
+    Auto-Restarts und Backup-Container-Stops miteinander -- vorher gab
+    es zwei Lock-Typen (asyncio.Lock + threading.Lock) was parallele
+    Pfade nicht serialisierte.
     """
-    return _LIFECYCLE_LOCKS.setdefault(server_id, asyncio.Lock())
+    with _LIFECYCLE_LOCKS_GUARD:
+        lock = _LIFECYCLE_LOCKS.get(server_id)
+        if lock is None:
+            lock = threading.Lock()
+            _LIFECYCLE_LOCKS[server_id] = lock
+        return lock
 
 
-def get_server_lifecycle_thread_lock(server_id: int) -> threading.Lock:
-    """Thread-Lock fuer Background-Lifecycle-Jobs.
+@asynccontextmanager
+async def acquire_lock_async(lock: threading.Lock) -> AsyncIterator[None]:
+    """Async-Bruecke fuer ``threading.Lock``.
 
-    Die alten asyncio-Locks schuetzen nur Request-/Scheduler-Coroutines. Da
-    manuelle Lifecycle-Aktionen jetzt bewusst ausserhalb des Request-Pfads in
-    Threads laufen, braucht der Worker einen passenden Lock-Typ.
+    ``async with acquire_lock_async(lock):`` blockiert den awaiter
+    asynchron, ohne den Event-Loop zu blockieren, und haelt den Lock bis
+    zum Verlassen des Blocks. Ersetzt ``async with lock:`` (das auf
+    asyncio.Lock zugeschnitten ist und mit threading.Lock nicht
+    funktioniert).
     """
-    with _ACTIVE_JOBS_LOCK:
-        return _THREAD_LOCKS.setdefault(server_id, threading.Lock())
+    await asyncio.to_thread(lock.acquire)
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def is_lifecycle_job_active(server_id: int) -> bool:
@@ -140,7 +161,13 @@ def queue_lifecycle_operation(
     if operation not in {"start", "stop", "restart", "kill"}:
         raise ValueError(f"Unbekannte Lifecycle-Operation: {operation}")
     if operation == "kill":
-        _mark_job_done(server.id)  # emergency override: allow kill to interrupt any pending start/restart/stop as last resort
+        # Kill laeuft nach dem aktuell laufenden Lifecycle-Job (threading.Lock ist
+        # nicht-reentrant und wird vom aktiven Job gehalten). Damit ist kill
+        # kein echtes Interrupt, sondern ein "skip the queue" -- danach laeuft
+        # der Kill-Worker sobald der laufende Job fertig ist. Fuer ein hartes
+        # Interrupt waere eine separate Force-Remove-Pfad noetig (ausserhalb des
+        # per-server-Locks); aktuell nicht implementiert.
+        _mark_job_done(server.id)
     if not _mark_job_active(server.id):
         raise HTTPException(
             status_code=409,
@@ -185,7 +212,7 @@ def _run_lifecycle_job(
     notification: LifecycleNotification | None = None,
 ) -> None:
     db = SessionLocal()
-    lock = get_server_lifecycle_thread_lock(server_id)
+    lock = get_server_lifecycle_lock(server_id)
     try:
         with lock:
             server = db.query(Server).filter(Server.id == server_id).first()
@@ -232,17 +259,26 @@ def _send_lifecycle_notification(
         return
     if not EmailService.is_configured():
         return
+    # EmailService ist async (aiosmtplib/httpx). Wir laufen in einem Daemon-
+    # Worker-Thread ohne Zugriff auf die FastAPI-Event-Loop, also koennen wir
+    # nicht call_soon_threadsafe nutzen. Pragmatische Loesung: pro E-Mail eine
+    # frische Event-Loop, sauber geschlossen (kein Leak). Overhead ist
+    # akzeptabel, weil Lifecycle-E-Mails selten sind (eine pro Start/Stop).
     try:
         import asyncio as _asyncio
 
-        _asyncio.run(
-            EmailService.send_server_status_notification(
-                notification.email,
-                notification.username,
-                server_name,
-                status_text,
+        loop = _asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(
+                EmailService.send_server_status_notification(
+                    notification.email,
+                    notification.username,
+                    server_name,
+                    status_text,
+                )
             )
-        )
+        finally:
+            loop.close()
     except Exception:
         logger.warning("Lifecycle-E-Mail konnte nicht gesendet werden (details redacted for security)")
 
@@ -537,7 +573,7 @@ def _restart_server_sync(server_id: int) -> dict:
         if not plugin:
             raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
 
-        lock = get_server_lifecycle_thread_lock(server_id)
+        lock = get_server_lifecycle_lock(server_id)
         with lock:
             _set_status(db, server, "restarting", None)
             try:

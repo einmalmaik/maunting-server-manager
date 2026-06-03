@@ -175,7 +175,13 @@ def mark_mod_failed(server_id: int, workshop_id: str, error: str | None = None) 
         mod.install_status = INSTALL_ERROR
         mod.install_eta_seconds = None
         mod.install_completed_at = _now()
-        mod.install_error = (error or "Installation fehlgeschlagen")[:500]
+        # Sanitize: error kann aus SteamCMD/Docker stammen und Newlines oder
+        # Steuerzeichen enthalten. Werden in der UI als Text gerendert (nicht
+        # als HTML), aber Newlines fuehren zu kaputten Zeilenumbruechen im
+        # Mod-Status-Bereich. Whitespace wird normalisiert, 500-Zeichen-Limit
+        # bleibt.
+        raw = (error or "Installation fehlgeschlagen").replace("\r", "").replace("\n", " ")
+        mod.install_error = " ".join(raw.split())[:500]
         mod.update_status = UPDATE_FAILED
         mod.update_reason = "install_failed"
         mod.update_checked_at = _now()

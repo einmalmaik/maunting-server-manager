@@ -397,7 +397,12 @@ class TestKillServer:
             # no secrets/paths in response (data minimization)
             assert "container" not in str(response.json()).lower()
 
-    def test_kill_error_on_docker_failure_no_db_mutation(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session):
+    def test_kill_overrides_active_job(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session):
+        """Kill hat einen 'emergency override': markiert den aktiven Job als
+        done, damit ein zweiter Kill nicht in der 409-Active-Job-Falle stecken
+        bleibt. Der erste Kill wird gequeued, der zweite ueberschreibt
+        ebenfalls (override-Verhalten).
+        """
         test_server.status = "running"
         db.commit()
         with patch("services.server_lifecycle_service._start_lifecycle_thread"):
@@ -407,12 +412,15 @@ class TestKillServer:
                 headers={"X-CSRF-Token": csrf_token},
             )
             assert response.status_code == 200
+            # Zweiter Kill: kein 409 weil der erste Kill-Active-Job durch
+            # den Override markiert wurde. Der zweite Kill wird ebenfalls
+            # gequeued und laeuft NACH dem ersten (kein echtes Interrupt).
             second = client.post(
                 f"/api/servers/{test_server.id}/kill",
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
-            assert second.status_code == 409
+            assert second.status_code == 200
             db.refresh(test_server)
             assert test_server.status == "queued"
 
@@ -462,9 +470,11 @@ from services.server_lifecycle_service import get_server_lifecycle_lock
 class TestLifecycleLockBasic:
     def test_lifecycle_lock_import_and_acquisition(self):
         """Exercises import of central service + per-id lock acquisition (KISS helper)."""
+        import threading
+
         lock = get_server_lifecycle_lock(4242)
         assert lock is not None
-        assert isinstance(lock, asyncio.Lock)
+        assert isinstance(lock, threading.Lock)
         # Re-acquire yields same instance (setdefault semantics)
         lock2 = get_server_lifecycle_lock(4242)
         assert lock is lock2

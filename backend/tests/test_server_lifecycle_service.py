@@ -7,6 +7,7 @@ are mocked so we test the orchestration and locking logic itself.
 """
 
 import asyncio
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,7 +31,7 @@ def test_get_server_lifecycle_lock_returns_same_instance_for_same_id():
     lock1 = get_server_lifecycle_lock(42)
     lock2 = get_server_lifecycle_lock(42)
     assert lock1 is lock2
-    assert isinstance(lock1, asyncio.Lock)
+    assert isinstance(lock1, threading.Lock)
 
 
 def test_get_server_lifecycle_lock_different_ids_are_different():

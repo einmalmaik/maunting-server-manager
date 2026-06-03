@@ -17,7 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from database import SessionLocal
 from games import get_plugin, _append_console_log
 from services import docker_service
-from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock
+from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock, acquire_lock_async
 
 logger = logging.getLogger(__name__)
 
@@ -462,7 +462,7 @@ async def _background_update_check_task() -> None:
                         "Background-Check: %d Mod-Update(s) für Server %s ('%s') gefunden.",
                         count, server.id, server.name
                     )
-                    async with get_server_lifecycle_lock(server.id):
+                    async with acquire_lock_async(get_server_lifecycle_lock(server.id)):
                         db.refresh(server)
                         if server.status not in ("running", "starting", "stopping"):
                             from services.install_update_lock_service import (

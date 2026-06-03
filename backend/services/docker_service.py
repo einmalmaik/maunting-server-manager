@@ -192,8 +192,12 @@ def _safe_pull_error(exc: BaseException) -> str:
     # disk issues, or interrupted pulls). The "lease content" + "blob not found" at local path
     # means the index thinks the layer exists but the file is gone in ~/.local/share/docker/...
     if "lease content" in text_lower or "blob not found" in text_lower or "content store" in text_lower:
+        # 'detail' kann Image-Referenzen, Registry-Hostnames oder Pfade
+        # enthalten -- wir kuerzen auf 200 Zeichen, damit der UI-Hinweis
+        # nicht unnoetig lang wird und keine internen Details leakt.
+        safe_detail = (detail or "")[:200]
         return (
-            f"Lokaler Docker-Content-Store korrupt (Blob fehlt: {detail}). "
+            f"Lokaler Docker-Content-Store korrupt (Blob fehlt: {safe_detail}). "
             "Ursache oft: git clean -fd (hatte .local nicht ignoriert), rm oder unterbrochener Pull. "
             "VOLLSTÄNDIGER FIX (als root, uid 994, /opt/msm als HOME): "
             "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/994; systemctl --user stop docker || true; pkill -u 994 dockerd || true; sleep 2'; "

@@ -462,15 +462,16 @@ def run_steamcmd_workshop_download_batch(
 
     live_output: list[str] = []
 
-    from services.mod_install_status_service import record_mod_download_output
-
     def _live_log(line: str) -> None:
         safe_line = _redact(line, secrets_to_redact)
         _bounded_log_buffer_append(live_output, safe_line)
-        for item_id in item_ids:
-            if item_id in safe_line:
-                record_mod_download_output(server_id, item_id, safe_line)
         _append_console_log(server_id, safe_line)
+        # Per-Mod-Zuordnung des Downloads passiert ueber den Folder-Existenz-
+        # Check weiter unten (siehe ``items``-Dict-Build) -- das ist robuster
+        # als Substring-Matching (SteamCMD logt z. B. "Downloading item 12345"
+        # nur einmal pro Item, andere Zeilen wuerden mehreren Mods
+        # zugeordnet). Substring-Matching waere O(n*m) bei Batch-Groesse n
+        # und Log-Zeilen m und hat den oben genannten False-Positive-Fehler.
 
     uid, gid = docker_service.container_runtime_uid_gid()
     chown_uid, chown_gid = uid, gid
