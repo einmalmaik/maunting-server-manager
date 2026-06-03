@@ -1,15 +1,18 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
+import { oauthApi, type OAuthProviderPublic, type OAuthUserLink } from '@/api/oauth'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { confirm } from '@/stores/confirmStore'
-import { Shield, Mail, KeyRound, Check, Save, AlertTriangle, Download, RotateCcw } from 'lucide-react'
+import { toast } from '@/stores/toastStore'
+import { Shield, Mail, KeyRound, Check, Save, AlertTriangle, Download, RotateCcw, Link2, Unlink } from 'lucide-react'
 
 export function Profile() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user, setUser, logout } = useAuthStore()
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -33,6 +36,81 @@ export function Profile() {
   const [faSecret, setFaSecret] = useState('')
   const [faUri, setFaUri] = useState('')
   const [backupCodes, setBackupCodes] = useState<string[]>([])
+
+  const [oauthLinks, setOauthLinks] = useState<OAuthUserLink[]>([])
+  const [oauthAvailable, setOauthAvailable] = useState<OAuthProviderPublic[]>([])
+  const [oauthLoading, setOauthLoading] = useState(true)
+  const [unlinkingId, setUnlinkingId] = useState<number | null>(null)
+
+  const loadOauth = async () => {
+    try {
+      const [links, publicProviders] = await Promise.all([
+        oauthApi.listMyLinks(),
+        oauthApi.listPublicProviders(),
+      ])
+      setOauthLinks(links)
+      setOauthAvailable(publicProviders)
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setOauthLoading(false)
+    }
+  }
+
+  useEffect(() => { loadOauth() }, [])
+
+  // URL-Param-Auswertung fuer OAuth-Linking-Callback (redirect nach /profile?linked=1|error=…)
+  useEffect(() => {
+    const linked = searchParams.get('linked')
+    const linkError = searchParams.get('error')
+    if (linked === '1') {
+      toast.success(t('profile.linkedAccounts.linkSuccess'))
+      setSearchParams({}, { replace: true })
+      void loadOauth()
+    } else if (linkError) {
+      const key = `profile.linkedAccounts.linkError${linkError
+        .split('_')
+        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join('')}`
+      const translated = t(key, '')
+      toast.error(translated || t('profile.linkedAccounts.linkErrorUnknown'))
+      setSearchParams({}, { replace: true })
+    }
+  }, [searchParams, setSearchParams, t])
+
+  const handleUnlink = async (link: OAuthUserLink) => {
+    const ok = await confirm({
+      message: t('profile.linkedAccounts.unlinkConfirm', { provider: link.provider_name }),
+      danger: true,
+      confirmText: t('profile.linkedAccounts.unlink'),
+    })
+    if (!ok) return
+    setUnlinkingId(link.id)
+    try {
+      await oauthApi.unlinkProvider(link.provider_id)
+      toast.success(t('profile.linkedAccounts.unlinkSuccess'))
+      await loadOauth()
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setUnlinkingId(null)
+    }
+  }
+
+  const formatDate = (iso: string | null): string => {
+    if (!iso) return t('profile.linkedAccounts.neverUsed')
+    try {
+      return new Intl.DateTimeFormat(i18n.language, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(new Date(iso))
+    } catch {
+      return iso
+    }
+  }
+
+  const linkedSlugs = new Set(oauthLinks.map((l) => l.provider_slug))
+  const unlinkedProviders = oauthAvailable.filter((p) => !linkedSlugs.has(p.slug))
 
   const buildBackupCodeFile = (codes: string[]) => {
     const generatedAt = new Intl.DateTimeFormat(i18n.language, {
@@ -461,6 +539,86 @@ export function Profile() {
                 {t('profile.downloadBackupCodes')}
               </button>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Linked OAuth Accounts */}
+      <div className="msm-card p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
+            <Link2 className="w-5 h-5 text-secondary" />
+          </div>
+          <div>
+            <h2 className="font-headline text-headline-sm text-primary">{t('profile.linkedAccounts.title')}</h2>
+            <p className="font-body-md text-sm text-on-surface-variant mt-1">
+              {t('profile.linkedAccounts.subtitle')}
+            </p>
+          </div>
+        </div>
+
+        {oauthLoading ? (
+          <div className="flex items-center justify-center h-24">
+            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {oauthLinks.length === 0 ? (
+              <p className="font-body-md text-sm text-on-surface-variant">
+                {t('profile.linkedAccounts.empty')}
+              </p>
+            ) : (
+              <ul className="divide-y divide-outline-variant/30">
+                {oauthLinks.map((link) => (
+                  <li key={link.id} className="py-3 first:pt-0 last:pb-0 flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-label-md text-sm text-on-surface font-medium">{link.provider_name}</p>
+                      <p className="font-body-md text-xs text-on-surface-variant mt-0.5">
+                        {t('profile.linkedAccounts.linkedSince', { date: formatDate(link.created_at) })}
+                        {link.last_used_at && (
+                          <span className="ml-2">
+                            · {t('profile.linkedAccounts.lastUsed', { date: formatDate(link.last_used_at) })}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleUnlink(link)}
+                      disabled={unlinkingId === link.id}
+                      className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {unlinkingId === link.id ? (
+                        <span className="w-3.5 h-3.5 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Unlink className="w-3.5 h-3.5" />
+                      )}
+                      {t('profile.linkedAccounts.unlink')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {unlinkedProviders.length > 0 && (
+              <div className="pt-4 border-t border-outline-variant/30">
+                <p className="font-label-md text-xs text-on-surface-variant uppercase tracking-wider mb-3">
+                  {t('profile.linkedAccounts.connect')}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {unlinkedProviders.map((p) => (
+                    <a
+                      key={p.slug}
+                      href={`/api/oauth/${p.slug}/link/start`}
+                      className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2"
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                      {p.name}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

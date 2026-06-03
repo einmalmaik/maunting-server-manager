@@ -21,6 +21,8 @@ const Roles = lazy(() => import('./pages/Roles').then(module => ({ default: modu
 const Settings = lazy(() => import('./pages/Settings').then(module => ({ default: module.Settings })))
 const Profile = lazy(() => import('./pages/Profile').then(module => ({ default: module.Profile })))
 const Docs = lazy(() => import('./pages/Docs').then(module => ({ default: module.Docs })))
+const BlueprintsDocs = lazy(() => import('./pages/docs/BlueprintsDocs').then(module => ({ default: module.BlueprintsDocs })))
+const OAuthDocs = lazy(() => import('./pages/docs/OAuthDocs').then(module => ({ default: module.OAuthDocs })))
 const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ default: module.Blueprints })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
 import { useAuthStore } from '@/stores/authStore'
@@ -97,6 +99,8 @@ function App() {
           />
           <Route path="profile" element={<Profile />} />
           <Route path="docs" element={<Docs />} />
+          <Route path="docs/blueprints" element={<BlueprintsDocs />} />
+          <Route path="docs/oauth" element={<OAuthDocs />} />
           <Route path="privacy" element={<Privacy />} />
           <Route
             path="blueprints"

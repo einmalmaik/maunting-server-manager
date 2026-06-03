@@ -390,7 +390,12 @@
     "verifiedSuccess": "Email verified. Please sign in now.",
     "verifiedAndSignedIn": "Your email has been verified. Your session is active.",
     "verificationCode": "Verification code",
-    "resendCode": "Resend code"
+    "resendCode": "Resend code",
+    "or": "or",
+    "signInWith": "Sign in with {{provider}}",
+    "oauth2faTitle": "2FA code for OAuth login",
+    "oauth2faDescription": "Your {{provider}} account is protected with 2FA. Enter the 6-digit code from your authenticator app.",
+    "oauth2faSubmit": "Confirm 2FA"
   },
   "setup": {
     "welcome": "Welcome to MSM",
@@ -656,7 +661,69 @@
     "panelConfig": "Panel Configuration",
     "provider": "Provider",
     "providerSmtp": "SMTP",
-    "providerResend": "Resend"
+    "providerResend": "Resend",
+    "tabs": {
+      "general": "General",
+      "email": "Email",
+      "steam": "Steam",
+      "oauth": "OAuth / Social Login"
+    },
+    "oauth": {
+      "subtitle": "Login with external identity providers (Google, Discord, GitHub, Microsoft, Twitter, OIDC).",
+      "providers": "Providers",
+      "addProvider": "Add provider",
+      "noProviders": "No OAuth provider configured yet.",
+      "providerSlug": "Slug",
+      "providerSlugHint": "Unique identifier, lower case (a-z, 0-9, _, -).",
+      "providerName": "Display name",
+      "providerPreset": "Preset",
+      "providerClientId": "Client ID",
+      "providerClientSecret": "Client secret",
+      "providerSecretHint": "Stored encrypted. Empty input = delete secret. Re-sending the masked value = keep unchanged.",
+      "providerEnabled": "Enabled",
+      "providerIssuer": "Issuer (custom_oidc only)",
+      "providerAuthz": "Authorization endpoint (custom_* only)",
+      "providerToken": "Token endpoint (custom_* only)",
+      "providerUserinfo": "Userinfo endpoint (custom_* only)",
+      "providerScope": "Scope (space-separated)",
+      "providerClaims": "Claim mapping (JSON)",
+      "providerClaimsHint": "Optional override: {\"id\":\"sub\",\"email\":\"email\",\"username\":\"preferred_username\",\"email_verified\":\"email_verified\"}",
+      "providerPosition": "Order",
+      "save": "Save",
+      "saved": "OAuth provider saved",
+      "updated": "OAuth provider updated",
+      "deleted": "OAuth provider deleted",
+      "secretUpdated": "Client secret updated",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteConfirmTitle": "Delete OAuth provider?",
+      "deleteConfirmBody": "Delete provider \"{{name}}\" ({{slug}})? Linked user accounts keep their account but lose the {{slug}} login.",
+      "test": "Test connection",
+      "testOk": "Configuration looks consistent.",
+      "testFailed": "Configuration incomplete: {{message}}",
+      "preset": {
+        "google": "Google",
+        "discord": "Discord",
+        "github": "GitHub",
+        "microsoft": "Microsoft",
+        "twitter": "Twitter / X",
+        "custom_oidc": "Custom OIDC (Authentik, Keycloak, Zitadel …)",
+        "custom_oauth2": "Custom OAuth 2.0"
+      },
+      "switches": "Global switches",
+      "switchAllowRegistration": "Allow auto-registration",
+      "switchAllowRegistrationHint": "If off: unknown IdP users are blocked. If on: users are created with the default \"user\" role.",
+      "switchAllowLinking": "Allow account linking",
+      "switchAllowLinkingHint": "Logged-in users can link OAuth providers with their account (in addition to password login).",
+      "switchRequireVerifiedEmail": "Require verified email",
+      "switchRequireVerifiedEmailHint": "Users with an unverified IdP email are rejected. Protects against identity theft on IdPs that verify email.",
+      "switchesSaved": "Switches saved",
+      "noSecret": "No secret configured",
+      "createTitle": "New OAuth provider",
+      "editTitle": "Edit OAuth provider",
+      "redirectUri": "Callback URL (configure in IdP)",
+      "redirectUriHint": "Use EXACTLY this URL as redirect URI in the OAuth client of the IdP."
+    }
   },
   "profile": {
     "title": "Profile",
@@ -699,7 +766,30 @@
     "deleteAccountWarningText": "All your personal settings, active sessions, 2FA registrations, and custom permissions will be permanently and completely deleted. Running game servers will remain untouched, but you will lose all access to them.",
     "confirmPasswordLabel": "Confirm with your current password",
     "confirmOtpLabel": "Current 6-digit 2FA code (no backup code)",
-    "deleteAccountFinalBtn": "Delete Account Permanently"
+    "deleteAccountFinalBtn": "Delete Account Permanently",
+    "linkedAccounts": {
+      "title": "Linked accounts",
+      "subtitle": "Link external login providers (Google, Discord, GitHub …) with your account.",
+      "empty": "No linked accounts.",
+      "linkedSince": "Linked since {{date}}",
+      "lastUsed": "Last used {{date}}",
+      "neverUsed": "Never used for login yet",
+      "connect": "Link account",
+      "unlink": "Unlink",
+      "unlinkConfirm": "Really unlink {{provider}}? You will no longer be able to sign in with {{provider}} on this account.",
+      "unlinkSuccess": "Account unlinked",
+      "linkSuccess": "Account linked",
+      "linkingDisabled": "Account linking is disabled in the panel.",
+      "providerUnavailable": "This provider is unavailable.",
+      "linkErrorStateMismatch": "Security token mismatch. Please try again.",
+      "linkErrorInvalidCallback": "Response from IdP was incomplete.",
+      "linkErrorExchangeFailed": "Code exchange at IdP failed.",
+      "linkErrorProfileInvalid": "Response from IdP was invalid.",
+      "linkErrorLinkFailed": "Link failed (provider already linked to another account?).",
+      "linkErrorProviderUnavailable": "Provider is no longer available.",
+      "linkErrorPresetUnknown": "Preset for this provider is unknown.",
+      "linkErrorUnknown": "Link failed."
+    }
   },
   "errors": {
     "RATE_LIMITED": "Too many requests. Please wait a moment.",
@@ -762,8 +852,88 @@
     "uptime": "Uptime",
     "sinceLastStart": "Since last start"
   },
+  "docsIndex": {
+    "title": "Help & Documentation",
+    "subtitle": "Guides, references and how-tos for the panel.",
+    "blueprintsTitle": "Blueprints",
+    "blueprintsDesc": "Define custom server types: schema reference, quickstart, config patches, Steam Workshop.",
+    "blueprintsLink": "Open blueprint docs",
+    "oauthTitle": "OAuth & Social Login",
+    "oauthDesc": "Sign in with Google, Discord, GitHub, Microsoft, Twitter, or your own OIDC provider (Authentik, Keycloak, Zitadel).",
+    "oauthLink": "Open OAuth docs"
+  },
+  "docsOAuth": {
+    "title": "OAuth & Social Login",
+    "subtitle": "Wire up external identity providers for sign-in.",
+    "tocTitle": "Contents",
+    "toc": {
+      "intro": "What is OAuth in MSM?",
+      "presets": "Preset overview",
+      "create": "Create a provider",
+      "security": "Security & data minimisation",
+      "troubleshooting": "Troubleshooting"
+    },
+    "intro": {
+      "body": "OAuth / OIDC enables sign-in with external identity providers (IdP). The MSM backend alone decides whether a user is registered, linked, or only needs 2FA approval. The frontend only shows the available providers and starts the flow."
+    },
+    "presets": {
+      "title": "Preset overview",
+      "google": "OpenID Connect, email and profile. Requires an OAuth client in Google Cloud Console.",
+      "discord": "OAuth 2.0, email + username. Requires an application in the Discord Developer Portal.",
+      "github": "OAuth 2.0, primary email + username. Requires an OAuth app in GitHub Settings → Developer settings.",
+      "microsoft": "OpenID Connect (multi-tenant), email + username. Requires an app registration in Microsoft Entra ID.",
+      "twitter": "OAuth 2.0 with PKCE, user ID and username. Requires an app in the Twitter Developer Portal.",
+      "custom_oidc": "Generic OIDC client: only the issuer is required, endpoints are discovered via /.well-known/openid-configuration. Suitable for Authentik, Keycloak, Zitadel, Auth0, Okta.",
+      "custom_oauth2": "Generic OAuth 2.0 client: endpoints must be set manually. For providers that do not fully implement OIDC."
+    },
+    "create": {
+      "title": "Create a provider",
+      "step1": "Open \"Settings → OAuth\" in the panel.",
+      "step2": "Click \"Add provider\".",
+      "step3": "Pick a preset, choose a slug and a display name.",
+      "step4": "Register an OAuth app / client in the IdP. Use EXACTLY the callback URL shown in the MSM as the redirect URI.",
+      "step5": "Copy the client ID and client secret into the MSM form. The secret is stored Fernet-encrypted and is always masked in the UI.",
+      "step6": "Enable the provider. The test button checks the configuration for consistency (slug, endpoints, preset)."
+    },
+    "security": {
+      "title": "Security & data minimisation",
+      "rule1": "OAuth delivers identity only. Permissions are granted exclusively by the MSM backend.",
+      "rule2": "Client secrets are never sent to the frontend in cleartext. The UI shows only a mask (****1234).",
+      "rule3": "PKCE (S256) is enabled for all providers — prevents authorization code interception.",
+      "rule4": "The state cookie is HttpOnly + Secure + SameSite=Lax, valid for 10 minutes and Fernet-encrypted.",
+      "rule5": "If a user has 2FA enabled, the OAuth login is paused with a 5-minute challenge. The user must explicitly confirm the 2FA code.",
+      "rule6": "Email verification is enforced by default: users with an unverified IdP email are rejected (toggle in the UI).",
+      "rule7": "Auto-registration is OFF by default: only known users can sign in. Can be enabled globally in the UI.",
+      "rule8": "Account linking is OFF by default: users cannot link OAuth providers to their password account on their own. Admins can enable it globally."
+    },
+    "troubleshooting": {
+      "err1Title": "Redirect URI does not match",
+      "err1Body": "The redirect URI registered in the IdP must EXACTLY match the one shown in the MSM (including https vs http, path, query string).",
+      "err2Title": "State mismatch / session expired",
+      "err2Body": "The state cookie is valid for 10 minutes. Longer pauses require a fresh sign-in.",
+      "err3Title": "IdP does not return an email",
+      "err3Body": "Some providers (e.g. Twitter) only return the email if the user explicitly grants it. MSM rejects users without an email when \"Require verified email\" is on.",
+      "err4Title": "\"Provider unavailable\"",
+      "err4Body": "The provider is disabled or deleted in MSM. Enable it or re-create it.",
+      "err5Title": "Custom OIDC cannot find endpoints",
+      "err5Body": "The issuer must be a valid URL exposing /.well-known/openid-configuration. On air-gapped systems, use Custom OAuth 2.0 with manual endpoints."
+    }
+  },
   "Passwort ungültig": "Invalid password",
   "2FA-Code erforderlich": "2FA code required",
   "Ungültiger 2FA-Code": "Invalid 2FA code",
-  "Owner-Account kann nicht gelöscht werden": "Owner account cannot be deleted"
+  "Owner-Account kann nicht gelöscht werden": "Owner account cannot be deleted",
+  "oauth_provider_unavailable": "This login provider is not available.",
+  "oauth_idp_error": "The identity provider rejected the sign-in.",
+  "oauth_invalid_callback": "Response from the identity provider was incomplete.",
+  "oauth_state_mismatch": "Security token mismatch. Please sign in again.",
+  "oauth_exchange_failed": "Code exchange at the identity provider failed.",
+  "oauth_profile_fetch_failed": "Could not load the profile from the identity provider.",
+  "oauth_profile_invalid": "Response from the identity provider was invalid.",
+  "oauth_preset_unknown": "Preset for this provider is unknown.",
+  "oauth_forbidden": "Sign-in with this provider is not allowed for your account.",
+  "oauth_registration_failed": "Auto-registration failed. Please contact an admin.",
+  "oauth_link_failed": "Linking failed.",
+  "oauth_link_invalid": "This request has expired or is invalid.",
+  "oauth_unknown": "OAuth sign-in failed."
 }

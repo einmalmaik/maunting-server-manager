@@ -34,6 +34,15 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("servers.create",            "servers", "Neuen Server anlegen"),
     PermissionDef("servers.delete",            "servers", "Server loeschen (global, nicht delegierbar)"),
     PermissionDef("system.view",               "system",  "System-Ressourcen, Interfaces, Version"),
+    # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
+    # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
+    # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.
+    PermissionDef("panel.oauth.read",          "panel",   "OAuth-Provider-Konfiguration lesen"),
+    PermissionDef("panel.oauth.create",        "panel",   "OAuth-Provider anlegen"),
+    PermissionDef("panel.oauth.update",        "panel",   "OAuth-Provider bearbeiten (Slug, Client-ID, Endpoints)"),
+    PermissionDef("panel.oauth.delete",        "panel",   "OAuth-Provider loeschen"),
+    PermissionDef("panel.oauth.secret_update", "panel",   "OAuth-Client-Secret aendern (rotieren)"),
+    PermissionDef("panel.oauth.test",          "panel",   "OAuth-Provider-Verbindung testen"),
 )
 
 

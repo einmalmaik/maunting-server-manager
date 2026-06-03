@@ -28,6 +28,7 @@ from routers import (
     roles_router,
     permissions_router,
     blueprints_router,
+    oauth_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -314,6 +315,21 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # OAuth: abgelaufene Login-Challenges aufraeumen (idempotent, low-cost).
+    # Kein Hard-Fail, wenn der Cleanup scheitert — der naechste Startup macht
+    # es wieder.
+    try:
+        from database import SessionLocal as _SessionLocal2
+        from services.login_challenge_service import cleanup_expired
+        _cleanup_db = _SessionLocal2()
+        try:
+            cleanup_expired(_cleanup_db)
+        finally:
+            _cleanup_db.close()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("OAuth-LoginChallenge-Cleanup fehlgeschlagen: %s", exc)
+
 
     yield
 
@@ -399,6 +415,12 @@ app.include_router(files_router)
 app.include_router(roles_router)
 app.include_router(permissions_router)
 app.include_router(blueprints_router)
+# OAuth-Endpoints liegen absichtlich NICHT unter auth_rate_limit, weil das
+# Rate-Limit pro IP und pro Minute gilt (10/min). Bei Shared-IPs (Unternehmen,
+# Schulen, mobile Carrier) wuerde der Login-Flow sonst regelmaessig 429
+# liefern. Stattdessen schuetzen die State-Cookie-Validierung + PKCE + 5-Min
+# LoginChallenge gegen Brute-Force auf dem OAuth-Pfad.
+app.include_router(oauth_router)
 
 # Static Frontend (nur in Produktion)
 import os
