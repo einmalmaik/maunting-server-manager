@@ -166,6 +166,20 @@ def _safe_pull_error(exc: BaseException) -> str:
     if "toomanyrequests" in text_lower or "rate limit" in text_lower:
         return "Registry-Rate-Limit erreicht"
 
+    # Local containerd / Docker content store corruption (e.g. after git clean -fd deleting blobs,
+    # disk issues, or interrupted pulls). The "lease content" + "blob not found" at local path
+    # means the index thinks the layer exists but the file is gone in ~/.local/share/docker/...
+    if "lease content" in text_lower or "blob not found" in text_lower or "content store" in text_lower:
+        return (
+            f"Lokaler Docker-Content-Store korrupt (Blob fehlt: {detail}). "
+            "Ursache oft: git clean -fd, rm in .local/share/docker oder unterbrochener Pull. "
+            "Fix (als root): "
+            "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/$(id -u msm); systemctl --user stop docker || true; pkill -u $(id -u msm) dockerd || true'; "
+            "rm -rf /opt/msm/.local/share/docker/containerd/daemon/io.containerd.content.v1.content; "
+            "sudo -u msm bash -c 'export XDG_RUNTIME_DIR=/run/user/$(id -u msm); systemctl --user start docker'; "
+            "sudo -u msm bash -c 'export DOCKER_HOST=unix:///run/user/$(id -u msm)/docker.sock; docker pull ghcr.io/parkervcp/steamcmd:debian'"
+        )
+
     return detail
 
 
