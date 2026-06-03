@@ -544,6 +544,43 @@ class TestBuildAuthorizationURL:
         auth_url, _ = oauth_service.build_authorization_url(db, provider)
         assert auth_url.startswith("https://github.com/")
 
+    def test_link_mode_payload_contains_user_id_and_unified_callback(
+        self, db: Session, regular_user: User
+    ):
+        """Im link-Mode MUSS das State-Payload user_id enthalten und die
+        redirect_uri MUSS der geteilte /callback sein (nicht /link/callback)."""
+        provider = _make_provider(db, slug="gh-link", preset="github")
+        _auth_url, encrypted = oauth_service.build_authorization_url(
+            db, provider, mode=oauth_service.OAUTH_MODE_LINK, user=regular_user
+        )
+        payload = oauth_service.unpack_state_cookie(encrypted)
+        assert payload is not None
+        assert payload["mode"] == oauth_service.OAUTH_MODE_LINK
+        assert payload["user_id"] == regular_user.id
+        assert payload["redirect_uri"].endswith("/api/oauth/gh-link/callback")
+        assert "next" not in payload  # Login-only Feld
+
+    def test_login_mode_default_uses_unified_callback(self, db: Session):
+        provider = _make_provider(db, slug="gh-log", preset="github")
+        _auth_url, encrypted = oauth_service.build_authorization_url(db, provider)
+        payload = oauth_service.unpack_state_cookie(encrypted)
+        assert payload["mode"] == oauth_service.OAUTH_MODE_LOGIN
+        assert payload["redirect_uri"].endswith("/api/oauth/gh-log/callback")
+
+    def test_link_mode_requires_user(self, db: Session):
+        provider = _make_provider(db, slug="gh-x", preset="github")
+        with pytest.raises(ValueError, match="user ist Pflicht"):
+            oauth_service.build_authorization_url(
+                db, provider, mode=oauth_service.OAUTH_MODE_LINK
+            )
+
+    def test_unknown_mode_rejected(self, db: Session):
+        provider = _make_provider(db, slug="gh-x", preset="github")
+        with pytest.raises(ValueError, match="Unknown mode"):
+            oauth_service.build_authorization_url(
+                db, provider, mode="bogus"
+            )
+
 
 # ── Public-Listing ────────────────────────────────────────────────────
 

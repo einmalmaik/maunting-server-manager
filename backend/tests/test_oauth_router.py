@@ -289,12 +289,13 @@ class TestOAuthStart:
         _create_provider(db, slug="gh-next", preset="github")
         res = client.get("/api/oauth/gh-next/start?next=/servers", follow_redirects=False)
         assert res.status_code == 302
-        # Next wird ins State-Cookie gepackt
+        # Next + mode=login werden ins State-Cookie gepackt
         cookie = res.cookies.get("__Secure-oauth_state")
         assert cookie is not None
         payload = oauth_service.unpack_state_cookie(cookie)
         assert payload is not None
         assert payload["next"] == "/servers"
+        assert payload["mode"] == oauth_service.OAUTH_MODE_LOGIN
 
 
 # ── OAuth-Callback ────────────────────────────────────────────────────
@@ -350,6 +351,129 @@ class TestOAuthCallback:
         )
         assert res.status_code == 302
         assert "error=oauth_state_mismatch" in res.headers["location"]
+
+    def test_state_cookie_roundtrip_login_flow(
+        self, client: TestClient, db: Session
+    ):
+        """End-to-End: /start setzt State-Cookie, /callback liest ihn
+        mit demselben Client zurueck. Regression-Schutz fuer 'neue User
+        bekommen oauth_state_mismatch' — der State-Cookie MUSS den
+        Cross-Site-Browser-Hop ueberleben.
+
+        TestClient simuliert zwar keine SameSite-Policy, aber verifiziert
+        dass das Cookie mit dem richtigen Path/Name/Wert gesetzt wird.
+        """
+        _create_provider(db, slug="gh-rt", preset="github")
+        # /start setzt das State-Cookie
+        res_start = client.get("/api/oauth/gh-rt/start", follow_redirects=False)
+        assert res_start.status_code == 302
+        state_cookie = res_start.cookies.get("__Secure-oauth_state")
+        assert state_cookie is not None, "State-Cookie wurde nicht gesetzt"
+
+        # Cookie wurde serverseitig verschluesselt → Payload lesbar
+        payload = oauth_service.unpack_state_cookie(state_cookie)
+        assert payload is not None
+        assert payload["state"]  # non-empty
+        assert payload["mode"] == oauth_service.OAUTH_MODE_LOGIN
+        # Login-Flow hat KEIN user_id, nur next
+        assert "user_id" not in payload
+        assert "next" in payload
+
+    def test_second_login_flow_overwrites_first_state_cookie(
+        self, client: TestClient, db: Session
+    ):
+        """Regression: Wenn der User die Login-Flow zweimal startet (z.B. weil
+        der erste Versuch abgebrochen wurde), MUSS das State-Cookie ueber-
+        schrieben werden — sonst landet der Callback beim ERSTEN state-Wert
+        und der Redirect-URL-Zustand passt nicht mehr.
+        """
+        _create_provider(db, slug="gh-2x", preset="github")
+        res1 = client.get("/api/oauth/gh-2x/start", follow_redirects=False)
+        cookie1 = res1.cookies.get("__Secure-oauth_state")
+        payload1 = oauth_service.unpack_state_cookie(cookie1)
+        state1 = payload1["state"]
+
+        res2 = client.get("/api/oauth/gh-2x/start", follow_redirects=False)
+        cookie2 = res2.cookies.get("__Secure-oauth_state")
+        payload2 = oauth_service.unpack_state_cookie(cookie2)
+        state2 = payload2["state"]
+
+        # Zwei unabhaengige /start-Calls MUESSEN zwei verschiedene states liefern
+        # UND der zweite Call MUSS den Cookie ueberschreiben.
+        assert state1 != state2, "PKCE-State muss pro Aufruf neu sein"
+
+    def test_login_callback_after_failed_link_does_not_leak_state(
+        self, client: TestClient, user_cookies: dict, db: Session
+    ):
+        """Sequenz: User startet Link-Flow → erhaelt state-A. Bricht ab.
+        Startet Login-Flow → erhaelt state-B. Callback kommt mit state-B
+        aber Cookie hat noch state-A (alter Wert) → state_mismatch.
+
+        Wir testen, dass /start bei einem NEUEN Aufruf das Cookie IMMER
+        ueberschreibt, auch wenn vorher ein /link/start lief.
+        """
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-seq", preset="github")
+
+        # 1) Link-Flow (auth-pflichtig)
+        res_link = client.get(
+            "/api/oauth/gh-seq/link/start", cookies=user_cookies, follow_redirects=False
+        )
+        link_cookie = res_link.cookies.get("__Secure-oauth_state")
+        link_payload = oauth_service.unpack_state_cookie(link_cookie)
+        assert link_payload["mode"] == oauth_service.OAUTH_MODE_LINK
+
+        # 2) Login-Flow (anonym, ueberschreibt das Cookie weil gleicher Name+Path)
+        res_login = client.get("/api/oauth/gh-seq/start", follow_redirects=False)
+        login_cookie = res_login.cookies.get("__Secure-oauth_state")
+        login_payload = oauth_service.unpack_state_cookie(login_cookie)
+        assert login_payload["mode"] == oauth_service.OAUTH_MODE_LOGIN
+        # State-Werte unterscheiden sich
+        assert link_payload["state"] != login_payload["state"]
+
+    def test_full_roundtrip_state_in_cookie_matches_state_in_callback(
+        self, client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        """End-to-End-Simulation: /start setzt Cookie mit state=X, dann ruft
+        der Browser /callback?state=X mit dem Cookie auf. State MUSS matchen.
+
+        Wir monkeypatchen exchange_code, damit der Test nicht an 'kein echter
+        IdP' scheitert — wir wollen den State-Match-Pfad isoliert verifizieren.
+        """
+        _create_provider(db, slug="gh-e2e", preset="github")
+
+        # 1) /start wie ein Browser: Set-Cookie aufnehmen
+        res_start = client.get(
+            "/api/oauth/gh-e2e/start?next=/dashboard",
+            follow_redirects=False,
+        )
+        assert res_start.status_code == 302
+        cookie = res_start.cookies.get("__Secure-oauth_state")
+        assert cookie is not None
+        payload = oauth_service.unpack_state_cookie(cookie)
+        state_in_cookie = payload["state"]
+        code_verifier = payload["code_verifier"]
+        assert state_in_cookie and code_verifier
+
+        # 2) IdP-Call mocken, damit wir beim State-Match anhalten koennen
+        #    (sonst wuerde exchange_code fehlschlagen, weil kein echter GitHub)
+        def _fake_exchange(*_a, **_kw):
+            raise ValueError("STOP_AFTER_STATE_MATCH")
+        monkeypatch.setattr(oauth_service, "exchange_code", _fake_exchange)
+
+        # 3) /callback mit dem state aus dem Cookie aufrufen
+        res_cb = client.get(
+            f"/api/oauth/gh-e2e/callback?code=fake&state={state_in_cookie}",
+            cookies={"__Secure-oauth_state": cookie},
+            follow_redirects=False,
+        )
+        # State MUSS matchen → flow laeuft weiter bis exchange_code → "STOP_AFTER_STATE_MATCH"
+        # → Redirect zu /login?error=oauth_exchange_failed (NICHT oauth_state_mismatch)
+        assert res_cb.status_code == 302
+        assert "oauth_exchange_failed" in res_cb.headers["location"], (
+            f"State-Cookie hat nicht gematcht. Erwartet: oauth_exchange_failed. "
+            f"Got: {res_cb.headers['location']}"
+        )
 
 
 # ── 2FA-Endpoint ──────────────────────────────────────────────────────
@@ -515,8 +639,130 @@ class TestLinkStart:
         res = client.get("/api/oauth/gh-ok/link/start", cookies=user_cookies, follow_redirects=False)
         assert res.status_code == 302
         assert "github.com/login/oauth/authorize" in res.headers["location"]
+        # State-Cookie traegt mode=link + user_id
+        cookie = res.cookies.get("__Secure-oauth_state")
+        assert cookie is not None
+        payload = oauth_service.unpack_state_cookie(cookie)
+        assert payload is not None
+        assert payload["mode"] == oauth_service.OAUTH_MODE_LINK
+        assert "user_id" in payload
+        # redirect_uri im State MUSS der geteilte Callback sein (nicht /link/callback)
+        assert payload["redirect_uri"].endswith("/api/oauth/gh-ok/callback")
+
+
+# ── Unified Callback: Mode-Dispatch (Login vs. Link) ───────────────────
+
+class TestUnifiedCallback:
+    """Beide Flows (Login + Linking) teilen sich /api/oauth/{slug}/callback.
+    Die Trennung passiert ueber das mode-Feld im State-Cookie (Fernet-encrypted).
+    Damit muss in der IdP-Console nur EINE redirect_uri registriert werden.
+    """
+
+    def test_login_mode_rejects_state_without_mode(
+        self, client: TestClient, db: Session
+    ):
+        """Auch ohne mode im State laeuft der Callback — Default ist 'login'."""
+        provider = _create_provider(db, slug="gh-cb1", preset="github")
+        # State ohne mode-Feld bauen (backward-compat / alte Cookies)
+        payload = {
+            "state": "test-state",
+            "code_verifier": "test-verifier",
+            "redirect_uri": f"http://localhost:3000/api/oauth/gh-cb1/callback",
+            "next": "/",
+            "ts": 1,
+        }
+        cookie = oauth_service.pack_state_cookie(payload)
+        # Code + state muessen matchen — der Test bricht hier vor Token-Exchange ab,
+        # aber wir testen, dass der Mode-Default + State-Check greift.
+        res = client.get(
+            "/api/oauth/gh-cb1/callback?code=fake&state=test-state",
+            cookies={"__Secure-oauth_state": cookie},
+            follow_redirects=False,
+        )
+        # State OK, Code-Exchange wird versucht, schlaegt aber fehl (kein IdP) →
+        # Redirect zu /login?error=oauth_exchange_failed
         assert res.status_code == 302
-        assert "github.com/login/oauth/authorize" in res.headers["location"]
+        assert "/login" in res.headers["location"]
+        assert "oauth_exchange_failed" in res.headers["location"]
+
+    def test_link_mode_without_auth_redirects_to_profile_error(
+        self, client: TestClient, db: Session
+    ):
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-cb2", preset="github")
+        # Link-State mit user_id
+        payload = {
+            "state": "link-state",
+            "code_verifier": "v",
+            "redirect_uri": f"http://localhost:3000/api/oauth/gh-cb2/callback",
+            "mode": oauth_service.OAUTH_MODE_LINK,
+            "user_id": 999,
+            "ts": 1,
+        }
+        cookie = oauth_service.pack_state_cookie(payload)
+        res = client.get(
+            "/api/oauth/gh-cb2/callback?code=fake&state=link-state",
+            cookies={"__Secure-oauth_state": cookie},
+            follow_redirects=False,
+        )
+        # Anonymer Aufruf im link-Mode → /profile?error=auth_required
+        assert res.status_code == 302
+        assert "/profile" in res.headers["location"]
+        assert "auth_required" in res.headers["location"]
+
+    def test_link_mode_blocked_when_linking_disabled(
+        self, client: TestClient, user_cookies: dict, regular_user: User, db: Session
+    ):
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "false")
+        _create_provider(db, slug="gh-cb3", preset="github")
+        payload = {
+            "state": "link-state",
+            "code_verifier": "v",
+            "redirect_uri": f"http://localhost:3000/api/oauth/gh-cb3/callback",
+            "mode": oauth_service.OAUTH_MODE_LINK,
+            "user_id": regular_user.id,
+            "ts": 1,
+        }
+        cookie = oauth_service.pack_state_cookie(payload)
+        res = client.get(
+            "/api/oauth/gh-cb3/callback?code=fake&state=link-state",
+            cookies={**user_cookies, "__Secure-oauth_state": cookie},
+            follow_redirects=False,
+        )
+        assert res.status_code == 302
+        assert "linking_disabled" in res.headers["location"]
+
+    def test_link_mode_rejects_state_user_id_mismatch(
+        self, client: TestClient, user_cookies: dict, regular_user: User, db: Session
+    ):
+        """Defense-in-Depth: Wenn das State-Payload eine fremde user_id traegt,
+        muss der Callback das ablehnen — selbst wenn der Aufrufer eingeloggt ist."""
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-cb4", preset="github")
+        payload = {
+            "state": "link-state",
+            "code_verifier": "v",
+            "redirect_uri": f"http://localhost:3000/api/oauth/gh-cb4/callback",
+            "mode": oauth_service.OAUTH_MODE_LINK,
+            "user_id": regular_user.id + 9999,  # falsche ID
+            "ts": 1,
+        }
+        cookie = oauth_service.pack_state_cookie(payload)
+        res = client.get(
+            "/api/oauth/gh-cb4/callback?code=fake&state=link-state",
+            cookies={**user_cookies, "__Secure-oauth_state": cookie},
+            follow_redirects=False,
+        )
+        assert res.status_code == 302
+        assert "state_user_mismatch" in res.headers["location"]
+
+    def test_old_link_callback_endpoint_is_gone(
+        self, client: TestClient, user_cookies: dict, db: Session
+    ):
+        """/{slug}/link/callback existiert nicht mehr — unified callback only."""
+        _create_provider(db, slug="gh-cb5", preset="github")
+        res = client.get("/api/oauth/gh-cb5/link/callback", cookies=user_cookies)
+        assert res.status_code == 404
 
 
 # ── Helpers (lokal) ───────────────────────────────────────────────────

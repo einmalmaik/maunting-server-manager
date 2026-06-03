@@ -22,6 +22,24 @@ class TestLogin:
         assert "__Secure-csrf_token" in response.cookies
         # access_token and refresh_token must be httponly (FastAPI TestClient exposes them)
 
+    def test_access_cookie_uses_lax_for_oauth_callback_compat(
+        self, client: TestClient, owner_user: User
+    ):
+        """Security-Invariante: __Secure-access_token MUSS SameSite=Lax sein.
+
+        OAuth-Callbacks kommen als Cross-Site-Top-Level-Navigation vom IdP
+        zurueck (Google, Discord, Keycloak, ...). SameSite=Strict wuerde das
+        Cookie bei diesem Redirect NICHT mitsenden → 401 / Auth-Fehler direkt
+        nach erfolgreichem Login. Lax laesst Top-Level-Nav zu, blockt aber
+        weiterhin Cross-Site-Subresources (AJAX/fetch) und nicht-sichere
+        Methoden (POST) — d.h. keine CSRF-Schwaechung fuer MSM.
+        """
+        from cookies import _COOKIE_CONFIG
+        assert _COOKIE_CONFIG["__Secure-access_token"]["samesite"] == "lax"
+        # Refresh + CSRF duerfen/sollen strict bleiben
+        assert _COOKIE_CONFIG["__Secure-refresh_token"]["samesite"] == "strict"
+        assert _COOKIE_CONFIG["__Secure-csrf_token"]["samesite"] == "strict"
+
     def test_login_wrong_password(self, client: TestClient, owner_user: User):
         response = client.post("/api/auth/login", json={
             "username": "owner",

@@ -466,43 +466,50 @@ def build_redirect_uri(provider_slug: str) -> str:
     return f"{base}/api/oauth/{provider_slug}/callback"
 
 
+OAUTH_MODE_LOGIN = "login"
+OAUTH_MODE_LINK = "link"
+
+
 def build_authorization_url(
-    db: Session, provider: OAuthProvider, *, next_path: str | None = None
+    db: Session,
+    provider: OAuthProvider,
+    *,
+    mode: str = OAUTH_MODE_LOGIN,
+    user: User | None = None,
+    next_path: str | None = None,
 ) -> tuple[str, str]:
     """Erzeugt die authorize-URL + verschluesseltes State-Cookie-Payload.
 
+    Ein einziger Callback-Endpunkt (build_redirect_uri) bedient Login UND
+    Account-Linking. Die Unterscheidung laeuft ueber das ``mode``-Feld im
+    State-Payload (Fernet-encrypted) — der Callback liest es und dispatcht.
+
+    Args:
+        mode: "login" fuer anonymen Login, "link" fuer Account-Linking.
+              Bei "link" ist ``user`` Pflicht.
+        user: Aktuell eingeloggter MSM-User (nur mode="link").
+        next_path: Redirect-Ziel nach Login (nur mode="login").
+
     Returns: (authorize_url, encrypted_state_cookie)
     """
+    if mode not in (OAUTH_MODE_LOGIN, OAUTH_MODE_LINK):
+        raise ValueError(f"Unknown mode: {mode}")
+    if mode == OAUTH_MODE_LINK and user is None:
+        raise ValueError("user ist Pflicht fuer mode='link'")
+
     redirect_uri = build_redirect_uri(provider.slug)
     state, code_verifier = _new_pkce_pair()
-    payload = {
+    payload: dict[str, Any] = {
         "state": state,
         "code_verifier": code_verifier,
         "redirect_uri": redirect_uri,
-        "next": next_path or "/",
+        "mode": mode,
         "ts": int(secrets.randbelow(2**31)),  # nonce
     }
-    encrypted = pack_state_cookie(payload)
-    auth_url = _build_authz_url(provider, redirect_uri, state, code_verifier)
-    return auth_url, encrypted
-
-
-def build_link_authorization_url(
-    db: Session, provider: OAuthProvider, user: User
-) -> tuple[str, str]:
-    """Variante fuer Account-Linking. Redirect geht auf .../link/callback und
-    das State-Payload traegt die user_id, damit der Callback den Link dem
-    richtigen User zuordnen kann.
-    """
-    redirect_uri = f"{settings.panel_url.rstrip('/')}/api/oauth/{provider.slug}/link/callback"
-    state, code_verifier = _new_pkce_pair()
-    payload = {
-        "state": state,
-        "code_verifier": code_verifier,
-        "redirect_uri": redirect_uri,
-        "user_id": user.id,
-        "ts": int(secrets.randbelow(2**31)),
-    }
+    if mode == OAUTH_MODE_LOGIN:
+        payload["next"] = next_path or "/"
+    else:  # link
+        payload["user_id"] = user.id  # type: ignore[union-attr]
     encrypted = pack_state_cookie(payload)
     auth_url = _build_authz_url(provider, redirect_uri, state, code_verifier)
     return auth_url, encrypted
@@ -893,7 +900,8 @@ __all__ = [
     "list_public_providers",
     "build_redirect_uri",
     "build_authorization_url",
-    "build_link_authorization_url",
+    "OAUTH_MODE_LOGIN",
+    "OAUTH_MODE_LINK",
     "exchange_code",
     "fetch_user_profile",
     "resolve_user",

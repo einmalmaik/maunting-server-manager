@@ -325,9 +325,12 @@ def oauth_start(
     if provider is None or not provider.enabled:
         raise HTTPException(status_code=404, detail="Provider nicht verfuegbar")
     try:
-        auth_url, encrypted = oauth_service.build_authorization_url(db, provider, next_path=next)
+        auth_url, encrypted = oauth_service.build_authorization_url(
+            db, provider, mode=oauth_service.OAUTH_MODE_LOGIN, next_path=next
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _log.info("OAuth start (slug=%s) → IdP authorize URL: %s", slug, auth_url)
     resp = RedirectResponse(url=auth_url, status_code=302)
     _set_oauth_state_cookie(resp, encrypted)
     return resp
@@ -342,10 +345,11 @@ def oauth_callback(
     state: str | None = None,
     error: str | None = None,
 ) -> Response:
-    """Verarbeitet den IdP-Callback. Bei Erfolg: Login-Cookies setzen.
+    """Verarbeitet den IdP-Callback fuer Login UND Account-Linking.
 
-    Bei 2FA: Redirect auf ``/login?step=oauth_2fa&challenge=...&slug=...``.
-    Bei Forbidden/Fehler: Redirect auf ``/login?error=oauth``.
+    Beide Flows nutzen denselben Callback — die Unterscheidung laeuft ueber
+    ``mode`` im State-Payload. Damit muss in der IdP-Console (Google, Discord,
+    ...) nur EINE redirect_uri registriert werden: ``/api/oauth/{slug}/callback``.
     """
     provider = oauth_service.get_provider_by_slug(db, slug)
     if provider is None or not provider.enabled:
@@ -360,8 +364,32 @@ def oauth_callback(
     state_cookie = request.cookies.get(oauth_service.STATE_COOKIE_NAME)
     payload = oauth_service.unpack_state_cookie(state_cookie)
     if payload is None or payload.get("state") != state:
-        _log.warning("OAuth state mismatch (slug=%s)", slug)
+        # Diagnose-Helfer: bei 'neuer User bekommt state_mismatch' ist die Frage
+        # immer 'was ist mit dem State-Cookie passiert?'. Wir loggen den genauen
+        # Grund statt nur 'mismatch' — sieht der Server 'no_cookie', fehlt das
+        # Cookie komplett (Browser-Block / SameSite / Path-Problem). Sieht er
+        # 'state_mismatch' aber Cookie ist da, ist der State-Wert selbst falsch.
+        if not state_cookie:
+            _log.warning("OAuth state mismatch (slug=%s): no __Secure-oauth_state cookie on request", slug)
+        elif payload is None:
+            _log.warning("OAuth state mismatch (slug=%s): cookie present but Fernet decrypt failed", slug)
+        else:
+            _log.warning(
+                "OAuth state mismatch (slug=%s): state value differs (cookie has %r, URL has %r)",
+                slug, payload.get("state"), state,
+            )
         return _redirect_login_error("oauth_state_mismatch")
+
+    mode = payload.get("mode", oauth_service.OAUTH_MODE_LOGIN)
+    if mode not in (oauth_service.OAUTH_MODE_LOGIN, oauth_service.OAUTH_MODE_LINK):
+        _log.warning("OAuth callback: unknown mode=%r (slug=%s)", mode, slug)
+        return _redirect_login_error("oauth_invalid_callback")
+
+    # ── Link-Mode: Auth + Switch-Check VOR externem Token-Call ──
+    if mode == oauth_service.OAUTH_MODE_LINK:
+        link_user = _resolve_link_user(request, db, payload)
+        if isinstance(link_user, Response):
+            return link_user  # Redirect-Response auf /profile?error=...
 
     # Code einloesen
     try:
@@ -388,66 +416,47 @@ def oauth_callback(
         _log.warning("OAuth profile normalization failed: %s (slug=%s)", e, slug)
         return _redirect_login_error("oauth_profile_invalid")
 
-    # User resolven
-    result = oauth_service.resolve_user(db, provider, profile)
-
-    if result.action == "forbidden":
-        _log.info("OAuth resolution forbidden: %s (slug=%s)", result.reason, slug)
-        return _redirect_login_error(result.reason or "oauth_forbidden")
-
-    if result.action == "register":
+    # ── Link-Mode: Provider an authentifizierten User haengen ──
+    if mode == oauth_service.OAUTH_MODE_LINK:
         try:
-            user = oauth_service.register_user_from_oauth(db, profile)
-        except ValueError as e:
-            return _redirect_login_error("oauth_registration_failed")
-        # Link direkt anlegen
-        oauth_service.link_provider_to_user(db, provider, user, profile)
-        _audit(db, user.id, "oauth_user.registered", provider.id, f"slug={provider.slug}")
-        result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]
-
-    if result.action == "link":
-        # Sollte im anonymen Login-Flow nicht passieren (current_user=None),
-        # aber defensiv: fallback auf forbidden.
-        if result.user is None:
-            return _redirect_login_error("oauth_link_invalid")
-        user = result.user
-        try:
-            oauth_service.link_provider_to_user(db, provider, user, profile)
+            oauth_service.link_provider_to_user(db, provider, link_user, profile)
         except ValueError:
-            return _redirect_login_error("oauth_link_failed")
-        _audit(db, user.id, "oauth_user.linked", provider.id, f"slug={provider.slug}")
-        result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]
-
-    if result.action == "needs_2fa" and result.user is not None:
-        challenge = oauth_service.create_2fa_challenge(db, result.user, provider)
-        _audit(db, result.user.id, "oauth_login.2fa_required", provider.id, f"slug={provider.slug}")
-        return _redirect_oauth_2fa(slug, challenge)
-
-    # Aktion "login" → Session setzen
-    if result.action == "login" and result.user is not None:
-        user = result.user
-        # last_used_at auf Link aktualisieren
-        link = (
-            db.query(OAuthUserLink)
-            .filter(
-                OAuthUserLink.provider_id == provider.id,
-                OAuthUserLink.user_id == user.id,
-            )
-            .first()
-        )
-        if link is not None:
-            oauth_service.update_link_last_used(db, link)
-        _audit(db, user.id, "oauth_login.success", provider.id, f"slug={provider.slug}")
-        next_path = payload.get("next") or "/"
-        # Open-Redirect-Schutz: nur relative Pfade
-        if not next_path.startswith("/") or next_path.startswith("//"):
-            next_path = "/"
-        resp = _redirect_ok(next_path)
-        _set_login_session(resp, db, user)
+            return _redirect_profile_error("link_failed")
+        _audit(db, link_user.id, "oauth_user.linked", provider.id, f"slug={provider.slug}")
+        resp = _redirect_profile_ok()
         _clear_oauth_state_cookie(resp)
         return resp
 
-    return _redirect_login_error("oauth_unknown")
+    # ── Login-Flow (anonym) ──
+    return _handle_login_callback(db, provider, profile, payload, slug)
+
+
+def _resolve_link_user(
+    request: Request, db: Session, payload: dict[str, Any]
+) -> User | Response:
+    """Validiert Auth + Linking-Switch + state.user_id — VOR externem IdP-Call.
+
+    Liefert den authentifizierten User bei Erfolg oder einen Redirect-Response
+    bei jedem Auth/Switch/Mismatch-Fehler. Pattern: 'return early with error
+    page' statt verschachtelter ifs.
+    """
+    if not oauth_service.is_linking_allowed():
+        return _redirect_profile_error("linking_disabled")
+    token = request.cookies.get("__Secure-access_token")
+    if not token:
+        return _redirect_profile_error("auth_required")
+    try:
+        current_user = get_current_user(request, db)
+    except HTTPException:
+        return _redirect_profile_error("auth_required")
+    state_user_id = payload.get("user_id")
+    if state_user_id is None or int(state_user_id) != current_user.id:
+        _log.warning(
+            "OAuth link state user_id mismatch (payload=%s, current=%s)",
+            state_user_id, current_user.id,
+        )
+        return _redirect_profile_error("state_user_mismatch")
+    return current_user
 
 
 @router.post("/{slug}/2fa")
@@ -522,14 +531,20 @@ def oauth_link_start(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    """Startet einen Linking-Flow fuer den aktuell eingeloggten User."""
+    """Startet einen Linking-Flow fuer den aktuell eingeloggten User.
+
+    Der IdP redirected am Ende auf den geteilten ``/{slug}/callback`` — der
+    Mode wird ueber das (Fernet-encrypted) State-Cookie transportiert.
+    """
     if not oauth_service.is_linking_allowed():
         raise HTTPException(status_code=403, detail="Account-Linking ist deaktiviert")
     provider = oauth_service.get_provider_by_slug(db, slug)
     if provider is None or not provider.enabled:
         raise HTTPException(status_code=404, detail="Provider nicht verfuegbar")
     try:
-        auth_url, encrypted = oauth_service.build_link_authorization_url(db, provider, user)
+        auth_url, encrypted = oauth_service.build_authorization_url(
+            db, provider, mode=oauth_service.OAUTH_MODE_LINK, user=user
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     resp = RedirectResponse(url=auth_url, status_code=302)
@@ -537,60 +552,70 @@ def oauth_link_start(
     return resp
 
 
-@router.get("/{slug}/link/callback")
-def oauth_link_callback(
-    slug: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
-) -> Response:
-    """Verarbeitet den IdP-Callback fuer den Linking-Flow."""
-    if not oauth_service.is_linking_allowed():
-        raise HTTPException(status_code=403, detail="Account-Linking ist deaktiviert")
-    provider = oauth_service.get_provider_by_slug(db, slug)
-    if provider is None or not provider.enabled:
-        return _redirect_profile_error("provider_unavailable")
-
-    if error or not code or not state:
-        return _redirect_profile_error("invalid_callback")
-
-    state_cookie = request.cookies.get(oauth_service.STATE_COOKIE_NAME)
-    payload = oauth_service.unpack_state_cookie(state_cookie)
-    if payload is None or payload.get("state") != state or payload.get("user_id") != user.id:
-        _log.warning("OAuth link state mismatch (slug=%s, user=%s)", slug, user.id)
-        return _redirect_profile_error("state_mismatch")
-
-    try:
-        tokens = oauth_service.exchange_code(
-            db, provider, code, payload["code_verifier"], payload["redirect_uri"]
-        )
-        raw_profile = oauth_service.fetch_user_profile(db, provider, tokens)
-    except ValueError as e:
-        _log.warning("OAuth link exchange/profile failed: %s", e)
-        return _redirect_profile_error("exchange_failed")
-
-    preset = oauth_service.get_preset(provider.preset)
-    if preset is None:
-        return _redirect_profile_error("preset_unknown")
-    try:
-        profile = oauth_service.normalize_profile(preset, raw_profile, provider.claims_mapping_json)
-    except ValueError:
-        return _redirect_profile_error("profile_invalid")
-
-    try:
-        link = oauth_service.link_provider_to_user(db, provider, user, profile)
-    except ValueError:
-        return _redirect_profile_error("link_failed")
-    _audit(db, user.id, "oauth_user.linked", provider.id, f"slug={provider.slug}")
-    resp = _redirect_profile_ok()
-    _clear_oauth_state_cookie(resp)
-    return resp
-
-
 # ── Redirect-Helpers ───────────────────────────────────────────────────
+
+def _handle_login_callback(
+    db: Session,
+    provider: OAuthProvider,
+    profile: "oauth_service.NormalizedProfile",
+    payload: dict[str, Any],
+    slug: str,
+) -> Response:
+    """Anonymer Login-Pfad des geteilten /callback-Endpunkts (alter Flow)."""
+    result = oauth_service.resolve_user(db, provider, profile)
+
+    if result.action == "forbidden":
+        _log.info("OAuth resolution forbidden: %s (slug=%s)", result.reason, slug)
+        return _redirect_login_error(result.reason or "oauth_forbidden")
+
+    if result.action == "register":
+        try:
+            user = oauth_service.register_user_from_oauth(db, profile)
+        except ValueError:
+            return _redirect_login_error("oauth_registration_failed")
+        oauth_service.link_provider_to_user(db, provider, user, profile)
+        _audit(db, user.id, "oauth_user.registered", provider.id, f"slug={provider.slug}")
+        result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]
+
+    if result.action == "link":
+        if result.user is None:
+            return _redirect_login_error("oauth_link_invalid")
+        user = result.user
+        try:
+            oauth_service.link_provider_to_user(db, provider, user, profile)
+        except ValueError:
+            return _redirect_login_error("oauth_link_failed")
+        _audit(db, user.id, "oauth_user.linked", provider.id, f"slug={provider.slug}")
+        result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]
+
+    if result.action == "needs_2fa" and result.user is not None:
+        challenge = oauth_service.create_2fa_challenge(db, result.user, provider)
+        _audit(db, result.user.id, "oauth_login.2fa_required", provider.id, f"slug={provider.slug}")
+        return _redirect_oauth_2fa(slug, challenge)
+
+    if result.action == "login" and result.user is not None:
+        user = result.user
+        link = (
+            db.query(OAuthUserLink)
+            .filter(
+                OAuthUserLink.provider_id == provider.id,
+                OAuthUserLink.user_id == user.id,
+            )
+            .first()
+        )
+        if link is not None:
+            oauth_service.update_link_last_used(db, link)
+        _audit(db, user.id, "oauth_login.success", provider.id, f"slug={provider.slug}")
+        next_path = payload.get("next") or "/"
+        if not next_path.startswith("/") or next_path.startswith("//"):
+            next_path = "/"
+        resp = _redirect_ok(next_path)
+        _set_login_session(resp, db, user)
+        _clear_oauth_state_cookie(resp)
+        return resp
+
+    return _redirect_login_error("oauth_unknown")
+
 
 def _login_redirect_path() -> str:
     return "/login"

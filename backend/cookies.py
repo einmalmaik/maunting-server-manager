@@ -4,18 +4,29 @@ from config import settings
 
 
 _COOKIE_CONFIG = {
+    # Access-Token MUSS SameSite=Lax sein, nicht Strict: der OAuth-Callback
+    # kommt als Cross-Site-Top-Level-Navigation von Google/Discord/etc. zurueck.
+    # Bei Strict wuerde der Browser das Cookie auf diesem Redirect NICHT mitsenden
+    # → 401 / "Nicht authentifiziert" direkt nach dem Login-/Link-Start.
+    # Lax schuetzt weiterhin: keine Subresource-Requests (AJAX/fetch von fremden
+    # Origins), keine Cross-Site-POSTs (die State-Mutationen ausloesen wuerden).
+    # Alle State-mutierenden Endpoints in MSM sind POST/PATCH/DELETE + CSRF-geschuetzt.
     "__Secure-access_token": {
         "httponly": True,
         "secure": True,
-        "samesite": "strict",
+        "samesite": "lax",
         "path": "/api",
     },
+    # Refresh-Token bleibt strict: nur same-origin POST /api/auth/refresh
+    # braucht es, kein Cross-Site-Pfad beteiligt.
     "__Secure-refresh_token": {
         "httponly": True,
         "secure": True,
         "samesite": "strict",
         "path": "/api/auth",
     },
+    # CSRF-Token bleibt strict: das ist genau der Sinn — Cross-Site-Requests
+    # duerfen das Token NICHT lesen/duplizieren.
     "__Secure-csrf_token": {
         "httponly": False,  # JS muss lesen koennen fuer Double-Submit
         "secure": True,
