@@ -5,21 +5,29 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from config import settings
+from database import SessionLocal
 from database import get_db
 from models import Server, User
 from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
-from dependencies import get_current_user, require_global, require_server_permission, verify_csrf
+from dependencies import (
+    get_current_user,
+    get_current_user_for_ws,
+    require_global,
+    require_server_permission,
+    verify_csrf,
+)
 from services import permission_service
 from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
 from games import get_plugin
 from games.base import container_name_for, _console_log_path, _append_console_log
 from services import EmailService, docker_service
+from services.console_ws_service import connect as ws_connect
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
@@ -812,6 +820,84 @@ async def server_console_stream(
             "Cache-Control": "no-cache",
         },
     )
+
+
+# ── Erlaubte Origins fuer WebSocket-Upgrades ───────────────────────────────
+# Dieselbe Logik wie die CORS-Middleware: in Dev mehr, in Prod strikt.
+_WS_ALLOWED_ORIGINS: tuple[str, ...] = (
+    settings.panel_url,
+    "http://localhost",
+    "http://localhost:5173",
+    "http://127.0.0.1",
+    "http://127.0.0.1:5173",
+)
+
+
+def _ws_origin_allowed(origin: str | None) -> bool:
+    """Prueft den Origin-Header des WS-Upgrade-Requests. SameSite-Cookie + Origin-Check
+    ersetzen die fehlende CSRF-Pruefung (WS sind keine 'simple requests').
+    """
+    if not origin:
+        return False
+    return origin.rstrip("/") in {o.rstrip("/") for o in _WS_ALLOWED_ORIGINS}
+
+
+@router.websocket("/{server_id}/console/ws")
+async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
+    """WebSocket-Variante der Server-Konsole (Phase 1, parallel zum SSE-Endpoint).
+
+    Auth: Cookie-Auth im WS-Handshake (genauso wie beim HTTP-Pfad), danach
+    Server-Permission ``server.console.read``. Origin-Check ersetzt den CSRF-Schutz
+    fuer WS-Upgrades.
+
+    Optional ``?last_id=<n>`` Query-Param: Replay-Resume nach Reconnect — der
+    Server spult nur Zeilen mit id > last_id aus dem Ring-Buffer ab und macht
+    dann mit Live-Stream weiter. Ohne last_id wird der volle Backlog gesendet.
+
+    Frame-Format: JSON ``{"id": int, "ts": iso, "source": "msm"|"docker", "text": str}``.
+    Eingehende Frames: vorerst nur Heartbeat ``{"action": "ping"}`` -> ``{"action": "pong"}``.
+    Stdin laeuft weiterhin ueber ``POST /api/servers/{id}/console/input``.
+    """
+    origin = websocket.headers.get("origin")
+    if not _ws_origin_allowed(origin):
+        await websocket.close(code=1008)  # 1008 = "policy violation"
+        return
+
+    db = SessionLocal()
+    try:
+        try:
+            user = get_current_user_for_ws(websocket, db)
+            server = db.query(Server).filter(Server.id == server_id).first()
+            if not server:
+                await websocket.close(code=1008)
+                return
+            require_server_permission(user, server_id, db, "server.console.read")
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
+        finally:
+            db.close()
+
+        container = container_name_for(server.id)
+        log_path = _console_log_path(server.id)
+        last_id_raw = websocket.query_params.get("last_id")
+        last_id: int | None = None
+        if last_id_raw is not None:
+            try:
+                last_id = int(last_id_raw)
+            except ValueError:
+                last_id = None
+
+        await ws_connect(
+            websocket,
+            server_id=server_id,
+            container=container,
+            log_path=log_path,
+            last_id=last_id,
+        )
+    finally:
+        if db.is_active:
+            db.close()
 
 
 def _sse_data(line: str, event_id: int | None = None) -> str:

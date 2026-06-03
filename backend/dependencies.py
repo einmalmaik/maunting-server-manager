@@ -1,7 +1,7 @@
 import logging
 from typing import Callable
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, WebSocket
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -13,8 +13,8 @@ from services.permission_service import has_global_permission, has_server_permis
 _log = logging.getLogger("msm.csrf")
 
 
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    token = request.cookies.get("__Secure-access_token")
+def _user_from_token(token: str | None, db: Session) -> User:
+    """Gemeinsame JWT-Validierung fuer HTTP- und WS-Pfade. Wirft HTTPException(401)."""
     if not token:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
     payload = AuthService.decode_token(token)
@@ -27,6 +27,24 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User nicht gefunden oder inaktiv")
     return user
+
+
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    token = request.cookies.get("__Secure-access_token")
+    return _user_from_token(token, db)
+
+
+def get_current_user_for_ws(ws: WebSocket, db: Session) -> User:
+    """Auth fuer WebSocket-Endpoints. Wirft HTTPException(401) wie der HTTP-Pfad,
+    muss im Endpoint aber in einen sauberen WS-Close (1008) umgesetzt werden.
+
+    Liest das Access-Token-Cookie aus dem WS-Handshake-Header (Browser sendet
+    Cookies bei WS-Upgrade automatisch mit). Keine CSRF-Pruefung noetig, weil
+    WS-Frames keine "simple requests" sind und der Origin-Header im Endpoint
+    explizit geprueft wird.
+    """
+    token = ws.cookies.get("__Secure-access_token")
+    return _user_from_token(token, db)
 
 
 def get_current_owner(user: User = Depends(get_current_user)) -> User:

@@ -18,6 +18,7 @@ type ConsoleLogLine = {
   source: 'msm' | 'docker' | 'unknown'
 }
 type ConsoleFrame = {
+  id?: number
   line?: string
   text?: string
   timestamp?: string
@@ -94,13 +95,14 @@ export function displayConsoleLine(line: string, language: string): string {
   return cleaned
 }
 
-function parseConsoleFrame(raw: string): Omit<ConsoleLogLine, 'marker'> {
+function parseConsoleFrame(raw: string): Omit<ConsoleLogLine, 'marker'> & { id?: number } {
   try {
     const parsed = JSON.parse(raw) as ConsoleFrame
     return {
       text: parsed.line ?? parsed.text ?? raw,
       timestamp: parsed.timestamp ?? null,
       source: parsed.source ?? 'unknown',
+      id: typeof parsed.id === 'number' ? parsed.id : undefined,
     }
   } catch {
     return { text: raw, timestamp: null, source: 'unknown' }
@@ -177,6 +179,10 @@ export function ServerConsolePanel({ serverId }: Props) {
   const [copiedLogs, setCopiedLogs] = useState(false)
   const nextSeqRef = useRef(0)
   const bufferRef = useRef<string[]>([])
+  // Letzte vom Server empfangene Zeilen-ID. Wird bei Reconnect als
+  // ?last_id=<n> an den Server geschickt, damit nur verpasste Zeilen
+  // nachgeliefert werden (statt komplettem Backlog).
+  const lastServerIdRef = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Neue States fuer verbesserte UI/UX
@@ -199,50 +205,125 @@ export function ServerConsolePanel({ serverId }: Props) {
   useEffect(() => {
     nextSeqRef.current = 0
     bufferRef.current = []
+    lastServerIdRef.current = null
     setLogs([])
-    const url = `/api/servers/${serverId}/console/stream`
-    const es = new EventSource(url)
-    
-    es.onmessage = (ev) => {
-      const eventMarker = Number.parseInt(ev.lastEventId || '', 10)
-      const marker = Number.isFinite(eventMarker) && eventMarker > 0
-        ? eventMarker
-        : nextSeqRef.current + 1
-      nextSeqRef.current = Math.max(nextSeqRef.current, marker)
-      bufferRef.current.push(JSON.stringify({ marker, raw: ev.data }))
-    }
-    
-    const flushInterval = setInterval(() => {
-      if (bufferRef.current.length > 0) {
-        const toFlush = bufferRef.current
-        bufferRef.current = []
-        
-        if (!autoscrollRef.current) {
-          setHasNewLines(true)
-        }
+    let cancelled = false
+    let ws: WebSocket | null = null
+    let reconnectTimer: number | null = null
+    let pingTimer: number | null = null
+    let reconnectAttempt = 0
 
-        setLogs((prev) => {
-          const mapped = toFlush.map((item) => {
-            try {
-              const parsed = JSON.parse(item) as { marker: number; raw: string }
-              return { marker: parsed.marker, ...parseConsoleFrame(parsed.raw) }
-            } catch {
-              nextSeqRef.current += 1
-              return { marker: nextSeqRef.current, ...parseConsoleFrame(item) }
-            }
-          })
-          const next = [...prev, ...mapped]
-          return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
-        })
+    const clearTimers = () => {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer)
+        reconnectTimer = null
       }
-    }, 50)
-
-    es.onerror = () => {
-      // Stille: Browser reconnected automatisch.
+      if (pingTimer !== null) {
+        window.clearInterval(pingTimer)
+        pingTimer = null
+      }
     }
+
+    const flushBuffer = () => {
+      if (bufferRef.current.length === 0) return
+      const toFlush = bufferRef.current
+      bufferRef.current = []
+      if (!autoscrollRef.current) {
+        setHasNewLines(true)
+      }
+      setLogs((prev) => {
+        const mapped = toFlush.map((item) => {
+          try {
+            const parsed = JSON.parse(item) as { marker: number; raw: string; id?: number }
+            const frame = parseConsoleFrame(parsed.raw)
+            // Server-uebermittelte ID uebernehmen wenn vorhanden (WS liefert sie).
+            const marker = typeof frame.id === 'number' ? frame.id : parsed.marker
+            const { id: _id, ...rest } = frame
+            return { marker, ...rest }
+          } catch {
+            nextSeqRef.current += 1
+            return { marker: nextSeqRef.current, ...parseConsoleFrame(item) }
+          }
+        })
+        const next = [...prev, ...mapped]
+        return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
+      })
+    }
+
+    const scheduleReconnect = () => {
+      if (cancelled) return
+      // Backoff: 1s, 2s, 5s, 10s (cap).
+      const delays = [1000, 2000, 5000, 10000]
+      const delay = delays[Math.min(reconnectAttempt, delays.length - 1)]
+      reconnectAttempt += 1
+      reconnectTimer = window.setTimeout(connect, delay)
+    }
+
+    const connect = () => {
+      if (cancelled) return
+      // Reconnect-Resume: letzte empfangene ID mitschicken, damit der Server
+      // nur Zeilen mit id > last_id nochmal sendet (statt komplettem Backlog).
+      const lastId = lastServerIdRef.current
+      const url = lastId !== null
+        ? `/api/servers/${serverId}/console/ws?last_id=${lastId}`
+        : `/api/servers/${serverId}/console/ws`
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      ws = new WebSocket(`${proto}//${window.location.host}${url}`)
+
+      ws.onopen = () => {
+        reconnectAttempt = 0
+        // 25s-Ping-Heartbeat haelt die Verbindung in Background-Tabs wach
+        // (Browser schliessen sonst inaktive WS nach 60s).
+        if (pingTimer !== null) window.clearInterval(pingTimer)
+        pingTimer = window.setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ action: 'ping' })) } catch { /* ignore */ }
+          }
+        }, 25_000)
+      }
+
+      ws.onmessage = (ev) => {
+        const raw = typeof ev.data === 'string' ? ev.data : ''
+        if (!raw) return
+        try {
+          const frame = parseConsoleFrame(raw)
+          if (typeof frame.id === 'number') {
+            lastServerIdRef.current = frame.id
+            nextSeqRef.current = Math.max(nextSeqRef.current, frame.id)
+          }
+          bufferRef.current.push(JSON.stringify({ marker: frame.id ?? nextSeqRef.current + 1, raw }))
+        } catch {
+          bufferRef.current.push(raw)
+        }
+      }
+
+      ws.onerror = () => {
+        // Browser reconnected automatisch bei transienten Fehlern; bei hartem
+        // Disconnect triggert onclose direkt. Beides ist OK.
+      }
+
+      ws.onclose = () => {
+        if (pingTimer !== null) {
+          window.clearInterval(pingTimer)
+          pingTimer = null
+        }
+        if (!cancelled) {
+          scheduleReconnect()
+        }
+      }
+    }
+
+    const flushInterval = setInterval(flushBuffer, 50)
+    connect()
+
     return () => {
+      cancelled = true
       clearInterval(flushInterval)
-      es.close()
+      clearTimers()
+      if (ws) {
+        ws.onclose = null
+        try { ws.close() } catch { /* ignore */ }
+      }
     }
   }, [serverId])
 
