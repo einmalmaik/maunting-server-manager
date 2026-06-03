@@ -722,7 +722,8 @@
     "steam_api_unavailable": "Steam API 不可用或 API key 无效。",
     "steam_search_failed": "Steam 搜索失败。",
     "steam_load_failed": "无法加载 Steam 数据。",
-    "invalid_workshop_id": "无效的 Workshop ID。"
+    "invalid_workshop_id": "无效的 Workshop ID。",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "禁用电子邮件通知",

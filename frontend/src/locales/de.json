@@ -709,7 +709,8 @@
     "steam_api_unavailable": "Steam API ist nicht erreichbar oder der API-Key ist ungültig.",
     "steam_search_failed": "Steam-Suche fehlgeschlagen.",
     "steam_load_failed": "Steam-Daten konnten nicht geladen werden.",
-    "invalid_workshop_id": "Ungültige Workshop-ID."
+    "invalid_workshop_id": "Ungültige Workshop-ID.",
+    "server_lifecycle_already_running": "Es läuft bereits eine Server-Lebenszyklus-Operation (Start/Stop/Neustart). Bitte warte, bis die aktuelle Operation abgeschlossen ist oder nutze im Notfall den Kill-Button."
   },
   "notifications": {
     "disable": "E-Mail-Benachrichtigungen deaktivieren",

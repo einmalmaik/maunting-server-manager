@@ -74,17 +74,17 @@ def test_queue_lifecycle_operation_returns_before_worker_runs():
     reset_lifecycle_jobs_for_tests()
 
 
-def test_queue_lifecycle_operation_blocks_parallel_action_for_same_server():
+def test_queue_lifecycle_operation_kill_overrides_active_job_as_emergency():
+    """Kill as Notfall-Button soll auch bei laufendem Start/Restart/Stop funktionieren (override)."""
     fake_server = Server(id=11, game_type="dayz", status="running")
     fake_db = MagicMock(spec=Session)
 
     with patch("services.server_lifecycle_service._start_lifecycle_thread"):
         queue_lifecycle_operation(fake_db, fake_server, "stop")
-        with pytest.raises(HTTPException) as exc:
-            queue_lifecycle_operation(fake_db, fake_server, "kill")
+        # kill must NOT raise 409, it forces the lock
+        result = queue_lifecycle_operation(fake_db, fake_server, "kill")
+        assert "queued" in str(result).lower() or result.get("operation") == "kill"
 
-    assert exc.value.status_code == 409
-    assert exc.value.detail["code"] == "server_lifecycle_already_running"
     reset_lifecycle_jobs_for_tests()
 
 

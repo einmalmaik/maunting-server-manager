@@ -722,7 +722,8 @@
     "steam_api_unavailable": "Steam API उपलब्ध नहीं है या API key अमान्य है.",
     "steam_search_failed": "Steam खोज विफल हुई.",
     "steam_load_failed": "Steam डेटा लोड नहीं हो सका.",
-    "invalid_workshop_id": "अमान्य Workshop ID."
+    "invalid_workshop_id": "अमान्य Workshop ID.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "ईमेल सूचनाएं अक्षम करें",

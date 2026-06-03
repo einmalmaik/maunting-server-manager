@@ -722,7 +722,8 @@
     "steam_api_unavailable": "Steam API অনুপলব্ধ বা API key অবৈধ.",
     "steam_search_failed": "Steam অনুসন্ধান ব্যর্থ হয়েছে.",
     "steam_load_failed": "Steam ডেটা লোড করা যায়নি.",
-    "invalid_workshop_id": "অবৈধ Workshop ID."
+    "invalid_workshop_id": "অবৈধ Workshop ID.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "ইমেল বিজ্ঞপ্তি নিষ্ক্রিয়",

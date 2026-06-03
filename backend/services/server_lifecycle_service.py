@@ -139,6 +139,8 @@ def queue_lifecycle_operation(
     """
     if operation not in {"start", "stop", "restart", "kill"}:
         raise ValueError(f"Unbekannte Lifecycle-Operation: {operation}")
+    if operation == "kill":
+        _mark_job_done(server.id)  # emergency override: allow kill to interrupt any pending start/restart/stop as last resort
     if not _mark_job_active(server.id):
         raise HTTPException(
             status_code=409,

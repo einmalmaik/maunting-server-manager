@@ -722,7 +722,8 @@
     "steam_api_unavailable": "Steam API tidak tersedia atau API key tidak valid.",
     "steam_search_failed": "Pencarian Steam gagal.",
     "steam_load_failed": "Data Steam tidak dapat dimuat.",
-    "invalid_workshop_id": "Workshop ID tidak valid."
+    "invalid_workshop_id": "Workshop ID tidak valid.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "Nonaktifkan notifikasi email",

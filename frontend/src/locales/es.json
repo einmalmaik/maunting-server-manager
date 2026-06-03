@@ -722,7 +722,8 @@
     "steam_api_unavailable": "Steam API no está disponible o la clave no es válida.",
     "steam_search_failed": "La búsqueda de Steam falló.",
     "steam_load_failed": "No se pudieron cargar los datos de Steam.",
-    "invalid_workshop_id": "ID de Workshop no válido."
+    "invalid_workshop_id": "ID de Workshop no válido.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "Desactivar notificaciones por correo electrónico",

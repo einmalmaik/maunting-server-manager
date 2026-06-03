@@ -722,7 +722,8 @@
     "steam_api_unavailable": "Steam API est indisponible ou la clé est invalide.",
     "steam_search_failed": "La recherche Steam a échoué.",
     "steam_load_failed": "Les données Steam n'ont pas pu être chargées.",
-    "invalid_workshop_id": "ID Workshop invalide."
+    "invalid_workshop_id": "ID Workshop invalide.",
+    "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
   "notifications": {
     "disable": "Désactiver les notifications par e-mail",
