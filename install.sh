@@ -324,6 +324,24 @@ fi
 if [[ -f "$MSM_DIR/backend/.env" ]]; then
     REINSTALL_MODE=true
     load_current_env
+
+    # Autonom sicherstellen, dass MSM_COOKIE_DOMAIN in .env steht (basierend auf der bei Installation hinterlegten Domain).
+    # Dies passiert auch bei Keep-Modus, damit update.sh / install.sh die Config für OAuth State-Cookie aktualisieren.
+    if ! grep -q '^MSM_COOKIE_DOMAIN=' "$MSM_DIR/backend/.env" 2>/dev/null || grep -qE '^MSM_COOKIE_DOMAIN=(""|)$' "$MSM_DIR/backend/.env" 2>/dev/null; then
+        if [[ -n "$CURRENT_DOMAIN" ]]; then
+            host="${CURRENT_DOMAIN#*://}"
+            if [[ "$host" == *.*.* ]]; then
+                cdom=".${host#*.}"
+            else
+                cdom=".$host"
+            fi
+        else
+            cdom=""
+        fi
+        echo "MSM_COOKIE_DOMAIN=\"$cdom\"" >> "$MSM_DIR/backend/.env"
+        log "MSM_COOKIE_DOMAIN autonom in .env ergänzt/aktualisiert: $cdom (für self-hosted Domain aus Installation)"
+    fi
+
     show_current_config
 
     echo -e "${BOLD}[?]${NC} Einstellungen beibehalten oder ändern?"
@@ -912,6 +930,11 @@ else
     fi
 fi
 
+# Redis-URL Fallback (sicherstellen, dass sie nie leer ist wenn Redis aktiv sein soll)
+if $INSTALL_REDIS && [[ -z "$MSM_REDIS_URL" ]]; then
+    MSM_REDIS_URL="redis://localhost:6379"
+fi
+
 cat > "$ENV_FILE" <<EOF
 # Automatisch generiert durch install.sh am $(date -Iseconds)
 # ÄNDERUNGEN NUR MIT VORSICHT
@@ -938,10 +961,6 @@ MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
 MSM_DOCKER_HOST="$MSM_DOCKER_HOST"
 MSM_STEAMCMD_PATH="/usr/games/steamcmd"
 MSM_COOKIE_DOMAIN="$COOKIE_DOMAIN"
-# Redis-URL Fallback (sicherstellen, dass sie nie leer ist wenn Redis aktiv sein soll)
-if $INSTALL_REDIS && [[ -z "$MSM_REDIS_URL" ]]; then
-    MSM_REDIS_URL="redis://localhost:6379"
-fi
 MSM_REDIS_URL="$MSM_REDIS_URL"
 
 # Auto-Update (GitHub Releases)
