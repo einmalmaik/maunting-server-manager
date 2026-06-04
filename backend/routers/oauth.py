@@ -110,13 +110,9 @@ def _set_login_session(response: Response, db: Session, user: User) -> None:
 
 
 def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
-    # Domain-Attribut nur setzen, wenn explizit konfiguriert. Bei leerem String
-    # laesst FastAPI das Attribut weg, das Cookie gilt dann nur fuer die exakte
-    # Origin (gleicher Host, kein Subdomain-Match). Hinter einem Reverse-Proxy
-    # mit verschiedenen Subdomains fuer Frontend und Backend MUSS ``MSM_COOKIE_DOMAIN``
-    # auf z.B. ``.mauntingstudios.de`` gesetzt sein, sonst geht das State-Cookie
-    # beim Top-Level-Redirect vom IdP (Discord, Google, ...) verloren und der
-    # Callback laeuft in einen state_mismatch.
+    # Cookie mit path=/ + optional domain= (abgeleitet aus MSM_PANEL_URL oder
+    # explizit MSM_COOKIE_DOMAIN). Wichtig damit das State-Cookie den Redirect
+    # vom IdP (Google/Discord) ueberlebt. Siehe get_effective_cookie_domain().
     cookie_kwargs: dict[str, Any] = {
         "key": oauth_service.STATE_COOKIE_NAME,
         "value": encrypted,
@@ -133,6 +129,8 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
 
 
 def _clear_oauth_state_cookie(response: Response) -> None:
+    # Gleiche Domain/Path-Attribute wie beim Setzen → Cookie wird zuverlässig
+    # gelöscht (auch bei Mismatch-Fehlern oder nach erfolgreichem Login).
     delete_kwargs: dict[str, Any] = {
         "key": oauth_service.STATE_COOKIE_NAME,
         "path": "/",
@@ -351,7 +349,11 @@ def oauth_start(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    _log.info("OAuth start (slug=%s) → IdP authorize URL: %s", slug, auth_url)
+    cookie_domain = get_effective_cookie_domain()
+    _log.info(
+        "OAuth start (slug=%s) → IdP authorize URL: %s (cookie_domain=%r, panel_url=%s)",
+        slug, auth_url, cookie_domain or "(host-only)", settings.panel_url,
+    )
     resp = RedirectResponse(url=auth_url, status_code=302)
     _set_oauth_state_cookie(resp, encrypted)
     return resp
@@ -568,6 +570,11 @@ def oauth_link_start(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    cookie_domain = get_effective_cookie_domain()
+    _log.info(
+        "OAuth link/start (slug=%s) → IdP authorize URL: %s (cookie_domain=%r, panel_url=%s)",
+        slug, auth_url, cookie_domain or "(host-only)", settings.panel_url,
+    )
     resp = RedirectResponse(url=auth_url, status_code=302)
     _set_oauth_state_cookie(resp, encrypted)
     return resp

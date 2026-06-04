@@ -94,32 +94,43 @@ def get_effective_cookie_domain() -> str:
     """Return the cookie domain to use for OAuth state cookie.
 
     If MSM_COOKIE_DOMAIN is explicitly set in .env / env, use it (override).
-    Otherwise derive from MSM_PANEL_URL using the exact same logic as install.sh
-    (so that install.sh / update.sh remain the single source of truth for the
-    domain that was configured at first install or changed later).
+    Otherwise derive from MSM_PANEL_URL using the same parent-domain logic
+    that install.sh used for the DOMAIN at first install (or on reinstall "keep").
 
-    This keeps everything autonomous for self-hosted open-source installs and
-    avoids needing a separate new variable in most cases.
+    Self-hosted autonomy: MSM_PANEL_URL (written by install.sh) is the single
+    source of truth. No extra variables needed for the common case.
+
+    Special cases:
+    - localhost / 127.0.0.1 (any port): return "" → no Domain attr (host-only cookie)
+    - ports are always stripped (Domain= must not contain :port)
     """
     explicit = getattr(settings, "cookie_domain", None)
     if explicit:
         return explicit
 
     panel_url: str = getattr(settings, "panel_url", "") or ""
-    if not panel_url or panel_url == "http://localhost":
+    if not panel_url:
         return ""
 
-    # strip protocol + path, keep host only (same as install.sh)
+    # robust host extraction (strip scheme, path, port)
     if "://" in panel_url:
         host = panel_url.split("://", 1)[1].split("/", 1)[0]
     else:
         host = panel_url.split("/", 1)[0]
+    host = host.split(":", 1)[0].strip().lower()
 
     if not host:
         return ""
 
-    # exact logic copied from the derivation in install.sh:
-    # if the host has a subdomain (at least two dots), take from the first dot onward
+    # loopback / local dev: never set Domain (browsers + TestClient are strict;
+    # host-only cookie is correct and makes res.cookies visible in tests)
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return ""
+
+    # parent domain logic (mirrors original install.sh derivation):
+    # "msm.mauntingstudios.de" → ".mauntingstudios.de"
+    # "app.example.com" → ".example.com"
+    # "example.com" → ".example.com"
     if host.count(".") >= 2:
         return "." + host.split(".", 1)[1]
     return "." + host
