@@ -126,8 +126,9 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
         "path": "/",
         "max_age": oauth_service.STATE_TTL_SECONDS,
     }
-    if settings.cookie_domain:
-        cookie_kwargs["domain"] = settings.cookie_domain
+    cookie_domain = getattr(settings, "cookie_domain", None)
+    if cookie_domain:
+        cookie_kwargs["domain"] = cookie_domain
     response.set_cookie(**cookie_kwargs)
 
 
@@ -138,8 +139,9 @@ def _clear_oauth_state_cookie(response: Response) -> None:
         "secure": True,
         "samesite": "lax",
     }
-    if settings.cookie_domain:
-        delete_kwargs["domain"] = settings.cookie_domain
+    cookie_domain = getattr(settings, "cookie_domain", None)
+    if cookie_domain:
+        delete_kwargs["domain"] = cookie_domain
     response.delete_cookie(**delete_kwargs)
 
 

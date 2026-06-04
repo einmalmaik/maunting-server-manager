@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     panel_url: str = "http://localhost"
     setup_completed_file: Path = Path("/opt/msm/.setup_completed")
 
+    # Cookie-Domain fuer cross-subdomain Setups (z.B. app.X.example.com + api.X.example.com).
+    # LEER lassen, wenn Frontend und Backend auf derselben Origin laufen — dann nutzt
+    # FastAPI den Default (kein Domain-Attribut, Cookie gilt nur fuer die exakte Host-Origin).
+    # Produktion hinter Reverse-Proxy: ".mauntingstudios.de" (fuehrender Punkt = gilt fuer
+    # alle Subdomains). Wird vom OAuth-State-Cookie verwendet, damit der IdP-Redirect das
+    # State-Cookie zuverlaessig mitschickt.
+    cookie_domain: str = ""
+
     # Logo — absolute URL used in email templates.
     # Falls back to panel_url + /logo.png when empty.
     logo_url: str = ""
