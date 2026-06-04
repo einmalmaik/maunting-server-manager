@@ -123,7 +123,7 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
         "httponly": True,
         "secure": True,
         "samesite": "lax",
-        "path": "/api/oauth",
+        "path": "/",
         "max_age": oauth_service.STATE_TTL_SECONDS,
     }
     if settings.cookie_domain:
@@ -132,15 +132,15 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
 
 
 def _clear_oauth_state_cookie(response: Response) -> None:
-    cookie_kwargs: dict[str, Any] = {
+    delete_kwargs: dict[str, Any] = {
         "key": oauth_service.STATE_COOKIE_NAME,
-        "path": "/api/oauth",
+        "path": "/",
         "secure": True,
         "samesite": "lax",
     }
     if settings.cookie_domain:
-        cookie_kwargs["domain"] = settings.cookie_domain
-    response.delete_cookie(**cookie_kwargs)
+        delete_kwargs["domain"] = settings.cookie_domain
+    response.delete_cookie(**delete_kwargs)
 
 
 # ── Public: Public-Provider-Listing fuer Login-UI ─────────────────────
