@@ -327,7 +327,17 @@ if [[ -f "$MSM_DIR/backend/.env" ]]; then
 
     # Autonom sicherstellen, dass MSM_COOKIE_DOMAIN in .env steht (basierend auf der bei Installation hinterlegten Domain).
     # Dies passiert auch bei Keep-Modus, damit update.sh / install.sh die Config für OAuth State-Cookie aktualisieren.
-    if ! grep -q '^MSM_COOKIE_DOMAIN=' "$MSM_DIR/backend/.env" 2>/dev/null || grep -qE '^MSM_COOKIE_DOMAIN=(""|)$' "$MSM_DIR/backend/.env" 2>/dev/null; then
+    has_key=$(grep -c '^MSM_COOKIE_DOMAIN=' "$MSM_DIR/backend/.env" 2>/dev/null || echo 0)
+    if [[ "$has_key" -eq 0 ]]; then
+        needs_update=true
+    else
+        if grep -qE '^MSM_COOKIE_DOMAIN=(""|)$' "$MSM_DIR/backend/.env" 2>/dev/null; then
+            needs_update=true
+        else
+            needs_update=false
+        fi
+    fi
+    if $needs_update; then
         if [[ -n "$CURRENT_DOMAIN" ]]; then
             host="${CURRENT_DOMAIN#*://}"
             if [[ "$host" == *.*.* ]]; then
