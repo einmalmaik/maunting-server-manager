@@ -1,4 +1,5 @@
 import i18n from '@/i18n'
+import { toast } from '@/stores/toastStore'
 
 const API_BASE = '/api'
 
@@ -121,7 +122,9 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     if (res.status === 429) {
-      throw new Error(i18n.t('errors.RATE_LIMITED'))
+      const message = i18n.t('errors.RATE_LIMITED')
+      toast.error(message)
+      throw new Error(message)
     }
     const text = await res.text()
     let message: string | null = null

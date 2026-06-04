@@ -78,6 +78,12 @@ def _provider_to_response(p: OAuthProvider) -> dict[str, Any]:
         "scope": p.scope,
         "claims_mapping_json": p.claims_mapping_json,
         "position": p.position,
+        # Die tatsaechlich vom Backend an den IdP gesendete redirect_uri.
+        # Wird im Admin-UI read-only + Copy-Button angezeigt, damit die
+        # IdP-Konfiguration (Google/Discord/...) nicht versehentlich auf
+        # einen nicht existierenden Pfad wie /api/oauth/{slug}/link/callback
+        # zeigt. KISS: ein Endpunkt, eine Quelle der Wahrheit.
+        "redirect_uri": oauth_service.build_redirect_uri(p.slug),
         "created_at": p.created_at.isoformat() if p.created_at else "",
         "updated_at": p.updated_at.isoformat() if p.updated_at else "",
     }
@@ -104,24 +110,37 @@ def _set_login_session(response: Response, db: Session, user: User) -> None:
 
 
 def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
-    response.set_cookie(
-        key=oauth_service.STATE_COOKIE_NAME,
-        value=encrypted,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        path="/api/oauth",
-        max_age=oauth_service.STATE_TTL_SECONDS,
-    )
+    # Domain-Attribut nur setzen, wenn explizit konfiguriert. Bei leerem String
+    # laesst FastAPI das Attribut weg, das Cookie gilt dann nur fuer die exakte
+    # Origin (gleicher Host, kein Subdomain-Match). Hinter einem Reverse-Proxy
+    # mit verschiedenen Subdomains fuer Frontend und Backend MUSS ``MSM_COOKIE_DOMAIN``
+    # auf z.B. ``.mauntingstudios.de`` gesetzt sein, sonst geht das State-Cookie
+    # beim Top-Level-Redirect vom IdP (Discord, Google, ...) verloren und der
+    # Callback laeuft in einen state_mismatch.
+    cookie_kwargs: dict[str, Any] = {
+        "key": oauth_service.STATE_COOKIE_NAME,
+        "value": encrypted,
+        "httponly": True,
+        "secure": True,
+        "samesite": "lax",
+        "path": "/api/oauth",
+        "max_age": oauth_service.STATE_TTL_SECONDS,
+    }
+    if settings.cookie_domain:
+        cookie_kwargs["domain"] = settings.cookie_domain
+    response.set_cookie(**cookie_kwargs)
 
 
 def _clear_oauth_state_cookie(response: Response) -> None:
-    response.delete_cookie(
-        key=oauth_service.STATE_COOKIE_NAME,
-        path="/api/oauth",
-        secure=True,
-        samesite="lax",
-    )
+    cookie_kwargs: dict[str, Any] = {
+        "key": oauth_service.STATE_COOKIE_NAME,
+        "path": "/api/oauth",
+        "secure": True,
+        "samesite": "lax",
+    }
+    if settings.cookie_domain:
+        cookie_kwargs["domain"] = settings.cookie_domain
+    response.delete_cookie(**cookie_kwargs)
 
 
 # ── Public: Public-Provider-Listing fuer Login-UI ─────────────────────
