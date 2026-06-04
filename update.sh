@@ -476,6 +476,24 @@ if id "msm" &>/dev/null; then
     fi
 fi
 
+# ── Legacy: MSM_COOKIE_DOMAIN automatisch ergänzen (für OAuth State-Cookie Robustheit) ──
+# Wird bei alten Installationen (vor Einführung des Feldes) aus MSM_PANEL_URL abgeleitet,
+# damit install.sh / update.sh autonom funktionieren ohne manuelle .env Edit.
+# Wichtig für self-hosted Open Source: die bei Erst-Installation (oder via install.sh geänderte) Domain.
+if [[ -f "$ENV_FILE" ]] && ! grep -q '^MSM_COOKIE_DOMAIN=' "$ENV_FILE"; then
+    panel_url=$(grep -E '^MSM_PANEL_URL=' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    if [[ -n "$panel_url" ]]; then
+        host="${panel_url#*://}"
+        if [[ "$host" == *.*.* ]]; then
+            cdom=".${host#*.}"
+        else
+            cdom=".$host"
+        fi
+        echo "MSM_COOKIE_DOMAIN=\"$cdom\"" >> "$ENV_FILE"
+        log "MSM_COOKIE_DOMAIN für bestehende Installation automatisch ergänzt: $cdom (basierend auf installierter Domain)"
+    fi
+fi
+
 # ── Service neustarten ──
 log "Starte Services neu..."
 if $SYSTEMD_AVAILABLE; then

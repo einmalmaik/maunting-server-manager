@@ -92,6 +92,7 @@ load_current_env() {
     CURRENT_SECRET_KEY=""
     CURRENT_DB_URL=""
     CURRENT_DB_URL_ASYNC=""
+    CURRENT_COOKIE_DOMAIN=""
 
     [[ -f "$env_file" ]] || return
 
@@ -144,6 +145,9 @@ load_current_env() {
 
     val=$(grep -E '^MSM_SECRET_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
     [[ -n "$val" ]] && CURRENT_SECRET_KEY="$val"
+
+    val=$(grep -E '^MSM_COOKIE_DOMAIN=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_COOKIE_DOMAIN="$val"
 }
 
 show_current_config() {
@@ -860,6 +864,23 @@ if [[ -n "$DOMAIN" ]]; then
     PANEL_URL="https://$DOMAIN"
 fi
 
+# Cookie-Domain für OAuth State-Cookie ableiten (autonom für self-hosted Open Source Panel).
+# Wird aus der bei der Installation (oder via Re-Install) hinterlegten DOMAIN berechnet.
+# Mit führendem Punkt, damit Cookie auch bei Subdomains (z.B. msm.example.com) korrekt
+# an den Callback übermittelt wird (wichtig für Cloudflare Proxy, Reverse-Proxy etc.).
+# Siehe docs und config.py für Details.
+if [[ -n "$DOMAIN" ]]; then
+    host="${DOMAIN#*://}"
+    # Bei Subdomain (mind. 2 Dots) den Parent-Domain-Teil nehmen
+    if [[ "$host" == *.*.* ]]; then
+        COOKIE_DOMAIN=".${host#*.}"
+    else
+        COOKIE_DOMAIN=".$host"
+    fi
+else
+    COOKIE_DOMAIN=""
+fi
+
 ENV_FILE="$MSM_DIR/backend/.env"
 
 # Datenbank-URL bestimmen
@@ -916,6 +937,7 @@ MSM_PANEL_URL="$PANEL_URL"
 MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
 MSM_DOCKER_HOST="$MSM_DOCKER_HOST"
 MSM_STEAMCMD_PATH="/usr/games/steamcmd"
+MSM_COOKIE_DOMAIN="$COOKIE_DOMAIN"
 # Redis-URL Fallback (sicherstellen, dass sie nie leer ist wenn Redis aktiv sein soll)
 if $INSTALL_REDIS && [[ -z "$MSM_REDIS_URL" ]]; then
     MSM_REDIS_URL="redis://localhost:6379"
