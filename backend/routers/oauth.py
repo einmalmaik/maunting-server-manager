@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from config import settings
+from config import settings, get_effective_cookie_domain
 from cookies import _set_auth_cookies
 from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
@@ -126,7 +126,7 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
         "path": "/",
         "max_age": oauth_service.STATE_TTL_SECONDS,
     }
-    cookie_domain = getattr(settings, "cookie_domain", None)
+    cookie_domain = get_effective_cookie_domain()
     if cookie_domain:
         cookie_kwargs["domain"] = cookie_domain
     response.set_cookie(**cookie_kwargs)
@@ -139,7 +139,7 @@ def _clear_oauth_state_cookie(response: Response) -> None:
         "secure": True,
         "samesite": "lax",
     }
-    cookie_domain = getattr(settings, "cookie_domain", None)
+    cookie_domain = get_effective_cookie_domain()
     if cookie_domain:
         delete_kwargs["domain"] = cookie_domain
     response.delete_cookie(**delete_kwargs)
