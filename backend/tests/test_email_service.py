@@ -121,6 +121,6 @@ class TestEmailSendingHelpers:
         success = await EmailService.send_account_registered_notification("user@test.de", "newuser")
         assert success is True
         args, _ = mock_send_email.call_args
-        assert "Konto erstellt" in args[1]
+        assert "Konto erfolgreich erstellt" in args[1]
         html = args[3] if len(args) > 3 else None
         assert "Konto erfolgreich erstellt" in (html or "")
