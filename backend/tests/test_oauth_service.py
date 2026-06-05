@@ -356,6 +356,26 @@ class TestResolveUser:
         assert result.action == "link"
         assert result.user == regular_user
 
+    def test_link_by_email_rejected_when_email_unverified(
+        self, db: Session, regular_user: User
+    ):
+        """Defense-in-Depth: Email-Match-Linking darf NUR greifen, wenn der
+        IdP die E-Mail verifiziert hat. Sonst kann ein Angreifer ueber einen
+        schwach konfigurierten (Custom-)IdP ein OAuth-Profil mit der Mail
+        eines bestehenden Users einspielen und sich so ohne dessen Wissen
+        einlinken → Account-Takeover.
+        """
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        provider = _make_provider(db, slug="gh", preset="github")
+        profile = _make_profile("999", regular_user.email, email_verified=False)
+        result = oauth_service.resolve_user(db, provider, profile)
+        # Muss verboten sein (kein Link), nicht aber auto-registrieren,
+        # weil Allow-Registration standardmaessig OFF ist.
+        assert result.action == "forbidden", (
+            f"Erwartet forbidden, bekam: action={result.action!r}, "
+            f"reason={result.reason!r}"
+        )
+
 
 # ── Register / Link ───────────────────────────────────────────────────
 

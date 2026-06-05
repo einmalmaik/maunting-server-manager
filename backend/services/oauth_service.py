@@ -720,8 +720,13 @@ def resolve_user(
             return ResolutionResult(None, "forbidden", "linking_disabled")
         return ResolutionResult(current_user, "link")
 
-    # Email-Match (nur wenn linking erlaubt)
-    if is_linking_allowed() and profile.email:
+    # Email-Match (nur wenn linking erlaubt UND E-Mail vom IdP verifiziert).
+    # Defense-in-Depth: ohne den verified-Check koennte ein Angreifer ueber
+    # einen schwach konfigurierten Custom-IdP ein OAuth-Profil mit der Mail
+    # eines bestehenden Users einspielen und sich so ohne Wissen des Victims
+    # einlinken. Auto-Registration prueft denselben Switch (requires_verified_email)
+    # bereits — hier war die Luecke.
+    if is_linking_allowed() and profile.email and profile.email_verified:
         existing = db.query(User).filter(User.email == profile.email).first()
         if existing is not None and existing.is_active:
             return ResolutionResult(existing, "link")

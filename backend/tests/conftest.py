@@ -52,8 +52,13 @@ def clean_db():
     # Built-in Rollen (admin/user) bei jedem Test bereitstellen.
     from services.install_update_lock_service import reset_install_update_lock_for_tests
     from services.server_lifecycle_service import reset_lifecycle_jobs_for_tests
+    from services.panel_settings_service import PanelSettingsService
     reset_install_update_lock_for_tests()
     reset_lifecycle_jobs_for_tests()
+    # PanelSettingsService hat einen In-Memory-Cache — ohne invalidate_cache
+    # leaken Werte zwischen Tests (z. B. oauth.allow_registration=true aus
+    # einem frueheren Test).
+    PanelSettingsService.invalidate_cache()
     session = db_module.SessionLocal()
     try:
         ensure_system_roles(session)
