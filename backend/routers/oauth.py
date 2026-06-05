@@ -110,15 +110,21 @@ def _set_login_session(response: Response, db: Session, user: User) -> None:
 
 
 def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
-    # Cookie mit path=/ + optional domain= (abgeleitet aus MSM_PANEL_URL oder
-    # explizit MSM_COOKIE_DOMAIN). Wichtig damit das State-Cookie den Redirect
-    # vom IdP (Google/Discord) ueberlebt. Siehe get_effective_cookie_domain().
+    # SameSite=None + Secure: der State-Cookie MUSS den IdP-Cross-Site-
+    # Roundtrip (z. B. Google → msm.mauntingstudios.de) zuverlaessig
+    # ueberleben. SameSite=Lax schickt Cookies NUR bei Top-Level-Navigation;
+    # fuer OAuth-Callbacks (vor allem bei `prompt=none` silent re-auth ueber
+    # hidden iframe) braucht es None. Security: der State-Wert ist 24 Bytes
+    # random + PKCE-Code-Verifier, beide nicht erratbar. HttpOnly verhindert
+    # JS-Zugriff. Domain-Attribut wird weiterhin aus get_effective_cookie_domain()
+    # abgeleitet, damit Subdomain-Setups (z. B. app.X.example.com) korrekt
+    # funktionieren.
     cookie_kwargs: dict[str, Any] = {
         "key": oauth_service.STATE_COOKIE_NAME,
         "value": encrypted,
         "httponly": True,
         "secure": True,
-        "samesite": "lax",
+        "samesite": "none",
         "path": "/",
         "max_age": oauth_service.STATE_TTL_SECONDS,
     }
@@ -129,13 +135,15 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
 
 
 def _clear_oauth_state_cookie(response: Response) -> None:
-    # Gleiche Domain/Path-Attribute wie beim Setzen → Cookie wird zuverlässig
-    # gelöscht (auch bei Mismatch-Fehlern oder nach erfolgreichem Login).
+    # Gleiche Domain/Path/SameSite-Attribute wie beim Setzen → Cookie wird
+    # zuverlaessig geloescht (auch bei Mismatch-Fehlern oder nach erfolgreichem
+    # Login). SameSite=None beim Delete ist zulaessig — Browser matchen das
+    # gegen das urspruenglich gesetzte Cookie.
     delete_kwargs: dict[str, Any] = {
         "key": oauth_service.STATE_COOKIE_NAME,
         "path": "/",
         "secure": True,
-        "samesite": "lax",
+        "samesite": "none",
     }
     cookie_domain = get_effective_cookie_domain()
     if cookie_domain:
@@ -350,9 +358,14 @@ def oauth_start(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     cookie_domain = get_effective_cookie_domain()
+    # NICHT die volle auth_url loggen — sie enthaelt state + code_challenge,
+    # mit denen ein Angreifer (Log-Reader) den Token-Exchange replizieren
+    # koennte. Wir loggen nur den Host des IdP + slug + Domain-Info.
+    from urllib.parse import urlparse
+    idp_host = urlparse(auth_url).netloc
     _log.info(
-        "OAuth start (slug=%s) → IdP authorize URL: %s (cookie_domain=%r, panel_url=%s)",
-        slug, auth_url, cookie_domain or "(host-only)", settings.panel_url,
+        "OAuth start (slug=%s) → IdP=%s (cookie_domain=%r, panel_url=%s)",
+        slug, idp_host, cookie_domain or "(host-only)", settings.panel_url,
     )
     resp = RedirectResponse(url=auth_url, status_code=302)
     _set_oauth_state_cookie(resp, encrypted)
@@ -581,9 +594,12 @@ def oauth_link_start(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     cookie_domain = get_effective_cookie_domain()
+    # IdP-Host statt voller URL loggen (siehe oauth_start).
+    from urllib.parse import urlparse
+    idp_host = urlparse(auth_url).netloc
     _log.info(
-        "OAuth link/start (slug=%s) → IdP authorize URL: %s (cookie_domain=%r, panel_url=%s)",
-        slug, auth_url, cookie_domain or "(host-only)", settings.panel_url,
+        "OAuth link/start (slug=%s) → IdP=%s (cookie_domain=%r, panel_url=%s)",
+        slug, idp_host, cookie_domain or "(host-only)", settings.panel_url,
     )
     resp = RedirectResponse(url=auth_url, status_code=302)
     _set_oauth_state_cookie(resp, encrypted)

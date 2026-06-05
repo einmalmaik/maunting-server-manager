@@ -297,6 +297,40 @@ class TestOAuthStart:
         assert payload["next"] == "/servers"
         assert payload["mode"] == oauth_service.OAUTH_MODE_LOGIN
 
+    def test_state_cookie_uses_samesite_none(
+        self, client: TestClient, db: Session
+    ):
+        """Security-Invariante: der OAuth-State-Cookie MUSS SameSite=None
+        haben, damit er den Cross-Site-Roundtrip vom IdP (Google/Discord)
+        zuverlaessig ueberlebt. SameSite=Lax wuerde Cookies nur bei
+        Top-Level-Navigation mitsenden — OAuth-Silent-Re-Auth (prompt=none)
+        und einige IdP-Flows nutzen aber hidden-iframe / sub-resource
+        redirects, wo SameSite=Lax blockt.
+
+        HttpOnly + Secure + SameSite=None + state-als-random + PKCE-Code-
+        Verifier ergibt zusammen ein sicheres OAuth-State-Pattern (RFC 6749
+        + RFC 6265bis).
+        """
+        _create_provider(db, slug="gh-samesite", preset="github")
+        res = client.get("/api/oauth/gh-samesite/start", follow_redirects=False)
+        assert res.status_code == 302
+        # Set-Cookie-Header holen (TestClient exponiert .cookies, aber
+        # SameSite kommt aus dem Raw-Header)
+        set_cookie = None
+        for k, v in res.headers.raw:
+            if k.lower() == b"set-cookie" and b"__Secure-oauth_state" in v:
+                set_cookie = v.decode()
+                break
+        assert set_cookie is not None, "Set-Cookie fuer State-Cookie fehlt"
+        # HTTP-Header-Werte sind case-insensitive per RFC 7230, deshalb
+        # sowohl 'SameSite=None' als auch 'SameSite=none' akzeptieren.
+        assert "samesite=none" in set_cookie.lower(), (
+            f"State-Cookie MUSS SameSite=None fuer Cross-Site-IdP-"
+            f"Roundtrip haben. Header war: {set_cookie!r}"
+        )
+        assert "Secure" in set_cookie, "State-Cookie MUSS Secure haben"
+        assert "HttpOnly" in set_cookie, "State-Cookie MUSS HttpOnly haben"
+
 
 # ── OAuth-Callback ────────────────────────────────────────────────────
 
