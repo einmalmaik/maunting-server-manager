@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
@@ -39,14 +39,14 @@ export function Profile() {
   const [backupCodes, setBackupCodes] = useState<string[]>([])
 
   const [oauthLinks, setOauthLinks] = useState<OAuthUserLink[]>([])
-// For deletion: social-only (has links) can skip current-password step.
-// Central truth is in backend (has OAuthUserLink), here we use the loaded links for UI.
-const isSocialOnlyForDeletion = oauthLinks.length > 0
+  // For deletion: social-only (has links) can skip current-password step.
+  // Central truth is in backend (has OAuthUserLink), here we use the loaded links for UI.
+  const isSocialOnlyForDeletion = oauthLinks.length > 0
   const [oauthAvailable, setOauthAvailable] = useState<OAuthProviderPublic[]>([])
   const [oauthLoading, setOauthLoading] = useState(true)
   const [unlinkingId, setUnlinkingId] = useState<number | null>(null)
 
-  const loadOauth = async () => {
+  const loadOauth = useCallback(async () => {
     try {
       const [links, publicProviders] = await Promise.all([
         oauthApi.listMyLinks(),
@@ -59,9 +59,9 @@ const isSocialOnlyForDeletion = oauthLinks.length > 0
     } finally {
       setOauthLoading(false)
     }
-  }
+  }, [])
 
-  useEffect(() => { loadOauth() }, [])
+  useEffect(() => { void loadOauth() }, [loadOauth])
 
   // URL-Param-Auswertung fuer OAuth-Linking-Callback (redirect nach /profile?linked=1|error=…)
   useEffect(() => {
@@ -80,7 +80,7 @@ const isSocialOnlyForDeletion = oauthLinks.length > 0
       toast.error(translated || t('profile.linkedAccounts.linkErrorUnknown'))
       setSearchParams({}, { replace: true })
     }
-  }, [searchParams, setSearchParams, t])
+  }, [searchParams, setSearchParams, t, loadOauth])
 
   const handleUnlink = async (link: OAuthUserLink) => {
     const ok = await confirm({
