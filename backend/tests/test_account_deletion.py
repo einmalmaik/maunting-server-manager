@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from models import User, RefreshToken, JwtBlacklist, EmailVerification, AuditLog
+from models import User, RefreshToken, JwtBlacklist, EmailVerification, AuditLog, OAuthUserLink, OAuthProvider
 from services.auth_service import AuthService
 from services.backup_code_service import BackupCodeService
 
@@ -65,7 +65,7 @@ class TestAccountDeletion:
         response = client.request(
             "DELETE",
             "/api/auth/delete-account",
-            json={"password": "UserPass123!", "otp_code": None},
+            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": None},
             cookies=normal_cookies,
             headers={"X-CSRF-Token": csrf},
         )
@@ -91,7 +91,7 @@ class TestAccountDeletion:
         response = client.request(
             "DELETE",
             "/api/auth/delete-account",
-            json={"password": "WrongPass123!", "otp_code": None},
+            json={"password": "WrongPass123!", "confirmation": "delete", "otp_code": None},
             cookies=normal_cookies,
             headers={"X-CSRF-Token": csrf},
         )
@@ -112,7 +112,7 @@ class TestAccountDeletion:
         response = client.request(
             "DELETE",
             "/api/auth/delete-account",
-            json={"password": "UserPass123!", "otp_code": None},
+            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": None},
             cookies=normal_cookies,
             headers={"X-CSRF-Token": csrf},
         )
@@ -123,7 +123,7 @@ class TestAccountDeletion:
         response = client.request(
             "DELETE",
             "/api/auth/delete-account",
-            json={"password": "UserPass123!", "otp_code": "000000"},
+            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": "000000"},
             cookies=normal_cookies,
             headers={"X-CSRF-Token": csrf},
         )
@@ -135,7 +135,7 @@ class TestAccountDeletion:
         response = client.request(
             "DELETE",
             "/api/auth/delete-account",
-            json={"password": "UserPass123!", "otp_code": codes[0]},
+            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": codes[0]},
             cookies=normal_cookies,
             headers={"X-CSRF-Token": csrf},
         )
@@ -147,7 +147,7 @@ class TestAccountDeletion:
         response = client.request(
             "DELETE",
             "/api/auth/delete-account",
-            json={"password": "UserPass123!", "otp_code": totp.now()},
+            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": totp.now()},
             cookies=normal_cookies,
             headers={"X-CSRF-Token": csrf},
         )
@@ -158,9 +158,85 @@ class TestAccountDeletion:
         response = client.request(
             "DELETE",
             "/api/auth/delete-account",
-            json={"password": "OwnerPass123!", "otp_code": None},
+            json={"password": "OwnerPass123!", "confirmation": "delete", "otp_code": None},
             cookies=owner_cookies,
             headers={"X-CSRF-Token": csrf},
         )
         assert response.status_code == 403
         assert "Owner-Account kann nicht gelöscht werden" in response.json()["detail"]
+
+    def test_social_only_account_can_delete_without_password(self, client: TestClient, db: Session):
+        """Social-only accounts (with OAuthUserLink) can delete without current password.
+        Only confirmation + (if 2FA) otp required. Central logic in router.
+        """
+        from services.auth_service import AuthService
+        # Fresh user for this test (avoid pollution from other tests that delete)
+        user = AuthService.create_user(db, "social_delete_test", "socialdel@test.de", "TempPass123!")
+        user.email_verified = True
+        db.commit()
+        db.refresh(user)
+        user_id = user.id  # capture numeric id before delete removes the row
+
+        # Add google link to mark as social
+        provider = db.query(OAuthProvider).filter(OAuthProvider.slug == "google").first()
+        if not provider:
+            provider = OAuthProvider(slug="google", name="Google", preset="google", client_id="dummy-test", enabled=True)
+            db.add(provider)
+            db.commit()
+            db.refresh(provider)
+
+        link = OAuthUserLink(
+            provider_id=provider.id, 
+            user_id=user.id, 
+            subject="social-xyz", 
+            email_at_link=user.email,
+            username_at_link=user.username
+        )
+        db.add(link)
+        db.commit()
+
+        # Login to get cookies + csrf
+        login = client.post("/api/auth/login", json={
+            "username": "social_delete_test",
+            "password": "TempPass123!",
+            "otp_code": None,
+        })
+        assert login.status_code == 200
+        cookies = dict(login.cookies)
+        csrf = cookies.get("__Secure-csrf_token")
+
+        # Delete WITHOUT password, WITH confirmation
+        resp = client.request(
+            "DELETE",
+            "/api/auth/delete-account",
+            json={"password": None, "confirmation": "delete", "otp_code": None},
+            cookies=cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json().get("message") == "Account gelöscht"
+        assert db.query(User).filter(User.id == user_id).first() is None
+
+    def test_delete_fails_without_confirmation_word(self, client: TestClient, db: Session):
+        from services.auth_service import AuthService
+        user = AuthService.create_user(db, "confirmfail_test", "cfail@test.de", "Pass1234!")
+        user.email_verified = True
+        db.commit()
+        db.refresh(user)
+        user_id = user.id  # capture numeric id before delete removes the row
+
+        login = client.post("/api/auth/login", json={"username": "confirmfail_test", "password": "Pass1234!", "otp_code": None})
+        assert login.status_code == 200
+        cookies = dict(login.cookies)
+        csrf = cookies.get("__Secure-csrf_token")
+
+        resp = client.request(
+            "DELETE",
+            "/api/auth/delete-account",
+            json={"password": "Pass1234!", "confirmation": "wrongword", "otp_code": None},
+            cookies=cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 400
+        assert "Bestätigung delete erforderlich" in resp.json().get("detail", "")
+

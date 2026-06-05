@@ -52,6 +52,10 @@ class ChangeEmailRequest(BaseModel):
 
 
 class DeleteAccountRequest(BaseModel):
-    password: str = Field(..., min_length=1)
+    # password is required only for accounts without OAuth links (local password accounts).
+    # For social-only accounts (created/linked via OAuth) it is skipped.
+    password: str | None = Field(None, min_length=1)
+    # Always required: user must type the exact word "delete". Frontend prevents paste.
+    confirmation: str = Field(..., min_length=5)
     otp_code: str | None = Field(None, pattern=r"^\d{6}$")
 

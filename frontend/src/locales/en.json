@@ -789,7 +789,8 @@
       "linkErrorProviderUnavailable": "Provider is no longer available.",
       "linkErrorPresetUnknown": "Preset for this provider is unknown.",
       "linkErrorUnknown": "Link failed."
-    }
+    },
+    "confirmDeleteWordLabel": "Type delete to confirm (paste disabled)"
   },
   "errors": {
     "RATE_LIMITED": "Too many requests. Please wait a moment.",

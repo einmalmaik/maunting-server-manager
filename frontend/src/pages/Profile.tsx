@@ -20,6 +20,7 @@ export function Profile() {
 
   const [deleteState, setDeleteState] = useState<'idle' | 'first-confirmed' | 'deleting' | 'success'>('idle')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [confirmDeleteWord, setConfirmDeleteWord] = useState('')
   const [confirmOtp, setConfirmOtp] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -38,6 +39,9 @@ export function Profile() {
   const [backupCodes, setBackupCodes] = useState<string[]>([])
 
   const [oauthLinks, setOauthLinks] = useState<OAuthUserLink[]>([])
+// For deletion: social-only (has links) can skip current-password step.
+// Central truth is in backend (has OAuthUserLink), here we use the loaded links for UI.
+const isSocialOnlyForDeletion = oauthLinks.length > 0
   const [oauthAvailable, setOauthAvailable] = useState<OAuthProviderPublic[]>([])
   const [oauthLoading, setOauthLoading] = useState(true)
   const [unlinkingId, setUnlinkingId] = useState<number | null>(null)
@@ -663,6 +667,7 @@ export function Profile() {
                       method: 'DELETE',
                       body: JSON.stringify({
                         password: confirmPassword,
+                        confirmation: confirmDeleteWord,
                         otp_code: user?.two_factor_enabled ? confirmOtp : null,
                       }),
                     })
@@ -685,6 +690,7 @@ export function Profile() {
                   </p>
                 </div>
 
+                {!isSocialOnlyForDeletion && (
                 <div>
                   <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                     {t('profile.confirmPasswordLabel')}
@@ -692,9 +698,33 @@ export function Profile() {
                   <PasswordInput
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
+                    required={!isSocialOnlyForDeletion}
                     disabled={deleteState === 'deleting'}
                   />
+                </div>
+                )}
+
+                {/* Always required confirmation word "delete" - paste disabled for security/accidental prevention */}
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('profile.confirmDeleteWordLabel', { defaultValue: "Tippe 'delete' zur Bestätigung (nicht kopierbar)" })}
+                  </label>
+                  <input
+                    type="text"
+                    value={confirmDeleteWord}
+                    onChange={(e) => setConfirmDeleteWord(e.target.value)}
+                    onPaste={(e) => {
+                      e.preventDefault();
+                      // Paste is intentionally blocked. User must type the word.
+                    }}
+                    className="msm-input font-mono"
+                    placeholder="delete"
+                    required
+                    disabled={deleteState === 'deleting'}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <p className="text-[10px] text-on-surface-variant mt-1">Tippe das Wort exakt ein – Kopieren/Einfügen ist deaktiviert.</p>
                 </div>
 
                 {user?.two_factor_enabled && (
@@ -736,6 +766,7 @@ export function Profile() {
                     onClick={() => {
                       setDeleteState('idle')
                       setConfirmPassword('')
+                      setConfirmDeleteWord('')
                       setConfirmOtp('')
                       setErrorMsg('')
                     }}

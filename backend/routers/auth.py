@@ -447,12 +447,37 @@ def delete_account(
     user: User = Depends(get_current_user),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Eigenes Konto loeschen. Erfordert Passwort und aktuellen 2FA-Code (falls 2FA aktiv)."""
-    # 1. Passwort verifizieren
-    if not AuthService.verify_password(req.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Passwort ungültig")
+    """Eigenes Konto loeschen.
 
-    # 2. 2FA verifizieren (falls aktiv)
+    Zentrale Logik:
+    - Lokale Accounts (keine OAuth-Links): aktuelles Passwort erforderlich.
+    - Social-Only Accounts (haben OAuthUserLink): Passwort-Schritt wird übersprungen
+      (die aktuelle Session beweist Besitz via Social-Login).
+    - 2FA wird **niemals** übersprungen, wenn aktiv (auch nicht bei Social).
+    - Immer: exaktes Wort "delete" als confirmation (Frontend verhindert Paste).
+    """
+    from models import OAuthUserLink
+
+    # Zentrale Entscheidung: braucht dieser User ein Passwort für Löschung?
+    has_oauth_links = (
+        db.query(OAuthUserLink)
+        .filter(OAuthUserLink.user_id == user.id)
+        .first()
+    ) is not None
+
+    if not has_oauth_links:
+        # Lokaler Account: Passwort zwingend
+        if not req.password:
+            raise HTTPException(status_code=400, detail="Passwort erforderlich")
+        if not AuthService.verify_password(req.password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Passwort ungültig")
+    # else: Social-Only -> Passwort überspringen (wie gewünscht)
+
+    # Immer Bestätigungswort "delete" (nicht kopierbar im Frontend)
+    if (req.confirmation or "").strip().lower() != "delete":
+        raise HTTPException(status_code=400, detail="Bestätigung delete erforderlich")
+
+    # 2FA: niemals überspringen wenn aktiv
     if user.two_factor_enabled:
         if not req.otp_code:
             raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
