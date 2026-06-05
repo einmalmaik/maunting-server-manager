@@ -363,7 +363,7 @@ export function Login() {
                   {oauthProviders.map((p) => (
                     <a
                       key={p.slug}
-                      href={`/api/oauth/${p.slug}/start?next=/`}
+                      href={`/api/oauth/${p.slug}/start?next=/&cb=${Date.now().toString(36)}`}
                       className="msm-btn-secondary w-full py-2.5 inline-flex items-center justify-center gap-2"
                     >
                       <KeyRound className="w-4 h-4" />
