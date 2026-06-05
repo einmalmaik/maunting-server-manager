@@ -177,10 +177,10 @@ class TestAccountDeletion:
         db.refresh(user)
         user_id = user.id  # capture numeric id before delete removes the row
 
-        # Add google link to mark as social
-        provider = db.query(OAuthProvider).filter(OAuthProvider.slug == "google").first()
+        # Add discord link (real built-in provider) to mark as social
+        provider = db.query(OAuthProvider).filter(OAuthProvider.slug == "discord").first()
         if not provider:
-            provider = OAuthProvider(slug="google", name="Google", preset="google", client_id="dummy-test", enabled=True)
+            provider = OAuthProvider(slug="discord", name="Discord", preset="discord", client_id="dummy-test", enabled=True)
             db.add(provider)
             db.commit()
             db.refresh(provider)
@@ -240,3 +240,63 @@ class TestAccountDeletion:
         assert resp.status_code == 400
         assert "Bestätigung delete erforderlich" in resp.json().get("detail", "")
 
+
+    def test_social_only_via_custom_provider_can_delete_without_password(self, client: TestClient, db: Session):
+        """Social-only accounts using a *custom* OAuth provider (custom_oauth2 or custom_oidc)
+        must also be able to delete without providing current password.
+        The decision is based solely on existence of any OAuthUserLink, independent of preset.
+        """
+        from services.auth_service import AuthService
+        user = AuthService.create_user(db, "custom_social_delete", "customsocial@test.de", "TempPass123!")
+        user.email_verified = True
+        db.commit()
+        db.refresh(user)
+        user_id = user.id
+
+        # Create a custom provider (simulates admin-added custom_oauth2)
+        provider = db.query(OAuthProvider).filter(OAuthProvider.slug == "custom_test").first()
+        if not provider:
+            provider = OAuthProvider(
+                slug="custom_test",
+                name="Custom Test",
+                preset="custom_oauth2",
+                client_id="dummy-custom",
+                # For custom the other endpoints are set in UI, but not needed for link test
+                enabled=True,
+            )
+            db.add(provider)
+            db.commit()
+            db.refresh(provider)
+
+        # Create the link exactly as oauth_service.link_provider_to_user would
+        link = OAuthUserLink(
+            provider_id=provider.id,
+            user_id=user.id,
+            subject="custom-subject-xyz",
+            email_at_link=user.email,
+            username_at_link=user.username,
+        )
+        db.add(link)
+        db.commit()
+
+        # Login (the temp password is only for this login, deletion must skip it)
+        login = client.post("/api/auth/login", json={
+            "username": "custom_social_delete",
+            "password": "TempPass123!",
+            "otp_code": None,
+        })
+        assert login.status_code == 200
+        cookies = dict(login.cookies)
+        csrf = cookies.get("__Secure-csrf_token")
+
+        # Delete WITHOUT password, only confirmation
+        resp = client.request(
+            "DELETE",
+            "/api/auth/delete-account",
+            json={"password": None, "confirmation": "delete", "otp_code": None},
+            cookies=cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json().get("message") == "Account gelöscht"
+        assert db.query(User).filter(User.id == user_id).first() is None
