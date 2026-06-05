@@ -666,7 +666,10 @@ const isSocialOnlyForDeletion = oauthLinks.length > 0
                     await api('/auth/delete-account', {
                       method: 'DELETE',
                       body: JSON.stringify({
-                        password: confirmPassword,
+                        // For social-only accounts (has OAuth links) we send null so the backend
+                        // skips the password check. Local accounts send the real password.
+                        // This prevents Pydantic "String should have at least 1 character" on empty string.
+                        password: isSocialOnlyForDeletion ? null : confirmPassword,
                         confirmation: confirmDeleteWord,
                         otp_code: user?.two_factor_enabled ? confirmOtp : null,
                       }),
