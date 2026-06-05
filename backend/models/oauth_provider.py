@@ -38,6 +38,11 @@ class OAuthProvider(Base):
     client_id: Mapped[str] = mapped_column(String(512), nullable=False)
     # Fernet-encrypted; leer = kein Secret hinterlegt (z. B. PKCE-only Provider)
     client_secret_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)
+    # Maske des Klartext-Secrets (z. B. "********cdef") — wird bei
+    # Create/Update berechnet und mit-geschrieben. Vermeidet, dass der
+    # Listing-Pfad fuer jeden Provider einen Fernet-Decrypt macht, nur um
+    # die letzten 4 Zeichen anzuzeigen. KISS + Performance.
+    client_secret_mask: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Optionale Overrides fuer custom_oidc/custom_oauth2 (sonst NULL = aus Preset)
     issuer: Mapped[str | None] = mapped_column(String(512), nullable=True)

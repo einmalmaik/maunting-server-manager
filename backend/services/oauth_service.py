@@ -333,10 +333,14 @@ def create_provider(
 
     norm_scope = _normalize_scope(scope)
 
-    # Secret-Encryption nur wenn Secret uebergeben wurde
+    # Secret-Encryption nur wenn Secret uebergeben wurde. Die Maske wird
+    # mit-gespeichert, damit der Listing-Pfad keinen Fernet-Decrypt mehr
+    # machen muss (P1.3 aus Code-Review).
     secret_enc: str | None = None
+    secret_mask: str | None = None
     if client_secret:
         secret_enc = encrypt_secret(client_secret)
+        secret_mask = mask_secret(client_secret)
 
     provider = OAuthProvider(
         slug=norm_slug,
@@ -345,6 +349,7 @@ def create_provider(
         enabled=enabled,
         client_id=client_id.strip(),
         client_secret_encrypted=secret_enc,
+        client_secret_mask=secret_mask,
         issuer=(issuer or None),
         authorization_endpoint=(authorization_endpoint or None),
         token_endpoint=(token_endpoint or None),
@@ -396,8 +401,10 @@ def update_provider(
         elif client_secret == "":
             # Explizit leeren = Secret loeschen
             provider.client_secret_encrypted = None
+            provider.client_secret_mask = None
         else:
             provider.client_secret_encrypted = encrypt_secret(client_secret)
+            provider.client_secret_mask = mask_secret(client_secret)
     if issuer is not None:
         provider.issuer = issuer or None
     if authorization_endpoint is not None:

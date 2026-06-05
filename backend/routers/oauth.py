@@ -65,17 +65,14 @@ def _no_cache_redirect(url: str, status_code: int = 302) -> "RedirectResponse":
 # ── Helpers ────────────────────────────────────────────────────────────
 
 def _provider_to_response(p: OAuthProvider) -> dict[str, Any]:
-    # Wir entschluesseln NUR fuer das Response-Masking — der Plain-Text wird
-    # nicht persistiert oder geloggt. Die "****1234"-Maske auf dem verschluesselten
-    # Blob waere unleserlich; die Plain-Maske kommuniziert dem Admin, was er
-    # hinterlegt hat. Performance: 1x Fernet-Decrypt pro Provider-Listing.
-    plain = ""
-    if p.client_secret_encrypted:
-        try:
-            plain = oauth_service.decrypt_secret(p.client_secret_encrypted)
-        except Exception as exc:
-            _log.warning("OAuth provider %s secret decryption failed: %s", p.slug, exc)
-            plain = ""  # Defekt nach SECRET_KEY-Rotation → leer maskieren
+    # Maske kommt direkt aus der DB-Spalte `client_secret_mask` (wird beim
+    # Create/Update berechnet). Kein Fernet-Decrypt im Read-Pfad mehr noetig.
+    # Fuer sehr alte Provider ohne gesetzte Maske (vor der P1.3-Migration):
+    # Fallback "****" signalisiert "Secret ist gesetzt, aber Maske unbekannt".
+    # Der Admin kann durch erneutes Speichern die Maske neu berechnen.
+    secret_mask = p.client_secret_mask
+    if secret_mask is None and p.client_secret_encrypted:
+        secret_mask = "****"  # Legacy: nicht-migrierter Provider
     return {
         "id": p.id,
         "slug": p.slug,
@@ -83,7 +80,7 @@ def _provider_to_response(p: OAuthProvider) -> dict[str, Any]:
         "preset": p.preset,
         "enabled": p.enabled,
         "client_id": p.client_id,
-        "client_secret": oauth_service.mask_secret(plain),
+        "client_secret": secret_mask or "",
         "issuer": p.issuer,
         "authorization_endpoint": p.authorization_endpoint,
         "token_endpoint": p.token_endpoint,

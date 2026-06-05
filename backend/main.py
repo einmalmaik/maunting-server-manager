@@ -315,6 +315,16 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Migration: oauth_providers.client_secret_mask (P1.3) — vermeidet
+    # Fernet-Decrypt im Listing-Pfad. Die Spalte wird beim naechsten
+    # Create/Update des Providers automatisch befuellt; alte Provider
+    # bekommen NULL (Fallback im Response-Builder).
+    if 'oauth_providers' in inspector.get_table_names():
+        cols = [c['name'] for c in inspector.get_columns('oauth_providers')]
+        if 'client_secret_mask' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE oauth_providers ADD COLUMN client_secret_mask VARCHAR(64)"))
+
     # OAuth: abgelaufene Login-Challenges aufraeumen (idempotent, low-cost).
     # Kein Hard-Fail, wenn der Cleanup scheitert — der naechste Startup macht
     # es wieder.
