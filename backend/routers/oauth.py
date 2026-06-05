@@ -386,6 +386,16 @@ def oauth_callback(
 
     state_cookie = request.cookies.get(oauth_service.STATE_COOKIE_NAME)
     payload = oauth_service.unpack_state_cookie(state_cookie)
+    # WICHTIG: Mode ZUERST lesen, BEVOR wir auf Mismatch prüfen — sonst landet
+    # ein Link-Mode-Fehler auf /login (was PublicOnlyRoute für eingeloggte User
+    # auf / redirected → der User sieht nie die Fehlermeldung in /profile).
+    # Bei kaputtem Payload ist der Mode unbekannt → Default login als sicherer
+    # Fallback (Login-Fehler ist weniger schlimm als stilles Verschwinden).
+    mode = (payload or {}).get("mode", oauth_service.OAUTH_MODE_LOGIN)
+    if mode not in (oauth_service.OAUTH_MODE_LOGIN, oauth_service.OAUTH_MODE_LINK):
+        _log.warning("OAuth callback: unknown mode=%r (slug=%s)", mode, slug)
+        return _redirect_login_error("oauth_invalid_callback")
+
     if payload is None or payload.get("state") != state:
         # Diagnose-Helfer: bei 'neuer User bekommt state_mismatch' ist die Frage
         # immer 'was ist mit dem State-Cookie passiert?'. Wir loggen den genauen
@@ -393,20 +403,20 @@ def oauth_callback(
         # Cookie komplett (Browser-Block / SameSite / Path-Problem). Sieht er
         # 'state_mismatch' aber Cookie ist da, ist der State-Wert selbst falsch.
         if not state_cookie:
-            _log.warning("OAuth state mismatch (slug=%s): no __Secure-oauth_state cookie on request", slug)
+            _log.warning("OAuth state mismatch (slug=%s, mode=%s): no __Secure-oauth_state cookie on request", slug, mode)
         elif payload is None:
-            _log.warning("OAuth state mismatch (slug=%s): cookie present but Fernet decrypt failed", slug)
+            _log.warning("OAuth state mismatch (slug=%s, mode=%s): cookie present but Fernet decrypt failed", slug, mode)
         else:
             _log.warning(
-                "OAuth state mismatch (slug=%s): state value differs (cookie has %r, URL has %r)",
-                slug, payload.get("state"), state,
+                "OAuth state mismatch (slug=%s, mode=%s): state value differs (cookie has %r, URL has %r)",
+                slug, mode, payload.get("state"), state,
             )
+        # Modus-spezifisches Redirect-Ziel: Link-Mode-Fehler gehören auf /profile,
+        # damit der User (der noch eingeloggt ist) die Toast-Meldung tatsächlich
+        # sieht. Login-Mode-Fehler bleiben auf /login.
+        if mode == oauth_service.OAUTH_MODE_LINK:
+            return _redirect_profile_error("state_user_mismatch")
         return _redirect_login_error("oauth_state_mismatch")
-
-    mode = payload.get("mode", oauth_service.OAUTH_MODE_LOGIN)
-    if mode not in (oauth_service.OAUTH_MODE_LOGIN, oauth_service.OAUTH_MODE_LINK):
-        _log.warning("OAuth callback: unknown mode=%r (slug=%s)", mode, slug)
-        return _redirect_login_error("oauth_invalid_callback")
 
     # ── Link-Mode: Auth + Switch-Check VOR externem Token-Call ──
     if mode == oauth_service.OAUTH_MODE_LINK:

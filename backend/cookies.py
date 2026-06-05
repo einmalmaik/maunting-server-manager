@@ -1,6 +1,6 @@
 from fastapi import Response
 
-from config import settings
+from config import get_effective_cookie_domain, settings
 
 
 _COOKIE_CONFIG = {
@@ -44,6 +44,14 @@ _LEGACY_CSRF_PATHS = ("/api",)
 
 def _set_cookie(response: Response, key: str, value: str, max_age: int | None = None) -> None:
     cfg = _COOKIE_CONFIG[key]
+    # Konsistente Domain mit dem OAuth-State-Cookie: wenn get_effective_cookie_domain()
+    # einen Parent-Domain-Wert liefert (z. B. ".mauntingstudios.de"), setzen wir
+    # die Auth-Cookies ebenfalls mit Domain=. Parent-Domain. Sonst sind die
+    # __Secure-access_token / __Secure-refresh_token / __Secure-csrf_token
+    # host-only (z. B. nur "panel.mauntingstudios.de"). Browser handhaben das
+    # unterschiedlich streng — gleiche Attribute für alle drei Cookies
+    # verhindern subtile Mismatch-Bugs beim IdP-Callback-Roundtrip.
+    cookie_domain = get_effective_cookie_domain() or None
     response.set_cookie(
         key=key,
         value=value,
@@ -52,6 +60,7 @@ def _set_cookie(response: Response, key: str, value: str, max_age: int | None = 
         samesite=cfg["samesite"],
         path=cfg["path"],
         max_age=max_age,
+        domain=cookie_domain,
     )
 
 
@@ -63,18 +72,28 @@ def _clear_legacy_csrf_cookies(response: Response) -> None:
     jedem Request auf /api/* zusammen mit dem aktuellen Cookie unter Path=/.
     Wenn der Server beim Parsen den falschen Wert sieht, schlägt die
     Double-Submit-Prüfung mit "CSRF-Token ungueltig" fehl.
+
+    Domain MUSS mit dem Set-Cookie uebereinstimmen, sonst verwirft der Browser
+    das Delete und das Legacy-Cookie bleibt als Geister-Cookie zurueck.
     """
     cfg = _COOKIE_CONFIG["__Secure-csrf_token"]
+    cookie_domain = get_effective_cookie_domain() or None
     for legacy_path in _LEGACY_CSRF_PATHS:
         response.delete_cookie(
             key="__Secure-csrf_token",
             path=legacy_path,
             secure=cfg["secure"],
             samesite=cfg["samesite"],
+            domain=cookie_domain,
         )
 
 
 def _clear_auth_cookies(response: Response) -> None:
+    # Wichtig: beim Löschen MUSS die Domain mit dem Set-Cookie übereinstimmen,
+    # sonst verwirft der Browser das Delete. Wir leiten die Domain aus
+    # get_effective_cookie_domain() ab, damit Logout/Refresh-401-Rotation
+    # zuverlässig funktioniert.
+    cookie_domain = get_effective_cookie_domain() or None
     for key in ("__Secure-access_token", "__Secure-refresh_token", "__Secure-csrf_token"):
         cfg = _COOKIE_CONFIG[key]
         response.delete_cookie(
@@ -82,6 +101,7 @@ def _clear_auth_cookies(response: Response) -> None:
             path=cfg["path"],
             secure=cfg["secure"],
             samesite=cfg["samesite"],
+            domain=cookie_domain,
         )
     _clear_legacy_csrf_cookies(response)
 

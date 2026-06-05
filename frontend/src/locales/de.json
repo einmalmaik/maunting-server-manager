@@ -933,6 +933,7 @@
   "oauth_preset_unknown": "Preset für diesen Provider ist unbekannt.",
   "oauth_forbidden": "Login mit diesem Provider ist für deinen Account nicht erlaubt.",
   "oauth_registration_failed": "Auto-Registrierung fehlgeschlagen. Bitte Admin kontaktieren.",
+  "no_matching_user": "Für dieses Konto existiert noch kein MSM-Login. Bitte zuerst lokal registrieren und den Provider danach im Profil verknüpfen, oder Auto-Registrierung in den OAuth-Einstellungen aktivieren.",
   "oauth_link_failed": "Verknüpfung fehlgeschlagen.",
   "oauth_link_invalid": "Diese Anfrage ist abgelaufen oder ungültig.",
   "oauth_unknown": "OAuth-Login fehlgeschlagen."

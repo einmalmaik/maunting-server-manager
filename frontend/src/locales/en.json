@@ -933,6 +933,7 @@
   "oauth_preset_unknown": "Preset for this provider is unknown.",
   "oauth_forbidden": "Sign-in with this provider is not allowed for your account.",
   "oauth_registration_failed": "Auto-registration failed. Please contact an admin.",
+  "no_matching_user": "No MSM account exists for this identity yet. Please register locally first and then link the provider in your profile, or enable auto-registration in the OAuth settings.",
   "oauth_link_failed": "Linking failed.",
   "oauth_link_invalid": "This request has expired or is invalid.",
   "oauth_unknown": "OAuth sign-in failed."

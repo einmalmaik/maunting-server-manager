@@ -764,6 +764,63 @@ class TestUnifiedCallback:
         res = client.get("/api/oauth/gh-cb5/link/callback", cookies=user_cookies)
         assert res.status_code == 404
 
+    def test_link_mode_state_mismatch_redirects_to_profile(
+        self, client: TestClient, user_cookies: dict, regular_user: User, db: Session
+    ):
+        """Regression: Im Link-Mode darf ein State-Mismatch NICHT auf /login
+        umleiten — der User waere dann eingeloggt, PublicOnlyRoute redirected
+        auf /, und die Fehlermeldung geht verloren. Korrekt: /profile?error=
+        (state_user_mismatch), damit die Profile-Toast-Logik greift.
+        """
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-cb6", preset="github")
+        # State-Cookie sagt mode=link, aber URL-state stimmt NICHT ueberein
+        payload = {
+            "state": "expected-state",
+            "code_verifier": "v",
+            "redirect_uri": f"http://localhost:3000/api/oauth/gh-cb6/callback",
+            "mode": oauth_service.OAUTH_MODE_LINK,
+            "user_id": regular_user.id,
+            "ts": 1,
+        }
+        cookie = oauth_service.pack_state_cookie(payload)
+        res = client.get(
+            "/api/oauth/gh-cb6/callback?code=fake&state=DIFFERENT-STATE",
+            cookies={**user_cookies, "__Secure-oauth_state": cookie},
+            follow_redirects=False,
+        )
+        assert res.status_code == 302
+        loc = res.headers["location"]
+        assert "/profile" in loc, f"Link-Mode muss auf /profile landen, nicht /login (war: {loc!r})"
+        assert "state_user_mismatch" in loc
+
+    def test_login_mode_state_mismatch_redirects_to_login(
+        self, client: TestClient, db: Session
+    ):
+        """Regression-Gegentest: Im Login-Mode bleibt der State-Mismatch
+        Redirect auf /login (mit error=oauth_state_mismatch) — nur der
+        Link-Mode wechselt auf /profile.
+        """
+        _create_provider(db, slug="gh-cb7", preset="github")
+        payload = {
+            "state": "expected",
+            "code_verifier": "v",
+            "redirect_uri": f"http://localhost:3000/api/oauth/gh-cb7/callback",
+            "mode": oauth_service.OAUTH_MODE_LOGIN,
+            "next": "/",
+            "ts": 1,
+        }
+        cookie = oauth_service.pack_state_cookie(payload)
+        res = client.get(
+            "/api/oauth/gh-cb7/callback?code=fake&state=DIFFERENT",
+            cookies={"__Secure-oauth_state": cookie},
+            follow_redirects=False,
+        )
+        assert res.status_code == 302
+        loc = res.headers["location"]
+        assert "/login" in loc, f"Login-Mode muss auf /login landen (war: {loc!r})"
+        assert "oauth_state_mismatch" in loc
+
 
 # ── Helpers (lokal) ───────────────────────────────────────────────────
 
