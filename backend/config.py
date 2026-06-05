@@ -89,6 +89,22 @@ if settings.secret_key == "change-me-in-production-please-use-a-256-bit-key" and
         "Default placeholder allows JWT forgery. Set in .env or env (prefixed MSM_)."
     )
 
+# Harte Fail-Fast für unkonfigurierten panel_url in Production.
+# Hintergrund: panel_url treibt OAuth-redirect_uri, E-Mail-Links (Password-Reset,
+# OAuth-Link-Bestaetigungen) und CORS. Mit dem http://localhost-Default in Prod
+# wuerden OAuth-Callbacks gegen einen falschen Host laufen, E-Mails zeigen auf
+# localhost, und Browser wuerden Mixed-Content-Fehler werfen. install.sh setzt
+# panel_url aus der Domain — wenn es nicht gelaufen ist oder .env verloren
+# ging, bricht die App hier sauber ab statt spaet in der OAuth-Flow.
+# Tests setzen debug=True via conftest und ueberschreiben panel_url explizit.
+if settings.panel_url == "http://localhost" and not settings.debug:
+    raise RuntimeError(
+        "CRITICAL: MSM_PANEL_URL is the 'http://localhost' default in production. "
+        "Set it to your HTTPS panel URL via .env or env (prefixed MSM_). "
+        "The install.sh script writes it automatically on first install. "
+        "Default would break OAuth redirect_uri, email links and CORS."
+    )
+
 
 def get_effective_cookie_domain() -> str:
     """Return the cookie domain to use for OAuth state cookie.
