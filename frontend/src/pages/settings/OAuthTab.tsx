@@ -9,12 +9,6 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import { confirm } from '@/stores/confirmStore'
 import { Switch } from '@/components/ui/Switch'
 
-const SECRET_MASK_PATTERN = /^[*]+$/
-
-function isSecretMasked(value: string): boolean {
-  return SECRET_MASK_PATTERN.test(value)
-}
-
 interface FormState {
   id: number | null
   slug: string
@@ -22,7 +16,13 @@ interface FormState {
   preset: OAuthPreset
   enabled: boolean
   client_id: string
+  // Form-Wert des Secrets. Leer = entweder untouched (Update) oder
+  // "nicht gesetzt" (Create). secret_dirty trackt, ob der User das Feld
+  // bewusst angefasst hat, damit wir nicht bei jedem Save den (maskiert
+  // geladenen) Platzhalter-Wert als neuen Secret mitsenden.
   client_secret: string
+  client_secret_dirty: boolean
+  // Indicator, ob in der DB ein Secret hinterlegt ist (fuer Placeholder/Hint).
   client_secret_present: boolean
   issuer: string
   authorization_endpoint: string
@@ -41,6 +41,7 @@ const EMPTY_FORM: FormState = {
   enabled: true,
   client_id: '',
   client_secret: '',
+  client_secret_dirty: false,
   client_secret_present: false,
   issuer: '',
   authorization_endpoint: '',
@@ -59,7 +60,12 @@ function providerToForm(p: OAuthProvider): FormState {
     preset: (p.preset as OAuthPreset) || 'custom_oauth2',
     enabled: p.enabled,
     client_id: p.client_id,
-    client_secret: p.client_secret,
+    // Niemals den maskierten Wert aus dem Backend ins Eingabefeld laden:
+    // (a) User koennte denken, das sei der echte Secret
+    // (b) Regex-Match auf "Mask" ist fragil (Backend: ********last4)
+    // Stattdessen: leeres Feld + Placeholder zeigt an, dass eins gesetzt ist.
+    client_secret: '',
+    client_secret_dirty: false,
     client_secret_present: !!p.client_secret && p.client_secret.length > 0,
     issuer: p.issuer ?? '',
     authorization_endpoint: p.authorization_endpoint ?? '',
@@ -134,10 +140,12 @@ export function OAuthTab() {
       }
       if (isUpdate) {
         const body: Record<string, unknown> = { ...baseBody }
-        if (editing.client_secret && !isSecretMasked(editing.client_secret)) {
+        // Secret nur mitsenden, wenn der User das Feld bewusst angefasst hat.
+        // secret_dirty wird auf jeden User-Input (auch Leeren) gesetzt → ein
+        // leerer String bedeutet "Secret loeschen". Untouched → Body enthaelt
+        // kein client_secret, Backend behaelt den bestehenden Wert.
+        if (editing.client_secret_dirty) {
           body.client_secret = editing.client_secret
-        } else if (editing.client_secret === '') {
-          body.client_secret = ''
         }
         await oauthApi.updateProvider(editing.id as number, body)
         toast.success(t('settings.oauth.updated'))
@@ -513,7 +521,7 @@ function ProviderDialog({
             <input
               type="text"
               value={form.client_secret}
-              onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
+              onChange={(e) => setForm({ ...form, client_secret: e.target.value, client_secret_dirty: true })}
               className="msm-input font-mono text-sm"
               placeholder={form.client_secret_present ? '•••••••• (leave empty to keep)' : 'GOCSPX-…'}
               autoComplete="off"
