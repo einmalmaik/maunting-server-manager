@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoginRequest(BaseModel):
@@ -59,3 +59,13 @@ class DeleteAccountRequest(BaseModel):
     confirmation: str = Field(..., min_length=5)
     otp_code: str | None = Field(None, pattern=r"^\d{6}$")
 
+
+    @field_validator("password", mode="before")
+    @classmethod
+    def _empty_password_to_none(cls, v: str | None) -> str | None:
+        """Treat empty string (from forms) as None so social-only deletion works cleanly.
+        Local accounts will always have a real value from the input.
+        """
+        if v == "" or v is None:
+            return None
+        return v
