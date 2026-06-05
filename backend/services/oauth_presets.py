@@ -8,7 +8,7 @@ Sicherheit: Hier stehen KEINE Secrets. Nur oeffentliche, dokumentierte Endpoints
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -33,10 +33,6 @@ class OAuthPreset:
     pkce: bool = True
     # Unterstuetzt der Provider OIDC (ID-Token) oder nur OAuth2 (userinfo)
     is_oidc: bool = True
-    # Discovery-URL fuer OIDC (nur relevant bei is_oidc und fehlenden Endpoints)
-    discovery_url: str | None = None
-    # Default-Berechtigungen dieses Presets bei Updates
-    extra_scopes: tuple[str, ...] = field(default_factory=tuple)
 
 
 PRESETS: dict[str, OAuthPreset] = {
@@ -142,8 +138,8 @@ PRESETS: dict[str, OAuthPreset] = {
             "username": "preferred_username",
             "name": "name",
         },
-        # Bei Custom OIDC wird der Discovery-Endpoint abgefragt
-        discovery_url=None,  # = "{issuer}/.well-known/openid-configuration"
+        # Endpoints werden per OIDC-Discovery vom issuer aufgeloest
+        # (siehe oauth_service._fetch_oidc_discovery).
     ),
     "custom_oauth2": OAuthPreset(
         key="custom_oauth2",
