@@ -89,3 +89,38 @@ class TestEmailSendingHelpers:
         assert EmailService.LOGO_BASE64 in html_body
         assert "987654" in html_body
         assert "testuser" not in html_body
+
+    @pytest.mark.anyio
+    @patch("services.email_service.EmailService.send_email", new_callable=AsyncMock)
+    async def test_send_oauth_linked_notification(self, mock_send_email):
+        mock_send_email.return_value = True
+        success = await EmailService.send_oauth_linked_notification("user@test.de", "testuser", "Google")
+        assert success is True
+        mock_send_email.assert_called_once()
+        args, _ = mock_send_email.call_args
+        assert args[0] == "user@test.de"
+        assert "Google verknüpft" in args[1]
+        html = args[3] if len(args) > 3 else None
+        assert html is not None
+        assert "Google" in html
+        assert "data:image/png;base64," in html
+
+    @pytest.mark.anyio
+    @patch("services.email_service.EmailService.send_email", new_callable=AsyncMock)
+    async def test_send_oauth_unlinked_notification(self, mock_send_email):
+        mock_send_email.return_value = True
+        success = await EmailService.send_oauth_unlinked_notification("user@test.de", "testuser", "Discord")
+        assert success is True
+        args, _ = mock_send_email.call_args
+        assert "Discord Verknüpfung aufgehoben" in args[1]
+
+    @pytest.mark.anyio
+    @patch("services.email_service.EmailService.send_email", new_callable=AsyncMock)
+    async def test_send_account_registered_notification(self, mock_send_email):
+        mock_send_email.return_value = True
+        success = await EmailService.send_account_registered_notification("user@test.de", "newuser")
+        assert success is True
+        args, _ = mock_send_email.call_args
+        assert "Konto erstellt" in args[1]
+        html = args[3] if len(args) > 3 else None
+        assert "Konto erfolgreich erstellt" in (html or "")

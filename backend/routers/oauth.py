@@ -20,6 +20,7 @@ Drei Bereiche, klare Security-Gates:
 """
 
 from __future__ import annotations
+import asyncio
 
 import logging
 import uuid
@@ -42,6 +43,7 @@ from schemas.oauth import (
 )
 from services import oauth_service
 from services.auth_service import AuthService
+from services.email_service import EmailService
 from services.panel_settings_service import PanelSettingsService
 
 router = APIRouter(prefix="/api/oauth", tags=["oauth"])
@@ -482,6 +484,16 @@ def oauth_callback(
         except ValueError:
             return _redirect_profile_error("link_failed")
         _audit(db, link_user.id, "oauth_user.linked", provider.id, f"slug={provider.slug}")
+
+        # Email-Benachrichtigung (respektiert user.email_notifications)
+        if EmailService.is_configured() and link_user.email_notifications:
+            try:
+                asyncio.get_running_loop().create_task(
+                    EmailService.send_oauth_linked_notification(link_user.email, link_user.username, provider.name)
+                )
+            except RuntimeError:
+                pass
+
         resp = _redirect_profile_ok()
         _clear_oauth_state_cookie(resp)
         return resp
@@ -580,7 +592,21 @@ def unlink_my_account(
     ok = oauth_service.unlink_user_from_provider(db, user.id, provider_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Kein Link fuer diesen Provider")
+
+    provider = oauth_service.get_provider_by_id(db, provider_id)
+    provider_name = provider.name if provider else f"Provider {provider_id}"
+
     _audit(db, user.id, "oauth_user.unlinked", provider_id)
+
+    # Email-Benachrichtigung (respektiert user.email_notifications)
+    if EmailService.is_configured() and user.email_notifications:
+        try:
+            asyncio.get_running_loop().create_task(
+                EmailService.send_oauth_unlinked_notification(user.email, user.username, provider_name)
+            )
+        except RuntimeError:
+            pass  # no event loop (e.g. during tests)
+
     return {"message": "Verknuepfung aufgehoben"}
 
 
@@ -642,6 +668,16 @@ def _handle_login_callback(
             return _redirect_login_error("oauth_registration_failed")
         oauth_service.link_provider_to_user(db, provider, user, profile)
         _audit(db, user.id, "oauth_user.registered", provider.id, f"slug={provider.slug}")
+
+        # Willkommens-Benachrichtigung für OAuth-Registrierung
+        if EmailService.is_configured() and user.email_notifications:
+            try:
+                asyncio.get_running_loop().create_task(
+                    EmailService.send_account_registered_notification(user.email, user.username)
+                )
+            except RuntimeError:
+                pass
+
         result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]
 
     if result.action == "link":
@@ -653,6 +689,16 @@ def _handle_login_callback(
         except ValueError:
             return _redirect_login_error("oauth_link_failed")
         _audit(db, user.id, "oauth_user.linked", provider.id, f"slug={provider.slug}")
+
+        # Email-Benachrichtigung für Link (auch über Login-Flow)
+        if EmailService.is_configured() and user.email_notifications:
+            try:
+                asyncio.get_running_loop().create_task(
+                    EmailService.send_oauth_linked_notification(user.email, user.username, provider.name)
+                )
+            except RuntimeError:
+                pass
+
         result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]
 
     if result.action == "needs_2fa" and result.user is not None:

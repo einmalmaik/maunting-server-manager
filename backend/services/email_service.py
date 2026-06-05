@@ -358,6 +358,68 @@ Maunting Server Manager
         return await EmailService.send_email(to, subject, body, html)
 
     # ------------------------------------------------------------------
+    # OAuth Linking / Unlinking + Account Registration notifications
+    # (nutzen das bestehende _notification_email_html Template + user.email_notifications Flag)
+    # Deaktivierbar über die Glocke im Topbar (bestehende Einstellung).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def send_oauth_linked_notification(to: str, username: str, provider_name: str) -> bool:
+        subject = f"Maunting Server Manager — {provider_name} verknüpft"
+        body = f"""Hallo {username},
+
+Dein {provider_name}-Account wurde erfolgreich mit deinem MSM-Konto verknüpft.
+
+Falls du diese Verknüpfung nicht durchgeführt hast, entferne sie sofort und kontaktiere den Administrator.
+
+Maunting Server Manager
+"""
+        html = EmailService._notification_email_html(
+            username,
+            f"{provider_name} verknüpft",
+            f"Dein <strong>{provider_name}</strong>-Account wurde erfolgreich mit deinem MSM-Konto verknüpft."
+        )
+        return await EmailService.send_email(to, subject, body, html)
+
+    @staticmethod
+    async def send_oauth_unlinked_notification(to: str, username: str, provider_name: str) -> bool:
+        subject = f"Maunting Server Manager — {provider_name} Verknüpfung aufgehoben"
+        body = f"""Hallo {username},
+
+Die Verknüpfung zu deinem {provider_name}-Account wurde aufgehoben.
+
+Falls du diese Aktion nicht durchgeführt hast, ändere sofort dein Passwort und kontaktiere den Administrator.
+
+Maunting Server Manager
+"""
+        html = EmailService._notification_email_html(
+            username,
+            f"{provider_name} Verknüpfung aufgehoben",
+            f"Die Verknüpfung zu deinem <strong>{provider_name}</strong>-Account wurde aufgehoben."
+        )
+        return await EmailService.send_email(to, subject, body, html)
+
+    @staticmethod
+    async def send_account_registered_notification(to: str, username: str) -> bool:
+        subject = "Maunting Server Manager — Konto erstellt"
+        body = f"""Hallo {username},
+
+Dein Konto wurde erfolgreich erstellt.
+
+Willkommen bei Maunting Server Manager!
+
+Falls du dieses Konto nicht angelegt hast, kontaktiere bitte den Administrator.
+
+Maunting Server Manager
+"""
+        html = EmailService._notification_email_html(
+            username,
+            "Konto erfolgreich erstellt",
+            "Dein Konto wurde erfolgreich erstellt. Willkommen!"
+        )
+        return await EmailService.send_email(to, subject, body, html)
+
+    # ------------------------------------------------------------------
     # Update-Benachrichtigungen (für Hintergrund-Check-Job)
     # ------------------------------------------------------------------
     # Deutsche Templates mit englischem Fallback im Plain-Text-Body (sinnvoll

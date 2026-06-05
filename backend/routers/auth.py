@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import asyncio
 import uuid
 import logging
 
@@ -178,6 +179,16 @@ def register_verify(
     user.email_verified = True
     db.commit()
     _set_login_session(response, db, user)
+
+    # Email-Benachrichtigung für erfolgreiche Registrierung (normaler Flow)
+    if EmailService.is_configured() and user.email_notifications:
+        try:
+            asyncio.get_running_loop().create_task(
+                EmailService.send_account_registered_notification(user.email, user.username)
+            )
+        except RuntimeError:
+            pass  # no running loop (tests)
+
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False, "requires_verification": False}
 
 
