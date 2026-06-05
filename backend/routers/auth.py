@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta, timezone
-import asyncio
 import uuid
 import logging
 
@@ -161,7 +160,7 @@ async def register(req: UserCreate, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/register-verify", response_model=TokenResponse)
-def register_verify(
+async def register_verify(
     req: SetupVerifyRequest,
     response: Response,
     db: Session = Depends(get_db),
@@ -182,12 +181,7 @@ def register_verify(
 
     # Email-Benachrichtigung für erfolgreiche Registrierung (normaler Flow)
     if EmailService.is_configured() and user.email_notifications:
-        try:
-            asyncio.get_running_loop().create_task(
-                EmailService.send_account_registered_notification(user.email, user.username)
-            )
-        except RuntimeError:
-            pass  # no running loop (tests)
+        await EmailService.send_account_registered_notification(user.email, user.username)
 
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False, "requires_verification": False}
 

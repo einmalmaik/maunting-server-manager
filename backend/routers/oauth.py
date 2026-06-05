@@ -20,13 +20,11 @@ Drei Bereiche, klare Security-Gates:
 """
 
 from __future__ import annotations
-import asyncio
-
 import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -391,6 +389,7 @@ def oauth_start(
 def oauth_callback(
     slug: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     code: str | None = None,
     state: str | None = None,
@@ -485,21 +484,19 @@ def oauth_callback(
             return _redirect_profile_error("link_failed")
         _audit(db, link_user.id, "oauth_user.linked", provider.id, f"slug={provider.slug}")
 
-        # Email-Benachrichtigung (respektiert user.email_notifications)
+        # Email via BackgroundTasks (reliable, runs after redirect response)
         if EmailService.is_configured() and link_user.email_notifications:
-            try:
-                asyncio.get_running_loop().create_task(
-                    EmailService.send_oauth_linked_notification(link_user.email, link_user.username, provider.name)
-                )
-            except RuntimeError:
-                pass
+            background_tasks.add_task(
+                EmailService.send_oauth_linked_notification,
+                link_user.email, link_user.username, provider.name
+            )
 
         resp = _redirect_profile_ok()
         _clear_oauth_state_cookie(resp)
         return resp
 
     # ── Login-Flow (anonym) ──
-    return _handle_login_callback(db, provider, profile, payload, slug)
+    return _handle_login_callback(db, provider, profile, payload, slug, background_tasks)
 
 
 def _resolve_link_user(
@@ -583,7 +580,7 @@ def list_my_links(
 
 
 @router.delete("/me/links/{provider_id}", status_code=200)
-def unlink_my_account(
+async def unlink_my_account(
     provider_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -599,13 +596,9 @@ def unlink_my_account(
     _audit(db, user.id, "oauth_user.unlinked", provider_id)
 
     # Email-Benachrichtigung (respektiert user.email_notifications)
+    # Await directly (route is now async) — reliable delivery, consistent with change-password etc.
     if EmailService.is_configured() and user.email_notifications:
-        try:
-            asyncio.get_running_loop().create_task(
-                EmailService.send_oauth_unlinked_notification(user.email, user.username, provider_name)
-            )
-        except RuntimeError:
-            pass  # no event loop (e.g. during tests)
+        await EmailService.send_oauth_unlinked_notification(user.email, user.username, provider_name)
 
     return {"message": "Verknuepfung aufgehoben"}
 
@@ -653,6 +646,7 @@ def _handle_login_callback(
     profile: "oauth_service.NormalizedProfile",
     payload: dict[str, Any],
     slug: str,
+    background_tasks: BackgroundTasks,
 ) -> Response:
     """Anonymer Login-Pfad des geteilten /callback-Endpunkts (alter Flow)."""
     result = oauth_service.resolve_user(db, provider, profile)
@@ -669,14 +663,12 @@ def _handle_login_callback(
         oauth_service.link_provider_to_user(db, provider, user, profile)
         _audit(db, user.id, "oauth_user.registered", provider.id, f"slug={provider.slug}")
 
-        # Willkommens-Benachrichtigung für OAuth-Registrierung
+        # Willkommens-Benachrichtigung für OAuth-Registrierung (via BackgroundTasks)
         if EmailService.is_configured() and user.email_notifications:
-            try:
-                asyncio.get_running_loop().create_task(
-                    EmailService.send_account_registered_notification(user.email, user.username)
-                )
-            except RuntimeError:
-                pass
+            background_tasks.add_task(
+                EmailService.send_account_registered_notification,
+                user.email, user.username
+            )
 
         result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]
 
@@ -690,14 +682,12 @@ def _handle_login_callback(
             return _redirect_login_error("oauth_link_failed")
         _audit(db, user.id, "oauth_user.linked", provider.id, f"slug={provider.slug}")
 
-        # Email-Benachrichtigung für Link (auch über Login-Flow)
+        # Email-Benachrichtigung für Link (auch über Login-Flow) via BackgroundTasks
         if EmailService.is_configured() and user.email_notifications:
-            try:
-                asyncio.get_running_loop().create_task(
-                    EmailService.send_oauth_linked_notification(user.email, user.username, provider.name)
-                )
-            except RuntimeError:
-                pass
+            background_tasks.add_task(
+                EmailService.send_oauth_linked_notification,
+                user.email, user.username, provider.name
+            )
 
         result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]
 
