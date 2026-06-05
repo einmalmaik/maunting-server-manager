@@ -48,6 +48,19 @@ router = APIRouter(prefix="/api/oauth", tags=["oauth"])
 
 _log = logging.getLogger("msm.oauth")
 
+def _no_cache_redirect(url: str, status_code: int = 302) -> "RedirectResponse":
+    """Erzeugt RedirectResponse mit strikten no-cache Headers.
+
+    Kritisch fuer OAuth: Der Redirect zur IdP-Authorize-URL (mit state + PKCE)
+    darf niemals vom Browser, Proxy oder SW gecached werden. Sonst wird ein
+    alter State wiederverwendet -> state_mismatch auch bei aktivem Klick.
+    """
+    resp = RedirectResponse(url=url, status_code=status_code)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, private"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -367,7 +380,7 @@ def oauth_start(
         "OAuth start (slug=%s) → IdP=%s (cookie_domain=%r, panel_url=%s)",
         slug, idp_host, cookie_domain or "(host-only)", settings.panel_url,
     )
-    resp = RedirectResponse(url=auth_url, status_code=302)
+    resp = _no_cache_redirect(auth_url)
     _set_oauth_state_cookie(resp, encrypted)
     return resp
 
@@ -601,7 +614,7 @@ def oauth_link_start(
         "OAuth link/start (slug=%s) → IdP=%s (cookie_domain=%r, panel_url=%s)",
         slug, idp_host, cookie_domain or "(host-only)", settings.panel_url,
     )
-    resp = RedirectResponse(url=auth_url, status_code=302)
+    resp = _no_cache_redirect(auth_url)
     _set_oauth_state_cookie(resp, encrypted)
     return resp
 
@@ -681,7 +694,7 @@ def _profile_redirect_path() -> str:
 
 def _redirect_login_error(reason: str) -> Response:
     url = f"{_login_redirect_path()}?error={reason}"
-    resp = RedirectResponse(url=url, status_code=302)
+    resp = _no_cache_redirect(url)
     _clear_oauth_state_cookie(resp)
     return resp
 
@@ -689,22 +702,22 @@ def _redirect_login_error(reason: str) -> Response:
 def _redirect_oauth_2fa(slug: str, challenge: str) -> Response:
     from urllib.parse import urlencode
     url = f"{_login_redirect_path()}?{urlencode({'step': 'oauth_2fa', 'slug': slug, 'challenge': challenge})}"
-    resp = RedirectResponse(url=url, status_code=302)
+    resp = _no_cache_redirect(url)
     _clear_oauth_state_cookie(resp)
     return resp
 
 
 def _redirect_ok(next_path: str) -> Response:
-    resp = RedirectResponse(url=next_path, status_code=302)
+    resp = _no_cache_redirect(next_path)
     return resp
 
 
 def _redirect_profile_error(reason: str) -> Response:
-    resp = RedirectResponse(url=f"{_profile_redirect_path()}?error={reason}", status_code=302)
+    resp = _no_cache_redirect(f"{_profile_redirect_path()}?error={reason}")
     _clear_oauth_state_cookie(resp)
     return resp
 
 
 def _redirect_profile_ok() -> Response:
-    resp = RedirectResponse(url=f"{_profile_redirect_path()}?linked=1", status_code=302)
+    resp = _no_cache_redirect(f"{_profile_redirect_path()}?linked=1")
     return resp

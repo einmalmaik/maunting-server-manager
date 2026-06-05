@@ -404,6 +404,10 @@ class TestOAuthCallback:
         state_cookie = res_start.cookies.get("__Secure-oauth_state")
         assert state_cookie is not None, "State-Cookie wurde nicht gesetzt"
 
+        cache_control = res_start.headers.get("cache-control", "").lower()
+        assert "no-store" in cache_control, "OAuth start redirect muss no-cache haben (verhindert State-Replay)"
+        assert "no-cache" in cache_control
+
         # Cookie wurde serverseitig verschluesselt → Payload lesbar
         payload = oauth_service.unpack_state_cookie(state_cookie)
         assert payload is not None
