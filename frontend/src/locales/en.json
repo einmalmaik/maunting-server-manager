@@ -632,7 +632,7 @@
     "timeFormat": "Time format",
     "timeFormat24": "24-hour format",
     "timeFormat12": "12-hour format",
-    "timeFormatHint": "Used by restart schedules in the server panel.",
+    "timeFormatHint": "Only affects display of restart times in the server panel (12-hour vs 24-hour format). Restart schedules are always stored and executed as 24h UTC strings, independent of this setting.",
     "steamApiKey": "Steam Web API",
     "steamConfigured": "Steam API configured",
     "steamNotConfigured": "Steam API not configured",
