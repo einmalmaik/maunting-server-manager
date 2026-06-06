@@ -1378,6 +1378,23 @@ else
     fi
 fi
 
+# ═══════════════════════════════════════════════════════════════
+# 6a. AES-256-GCM Master-Key generieren (Schritt 8.2)
+# ═══════════════════════════════════════════════════════════════
+# Beim ersten Cloud-Enable (BACKUP_PROVIDER != local) und leerem Key wird
+# ein 32-Byte-Key (base64) generiert und in $ENV_FILE geschrieben.
+# Der Key wird NUR in der .env gespeichert (chmod 600). Kein Display, kein
+# Backup ausserhalb des User-.env. Wer die .env verliert, verliert alle
+# Cloud-Backups — das ist ein bewusstes Sicherheits-Design.
+if [[ "$BACKUP_PROVIDER" != "local" && -z "$BACKUP_ENCRYPTION_KEY" ]]; then
+    BACKUP_ENCRYPTION_KEY=$(python3 -c "import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())")
+    log "AES-256-GCM Master-Key fuer Cloud-Backups generiert (in $ENV_FILE)."
+    warn "WICHTIG: Wer den .env verliert, verliert alle Cloud-Backups (unwiderruflich)."
+    warn "         Empfehlung: .env an einem sicheren Ort backuppen (Passwort-Manager, verschluesseltes Backup)."
+elif [[ "$BACKUP_PROVIDER" != "local" && -n "$BACKUP_ENCRYPTION_KEY" && "$CHANGED_BACKUP" == "true" ]]; then
+    log "Bestehender AES-256-GCM Master-Key bleibt unveraendert (sonst waeren alte Cloud-Backups verloren)."
+fi
+
 cat > "$ENV_FILE" <<EOF
 # Automatisch generiert durch install.sh am $(date -Iseconds)
 # ÄNDERUNGEN NUR MIT VORSICHT
@@ -2032,9 +2049,9 @@ case "$BACKUP_PROVIDER" in
 esac
 if [[ "$BACKUP_PROVIDER" != "local" ]]; then
     if [[ -n "$BACKUP_ENCRYPTION_KEY" ]]; then
-        echo -e "  ${GREEN}Verschlüsselung:${NC}    AES-256-GCM aktiv"
+        echo -e "  ${GREEN}Verschlüsselung:${NC}    AES-256-GCM aktiv (Master-Key in $ENV_FILE, nicht angezeigt)"
     else
-        echo -e "  ${YELLOW}Verschlüsselung:${NC}    Wird beim Backend-Start generiert"
+        echo -e "  ${YELLOW}Verschlüsselung:${NC}    Master-Key fehlt — install.sh erneut ausfuehren oder manuell setzen"
     fi
     if [[ "$PENDING_AUTO_MIGRATION" == "1" ]]; then
         echo -e "  ${YELLOW}Auto-Migration:${NC}    Alte lokale Backups werden beim Backend-Startup in die Cloud migriert"
