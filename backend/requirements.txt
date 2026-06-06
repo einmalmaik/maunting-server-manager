@@ -33,5 +33,9 @@ dropbox>=10.0.0
 # Service-Account-JSON-Datei (Pfad in .env, chmod 600). Zieht grpcio +
 # protobuf (schwer, aber Google-maintained). Begruendung im ADR-0011.
 google-cloud-storage>=2.16.0
+# Azure-Provider (Schritt 6): offizielles azure-storage-blob SDK. Auth via
+# Connection-String (kein Azure-AD-Setup). Transitive Flaeche moderat
+# (azure-core + isodate + cryptography eh vorhanden). Begruendung im ADR-0012.
+azure-storage-blob>=12.0.0
 # Test-only: moto mockt S3-API offline (nicht in prod-requirements)
 # moto[s3]>=5.0  (dev-dependency, ueber requirements-dev.txt)

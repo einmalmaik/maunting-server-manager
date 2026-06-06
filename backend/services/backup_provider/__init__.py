@@ -2,14 +2,14 @@
 
 Liest ``MSM_BACKUP_PROVIDER`` aus der zentralen Config und instanziiert
 den passenden Adapter. Aktuell: local (Schritt 1), s3 (Schritt 2),
-sftp (Schritt 3), dropbox (Schritt 4), gcs (Schritt 5). Azure kommt
-in einem eigenen Commit (Plan-Reihenfolge).
+sftp (Schritt 3), dropbox (Schritt 4), gcs (Schritt 5), azure (Schritt 6).
 """
 import logging
 
 from config import settings
 
 from .base import BackupLocation, BackupMetadata, BackupProvider, ProviderError
+from .azure import AzureProvider
 from .dropbox import DropboxProvider
 from .gcs import GCSProvider
 from .local import LocalProvider
@@ -96,11 +96,24 @@ def get_provider(provider_name: str | None = None) -> BackupProvider:
             path_prefix=settings.backup_gcs_path_prefix or "msm-backups",
         )
 
-    # Weitere Provider kommen in eigenen Commits (siehe Plan):
-    #   azure
+    if name == "azure":
+        # Import hier (nicht oben) → azure-storage-blob wird nur geladen
+        # wenn azure genutzt wird (vermeidet azure-core + isodate-Import-
+        # Overhead fuer User, die Azure nicht nutzen).
+        from .azure import AzureProvider
+        if not settings.backup_azure_connection_string:
+            raise ProviderError("Azure Connection-String nicht konfiguriert")
+        return AzureProvider(
+            connection_string=settings.backup_azure_connection_string,
+            container=settings.backup_azure_container or "msm-backups",
+            path_prefix=settings.backup_azure_path_prefix or "",
+            account_name=settings.backup_azure_account or "",
+        )
+
+    # Alle 6 Provider abgedeckt. Ein hier ankommender Name ist ein Bug.
     raise ProviderError(
-        f"Backup-Provider {name!r} ist in dieser Version noch nicht verfuegbar. "
-        "Er wird in einem spaeteren Commit nachgereicht."
+        f"Unbekannter Backup-Provider: {name!r}. "
+        "Erwartet: local | s3 | sftp | dropbox | gcs | azure."
     )
 
 
@@ -114,5 +127,6 @@ __all__ = [
     "SFTPProvider",
     "DropboxProvider",
     "GCSProvider",
+    "AzureProvider",
     "get_provider",
 ]

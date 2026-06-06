@@ -107,6 +107,15 @@ class Settings(BaseSettings):
     backup_gcs_sa_file: str = ""  # z. B. /opt/msm/secrets/gcs-sa.json
     backup_gcs_path_prefix: str = "msm-backups"  # logischer Prefix im Bucket
 
+    # ── Azure-Provider (Schritt 6) ──
+    # Auth via Connection-String (kein Azure-AD-Setup — simpelster
+    # Self-Hosted-Pfad). Connection-String liegt mit chmod 600 in .env.
+    # Container wird auto-erstellt beim ersten Upload wenn noetig.
+    backup_azure_account: str = ""  # Storage-Account-Name (auch im Conn-String)
+    backup_azure_connection_string: str = ""  # z. B. DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net
+    backup_azure_container: str = "msm-backups"  # Default-Container-Name
+    backup_azure_path_prefix: str = ""  # logischer Prefix im Container (default: keiner)
+
     # Steam — SteamCMD läuft in einem ephemeren Container (cm2network/steamcmd:root per Default
     # als dediziertes Tool-Image mit pre-installed binary). steamcmd_path bleibt nur für Backward-Compat-Tests.
     steamcmd_path: str = "/usr/games/steamcmd"
