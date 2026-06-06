@@ -16,6 +16,28 @@ GCS-Pfade sind flach (kein fuehrender ``/``, kein abschliessender
 ``/``). Default-Prefix ist ``msm-backups`` (anpassbar ueber
 ``MSM_BACKUP_GCS_PATH_PREFIX``).
 
+Live-Progress:
+  Anders als boto3 (S3) bietet ``google-cloud-storage`` keinen
+  per-call Progress-Callback in ``upload_from_filename`` /
+  ``download_to_file``. Wir loesen das mit zwei Strategien:
+
+  - **Upload mit progress_cb:** manueller Resumable-Upload ueber das
+    GCS-Resumable-Protokoll. Eine Upload-Session wird via
+    ``Blob.create_resumable_upload_session`` erstellt, dann werden
+    die Bytes in 8-MB-Chunks per ``AuthorizedSession.patch`` an die
+    Resumable-URL geschickt. Nach jedem Chunk feuern wir den
+    Progress-Callback mit der kumulativen Byte-Anzahl. Das ist exakt
+    die gleiche Semantik wie der boto3-Callback, der Backup-Service
+    kann die Bytes an die bestehende ``_active_backups``-Struktur
+    durchreichen ohne Sonderlogik fuer GCS.
+
+  - **Download mit progress_cb:** manueller Stream-Download ueber
+    ``AuthorizedSession.get(url, stream=True)`` und Chunk-Read.
+    Pro gelesenem Chunk feuern wir den Progress-Callback.
+
+  Ohne progress_cb nutzen wir weiterhin ``upload_from_filename`` /
+  ``download_to_filename`` (kein Overhead fuer den Fallback-Pfad).
+
 Security:
   - Service-Account-JSON wird **nicht** gelesen ausser vom
     ``google.cloud.storage.Client`` (kein eigenes Parsing).
@@ -24,15 +46,9 @@ Security:
   - Path-Traversal-Schutz: ``remote_key`` muss relativ sein, kein
     ``..``, voller Pfad bleibt unter ``path_prefix``.
   - Idempotente delete()-Operation (GCS loescht nicht-existente
-    Objekte ohne Fehler).
+    Objekte ohne Fehler — NotFound wird abgefangen).
   - Adapter sieht nur Chiffretext (Verschluesselung im Caller, ADR-0013).
   - Constructor validiert alle Felder.
-
-Bekannte Limitierung v1:
-  - ``Blob.upload_from_filename`` ist Single-Shot, bei grossen Files
-    > 5 GB sollte ``Blob.chunk_size`` + resumable Upload genutzt
-    werden. Die meisten Game-Server-Backups liegen unter 1 GB, daher
-    akzeptabel. ADR dokumentiert dies.
 """
 import logging
 import posixpath
@@ -40,6 +56,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from google.api_core import exceptions as gcs_exceptions
+from google.auth.transport import requests as google_requests
 from google.cloud import storage as gcs
 from google.cloud.storage.client import Client as GcsClient
 from google.cloud.storage.bucket import Bucket
@@ -55,6 +72,19 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 META_SUFFIX = ".meta.json"
+
+# Resumable-Upload-Chunk-Groesse. 8 MB ist der von Google empfohlene
+# Sweet-Spot: klein genug, dass Retries nach Netzwerkabbruch nicht zu
+# viel wiederholen, gross genug fuer guten Throughput. GCS akzeptiert
+# 256 KB bis 5 GB pro Chunk.
+_GCS_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+
+# Download-Stream-Chunk-Groesse fuer Live-Progress.
+_GCS_DOWNLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+
+# GCS Resumable-Upload-Status-Codes: 200 = fertig, 308 = mehr Chunks noetig.
+_GCS_RESUMABLE_OK = 200
+_GCS_RESUMABLE_CONTINUE = 308
 
 # Generische GCS-Fehler, die wir als Provider-Fehler klassifizieren.
 # ``GoogleAPICallError`` ist die gemeinsame Basisklasse aller
@@ -157,17 +187,28 @@ class GCSProvider(BackupProvider):
             if name.endswith(META_SUFFIX):
                 yield blob
 
+    def _authorized_session(self):
+        """Baut eine AuthorizedSession aus den Client-Credentials.
+
+        Wird fuer den Resumable-Upload- und den Stream-Download-Pfad
+        genutzt. google.auth.transport.requests.AuthorizedSession
+        handhabt Token-Refresh automatisch (HTTP 401 → refresh → retry).
+        """
+        return google_requests.AuthorizedSession(
+            self._client._credentials,
+            refresh_status_codes=[401],
+        )
+
     # ── public API ────────────────────────────────────────────────────────
 
     def test_connection(self) -> bool:
         """Prueft Credentials + Bucket-Erreichbarkeit.
 
-        list_blobs(max_results=1) ist ein minimal-invasiver Check: er
-        validiert die Credentials (sonst 401/403) und dass der Bucket
-        existiert (sonst 404). Wir lesen KEINE Daten.
+        ``exists()`` macht HEAD-Request auf den Bucket — schnell, kein
+        Listing, keine Daten. Validiert Credentials (sonst 401/403) und
+        Bucket-Existenz (sonst 404).
         """
         try:
-            # exists() macht HEAD-Request auf den Bucket — schnell, kein Listing
             return self._bucket.exists(retry=None)
         except _GCS_ERRORS:
             return False
@@ -179,6 +220,15 @@ class GCSProvider(BackupProvider):
         *,
         progress_cb: Optional[ProgressCallback] = None,
     ) -> BackupLocation:
+        """Laedt eine (bereits verschluesselte) Datei in den Bucket.
+
+        Mit ``progress_cb``: Resumable-Upload mit Chunked-Progress
+        (8-MB-Chunks, Callback pro Chunk mit kumulativer Byte-Anzahl).
+
+        Ohne ``progress_cb``: Single-Shot-Upload via
+        ``upload_from_filename`` (kein Overhead fuer Aufrufer, die
+        keinen Live-Progress brauchen, z. B. Auto-Migration).
+        """
         if not local_path.is_file():
             raise ProviderError("Lokale Datei existiert nicht")
         full = self._full_key(remote_key)
@@ -188,28 +238,112 @@ class GCSProvider(BackupProvider):
             size_bytes = 0
 
         blob = self._bucket.blob(full)
-        try:
-            # GCS-SDK hat keinen per-call Progress-Callback in
-            # upload_from_filename (anders als boto3). Wir reporten daher
-            # einmalig am Ende mit der finalen Dateigroesse — gleiche
-            # Semantik wie LocalProvider/DropboxProvider.
-            if progress_cb:
-                # Chunksize fuer resumable Upload: 5 MB — klein genug
-                # fuer saubere Retries bei Abbruch, gross genug fuer
-                # Throughput bei grossen Backups.
-                blob.chunk_size = 5 * 1024 * 1024
-            blob.upload_from_filename(
-                str(local_path),
-                retry=None,
+        if progress_cb is None:
+            # Fallback-Pfad: single-shot, kein Progress
+            try:
+                blob.upload_from_filename(str(local_path), retry=None)
+            except _GCS_ERRORS as e:
+                logger.warning(
+                    "GCS-Upload fehlgeschlagen: %s", type(e).__name__
+                )
+                raise ProviderError("Upload fehlgeschlagen") from e
+        else:
+            # Resumable-Upload mit Chunked-Progress
+            self._resumable_upload(
+                blob=blob,
+                local_path=local_path,
+                size_bytes=size_bytes,
+                progress_cb=progress_cb,
             )
+
+        size_mb = int(size_bytes // (1024 * 1024)) if size_bytes else None
+        return BackupLocation(remote_key=remote_key, size_mb=size_mb)
+
+    def _resumable_upload(
+        self,
+        blob: "gcs.Blob",
+        local_path: Path,
+        size_bytes: int,
+        progress_cb: ProgressCallback,
+    ) -> None:
+        """Manueller Resumable-Upload mit Progress-Callback pro Chunk.
+
+        GCS-Resumable-Protokoll:
+          1) ``create_resumable_upload_session`` → Upload-URL
+          2) PATCH-Requests mit ``Content-Range: bytes X-Y/Z``
+          3) Pro Chunk: GCS antwortet mit 308 (Resume Incomplete) bis
+             der finale Chunk 200 OK zurueckgibt.
+
+        Wir feuern nach jedem vollstaendig geschriebenen Chunk den
+        Progress-Callback mit der kumulativen Byte-Anzahl. Fehler
+        (Netzwerk, Auth, 4xx/5xx) werden in generischen ProviderError
+        gewandelt.
+        """
+        # 1) Resumable Session erstellen
+        try:
+            upload_url = blob.create_resumable_upload_session(
+                content_type="application/octet-stream",
+                size=size_bytes,
+                retry=None,
+                timeout=60,
+            )
+        except _GCS_ERRORS as e:
+            logger.warning(
+                "GCS-Resumable-Session fehlgeschlagen: %s",
+                type(e).__name__,
+            )
+            raise ProviderError("Upload fehlgeschlagen") from e
+
+        # 2) AuthorizedSession fuer PATCH-Requests (handhabt Token-Refresh)
+        session = self._authorized_session()
+
+        # 3) Bytes in Chunks hochladen
+        bytes_sent = 0
+        try:
+            with open(local_path, "rb") as f:
+                while bytes_sent < size_bytes:
+                    chunk_size = min(
+                        _GCS_UPLOAD_CHUNK_BYTES, size_bytes - bytes_sent
+                    )
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        # Datei wurde seit dem stat() geschrumpft — Abbruch
+                        # als inkonsistenten Zustand werten.
+                        raise ProviderError("Upload fehlgeschlagen")
+
+                    content_range = (
+                        f"bytes {bytes_sent}-{bytes_sent + len(chunk) - 1}"
+                        f"/{size_bytes}"
+                    )
+                    response = session.patch(
+                        upload_url,
+                        data=chunk,
+                        headers={"Content-Range": content_range},
+                        retry=False,
+                    )
+
+                    if response.status_code not in (
+                        _GCS_RESUMABLE_OK,
+                        _GCS_RESUMABLE_CONTINUE,
+                    ):
+                        # Unerwarteter Statuscode → ProviderError.
+                        # response.text koennte GCS-spezifische Details
+                        # enthalten, wir geben das NICHT weiter (Security:
+                        # kein Pfad/Key/Bucket-Leak).
+                        logger.warning(
+                            "GCS-Resumable-Upload unerwarteter Status: %d",
+                            response.status_code,
+                        )
+                        raise ProviderError("Upload fehlgeschlagen")
+
+                    bytes_sent += len(chunk)
+                    progress_cb(bytes_sent)
         except _GCS_ERRORS as e:
             logger.warning("GCS-Upload fehlgeschlagen: %s", type(e).__name__)
             raise ProviderError("Upload fehlgeschlagen") from e
-
-        if progress_cb:
-            progress_cb(size_bytes)
-        size_mb = int(size_bytes // (1024 * 1024)) if size_bytes else None
-        return BackupLocation(remote_key=remote_key, size_mb=size_mb)
+        except OSError as e:
+            logger.warning("GCS-Upload I/O-Fehler: %s", type(e).__name__)
+            raise ProviderError("Upload fehlgeschlagen") from e
 
     def download(
         self,
@@ -218,29 +352,96 @@ class GCSProvider(BackupProvider):
         *,
         progress_cb: Optional[ProgressCallback] = None,
     ) -> None:
+        """Laedt eine Datei aus dem Bucket herunter.
+
+        Mit ``progress_cb``: Stream-Download mit Chunked-Progress
+        (8-MB-Chunks, Callback pro Chunk mit kumulativer Byte-Anzahl).
+
+        Ohne ``progress_cb``: Single-Shot-Download via
+        ``download_to_filename`` (kein Overhead fuer Fallback-Pfad).
+        """
         full = self._full_key(remote_key)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         blob = self._bucket.blob(full)
-        try:
-            blob.download_to_filename(
-                str(local_path),
-                retry=None,
-            )
-        except gcs_exceptions.NotFound as e:
-            # Spezifischer Fehlertext: 404 ist eine klare Information,
-            # die der Restore-Pfad braucht (um "Backup fehlt im Provider"
-            # von "Netzwerk-Fehler" zu unterscheiden).
-            raise ProviderError("Download fehlgeschlagen") from e
-        except _GCS_ERRORS as e:
-            logger.warning("GCS-Download fehlgeschlagen: %s", type(e).__name__)
-            raise ProviderError("Download fehlgeschlagen") from e
 
-        if progress_cb:
+        if progress_cb is None:
+            # Fallback-Pfad: single-shot, kein Progress
             try:
-                size = local_path.stat().st_size
-            except OSError:
-                size = 0
-            progress_cb(size)
+                blob.download_to_filename(str(local_path), retry=None)
+            except gcs_exceptions.NotFound as e:
+                raise ProviderError("Download fehlgeschlagen") from e
+            except _GCS_ERRORS as e:
+                logger.warning(
+                    "GCS-Download fehlgeschlagen: %s", type(e).__name__
+                )
+                raise ProviderError("Download fehlgeschlagen") from e
+            return
+
+        # Stream-Download mit Progress
+        self._stream_download(
+            blob=blob,
+            local_path=local_path,
+            progress_cb=progress_cb,
+        )
+
+    def _stream_download(
+        self,
+        blob: "gcs.Blob",
+        local_path: Path,
+        progress_cb: ProgressCallback,
+    ) -> None:
+        """Manueller Stream-Download mit Progress-Callback pro Chunk.
+
+        Wir holen die Media-URL (signierte URL oder direkter GCS-
+        Endpoint) und streamen die Bytes per AuthorizedSession. Nach
+        jedem gelesenen Chunk feuern wir den Progress-Callback mit der
+        kumulativen Byte-Anzahl.
+
+        Vorteil gegenueber ``download_to_file(wrapped_file)``: garantiert
+        chunked-reads (auch fuer kleine Files), unabhaengig davon wie
+        GCS intern liefert.
+        """
+        # media_link ist die GCS-Media-URL des Blobs. Bei privaten Buckets
+        # liefert die URL 401/403 ohne Credentials; die AuthorizedSession
+        # setzt den Bearer-Token automatisch.
+        media_url = blob.media_link
+        if not media_url:
+            # Aelterer/ungenutzter Blob ohne media_link — Bucket-Listing
+            # via API als Fallback. Sollte selten sein.
+            try:
+                blob.reload(client=self._client)
+            except _GCS_ERRORS as e:
+                raise ProviderError("Download fehlgeschlagen") from e
+            media_url = blob.media_link
+            if not media_url:
+                raise ProviderError("Download fehlgeschlagen")
+
+        session = self._authorized_session()
+        bytes_written = 0
+        try:
+            response = session.get(media_url, stream=True, retry=False)
+            # 404 = "Backup fehlt im Provider" → ProviderError
+            if response.status_code == 404:
+                raise ProviderError("Download fehlgeschlagen")
+            response.raise_for_status()
+
+            with open(local_path, "wb") as f:
+                for chunk in response.iter_content(
+                    chunk_size=_GCS_DOWNLOAD_CHUNK_BYTES
+                ):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    bytes_written += len(chunk)
+                    progress_cb(bytes_written)
+        except _GCS_ERRORS as e:
+            logger.warning(
+                "GCS-Download fehlgeschlagen: %s", type(e).__name__
+            )
+            raise ProviderError("Download fehlgeschlagen") from e
+        except OSError as e:
+            logger.warning("GCS-Download I/O-Fehler: %s", type(e).__name__)
+            raise ProviderError("Download fehlgeschlagen") from e
 
     def delete(self, remote_key: str) -> None:
         """Loescht Daten- und Meta-Blob. Idempotent (fehlend = ok)."""

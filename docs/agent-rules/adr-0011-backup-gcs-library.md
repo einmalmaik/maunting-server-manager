@@ -80,6 +80,46 @@ Hetzner S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi.
 
 ## Konsequenzen
 
+### Live-Progress: manueller Resumable-Upload + Stream-Download
+
+Das google-cloud-storage SDK bietet in `upload_from_filename` /
+`download_to_file` **keinen** per-call Progress-Callback (anders als
+boto3). Wir implementieren den Live-Progress deshalb manuell:
+
+**Upload mit progress_cb:**
+- `Blob.create_resumable_upload_session(...)` liefert eine
+  Resumable-URL.
+- `google.auth.transport.requests.AuthorizedSession` (baut auf
+  `google-auth` auf, ist transitiv von `google-cloud-storage`
+  vorhanden) handhabt PATCH-Requests inkl. automatischem Token-
+  Refresh bei HTTP 401.
+- Wir lesen die Datei in 8-MB-Chunks (`_GCS_UPLOAD_CHUNK_BYTES`)
+  und feuern `progress_cb(bytes_sent)` nach jedem vollstaendig
+  geschriebenen Chunk. Der Counter ist kumulativ (gleiche Semantik
+  wie boto3-Callback).
+- GCS antwortet auf nicht-finale Chunks mit HTTP 308 (Resume
+  Incomplete), auf den finalen Chunk mit HTTP 200. Wir validieren
+  den Statuscode und brechen bei anderen Codes mit `ProviderError`
+  ab.
+- Vorteil: identische Semantik zum S3-Provider, der Backup-Service
+  kann den progress-Callback 1:1 an `_active_backups[server_id]`
+  durchreichen. Multi-GB-Backups zeigen echten Live-Progress im
+  Frontend.
+
+**Download mit progress_cb:**
+- `Blob.media_link` liefert die GCS-Media-URL.
+- `AuthorizedSession.get(media_link, stream=True)` holt die
+  Response.
+- Wir lesen Chunks via `response.iter_content(chunk_size=8 MB)` und
+  schreiben direkt in die lokale Datei. `progress_cb(bytes_written)`
+  nach jedem Chunk.
+
+**Fallback-Pfad (kein progress_cb):**
+- `upload_from_filename` und `download_to_filename` wie gewohnt.
+  Kein Overhead fuer Aufrufer, die keinen Live-Progress brauchen
+  (z. B. Auto-Migration wo der Frontend-Progress egal ist).
+- Garantiert: kein AuthorizedSession-Construction ohne progress_cb.
+
 ### Dependency-Flaeche: schwer aber gut gepflegt
 
 `google-cloud-storage` zieht transitiv:
@@ -88,7 +128,8 @@ Hetzner S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi.
 - `grpcio` (gRPC, gross, ~30-50 MB nativ; wird nur geladen wenn
   tatsaechlich GCS genutzt — Lazy-Import in der Factory)
 - `protobuf` (gross, aber Standard)
-- `google-auth` (Auth, klein)
+- `google-auth` (Auth, klein) — liefert `AuthorizedSession` fuer
+  den Resumable-Pfad
 
 Die Gesamt-Install-Groesse steigt um ~50-100 MB. Begruendung:
 - Google-maintained, regelmaessige Security-Patches.
@@ -124,17 +165,6 @@ existieren nur als Prefix im Key-Namen. Kein expliziter mkdir noetig.
   - Key beginnt nicht mit `/`
   - Kein `..` in Key-Teilen
   - Final-Key bleibt unter `path_prefix`
-
-### Progress-Callback: einmaliger Final-Call
-
-Das GCS-SDK bietet in `upload_from_filename` / `download_to_filename`
-**keinen** per-call Progress-Callback (anders als boto3). Wir
-reporten daher einmalig am Ende mit der finalen Dateigroesse
-(gleiche Semantik wie LocalProvider/DropboxProvider).
-
-`blob.chunk_size = 5 * 1024 * 1024` aktiviert resumable Upload mit
-5-MB-Chunks (klein genug fuer saubere Retries bei Netzwerkabbruch,
-gross genug fuer guten Throughput).
 
 ### Idempotente delete()
 
@@ -191,19 +221,32 @@ und parsen pro Eintrag. Kaputte Meta-Files werden uebersprungen.
 
 ## Test-Coverage
 
-- 42 Tests mit `FakeGcsClient` (in-memory, kein echter GCS-Account
-  noetig). `from_service_account_json` wird per monkeypatch ersetzt,
-  sodass die ECHTE GCS-Initialisierungs-Logik (ValueError/OSError
-  auf kaputten Files) getestet wird:
+- 45 Tests mit `FakeGcsClient` + `FakeAuthorizedSession` (in-memory,
+  kein echter GCS-Account noetig). `from_service_account_json` und
+  `google.auth.transport.requests.AuthorizedSession` werden per
+  monkeypatch ersetzt, sodass die ECHTE GCS-Initialisierungs-Logik
+  (ValueError/OSError auf kaputten Files) und der Resumable-Protokoll-
+  Code vollstaendig getestet werden:
   - **Contract:** Interface-Implementierung, Constructor-Validierung
     (leere Felder, path_prefix-Format, Normalisierung, SA-File
     fehlt → ProviderError, SA-File JSON kaputt → ProviderError)
   - **Connection:** True bei existentem Bucket, False bei 404,
     False bei Auth-Fehler, False bei Forbidden, False bei
     ServiceUnavailable
-  - **Upload/Download:** Roundtrip byte-genau, intermediate-dirs,
-    missing key/source, Upload-Fehler-Propagation, Progress-Callback
-    (einmaliger Final-Call)
+  - **Upload ohne progress_cb:** Single-Shot-Pfad via
+    `upload_from_filename`, kein AuthorizedSession-Construction
+    (Performance-Verifikation)
+  - **Upload mit progress_cb (Resumable):** Single-Chunk-File
+    (5 KB < 8 MB → ein PATCH-Call), Multi-Chunk-File
+    (25 MB → 4 PATCH-Calls mit korrekten `Content-Range`-Headern
+    + kumulative Progress-Calls), 500-Response in der Mitte →
+    ProviderError + Progress bis zum Fehler-Punkt, Resumable-
+    Session-Erstellung fehlgeschlagen → ProviderError ohne PATCH
+  - **Download ohne progress_cb:** Single-Shot-Pfad via
+    `download_to_filename`, kein AuthorizedSession-Construction
+  - **Download mit progress_cb (Stream):** Multi-Chunk-Response
+    (3 Chunks → 3 kumulative Progress-Calls), Single-Chunk-
+    Response, 404 → ProviderError, intermediate-dirs
   - **Delete:** Daten + Meta, fehlende Dateien, malformed key,
     non-not_found Fehler → raise
   - **List-Metadata:** parsed, kaputte Files skipped, empty bucket,
