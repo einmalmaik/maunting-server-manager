@@ -93,6 +93,35 @@ load_current_env() {
     CURRENT_DB_URL=""
     CURRENT_DB_URL_ASYNC=""
 
+    # Backup-Storage (Schritt 8 — 6 Provider, default local)
+    CURRENT_BACKUP_PROVIDER="local"
+    CURRENT_BACKUP_ENCRYPTION_KEY=""
+    CURRENT_BACKUP_S3_BUCKET=""
+    CURRENT_BACKUP_S3_REGION=""
+    CURRENT_BACKUP_S3_ENDPOINT=""
+    CURRENT_BACKUP_S3_ACCESS_KEY=""
+    CURRENT_BACKUP_S3_SECRET_KEY=""
+    CURRENT_BACKUP_SFTP_HOST=""
+    CURRENT_BACKUP_SFTP_PORT="22"
+    CURRENT_BACKUP_SFTP_USER=""
+    CURRENT_BACKUP_SFTP_PASSWORD=""
+    CURRENT_BACKUP_SFTP_PATH="/msm-backups"
+    CURRENT_BACKUP_DROPBOX_APP_KEY=""
+    CURRENT_BACKUP_DROPBOX_APP_SECRET=""
+    CURRENT_BACKUP_DROPBOX_REFRESH_TOKEN=""
+    CURRENT_BACKUP_DROPBOX_PATH="/msm-backups"
+    CURRENT_BACKUP_GCS_BUCKET=""
+    CURRENT_BACKUP_GCS_SA_FILE=""
+    CURRENT_BACKUP_GCS_PATH_PREFIX="msm-backups"
+    CURRENT_BACKUP_AZURE_ACCOUNT=""
+    CURRENT_BACKUP_AZURE_CONNECTION_STRING=""
+    CURRENT_BACKUP_AZURE_CONTAINER="msm-backups"
+    CURRENT_BACKUP_AZURE_PATH_PREFIX=""
+    CURRENT_PENDING_CLOUD_RESTORE="0"
+    CURRENT_PENDING_AUTO_MIGRATION="0"
+    CURRENT_PENDING_CROSS_CLOUD_MIGRATION="0"
+    CURRENT_CROSS_CLOUD_TARGET=""
+
     [[ -f "$env_file" ]] || return
 
     local val
@@ -144,6 +173,69 @@ load_current_env() {
 
     val=$(grep -E '^MSM_SECRET_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
     [[ -n "$val" ]] && CURRENT_SECRET_KEY="$val"
+
+    # ── Backup-Storage Variablen lesen (Schritt 8) ──
+    val=$(grep -E '^MSM_BACKUP_PROVIDER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_PROVIDER="$val"
+
+    val=$(grep -E '^MSM_BACKUP_ENCRYPTION_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_ENCRYPTION_KEY="$val"
+
+    val=$(grep -E '^MSM_BACKUP_S3_BUCKET=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_S3_BUCKET="$val"
+    val=$(grep -E '^MSM_BACKUP_S3_REGION=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_S3_REGION="$val"
+    val=$(grep -E '^MSM_BACKUP_S3_ENDPOINT=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_S3_ENDPOINT="$val"
+    val=$(grep -E '^MSM_BACKUP_S3_ACCESS_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_S3_ACCESS_KEY="$val"
+    val=$(grep -E '^MSM_BACKUP_S3_SECRET_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_S3_SECRET_KEY="$val"
+
+    val=$(grep -E '^MSM_BACKUP_SFTP_HOST=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_SFTP_HOST="$val"
+    val=$(grep -E '^MSM_BACKUP_SFTP_PORT=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_SFTP_PORT="$val"
+    val=$(grep -E '^MSM_BACKUP_SFTP_USER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_SFTP_USER="$val"
+    val=$(grep -E '^MSM_BACKUP_SFTP_PASSWORD=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_SFTP_PASSWORD="$val"
+    val=$(grep -E '^MSM_BACKUP_SFTP_PATH=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_SFTP_PATH="$val"
+
+    val=$(grep -E '^MSM_BACKUP_DROPBOX_APP_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_DROPBOX_APP_KEY="$val"
+    val=$(grep -E '^MSM_BACKUP_DROPBOX_APP_SECRET=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_DROPBOX_APP_SECRET="$val"
+    val=$(grep -E '^MSM_BACKUP_DROPBOX_REFRESH_TOKEN=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_DROPBOX_REFRESH_TOKEN="$val"
+    val=$(grep -E '^MSM_BACKUP_DROPBOX_PATH=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_DROPBOX_PATH="$val"
+
+    val=$(grep -E '^MSM_BACKUP_GCS_BUCKET=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_GCS_BUCKET="$val"
+    val=$(grep -E '^MSM_BACKUP_GCS_SA_FILE=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_GCS_SA_FILE="$val"
+    val=$(grep -E '^MSM_BACKUP_GCS_PATH_PREFIX=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_GCS_PATH_PREFIX="$val"
+
+    val=$(grep -E '^MSM_BACKUP_AZURE_ACCOUNT=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_AZURE_ACCOUNT="$val"
+    val=$(grep -E '^MSM_BACKUP_AZURE_CONNECTION_STRING=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_AZURE_CONNECTION_STRING="$val"
+    val=$(grep -E '^MSM_BACKUP_AZURE_CONTAINER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_AZURE_CONTAINER="$val"
+    val=$(grep -E '^MSM_BACKUP_AZURE_PATH_PREFIX=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_BACKUP_AZURE_PATH_PREFIX="$val"
+
+    val=$(grep -E '^MSM_PENDING_CLOUD_RESTORE=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_PENDING_CLOUD_RESTORE="$val"
+    val=$(grep -E '^MSM_PENDING_AUTO_MIGRATION=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_PENDING_AUTO_MIGRATION="$val"
+    val=$(grep -E '^MSM_PENDING_CROSS_CLOUD_MIGRATION=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_PENDING_CROSS_CLOUD_MIGRATION="$val"
+    val=$(grep -E '^MSM_CROSS_CLOUD_TARGET=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_CROSS_CLOUD_TARGET="$val"
 }
 
 show_current_config() {
@@ -185,6 +277,63 @@ show_current_config() {
         echo -e "  ${BOLD}Auto-Update:${NC}     Aktiviert"
     else
         echo -e "  ${BOLD}Auto-Update:${NC}     Deaktiviert"
+    fi
+
+    # ── Backup-Storage (Schritt 8) ──
+    # Klartext nur für Endpoint/Region/Host; Secrets (S3-Key, SFTP-Pass,
+    # Dropbox-Refresh-Token, Azure-Conn-String) bewusst als *** konfiguriert ***.
+    case "$CURRENT_BACKUP_PROVIDER" in
+        local)  echo -e "  ${BOLD}Backup-Storage:${NC}  Lokal (Default)" ;;
+        s3)
+            echo -e "  ${BOLD}Backup-Storage:${NC}  Cloud — S3-kompatibel"
+            echo -e "  ${BOLD}  Bucket:${NC}        ${CURRENT_BACKUP_S3_BUCKET:-<nicht gesetzt>}"
+            echo -e "  ${BOLD}  Region:${NC}        ${CURRENT_BACKUP_S3_REGION:-us-east-1}"
+            [[ -n "$CURRENT_BACKUP_S3_ENDPOINT" ]] && \
+                echo -e "  ${BOLD}  Endpoint:${NC}      ${CURRENT_BACKUP_S3_ENDPOINT}"
+            if [[ -n "$CURRENT_BACKUP_S3_ACCESS_KEY" ]]; then
+                echo -e "  ${BOLD}  Access-Key:${NC}    *** konfiguriert ***"
+            fi
+            [[ -n "$CURRENT_BACKUP_S3_SECRET_KEY" ]] && \
+                echo -e "  ${BOLD}  Secret-Key:${NC}    *** konfiguriert ***"
+            ;;
+        sftp)
+            echo -e "  ${BOLD}Backup-Storage:${NC}  Cloud — SFTP (Hetzner Storage Box o.ä.)"
+            echo -e "  ${BOLD}  Host:${NC}          ${CURRENT_BACKUP_SFTP_HOST:-<nicht gesetzt>}:${CURRENT_BACKUP_SFTP_PORT:-22}"
+            echo -e "  ${BOLD}  User:${NC}          ${CURRENT_BACKUP_SFTP_USER:-<nicht gesetzt>}"
+            echo -e "  ${BOLD}  Pfad:${NC}          ${CURRENT_BACKUP_SFTP_PATH:-/msm-backups}"
+            [[ -n "$CURRENT_BACKUP_SFTP_PASSWORD" ]] && \
+                echo -e "  ${BOLD}  Passwort:${NC}      *** konfiguriert ***"
+            ;;
+        dropbox)
+            echo -e "  ${BOLD}Backup-Storage:${NC}  Cloud — Dropbox"
+            echo -e "  ${BOLD}  Pfad:${NC}          ${CURRENT_BACKUP_DROPBOX_PATH:-/msm-backups}"
+            if [[ -n "$CURRENT_BACKUP_DROPBOX_APP_KEY" ]]; then
+                echo -e "  ${BOLD}  App-Key:${NC}       ${CURRENT_BACKUP_DROPBOX_APP_KEY:0:8}..."
+            fi
+            [[ -n "$CURRENT_BACKUP_DROPBOX_APP_SECRET" ]] && \
+                echo -e "  ${BOLD}  App-Secret:${NC}    *** konfiguriert ***"
+            [[ -n "$CURRENT_BACKUP_DROPBOX_REFRESH_TOKEN" ]] && \
+                echo -e "  ${BOLD}  Refresh-Token:${NC} *** konfiguriert ***"
+            ;;
+        gcs)
+            echo -e "  ${BOLD}Backup-Storage:${NC}  Cloud — Google Cloud Storage"
+            echo -e "  ${BOLD}  Bucket:${NC}        ${CURRENT_BACKUP_GCS_BUCKET:-<nicht gesetzt>}"
+            echo -e "  ${BOLD}  Prefix:${NC}        ${CURRENT_BACKUP_GCS_PATH_PREFIX:-msm-backups}"
+            echo -e "  ${BOLD}  SA-Datei:${NC}      ${CURRENT_BACKUP_GCS_SA_FILE:-<nicht gesetzt>}"
+            ;;
+        azure)
+            echo -e "  ${BOLD}Backup-Storage:${NC}  Cloud — Microsoft Azure Blob"
+            echo -e "  ${BOLD}  Account:${NC}       ${CURRENT_BACKUP_AZURE_ACCOUNT:-<nicht gesetzt>}"
+            echo -e "  ${BOLD}  Container:${NC}     ${CURRENT_BACKUP_AZURE_CONTAINER:-msm-backups}"
+            [[ -n "$CURRENT_BACKUP_AZURE_CONNECTION_STRING" ]] && \
+                echo -e "  ${BOLD}  Conn-String:${NC}   *** konfiguriert ***"
+            ;;
+        *)      echo -e "  ${BOLD}Backup-Storage:${NC}  ${CURRENT_BACKUP_PROVIDER} (unbekannt)" ;;
+    esac
+    if [[ -n "$CURRENT_BACKUP_ENCRYPTION_KEY" ]]; then
+        echo -e "  ${BOLD}  Verschlüsselung:${NC} AES-256-GCM aktiv (Master-Key gesetzt, nicht angezeigt)"
+    elif [[ "$CURRENT_BACKUP_PROVIDER" != "local" ]]; then
+        echo -e "  ${YELLOW}  Verschlüsselung:${NC} Kein Master-Key — Backups wären UNVERSCHLÜSSELT in der Cloud.${NC}"
     fi
     echo ""
 }
@@ -310,6 +459,7 @@ CHANGED_EMAIL=false
 CHANGED_DB=false
 CHANGED_REDIS=false
 CHANGED_AUTO_UPDATE=false
+CHANGED_BACKUP=false
 NEED_FULL_REBUILD=false
 CODE_CHANGED=false
 
@@ -540,6 +690,166 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ! $CODE_CHANGED; then
 fi
 
 # ═══════════════════════════════════════════════════════════════
+# 4b. Backup-Storage Helper (Schritt 8)
+# ═══════════════════════════════════════════════════════════════
+# Diese Funktionen füllen die BACKUP_*-Variablen je Provider. Sie werden
+# sowohl im Fresh- als auch im Change-Flow aufgerufen. Kein Schreibzugriff
+# auf .env — nur Variablen-Setting. Schreiben passiert zentral in Schritt 6.
+#
+# ``$1`` = "fresh" (Default-Werte) | "keep" (CURRENT_* übernehmen) | "change"
+# (User-Eingabe). Helper nutzen eigene Defaults aus CURRENT_* als Platzhalter.
+
+ask_s3_credentials() {
+    local mode="${1:-fresh}"
+    echo ""
+    echo -e "  ${BOLD}S3 — Konfiguration:${NC}"
+    if [[ "$mode" == "keep" ]]; then
+        BACKUP_S3_BUCKET="$CURRENT_BACKUP_S3_BUCKET"
+        BACKUP_S3_REGION="$CURRENT_BACKUP_S3_REGION"
+        BACKUP_S3_ENDPOINT="$CURRENT_BACKUP_S3_ENDPOINT"
+        BACKUP_S3_ACCESS_KEY="$CURRENT_BACKUP_S3_ACCESS_KEY"
+        BACKUP_S3_SECRET_KEY="$CURRENT_BACKUP_S3_SECRET_KEY"
+        echo "    (bestehende Werte werden übernommen)"
+        return 0
+    fi
+    local def_region="${CURRENT_BACKUP_S3_REGION:-us-east-1}"
+    local def_endpoint="${CURRENT_BACKUP_S3_ENDPOINT:-}"
+    ask "    Bucket-Name [${CURRENT_BACKUP_S3_BUCKET:-mein-bucket}]: " BACKUP_S3_BUCKET
+    BACKUP_S3_BUCKET="${BACKUP_S3_BUCKET:-${CURRENT_BACKUP_S3_BUCKET:-}}"
+    ask "    Region [${def_region}]: " BACKUP_S3_REGION
+    BACKUP_S3_REGION="${BACKUP_S3_REGION:-$def_region}"
+    ask "    Endpoint (leer = AWS-Default; Hetzner/R2/B2/MinIO: spezifischer Endpoint) [${def_endpoint}]: " BACKUP_S3_ENDPOINT
+    BACKUP_S3_ENDPOINT="${BACKUP_S3_ENDPOINT:-$def_endpoint}"
+    ask "    Access-Key: " BACKUP_S3_ACCESS_KEY
+    BACKUP_S3_ACCESS_KEY="${BACKUP_S3_ACCESS_KEY:-${CURRENT_BACKUP_S3_ACCESS_KEY:-}}"
+    read -rsp "    Secret-Key (wird nicht angezeigt): " BACKUP_S3_SECRET_KEY
+    echo ""
+    BACKUP_S3_SECRET_KEY="${BACKUP_S3_SECRET_KEY:-${CURRENT_BACKUP_S3_SECRET_KEY:-}}"
+    if [[ -z "$BACKUP_S3_BUCKET" || -z "$BACKUP_S3_ACCESS_KEY" || -z "$BACKUP_S3_SECRET_KEY" ]]; then
+        err "S3 benötigt Bucket, Access-Key und Secret-Key. Abbruch."
+    fi
+}
+
+ask_sftp_credentials() {
+    local mode="${1:-fresh}"
+    echo ""
+    echo -e "  ${BOLD}SFTP — Konfiguration (Hetzner Storage Box o.ä.):${NC}"
+    if [[ "$mode" == "keep" ]]; then
+        BACKUP_SFTP_HOST="$CURRENT_BACKUP_SFTP_HOST"
+        BACKUP_SFTP_PORT="$CURRENT_BACKUP_SFTP_PORT"
+        BACKUP_SFTP_USER="$CURRENT_BACKUP_SFTP_USER"
+        BACKUP_SFTP_PASSWORD="$CURRENT_BACKUP_SFTP_PASSWORD"
+        BACKUP_SFTP_PATH="$CURRENT_BACKUP_SFTP_PATH"
+        echo "    (bestehende Werte werden übernommen)"
+        return 0
+    fi
+    local def_port="${CURRENT_BACKUP_SFTP_PORT:-22}"
+    local def_path="${CURRENT_BACKUP_SFTP_PATH:-/msm-backups}"
+    ask "    Host (z.B. u123456.your-storagebox.de) [${CURRENT_BACKUP_SFTP_HOST:-}]: " BACKUP_SFTP_HOST
+    BACKUP_SFTP_HOST="${BACKUP_SFTP_HOST:-${CURRENT_BACKUP_SFTP_HOST:-}}"
+    ask "    Port [${def_port}]: " BACKUP_SFTP_PORT
+    BACKUP_SFTP_PORT="${BACKUP_SFTP_PORT:-$def_port}"
+    ask "    Username [${CURRENT_BACKUP_SFTP_USER:-}]: " BACKUP_SFTP_USER
+    BACKUP_SFTP_USER="${BACKUP_SFTP_USER:-${CURRENT_BACKUP_SFTP_USER:-}}"
+    read -rsp "    Passwort (wird nicht angezeigt): " BACKUP_SFTP_PASSWORD
+    echo ""
+    BACKUP_SFTP_PASSWORD="${BACKUP_SFTP_PASSWORD:-${CURRENT_BACKUP_SFTP_PASSWORD:-}}"
+    ask "    Remote-Pfad (wird auto-mkdir-p) [${def_path}]: " BACKUP_SFTP_PATH
+    BACKUP_SFTP_PATH="${BACKUP_SFTP_PATH:-$def_path}"
+    if [[ -z "$BACKUP_SFTP_HOST" || -z "$BACKUP_SFTP_USER" || -z "$BACKUP_SFTP_PASSWORD" ]]; then
+        err "SFTP benötigt Host, Username und Passwort. Abbruch."
+    fi
+}
+
+ask_dropbox_credentials() {
+    local mode="${1:-fresh}"
+    echo ""
+    echo -e "  ${BOLD}Dropbox — Konfiguration:${NC}"
+    echo "    App-Key + App-Secret + Refresh-Token aus deiner Dropbox-App-Konsole."
+    echo "    (Refresh-Token via OAuth-Tool einmalig generieren; siehe Plan 3.1)."
+    if [[ "$mode" == "keep" ]]; then
+        BACKUP_DROPBOX_APP_KEY="$CURRENT_BACKUP_DROPBOX_APP_KEY"
+        BACKUP_DROPBOX_APP_SECRET="$CURRENT_BACKUP_DROPBOX_APP_SECRET"
+        BACKUP_DROPBOX_REFRESH_TOKEN="$CURRENT_BACKUP_DROPBOX_REFRESH_TOKEN"
+        BACKUP_DROPBOX_PATH="$CURRENT_BACKUP_DROPBOX_PATH"
+        echo "    (bestehende Werte werden übernommen)"
+        return 0
+    fi
+    local def_path="${CURRENT_BACKUP_DROPBOX_PATH:-/msm-backups}"
+    ask "    App-Key [${CURRENT_BACKUP_DROPBOX_APP_KEY:-}]: " BACKUP_DROPBOX_APP_KEY
+    BACKUP_DROPBOX_APP_KEY="${BACKUP_DROPBOX_APP_KEY:-${CURRENT_BACKUP_DROPBOX_APP_KEY:-}}"
+    read -rsp "    App-Secret (wird nicht angezeigt): " BACKUP_DROPBOX_APP_SECRET
+    echo ""
+    BACKUP_DROPBOX_APP_SECRET="${BACKUP_DROPBOX_APP_SECRET:-${CURRENT_BACKUP_DROPBOX_APP_SECRET:-}}"
+    read -rsp "    Refresh-Token (wird nicht angezeigt): " BACKUP_DROPBOX_REFRESH_TOKEN
+    echo ""
+    BACKUP_DROPBOX_REFRESH_TOKEN="${BACKUP_DROPBOX_REFRESH_TOKEN:-${CURRENT_BACKUP_DROPBOX_REFRESH_TOKEN:-}}"
+    ask "    Pfad im Dropbox-App-Folder [${def_path}]: " BACKUP_DROPBOX_PATH
+    BACKUP_DROPBOX_PATH="${BACKUP_DROPBOX_PATH:-$def_path}"
+    if [[ -z "$BACKUP_DROPBOX_APP_KEY" || -z "$BACKUP_DROPBOX_APP_SECRET" || -z "$BACKUP_DROPBOX_REFRESH_TOKEN" ]]; then
+        err "Dropbox benötigt App-Key, App-Secret und Refresh-Token. Abbruch."
+    fi
+}
+
+ask_gcs_credentials() {
+    local mode="${1:-fresh}"
+    echo ""
+    echo -e "  ${BOLD}Google Cloud Storage — Konfiguration:${NC}"
+    echo "    Service-Account-JSON-Datei muss bereits liegen mit chmod 600 (z.B. /opt/msm/secrets/gcs-sa.json)."
+    echo "    SA braucht roles/storage.objectAdmin auf den Bucket."
+    if [[ "$mode" == "keep" ]]; then
+        BACKUP_GCS_BUCKET="$CURRENT_BACKUP_GCS_BUCKET"
+        BACKUP_GCS_SA_FILE="$CURRENT_BACKUP_GCS_SA_FILE"
+        BACKUP_GCS_PATH_PREFIX="$CURRENT_BACKUP_GCS_PATH_PREFIX"
+        echo "    (bestehende Werte werden übernommen)"
+        return 0
+    fi
+    local def_prefix="${CURRENT_BACKUP_GCS_PATH_PREFIX:-msm-backups}"
+    ask "    Bucket-Name [${CURRENT_BACKUP_GCS_BUCKET:-mein-bucket}]: " BACKUP_GCS_BUCKET
+    BACKUP_GCS_BUCKET="${BACKUP_GCS_BUCKET:-${CURRENT_BACKUP_GCS_BUCKET:-}}"
+    ask "    Pfad zur Service-Account-JSON-Datei [${CURRENT_BACKUP_GCS_SA_FILE:-/opt/msm/secrets/gcs-sa.json}]: " BACKUP_GCS_SA_FILE
+    BACKUP_GCS_SA_FILE="${BACKUP_GCS_SA_FILE:-${CURRENT_BACKUP_GCS_SA_FILE:-/opt/msm/secrets/gcs-sa.json}}"
+    ask "    Logischer Prefix im Bucket [${def_prefix}]: " BACKUP_GCS_PATH_PREFIX
+    BACKUP_GCS_PATH_PREFIX="${BACKUP_GCS_PATH_PREFIX:-$def_prefix}"
+    if [[ -z "$BACKUP_GCS_BUCKET" || -z "$BACKUP_GCS_SA_FILE" ]]; then
+        err "GCS benötigt Bucket und SA-Datei-Pfad. Abbruch."
+    fi
+    if [[ ! -f "$BACKUP_GCS_SA_FILE" ]]; then
+        warn "GCS-SA-Datei '$BACKUP_GCS_SA_FILE' existiert noch nicht."
+        warn "Du musst sie vor dem ersten Backup manuell anlegen (chmod 600 msm:msm)."
+    fi
+}
+
+ask_azure_credentials() {
+    local mode="${1:-fresh}"
+    echo ""
+    echo -e "  ${BOLD}Microsoft Azure Blob — Konfiguration:${NC}"
+    echo "    Connection-String aus dem Azure-Portal (Storage-Account → Access-Keys)."
+    if [[ "$mode" == "keep" ]]; then
+        BACKUP_AZURE_ACCOUNT="$CURRENT_BACKUP_AZURE_ACCOUNT"
+        BACKUP_AZURE_CONNECTION_STRING="$CURRENT_BACKUP_AZURE_CONNECTION_STRING"
+        BACKUP_AZURE_CONTAINER="$CURRENT_BACKUP_AZURE_CONTAINER"
+        BACKUP_AZURE_PATH_PREFIX="$CURRENT_BACKUP_AZURE_PATH_PREFIX"
+        echo "    (bestehende Werte werden übernommen)"
+        return 0
+    fi
+    local def_container="${CURRENT_BACKUP_AZURE_CONTAINER:-msm-backups}"
+    local def_prefix="${CURRENT_BACKUP_AZURE_PATH_PREFIX:-}"
+    ask "    Storage-Account-Name [${CURRENT_BACKUP_AZURE_ACCOUNT:-}]: " BACKUP_AZURE_ACCOUNT
+    BACKUP_AZURE_ACCOUNT="${BACKUP_AZURE_ACCOUNT:-${CURRENT_BACKUP_AZURE_ACCOUNT:-}}"
+    read -rsp "    Connection-String (wird nicht angezeigt): " BACKUP_AZURE_CONNECTION_STRING
+    echo ""
+    BACKUP_AZURE_CONNECTION_STRING="${BACKUP_AZURE_CONNECTION_STRING:-${CURRENT_BACKUP_AZURE_CONNECTION_STRING:-}}"
+    ask "    Container-Name [${def_container}]: " BACKUP_AZURE_CONTAINER
+    BACKUP_AZURE_CONTAINER="${BACKUP_AZURE_CONTAINER:-$def_container}"
+    ask "    Logischer Prefix (leer = root) [${def_prefix}]: " BACKUP_AZURE_PATH_PREFIX
+    BACKUP_AZURE_PATH_PREFIX="${BACKUP_AZURE_PATH_PREFIX:-$def_prefix}"
+    if [[ -z "$BACKUP_AZURE_ACCOUNT" || -z "$BACKUP_AZURE_CONNECTION_STRING" ]]; then
+        err "Azure benötigt Account-Name und Connection-String. Abbruch."
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════
 # 5. Interaktive Konfiguration
 # ═══════════════════════════════════════════════════════════════
 
@@ -555,6 +865,37 @@ RESEND_API_KEY=""
 USE_POSTGRES=false
 PG_PASSWORD=""
 MSM_AUTO_UPDATE="false"
+
+# Backup-Storage Defaults (Schritt 8)
+BACKUP_PROVIDER="local"
+BACKUP_ENCRYPTION_KEY=""
+BACKUP_S3_BUCKET=""
+BACKUP_S3_REGION=""
+BACKUP_S3_ENDPOINT=""
+BACKUP_S3_ACCESS_KEY=""
+BACKUP_S3_SECRET_KEY=""
+BACKUP_SFTP_HOST=""
+BACKUP_SFTP_PORT=22
+BACKUP_SFTP_USER=""
+BACKUP_SFTP_PASSWORD=""
+BACKUP_SFTP_PATH="/msm-backups"
+BACKUP_DROPBOX_APP_KEY=""
+BACKUP_DROPBOX_APP_SECRET=""
+BACKUP_DROPBOX_REFRESH_TOKEN=""
+BACKUP_DROPBOX_PATH="/msm-backups"
+BACKUP_GCS_BUCKET=""
+BACKUP_GCS_SA_FILE=""
+BACKUP_GCS_PATH_PREFIX="msm-backups"
+BACKUP_AZURE_ACCOUNT=""
+BACKUP_AZURE_CONNECTION_STRING=""
+BACKUP_AZURE_CONTAINER="msm-backups"
+BACKUP_AZURE_PATH_PREFIX=""
+PENDING_CLOUD_RESTORE="0"
+PENDING_AUTO_MIGRATION="0"
+PENDING_CROSS_CLOUD_MIGRATION="0"
+CROSS_CLOUD_TARGET=""
+# old_provider merkt sich den vorigen Wert (für Migration-Detection)
+OLD_BACKUP_PROVIDER=""
 
 if $REINSTALL_MODE && $KEEP_SETTINGS; then
     # Keep mode: alle aktuellen Werte übernehmen
@@ -573,14 +914,44 @@ if $REINSTALL_MODE && $KEEP_SETTINGS; then
     fi
     MSM_AUTO_UPDATE="$CURRENT_AUTO_UPDATE"
 
+    # Backup-Storage (Schritt 8) — komplett übernehmen
+    BACKUP_PROVIDER="$CURRENT_BACKUP_PROVIDER"
+    BACKUP_ENCRYPTION_KEY="$CURRENT_BACKUP_ENCRYPTION_KEY"
+    BACKUP_S3_BUCKET="$CURRENT_BACKUP_S3_BUCKET"
+    BACKUP_S3_REGION="${CURRENT_BACKUP_S3_REGION:-us-east-1}"
+    BACKUP_S3_ENDPOINT="$CURRENT_BACKUP_S3_ENDPOINT"
+    BACKUP_S3_ACCESS_KEY="$CURRENT_BACKUP_S3_ACCESS_KEY"
+    BACKUP_S3_SECRET_KEY="$CURRENT_BACKUP_S3_SECRET_KEY"
+    BACKUP_SFTP_HOST="$CURRENT_BACKUP_SFTP_HOST"
+    BACKUP_SFTP_PORT="${CURRENT_BACKUP_SFTP_PORT:-22}"
+    BACKUP_SFTP_USER="$CURRENT_BACKUP_SFTP_USER"
+    BACKUP_SFTP_PASSWORD="$CURRENT_BACKUP_SFTP_PASSWORD"
+    BACKUP_SFTP_PATH="${CURRENT_BACKUP_SFTP_PATH:-/msm-backups}"
+    BACKUP_DROPBOX_APP_KEY="$CURRENT_BACKUP_DROPBOX_APP_KEY"
+    BACKUP_DROPBOX_APP_SECRET="$CURRENT_BACKUP_DROPBOX_APP_SECRET"
+    BACKUP_DROPBOX_REFRESH_TOKEN="$CURRENT_BACKUP_DROPBOX_REFRESH_TOKEN"
+    BACKUP_DROPBOX_PATH="${CURRENT_BACKUP_DROPBOX_PATH:-/msm-backups}"
+    BACKUP_GCS_BUCKET="$CURRENT_BACKUP_GCS_BUCKET"
+    BACKUP_GCS_SA_FILE="$CURRENT_BACKUP_GCS_SA_FILE"
+    BACKUP_GCS_PATH_PREFIX="${CURRENT_BACKUP_GCS_PATH_PREFIX:-msm-backups}"
+    BACKUP_AZURE_ACCOUNT="$CURRENT_BACKUP_AZURE_ACCOUNT"
+    BACKUP_AZURE_CONNECTION_STRING="$CURRENT_BACKUP_AZURE_CONNECTION_STRING"
+    BACKUP_AZURE_CONTAINER="${CURRENT_BACKUP_AZURE_CONTAINER:-msm-backups}"
+    BACKUP_AZURE_PATH_PREFIX="$CURRENT_BACKUP_AZURE_PATH_PREFIX"
+    PENDING_CLOUD_RESTORE="${CURRENT_PENDING_CLOUD_RESTORE:-0}"
+    PENDING_AUTO_MIGRATION="${CURRENT_PENDING_AUTO_MIGRATION:-0}"
+    PENDING_CROSS_CLOUD_MIGRATION="${CURRENT_PENDING_CROSS_CLOUD_MIGRATION:-0}"
+    CROSS_CLOUD_TARGET="${CURRENT_CROSS_CLOUD_TARGET:-}"
+    OLD_BACKUP_PROVIDER="$CURRENT_BACKUP_PROVIDER"
+
 elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
     # ═══════════════════════════════════════════════════════════════
     # Change mode: 4 Fragen mit aktuellen Werten als Default
     # ═══════════════════════════════════════════════════════════════
 
-    # ── 1/4 Domain ──
+    # ── 1/5 Domain ──
     echo ""
-    echo -e "${BOLD}Schritt 1/4: Domain${NC}"
+    echo -e "${BOLD}Schritt 1/5: Domain${NC}"
     echo "  Gib eine Domain an, damit Caddy automatisch ein SSL-Zertifikat erstellt."
     echo "  Ohne Domain wird das Panel über HTTP (nur IP) erreichbar — nicht empfohlen."
     echo "  Leer lassen um aktuellen Wert zu behalten: ${CURRENT_DOMAIN:-<nicht gesetzt>}"
@@ -591,9 +962,9 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
         CHANGED_DOMAIN=true
     fi
 
-    # ── 2/4 Email ──
+    # ── 2/5 Email ──
     echo ""
-    echo -e "${BOLD}Schritt 2/4: Email-Versand${NC}"
+    echo -e "${BOLD}Schritt 2/5: Email-Versand${NC}"
     echo "  Aktueller Provider: ${CURRENT_EMAIL_PROVIDER}"
     echo "  'Ändern' wählen um Provider oder Details zu ändern."
     echo ""
@@ -649,9 +1020,9 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
         log "Email-Einstellungen bleiben unverändert."
     fi
 
-    # ── 3/4 PostgreSQL ──
+    # ── 3/5 PostgreSQL ──
     echo ""
-    echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
+    echo -e "${BOLD}Schritt 3/5: Datenbank${NC}"
     if $CURRENT_USE_POSTGRES; then
         echo "  Aktuell: PostgreSQL"
     else
@@ -680,9 +1051,9 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
         fi
     fi
 
-    # ── 4/4 Auto-Update ──
+    # ── 4/5 Auto-Update ──
     echo ""
-    echo -e "${BOLD}Schritt 4/4: Automatische Updates${NC}"
+    echo -e "${BOLD}Schritt 4/5: Automatische Updates${NC}"
     if [[ "$CURRENT_AUTO_UPDATE" == "true" ]]; then
         echo "  Aktuell: Aktiviert"
         if ask_yesno_default "Automatische Updates beibehalten?" "Y"; then
@@ -701,6 +1072,94 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
         fi
     fi
 
+    # ── 5/5 Backup-Storage (Schritt 8) ──
+    echo ""
+    echo -e "${BOLD}Schritt 5/5: Backup-Storage${NC}"
+    OLD_BACKUP_PROVIDER="$CURRENT_BACKUP_PROVIDER"
+    case "$OLD_BACKUP_PROVIDER" in
+        local)  echo "  Aktuell: Lokal (Default)" ;;
+        s3)     echo "  Aktuell: Cloud — S3-kompatibel (${CURRENT_BACKUP_S3_BUCKET:-Bucket unbekannt})" ;;
+        sftp)   echo "  Aktuell: Cloud — SFTP (${CURRENT_BACKUP_SFTP_HOST:-Host unbekannt})" ;;
+        dropbox) echo "  Aktuell: Cloud — Dropbox" ;;
+        gcs)    echo "  Aktuell: Cloud — Google Cloud Storage (${CURRENT_BACKUP_GCS_BUCKET:-Bucket unbekannt})" ;;
+        azure)  echo "  Aktuell: Cloud — Microsoft Azure (${CURRENT_BACKUP_AZURE_ACCOUNT:-Account unbekannt})" ;;
+    esac
+    echo ""
+    if ask_yesno "Backup-Storage ändern?"; then
+        echo ""
+        echo -e "  ${BOLD}Wo sollen Backups gespeichert werden?${NC}"
+        echo "    1) Lokal (Default, keine Cloud)"
+        echo "    2) Cloud — S3-kompatibel (AWS, Hetzner S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi)"
+        echo "    3) Cloud — SFTP (Hetzner Storage Box o.ä.)"
+        echo "    4) Cloud — Dropbox"
+        echo "    5) Cloud — Google Cloud Storage"
+        echo "    6) Cloud — Microsoft Azure Blob"
+        ask "  [1/2/3/4/5/6]: " BACKUP_PROVIDER_CHOICE
+
+        case "$BACKUP_PROVIDER_CHOICE" in
+            1|"") BACKUP_PROVIDER="local" ;;
+            2)     BACKUP_PROVIDER="s3";     ask_s3_credentials     change ;;
+            3)     BACKUP_PROVIDER="sftp";   ask_sftp_credentials   change ;;
+            4)     BACKUP_PROVIDER="dropbox"; ask_dropbox_credentials change ;;
+            5)     BACKUP_PROVIDER="gcs";    ask_gcs_credentials    change ;;
+            6)     BACKUP_PROVIDER="azure";  ask_azure_credentials  change ;;
+            *)     err "Ungültige Auswahl: $BACKUP_PROVIDER_CHOICE" ;;
+        esac
+
+        if [[ "$BACKUP_PROVIDER" != "$OLD_BACKUP_PROVIDER" ]]; then
+            CHANGED_BACKUP=true
+            # Migration-Detection:
+            # local → cloud: alte lokale Backups migrieren
+            if [[ "$OLD_BACKUP_PROVIDER" == "local" && "$BACKUP_PROVIDER" != "local" ]]; then
+                warn "Wechsel von 'local' auf '$BACKUP_PROVIDER' — Auto-Migration läuft beim Backend-Startup."
+                warn "Alle bestehenden lokalen Backups werden einmalig in die Cloud hochgeladen."
+                PENDING_AUTO_MIGRATION="1"
+            fi
+            # cloud → anderes cloud: Cross-Cloud-Migration anbieten (NICHT auto)
+            if [[ "$OLD_BACKUP_PROVIDER" != "local" && "$BACKUP_PROVIDER" != "local" \
+                  && "$OLD_BACKUP_PROVIDER" != "$BACKUP_PROVIDER" ]]; then
+                echo ""
+                warn "Cloud-Provider-Wechsel: $OLD_BACKUP_PROVIDER → $BACKUP_PROVIDER"
+                warn "Bestehende Cloud-Backups liegen weiterhin beim alten Provider ($OLD_BACKUP_PROVIDER)."
+                if ask_yesno "Beim Backend-Startup eine Cross-Cloud-Migration anbieten? (Backups vom alten zum neuen Provider umkopieren)"; then
+                    PENDING_CROSS_CLOUD_MIGRATION="1"
+                    CROSS_CLOUD_TARGET="$BACKUP_PROVIDER"
+                    ok "Cross-Cloud-Migration wird beim nächsten Backend-Startup als optionaler Banner angeboten."
+                else
+                    log "Cross-Cloud-Migration wird nicht angeboten. Backups bleiben beim alten Provider."
+                fi
+            fi
+        fi
+    else
+        log "Backup-Storage bleibt unverändert ($OLD_BACKUP_PROVIDER)."
+        BACKUP_PROVIDER="$OLD_BACKUP_PROVIDER"
+        # Wenn kein Wechsel: alle Detail-Variablen aus .env übernehmen (keep-Verhalten)
+        BACKUP_S3_BUCKET="$CURRENT_BACKUP_S3_BUCKET"
+        BACKUP_S3_REGION="${CURRENT_BACKUP_S3_REGION:-us-east-1}"
+        BACKUP_S3_ENDPOINT="$CURRENT_BACKUP_S3_ENDPOINT"
+        BACKUP_S3_ACCESS_KEY="$CURRENT_BACKUP_S3_ACCESS_KEY"
+        BACKUP_S3_SECRET_KEY="$CURRENT_BACKUP_S3_SECRET_KEY"
+        BACKUP_SFTP_HOST="$CURRENT_BACKUP_SFTP_HOST"
+        BACKUP_SFTP_PORT="${CURRENT_BACKUP_SFTP_PORT:-22}"
+        BACKUP_SFTP_USER="$CURRENT_BACKUP_SFTP_USER"
+        BACKUP_SFTP_PASSWORD="$CURRENT_BACKUP_SFTP_PASSWORD"
+        BACKUP_SFTP_PATH="${CURRENT_BACKUP_SFTP_PATH:-/msm-backups}"
+        BACKUP_DROPBOX_APP_KEY="$CURRENT_BACKUP_DROPBOX_APP_KEY"
+        BACKUP_DROPBOX_APP_SECRET="$CURRENT_BACKUP_DROPBOX_APP_SECRET"
+        BACKUP_DROPBOX_REFRESH_TOKEN="$CURRENT_BACKUP_DROPBOX_REFRESH_TOKEN"
+        BACKUP_DROPBOX_PATH="${CURRENT_BACKUP_DROPBOX_PATH:-/msm-backups}"
+        BACKUP_GCS_BUCKET="$CURRENT_BACKUP_GCS_BUCKET"
+        BACKUP_GCS_SA_FILE="$CURRENT_BACKUP_GCS_SA_FILE"
+        BACKUP_GCS_PATH_PREFIX="${CURRENT_BACKUP_GCS_PATH_PREFIX:-msm-backups}"
+        BACKUP_AZURE_ACCOUNT="$CURRENT_BACKUP_AZURE_ACCOUNT"
+        BACKUP_AZURE_CONNECTION_STRING="$CURRENT_BACKUP_AZURE_CONNECTION_STRING"
+        BACKUP_AZURE_CONTAINER="${CURRENT_BACKUP_AZURE_CONTAINER:-msm-backups}"
+        BACKUP_AZURE_PATH_PREFIX="$CURRENT_BACKUP_AZURE_PATH_PREFIX"
+    fi
+
+    # Bestehender Encryption-Key bleibt (sonst sind alte Cloud-Backups verloren)
+    BACKUP_ENCRYPTION_KEY="$CURRENT_BACKUP_ENCRYPTION_KEY"
+
     # Bestimme ob Full Rebuild nötig
     if $CODE_CHANGED || $CHANGED_DB; then
         NEED_FULL_REBUILD=true
@@ -713,7 +1172,7 @@ else
 
     # ── 5a. Domain ──
     echo ""
-    echo -e "${BOLD}Schritt 1/4: Domain${NC}"
+    echo -e "${BOLD}Schritt 1/5: Domain${NC}"
     echo "  Gib eine Domain an, damit Caddy automatisch ein SSL-Zertifikat erstellt."
     echo "  Ohne Domain wird das Panel über HTTP (nur IP) erreichbar — nicht empfohlen."
     echo ""
@@ -722,7 +1181,7 @@ else
 
     # ── 5b. Email ──
     echo ""
-    echo -e "${BOLD}Schritt 2/4: Email-Versand${NC}"
+    echo -e "${BOLD}Schritt 2/5: Email-Versand${NC}"
     echo "  Wird für Setup-Verifikation, 2FA-Setup und Backup-Codes benötigt."
     echo "  Optionen:"
     echo "    1. Resend (resend.com) — API-Key, kein SMTP nötig, empfohlen"
@@ -760,7 +1219,7 @@ else
 
     # ── 5c. PostgreSQL ──
     echo ""
-    echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
+    echo -e "${BOLD}Schritt 3/5: Datenbank${NC}"
     if ask_yesno "PostgreSQL für die Datenbank nutzen? (empfohlen für Produktion, sonst SQLite)"; then
         USE_POSTGRES=true
     else
@@ -769,7 +1228,7 @@ else
 
     # ── 5d. Auto-Update ──
     echo ""
-    echo -e "${BOLD}Schritt 4/4: Automatische Updates${NC}"
+    echo -e "${BOLD}Schritt 4/5: Automatische Updates${NC}"
     echo "  Prüft täglich auf neue GitHub-Releases und installiert sie automatisch."
     echo "  Empfohlen für Produktion, aber Updates sollten vorher getestet werden."
     echo ""
@@ -777,6 +1236,34 @@ else
         MSM_AUTO_UPDATE="true"
     else
         MSM_AUTO_UPDATE="false"
+    fi
+
+    # ── 5e. Backup-Storage (Schritt 8) ──
+    echo ""
+    echo -e "${BOLD}Schritt 5/5: Backup-Storage${NC}"
+    echo "  Wo sollen Backups gespeichert werden?"
+    echo "    1) Lokal (Default, keine Cloud)"
+    echo "    2) Cloud — S3-kompatibel (AWS, Hetzner S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi)"
+    echo "    3) Cloud — SFTP (Hetzner Storage Box o.ä.)"
+    echo "    4) Cloud — Dropbox"
+    echo "    5) Cloud — Google Cloud Storage"
+    echo "    6) Cloud — Microsoft Azure Blob"
+    ask "  [1/2/3/4/5/6]: " BACKUP_PROVIDER_CHOICE
+
+    case "$BACKUP_PROVIDER_CHOICE" in
+        1|"") BACKUP_PROVIDER="local" ;;
+        2)     BACKUP_PROVIDER="s3";      ask_s3_credentials     fresh ;;
+        3)     BACKUP_PROVIDER="sftp";    ask_sftp_credentials   fresh ;;
+        4)     BACKUP_PROVIDER="dropbox"; ask_dropbox_credentials fresh ;;
+        5)     BACKUP_PROVIDER="gcs";     ask_gcs_credentials    fresh ;;
+        6)     BACKUP_PROVIDER="azure";   ask_azure_credentials  fresh ;;
+        *)     err "Ungültige Auswahl: $BACKUP_PROVIDER_CHOICE" ;;
+    esac
+
+    if [[ "$BACKUP_PROVIDER" != "local" ]]; then
+        warn "Cloud-Backup-Storage aktiv: Backups werden client-seitig AES-256-GCM verschlüsselt."
+        warn "Master-Key wird beim Schreiben des .env generiert und in $ENV_FILE gespeichert."
+        warn "WICHTIG: Wer den .env verliert, verliert alle Cloud-Backups!"
     fi
 fi
 
@@ -927,6 +1414,36 @@ MSM_GITHUB_OWNER="einmalmaik"
 MSM_GITHUB_REPO="maunting-server-manager"
 MSM_AUTO_UPDATE=$MSM_AUTO_UPDATE
 MSM_AUTO_UPDATE_INTERVAL_HOURS=24
+
+# Backup-Storage (Schritt 8)
+MSM_BACKUP_PROVIDER="$BACKUP_PROVIDER"
+MSM_BACKUP_LOCAL_DIR="/opt/msm/backups"
+MSM_BACKUP_ENCRYPTION_KEY="$BACKUP_ENCRYPTION_KEY"
+MSM_BACKUP_S3_BUCKET="$BACKUP_S3_BUCKET"
+MSM_BACKUP_S3_REGION="$BACKUP_S3_REGION"
+MSM_BACKUP_S3_ENDPOINT="$BACKUP_S3_ENDPOINT"
+MSM_BACKUP_S3_ACCESS_KEY="$BACKUP_S3_ACCESS_KEY"
+MSM_BACKUP_S3_SECRET_KEY="$BACKUP_S3_SECRET_KEY"
+MSM_BACKUP_SFTP_HOST="$BACKUP_SFTP_HOST"
+MSM_BACKUP_SFTP_PORT=$BACKUP_SFTP_PORT
+MSM_BACKUP_SFTP_USER="$BACKUP_SFTP_USER"
+MSM_BACKUP_SFTP_PASSWORD="$BACKUP_SFTP_PASSWORD"
+MSM_BACKUP_SFTP_PATH="$BACKUP_SFTP_PATH"
+MSM_BACKUP_DROPBOX_APP_KEY="$BACKUP_DROPBOX_APP_KEY"
+MSM_BACKUP_DROPBOX_APP_SECRET="$BACKUP_DROPBOX_APP_SECRET"
+MSM_BACKUP_DROPBOX_REFRESH_TOKEN="$BACKUP_DROPBOX_REFRESH_TOKEN"
+MSM_BACKUP_DROPBOX_PATH="$BACKUP_DROPBOX_PATH"
+MSM_BACKUP_GCS_BUCKET="$BACKUP_GCS_BUCKET"
+MSM_BACKUP_GCS_SA_FILE="$BACKUP_GCS_SA_FILE"
+MSM_BACKUP_GCS_PATH_PREFIX="$BACKUP_GCS_PATH_PREFIX"
+MSM_BACKUP_AZURE_ACCOUNT="$BACKUP_AZURE_ACCOUNT"
+MSM_BACKUP_AZURE_CONNECTION_STRING="$BACKUP_AZURE_CONNECTION_STRING"
+MSM_BACKUP_AZURE_CONTAINER="$BACKUP_AZURE_CONTAINER"
+MSM_BACKUP_AZURE_PATH_PREFIX="$BACKUP_AZURE_PATH_PREFIX"
+MSM_PENDING_CLOUD_RESTORE=$PENDING_CLOUD_RESTORE
+MSM_PENDING_AUTO_MIGRATION=$PENDING_AUTO_MIGRATION
+MSM_PENDING_CROSS_CLOUD_MIGRATION=$PENDING_CROSS_CLOUD_MIGRATION
+MSM_CROSS_CLOUD_TARGET="$CROSS_CLOUD_TARGET"
 EOF
 
 chmod 600 "$ENV_FILE"
@@ -1179,7 +1696,7 @@ if ! $REINSTALL_MODE; then
     RUN_SYSTEMD_SETUP=true
 elif $KEEP_SETTINGS; then
     RUN_SYSTEMD_SETUP=true
-elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ($CODE_CHANGED || $CHANGED_DOMAIN || $CHANGED_EMAIL || $CHANGED_REDIS); then
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ($CODE_CHANGED || $CHANGED_DOMAIN || $CHANGED_EMAIL || $CHANGED_REDIS || $CHANGED_BACKUP); then
     RUN_SYSTEMD_SETUP=true
 fi
 
@@ -1443,6 +1960,7 @@ if $REINSTALL_MODE; then
         if $CHANGED_DB; then         echo -e "    ${YELLOW}•${NC} Datenbank geändert";     else echo -e "    ${CYAN}•${NC} Datenbank unverändert"; fi
         if $CHANGED_REDIS; then      echo -e "    ${YELLOW}•${NC} Redis geändert";          else echo -e "    ${CYAN}•${NC} Redis unverändert"; fi
         if $CHANGED_AUTO_UPDATE; then echo -e "    ${YELLOW}•${NC} Auto-Update geändert";   else echo -e "    ${CYAN}•${NC} Auto-Update unverändert"; fi
+        if $CHANGED_BACKUP; then    echo -e "    ${YELLOW}•${NC} Backup-Storage geändert"; else echo -e "    ${CYAN}•${NC} Backup-Storage unverändert"; fi
         if $CODE_CHANGED; then       echo -e "    ${GREEN}•${NC} Quellcode aktualisiert";  else echo -e "    ${CYAN}•${NC} Quellcode unverändert"; fi
     fi
 fi
@@ -1489,6 +2007,41 @@ if [[ "$MSM_AUTO_UPDATE" == "true" ]]; then
     echo -e "  ${GREEN}Auto-Update:${NC}      Aktiviert (24h Intervall)"
 else
     echo -e "  ${YELLOW}Auto-Update:${NC}      Deaktiviert"
+fi
+
+# Backup-Storage Zusammenfassung (Schritt 8) — Klartext, KEINE Secrets
+case "$BACKUP_PROVIDER" in
+    local)
+        echo -e "  ${BOLD}Backup-Storage:${NC}   Lokal (/opt/msm/backups)"
+        ;;
+    s3)
+        echo -e "  ${GREEN}Backup-Storage:${NC}   Cloud — S3 (Bucket: $BACKUP_S3_BUCKET, Region: ${BACKUP_S3_REGION:-us-east-1})"
+        ;;
+    sftp)
+        echo -e "  ${GREEN}Backup-Storage:${NC}   Cloud — SFTP (Host: $BACKUP_SFTP_HOST, Pfad: $BACKUP_SFTP_PATH)"
+        ;;
+    dropbox)
+        echo -e "  ${GREEN}Backup-Storage:${NC}   Cloud — Dropbox (Pfad: $BACKUP_DROPBOX_PATH)"
+        ;;
+    gcs)
+        echo -e "  ${GREEN}Backup-Storage:${NC}   Cloud — Google Cloud Storage (Bucket: $BACKUP_GCS_BUCKET)"
+        ;;
+    azure)
+        echo -e "  ${GREEN}Backup-Storage:${NC}   Cloud — Microsoft Azure (Account: $BACKUP_AZURE_ACCOUNT, Container: $BACKUP_AZURE_CONTAINER)"
+        ;;
+esac
+if [[ "$BACKUP_PROVIDER" != "local" ]]; then
+    if [[ -n "$BACKUP_ENCRYPTION_KEY" ]]; then
+        echo -e "  ${GREEN}Verschlüsselung:${NC}    AES-256-GCM aktiv"
+    else
+        echo -e "  ${YELLOW}Verschlüsselung:${NC}    Wird beim Backend-Start generiert"
+    fi
+    if [[ "$PENDING_AUTO_MIGRATION" == "1" ]]; then
+        echo -e "  ${YELLOW}Auto-Migration:${NC}    Alte lokale Backups werden beim Backend-Startup in die Cloud migriert"
+    fi
+    if [[ "$PENDING_CROSS_CLOUD_MIGRATION" == "1" ]]; then
+        echo -e "  ${YELLOW}Cross-Cloud-Migration:${NC} Wird beim Backend-Startup optional angeboten ($OLD_BACKUP_PROVIDER → $BACKUP_PROVIDER)"
+    fi
 fi
 
 echo ""
