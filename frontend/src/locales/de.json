@@ -728,6 +728,13 @@
   "profile": {
     "title": "Profil",
     "subtitle": "Dein Account",
+    "tabs": {
+      "account": "Konto",
+      "password": "Passwort",
+      "2fa": "2-Faktor",
+      "linked": "Verknüpfte Konten",
+      "danger": "Gefahrenzone"
+    },
     "email": "E-Mail-Adresse",
     "changePassword": "Passwort ändern",
     "currentPassword": "Aktuelles Passwort",

@@ -674,6 +674,13 @@
   "profile": {
     "title": "प्रोफाइल",
     "subtitle": "आपका खाता",
+    "tabs": {
+      "account": "खाता",
+      "password": "पासवर्ड",
+      "2fa": "दो-कारक",
+      "linked": "जुड़े खाते",
+      "danger": "खतरा क्षेत्र"
+    },
     "email": "ईमेल पता",
     "changePassword": "पासवर्ड बदलें",
     "currentPassword": "वर्तमान पासवर्ड",

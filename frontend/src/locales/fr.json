@@ -674,6 +674,13 @@
   "profile": {
     "title": "Profil",
     "subtitle": "Votre compte",
+    "tabs": {
+      "account": "Compte",
+      "password": "Mot de passe",
+      "2fa": "Authentification 2 facteurs",
+      "linked": "Comptes liés",
+      "danger": "Zone de danger"
+    },
     "email": "Adresse e-mail",
     "changePassword": "Changer le mot de passe",
     "currentPassword": "Mot de passe actuel",
