@@ -570,7 +570,7 @@ class TestBackupsRouter:
         # Trigger Fehler im Extract-Block (nach move) → generische 500 ohne Leak
         with patch("services.docker_service.is_running", return_value=False), \
              patch("services.docker_service.remove"):
-            with patch("routers.backups._safe_extract_backup_tar", side_effect=Exception("/secret/path/leak")):
+            with patch("services.backup_service._safe_extract_backup_tar", side_effect=Exception("/secret/path/leak")):
                 resp = client.post(f"/api/backups/{test_server.id}/restore/{b.id}", cookies=owner_cookies, headers={"X-CSRF-Token": csrf_token})
                 assert resp.status_code == 500
                 detail = resp.json()["detail"]

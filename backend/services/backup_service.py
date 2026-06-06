@@ -379,6 +379,279 @@ def cleanup_old_backups(
         )
 
 
+# ── Restore (Schritt 7) ───────────────────────────────────────────────────
+
+
+def restore_backup(
+    server_id: int,
+    backup_id: int,
+    db: Session,
+) -> "Backup":
+    """Stellt ein Backup wieder her — Provider-agnostisch.
+
+    Pipeline:
+    1. Server + Backup laden (404 wenn nicht da).
+    2. Provider-Stage:
+       - ``provider == "local"``: lokale Datei direkt verwenden.
+       - cloud-Provider: ``provider.download(remote_key, /tmp/...tar.gz[.enc])``
+         mit Progress-Callback in ``_active_backups``.
+    3. Optional: ``decrypt_file(.enc, .tar.gz)`` wenn Encryption-Key konfiguriert.
+    4. Extract via ``_safe_extract_backup_tar`` (Path-Traversal-Schutz, hardlinks
+       geblockt — bestehende Logik, in ``routers.backups`` gewohnt).
+    5. Metadata-Apply: aus ``backup.metadata_json`` werden ``server.cpu_limit_percent``,
+       ``ram_limit_mb``, ``disk_limit_gb``, ``public_bind_ip`` zurueckgeschrieben
+       (nur wenn Metadata vorhanden — alte Records ohne metadata_json werden
+       einfach mit den aktuellen Werten restored).
+    6. Port-Reallocation: aus Metadata die Port-**Rollen** (game/query/rcon) extrahieren
+       und via ``port_allocation_service.allocate_ports`` neu vergeben (konkrete
+       Portnummern koennen belegt sein). Bei fehlender Metadata bleiben die aktuellen
+       Ports unveraendert.
+    7. Status auf ``"stopped"`` (kein auto-restart — User drueckt manuell Start).
+
+    Wirft spezifische Exceptions (FileNotFoundError, RuntimeError, ProviderError)
+    mit generischem Text (kein Pfad-Leak). Caller (Router) wandelt in HTTP 4xx/5xx.
+
+    Vorbedingung: der Docker-Container des Servers ist gestoppt + removed (macht
+    der Router via ``docker_service``). Die Funktion selbst tut das NICHT — sie
+    ist Single-Source-of-Truth fuer die Backup-Logik, der Router orchestriert
+    den Docker-Lifecycle drumherum.
+    """
+    from models import Backup, Server  # Inline-Import
+
+    server = db.query(Server).filter(Server.id == server_id).first()
+    backup = db.query(Backup).filter(
+        Backup.id == backup_id, Backup.server_id == server_id
+    ).first()
+    if not server or not backup:
+        raise FileNotFoundError("Server oder Backup nicht gefunden")
+    if not server.install_dir:
+        raise FileNotFoundError("Server-Verzeichnis nicht konfiguriert")
+
+    provider_name = (backup.provider or "local").lower()
+    encryption_key = settings.backup_encryption_key or ""
+
+    # Temp-Dateien in /var/tmp — werden am Ende (Erfolg oder Fehler) aufgeraeumt
+    os.makedirs(TEMP_BACKUP_DIR, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    enc_temp = os.path.join(TEMP_BACKUP_DIR, f"restore_{server_id}_{timestamp}.tar.gz.enc")
+    plain_temp = os.path.join(TEMP_BACKUP_DIR, f"restore_{server_id}_{timestamp}.tar.gz")
+    enc_temp_exists = False  # fuer finally-Cleanup
+
+    try:
+        # ── Stage 1: Provider-Download (oder lokaler Read) ──
+        set_active_backup_status(server_id, "downloading", backup.size_mb)
+
+        if provider_name == "local" or not backup.remote_key:
+            # Local-Provider oder sehr alte Records: lokale Datei direkt.
+            if not backup.filename or not os.path.exists(backup.filename):
+                raise FileNotFoundError("Backup-Quelle nicht gefunden")
+            # Bei Encryption hat das File .enc Endung
+            local_source = backup.filename
+            size_bytes = os.path.getsize(local_source)
+        else:
+            # Cloud-Provider: provider.download in die .enc-Temp-Datei
+            local_source = enc_temp
+            from services.backup_provider import get_provider
+            provider = get_provider(provider_name)
+
+            def _progress_to_active(bytes_done: int) -> None:
+                _active_backups[server_id] = {
+                    **_active_backups.get(server_id, {}),
+                    "operation": "downloading",
+                    "bytes_done": bytes_done,
+                    "bytes_total": backup.size_mb * 1024 * 1024
+                    if backup.size_mb
+                    else None,
+                    "percent": (
+                        int(bytes_done * 100 / (backup.size_mb * 1024 * 1024))
+                        if backup.size_mb
+                        else None
+                    ),
+                    "started_at": _active_backups.get(
+                        server_id, {}
+                    ).get("started_at"),
+                }
+
+            try:
+                provider.download(
+                    backup.remote_key,
+                    Path(enc_temp),
+                    progress_cb=_progress_to_active,
+                )
+            except Exception as e:
+                # Provider-Fehler (z. B. 404, Auth) — generischer Text
+                logger.warning(
+                    "Provider-Download fehlgeschlagen fuer Backup %s (provider=%s)",
+                    backup_id,
+                    provider_name,
+                )
+                raise RuntimeError("Restore fehlgeschlagen") from e
+
+            enc_temp_exists = True
+            size_bytes = os.path.getsize(enc_temp)
+
+        # ── Stage 2: Optional Decryption ──
+        if encryption_key and local_source.endswith(".enc"):
+            # Verschlusselt → in plain_temp entschluesseln
+            set_active_backup_status(server_id, "decrypting", backup.size_mb)
+            from services.backup_encryption import decrypt_file
+            try:
+                decrypt_file(
+                    Path(local_source),
+                    Path(plain_temp),
+                    encryption_key,
+                )
+            except Exception as e:
+                # Falscher Key, korrupte Datei — generischer Text, kein Key-Hint
+                logger.warning(
+                    "Decryption fehlgeschlagen fuer Backup %s (key korrekt? file korrekt?)",
+                    backup_id,
+                )
+                raise RuntimeError("Restore fehlgeschlagen") from e
+            tar_source = plain_temp
+        else:
+            tar_source = local_source
+
+        # ── Stage 3: Extract ──
+        set_active_backup_status(server_id, "restoring", backup.size_mb)
+
+        # install_dir sichern (pre_restore_<ts>) — bestehende Logik aus dem Router
+        old_backup_dir: str | None = None
+        if os.path.exists(server.install_dir):
+            old_backup_dir = (
+                f"{server.install_dir}_pre_restore_{timestamp}"
+            )
+            shutil.move(server.install_dir, old_backup_dir)
+        os.makedirs(server.install_dir, exist_ok=True)
+
+        try:
+            _safe_extract_backup_tar(tar_source, server.install_dir)
+        except Exception:
+            # Rollback: install_dir wiederherstellen
+            if old_backup_dir and os.path.exists(old_backup_dir):
+                try:
+                    if os.path.exists(server.install_dir):
+                        shutil.rmtree(server.install_dir)
+                    shutil.move(old_backup_dir, server.install_dir)
+                except OSError:
+                    pass
+            raise
+
+        # ── Stage 4: Metadata-Apply (Limits) ──
+        if backup.metadata_json:
+            try:
+                from services.backup_provider import BackupMetadata
+                meta = BackupMetadata.from_json(backup.metadata_json)
+                # Nur ueberschreiben wenn im Metadata vorhanden (None-Werte
+                # wuerden aktuelle Werte loeschen — nicht gewollt).
+                if meta.cpu_limit_percent is not None:
+                    server.cpu_limit_percent = meta.cpu_limit_percent
+                if meta.ram_limit_mb is not None:
+                    server.ram_limit_mb = meta.ram_limit_mb
+                if meta.disk_limit_gb is not None:
+                    server.disk_limit_gb = meta.disk_limit_gb
+                # public_bind_ip wird IGNORIERT (passt auf neuem Host moeglicherweise nicht)
+                # — Plan §3.6 explizit so spezifiziert.
+
+                # ── Stage 5: Port-Reallocation (Rollen aus Metadata, Nummern frisch) ──
+                if meta.ports:
+                    port_roles = []
+                    protocols = {}
+                    for p in meta.ports:
+                        role = p.get("role")
+                        if role and role not in port_roles:
+                            port_roles.append(role)
+                            protocols[role] = p.get("protocol", "udp")
+                    if port_roles:
+                        from services.port_allocation_service import (
+                            allocate_ports,
+                            PortConflictError,
+                        )
+                        try:
+                            requested_game = None
+                            for p in meta.ports:
+                                if p.get("role") == "game" and p.get("port"):
+                                    requested_game = p["port"]
+                                    break
+                            allocated = allocate_ports(
+                                db,
+                                requested_game_port=requested_game,
+                            )
+                            # Map (game, query, rcon) auf die Rollen aus Metadata
+                            # (Reihenfolge der Allocation ist fix game/query/rcon,
+                            # wir nutzen nur die relevanten).
+                            allocated_map = {
+                                "game": allocated[0] if len(allocated) > 0 else None,
+                                "query": allocated[1] if len(allocated) > 1 else None,
+                                "rcon": allocated[2] if len(allocated) > 2 else None,
+                            }
+                            for role in port_roles:
+                                new_port = allocated_map.get(role)
+                                if new_port is None:
+                                    continue
+                                # Existierende ServerPort-Records updaten
+                                existing = next(
+                                    (
+                                        p
+                                        for p in server.ports
+                                        if p.role == role
+                                    ),
+                                    None,
+                                )
+                                if existing:
+                                    existing.port = new_port
+                                else:
+                                    from models.server_port import ServerPort
+                                    server.ports.append(
+                                        ServerPort(
+                                            server_id=server.id,
+                                            role=role,
+                                            port=new_port,
+                                            protocol=protocols.get(role, "udp"),
+                                        )
+                                    )
+                        except PortConflictError as e:
+                            # Port-Allokation gescheitert — Restore selbst war
+                            # erfolgreich, aber Ports konnten nicht neu vergeben
+                            # werden. Wir loggen + setzen server.status_message,
+                            # Restore laeuft trotzdem durch.
+                            logger.warning(
+                                "Port-Reallocation fehlgeschlagen fuer Backup %s: %s",
+                                backup_id,
+                                e,
+                            )
+            except Exception as e:
+                # Metadata-Parse oder Apply fehlgeschlagen — kein Abbruch,
+                # Restore laeuft mit aktuellen Werten weiter (kompatibel zu
+                # alten Records ohne Metadata).
+                logger.warning(
+                    "Metadata-Apply fehlgeschlagen fuer Backup %s: %s",
+                    backup_id,
+                    e,
+                )
+
+        # ── Stage 6: Server-Status ──
+        server.status = "stopped"
+        server.status_message = None
+        db.commit()
+
+        # Aufräumen pre_restore_dir wenn alles gut ging
+        if old_backup_dir and os.path.exists(old_backup_dir):
+            try:
+                shutil.rmtree(old_backup_dir)
+            except OSError:
+                pass
+
+        return backup
+
+    finally:
+        # Temp-Files IMMER aufraeumen
+        if enc_temp_exists:
+            _safe_remove(enc_temp)
+        _safe_remove(plain_temp)
+        clear_active_backup_status(server_id)
+
+
 def set_active_backup_status(
     server_id: int, operation: str, estimated_size_mb: int | None = None
 ) -> None:
@@ -410,6 +683,36 @@ def _safe_remove(path: str) -> None:
             os.remove(path)
         except OSError:
             pass
+
+
+def _safe_extract_backup_tar(archive_path: str, destination: str) -> None:
+    """Extract a backup tar without allowing paths or links to escape install_dir.
+
+    Wird in restore_backup() benutzt. Urspruenglich in ``routers/backups.py``
+    definiert — hier dupliziert fuer Single-Source-of-Truth der Backup-Logik.
+    Der Router ruft jetzt restore_backup() und braucht diesen Helper nicht mehr.
+
+    Security:
+    - Blockiert absolute Pfade und Path-Traversal (``..``) im tar
+    - Blockiert Symlinks, Hardlinks und Device-Files (sowohl absolute
+      als auch relative) — koennten aus dem install_dir ausbrechen
+    - Verwendet ``filter="data"`` fuer Python 3.12+ Tarfile-Schutz
+    """
+    import tarfile
+
+    dest = os.path.abspath(destination)
+    with tarfile.open(archive_path, "r:gz") as archive:
+        members = archive.getmembers()
+        for member in members:
+            name = member.name
+            if not name or "\x00" in name or os.path.isabs(name):
+                raise ValueError("Unsicheres Backup-Archiv")
+            target = os.path.abspath(os.path.join(dest, name))
+            if os.path.commonpath([dest, target]) != dest:
+                raise ValueError("Unsicheres Backup-Archiv")
+            if member.issym() or member.islnk() or member.isdev():
+                raise ValueError("Unsicheres Backup-Archiv")
+        archive.extractall(dest, members=members, filter="data")
 
 
 def _build_backup_metadata(server) -> "BackupMetadata":

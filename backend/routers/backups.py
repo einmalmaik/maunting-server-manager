@@ -172,64 +172,51 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
 
     Verwendet denselben Lifecycle-Lock wie Start/Stop/Restart, damit während
     des Restore kein paralleler Start gegen ein halb ersetztes install_dir läuft.
+
+    Die Backup-Logik selbst (Provider-Download, Decryption, Extract,
+    Metadata-Apply, Port-Reallocation, Status) liegt zentral in
+    ``services.backup_service.restore_backup``. Hier ist nur noch das
+    Docker-Lifecycle-Orchestration (Container stoppen/remove) +
+    Lifecycle-Lock.
     """
     require_server_permission(user, server_id, db, "server.backups.restore")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    backup = db.query(Backup).filter(Backup.id == backup_id, Backup.server_id == server_id).first()
-    if not server or not backup:
-        raise HTTPException(status_code=404, detail="Server oder Backup nicht gefunden")
-    if not os.path.exists(backup.filename):
-        raise HTTPException(status_code=404, detail="Backup-Datei nicht gefunden")
 
     from services.server_lifecycle_service import acquire_lock_async, get_server_lifecycle_lock
 
-    lock = get_server_lifecycle_lock(server.id)
+    lock = get_server_lifecycle_lock(server_id)
     async with acquire_lock_async(lock):
-        db.refresh(server)
-
         # Container stoppen, falls er läuft — Bind-Mount-Konsistenz
         from games.base import container_name_for
         from services import docker_service
-        container = container_name_for(server.id)
-        if docker_service.is_running(container):
-            docker_service.stop(container, timeout=30)
-        # Force-Remove, damit das install_dir nicht von einem (gestoppten) Container
-        # beansprucht bleibt und der Container beim nächsten Start frisch kommt
-        docker_service.remove(container, force=True)
+        server = db.query(Server).filter(Server.id == server_id).first()
+        if server:
+            container = container_name_for(server.id)
+            if docker_service.is_running(container):
+                docker_service.stop(container, timeout=30)
+            # Force-Remove, damit das install_dir nicht von einem (gestoppten) Container
+            # beansprucht bleibt und der Container beim nächsten Start frisch kommt
+            docker_service.remove(container, force=True)
 
-        # Live-Status für Restore (Estimate = Größe des zu restore-nden Backups)
-        from services.backup_service import set_active_backup_status, clear_active_backup_status
-        set_active_backup_status(server_id, "restoring", backup.size_mb)
-
-        old_backup: str | None = None
+        # Provider-Download, Decryption, Extract, Metadata-Apply, Ports, Status
+        # — alles in restore_backup() (Single Source of Truth)
+        from services.backup_service import restore_backup as service_restore_backup
         try:
-            if os.path.exists(server.install_dir):
-                old_backup = f"{server.install_dir}_pre_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-                shutil.move(server.install_dir, old_backup)
-            os.makedirs(server.install_dir, exist_ok=True)
-            _safe_extract_backup_tar(backup.filename, server.install_dir)
-        except Exception:
-            # Best-effort Rollback: Der Server bleibt danach stopped/error statt
-            # mit halb extrahierten Dateien als running markiert zu werden.
-            if old_backup and os.path.exists(old_backup):
-                try:
-                    if os.path.exists(server.install_dir):
-                        shutil.rmtree(server.install_dir)
-                    shutil.move(old_backup, server.install_dir)
-                except OSError:
-                    pass
-            server.status = "error"
-            server.status_message = "Wiederherstellung fehlgeschlagen"
-            db.commit()
-            clear_active_backup_status(server_id)
-            raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
-        finally:
-            clear_active_backup_status(server_id)
-
-        # Status zurücksetzen — Server ist jetzt installiert/stopped, nicht running
-        server.status = "stopped"
-        server.status_message = None
-        db.commit()
+            service_restore_backup(server_id, backup_id, db)
+        except FileNotFoundError as e:
+            # 404 — Server, Backup oder Backup-Datei nicht gefunden
+            raise HTTPException(status_code=404, detail="Server oder Backup nicht gefunden") from e
+        except Exception as e:
+            # Generischer Fehler (Provider, Decryption, Tar-Sicherheitscheck,
+            # Path-Traversal, generischer Extract-Error, ...). Wir geben
+            # bewusst einen generischen 500 ohne Pfad-Leak zurueck.
+            error_server = db.query(Server).filter(Server.id == server_id).first()
+            if error_server:
+                error_server.status = "error"
+                error_server.status_message = "Wiederherstellung fehlgeschlagen"
+                db.commit()
+            raise HTTPException(
+                status_code=500, detail="Wiederherstellung fehlgeschlagen"
+            ) from e
 
     return {"message": "Backup wiederhergestellt"}
 
