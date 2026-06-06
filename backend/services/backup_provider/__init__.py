@@ -2,8 +2,8 @@
 
 Liest ``MSM_BACKUP_PROVIDER`` aus der zentralen Config und instanziiert
 den passenden Adapter. Aktuell: local (Schritt 1), s3 (Schritt 2),
-sftp (Schritt 3), dropbox (Schritt 4). GCS und Azure kommen in eigenen
-Commits (Plan-Reihenfolge).
+sftp (Schritt 3), dropbox (Schritt 4), gcs (Schritt 5). Azure kommt
+in einem eigenen Commit (Plan-Reihenfolge).
 """
 import logging
 
@@ -11,6 +11,7 @@ from config import settings
 
 from .base import BackupLocation, BackupMetadata, BackupProvider, ProviderError
 from .dropbox import DropboxProvider
+from .gcs import GCSProvider
 from .local import LocalProvider
 from .s3 import S3Provider
 from .sftp import SFTPProvider
@@ -80,8 +81,23 @@ def get_provider(provider_name: str | None = None) -> BackupProvider:
             base_path=settings.backup_dropbox_path or "/msm-backups",
         )
 
+    if name == "gcs":
+        # Import hier (nicht oben) → google-cloud-storage wird nur geladen
+        # wenn gcs genutzt wird (vermeidet 50+ MB grpcio-Import-Overhead
+        # fuer User, die GCS nicht nutzen).
+        from .gcs import GCSProvider
+        if not settings.backup_gcs_bucket:
+            raise ProviderError("GCS-Bucket nicht konfiguriert")
+        if not settings.backup_gcs_sa_file:
+            raise ProviderError("GCS Service-Account-Datei nicht konfiguriert")
+        return GCSProvider(
+            bucket=settings.backup_gcs_bucket,
+            sa_file_path=settings.backup_gcs_sa_file,
+            path_prefix=settings.backup_gcs_path_prefix or "msm-backups",
+        )
+
     # Weitere Provider kommen in eigenen Commits (siehe Plan):
-    #   gcs, azure
+    #   azure
     raise ProviderError(
         f"Backup-Provider {name!r} ist in dieser Version noch nicht verfuegbar. "
         "Er wird in einem spaeteren Commit nachgereicht."
@@ -97,5 +113,6 @@ __all__ = [
     "S3Provider",
     "SFTPProvider",
     "DropboxProvider",
+    "GCSProvider",
     "get_provider",
 ]

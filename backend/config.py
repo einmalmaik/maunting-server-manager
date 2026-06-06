@@ -99,6 +99,14 @@ class Settings(BaseSettings):
     backup_dropbox_refresh_token: str = ""
     backup_dropbox_path: str = "/msm-backups"  # absoluter Pfad mit fuehrendem /
 
+    # ── GCS-Provider (Schritt 5) ──
+    # Auth via Service-Account-JSON-Datei. Pfad in .env, Datei vom User
+    # angelegt mit chmod 600. Service-Account braucht
+    # ``roles/storage.objectAdmin`` auf den Bucket.
+    backup_gcs_bucket: str = ""
+    backup_gcs_sa_file: str = ""  # z. B. /opt/msm/secrets/gcs-sa.json
+    backup_gcs_path_prefix: str = "msm-backups"  # logischer Prefix im Bucket
+
     # Steam — SteamCMD läuft in einem ephemeren Container (cm2network/steamcmd:root per Default
     # als dediziertes Tool-Image mit pre-installed binary). steamcmd_path bleibt nur für Backward-Compat-Tests.
     steamcmd_path: str = "/usr/games/steamcmd"

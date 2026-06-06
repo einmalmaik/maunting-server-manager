@@ -29,5 +29,9 @@ paramiko>=3.4.0
 # Dropbox-Provider (Schritt 4): offizielles Dropbox Python-SDK. Auth via
 # App-Key + App-Secret + manuell generierter Refresh-Token (server-zu-server).
 dropbox>=10.0.0
+# GCS-Provider (Schritt 5): offizielles google-cloud-storage SDK. Auth via
+# Service-Account-JSON-Datei (Pfad in .env, chmod 600). Zieht grpcio +
+# protobuf (schwer, aber Google-maintained). Begruendung im ADR-0011.
+google-cloud-storage>=2.16.0
 # Test-only: moto mockt S3-API offline (nicht in prod-requirements)
 # moto[s3]>=5.0  (dev-dependency, ueber requirements-dev.txt)
