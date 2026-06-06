@@ -48,7 +48,7 @@ def get_scheduler() -> AsyncIOScheduler:
     """Get or create scheduler instance."""
     global _scheduler
     if _scheduler is None:
-        _scheduler = AsyncIOScheduler()
+        _scheduler = AsyncIOScheduler(timezone=timezone.utc)
     return _scheduler
 
 
@@ -181,7 +181,7 @@ def schedule_server_restart(
         trigger = IntervalTrigger(hours=interval_hours)
     elif cron_time:
         hour, minute = map(int, cron_time.split(":"))
-        trigger = CronTrigger(hour=hour, minute=minute)
+        trigger = CronTrigger(hour=hour, minute=minute, timezone=timezone.utc)
     else:
         raise ValueError("Either interval_hours or cron_time required")
 
