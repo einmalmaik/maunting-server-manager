@@ -674,6 +674,13 @@
   "profile": {
     "title": "Profil",
     "subtitle": "Akun Anda",
+    "tabs": {
+      "account": "Akun",
+      "password": "Kata Sandi",
+      "2fa": "Otentikasi 2 Faktor",
+      "linked": "Akun Tertaut",
+      "danger": "Zona Berbahaya"
+    },
     "email": "Alamat Surel",
     "changePassword": "Ubah Kata Sandi",
     "currentPassword": "Kata Sandi Saat Ini",

@@ -674,6 +674,13 @@
   "profile": {
     "title": "Perfil",
     "subtitle": "Tu cuenta",
+    "tabs": {
+      "account": "Cuenta",
+      "password": "Contraseña",
+      "2fa": "Autenticación 2 factores",
+      "linked": "Cuentas vinculadas",
+      "danger": "Zona de peligro"
+    },
     "email": "Dirección de correo electrónico",
     "changePassword": "Cambiar contraseña",
     "currentPassword": "Contraseña actual",

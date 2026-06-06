@@ -674,6 +674,13 @@
   "profile": {
     "title": "公司简介",
     "subtitle": "您的帐户",
+    "tabs": {
+      "account": "账户",
+      "password": "密码",
+      "2fa": "两步验证",
+      "linked": "关联账户",
+      "danger": "危险区域"
+    },
     "email": "电子邮件地址",
     "changePassword": "更改密码",
     "currentPassword": "当前密码",
