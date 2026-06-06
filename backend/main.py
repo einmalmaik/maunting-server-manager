@@ -340,6 +340,55 @@ async def lifespan(app: FastAPI):
         import logging
         logging.getLogger(__name__).warning("OAuth-LoginChallenge-Cleanup fehlgeschlagen: %s", exc)
 
+    # ── Backup Auto-Migration (Schritt 9.2) ─────────────────────────
+    # Wenn MSM_BACKUP_PROVIDER auf einen Cloud-Provider gewechselt wurde
+    # (install.sh hat MSM_PENDING_AUTO_MIGRATION=1 gesetzt) und es noch
+    # lokale Backup-Records gibt, migriert dieser Hook sie einmalig in
+    # den Cloud-Provider. Sequenziell, idempotent, im Hintergrund-Thread
+    # (blockiert den Startup nicht).
+    #
+    # Trigger-Bedingungen (alle muessen erfuellt sein):
+    # 1. backup_provider != "local"
+    # 2. state.cloud_migration_done == false
+    # 3. DB enthaelt provider=="local" Records (mind. 1)
+    #
+    # Cross-Cloud-Migration (Cloud A -> Cloud B): wird in Schritt 9.3
+    # erweitert (liesst MSM_CROSS_CLOUD_TARGET). Hier vorerst nur der
+    # Standard-Fall lokal->Cloud.
+    try:
+        from services.backup_migration_service import (
+            get_migration_service,
+        )
+        _svc = get_migration_service()
+        if _svc.should_run():
+            from database import SessionLocal as _MigSessionLocal
+            _mig_db = _MigSessionLocal()
+            try:
+                if _svc.has_local_backups(_mig_db):
+                    import logging
+                    logging.getLogger(__name__).info(
+                        "Backup-Auto-Migration wird gestartet (provider=%s, "
+                        "im Hintergrund-Thread, blockiert Startup nicht).",
+                        settings.backup_provider,
+                    )
+                    # asyncio.to_thread schiebt den blockierenden Call in
+                    # den Default-Thread-Pool, loop laeuft weiter. Bei
+                    # Shutdown wird der Thread mit-abgebrochen — ist OK
+                    # weil Migration idempotent ist (naechster Startup
+                    # macht die uebrigen Records).
+                    import asyncio
+                    asyncio.get_event_loop().create_task(
+                        asyncio.to_thread(_svc.run, _mig_db)
+                    )
+            finally:
+                # Session schliessen — der Thread-Pool haelt seine eigene
+                # Referenz, das ist sicher (svc.run nutzt sie direkt).
+                _mig_db.close()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Auto-Migration-Hook fehlgeschlagen: %s", type(exc).__name__
+        )
 
     yield
 
