@@ -69,3 +69,4 @@ frontend/frontend-dev.log
 frontend/frontend-dev.err
 backend-dev.log
 backend-dev.err
+PATCHNOTES-ms-oauth-feature.md
