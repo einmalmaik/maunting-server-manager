@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     backup_s3_access_key: str = ""
     backup_s3_secret_key: str = ""
 
+    # ── SFTP-Provider (Schritt 3) ──
+    # Hetzner Storage Box + jeder generische SFTP-Server. Auth v1: Passwort
+    # only (SSH-Key spaeter moeglich, paramiko unterstuetzt beides).
+    backup_sftp_host: str = ""
+    backup_sftp_port: int = 22
+    backup_sftp_user: str = ""
+    backup_sftp_password: str = ""
+    backup_sftp_path: str = "/msm-backups"  # absoluter Remote-Pfad, wird auto-mkdir-p
+
     # Steam — SteamCMD läuft in einem ephemeren Container (cm2network/steamcmd:root per Default
     # als dediziertes Tool-Image mit pre-installed binary). steamcmd_path bleibt nur für Backward-Compat-Tests.
     steamcmd_path: str = "/usr/games/steamcmd"

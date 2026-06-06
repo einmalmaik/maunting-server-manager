@@ -23,5 +23,8 @@ docker==7.1.0
 # S3-Provider (Schritt 2): boto3 spricht AWS S3, Hetzner, Cloudflare R2,
 # Backblaze B2 (S3-Endpoint), MinIO, Wasabi.
 boto3>=1.34.0
+# SFTP-Provider (Schritt 3): paramiko fuer Hetzner Storage Box + generische
+# SFTP-Server. Auth v1: Passwort only (SSH-Key spaeter, paramiko kann beides).
+paramiko>=3.4.0
 # Test-only: moto mockt S3-API offline (nicht in prod-requirements)
 # moto[s3]>=5.0  (dev-dependency, ueber requirements-dev.txt)

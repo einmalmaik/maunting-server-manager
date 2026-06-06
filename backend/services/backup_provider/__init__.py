@@ -1,8 +1,9 @@
 """Backup-Provider Factory.
 
 Liest ``MSM_BACKUP_PROVIDER`` aus der zentralen Config und instanziiert
-den passenden Adapter. Aktuell: local (Schritt 1) und s3 (Schritt 2).
-SFTP, Dropbox, GCS und Azure kommen in eigenen Commits (Plan-Reihenfolge).
+den passenden Adapter. Aktuell: local (Schritt 1), s3 (Schritt 2),
+sftp (Schritt 3). Dropbox, GCS und Azure kommen in eigenen Commits
+(Plan-Reihenfolge).
 """
 import logging
 
@@ -11,6 +12,7 @@ from config import settings
 from .base import BackupLocation, BackupMetadata, BackupProvider, ProviderError
 from .local import LocalProvider
 from .s3 import S3Provider
+from .sftp import SFTPProvider
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +48,23 @@ def get_provider(provider_name: str | None = None) -> BackupProvider:
             secret_key=settings.backup_s3_secret_key,
         )
 
+    if name == "sftp":
+        # Import hier (nicht oben) → paramiko wird nur geladen wenn sftp genutzt wird
+        from .sftp import SFTPProvider
+        if not settings.backup_sftp_host:
+            raise ProviderError("SFTP-Host nicht konfiguriert")
+        if not settings.backup_sftp_user or not settings.backup_sftp_password:
+            raise ProviderError("SFTP-Credentials fehlen")
+        return SFTPProvider(
+            host=settings.backup_sftp_host,
+            port=settings.backup_sftp_port or 22,
+            user=settings.backup_sftp_user,
+            password=settings.backup_sftp_password,
+            base_path=settings.backup_sftp_path or "/msm-backups",
+        )
+
     # Weitere Provider kommen in eigenen Commits (siehe Plan):
-    #   sftp, dropbox, gcs, azure
+    #   dropbox, gcs, azure
     raise ProviderError(
         f"Backup-Provider {name!r} ist in dieser Version noch nicht verfuegbar. "
         "Er wird in einem spaeteren Commit nachgereicht."
@@ -61,5 +78,6 @@ __all__ = [
     "ProviderError",
     "LocalProvider",
     "S3Provider",
+    "SFTPProvider",
     "get_provider",
 ]
