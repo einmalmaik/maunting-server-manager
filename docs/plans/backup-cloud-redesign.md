@@ -337,11 +337,11 @@ MSM_PENDING_AUTO_MIGRATION=0
 - **Kapselung:** komplett hinter `services/backup_provider/azure.py`.
 
 Alle 5 Cloud-Provider-ADRs werden vor Implementation angelegt:
-- `docs/adr/0007-backup-s3-library.md` (boto3)
-- `docs/adr/0008-backup-sftp-library.md` (paramiko)
-- `docs/adr/0009-backup-dropbox-library.md` (dropbox)
-- `docs/adr/0010-backup-gcs-library.md` (google-cloud-storage)
-- `docs/adr/0011-backup-azure-library.md` (azure-storage-blob)
+- `docs/adr/0008-backup-s3-library.md` (boto3)
+- `docs/adr/0009-backup-sftp-library.md` (paramiko)
+- `docs/adr/0010-backup-dropbox-library.md` (dropbox)
+- `docs/adr/0011-backup-gcs-library.md` (google-cloud-storage)
+- `docs/adr/0012-backup-azure-library.md` (azure-storage-blob)
 
 ### 3.10 Auto-Migration (lokal → Cloud, einmalig)
 
@@ -448,12 +448,12 @@ Wenn `MSM_BACKUP_PROVIDER` von `local` auf `s3` oder `sftp` wechselt (per Re-Ins
 - i18n: `frontend/src/locales/de.json` + `en.json` — neue Keys (`backups.uploading`, `setup.cloudRestore.*`, `setup.cloudMigration.*`)
 
 **Doku / Meta:**
-- `docs/adr/0007-backup-s3-library.md` (neu) — boto3-Entscheidung
-- `docs/adr/0008-backup-sftp-library.md` (neu) — paramiko-Entscheidung
-- `docs/adr/0009-backup-dropbox-library.md` (neu) — dropbox-Entscheidung
-- `docs/adr/0010-backup-gcs-library.md` (neu) — google-cloud-storage-Entscheidung
-- `docs/adr/0011-backup-azure-library.md` (neu) — azure-storage-blob-Entscheidung
-- `docs/adr/0012-backup-encryption.md` (neu) — AES-256-GCM-Entscheidung + Key-Management
+- `docs/adr/0008-backup-s3-library.md` (neu) — boto3-Entscheidung
+- `docs/adr/0009-backup-sftp-library.md` (neu) — paramiko-Entscheidung
+- `docs/adr/0010-backup-dropbox-library.md` (neu) — dropbox-Entscheidung
+- `docs/adr/0011-backup-gcs-library.md` (neu) — google-cloud-storage-Entscheidung
+- `docs/adr/0012-backup-azure-library.md` (neu) — azure-storage-blob-Entscheidung
+- `docs/adr/0013-backup-encryption.md` (neu) — AES-256-GCM-Entscheidung + Key-Management
 - `backend/requirements.txt` — 4 neue Deps: `boto3`, `paramiko`, `dropbox`, `google-cloud-storage`, `azure-storage-blob`
 - `PATCHNOTES-ms-backup-cloud-redesign.md` (am Ende, wie üblich)
 

@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     # Produktion: /opt/msm/blueprints/community  |  Dev/Test ggf. via MSM_BLUEPRINTS_DIR
     blueprints_dir: str = "/opt/msm/blueprints/community"
 
+    # ── Backup-Storage (Schritt 1: nur local; weitere Provider folgen) ──
+    # Werte: "local" (default) | spaeter: "s3" | "sftp" | "dropbox" | "gcs" | "azure"
+    backup_provider: str = "local"
+    # Lokaler Backup-Root (heutiges Verhalten, /opt/msm/backups)
+    backup_local_dir: str = "/opt/msm/backups"
+    # Master-Key fuer Client-seitige AES-256-GCM Verschluesselung der Backups.
+    # Wird beim ersten Cloud-Enable vom Installer generiert (base64-32-Bytes).
+    # Leer = Backups werden UNVERSCHLUESSELT geschrieben (nur sinnvoll fuer local-Provider).
+    backup_encryption_key: str = ""
+
     # Steam — SteamCMD läuft in einem ephemeren Container (cm2network/steamcmd:root per Default
     # als dediziertes Tool-Image mit pre-installed binary). steamcmd_path bleibt nur für Backward-Compat-Tests.
     steamcmd_path: str = "/usr/games/steamcmd"
