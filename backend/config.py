@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     panel_url: str = "http://localhost"
     setup_completed_file: Path = Path("/opt/msm/.setup_completed")
 
+    # Cookie-Domain fuer cross-subdomain Setups (z.B. app.X.example.com + api.X.example.com).
+    # Optionaler Override. Wenn nicht gesetzt (oder leer), wird automatisch aus
+    # panel_url / MSM_PANEL_URL abgeleitet (genau die gleiche Logik wie in install.sh).
+    # Das macht die Cookie-Domain-Konfiguration autonom für self-hosted Open-Source-Installationen:
+    # die Domain, die bei der ersten Installation (oder später per install.sh geändert) hinterlegt wurde,
+    # ist die einzige Quelle der Wahrheit (zusammen mit dem schon existierenden MSM_PANEL_URL).
+    # LEER lassen für Single-Domain / localhost (dann host-only Cookie).
+    # Mit führendem Punkt für Subdomains (Cloudflare, Reverse-Proxy etc.).
+    cookie_domain: str = ""
+
     # Logo — absolute URL used in email templates.
     # Falls back to panel_url + /logo.png when empty.
     logo_url: str = ""
@@ -78,3 +88,65 @@ if settings.secret_key == "change-me-in-production-please-use-a-256-bit-key" and
         "CRITICAL SECURITY: MSM_SECRET_KEY (or secret_key) must be overridden with a strong >=32 char value in production. "
         "Default placeholder allows JWT forgery. Set in .env or env (prefixed MSM_)."
     )
+
+# Harte Fail-Fast für unkonfigurierten panel_url in Production.
+# Hintergrund: panel_url treibt OAuth-redirect_uri, E-Mail-Links (Password-Reset,
+# OAuth-Link-Bestaetigungen) und CORS. Mit dem http://localhost-Default in Prod
+# wuerden OAuth-Callbacks gegen einen falschen Host laufen, E-Mails zeigen auf
+# localhost, und Browser wuerden Mixed-Content-Fehler werfen. install.sh setzt
+# panel_url aus der Domain — wenn es nicht gelaufen ist oder .env verloren
+# ging, bricht die App hier sauber ab statt spaet in der OAuth-Flow.
+# Tests setzen debug=True via conftest und ueberschreiben panel_url explizit.
+if settings.panel_url == "http://localhost" and not settings.debug:
+    raise RuntimeError(
+        "CRITICAL: MSM_PANEL_URL is the 'http://localhost' default in production. "
+        "Set it to your HTTPS panel URL via .env or env (prefixed MSM_). "
+        "The install.sh script writes it automatically on first install. "
+        "Default would break OAuth redirect_uri, email links and CORS."
+    )
+
+
+def get_effective_cookie_domain() -> str:
+    """Return the cookie domain to use for OAuth state cookie.
+
+    If MSM_COOKIE_DOMAIN is explicitly set in .env / env, use it (override).
+    Otherwise derive from MSM_PANEL_URL using the same parent-domain logic
+    that install.sh used for the DOMAIN at first install (or on reinstall "keep").
+
+    Self-hosted autonomy: MSM_PANEL_URL (written by install.sh) is the single
+    source of truth. No extra variables needed for the common case.
+
+    Special cases:
+    - localhost / 127.0.0.1 (any port): return "" → no Domain attr (host-only cookie)
+    - ports are always stripped (Domain= must not contain :port)
+    """
+    explicit = getattr(settings, "cookie_domain", None)
+    if explicit:
+        return explicit
+
+    panel_url: str = getattr(settings, "panel_url", "") or ""
+    if not panel_url:
+        return ""
+
+    # robust host extraction (strip scheme, path, port)
+    if "://" in panel_url:
+        host = panel_url.split("://", 1)[1].split("/", 1)[0]
+    else:
+        host = panel_url.split("/", 1)[0]
+    host = host.split(":", 1)[0].strip().lower()
+
+    if not host:
+        return ""
+
+    # loopback / local dev: never set Domain (browsers + TestClient are strict;
+    # host-only cookie is correct and makes res.cookies visible in tests)
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return ""
+
+    # parent domain logic (mirrors original install.sh derivation):
+    # "msm.mauntingstudios.de" → ".mauntingstudios.de"
+    # "app.example.com" → ".example.com"
+    # "example.com" → ".example.com"
+    if host.count(".") >= 2:
+        return "." + host.split(".", 1)[1]
+    return "." + host

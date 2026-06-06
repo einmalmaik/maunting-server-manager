@@ -1,9 +1,12 @@
+import logging
 import httpx
 import aiosmtplib
 from email.message import EmailMessage
 
 from config import settings
 from services.panel_settings_service import PanelSettingsService
+
+_log = logging.getLogger("msm.email")
 
 
 class EmailService:
@@ -66,8 +69,12 @@ class EmailService:
         if provider == "none":
             return False
         if provider == "resend":
-            return await EmailService._send_resend(to, subject, body, html)
-        return await EmailService._send_smtp(to, subject, body, html)
+            ok = await EmailService._send_resend(to, subject, body, html)
+        else:
+            ok = await EmailService._send_smtp(to, subject, body, html)
+        if not ok:
+            _log.warning("Email send failed for %s (provider=%s, subject=%s) – check Resend/SMTP config or rate limits", to, provider, subject)
+        return ok
 
     @staticmethod
     async def _send_smtp(to: str, subject: str, body: str, html: str | None = None) -> bool:
@@ -275,6 +282,25 @@ Maunting Server Manager
         return cls._base_template(title, content)
 
     @staticmethod
+    async def send_security_notification(to: str, username: str, title: str, message: str, detail: str = "") -> bool:
+        """Zentrale Funktion für Security-/Login-bezogene Benachrichtigungen (neuer Login, OAuth-Link, Passwort-Änderung etc.).
+        Nutzt _notification_email_html + send_email. Alle Security-Events gehen hier durch (KISS + zentrale Wartung).
+        """
+        subject = f"Maunting Server Manager — {title}"
+        body = f"""Hallo {username},
+
+{message}
+
+{detail}
+
+Falls du diese Aktion nicht durchgeführt hast, ändere sofort dein Passwort und kontaktiere den Administrator.
+
+Maunting Server Manager
+"""
+        html = EmailService._notification_email_html(username, title, message, detail)
+        return await EmailService.send_email(to, subject, body, html)
+
+    @staticmethod
     async def send_password_changed_notification(to: str, username: str) -> bool:
         subject = "Maunting Server Manager — Passwort geändert"
         body = f"""Hallo {username},
@@ -290,21 +316,13 @@ Maunting Server Manager
 
     @staticmethod
     async def send_new_device_login_notification(to: str, username: str, ip: str, user_agent: str) -> bool:
-        subject = "Maunting Server Manager — Neuer Login"
-        body = f"""Hallo {username},
-
-Ein neuer Login wurde von einem unbekannten Gerät erkannt:
-
-IP: {ip}
-Gerät: {user_agent}
-
-Falls du dich nicht eingeloggt hast, ändere sofort dein Passwort.
-
-Maunting Server Manager
-"""
+        """Nutzt die zentrale send_security_notification (KISS)."""
         detail = f"IP: {ip}<br>Gerät: {user_agent}"
-        html = EmailService._notification_email_html(username, "Neuer Login erkannt", "Ein neuer Login wurde von einem unbekannten Gerät erkannt.", detail)
-        return await EmailService.send_email(to, subject, body, html)
+        return await EmailService.send_security_notification(
+            to, username, "Neuer Login erkannt",
+            "Ein neuer Login wurde von einem unbekannten Gerät erkannt.",
+            detail
+        )
 
     @staticmethod
     async def send_2fa_status_notification(to: str, username: str, enabled: bool) -> bool:
@@ -356,6 +374,39 @@ Maunting Server Manager
 """
         html = EmailService._notification_email_html(username, "Zu Server hinzugefügt", f'Du wurdest von <strong>{added_by}</strong> zum Server "{server_name}" hinzugefügt.')
         return await EmailService.send_email(to, subject, body, html)
+
+    # ------------------------------------------------------------------
+    # OAuth Linking / Unlinking + Account Registration notifications
+    # (nutzen das bestehende _notification_email_html Template + user.email_notifications Flag)
+    # Deaktivierbar über die Glocke im Topbar (bestehende Einstellung).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def send_oauth_linked_notification(to: str, username: str, provider_name: str) -> bool:
+        """OAuth Link: nutzt die zentrale send_security_notification (wie neuer Login etc.)."""
+        return await EmailService.send_security_notification(
+            to, username,
+            f"{provider_name} verknüpft",
+            f"Dein <strong>{provider_name}</strong>-Account wurde erfolgreich mit deinem MSM-Konto verknüpft."
+        )
+
+    @staticmethod
+    async def send_oauth_unlinked_notification(to: str, username: str, provider_name: str) -> bool:
+        """OAuth Unlink: nutzt die zentrale send_security_notification (wie neuer Login etc.)."""
+        return await EmailService.send_security_notification(
+            to, username,
+            f"{provider_name} Verknüpfung aufgehoben",
+            f"Die Verknüpfung zu deinem <strong>{provider_name}</strong>-Account wurde aufgehoben."
+        )
+
+    @staticmethod
+    async def send_account_registered_notification(to: str, username: str) -> bool:
+        """Account Registration: nutzt die zentrale send_security_notification."""
+        return await EmailService.send_security_notification(
+            to, username,
+            "Konto erfolgreich erstellt",
+            "Dein Konto wurde erfolgreich erstellt. Willkommen!"
+        )
 
     # ------------------------------------------------------------------
     # Update-Benachrichtigungen (für Hintergrund-Check-Job)
