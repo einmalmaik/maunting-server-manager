@@ -90,6 +90,15 @@ class Settings(BaseSettings):
     backup_sftp_password: str = ""
     backup_sftp_path: str = "/msm-backups"  # absoluter Remote-Pfad, wird auto-mkdir-p
 
+    # ── Dropbox-Provider (Schritt 4) ──
+    # Auth via App-Key + App-Secret + manuell generierter Refresh-Token
+    # (Standard server-zu-server, OAuth-Flow einmalig in Dropbox-App-Konsole).
+    # Refresh-Token laeuft nicht ab und wird vom SDK fuer Auto-Refresh genutzt.
+    backup_dropbox_app_key: str = ""
+    backup_dropbox_app_secret: str = ""
+    backup_dropbox_refresh_token: str = ""
+    backup_dropbox_path: str = "/msm-backups"  # absoluter Pfad mit fuehrendem /
+
     # Steam — SteamCMD läuft in einem ephemeren Container (cm2network/steamcmd:root per Default
     # als dediziertes Tool-Image mit pre-installed binary). steamcmd_path bleibt nur für Backward-Compat-Tests.
     steamcmd_path: str = "/usr/games/steamcmd"

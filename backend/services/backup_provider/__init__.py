@@ -2,14 +2,15 @@
 
 Liest ``MSM_BACKUP_PROVIDER`` aus der zentralen Config und instanziiert
 den passenden Adapter. Aktuell: local (Schritt 1), s3 (Schritt 2),
-sftp (Schritt 3). Dropbox, GCS und Azure kommen in eigenen Commits
-(Plan-Reihenfolge).
+sftp (Schritt 3), dropbox (Schritt 4). GCS und Azure kommen in eigenen
+Commits (Plan-Reihenfolge).
 """
 import logging
 
 from config import settings
 
 from .base import BackupLocation, BackupMetadata, BackupProvider, ProviderError
+from .dropbox import DropboxProvider
 from .local import LocalProvider
 from .s3 import S3Provider
 from .sftp import SFTPProvider
@@ -63,8 +64,24 @@ def get_provider(provider_name: str | None = None) -> BackupProvider:
             base_path=settings.backup_sftp_path or "/msm-backups",
         )
 
+    if name == "dropbox":
+        # Import hier (nicht oben) → dropbox SDK wird nur geladen wenn dropbox genutzt wird
+        from .dropbox import DropboxProvider
+        if not settings.backup_dropbox_app_key:
+            raise ProviderError("Dropbox App-Key nicht konfiguriert")
+        if not settings.backup_dropbox_app_secret:
+            raise ProviderError("Dropbox App-Secret nicht konfiguriert")
+        if not settings.backup_dropbox_refresh_token:
+            raise ProviderError("Dropbox Refresh-Token nicht konfiguriert")
+        return DropboxProvider(
+            app_key=settings.backup_dropbox_app_key,
+            app_secret=settings.backup_dropbox_app_secret,
+            refresh_token=settings.backup_dropbox_refresh_token,
+            base_path=settings.backup_dropbox_path or "/msm-backups",
+        )
+
     # Weitere Provider kommen in eigenen Commits (siehe Plan):
-    #   dropbox, gcs, azure
+    #   gcs, azure
     raise ProviderError(
         f"Backup-Provider {name!r} ist in dieser Version noch nicht verfuegbar. "
         "Er wird in einem spaeteren Commit nachgereicht."
@@ -79,5 +96,6 @@ __all__ = [
     "LocalProvider",
     "S3Provider",
     "SFTPProvider",
+    "DropboxProvider",
     "get_provider",
 ]
