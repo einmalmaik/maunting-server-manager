@@ -1492,6 +1492,67 @@ if $RUN_BACKEND_SETUP; then
 fi
 
 # ═══════════════════════════════════════════════════════════════
+# 7b. Cloud-Backup-Probe (Schritt 8.3)
+# ═══════════════════════════════════════════════════════════════
+# Direkt nach .env-Write + venv-Setup: pruefen ob im konfigurierten
+# Cloud-Storage bereits Backups liegen. Falls ja, setzen wir
+# MSM_PENDING_CLOUD_RESTORE=1 in der .env - das Backend liest das Flag
+# beim Startup und zeigt das CloudRestoreBanner auf dem Dashboard.
+#
+# Wichtig:
+# - Probe ruft NUR list_metadata() auf, kein Download.
+# - Bei Provider-Fehlern (Credentials falsch, Netzwerk weg) wird die
+#   Probe geloggt aber NICHT abgebrochen. Der Installer laeuft weiter.
+# - Probe laeuft als msm-User (nicht als root), damit die .env-Berechtigung
+#   (chmod 600, msm-owned) sauber bleibt.
+# - Output wird ueber sys.exit code transportiert (0 = leer/kein Cloud,
+#   2 = Backups gefunden, 1 = Provider-Fehler). Stdout enthaelt NUR die
+#   Anzahl (oder 'ERROR'), keine Tokens, keine Pfade, keine Secrets.
+if [[ "$BACKUP_PROVIDER" != "local" ]]; then
+    log "Cloud-Backup-Probe: pruefe ob im konfigurierten Storage Backups existieren..."
+    PROBE_EXIT=0
+    PROBE_COUNT=$(su - "$MSM_USER" -c "
+        cd $MSM_DIR/backend
+        source venv/bin/activate
+        python3 -c '
+import sys
+from services.backup_provider import probe_cloud_backups, ProviderError
+try:
+    items = probe_cloud_backups()
+except Exception as e:
+    print(\"ERROR\", type(e).__name__)
+    sys.exit(1)
+if not items:
+    print(\"0\")
+    sys.exit(0)
+print(len(items))
+sys.exit(2)
+'
+    " 2>/dev/null); PROBE_EXIT=$?
+    case "$PROBE_COUNT" in
+        ERROR)
+            warn "Cloud-Backup-Probe fehlgeschlagen (Provider-Fehler)."
+            warn "Pruefe Credentials in $ENV_FILE. Installation laeuft trotzdem weiter."
+            ;;
+        0)
+            ok "Cloud-Backup-Probe: kein Restore noetig (Storage ist leer)."
+            ;;
+        *)
+            if [[ "$PROBE_EXIT" == "2" ]]; then
+                warn "Cloud-Backup-Probe: $PROBE_COUNT Backup(s) im Cloud-Storage gefunden!"
+                warn "Setze MSM_PENDING_CLOUD_RESTORE=1 — beim ersten Backend-Start erscheint"
+                warn "ein Restore-Banner auf dem Dashboard (CloudRestoreWizard)."
+                # .env updaten - nur diese eine Zeile
+                sed -i 's/^MSM_PENDING_CLOUD_RESTORE=.*/MSM_PENDING_CLOUD_RESTORE=1/' "$ENV_FILE"
+                PENDING_CLOUD_RESTORE="1"
+            else
+                warn "Cloud-Backup-Probe: unerwarteter Output (count=$PROBE_COUNT, exit=$PROBE_EXIT). Ueberspringe."
+            fi
+            ;;
+    esac
+fi
+
+# ═══════════════════════════════════════════════════════════════
 # 8. Datenbank initialisieren
 # ═══════════════════════════════════════════════════════════════
 RUN_DB_INIT=false

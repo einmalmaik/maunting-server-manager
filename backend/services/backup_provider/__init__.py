@@ -129,4 +129,33 @@ __all__ = [
     "GCSProvider",
     "AzureProvider",
     "get_provider",
+    "probe_cloud_backups",
 ]
+
+
+def probe_cloud_backups() -> list[BackupMetadata]:
+    """Listet Metadaten aus dem aktuell konfigurierten Cloud-Provider.
+
+    Wird vom install.sh nach dem .env-Write aufgerufen, um zu erkennen ob
+    im Cloud-Storage bereits Backups existieren (Fresh-Install-Restore-Flow,
+    siehe Plan 3.7). Liefert eine leere Liste bei lokalem Provider oder
+    wenn der Provider-Call fehlschlaegt. Fehler werden geloggt aber NICHT
+    propagiert - der Probe soll den Installer nie abbrechen.
+
+    Security: Kein Download, nur list_metadata(). Provider-Fehlertexte
+    werden sanitisiert (kein Pfad-Leak, kein Stack-Trace, keine Tokens).
+    """
+    if (settings.backup_provider or "local").lower() == "local":
+        return []
+    try:
+        provider = get_provider()
+        return provider.list_metadata()
+    except ProviderError as e:
+        logger.warning("Cloud-Probe: Provider nicht verfuegbar (%s)", e)
+        return []
+    except Exception as e:  # noqa: BLE001 — bewusst breit, da Probe-Phase
+        # Sanitisiert: nur Exception-Typ-Name, keine Details (kein Pfad,
+        # kein Token, keine Stack-Trace). User sieht in show_current_config
+        # oder im Installer-Log 'Cloud-Probe fehlgeschlagen, fahre fort'.
+        logger.warning("Cloud-Probe: unerwarteter Fehler (%s)", type(e).__name__)
+        return []
