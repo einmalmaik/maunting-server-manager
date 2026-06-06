@@ -512,11 +512,18 @@ def run_steamcmd_workshop_download_batch(
                 installed = any(target.iterdir())
             except OSError:
                 installed = False
-        if result.get("ok") and installed:
+        # installed (Dateien liegen auf Platte) ist die Quelle der Wahrheit.
+        # SteamCMD-OK ist ein Validierungs-Signal, das bei transienten Fehlern
+        # (0x202, Rate-Limit, Netz-Hickup) fehlen kann — die Mod ist aber
+        # trotzdem nutzbar, weil die Dateien da sind. Vorheriger Bug: bei
+        # Reinstall war der Code zu strikt und hat jeden transienten SteamCMD-
+        # Fehler als Install-Fehler gemeldet, obwohl die Mod bereits vollstaendig
+        # installiert war.
+        if installed:
             items[item_id] = {"ok": True, "installed": True}
         else:
             error = result.get("error") or "Workshop-Download nicht verifiziert"
-            items[item_id] = {"ok": False, "installed": installed, "error": str(error)}
+            items[item_id] = {"ok": False, "installed": False, "error": str(error)}
 
     failed_ids = [item_id for item_id, item in items.items() if not item.get("ok")]
     if retry and failed_ids:

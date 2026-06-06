@@ -473,6 +473,55 @@ def test_post_install_actions_unresolved_target_symlink_check(tmp_path) -> None:
     assert unresolved_target.resolve() == source_dir.resolve()
 
 
+def test_dayz_blueprint_reinstall_succeeds_when_steamcmd_transiently_fails(tmp_path) -> None:
+    """Regressions-Test: Wenn SteamCMD beim Reinstall transient scheitert
+    (Rate-Limit, 0x202, Netz), aber die Workshop-Dateien bereits auf Platte
+    sind, muss die run_steamcmd_workshop_download_batch trotzdem
+    items[wid]["ok"]=True liefern — die Mod ist ja bereits vollstaendig
+    installiert. Vorheriger Bug: items[wid]["ok"] wurde nur dann True, wenn
+    sowohl SteamCMD-OK als auch installed True waren. Bei transientem SteamCMD-
+    Fehler wurde die Mod als fehlgeschlagen markiert, obwohl sie auf Platte
+    vollstaendig vorhanden war.
+    """
+    from games import base as base_mod
+    from unittest.mock import patch
+    from services import steam_account_service
+
+    # Workshop-Dateien sind da (von vorherigem Install).
+    workshop_dir = tmp_path / "steamapps" / "workshop" / "content" / "221100" / "12345"
+    workshop_dir.mkdir(parents=True)
+    (workshop_dir / "mod.cfo").write_text("synth", encoding="utf-8")
+
+    # SteamCMD-Container-Run simuliert transienten Fehler (0x202 / Netz).
+    ephemeral_fail = {
+        "ok": False,
+        "error": "0x202 (transient SteamCMD failure simulated)",
+        "stdout": "0x202",
+        "stderr": "",
+    }
+
+    with patch.object(steam_account_service.SteamAccountService, "is_configured", return_value=True), \
+         patch.object(steam_account_service.SteamAccountService, "get_username", return_value="user"), \
+         patch.object(steam_account_service.SteamAccountService, "get_decrypted_password", return_value="pw"), \
+         patch("games.base.docker_service.run_ephemeral", return_value=ephemeral_fail):
+        result = base_mod.run_steamcmd_workshop_download_batch(
+            server_id=1,
+            install_dir=str(tmp_path),
+            workshop_app_id="221100",
+            workshop_item_ids=["12345"],
+            use_authenticated_login=True,
+            retry=False,
+        )
+
+    # Kern-Invariante: trotz SteamCMD-Fail ist die Mod auf Platte → ok=True.
+    items = result.get("items", {})
+    assert items.get("12345", {}).get("ok") is True, (
+        f"items[12345].ok muss True sein wenn Dateien auf Platte liegen: {result}"
+    )
+    assert result.get("ok") is True, f"result.ok muss True sein: {result}"
+    assert result.get("applied") == 1
+
+
 def test_dayz_blueprint_renders_runtime_env_command_and_dirs(tmp_path) -> None:
     plugin = _native_plugin("dayz")
     server = _FakeServer(id=77, install_dir=str(tmp_path), game_port=2302, query_port=27016)
