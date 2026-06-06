@@ -860,6 +860,53 @@ class TestUnifiedCallback:
         assert "oauth_state_mismatch" in loc
 
 
+# ── Log-Truncation (Defense-in-Depth gegen PII / Log-Injection) ──────
+
+class TestTruncateForLog:
+    def test_short_value_returned_unchanged(self):
+        from routers.oauth import _truncate_for_log
+        assert _truncate_for_log("abc") == "abc"
+        assert _truncate_for_log("1234567890abcdef") == "1234567890abcdef"  # 16 Zeichen
+
+    def test_long_value_truncated_with_ellipsis(self):
+        from routers.oauth import _truncate_for_log
+        # 20 Zeichen → 16 + "..."
+        assert _truncate_for_log("12345678901234567890") == "1234567890123456..."
+
+    def test_none_returns_marker(self):
+        from routers.oauth import _truncate_for_log
+        assert _truncate_for_log(None) == "<none>"
+
+    def test_used_in_mismatch_log_does_not_blow_up_on_huge_url_state(
+        self, client: TestClient, db: Session, caplog
+    ):
+        """End-to-End: Auch ein 10kB-State-Wert in der URL darf den Server
+        nicht zumuellen — der Log-Eintrag bleibt klein. Triggert den
+        'state value differs'-Pfad (sonst waere der Log der 'no cookie'-
+        Pfad und enthaelt den State gar nicht)."""
+        import logging
+        _create_provider(db, slug="gh-huge", preset="github")
+        # State-Cookie mit echtem (kleinem) State setzen, damit der
+        # 'state value differs'-Pfad feuert (sonst 'no cookie'-Pfad).
+        encrypted = oauth_service.pack_state_cookie(
+            {"state": "good", "code_verifier": "v", "redirect_uri": "u"}
+        )
+        client.cookies.set("__Secure-oauth_state", encrypted)
+        huge_state = "A" * 10000
+        with caplog.at_level(logging.WARNING, logger="msm.oauth"):
+            res = client.get(
+                "/api/oauth/gh-huge/callback",
+                params={"code": "fake", "state": huge_state},
+                follow_redirects=False,
+            )
+        assert res.status_code == 302
+        log_blob = " ".join(rec.getMessage() for rec in caplog.records)
+        # Gekuerzte Form muss im Log sein, voller Wert NICHT
+        assert "AAAAAAAAAAAAAAAA" in log_blob  # 16 As aus 10000
+        assert huge_state not in log_blob  # nicht voll geleakt
+        assert len(log_blob) < 500  # hart: Log-Eintrag bleibt klein
+
+
 # ── Helpers (lokal) ───────────────────────────────────────────────────
 
 def _create_provider(

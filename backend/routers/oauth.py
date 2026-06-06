@@ -62,6 +62,20 @@ def _no_cache_redirect(url: str, status_code: int = 302) -> "RedirectResponse":
     return resp
 
 
+def _truncate_for_log(value: str | None, max_len: int = 16) -> str:
+    """Kuerzt einen String fuer Log-Output. Verhindert, dass extrem lange
+    (potenziell boseartige) Werte Log-Aggregatoren (Loki/Splunk/ELK) zumuellen
+    oder PII-Tokens enthalten. Format: "abcdef1234..." bzw. original bei
+    bereits kurzem Wert.
+    """
+    if value is None:
+        return "<none>"
+    s = str(value)
+    if len(s) <= max_len:
+        return s
+    return s[:max_len] + "..."
+
+
 # ── Helpers ────────────────────────────────────────────────────────────
 
 def _provider_to_response(p: OAuthProvider) -> dict[str, Any]:
@@ -431,9 +445,14 @@ def oauth_callback(
         elif payload is None:
             _log.warning("OAuth state mismatch (slug=%s, mode=%s): cookie present but Fernet decrypt failed", slug, mode)
         else:
+            # State-Werte koennen potenziell lang sein (URL-kontrolliert) —
+            # fuer den Log auf 16 Zeichen kuerzen, damit Log-Aggregatoren
+            # nicht zugemuellt werden und keine PII leakt.
             _log.warning(
                 "OAuth state mismatch (slug=%s, mode=%s): state value differs (cookie has %r, URL has %r)",
-                slug, mode, payload.get("state"), state,
+                slug, mode,
+                _truncate_for_log(payload.get("state")),
+                _truncate_for_log(state),
             )
         # Modus-spezifisches Redirect-Ziel: Link-Mode-Fehler gehören auf /profile,
         # damit der User (der noch eingeloggt ist) die Toast-Meldung tatsächlich

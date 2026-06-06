@@ -637,6 +637,11 @@ def fetch_user_profile(
     return userinfo
 
 
+# ACHTUNG — REVIEWER: Diese Funktion prueft die JWT-Signatur NICHT.
+# Der Output ist ausschliesslich informativ und darf NIE fuer Auth-Gating
+# oder vertrauliche Profilfelder benutzt werden, ohne den parallelen
+# /userinfo-Call in fetch_user_profile() als Cross-Check. Phase-2-Material:
+# echte JWKS-Validierung (siehe ADR-0007 + docs/agent-rules/adr-0007-…md).
 def _decode_jwt_payload(jwt: str) -> dict[str, Any] | None:
     """Dekodiert nur den Payload-Teil eines JWT. KEINE Signaturpruefung.
 
