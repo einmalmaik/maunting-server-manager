@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     # Leer = Backups werden UNVERSCHLUESSELT geschrieben (nur sinnvoll fuer local-Provider).
     backup_encryption_key: str = ""
 
+    # ── S3-Provider (Schritt 2) ──
+    # S3-kompatibel: AWS S3, Hetzner S3, Cloudflare R2, Backblaze B2,
+    # MinIO, Wasabi, DigitalOcean Spaces (mit S3-Endpoint).
+    backup_s3_bucket: str = ""
+    backup_s3_region: str = "us-east-1"  # AWS-Default
+    backup_s3_endpoint: str = ""  # leer = AWS-Default; Hetzner/R2/MinIO: spezifischer Endpoint
+    backup_s3_access_key: str = ""
+    backup_s3_secret_key: str = ""
+
     # Steam — SteamCMD läuft in einem ephemeren Container (cm2network/steamcmd:root per Default
     # als dediziertes Tool-Image mit pre-installed binary). steamcmd_path bleibt nur für Backward-Compat-Tests.
     steamcmd_path: str = "/usr/games/steamcmd"

@@ -81,9 +81,13 @@ class BackupLocation:
     size_mb: Optional[int] = None
 
 
-# Progress-Callback: (bytes_done, bytes_total) -> None.
-# Adapter ohne nativen Progress-Hook rufen einmalig (total, total) am Ende auf.
-ProgressCallback = Callable[[int, int], None]
+# Progress-Callback: (bytes_transferred) -> None.
+# Pattern folgt der boto3-Konvention: das Callback wird kumulativ
+# aufgerufen, d.h. bytes_transferred ist die Summe aller bisher
+# uebertragenen Bytes (nicht ein Delta). Adapter ohne nativen
+# Progress-Support rufen das Callback einmalig am Ende mit der
+# finalen Dateigroesse auf.
+ProgressCallback = Callable[[int], None]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -136,15 +136,15 @@ class TestUploadDownload:
     def test_progress_callback_called(self, provider: LocalProvider, tmp_path: Path):
         src = tmp_path / "src.bin"
         src.write_bytes(b"x" * 100)
-        calls: list[tuple[int, int]] = []
+        calls: list[int] = []
 
-        def cb(done: int, total: int) -> None:
-            calls.append((done, total))
+        def cb(transferred: int) -> None:
+            calls.append(transferred)
 
         provider.upload(src, "42/x.enc", progress_cb=cb)
         # Local hat keinen In-File-Progress; einmaliger Callback am Ende erwartet
         assert len(calls) == 1
-        assert calls[0] == (100, 100)
+        assert calls[0] == 100
 
 
 class TestDelete:

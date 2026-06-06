@@ -102,7 +102,7 @@ class LocalProvider(BackupProvider):
         shutil.copy2(local_path, dest)
         size_bytes = dest.stat().st_size
         if progress_cb:
-            progress_cb(size_bytes, size_bytes)
+            progress_cb(size_bytes)
         size_mb = int(size_bytes // (1024 * 1024))
         return BackupLocation(remote_key=remote_key, size_mb=size_mb)
 
@@ -120,7 +120,7 @@ class LocalProvider(BackupProvider):
         shutil.copy2(src, local_path)
         size_bytes = local_path.stat().st_size
         if progress_cb:
-            progress_cb(size_bytes, size_bytes)
+            progress_cb(size_bytes)
 
     def delete(self, remote_key: str) -> None:
         """Loescht Daten- + Meta-Datei. Idempotent."""
