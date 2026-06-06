@@ -181,17 +181,22 @@ class BackupMigrationService:
         return True
 
     def has_local_backups(self, db: Session) -> bool:
-        """True wenn es noch DB-Records mit provider=="local"/None gibt.
+        """True wenn es noch DB-Records mit provider!=target gibt.
 
-        Wir joinen mit Server, um geloeschte Server-Cascade abzufangen
-        (Plan §3.10 Edge Case: nur noch-existierende Server migrieren).
+        Standard-Fall (lokal->Cloud): target=settings.backup_provider.
+        Cross-Cloud (A->B): target wird explizit uebergeben.
+        Query: ``provider != target_name`` filtert alles raus, was bereits
+        im Ziel-Provider liegt. Plus Server-Join um geloeschte Server-
+        Cascade abzufangen (Plan §3.10: nur noch-existierende Server).
         """
         from models import Backup, Server
 
+        target = (settings.backup_provider or "local").lower()
         q = (
             db.query(Backup)
             .join(Server, Backup.server_id == Server.id)
-            .filter((Backup.provider == "local") | (Backup.provider.is_(None)))
+            .filter(Backup.provider != target)
+            .filter(Backup.provider.isnot(None))
         )
         return db.query(q.exists()).scalar()
 
@@ -237,13 +242,17 @@ class BackupMigrationService:
         self._cancel_event.clear()
         encryption_key = settings.backup_encryption_key or ""
 
-        # ── Idempotenter DB-Snapshot: nur lokal-Records, sortiert ──
+        # ── Idempotenter DB-Snapshot: provider != target, sortiert ──
+        # Selektiert ALLES was nicht bereits im Ziel-Provider liegt:
+        # - lokal->Cloud: target=cloud, query "provider!=cloud" findet local
+        # - s3->gcs (Cross-Cloud): target=gcs, query "provider!=gcs" findet s3
         from models import Backup, Server
 
         local_records: list[Backup] = (
             db.query(Backup)
             .join(Server, Backup.server_id == Server.id)
-            .filter((Backup.provider == "local") | (Backup.provider.is_(None)))
+            .filter(Backup.provider != target_name)
+            .filter(Backup.provider.isnot(None))
             .order_by(Backup.created_at.asc())  # aelteste zuerst
             .all()
         )
@@ -449,13 +458,14 @@ class BackupMigrationService:
             # Provider-Upload. Fehler hier fuehrt zu Caller-Exception.
             target_provider.upload(_P(upload_source), remote_key)
 
-            # DB-Update: provider, remote_key, filename=None
-            # filename=None weil das lokale File gleich geloescht wird.
-            # Wir behalten es NICHT als Fallback, weil das die ganze
-            # Cloud-only-Mode-Logik kaputt machen wuerde.
+            # DB-Update: provider, remote_key, filename
+            # Bei Cloud-Records: filename = remote_key (gleicher String),
+            # weil die Spalte NOT NULL ist und konsistent zu run_backup()
+            # sein soll (siehe backup_service.run_backup: filename =
+            # final_filepath or remote_key).
             backup.provider = target_name
             backup.remote_key = remote_key
-            backup.filename = None
+            backup.filename = remote_key
             db.commit()
         except Exception:
             # DB-Rollback falls gerade in einer Transaktion. Falls der
