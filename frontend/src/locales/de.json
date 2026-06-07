@@ -415,7 +415,60 @@
     "resendFailed": "Code konnte nicht erneut gesendet werden",
     "success": "Einrichtung abgeschlossen",
     "successDesc": "Der Owner-Account wurde erfolgreich erstellt und verifiziert.",
-    "redirecting": "Weiterleitung zum Login..."
+    "redirecting": "Weiterleitung zum Login...",
+    "cloudRestore": {
+      "bannerTitle": "Cloud-Backups gefunden",
+      "bannerText": "{{count}} Backups in der Cloud gefunden. Klicken zum Wiederherstellen.",
+      "bannerTextSingular": "1 Backup in der Cloud gefunden. Klicken zum Wiederherstellen.",
+      "bannerOpen": "Öffnen",
+      "verwerfen": "Verwerfen",
+      "discardText": "Die Cloud-Backups bleiben erhalten, aber der Banner verschwindet. Du kannst sie jederzeit später wiederherstellen.",
+      "errorPrefix": "Cloud-Provider meldet:",
+      "wizardTitle": "Cloud-Backups wiederherstellen",
+      "wizardSubtitle": "Wähle die Backups aus, die du wiederherstellen möchtest.",
+      "selectAll": "Alle auswählen",
+      "deselectAll": "Auswahl aufheben",
+      "selected": "{{selected}} von {{total}} ausgewählt",
+      "restoreSelected": "Auswahl wiederherstellen",
+      "spaeter": "Später",
+      "noBackups": "Keine Cloud-Backups gefunden",
+      "loading": "Lade Cloud-Backups...",
+      "table": {
+        "name": "Server",
+        "game": "Spiel",
+        "date": "Erstellt",
+        "size": "Größe",
+        "ports": "Ports"
+      },
+      "phase": {
+        "pending": "Wartet",
+        "downloading": "Wird heruntergeladen",
+        "extracting": "Wird entpackt",
+        "creating": "Server wird angelegt",
+        "done": "Fertig",
+        "error": "Fehler"
+      },
+      "statusDownloadFailed": "Download fehlgeschlagen",
+      "statusExtractFailed": "Entpacken fehlgeschlagen",
+      "viewServer": "Zum Server",
+      "restoreStarted": "Wiederherstellung gestartet",
+      "allDone": "Alle ausgewählten Backups verarbeitet.",
+      "remainingCount": "{{count}} Eintrag/Einträge übrig"
+    },
+    "cloudMigration": {
+      "bannerTitle": "Auto-Migration läuft",
+      "bannerText": "{{migrated}} von {{total}} lokalen Backups werden in die Cloud migriert...",
+      "currentFile": "Aktuell:",
+      "cancel": "Abbrechen",
+      "cancelConfirm": "Migration wirklich abbrechen?",
+      "cancelling": "Abbruch wird vorbereitet...",
+      "cancelSent": "Cancel-Signal gesendet.",
+      "completed": "Migration abgeschlossen",
+      "completedText": "{{migrated}} von {{total}} Backups erfolgreich in die Cloud migriert.",
+      "failed": "Migration fehlgeschlagen",
+      "errorPrefix": "Fehler:",
+      "retryHint": "Cloud-Credentials in .env prüfen, dann erscheint der Banner beim nächsten Start erneut."
+    }
   },
   "verifyEmail": {
     "title": "E-Mail verifizieren",

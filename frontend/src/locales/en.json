@@ -415,7 +415,60 @@
     "resendFailed": "Could not resend code",
     "success": "Setup completed",
     "successDesc": "The owner account was successfully created and verified.",
-    "redirecting": "Redirecting to login..."
+    "redirecting": "Redirecting to login...",
+    "cloudRestore": {
+      "bannerTitle": "Cloud backups found",
+      "bannerText": "{{count}} cloud backups found. Click to restore.",
+      "bannerTextSingular": "1 cloud backup found. Click to restore.",
+      "bannerOpen": "Open",
+      "verwerfen": "Discard",
+      "discardText": "The cloud backups will remain, but the banner disappears. You can restore them at any time later.",
+      "errorPrefix": "Cloud provider reports:",
+      "wizardTitle": "Restore cloud backups",
+      "wizardSubtitle": "Select the backups you want to restore.",
+      "selectAll": "Select all",
+      "deselectAll": "Deselect all",
+      "selected": "{{selected}} of {{total}} selected",
+      "restoreSelected": "Restore selected",
+      "spaeter": "Later",
+      "noBackups": "No cloud backups found",
+      "loading": "Loading cloud backups...",
+      "table": {
+        "name": "Server",
+        "game": "Game",
+        "date": "Created",
+        "size": "Size",
+        "ports": "Ports"
+      },
+      "phase": {
+        "pending": "Pending",
+        "downloading": "Downloading",
+        "extracting": "Extracting",
+        "creating": "Creating server",
+        "done": "Done",
+        "error": "Error"
+      },
+      "statusDownloadFailed": "Download failed",
+      "statusExtractFailed": "Extraction failed",
+      "viewServer": "Go to server",
+      "restoreStarted": "Restore started",
+      "allDone": "All selected backups processed.",
+      "remainingCount": "{{count}} entries remaining"
+    },
+    "cloudMigration": {
+      "bannerTitle": "Auto-migration running",
+      "bannerText": "{{migrated}} of {{total}} local backups are being migrated to the cloud...",
+      "currentFile": "Current:",
+      "cancel": "Cancel",
+      "cancelConfirm": "Really cancel the migration?",
+      "cancelling": "Preparing cancel...",
+      "cancelSent": "Cancel signal sent.",
+      "completed": "Migration completed",
+      "completedText": "{{migrated}} of {{total}} backups successfully migrated to the cloud.",
+      "failed": "Migration failed",
+      "errorPrefix": "Error:",
+      "retryHint": "Check cloud credentials in .env, then the banner will reappear on the next start."
+    }
   },
   "verifyEmail": {
     "title": "Verify Email",

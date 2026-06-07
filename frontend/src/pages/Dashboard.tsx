@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom'
 import { api } from '@/api/client'
 import { Server, GameInfo } from '@/types'
 import { UpdateBanner } from '@/components/UpdateBanner'
+import { CloudRestoreBanner } from '@/components/setup/CloudRestoreBanner'
+import { CloudMigrationBanner } from '@/components/setup/CloudMigrationBanner'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Server as ServerIcon, Activity, MemoryStick, CheckCircle2, AlertTriangle, XCircle, Loader2, Clock } from 'lucide-react'
 import { UptimeDisplay } from '@/components/server/UptimeDisplay'
@@ -141,6 +143,8 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <UpdateBanner />
+      <CloudRestoreBanner />
+      <CloudMigrationBanner />
 
       <div>
         <h1 className="font-headline text-headline-sm text-primary">{t('dashboard.title')}</h1>
