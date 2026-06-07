@@ -453,7 +453,13 @@
       "viewServer": "Zum Server",
       "restoreStarted": "Wiederherstellung gestartet",
       "allDone": "Alle ausgewählten Backups verarbeitet.",
-      "remainingCount": "{{count}} Eintrag/Einträge übrig"
+      "remainingCount": "{{count}} Eintrag/Einträge übrig",
+      "colPending": "Verfügbar",
+      "colPendingEmpty": "Keine ausstehenden Backups",
+      "colProgress": "Wiederherstellung",
+      "colProgressEmpty": "Keine laufenden Wiederherstellungen",
+      "colDone": "Abgeschlossen",
+      "colDoneEmpty": "Noch nichts abgeschlossen"
     },
     "cloudMigration": {
       "bannerTitle": "Auto-Migration läuft",

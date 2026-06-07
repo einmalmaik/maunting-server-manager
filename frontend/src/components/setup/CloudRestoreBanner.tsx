@@ -2,20 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Cloud, X, ChevronRight } from "lucide-react";
 import { api } from "@/api/client";
-
-interface PendingRestoreItem {
-  remote_key: string;
-  server_id: number;
-  server_name: string;
-  game_type: string;
-  created_at: string;
-  panel_version: string;
-  cpu_limit_percent: number | null;
-  ram_limit_mb: number | null;
-  disk_limit_gb: number | null;
-  size_mb: number | null;
-  ports: Array<{ role: string; port?: number; protocol?: string }>;
-}
+import { CloudRestoreWizard, type PendingRestoreItem } from "./CloudRestoreWizard";
 
 interface PendingRestoresResponse {
   pending: boolean;
@@ -46,6 +33,7 @@ export function CloudRestoreBanner() {
   const [data, setData] = useState<PendingRestoresResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const fetchPending = useCallback(async () => {
     try {
@@ -96,10 +84,11 @@ export function CloudRestoreBanner() {
       : t("setup.cloudRestore.bannerText", { count, defaultValue: "{{count}} Backups in der Cloud gefunden. Klicken zum Wiederherstellen." });
 
   return (
-    <div
-      data-testid="cloud-restore-banner"
-      className="msm-card border border-primary/30 bg-primary/5 p-4 mb-6"
-    >
+    <>
+      <div
+        data-testid="cloud-restore-banner"
+        className="msm-card border border-primary/30 bg-primary/5 p-4 mb-6"
+      >
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3 flex-1">
             <Cloud className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
@@ -130,11 +119,7 @@ export function CloudRestoreBanner() {
               {t("setup.cloudRestore.verwerfen", "Verwerfen")}
             </button>
             <button
-              onClick={() => {
-                // Wizard wird in Schritt 12.2 gemounted. Bis dahin ist
-                // der Button ein no-op — die Banner-Funktionalitaet
-                // (Verwerfen) bleibt voll funktional.
-              }}
+              onClick={() => setWizardOpen(true)}
               className="msm-btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
               data-testid="cloud-restore-banner-open"
             >
@@ -147,9 +132,23 @@ export function CloudRestoreBanner() {
               aria-label={t("common.close", "Schliessen")}
               data-testid="cloud-restore-banner-dismiss"
             >
-            <X className="w-4 h-4" />
-          </button>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
+
+      {wizardOpen && (
+        <CloudRestoreWizard
+          items={data.items}
+          provider={data.provider}
+          onClose={() => {
+            setWizardOpen(false);
+            // Liste nach Wizard-Close frisch holen (ggf. reduziert durch Discards)
+            fetchPending();
+          }}
+        />
+      )}
+    </>
   );
 }

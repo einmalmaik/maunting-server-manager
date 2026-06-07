@@ -453,7 +453,13 @@
       "viewServer": "Go to server",
       "restoreStarted": "Restore started",
       "allDone": "All selected backups processed.",
-      "remainingCount": "{{count}} entries remaining"
+      "remainingCount": "{{count}} entries remaining",
+      "colPending": "Available",
+      "colPendingEmpty": "No pending backups",
+      "colProgress": "Restoring",
+      "colProgressEmpty": "No ongoing restores",
+      "colDone": "Done",
+      "colDoneEmpty": "Nothing completed yet"
     },
     "cloudMigration": {
       "bannerTitle": "Auto-migration running",
