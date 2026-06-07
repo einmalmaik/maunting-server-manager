@@ -7,6 +7,7 @@ export interface ModInstallState {
   install_action?: ModInstallAction | null
   install_progress?: number | null
   install_eta_seconds?: number | null
+  install_error?: string | null
   update_status?: ModUpdateStatus | string | null
   update_reason?: string | null
 }
