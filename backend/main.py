@@ -25,6 +25,7 @@ from routers import (
     steam_router,
     panel_settings_router,
     files_router,
+    setup_router,
     roles_router,
     permissions_router,
     blueprints_router,
@@ -502,6 +503,9 @@ app.include_router(system_router)
 app.include_router(steam_router)
 app.include_router(panel_settings_router)
 app.include_router(files_router)
+# Setup-Routes (Schritt 10): Cloud-Backup-Restore-Liste, Auto-Migration-Status,
+# Restore-Trigger, Discard, Migration-Cancel. Auth: panel.settings.* (per-Endpoint).
+app.include_router(setup_router)
 app.include_router(roles_router)
 app.include_router(permissions_router)
 app.include_router(blueprints_router)
