@@ -474,7 +474,7 @@ class TestLifecycleLockBasic:
 
         lock = get_server_lifecycle_lock(4242)
         assert lock is not None
-        assert isinstance(lock, threading.Lock)
+        assert isinstance(lock, type(threading.Lock()))
         # Re-acquire yields same instance (setdefault semantics)
         lock2 = get_server_lifecycle_lock(4242)
         assert lock is lock2

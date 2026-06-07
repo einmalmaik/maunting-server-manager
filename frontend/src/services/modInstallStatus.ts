@@ -7,6 +7,7 @@ export interface ModInstallState {
   install_action?: ModInstallAction | null
   install_progress?: number | null
   install_eta_seconds?: number | null
+  install_error?: string | null
   update_status?: ModUpdateStatus | string | null
   update_reason?: string | null
 }
@@ -28,6 +29,14 @@ export function hasActiveModInstall(mod: ModInstallState): boolean {
 export function getModInstallPresentation(mod: ModInstallState, t: Translate): ModInstallPresentation {
   const action = mod.install_action === 'update' ? 'update' : 'install'
   const progress = clampProgress(mod.install_progress)
+  const rawError = typeof mod.install_error === 'string' ? mod.install_error.trim() : ''
+  // Bis zu 240 Zeichen echten Fehlertext zeigen, damit der User bei
+  // "Installation fehlgeschlagen" sehen kann, was wirklich passiert ist
+  // (z. B. SteamCMD 0x202, fehlender Steam-Account, Netzwerkfehler). Fallback
+  // auf den generischen Hint, wenn das Backend keinen Fehlertext geliefert hat.
+  const errorDetail = rawError
+    ? `${t('mods.statusErrorHint')} — ${rawError.slice(0, 240)}`
+    : t('mods.statusErrorHint')
 
   if (mod.install_status === 'pending') {
     return {
@@ -53,7 +62,7 @@ export function getModInstallPresentation(mod: ModInstallState, t: Translate): M
     return {
       kind: 'error',
       label: t('mods.statusError'),
-      detail: t('mods.statusErrorHint'),
+      detail: errorDetail,
       progress: null,
       showProgress: false,
     }

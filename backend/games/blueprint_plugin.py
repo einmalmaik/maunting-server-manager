@@ -506,12 +506,22 @@ class BlueprintPlugin(GamePlugin):
                     shutil.copy2(source, target)
                     continue
 
-                if target.exists() or target.is_symlink():
-                    if target.is_symlink():
-                        target.unlink()
-                    else:
-                        return {"error": f"postInstall-Ziel existiert bereits: {target_rel}"}
-                os.symlink(source, target, target_is_directory=source.is_dir())
+                # Wichtig: unresolved_target (NICHT target.resolve()) fuer
+                # Existenz-/Symlink-Checks. Path.resolve() folgt Symlinks,
+                # d. h. target.is_symlink() waere auf dem aufgeloesten Pfad
+                # immer False, selbst wenn der Pfad ein Symlink ist.
+                # Konsequenz (vorheriger Bug): bei jedem Reinstall einer
+                # bereits installierten Mod ist der Postinstall-Symlink noch
+                # da, und der Code ist faelschlich in den "Ziel existiert
+                # bereits"-Zweig gelaufen → Install-Fehler trotz erfolgreichem
+                # SteamCMD-Download. Mit unresolved_target wird der bestehende
+                # Symlink korrekt unlinkt und neu angelegt.
+                unresolved_target = base / target_rel
+                if unresolved_target.is_symlink():
+                    unresolved_target.unlink()
+                elif unresolved_target.exists():
+                    return {"error": f"postInstall-Ziel existiert bereits: {target_rel}"}
+                os.symlink(source, unresolved_target, target_is_directory=source.is_dir())
 
         return {}
 

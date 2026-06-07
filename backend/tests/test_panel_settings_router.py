@@ -99,7 +99,7 @@ class TestSteamAccountEndpoints:
 
 
 class TestTimeFormatEndpoints:
-    """Coverage for global time_format (used by RestartPanel 12/24 display + scheduler)."""
+    """Coverage for global time_format (pure UI display preference for RestartPanel 12/24h only; has NO effect on scheduler logic, stored restart_times_utc, or CronTrigger execution)."""
 
     def test_get_settings_includes_time_format_default(self, client: TestClient, owner_cookies: dict):
         res = client.get("/api/settings", cookies=owner_cookies)

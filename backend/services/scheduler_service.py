@@ -48,7 +48,7 @@ def get_scheduler() -> AsyncIOScheduler:
     """Get or create scheduler instance."""
     global _scheduler
     if _scheduler is None:
-        _scheduler = AsyncIOScheduler()
+        _scheduler = AsyncIOScheduler(timezone=timezone.utc)
     return _scheduler
 
 
@@ -67,7 +67,15 @@ def _utcnow() -> datetime:
 
 
 def get_next_restart_run_time(server_id: int) -> datetime | None:
-    """Liefert den naechsten APScheduler-Run fuer einen Server-Restart."""
+    """Liefert den naechsten APScheduler-Run fuer einen Server-Restart.
+
+    Defense-in-Depth: APScheduler's get_jobs()-Run-Times sind durch den expliziten
+    UTC-Default in `get_scheduler()`/`schedule_server_restart()` bereits tz-aware in
+    UTC. Der `tzinfo is None`-Branch behandelt legacy/mock-Pfade (z. B. zukuenftige
+    Trigger ohne TZ-Override oder externe Schedulers), damit niemals ein Crash oder
+    Drift durch naive Datetimes entsteht. Nicht entfernen, auch wenn der Branch
+    aktuell ungenutzt wirkt.
+    """
     scheduler = get_scheduler()
     next_run = None
     for job in scheduler.get_jobs():
@@ -75,6 +83,7 @@ def get_next_restart_run_time(server_id: int) -> datetime | None:
             run_time = getattr(job, "next_run_time", None)
             if run_time is None:
                 continue
+            # Defense-in-Depth: naive Datetimes als UTC interpretieren (siehe Docstring).
             if run_time.tzinfo is None:
                 run_time = run_time.replace(tzinfo=timezone.utc)
             run_time = run_time.astimezone(timezone.utc)
@@ -181,7 +190,7 @@ def schedule_server_restart(
         trigger = IntervalTrigger(hours=interval_hours)
     elif cron_time:
         hour, minute = map(int, cron_time.split(":"))
-        trigger = CronTrigger(hour=hour, minute=minute)
+        trigger = CronTrigger(hour=hour, minute=minute, timezone=timezone.utc)
     else:
         raise ValueError("Either interval_hours or cron_time required")
 
