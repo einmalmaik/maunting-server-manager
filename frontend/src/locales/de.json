@@ -581,6 +581,10 @@
     "createNow": "Backup erstellen",
     "creating": "Backup wird erstellt...",
     "restoring": "Backup wird wiederhergestellt...",
+    "uploading": "Wird hochgeladen...",
+    "downloading": "Wird heruntergeladen...",
+    "decrypting": "Wird entschlüsselt...",
+    "estimatedSize": "Geschätzte Größe",
     "runningSince": "Läuft seit:"
   },
   "tabs": {

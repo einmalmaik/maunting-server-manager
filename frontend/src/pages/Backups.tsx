@@ -23,7 +23,17 @@ interface BackupSettings {
 
 interface BackupStatus {
   active: boolean;
-  operation: "creating" | "restoring" | null;
+  operation:
+    | "creating"
+    | "uploading"
+    | "downloading"
+    | "restoring"
+    | "decrypting"
+    | null;
+  phase: "create" | "upload" | "download" | "extract" | "decrypt" | null;
+  bytes_done: number | null;
+  bytes_total: number | null;
+  percent: number | null;
   started_at: string | null;
   estimated_size_mb: number | null;
 }
@@ -255,12 +265,35 @@ export function Backups({ serverId }: BackupsProps) {
   const operationLabel =
     backupStatus?.operation === "creating"
       ? t("backups.creating")
-      : backupStatus?.operation === "restoring"
-        ? t("backups.restoring")
-        : "";
+      : backupStatus?.operation === "uploading"
+        ? t("backups.uploading", "Wird hochgeladen...")
+        : backupStatus?.operation === "downloading"
+          ? t("backups.downloading", "Wird heruntergeladen...")
+          : backupStatus?.operation === "restoring"
+            ? t("backups.restoring")
+            : backupStatus?.operation === "decrypting"
+              ? t("backups.decrypting", "Wird entschlüsselt...")
+              : "";
   const elapsedLabel = isActive
     ? `${elapsedSeconds} Sekunden`
     : "";
+
+  // Progress-Bar Daten (Schritt 11). Echte Progress statt animate-pulse
+  // wenn percent/bytes_total verfuegbar sind.
+  const hasProgress =
+    backupStatus?.bytes_done != null && backupStatus?.bytes_total != null;
+  const percentClamped =
+    backupStatus?.percent != null
+      ? Math.max(0, Math.min(100, Math.round(backupStatus.percent)))
+      : null;
+  const bytesDoneMb =
+    hasProgress && backupStatus
+      ? (backupStatus.bytes_done! / (1024 * 1024)).toFixed(1)
+      : null;
+  const bytesTotalMb =
+    hasProgress && backupStatus
+      ? (backupStatus.bytes_total! / (1024 * 1024)).toFixed(1)
+      : null;
 
   if (loading) {
     return (
@@ -272,25 +305,64 @@ export function Backups({ serverId }: BackupsProps) {
 
   return (
     <div className="space-y-6">
-      {/* Live-Status Banner (wenn aktiv) */}
+      {/* Live-Status Banner (wenn aktiv) - Schritt 11 */}
       {isActive && (
-        <div className="msm-card p-4 border border-secondary/40 bg-surface-container space-y-2">
-          <div className="flex items-center gap-3 text-sm text-on-surface">
+        <div
+          className="msm-card p-4 border border-secondary/40 bg-surface-container space-y-3"
+          data-testid="backup-live-status"
+        >
+          <div className="flex items-center gap-3 text-sm text-on-surface flex-wrap">
             <span className="w-4 h-4 border-2 border-secondary border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            <span className="font-body-md">{operationLabel || t("backups.creating", "Backup wird erstellt...")}</span>
+            <span className="font-body-md">
+              {operationLabel || t("backups.creating", "Backup wird erstellt...")}
+            </span>
             {elapsedLabel && (
               <span className="text-on-surface-variant">
                 {t("backups.runningSince")} {elapsedLabel}
               </span>
             )}
-            {backupStatus?.estimated_size_mb != null && backupStatus.estimated_size_mb > 0 && (
-              <span className="text-on-surface-variant">
-                Geschätzte Größe: {backupStatus.estimated_size_mb} MB
-              </span>
-            )}
+            {backupStatus?.estimated_size_mb != null &&
+              backupStatus.estimated_size_mb > 0 && (
+                <span className="text-on-surface-variant">
+                  {t("backups.estimatedSize", "Geschätzte Größe")}:{" "}
+                  {backupStatus.estimated_size_mb} MB
+                </span>
+              )}
           </div>
-          <div className="h-1 bg-secondary/30 rounded overflow-hidden">
-            <div className="h-1 bg-secondary animate-pulse w-1/3" />
+
+          {/* Progress-Bar (Schritt 11): Echte Progress wenn bytes_done/_total verfuegbar,
+              sonst indeterminate animate-pulse (local-Provider beim Erstellen). */}
+          <div className="space-y-1">
+            <div
+              className="h-2 bg-secondary/30 rounded overflow-hidden"
+              role="progressbar"
+              aria-valuenow={percentClamped ?? undefined}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              {hasProgress && percentClamped != null ? (
+                <div
+                  className="h-2 bg-secondary transition-all duration-300"
+                  style={{ width: `${percentClamped}%` }}
+                  data-testid="backup-progress-bar"
+                />
+              ) : (
+                <div className="h-2 bg-secondary animate-pulse w-1/3" />
+              )}
+            </div>
+            {hasProgress && bytesDoneMb != null && bytesTotalMb != null && (
+              <div
+                className="flex items-center justify-between text-xs text-on-surface-variant font-mono-sm"
+                data-testid="backup-progress-counter"
+              >
+                <span>
+                  {bytesDoneMb} MB / {bytesTotalMb} MB
+                </span>
+                {percentClamped != null && (
+                  <span className="font-mono-sm">{percentClamped}%</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -588,6 +588,10 @@
     "createNow": "Create Backup",
     "creating": "Creating backup...",
     "restoring": "Restoring backup...",
+    "uploading": "Uploading...",
+    "downloading": "Downloading...",
+    "decrypting": "Decrypting...",
+    "estimatedSize": "Estimated size",
     "runningSince": "Running since:"
   },
   "scheduler": {

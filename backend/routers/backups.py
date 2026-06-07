@@ -98,7 +98,21 @@ def get_backup_settings(server_id: int, db: Session = Depends(get_db), user: Use
 @router.get("/{server_id}/status")
 def get_backup_status(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Live-Status für laufende Backup/Restore Operationen (Polling-UX).
-    Note (Issue 18): status is ephemeral (module dict); lost on backend restart (acceptable per original task).
+
+    Felder (Schritt 7 + Schritt 11):
+    - active: bool
+    - operation: "creating" | "uploading" | "downloading" | "restoring" | "decrypting" | null
+    - phase: "create" | "upload" | "download" | "extract" | "decrypt" | null
+      (Frontend nutzt phase fuer Label + Progress-Bar-Farbe; operation ist
+       granularer fuer Status-Anzeige)
+    - bytes_done: int (None wenn nicht messbar, z.B. local-Provider beim create)
+    - bytes_total: int (None wenn noch nicht bekannt)
+    - percent: int (0-100, None wenn nicht berechenbar)
+    - started_at: ISO 8601
+    - estimated_size_mb: int (vom letzten Backup, Anzeige in MB)
+
+    Note (Issue 18): status is ephemeral (module dict); lost on backend restart
+    (acceptable per original task).
     """
     require_server_permission(user, server_id, db, "server.backups.read")
     from services.backup_service import get_active_backup_status
@@ -107,12 +121,20 @@ def get_backup_status(server_id: int, db: Session = Depends(get_db), user: User 
         return {
             "active": True,
             "operation": active.get("operation"),
+            "phase": active.get("phase"),
+            "bytes_done": active.get("bytes_done"),
+            "bytes_total": active.get("bytes_total"),
+            "percent": active.get("percent"),
             "started_at": active.get("started_at"),
             "estimated_size_mb": active.get("estimated_size_mb"),
         }
     return {
         "active": False,
         "operation": None,
+        "phase": None,
+        "bytes_done": None,
+        "bytes_total": None,
+        "percent": None,
         "started_at": None,
         "estimated_size_mb": None,
     }
