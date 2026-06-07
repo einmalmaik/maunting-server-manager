@@ -31,7 +31,7 @@ def test_get_server_lifecycle_lock_returns_same_instance_for_same_id():
     lock1 = get_server_lifecycle_lock(42)
     lock2 = get_server_lifecycle_lock(42)
     assert lock1 is lock2
-    assert isinstance(lock1, threading.Lock)
+    assert isinstance(lock1, type(threading.Lock()))
 
 
 def test_get_server_lifecycle_lock_different_ids_are_different():
