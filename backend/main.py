@@ -340,35 +340,66 @@ async def lifespan(app: FastAPI):
         import logging
         logging.getLogger(__name__).warning("OAuth-LoginChallenge-Cleanup fehlgeschlagen: %s", exc)
 
-    # ── Backup Auto-Migration (Schritt 9.2) ─────────────────────────
+    # ── Backup Auto-Migration (Schritt 9.2 + 9.4) ───────────────────
     # Wenn MSM_BACKUP_PROVIDER auf einen Cloud-Provider gewechselt wurde
-    # (install.sh hat MSM_PENDING_AUTO_MIGRATION=1 gesetzt) und es noch
-    # lokale Backup-Records gibt, migriert dieser Hook sie einmalig in
-    # den Cloud-Provider. Sequenziell, idempotent, im Hintergrund-Thread
-    # (blockiert den Startup nicht).
+    # (install.sh hat MSM_PENDING_AUTO_MIGRATION=1 oder
+    # MSM_PENDING_CROSS_CLOUD_MIGRATION=1 gesetzt) und es noch nicht-
+    # migrierte Backup-Records gibt, migriert dieser Hook sie einmalig.
+    # Sequenziell, idempotent, im Hintergrund-Thread (blockiert Startup).
     #
     # Trigger-Bedingungen (alle muessen erfuellt sein):
     # 1. backup_provider != "local"
-    # 2. state.cloud_migration_done == false
-    # 3. DB enthaelt provider=="local" Records (mind. 1)
+    # 2. state.cloud_migration_done == false (nach Reset via Pending-Flags)
+    # 3. DB enthaelt Records mit provider != target_provider (mind. 1)
     #
-    # Cross-Cloud-Migration (Cloud A -> Cloud B): wird in Schritt 9.3
-    # erweitert (liesst MSM_CROSS_CLOUD_TARGET). Hier vorerst nur der
-    # Standard-Fall lokal->Cloud.
+    # Schritt 9.4: state-Reset bei Provider-Wechsel. install.sh setzt die
+    # .env-Flags MSM_PENDING_AUTO_MIGRATION / MSM_PENDING_CROSS_CLOUD_MIGRATION,
+    # wenn der User von einem Provider auf einen anderen wechselt. Ohne
+    # Reset wuerde should_run() False zurueckgeben weil state.done noch
+    # von der Vorgaenger-Installation true ist.
     try:
         from services.backup_migration_service import (
             get_migration_service,
+            load_state,
+            save_state,
         )
         _svc = get_migration_service()
+
+        # State-Reset bei Provider-Wechsel (lokal->Cloud oder Cloud-A->Cloud-B).
+        # install.sh setzt die Flags, hier setzen wir cloud_migration_done=false
+        # damit should_run() True liefert. Wichtig: NUR resetten wenn ein
+        # Pending-Flag gesetzt ist — sonst wuerden wir den echten done-Status
+        # einer abgeschlossenen Migration ueberschreiben.
+        if settings.pending_auto_migration or settings.pending_cross_cloud_migration:
+            _state = load_state()
+            if _state.cloud_migration_done:
+                import logging
+                mode = "auto" if settings.pending_auto_migration else "cross-cloud"
+                logging.getLogger(__name__).info(
+                    "Backup-Auto-Migration (Schritt 9.4): Reset state.cloud_migration_done "
+                    "wegen Pending-Flag (%s, target=%s).",
+                    mode,
+                    settings.backup_provider,
+                )
+                _state.cloud_migration_done = False
+                _state.cloud_migration_target = ""
+                _state.cloud_migration_completed_at = ""
+                save_state(_state)
+
         if _svc.should_run():
             from database import SessionLocal as _MigSessionLocal
             _mig_db = _MigSessionLocal()
             try:
                 if _svc.has_local_backups(_mig_db):
                     import logging
+                    mode_label = (
+                        "Cross-Cloud-Migration" if settings.pending_cross_cloud_migration
+                        else "Auto-Migration"
+                    )
                     logging.getLogger(__name__).info(
-                        "Backup-Auto-Migration wird gestartet (provider=%s, "
-                        "im Hintergrund-Thread, blockiert Startup nicht).",
+                        "%s wird gestartet (provider=%s, im Hintergrund-Thread, "
+                        "blockiert Startup nicht).",
+                        mode_label,
                         settings.backup_provider,
                     )
                     # asyncio.to_thread schiebt den blockierenden Call in

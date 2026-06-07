@@ -127,6 +127,19 @@ class Settings(BaseSettings):
     auto_update: bool = False  # true = systemd-Timer installiert Updates automatisch
     auto_update_interval_hours: int = 24  # Prüfintervall
 
+    # ── Backup-Migration Pending-Flags (Schritt 8 install.sh, gelesen in 9.2/9.4) ──
+    # install.sh setzt diese Flags, wenn der User den Backup-Provider wechselt.
+    # Der main.py lifespan-Hook liest sie beim Startup:
+    # - pending_auto_migration=1: local->Cloud Wechsel, alte lokale Backups
+    #   hochladen.
+    # - pending_cross_cloud_migration=1: Cloud A -> Cloud B Wechsel, alte
+    #   Cloud-A-Backups in neuen Provider kopieren.
+    # Beide triggern einen Reset von .msm/state.json::cloud_migration_done,
+    # damit der Auto-Migration-Hook (Schritt 9.2) laeuft.
+    pending_auto_migration: bool = False
+    pending_cross_cloud_migration: bool = False
+    cross_cloud_target: str = ""  # Ziel-Provider bei Cross-Cloud (z.B. "gcs")
+
     class Config:
         env_prefix = "MSM_"
         env_file = ".env"

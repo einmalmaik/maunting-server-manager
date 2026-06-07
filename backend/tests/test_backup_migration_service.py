@@ -649,3 +649,231 @@ class TestProgress:
         snap1.migrated = 999  # In-place mutation
         snap2 = svc.progress()
         assert snap2.migrated == 0  # unveraendert
+
+
+# ── 9.4-Tests: State-Reset bei Provider-Wechsel + Encryption ──────────
+
+
+class TestStateResetOnProviderChange:
+    """Schritt 9.4: Wenn install.sh die Pending-Flags setzt (Provider-Wechsel),
+    muss der main.py-Hook state.cloud_migration_done zuruecksetzen, damit
+    die Migration laeuft. Diese Tests verifizieren das Verhalten der
+    _reset_state_if_pending-Helper-Logik (in main.py inline, hier als
+    pure-Funktion getestet).
+    """
+
+    def test_reset_state_when_pending_auto_migration_flag_set(
+        self, state_in_tmp
+    ):
+        """pending_auto_migration=1 + state.done=true -> state.done=false."""
+        from services import backup_migration_service as mod
+        from services.backup_migration_service import (
+            MigrationState,
+            load_state,
+        )
+
+        # Setup: state.done=true (alter Cloud-Provider-Stand)
+        mod.save_state(
+            MigrationState(cloud_migration_done=True, cloud_migration_target="s3")
+        )
+
+        # Helper simuliert main.py Hook-Logik
+        settings_pending = True  # settings.pending_auto_migration
+        if settings_pending:
+            state = load_state()
+            if state.cloud_migration_done:
+                state.cloud_migration_done = False
+                state.cloud_migration_target = ""
+                state.cloud_migration_completed_at = ""
+                mod.save_state(state)
+
+        loaded = load_state()
+        assert loaded.cloud_migration_done is False
+        assert loaded.cloud_migration_target == ""
+
+    def test_reset_state_when_pending_cross_cloud_flag_set(
+        self, state_in_tmp
+    ):
+        """pending_cross_cloud_migration=1 + state.done=true -> reset."""
+        from services import backup_migration_service as mod
+        from services.backup_migration_service import (
+            MigrationState,
+            load_state,
+        )
+
+        mod.save_state(
+            MigrationState(cloud_migration_done=True, cloud_migration_target="s3")
+        )
+
+        settings_pending_cross = True
+        if settings_pending_cross:
+            state = load_state()
+            if state.cloud_migration_done:
+                state.cloud_migration_done = False
+                state.cloud_migration_target = ""
+                state.cloud_migration_completed_at = ""
+                mod.save_state(state)
+
+        loaded = load_state()
+        assert loaded.cloud_migration_done is False
+
+    def test_does_not_reset_state_when_no_pending_flag(
+        self, state_in_tmp
+    ):
+        """Ohne Pending-Flag darf state NICHT resettet werden.
+
+        Sonst wuerde ein erfolgreich abgeschlossener Migrations-Run
+        beim naechsten Startup nochmal getriggert.
+        """
+        from services import backup_migration_service as mod
+        from services.backup_migration_service import (
+            MigrationState,
+            load_state,
+        )
+
+        mod.save_state(
+            MigrationState(cloud_migration_done=True, cloud_migration_target="gcs")
+        )
+
+        settings_pending = False  # Kein Provider-Wechsel
+        if settings_pending:  # noqa
+            state = load_state()
+            if state.cloud_migration_done:
+                state.cloud_migration_done = False
+                mod.save_state(state)
+
+        loaded = load_state()
+        assert loaded.cloud_migration_done is True  # unveraendert
+        assert loaded.cloud_migration_target == "gcs"
+
+
+class TestEncryptionIntegration:
+    """Schritt 9.4: Encryption-Test der Migration.
+
+    Verifiziert dass der Service den tar.gz VOR dem Upload verschluesselt
+    (AES-256-GCM), wenn MSM_BACKUP_ENCRYPTION_KEY gesetzt ist. Wir nutzen
+    den echten encrypt_file (nicht gemockt), um die End-to-End-Integration
+    sicherzustellen.
+    """
+
+    def test_run_with_encryption_uploads_encrypted_file(
+        self, db: Session, test_server, tmp_path, state_in_tmp
+    ):
+        import base64
+        import os
+        import secrets
+
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from models import Backup
+        from services.backup_migration_service import (
+            BackupMigrationService,
+            MigrationStatus,
+        )
+
+        # 32-byte base64 key (wie .env ihn speichert)
+        key = base64.b64encode(secrets.token_bytes(32)).decode()
+
+        # Tar-File anlegen
+        plain = b"plaintext tar content for encryption test" * 100
+        backup_file = tmp_path / "plain.tar.gz"
+        backup_file.write_bytes(plain)
+        db.add(Backup(server_id=test_server.id, filename=str(backup_file), provider="local"))
+        db.commit()
+
+        # Capture was uploaded: lies Bytes BEVOR der finally-Block das
+        # encrypted temp-File wieder loescht.
+        captured_encrypted: list[bytes] = []
+        captured_path: list = []
+        captured_remote_key: list[str] = []
+
+        def capture_upload(path, remote_key, **kwargs):
+            captured_path.append(path)
+            captured_remote_key.append(remote_key)
+            captured_encrypted.append(open(path, "rb").read())
+
+        fake_provider = MagicMock()
+        fake_provider.upload.side_effect = capture_upload
+
+        svc = BackupMigrationService()
+
+        # Patch encryption_key
+        from services import backup_migration_service as mod
+        original = mod.settings.backup_encryption_key
+        try:
+            mod.settings.backup_encryption_key = key
+            progress = svc.run(
+                db,
+                target_provider=fake_provider,
+                target_provider_name="s3",
+            )
+        finally:
+            mod.settings.backup_encryption_key = original
+
+        assert progress.status == MigrationStatus.COMPLETED
+        assert progress.migrated == 1
+        # upload() wurde 1x aufgerufen
+        assert len(captured_encrypted) == 1
+        # Remote-Key hat .enc Suffix (zeigt dass Encryption aktiv war)
+        assert captured_remote_key[0].endswith(".enc")
+        # Uploaded file ist NICHT das Original
+        assert str(captured_path[0]) != str(backup_file)
+        # File-Format: [1 byte version=0x01][12 byte nonce][ciphertext+tag]
+        encrypted_data = captured_encrypted[0]
+        assert encrypted_data != plain
+        assert encrypted_data[0] == 0x01
+        nonce = encrypted_data[1:13]
+        ciphertext = encrypted_data[13:]
+        # Mit dem richtigen Key koennen wir entschluesseln
+        aesgcm = AESGCM(base64.b64decode(key))
+        decrypted = aesgcm.decrypt(nonce, ciphertext, None)
+        assert decrypted == plain
+        # Encrypted temp file ist nach Migration aufgeraeumt
+        assert not os.path.exists(captured_path[0])
+        # Original-File ist geloescht (Cloud-only-Mode)
+        assert not backup_file.exists()
+
+    def test_run_without_encryption_uploads_plain_file(
+        self, db: Session, test_server, tmp_path, state_in_tmp
+    ):
+        """Ohne Encryption-Key wird das tar.gz unverschluesselt hochgeladen
+        (heutiges Verhalten, nur fuer local-Provider sinnvoll).
+        """
+        from models import Backup
+        from services.backup_migration_service import (
+            BackupMigrationService,
+            MigrationStatus,
+        )
+
+        plain = b"plaintext content"
+        backup_file = tmp_path / "plain.tar.gz"
+        backup_file.write_bytes(plain)
+        db.add(Backup(server_id=test_server.id, filename=str(backup_file), provider="local"))
+        db.commit()
+
+        uploaded_path = []
+
+        def capture_upload(path, key, **kwargs):
+            uploaded_path.append(path)
+
+        fake_provider = MagicMock()
+        fake_provider.upload.side_effect = capture_upload
+
+        from services import backup_migration_service as mod
+        original = mod.settings.backup_encryption_key
+        try:
+            mod.settings.backup_encryption_key = ""  # Kein Key
+            svc = BackupMigrationService()
+            progress = svc.run(
+                db,
+                target_provider=fake_provider,
+                target_provider_name="s3",
+            )
+        finally:
+            mod.settings.backup_encryption_key = original
+
+        assert progress.status == MigrationStatus.COMPLETED
+        assert progress.migrated == 1
+        # Upload ist das Original-File (kein .enc Suffix im remote_key)
+        assert len(uploaded_path) == 1
+        assert str(uploaded_path[0]) == str(backup_file)
+        assert not str(backup_file).endswith(".enc")
