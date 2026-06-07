@@ -289,9 +289,14 @@ def _create_server_and_backup(
 
     # Backup-Row anlegen
     target_provider = (settings.backup_provider or "local").lower()
+    # filename ist NOT NULL (mirror von remote_key, analog zu backup_service.run_backup).
+    # Falls remote_key None ist (sehr alte Metadata), generieren wir einen
+    # Platzhalter, damit der Insert nicht scheitert. Provider-Calls nutzen
+    # ohnehin remote_key, nicht filename.
+    backup_filename = meta.remote_key or f"{meta.server_id}/unknown.tar.gz"
     backup = Backup(
         server_id=server.id,
-        filename=meta.remote_key,  # NOT NULL constraint, mirror
+        filename=backup_filename,  # NOT NULL constraint, mirror
         size_mb=meta.size_mb,
         provider=target_provider,
         remote_key=meta.remote_key,
