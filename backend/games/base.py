@@ -325,6 +325,22 @@ def run_steamcmd_install(
 
     os.makedirs(install_dir, exist_ok=True)
 
+    # 0x226/0x202 auto-recovery (generic for all Steam Blueprint servers)
+    # If previous update left a bad manifest (StateFlags 550 etc.), delete it (with backup).
+    # SteamCMD will recreate a clean one during the validate. No player data touched.
+    try:
+        man = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
+        if os.path.exists(man):
+            with open(man) as mf:
+                mt = mf.read()
+            if "550" in mt or "0x226" in mt or "UpdateResult" in mt and "43" in mt:
+                bak = man + ".bad-state." + str(int(__import__("time").time()))
+                __import__("shutil").copy2(man, bak)
+                os.unlink(man)
+                _append_console_log(server_id, f"[MSM] Bad Steam manifest detected (0x226 state) - backed up and removed: {bak}\n")
+    except Exception as _e:
+        pass  # non-fatal
+
     if use_authenticated_login:
         if not SteamAccountService.is_configured():
             err = (
