@@ -19,7 +19,8 @@
       "WINEFSYNC": "1"
     },
     "startup": "./SCUM/Binaries/Win64/SCUMServer.exe -log -port={GAME_PORT} -queryPort={QUERY_PORT} -MULTIHOME=0.0.0.0 -MaxPlayers={ENV.MAX_PLAYERS} -ServerName={ENV.SERVER_NAME} -nullrhi",
-    "configPatches": []
+    "configPatches": [],
+    "startupCheckSeconds": 5.0
   },
   "ports": [
     {
