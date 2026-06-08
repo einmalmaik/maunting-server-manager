@@ -344,6 +344,12 @@ def _ensure_image_available(client: Any, image: str, server_id: int | None = Non
     # NotFound deckt ImageNotFound (Subklasse) ab.
     try:
         client.images.get(image)
+        if server_id is not None:
+            try:
+                from games.base import _append_console_log
+                _append_console_log(server_id, f"[MSM] Using cached local Docker image {image} (no pull needed)\n")
+            except Exception:
+                pass
         return
     except NotFound:
         pass

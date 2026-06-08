@@ -248,8 +248,8 @@ def _build_steamcmd_bash_command(steam_args: list[str], chown_uid: int, chown_gi
         cleanup +
         f"{shlex.quote(STEAMCMD_BIN)} {quoted}; "
         "rc=$?; "
-        f"chown -R {int(chown_uid)}:{int(chown_gid)} {shlex.quote(CONTAINER_DATA_DIR)}; "
-        f"chmod -R a+rwx {shlex.quote(CONTAINER_DATA_DIR)}; "
+        f"chown -R {int(chown_uid)}:{int(chown_gid)} {shlex.quote(CONTAINER_DATA_DIR)} 2>/dev/null || true; "
+        f"chmod -R a+rwx {shlex.quote(CONTAINER_DATA_DIR)} 2>/dev/null || true; "
         "exit $rc"
     )
     return ["-c", script]
@@ -333,11 +333,11 @@ def run_steamcmd_install(
         if os.path.exists(man):
             with open(man) as mf:
                 mt = mf.read()
-            if "550" in mt or "0x226" in mt or "UpdateResult" in mt and "43" in mt:
+            if ("550" in mt or "0x226" in mt or "0x206" in mt or "0x2" in mt or "Timed out waiting" in mt or ("UpdateResult" in mt and ("43" in mt or "8" in mt))):
                 bak = man + ".bad-state." + str(int(__import__("time").time()))
                 __import__("shutil").copy2(man, bak)
                 os.unlink(man)
-                _append_console_log(server_id, f"[MSM] Bad Steam manifest detected (0x226 state) - backed up and removed: {bak}\n")
+                _append_console_log(server_id, f"[MSM] Bad Steam manifest detected (0x2xx / timeout state) - backed up and removed: {bak}\n")
     except Exception as _e:
         pass  # non-fatal
 
