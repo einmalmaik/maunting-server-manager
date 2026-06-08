@@ -235,8 +235,10 @@ def remove_restart_jobs(server_id: int) -> None:
 def sync_server_restart_schedule(server) -> None:
     """Synchronisiert DB-Settings eines Servers in APScheduler.
 
-    DB bleibt die Quelle der Wahrheit. Intervall hat Vorrang vor festen Zeiten,
-    weil die UI immer genau einen Modus speichert.
+    DB bleibt die Quelle der Wahrheit. 
+    Intervall hat Vorrang vor festen Zeiten (siehe _normalize_server_restart_mode im Router).
+    Die Normalisierung im Router stellt sicher, dass in der DB nie beide Modi gleichzeitig
+    gesetzt sind (sowohl als auch ist jetzt ausgeschlossen).
     """
     remove_restart_jobs(server.id)
     if not getattr(server, "auto_restart", False):
