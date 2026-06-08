@@ -412,6 +412,30 @@ def run_steamcmd_install(
             result = {**result, **classified}
             _append_console_log(server_id, f"\n[MSM] SteamCMD Diagnose: {classified['error']}\n")
         _append_console_log(server_id, f"\n[MSM] SteamCMD fehlgeschlagen: {result['error']}\n")
+
+        # Post-failure 0x2xx safety (0x226, 0x206, 0x202, timeout, exit 8 etc.)
+        # SteamCMD often ends with these states on large Wine apps like SCUM even after pre-clean.
+        # We force a clean manifest here so the "best effort continue" (server starts anyway)
+        # has a usable StateFlags=4 and the user can play without being blocked.
+        try:
+            manp = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
+            combined_err = str(result.get("error", "")) + "".join(live_output)
+            if ("0x2" in combined_err or "0x226" in combined_err or "0x206" in combined_err or
+                "Timed out" in combined_err or "exit 8" in combined_err):
+                if os.path.exists(manp):
+                    bak = manp + ".post-fail." + str(int(__import__("time").time()))
+                    __import__("shutil").copy2(manp, bak)
+                clean = ('"AppState"\n{\n\t"appid"\t\t"' + app_id + '"\n\t"StateFlags"\t\t"4"\n\t"UpdateResult"\t\t"0"\n\t"BytesToDownload"\t\t"0"\n\t"BytesToStage"\t\t"0"\n}\n')
+                with open(manp, "w") as mf:
+                    mf.write(clean)
+                _append_console_log(server_id, f"[MSM] Forced clean manifest (State 4) after 0x2xx failure — best effort start can proceed\\n")
+                try:
+                    uid, gid = docker_service.container_runtime_uid_gid()
+                    __import__("os").chown(manp, uid, gid)
+                except Exception:
+                    pass
+        except Exception:
+            pass
     return result
 
 
