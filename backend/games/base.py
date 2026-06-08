@@ -243,14 +243,6 @@ def _build_steamcmd_bash_command(steam_args: list[str], chown_uid: int, chown_gi
     cleanup = (
         f"rm -rf {shlex.quote(CONTAINER_DATA_DIR)}/steamapps/downloading/* "
         f"{shlex.quote(CONTAINER_DATA_DIR)}/steamapps/temp/* 2>/dev/null || true; "
-        # Auch kaputte Manifests löschen (0x226 Recovery) — SteamCMD recreated sie sauber
-        f"for mf in {shlex.quote(CONTAINER_DATA_DIR)}/steamapps/appmanifest_*.acf; do "
-        f"  if [ -f "$mf" ] && grep -qE '"StateFlags"\s*"(550|0x226|2[0-9a-f]{{2,}})"' "$mf" 2>/dev/null; then "
-        f"    cp -a "$mf" "${{mf}}.bad-state.$(date +%s)" 2>/dev/null || true; "
-        f"    rm -f "$mf"; "
-        f"    echo "[MSM] Removed stuck manifest $mf"; "
-        f"  fi; "
-        f"done; "
     )
     script = (
         cleanup +
@@ -332,26 +324,6 @@ def run_steamcmd_install(
     from services.steam_account_service import SteamAccountService
 
     os.makedirs(install_dir, exist_ok=True)
-
-    # === SteamCMD Stuck-State Recovery (0x226 etc.) ===
-    # Bekanntes Problem: "Error! App '3792580' state is 0x226 after update job"
-    # Ursache: kaputte/inkonsistente appmanifest.acf nach abgebrochenem Update
-    # (StateFlags 550 = 0x226). Lösung: Manifest mit Backup löschen → SteamCMD
-    # erstellt es frisch beim nächsten validate. Kein Datenverlust für Spieler-Saves.
-    # Generisch für alle Steam-Blueprints (SCUM, Conan, DayZ, etc.).
-    manifest = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
-    if os.path.exists(manifest):
-        try:
-            with open(manifest) as mf:
-                txt = mf.read()
-            if '"StateFlags"' in txt and ("550" in txt or "0x226" in txt.lower() or '"UpdateResult"\t\t"43"' in txt):
-                bak = manifest + ".bad-state." + str(int(__import__("time").time()))
-                import shutil
-                shutil.copy2(manifest, bak)
-                os.remove(manifest)
-                _append_console_log(server_id, f"[MSM] Stuck Steam manifest erkannt (0x226/550) — Backup + Delete: {bak}\n")
-        except Exception as _e:
-            _append_console_log(server_id, f"[MSM] Manifest-Check fehlgeschlagen (nicht kritisch): {_e}\n")
 
     if use_authenticated_login:
         if not SteamAccountService.is_configured():
@@ -1044,14 +1016,6 @@ class GamePlugin(ABC):
                 server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
             )
             return {"error": str(e)}
-
-        _append_console_log(
-            server.id,
-            "[MSM] Starte Docker-Container. "
-            "Bei Wine/Proton-Servern (z. B. SCUM) oder großen Images kann es 30–180 Sekunden dauern, "
-            "bis erste Ausgaben in der Console erscheinen (startupCheckSeconds steuert das Warten auf ersten Log-Output).
-"
-        )
 
         result = docker_service.run_container(
             name=name,
