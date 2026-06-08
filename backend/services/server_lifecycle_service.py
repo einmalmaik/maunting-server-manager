@@ -192,7 +192,7 @@ def queue_lifecycle_operation(
         except Exception:
             pass
 
-        _append_console_log(server.id, "[MSM] Server hart via Kill beendet (auch aus Queue/Start heraus)\n")
+        _append_console_log(server.id, "[MSM] Server hart via Kill beendet (auch aus Queue/Start heraus, Docker auto-restarts disabled)\n")
         return {
             "message": "Server wurde erzwungen beendet",
             "status": "stopped",

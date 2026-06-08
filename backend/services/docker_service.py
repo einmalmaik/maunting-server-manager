@@ -486,7 +486,7 @@ def run_container(
         "name": name,
         "detach": detach,
         "stdin_open": True,
-        "restart_policy": {"Name": "on-failure", "MaximumRetryCount": 5},
+        "restart_policy": {"Name": "no"},  # MSM lifecycle only - see comment above
         "log_config": LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None,
         "cap_drop": _HARDENING_CAP_DROP,
         "security_opt": _HARDENING_SECURITY_OPT,
