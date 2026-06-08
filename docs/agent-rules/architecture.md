@@ -457,6 +457,15 @@ Rootless Docker ist Pflicht. Installation/Migration:
 
 Keine Game-Server-User-Units in Phase 6: Der direkte Container-Lifecycle bleibt der KISS-Pfad.
 
+Auto-Restart-Scheduling (Intervall-Modus ODER feste UTC-Zeitfenster) wird bewusst zentral im msm-panel-Prozess (uvicorn unter systemd User=msm) über APScheduler umgesetzt (IntervalTrigger oder CronTrigger). Die Router-Normalisierung (_normalize_server_restart_mode) + sync_server_restart_schedule stellen sicher, dass pro Server immer nur **ein** Modus aktiv ist – „sowohl Intervall als auch feste Zeiten gleichzeitig“ ist ausgeschlossen (DB-Invariant).
+
+Das ist Best-Practice für Rootless-Setups (live auf singra bestätigt: nur msm-panel.service + msm-update.timer, rootless docker als user@994, kein pro-Server-Unit):
+- Keine dynamischen pro-Server systemd --user Timer/Units oder Services (verletzt explizit „Keine Game-Server-User-Units“, würde pro Server daemon-reload, Unit-Cleanup bei DELETE, User-Namespace-Permissions und Auditing massiv komplexer machen).
+- Ein einzelner, von systemd supervisierter Prozess (Restart=on-failure, loginctl linger für den Docker-User-Daemon) ist die zuverlässigste und wartbarste Lösung für Scheduling in diesem Rootless-Kontext.
+- Nutzer-Flexibilität bleibt erhalten (Intervall für regelmäßige Neustarts z. B. gegen Memory-Leaks; feste Zeiten für vorhersehbare Low-Traffic-Fenster), ohne die Architektur zu sprengen.
+- Konsistent mit allen anderen zentralen Scheduler-Aufgaben (Disk-Soft-Limit, passive Background-Update-Checks, Backups).
+
+
 ### 12.9 Keine 0.0.0.0-Bindings im Panel
 
 Die Panel-API darf nur an `127.0.0.1` binden. Container-Port-Publishes dürfen `0.0.0.0` nutzen (Docker-Default), wenn die Game-Spielebene das benötigt. Optional pro Server: `server.public_bind_ip` setzt einen explizit gebundenen Host-Interface — empfohlen bei Multi-IP-Hosts.
