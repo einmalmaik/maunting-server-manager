@@ -459,12 +459,13 @@ class BlueprintSteamSource(BaseModel):
     platform: BlueprintSteamPlatform
     compatibility: BlueprintSteamCompatibility | None = None
     requiresLogin: bool = False
+    validate: bool = True  # if False: "+app_update <id>" without "validate" (faster, less error-prone for some Proton apps like SCUM); generic Blueprint control for ALL supported Steam games to avoid slow starts and 0x226 state errors on every start/restart
 
     @field_validator("appId")
     @classmethod
     def _check_app_id(cls, v: str) -> str:
         if not _NUMERIC_ID_RE.match(v):
-            raise ValueError("source.steam.appId muss numerischer String sein (^\\d{1,10}$).")
+            raise ValueError("source.steam.appId muss numerischer String sein (^\\\\d{1,10}$).")
         return v
 
     @model_validator(mode="after")
@@ -591,16 +592,19 @@ class BlueprintSource(BaseModel):
     def effective_update_strategy(self) -> BlueprintUpdateStrategy:
         """Liefert die effektive Update-Strategie.
 
-        Default pro Source-Type:
-        - steam: ``alwaysValidate`` (SteamCMD validate ist die einzige
-          verlaessliche Quelle fuer Binary-Aktualitaet).
+        Default pro Source-Type (geändert auf checkBased für Steam, um
+        inakzeptabel lange Startzeiten und wiederkehrende SteamCMD-State-Fehler
+        (0x226 etc.) bei jedem Start/Restart zu vermeiden. Validate ist teuer
+        und fehleranfällig bei großen/Proton-Spielen wenn unnötig).
+        User kann per Blueprint explizit "alwaysValidate" setzen, wenn gewünscht.
+        - steam: ``checkBased`` (schnelle Starts; Update nur bei Bedarf oder manuell)
         - http: ``checkBased`` (HEAD + Last-Modified).
         - dockerOnly/custom/manualUpload: ``none`` (kein Auto-Update).
         """
         if self.updateStrategy is not None:
             return self.updateStrategy
         defaults = {
-            BlueprintSourceType.STEAM: BlueprintUpdateStrategy.ALWAYS_VALIDATE,
+            BlueprintSourceType.STEAM: BlueprintUpdateStrategy.CHECK_BASED,
             BlueprintSourceType.HTTP: BlueprintUpdateStrategy.CHECK_BASED,
             BlueprintSourceType.DOCKER_ONLY: BlueprintUpdateStrategy.NONE,
             BlueprintSourceType.CUSTOM: BlueprintUpdateStrategy.NONE,
