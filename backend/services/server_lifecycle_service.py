@@ -459,6 +459,8 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     ports_list = _ports(server)
     open_ports(server.name, ports_list)
     iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
+    _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start möglich (Image-Pull/Steam-Update).\n")
     _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         result = plugin.start(server)
@@ -574,6 +576,8 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     ports_list = _ports(server)
     open_ports(server.name, ports_list)
     iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
+    _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start möglich (Image-Pull/Steam-Update).\n")
     _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         start_result = plugin.start(server)

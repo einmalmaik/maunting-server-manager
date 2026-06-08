@@ -307,6 +307,9 @@ class BlueprintRuntime(BaseModel):
     requiredFiles: list[str] = Field(default_factory=list, max_length=16)
     configPatches: list["BlueprintConfigPatch"] = Field(default_factory=list, max_length=32)
     stopGracePeriodSeconds: int = Field(default=30, ge=5, le=600)
+    # Generische Einstellung für lange Starts (Wine/Proton/erste Pulls, SCUM etc.)
+    # Erlaubt pro-Blueprint Tuning (Default 2s reicht für die meisten; bei großen Images höher).
+    startupCheckSeconds: float = Field(default=2.0, ge=0.0, le=30.0)
 
     @field_validator("image")
     @classmethod

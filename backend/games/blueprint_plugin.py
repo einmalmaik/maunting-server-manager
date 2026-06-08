@@ -579,6 +579,22 @@ class BlueprintPlugin(GamePlugin):
         if workshop_cache.exists() or workshop_cache.is_symlink():
             _safe_remove(workshop_cache)
 
+        # Staging-Bereich der laufenden/letzten Downloads ebenfalls bereinigen.
+        # Vorherige (teilweise) Downloads können hier "stale" Dateien hinterlassen,
+        # die SteamCMD bei Re-Installs verwirren und zu "Workshop-Download nicht
+        # verifiziert" trotz erfolgreichem Container-Lauf führen. Per-Item, ohne
+        # Seiteneffekte auf andere Workshop-Mods derselben App.
+        downloads_cache = (
+            base
+            / "steamapps"
+            / "workshop"
+            / "downloads"
+            / (bp_mods.workshopAppId or "")
+            / workshop_id
+        )
+        if downloads_cache.exists() or downloads_cache.is_symlink():
+            _safe_remove(downloads_cache)
+
         _append_console_log(server.id, f"[MSM] Mod {workshop_id} entfernt\n")
         return {"ok": True, "removed": removed}
 

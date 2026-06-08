@@ -119,6 +119,18 @@ async def _restart_server_task(server_id: int) -> None:
         await restart_server_with_updates(db, server)
         server.last_auto_restart_completed_at = _utcnow()
         server.last_auto_restart_status = "success"
+        # Reset interval timer from *this successful completion* (fixes "set 8h but ran at 4am" and drift with multiple servers).
+        # For interval-based auto-restart we re-schedule so the next run is now + interval_hours.
+        try:
+            if getattr(server, "auto_restart", False) and getattr(server, "restart_interval_hours", None):
+                from services.scheduler_service import schedule_server_restart
+                schedule_server_restart(
+                    server.id,
+                    interval_hours=server.restart_interval_hours,
+                    job_id=f"restart_server_{server.id}",
+                )
+        except Exception as _e:
+            logging.warning("Could not reschedule auto-restart interval after success: %s", _e)
 
         audit = AuditLog(
             user_id=None,
