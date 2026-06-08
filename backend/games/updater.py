@@ -849,9 +849,10 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
             requires_login = bool(getattr(steam, "requiresLogin", False))
             platform = getattr(steam, "platform", None)
             platform_str = platform.value if platform else None
+            validate_flag = bool(getattr(steam, "validate", True))
             _append_console_log(
                 server_id,
-                f"[MSM] Server-Datei-Update: SteamCMD +app_update {app_id} validate (synchron vor Start)\n"
+                f"[MSM] Server-Datei-Update: SteamCMD +app_update {app_id} {'validate' if validate_flag else '(no-validate)'} (synchron vor Start)\n"
             )
             return run_steamcmd_install(
                 server_id=server_id,
@@ -860,6 +861,7 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 use_authenticated_login=requires_login,
                 platform=platform_str,
                 # dedicated STEAMCMD_IMAGE for the tool (pre-baked binary), not the game's runtime image
+                validate=validate_flag,
             )
         elif source_type == BlueprintSourceType.HTTP:
             _append_console_log(

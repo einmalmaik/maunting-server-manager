@@ -54,8 +54,10 @@
     "steam": {
       "appId": "443030",
       "platform": "linux",
-      "compatibility": "native"
-    }
+      "compatibility": "native",
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
   },
   "mods": {
     "supportsMods": true,

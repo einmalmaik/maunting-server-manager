@@ -50,8 +50,10 @@
       "appId": "3792580",
       "platform": "windows",
       "compatibility": "proton",
-      "requiresLogin": false
+      "requiresLogin": false,
+      "validate": false
     },
+    "updateStrategy": "checkBased",
     "http": null,
     "manual": null
   },

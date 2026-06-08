@@ -8,7 +8,7 @@ Simple, reliable, and extensible.
 import asyncio
 import logging
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -109,6 +109,17 @@ async def _restart_server_task(server_id: int) -> None:
         server = db.query(Server).filter(Server.id == server_id).first()
         if not server:
             return
+        # Guard gegen gleichzeitige Auto-Restarts und falsche Trigger bei nicht-laufenden Servern
+        # (verhindert Fehler bei mehreren gleichzeitig aktiven Servern und falsche 4-Uhr-Neustarts
+        # durch veraltete Jobs oder Scheduler-Drift).
+        if server.status != "running":
+            logger.info("Auto-restart für Server %s übersprungen (Status=%s)", server_id, server.status)
+            return
+        from services.server_lifecycle_service import is_lifecycle_job_active
+        if is_lifecycle_job_active(server_id):
+            logger.info("Auto-restart für Server %s übersprungen (bereits ein Lifecycle-Job aktiv)", server_id)
+            return
+
         server.last_auto_restart_attempt_at = _utcnow()
         server.last_auto_restart_status = "running"
         db.commit()
@@ -199,7 +210,12 @@ def schedule_server_restart(
     remove_job(job_id)
 
     if interval_hours:
-        trigger = IntervalTrigger(hours=interval_hours)
+        # WICHTIG: start_date in Zukunft setzen, damit IntervalTrigger NICHT sofort
+        # beim Hinzufügen ausgeführt wird (verhindert unerwartete Neustarts direkt
+        # nach Config-Änderung oder Server-Start; löst Timing-Probleme bei
+        # 8h-Intervall etc. und Race bei mehreren Servern).
+        start_date = _utcnow() + timedelta(hours=interval_hours)
+        trigger = IntervalTrigger(hours=interval_hours, start_date=start_date)
     elif cron_time:
         hour, minute = map(int, cron_time.split(":"))
         trigger = CronTrigger(hour=hour, minute=minute, timezone=timezone.utc)
@@ -231,8 +247,10 @@ def remove_restart_jobs(server_id: int) -> None:
 def sync_server_restart_schedule(server) -> None:
     """Synchronisiert DB-Settings eines Servers in APScheduler.
 
-    DB bleibt die Quelle der Wahrheit. Intervall hat Vorrang vor festen Zeiten,
-    weil die UI immer genau einen Modus speichert.
+    DB bleibt die Quelle der Wahrheit. 
+    Intervall hat Vorrang vor festen Zeiten (siehe _normalize_server_restart_mode im Router).
+    Die Normalisierung im Router stellt sicher, dass in der DB nie beide Modi gleichzeitig
+    gesetzt sind (sowohl als auch ist jetzt ausgeschlossen).
     """
     remove_restart_jobs(server.id)
     if not getattr(server, "auto_restart", False):
