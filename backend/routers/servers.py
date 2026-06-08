@@ -58,17 +58,16 @@ def _normalize_server_restart_mode(server: Server) -> None:
     fehlende Client-Normalisierung oder Migrationen.
 
     KISS: zentrale Normalisierung an der Persistenzstelle.
-    Rootless-Best-Practice (siehe docs/agent-rules/architecture.md):
-    - Keine per-Server systemd --user Timer/Units (explizit verboten für Game-Server-Lifecycle).
-    - Scheduling bleibt im zentralen, von systemd überwachten Panel-Prozess (User=msm).
-    - APScheduler + DB als Source-of-Truth + Re-Init on startup + Restart=on-failure ist der
-      gewählte, wartbare Pfad (keine zusätzliche Komplexität durch dynamische Units).
-    - Zeiten immer UTC-intendiert, unabhängig von Host-TZ (wie im Scheduler implementiert).
     """
-    if getattr(server, "restart_interval_hours", None):
+    interval = getattr(server, "restart_interval_hours", None)
+    times = getattr(server, "restart_times_utc", None) or getattr(server, "restart_time_utc", None)
+
+    if interval:
+        # Interval wins: clear any fixed times
         server.restart_time_utc = None
         server.restart_times_utc = None
-    elif getattr(server, "restart_times_utc", None) or getattr(server, "restart_time_utc", None):
+    elif times:
+        # Only fixed times: clear interval
         server.restart_interval_hours = None
 
 # ── Leichtergewichtiger, passiver Cache für Update-Checks im Status-Endpoint ──
