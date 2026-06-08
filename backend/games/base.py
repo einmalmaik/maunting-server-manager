@@ -256,6 +256,17 @@ def classify_steamcmd_failure(output: str, fallback_error: str = "") -> dict[str
     platform metadata, or concurrent access was the root cause.
     """
     text = f"{output}\n{fallback_error}".lower()
+    if "0x226" in text or "state is 0x226" in text:
+        return {
+            "error_code": "steamcmd_update_state_0x226",
+            "error": (
+                "SteamCMD meldet App-State 0x226 nach dem Update-Job. "
+                "Mögliche Ursachen (nicht verifiziert): Dateiblockaden (Game-Container lief während Update?), "
+                "Berechtigungsprobleme (chown nach Wine/Proton-Run, Rootless-Docker), "
+                "unvollständiger vorheriger Job, korrupter Steam-App-State oder fehlender Login für diese App. "
+                "Lösung: Server stoppen vor Update, ggf. Reinstall, oder im Blueprint updateStrategy=checkBased + validate=false für Steam-Source setzen (vermeidet Validate auf jedem Start)."
+            ),
+        }
     if "0x202" in text:
         return {
             "error_code": "steamcmd_update_state_0x202",
@@ -295,11 +306,14 @@ def run_steamcmd_install(
     use_authenticated_login: bool = False,
     platform: str | None = None,
     steamcmd_image: str | None = None,
+    validate: bool = True,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
 
     Schreibt strukturiertes Console-Log und gibt strukturiertes dict zurück.
+    validate=False erlaubt schnelle "+app_update <id>" ohne teuren/fehleranfälligen
+    validate-Schritt (generisch über Blueprint steuerbar für alle Steam-Games).
     """
     from services.steam_account_service import SteamAccountService
 
@@ -328,8 +342,10 @@ def run_steamcmd_install(
     steam_args.extend([
         "+force_install_dir", CONTAINER_DATA_DIR,
         *login_args,
-        "+app_update", app_id, "validate",
+        "+app_update", app_id,
     ])
+    if validate:
+        steam_args.append("validate")
     if extra_args:
         steam_args.extend(extra_args)
     steam_args.append("+quit")
@@ -387,6 +403,7 @@ def run_steamcmd_workshop_download(
     workshop_item_id: str,
     use_authenticated_login: bool = False,
     steamcmd_image: str | None = None,
+    validate: bool = True,
 ) -> dict:
     """Kompatibler Single-Mod-Einstieg; intern ein Batch mit einer Mod."""
     result = run_steamcmd_workshop_download_batch(
@@ -415,6 +432,7 @@ def run_steamcmd_workshop_download_batch(
     timeout: int = 3600,
     retry: bool = True,
     steamcmd_image: str | None = None,
+    validate: bool = True,
 ) -> dict:
     """Lädt mehrere Workshop-Items in einer SteamCMD-Session.
 
