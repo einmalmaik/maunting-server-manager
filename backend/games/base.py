@@ -229,9 +229,23 @@ def _build_steamcmd_bash_command(steam_args: list[str], chown_uid: int, chown_gi
     privileges` und einen Bind-Mount-only-Schreibpfad genügend abgeschottet.
     Nach dem Lauf chown'en wir /data zurück auf die msm-Host-UID, damit das
     Panel als unprivilegierter User weiterarbeiten kann.
+
+    Zusätzlich: Vor dem SteamCMD-Lauf werden stale downloading/ und temp/
+    Reste für alle Apps im Server-Ordner entfernt. Das verhindert "state is
+    0x202/0x226 after update job" durch Dateiblockaden von vorherigen
+    fehlgeschlagenen Jobs (häufig bei SCUM und anderen großen Windows-Servern
+    via Wine/Proton).
     """
     quoted = " ".join(shlex.quote(a) for a in steam_args)
+    # KISS-Cleanup: stale Steam partials sind immer nur von fehlgeschlagenen
+    # vorherigen Jobs. Löschen ist sicher (keine Nutzerdaten) und löst
+    # den häufigsten Grund für 0x2xx State-Fehler nach App-Update.
+    cleanup = (
+        f"rm -rf {shlex.quote(CONTAINER_DATA_DIR)}/steamapps/downloading/* "
+        f"{shlex.quote(CONTAINER_DATA_DIR)}/steamapps/temp/* 2>/dev/null || true; "
+    )
     script = (
+        cleanup +
         f"{shlex.quote(STEAMCMD_BIN)} {quoted}; "
         "rc=$?; "
         f"chown -R {int(chown_uid)}:{int(chown_gid)} {shlex.quote(CONTAINER_DATA_DIR)}; "
@@ -256,13 +270,19 @@ def classify_steamcmd_failure(output: str, fallback_error: str = "") -> dict[str
     platform metadata, or concurrent access was the root cause.
     """
     text = f"{output}\n{fallback_error}".lower()
-    if "0x202" in text:
+    if "0x202" in text or "0x226" in text:
+        state = "0x202" if "0x202" in text else "0x226"
         return {
-            "error_code": "steamcmd_update_state_0x202",
+            "error_code": f"steamcmd_update_state_{state}",
             "error": (
-                "SteamCMD meldet App-State 0x202 nach dem Update-Job. "
-                "Mögliche Ursachen (nicht verifiziert): unvollständige App-Konfiguration, "
-                "Plattenplatz/Quota, Berechtigungen oder paralleler Zugriff auf Install-/Cache-Daten."
+                f"SteamCMD meldet App-State {state} nach dem Update-Job. "
+                "Mögliche Ursachen (nicht verifiziert): Dateiblockaden (z. B. laufender "
+                "Server-Prozess hält Dateien offen), Berechtigungsprobleme (z. B. nach "
+                "abgebrochenem vorherigem Job), unvollständige/partial Downloads "
+                "(Reste in steamapps/downloading/ oder temp/), Plattenplatz/Quota oder "
+                "paralleler Zugriff auf Install-/Cache-Daten. "
+                "MSM führt automatisch Cleanup der stale downloading/temp-Ordner vor "
+                "jedem +app_update durch (siehe _build_steamcmd_bash_command)."
             ),
         }
     if "missing configuration" in text:
