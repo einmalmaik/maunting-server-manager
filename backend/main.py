@@ -432,10 +432,6 @@ app.include_router(blueprints_router)
 # LoginChallenge gegen Brute-Force auf dem OAuth-Pfad.
 app.include_router(oauth_router)
 
-# Static Frontend (nur in Produktion)
-import os
-if os.path.exists("/opt/msm/frontend/dist"):
-    app.mount("/", StaticFiles(directory="/opt/msm/frontend/dist", html=True), name="frontend")
 
 
 @app.get("/")
@@ -446,3 +442,12 @@ def root():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+# Static Frontend (nur in Produktion)
+# Wichtig: Mount NACH allen API-Routern und expliziten Routes hinzufügen,
+# damit /api/* und Health nicht vom SPA-Static-Fallback geschluckt werden.
+# API-Routes haben Priorität, unbekannte Pfade (SPA) gehen an das StaticFiles.
+import os
+if os.path.exists("/opt/msm/frontend/dist"):
+    app.mount("/", StaticFiles(directory="/opt/msm/frontend/dist", html=True), name="frontend")
+
