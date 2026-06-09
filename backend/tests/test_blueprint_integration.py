@@ -173,8 +173,9 @@ def test_steam_blueprint_uses_real_check_server_file_update(tmp_path):
 
 
 def test_update_strategy_always_validate_forces_update_even_if_check_says_none(tmp_path):
-    """Steam default (alwaysValidate): perform wird gerufen, auch wenn check 'none' liefert."""
-    bp = _load_native("dayz")
+    """alwaysValidate: perform wird gerufen, auch wenn check 'none' liefert (explizit, da Default jetzt checkBased)."""
+    data = _bp_with_update_strategy("steam", "alwaysValidate", extra_source={"steam": {"appId": "223350", "platform": "linux"}})
+    bp = load_blueprint_dict(data)
     plugin = BlueprintPlugin(bp)
 
     install = tmp_path / "s"
@@ -184,7 +185,7 @@ def test_update_strategy_always_validate_forces_update_even_if_check_says_none(t
     srv = Server(
         id=101,
         name="steam_always",
-        game_type="dayz",
+        game_type="steam_test",
         install_dir=str(install),
         public_bind_ip="127.0.0.1",
         status="stopped",

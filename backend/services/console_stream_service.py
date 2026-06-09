@@ -106,6 +106,12 @@ def _serialize(line: _Line) -> str:
 async def _read_initial_backlog(log_path: str, state: _ServerState) -> None:
     """Liest die MSM-Console-Logdatei in den Ring-Buffer (beim ersten Connect
     pro Server, oder nach Reconnect-Bedarf).
+
+    Lines in the file may be prefixed with "iso-timestamp\\t" (post append
+    change). We parse the original write-timestamp so that historical MSM
+    messages show the time they *actually appeared/were appended*, not the
+    time the user opened the console panel (which produced the reported
+    frontend timestamp bug).
     """
     if not os.path.exists(log_path):
         return
@@ -118,13 +124,27 @@ async def _read_initial_backlog(log_path: str, state: _ServerState) -> None:
                 for raw_line in chunk.splitlines(keepends=False):
                     if not raw_line:
                         continue
-                    text = raw_line.decode("utf-8", errors="replace")
+                    line_str = raw_line.decode("utf-8", errors="replace")
+                    ts = _utc_iso()
+                    text = line_str
+                    if "\t" in line_str:
+                        parts = line_str.split("\t", 1)
+                        if len(parts) == 2:
+                            cand, rest = parts
+                            try:
+                                # tolerate Z-suffix or full offset
+                                cand_norm = cand.replace("Z", "+00:00")
+                                datetime.fromisoformat(cand_norm)
+                                ts = cand
+                                text = rest
+                            except Exception:
+                                pass  # old line without ts prefix -> fallback now (will be rare after rollout)
                     state.lines.append(
                         _Line(
                             id=state.next_id,
                             text=text,
                             source="msm",
-                            timestamp=_utc_iso(),
+                            timestamp=ts,
                         )
                     )
                     state.next_id += 1
@@ -160,8 +180,21 @@ async def _tail_file_loop(log_path: str, state: _ServerState, on_line) -> None:
         for raw_line in chunk.splitlines(keepends=False):
             if not raw_line:
                 continue
-            text = raw_line.decode("utf-8", errors="replace")
-            await on_line(text, "msm")
+            line_str = raw_line.decode("utf-8", errors="replace")
+            ts = None
+            text = line_str
+            if "\t" in line_str:
+                parts = line_str.split("\t", 1)
+                if len(parts) == 2:
+                    cand, rest = parts
+                    try:
+                        cand_norm = cand.replace("Z", "+00:00")
+                        datetime.fromisoformat(cand_norm)
+                        ts = cand
+                        text = rest
+                    except Exception:
+                        pass
+            await on_line(text, "msm", ts)
 
 
 async def _tail_docker_loop(container: str, on_line) -> None:
@@ -187,8 +220,23 @@ async def _tail_docker_loop(container: str, on_line) -> None:
             backoff = 0.5
             # stream_logs iteriert bis der Subprozess endet (Container stoppt,
             # Daemon weg, Pipe kaputt). Danach zurueck zum Readiness-Check.
-            async for text in docker_service.stream_logs(container, tail=200):
-                await on_line(text, "docker")
+            async for raw_line in docker_service.stream_logs(container, tail=200):
+                # Docker with --timestamps prefixes each line with "RFC3339 ts<space>line".
+                # Parse it out so the stored "text" stays clean (game output only)
+                # and we can use the real log time instead of receive time.
+                text = raw_line
+                ts = None
+                if raw_line and " " in raw_line:
+                    first, rest = raw_line.split(" ", 1)
+                    if first and (first[0].isdigit() or first[0] == "-"):
+                        try:
+                            first_norm = first.replace("Z", "+00:00")
+                            datetime.fromisoformat(first_norm)
+                            ts = first
+                            text = rest
+                        except Exception:
+                            pass
+                await on_line(text, "docker", ts)
             await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             raise
@@ -251,19 +299,20 @@ async def connect(
         for line in replay:
             await ws.send_text(_serialize(line))
 
-        async def _on_line(text: str, source: str) -> None:
+        async def _on_line(text: str, source: str, provided_ts: str | None = None) -> None:
             """Speichert die Zeile im Ring-Buffer (unter Lock) und schickt sie an den Client.
 
             Wird von zwei parallelen Tasks (_tail_file_loop + _tail_docker_loop)
             aufgerufen. Der Lock schuetzt next_id und das deque.append, damit
             bei reconnect-resume via ?last_id= keine Luecken entstehen.
             """
+            ts = provided_ts or _utc_iso()
             async with _STATES_LOCK:
                 line = _Line(
                     id=state.next_id,
                     text=text,
                     source=source,
-                    timestamp=_utc_iso(),
+                    timestamp=ts,
                 )
                 state.next_id += 1
                 state.lines.append(line)

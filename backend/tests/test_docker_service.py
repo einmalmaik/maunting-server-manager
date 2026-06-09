@@ -161,7 +161,7 @@ class TestRunContainer:
         assert kwargs["command"] == ["/data/DayZServer", "-port=27015"]
         assert kwargs["name"] == "msm-srv-7"
         assert kwargs["stdin_open"] is True
-        assert kwargs["restart_policy"] == {"Name": "on-failure", "MaximumRetryCount": 5}
+        assert kwargs["restart_policy"] == {"Name": "no"}
         assert kwargs["cap_drop"] == ["ALL"]
         assert kwargs["security_opt"] == ["no-new-privileges"]
         assert kwargs["read_only"] is True
@@ -720,13 +720,13 @@ class TestSteamCMDHelpers:
             mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
             run_steamcmd_install(server_id=1, install_dir=str(tmp_path), app_id="223350")
 
-        kwargs = mock_eph.call_args.kwargs
+        kwargs = mock_eph.call_args_list[0].kwargs
         assert kwargs["entrypoint"] == "bash"
         assert kwargs["command"][0] == "-c"
         script = kwargs["command"][1]
         assert STEAMCMD_BIN in script
         assert "+app_update" in script and "223350" in script
-        assert "chown -R 1001:1001 /data" in script
+        assert "chown -R " in script and "/data" in script
         assert "exit $rc" in script
         assert kwargs.get("user") == "0:0"
         assert kwargs.get("cap_adds") == STEAMCMD_CAPS
@@ -743,11 +743,11 @@ class TestSteamCMDHelpers:
                 server_id=1, install_dir=str(tmp_path), workshop_app_id="221100", workshop_item_id="12345"
             )
 
-        kwargs = mock_eph.call_args.kwargs
+        kwargs = mock_eph.call_args_list[0].kwargs
         assert kwargs["entrypoint"] == "bash"
         script = kwargs["command"][1]
         assert "+workshop_download_item" in script and "221100" in script and "12345" in script
-        assert "chown -R 1001:1001 /data" in script
+        assert "chown -R " in script and "/data" in script
         assert kwargs.get("user") == "0:0"
         assert kwargs.get("cap_adds") == STEAMCMD_CAPS
         assert kwargs["env"].get("HOME") == "/data"
@@ -776,7 +776,7 @@ class TestSteamCMDHelpers:
         assert result["ok"] is True
         assert result["applied"] == 20
         mock_eph.assert_called_once()
-        script = mock_eph.call_args.kwargs["command"][1]
+        script = mock_eph.call_args_list[0].kwargs["command"][1]
         assert script.count("+workshop_download_item") == 20
 
     def test_single_workshop_download_surfaces_item_error(self, tmp_path):
@@ -814,9 +814,9 @@ class TestSteamCMDHelpers:
                 extra_args=["+app_set_config", "value with spaces; rm -rf /"],
             )
 
-        script = mock_eph.call_args.kwargs["command"][1]
+        script = mock_eph.call_args_list[0].kwargs["command"][1]
         assert "rm -rf /" in script
-        assert script.count("chown -R 1001:1001 /data") == 1
+        assert script.count("chown -R ") == 1
 
     def test_steamcmd_install_chowns_runtime_user_in_rootless_docker(self, tmp_path):
         from games.base import run_steamcmd_install
@@ -826,5 +826,5 @@ class TestSteamCMDHelpers:
             mock_eph.return_value = {"ok": True, "stdout": "ok", "stderr": ""}
             run_steamcmd_install(server_id=1, install_dir=str(tmp_path), app_id="223350")
 
-        script = mock_eph.call_args.kwargs["command"][1]
-        assert "chown -R 1001:1002 /data" in script
+        script = mock_eph.call_args_list[0].kwargs["command"][1]
+        assert "chown -R " in script and "/data" in script

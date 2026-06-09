@@ -25,6 +25,9 @@ class Server(Base):
     status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Auto-Restart
+    # WICHTIG: Nur EIN Modus aktiv (Intervall oder feste Zeiten).
+    # Die _normalize_server_restart_mode im Router stellt Exklusivität sicher.
+    # Intervall hat Vorrang. Siehe sync_server_restart_schedule und AGENTS.md (KISS + Rootless).
     auto_restart: Mapped[bool] = mapped_column(Boolean, default=False)
     restart_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     restart_time_utc: Mapped[str | None] = mapped_column(String(8), nullable=True)  # HH:MM

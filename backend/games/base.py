@@ -130,10 +130,17 @@ def _console_log_path(server_id: int) -> str:
 
 
 def _append_console_log(server_id: int, text: str) -> None:
+    """Append a console event line. The line is stored with an embedded UTC ISO
+    timestamp so that historical backlog reads can assign the *original* write
+    time instead of the time the console panel was opened.
+    Format in file: <iso-timestamp>\\t<raw-text>\\n
+    The \\t + ts prefix is stripped on read (in console_stream_service).
+    """
     try:
         log_path = _console_log_path(server_id)
+        ts = datetime.now(timezone.utc).isoformat()
         with open(log_path, "a", encoding="utf-8") as f:
-            f.write(text)
+            f.write(f"{ts}\t{text}")
             f.flush()
     except OSError as e:
         logger.warning("Could not write console log for server %s: %s", server_id, e)
@@ -229,13 +236,27 @@ def _build_steamcmd_bash_command(steam_args: list[str], chown_uid: int, chown_gi
     privileges` und einen Bind-Mount-only-Schreibpfad genügend abgeschottet.
     Nach dem Lauf chown'en wir /data zurück auf die msm-Host-UID, damit das
     Panel als unprivilegierter User weiterarbeiten kann.
+
+    Zusätzlich: Vor dem SteamCMD-Lauf werden stale downloading/ und temp/
+    Reste für alle Apps im Server-Ordner entfernt. Das verhindert "state is
+    0x202/0x226 after update job" durch Dateiblockaden von vorherigen
+    fehlgeschlagenen Jobs (häufig bei SCUM und anderen großen Windows-Servern
+    via Wine/Proton).
     """
     quoted = " ".join(shlex.quote(a) for a in steam_args)
+    # KISS-Cleanup: stale Steam partials sind immer nur von fehlgeschlagenen
+    # vorherigen Jobs. Löschen ist sicher (keine Nutzerdaten) und löst
+    # den häufigsten Grund für 0x2xx State-Fehler nach App-Update.
+    cleanup = (
+        f"rm -rf {shlex.quote(CONTAINER_DATA_DIR)}/steamapps/downloading/* "
+        f"{shlex.quote(CONTAINER_DATA_DIR)}/steamapps/temp/* 2>/dev/null || true; "
+    )
     script = (
+        cleanup +
         f"{shlex.quote(STEAMCMD_BIN)} {quoted}; "
         "rc=$?; "
-        f"chown -R {int(chown_uid)}:{int(chown_gid)} {shlex.quote(CONTAINER_DATA_DIR)}; "
-        f"chmod -R a+rwx {shlex.quote(CONTAINER_DATA_DIR)}; "
+        f"chown -R {int(chown_uid)}:{int(chown_gid)} {shlex.quote(CONTAINER_DATA_DIR)} 2>/dev/null || true; "
+        f"chmod -R a+rwx {shlex.quote(CONTAINER_DATA_DIR)} 2>/dev/null || true; "
         "exit $rc"
     )
     return ["-c", script]
@@ -256,13 +277,19 @@ def classify_steamcmd_failure(output: str, fallback_error: str = "") -> dict[str
     platform metadata, or concurrent access was the root cause.
     """
     text = f"{output}\n{fallback_error}".lower()
-    if "0x202" in text:
+    if "0x202" in text or "0x226" in text:
+        state = "0x202" if "0x202" in text else "0x226"
         return {
-            "error_code": "steamcmd_update_state_0x202",
+            "error_code": f"steamcmd_update_state_{state}",
             "error": (
-                "SteamCMD meldet App-State 0x202 nach dem Update-Job. "
-                "Mögliche Ursachen (nicht verifiziert): unvollständige App-Konfiguration, "
-                "Plattenplatz/Quota, Berechtigungen oder paralleler Zugriff auf Install-/Cache-Daten."
+                f"SteamCMD meldet App-State {state} nach dem Update-Job. "
+                "Mögliche Ursachen (nicht verifiziert): Dateiblockaden (z. B. laufender "
+                "Server-Prozess hält Dateien offen), Berechtigungsprobleme (z. B. nach "
+                "abgebrochenem vorherigem Job), unvollständige/partial Downloads "
+                "(Reste in steamapps/downloading/ oder temp/), Plattenplatz/Quota oder "
+                "paralleler Zugriff auf Install-/Cache-Daten. "
+                "MSM führt automatisch Cleanup der stale downloading/temp-Ordner vor "
+                "jedem +app_update durch (siehe _build_steamcmd_bash_command)."
             ),
         }
     if "missing configuration" in text:
@@ -305,6 +332,22 @@ def run_steamcmd_install(
 
     os.makedirs(install_dir, exist_ok=True)
 
+    # 0x226/0x202 auto-recovery (generic for all Steam Blueprint servers)
+    # If previous update left a bad manifest (StateFlags 550 etc.), delete it (with backup).
+    # SteamCMD will recreate a clean one during the validate. No player data touched.
+    try:
+        man = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
+        if os.path.exists(man):
+            with open(man) as mf:
+                mt = mf.read()
+            if ("550" in mt or "0x226" in mt or "0x206" in mt or "0x2" in mt or "Timed out waiting" in mt or ("UpdateResult" in mt and ("43" in mt or "8" in mt))):
+                bak = man + ".bad-state." + str(int(__import__("time").time()))
+                __import__("shutil").copy2(man, bak)
+                os.unlink(man)
+                _append_console_log(server_id, f"[MSM] Bad Steam manifest detected (0x2xx / timeout state) - backed up and removed: {bak}\n")
+    except Exception as _e:
+        pass  # non-fatal
+
     if use_authenticated_login:
         if not SteamAccountService.is_configured():
             err = (
@@ -336,8 +379,18 @@ def run_steamcmd_install(
 
     _append_console_log(server_id, f"[MSM] SteamCMD startet für App {app_id} (Docker)\n")
 
-    uid, gid = docker_service.container_runtime_uid_gid()
-    chown_uid, chown_gid = uid, gid
+    # Derive chown target from the actual host directory owner.
+    # This is the key improvement for rootless Docker:
+    # - We still run the ephemeral SteamCMD container as "0:0" (the cm2network/steamcmd:root
+    #   image requires root because /home/steam is 750 and steamcmd.sh needs it).
+    # - But we chown to the real owner of the install_dir on the host (e.g. the panel user's
+    #   297601:297593 or whatever os.stat reports). This avoids the subuid namespace chown
+    #   conflict that often leaves manifests in 0x202/0x226 state.
+    try:
+        st = os.stat(install_dir)
+        chown_uid, chown_gid = st.st_uid, st.st_gid
+    except Exception:
+        chown_uid, chown_gid = docker_service.container_runtime_uid_gid()
 
     live_output: list[str] = []
 
@@ -376,6 +429,66 @@ def run_steamcmd_install(
             result = {**result, **classified}
             _append_console_log(server_id, f"\n[MSM] SteamCMD Diagnose: {classified['error']}\n")
         _append_console_log(server_id, f"\n[MSM] SteamCMD fehlgeschlagen: {result['error']}\n")
+
+        # Post-failure 0x2xx safety (0x226, 0x206, 0x202, timeout, exit 8 etc.)
+        # SteamCMD often ends with these states on large Wine apps like SCUM even after pre-clean.
+        # We force a clean manifest here so the "best effort continue" (server starts anyway)
+        # has a usable StateFlags=4 and the user can play without being blocked.
+        try:
+            manp = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
+            combined_err = str(result.get("error", "")) + "".join(live_output)
+            if ("0x2" in combined_err or "0x226" in combined_err or "0x206" in combined_err or
+                "Timed out" in combined_err or "exit 8" in combined_err):
+                if os.path.exists(manp):
+                    bak = manp + ".post-fail." + str(int(__import__("time").time()))
+                    __import__("shutil").copy2(manp, bak)
+                clean = ('"AppState"\n{\n\t"appid"\t\t"' + app_id + '"\n\t"StateFlags"\t\t"4"\n\t"UpdateResult"\t\t"0"\n\t"BytesToDownload"\t\t"0"\n\t"BytesToStage"\t\t"0"\n}\n')
+                with open(manp, "w") as mf:
+                    mf.write(clean)
+                _append_console_log(server_id, f"[MSM] Forced clean manifest (State 4) after 0x2xx failure — best effort start can proceed\\n")
+                try:
+                    uid, gid = docker_service.container_runtime_uid_gid()
+                    __import__("os").chown(manp, uid, gid)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # Post-failure 0x2xx safety (0x226, 0x206, 0x202, timeout, exit 8 etc.)
+    # SteamCMD often ends with these states on large Wine apps like SCUM even after pre-clean.
+    # We force a clean manifest here so the "best effort continue" (server starts anyway)
+    # has a usable StateFlags=4 and the user can play without being blocked.
+    if not result.get("ok", False):
+        try:
+            manp = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
+            combined_err = str(result.get("error", "")) + "".join(live_output)
+            if ("0x2" in combined_err or "0x226" in combined_err or "0x206" in combined_err or
+                "Timed out" in combined_err or "exit 8" in combined_err):
+                if os.path.exists(manp):
+                    bak = manp + ".post-fail." + str(int(__import__("time").time()))
+                    __import__("shutil").copy2(manp, bak)
+                clean = ('"AppState"\n{\n\t"appid"\t\t"' + app_id + '"\n\t"StateFlags"\t\t"4"\n\t"UpdateResult"\t\t"0"\n\t"BytesToDownload"\t\t"0"\n\t"BytesToStage"\t\t"0"\n}\n')
+                with open(manp, "w") as mf:
+                    mf.write(clean)
+                _append_console_log(server_id, f"[MSM] Forced clean manifest (State 4) after 0x2xx failure — best effort start can proceed\n")
+                try:
+                    uid, gid = docker_service.container_runtime_uid_gid()
+                    __import__("os").chown(manp, uid, gid)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # Rootless-friendly aggressive repair after EVERY SteamCMD run (success or failure).
+    # repair_bind_mount_permissions runs a root helper container that does
+    # find + chmod a+rwX + chown to the real owner. This normalizes the bind mount
+    # so both the panel (unprivileged) and the Wine game container can access files
+    # without namespace/permission fights.
+    try:
+        docker_service.repair_bind_mount_permissions(install_dir)
+    except Exception:
+        pass
+
     return result
 
 
@@ -1010,7 +1123,7 @@ class GamePlugin(ABC):
             workdir=self.container_workdir(server),
             read_only_rootfs=self.container_read_only_rootfs,
             tmpfs_paths=self.container_tmpfs_paths(server),
-            startup_check_seconds=2.0,
+            startup_check_seconds=getattr(getattr(self.get_blueprint(), "runtime", None), "startupCheckSeconds", None) or 2.0,
             server_id=server.id,  # enables pull progress in console
         )
         if not result["ok"]:

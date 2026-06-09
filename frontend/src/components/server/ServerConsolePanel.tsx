@@ -226,6 +226,7 @@ export function ServerConsolePanel({ serverId }: Props) {
   // Das eigentliche Log-Rendering bleibt im flushBuffer (Batching fuer
   // React-Renders).
   const onRawMessage = (raw: string) => {
+    if (raw.includes("pong") || raw.includes("ping")) return; // filter heartbeat control frames - do not show in console log
     try {
       const frame = parseConsoleFrame(raw)
       if (typeof frame.id === 'number') {

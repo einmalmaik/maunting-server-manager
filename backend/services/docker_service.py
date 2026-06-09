@@ -344,6 +344,12 @@ def _ensure_image_available(client: Any, image: str, server_id: int | None = Non
     # NotFound deckt ImageNotFound (Subklasse) ab.
     try:
         client.images.get(image)
+        if server_id is not None:
+            try:
+                from games.base import _append_console_log
+                _append_console_log(server_id, f"[MSM] Using cached local Docker image {image} (no pull needed)\n")
+            except Exception:
+                pass
         return
     except NotFound:
         pass
@@ -480,7 +486,7 @@ def run_container(
         "name": name,
         "detach": detach,
         "stdin_open": True,
-        "restart_policy": {"Name": "on-failure", "MaximumRetryCount": 5},
+        "restart_policy": {"Name": "no"},  # MSM lifecycle only - see comment above
         "log_config": LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None,
         "cap_drop": _HARDENING_CAP_DROP,
         "security_opt": _HARDENING_SECURITY_OPT,
@@ -787,7 +793,7 @@ async def stream_logs(name: str, tail: int = 200) -> AsyncIterator[str]:
 
     host = resolve_docker_host()
     env = {**os.environ, "DOCKER_HOST": host}
-    cmd = ["docker", "logs", "--follow", "--tail", str(tail), name]
+    cmd = ["docker", "logs", "--follow", "--timestamps", "--tail", str(tail), name]
     proc = None
     try:
         proc = await asyncio.create_subprocess_exec(

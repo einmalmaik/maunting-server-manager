@@ -1,0 +1,1 @@
+{"Name":"rootless","Metadata":{"Description":"Rootless mode"},"Endpoints":{"docker":{"Host":"unix:///run/user/994/docker.sock","SkipTLSVerify":false}}}

@@ -19,7 +19,7 @@ class TestSteamcmdPlatform:
                 use_authenticated_login=False,
                 platform="windows",
             )
-            cmd = mock_eph.call_args.kwargs["command"]
+            cmd = mock_eph.call_args_list[0].kwargs["command"]
             script = " ".join(cmd)
             assert "+@sSteamCmdForcePlatformType windows" in script
             # Ensure the platform type is set BEFORE the login
@@ -35,6 +35,6 @@ class TestSteamcmdPlatform:
                 app_id="123",
                 use_authenticated_login=False,
             )
-            cmd = mock_eph.call_args.kwargs["command"]
+            cmd = mock_eph.call_args_list[0].kwargs["command"]
             script = " ".join(cmd)
             assert "+@sSteamCmdForcePlatformType" not in script

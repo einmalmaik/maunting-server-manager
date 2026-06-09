@@ -101,7 +101,7 @@ def get_blueprint(
     if entry is None:
         raise HTTPException(status_code=404, detail="Blueprint nicht gefunden")
     # Pydantic dump → reines JSON-Objekt (Enums als Strings)
-    data = entry.blueprint.model_dump(mode="json")
+    data = entry.blueprint.model_dump(mode="json", by_alias=True)
     body = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     return Response(
         content=body,
@@ -170,7 +170,7 @@ async def import_blueprint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    payload = blueprint.model_dump(mode="json")
+    payload = blueprint.model_dump(mode="json", by_alias=True)
     try:
         target.write_text(
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n",

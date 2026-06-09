@@ -112,6 +112,7 @@ def test_installed_mod_without_metadata_is_marked_unknown_not_updated(db, test_s
     db.add(mod)
     db.commit()
 
+    monkeypatch.setattr(updater, "_has_steam_api_key", lambda: False)
     monkeypatch.setattr(updater, "_fetch_steam_mod_updated", lambda _app_id, _workshop_id: None)
 
     blueprint = load_blueprint_dict(

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -73,10 +73,11 @@ class Settings(BaseSettings):
     auto_update: bool = False  # true = systemd-Timer installiert Updates automatisch
     auto_update_interval_hours: int = 24  # Prüfintervall
 
-    class Config:
-        env_prefix = "MSM_"
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_prefix="MSM_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
 
 settings = Settings()

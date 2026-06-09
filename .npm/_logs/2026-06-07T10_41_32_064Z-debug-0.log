@@ -1,0 +1,408 @@
+0 verbose cli /usr/bin/node /usr/bin/npm
+1 info using npm@10.9.7
+2 info using node@v22.22.2
+3 silly config load:file:/usr/lib/node_modules/npm/npmrc
+4 silly config load:file:/opt/msm/frontend/.npmrc
+5 silly config load:file:/opt/msm/.npmrc
+6 silly config load:file:/usr/etc/npmrc
+7 verbose title npm install
+8 verbose argv "install" "--loglevel" "warn"
+9 verbose logfile logs-max:10 dir:/opt/msm/.npm/_logs/2026-06-07T10_41_32_064Z-
+10 verbose logfile /opt/msm/.npm/_logs/2026-06-07T10_41_32_064Z-debug-0.log
+11 silly logfile start cleaning logs, removing 1 files
+12 silly logfile done cleaning log files
+13 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+14 silly idealTree buildDeps
+15 silly reify moves {}
+16 silly audit bulk request {
+16 silly audit   '@adobe/css-tools': [ '4.4.4' ],
+16 silly audit   '@alloc/quick-lru': [ '5.2.0' ],
+16 silly audit   '@asamuzakjp/css-color': [ '5.1.11' ],
+16 silly audit   '@asamuzakjp/dom-selector': [ '7.1.1' ],
+16 silly audit   '@asamuzakjp/generational-cache': [ '1.0.1' ],
+16 silly audit   '@asamuzakjp/nwsapi': [ '2.3.9' ],
+16 silly audit   '@babel/code-frame': [ '7.29.0' ],
+16 silly audit   '@babel/helper-validator-identifier': [ '7.28.5' ],
+16 silly audit   '@babel/runtime': [ '7.29.2' ],
+16 silly audit   '@bramus/specificity': [ '2.4.2' ],
+16 silly audit   '@codemirror/autocomplete': [ '6.20.2' ],
+16 silly audit   '@codemirror/commands': [ '6.10.3' ],
+16 silly audit   '@codemirror/lang-css': [ '6.3.1' ],
+16 silly audit   '@codemirror/lang-html': [ '6.4.11' ],
+16 silly audit   '@codemirror/lang-javascript': [ '6.2.5' ],
+16 silly audit   '@codemirror/lang-json': [ '6.0.2' ],
+16 silly audit   '@codemirror/lang-markdown': [ '6.5.0' ],
+16 silly audit   '@codemirror/lang-xml': [ '6.1.0' ],
+16 silly audit   '@codemirror/lang-yaml': [ '6.1.3' ],
+16 silly audit   '@codemirror/language': [ '6.12.3' ],
+16 silly audit   '@codemirror/legacy-modes': [ '6.5.3' ],
+16 silly audit   '@codemirror/lint': [ '6.9.6' ],
+16 silly audit   '@codemirror/search': [ '6.7.0' ],
+16 silly audit   '@codemirror/state': [ '6.6.0' ],
+16 silly audit   '@codemirror/theme-one-dark': [ '6.1.3' ],
+16 silly audit   '@codemirror/view': [ '6.43.0' ],
+16 silly audit   '@csstools/color-helpers': [ '6.0.2' ],
+16 silly audit   '@csstools/css-calc': [ '3.2.1' ],
+16 silly audit   '@csstools/css-color-parser': [ '4.1.1' ],
+16 silly audit   '@csstools/css-parser-algorithms': [ '4.0.0' ],
+16 silly audit   '@csstools/css-syntax-patches-for-csstree': [ '1.1.4' ],
+16 silly audit   '@csstools/css-tokenizer': [ '4.0.0' ],
+16 silly audit   '@emnapi/core': [ '1.10.0' ],
+16 silly audit   '@emnapi/runtime': [ '1.10.0' ],
+16 silly audit   '@emnapi/wasi-threads': [ '1.2.1' ],
+16 silly audit   '@exodus/bytes': [ '1.15.1' ],
+16 silly audit   '@jridgewell/gen-mapping': [ '0.3.13' ],
+16 silly audit   '@jridgewell/resolve-uri': [ '3.1.2' ],
+16 silly audit   '@jridgewell/sourcemap-codec': [ '1.5.5' ],
+16 silly audit   '@jridgewell/trace-mapping': [ '0.3.31' ],
+16 silly audit   '@lezer/common': [ '1.5.2' ],
+16 silly audit   '@lezer/css': [ '1.3.3' ],
+16 silly audit   '@lezer/highlight': [ '1.2.3' ],
+16 silly audit   '@lezer/html': [ '1.3.13' ],
+16 silly audit   '@lezer/javascript': [ '1.5.4' ],
+16 silly audit   '@lezer/json': [ '1.0.3' ],
+16 silly audit   '@lezer/lr': [ '1.4.10' ],
+16 silly audit   '@lezer/markdown': [ '1.6.3' ],
+16 silly audit   '@lezer/xml': [ '1.0.6' ],
+16 silly audit   '@lezer/yaml': [ '1.0.4' ],
+16 silly audit   '@marijn/find-cluster-break': [ '1.0.2' ],
+16 silly audit   '@napi-rs/wasm-runtime': [ '1.1.4' ],
+16 silly audit   '@nodelib/fs.scandir': [ '2.1.5' ],
+16 silly audit   '@nodelib/fs.stat': [ '2.0.5' ],
+16 silly audit   '@nodelib/fs.walk': [ '1.2.8' ],
+16 silly audit   '@oxc-project/types': [ '0.132.0' ],
+16 silly audit   '@remix-run/router': [ '1.23.2' ],
+16 silly audit   '@rolldown/binding-android-arm64': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-darwin-arm64': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-darwin-x64': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-freebsd-x64': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-linux-arm-gnueabihf': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-linux-arm64-gnu': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-linux-arm64-musl': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-linux-ppc64-gnu': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-linux-s390x-gnu': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-linux-x64-gnu': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-linux-x64-musl': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-openharmony-arm64': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-wasm32-wasi': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-win32-arm64-msvc': [ '1.0.2' ],
+16 silly audit   '@rolldown/binding-win32-x64-msvc': [ '1.0.2' ],
+16 silly audit   '@rolldown/pluginutils': [ '1.0.1' ],
+16 silly audit   '@standard-schema/spec': [ '1.1.0' ],
+16 silly audit   '@testing-library/dom': [ '10.4.1' ],
+16 silly audit   '@testing-library/jest-dom': [ '6.9.1' ],
+16 silly audit   'dom-accessibility-api': [ '0.6.3', '0.5.16' ],
+16 silly audit   '@testing-library/react': [ '16.3.2' ],
+16 silly audit   '@tybys/wasm-util': [ '0.10.2' ],
+16 silly audit   '@types/aria-query': [ '5.0.4' ],
+16 silly audit   '@types/chai': [ '5.2.3' ],
+16 silly audit   '@types/deep-eql': [ '4.0.2' ],
+16 silly audit   '@types/estree': [ '1.0.8' ],
+16 silly audit   '@types/node': [ '25.9.1' ],
+16 silly audit   '@types/prop-types': [ '15.7.15' ],
+16 silly audit   '@types/react': [ '18.3.29' ],
+16 silly audit   '@types/react-dom': [ '18.3.7' ],
+16 silly audit   '@types/whatwg-mimetype': [ '3.0.2' ],
+16 silly audit   '@types/ws': [ '8.18.1' ],
+16 silly audit   '@uiw/codemirror-extensions-basic-setup': [ '4.25.10' ],
+16 silly audit   '@uiw/react-codemirror': [ '4.25.10' ],
+16 silly audit   '@vitejs/plugin-react': [ '6.0.2' ],
+16 silly audit   '@vitest/expect': [ '4.1.7' ],
+16 silly audit   '@vitest/pretty-format': [ '4.1.7' ],
+16 silly audit   '@vitest/runner': [ '4.1.7' ],
+16 silly audit   '@vitest/snapshot': [ '4.1.7' ],
+16 silly audit   '@vitest/spy': [ '4.1.7' ],
+16 silly audit   '@vitest/utils': [ '4.1.7' ],
+16 silly audit   'ansi-regex': [ '5.0.1' ],
+16 silly audit   'ansi-styles': [ '5.2.0' ],
+16 silly audit   'any-promise': [ '1.3.0' ],
+16 silly audit   anymatch: [ '3.1.3' ],
+16 silly audit   arg: [ '5.0.2' ],
+16 silly audit   'aria-query': [ '5.3.0' ],
+16 silly audit   'assertion-error': [ '2.0.1' ],
+16 silly audit   autoprefixer: [ '10.5.0' ],
+16 silly audit   'baseline-browser-mapping': [ '2.10.31' ],
+16 silly audit   'bidi-js': [ '1.0.3' ],
+16 silly audit   'binary-extensions': [ '2.3.0' ],
+16 silly audit   braces: [ '3.0.3' ],
+16 silly audit   browserslist: [ '4.28.2' ],
+16 silly audit   'camelcase-css': [ '2.0.1' ],
+16 silly audit   'caniuse-lite': [ '1.0.30001793' ],
+16 silly audit   chai: [ '6.2.2' ],
+16 silly audit   chokidar: [ '3.6.0' ],
+16 silly audit   'glob-parent': [ '5.1.2', '6.0.2' ],
+16 silly audit   codemirror: [ '6.0.2' ],
+16 silly audit   commander: [ '4.1.1' ],
+16 silly audit   'convert-source-map': [ '2.0.0' ],
+16 silly audit   crelt: [ '1.0.6' ],
+16 silly audit   'css-tree': [ '3.2.1' ],
+16 silly audit   'css.escape': [ '1.5.1' ],
+16 silly audit   cssesc: [ '3.0.0' ],
+16 silly audit   csstype: [ '3.2.3' ],
+16 silly audit   'data-urls': [ '7.0.0' ],
+16 silly audit   tr46: [ '6.0.0' ],
+16 silly audit   'webidl-conversions': [ '8.0.1' ],
+16 silly audit   'whatwg-mimetype': [ '5.0.0', '3.0.0' ],
+16 silly audit   'whatwg-url': [ '16.0.1' ],
+16 silly audit   'decimal.js': [ '10.6.0' ],
+16 silly audit   dequal: [ '2.0.3' ],
+16 silly audit   'detect-libc': [ '2.1.2' ],
+16 silly audit   didyoumean: [ '1.2.2' ],
+16 silly audit   dlv: [ '1.1.3' ],
+16 silly audit   'electron-to-chromium': [ '1.5.360' ],
+16 silly audit   entities: [ '7.0.1', '8.0.0' ],
+16 silly audit   'es-errors': [ '1.3.0' ],
+16 silly audit   'es-module-lexer': [ '2.1.0' ],
+16 silly audit   escalade: [ '3.2.0' ],
+16 silly audit   'estree-walker': [ '3.0.3' ],
+16 silly audit   'expect-type': [ '1.3.0' ],
+16 silly audit   'fast-glob': [ '3.3.3' ],
+16 silly audit   fastq: [ '1.20.1' ],
+16 silly audit   'fill-range': [ '7.1.1' ],
+16 silly audit   'fraction.js': [ '5.3.4' ],
+16 silly audit   fsevents: [ '2.3.3' ],
+16 silly audit   'function-bind': [ '1.1.2' ],
+16 silly audit   'happy-dom': [ '20.9.0' ],
+16 silly audit   hasown: [ '2.0.3' ],
+16 silly audit   'html-encoding-sniffer': [ '6.0.0' ],
+16 silly audit   'html-parse-stringify': [ '3.0.1' ],
+16 silly audit   i18next: [ '23.16.8' ],
+16 silly audit   'i18next-browser-languagedetector': [ '8.2.1' ],
+16 silly audit   'i18next-http-backend': [ '4.0.0' ],
+16 silly audit   'indent-string': [ '4.0.0' ],
+16 silly audit   'is-binary-path': [ '2.1.0' ],
+16 silly audit   'is-core-module': [ '2.16.2' ],
+16 silly audit   'is-extglob': [ '2.1.1' ],
+16 silly audit   'is-glob': [ '4.0.3' ],
+16 silly audit   'is-number': [ '7.0.0' ],
+16 silly audit   'is-potential-custom-element-name': [ '1.0.1' ],
+16 silly audit   jiti: [ '1.21.7' ],
+16 silly audit   'js-tokens': [ '4.0.0' ],
+16 silly audit   jsdom: [ '29.1.1' ],
+16 silly audit   'lru-cache': [ '11.5.0' ],
+16 silly audit   lightningcss: [ '1.32.0' ],
+16 silly audit   'lightningcss-android-arm64': [ '1.32.0' ],
+16 silly audit   'lightningcss-darwin-arm64': [ '1.32.0' ],
+16 silly audit   'lightningcss-darwin-x64': [ '1.32.0' ],
+16 silly audit   'lightningcss-freebsd-x64': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-arm-gnueabihf': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-arm64-gnu': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-arm64-musl': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-x64-gnu': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-x64-musl': [ '1.32.0' ],
+16 silly audit   'lightningcss-win32-arm64-msvc': [ '1.32.0' ],
+16 silly audit   'lightningcss-win32-x64-msvc': [ '1.32.0' ],
+16 silly audit   lilconfig: [ '3.1.3' ],
+16 silly audit   'lines-and-columns': [ '1.2.4' ],
+16 silly audit   'loose-envify': [ '1.4.0' ],
+16 silly audit   'lucide-react': [ '0.577.0' ],
+16 silly audit   'lz-string': [ '1.5.0' ],
+16 silly audit   'magic-string': [ '0.30.21' ],
+16 silly audit   'mdn-data': [ '2.27.1' ],
+16 silly audit   merge2: [ '1.4.1' ],
+16 silly audit   micromatch: [ '4.0.8' ],
+16 silly audit   'min-indent': [ '1.0.1' ],
+16 silly audit   mz: [ '2.7.0' ],
+16 silly audit   nanoid: [ '3.3.12' ],
+16 silly audit   'node-releases': [ '2.0.44' ],
+16 silly audit   'normalize-path': [ '3.0.0' ],
+16 silly audit   'object-assign': [ '4.1.1' ],
+16 silly audit   'object-hash': [ '3.0.0' ],
+16 silly audit   obug: [ '2.1.1' ],
+16 silly audit   parse5: [ '8.0.1' ],
+16 silly audit   'path-parse': [ '1.0.7' ],
+16 silly audit   pathe: [ '2.0.3' ],
+16 silly audit   picocolors: [ '1.1.1' ],
+16 silly audit   picomatch: [ '2.3.2', '4.0.4' ],
+16 silly audit   pify: [ '2.3.0' ],
+16 silly audit   pirates: [ '4.0.7' ],
+16 silly audit   postcss: [ '8.5.15' ],
+16 silly audit   'postcss-import': [ '15.1.0' ],
+16 silly audit   'postcss-js': [ '4.1.0' ],
+16 silly audit   'postcss-load-config': [ '6.0.1' ],
+16 silly audit   'postcss-nested': [ '6.2.0' ],
+16 silly audit   'postcss-selector-parser': [ '6.1.2' ],
+16 silly audit   'postcss-value-parser': [ '4.2.0' ],
+16 silly audit   'pretty-format': [ '27.5.1' ],
+16 silly audit   punycode: [ '2.3.1' ],
+16 silly audit   'queue-microtask': [ '1.2.3' ],
+16 silly audit   react: [ '18.3.1' ],
+16 silly audit   'react-dom': [ '18.3.1' ],
+16 silly audit   'react-i18next': [ '14.1.3' ],
+16 silly audit   'react-is': [ '17.0.2' ],
+16 silly audit   'react-router': [ '6.30.3' ],
+16 silly audit   'react-router-dom': [ '6.30.3' ],
+16 silly audit   'read-cache': [ '1.0.0' ],
+16 silly audit   readdirp: [ '3.6.0' ],
+16 silly audit   redent: [ '3.0.0' ],
+16 silly audit   'require-from-string': [ '2.0.2' ],
+16 silly audit   resolve: [ '1.22.12' ],
+16 silly audit   reusify: [ '1.1.0' ],
+16 silly audit   rolldown: [ '1.0.2' ],
+16 silly audit   'run-parallel': [ '1.2.0' ],
+16 silly audit   saxes: [ '6.0.0' ],
+16 silly audit   scheduler: [ '0.23.2' ],
+16 silly audit   siginfo: [ '2.0.0' ],
+16 silly audit   'source-map-js': [ '1.2.1' ],
+16 silly audit   stackback: [ '0.0.2' ],
+16 silly audit   'std-env': [ '4.1.0' ],
+16 silly audit   'strip-indent': [ '3.0.0' ],
+16 silly audit   'style-mod': [ '4.1.3' ],
+16 silly audit   sucrase: [ '3.35.1' ],
+16 silly audit   'supports-preserve-symlinks-flag': [ '1.0.0' ],
+16 silly audit   'symbol-tree': [ '3.2.4' ],
+16 silly audit   tailwindcss: [ '3.4.19' ],
+16 silly audit   thenify: [ '3.3.1' ],
+16 silly audit   'thenify-all': [ '1.6.0' ],
+16 silly audit   tinybench: [ '2.9.0' ],
+16 silly audit   tinyexec: [ '1.1.2' ],
+16 silly audit   tinyglobby: [ '0.2.16' ],
+16 silly audit   fdir: [ '6.5.0' ],
+16 silly audit   tinyrainbow: [ '3.1.0' ],
+16 silly audit   tldts: [ '7.0.30' ],
+16 silly audit   'tldts-core': [ '7.0.30' ],
+16 silly audit   'to-regex-range': [ '5.0.1' ],
+16 silly audit   'tough-cookie': [ '6.0.1' ],
+16 silly audit   'ts-interface-checker': [ '0.1.13' ],
+16 silly audit   tslib: [ '2.8.1' ],
+16 silly audit   typescript: [ '5.9.3' ],
+16 silly audit   undici: [ '7.25.0' ],
+16 silly audit   'undici-types': [ '7.24.6' ],
+16 silly audit   'update-browserslist-db': [ '1.2.3' ],
+16 silly audit   'use-sync-external-store': [ '1.6.0' ],
+16 silly audit   'util-deprecate': [ '1.0.2' ],
+16 silly audit   vite: [ '8.0.14' ],
+16 silly audit   vitest: [ '4.1.7' ],
+16 silly audit   '@vitest/mocker': [ '4.1.7' ],
+16 silly audit   'void-elements': [ '3.1.0' ],
+16 silly audit   'w3c-keyname': [ '2.2.8' ],
+16 silly audit   'w3c-xmlserializer': [ '5.0.0' ],
+16 silly audit   'why-is-node-running': [ '2.3.0' ],
+16 silly audit   ws: [ '8.20.1' ],
+16 silly audit   'xml-name-validator': [ '5.0.0' ],
+16 silly audit   xmlchars: [ '2.2.0' ],
+16 silly audit   zustand: [ '4.5.7' ]
+16 silly audit }
+17 verbose reify failed optional dependency /opt/msm/frontend/node_modules/lightningcss-win32-x64-msvc
+18 silly reify mark deleted [ '/opt/msm/frontend/node_modules/lightningcss-win32-x64-msvc' ]
+19 verbose reify failed optional dependency /opt/msm/frontend/node_modules/lightningcss-win32-arm64-msvc
+20 silly reify mark deleted [ '/opt/msm/frontend/node_modules/lightningcss-win32-arm64-msvc' ]
+21 verbose reify failed optional dependency /opt/msm/frontend/node_modules/lightningcss-linux-arm64-musl
+22 silly reify mark deleted [ '/opt/msm/frontend/node_modules/lightningcss-linux-arm64-musl' ]
+23 verbose reify failed optional dependency /opt/msm/frontend/node_modules/lightningcss-linux-arm64-gnu
+24 silly reify mark deleted [ '/opt/msm/frontend/node_modules/lightningcss-linux-arm64-gnu' ]
+25 verbose reify failed optional dependency /opt/msm/frontend/node_modules/lightningcss-linux-arm-gnueabihf
+26 silly reify mark deleted [ '/opt/msm/frontend/node_modules/lightningcss-linux-arm-gnueabihf' ]
+27 verbose reify failed optional dependency /opt/msm/frontend/node_modules/lightningcss-freebsd-x64
+28 silly reify mark deleted [ '/opt/msm/frontend/node_modules/lightningcss-freebsd-x64' ]
+29 verbose reify failed optional dependency /opt/msm/frontend/node_modules/lightningcss-darwin-x64
+30 silly reify mark deleted [ '/opt/msm/frontend/node_modules/lightningcss-darwin-x64' ]
+31 verbose reify failed optional dependency /opt/msm/frontend/node_modules/lightningcss-darwin-arm64
+32 silly reify mark deleted [ '/opt/msm/frontend/node_modules/lightningcss-darwin-arm64' ]
+33 verbose reify failed optional dependency /opt/msm/frontend/node_modules/lightningcss-android-arm64
+34 silly reify mark deleted [ '/opt/msm/frontend/node_modules/lightningcss-android-arm64' ]
+35 verbose reify failed optional dependency /opt/msm/frontend/node_modules/fsevents
+36 silly reify mark deleted [ '/opt/msm/frontend/node_modules/fsevents' ]
+37 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-win32-x64-msvc
+38 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-win32-x64-msvc' ]
+39 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-win32-arm64-msvc
+40 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-win32-arm64-msvc' ]
+41 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-wasm32-wasi
+42 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-wasm32-wasi' ]
+43 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@emnapi/core
+44 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@emnapi/core' ]
+45 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@emnapi/runtime
+46 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@emnapi/runtime' ]
+47 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@napi-rs/wasm-runtime
+48 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@napi-rs/wasm-runtime' ]
+49 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@emnapi/wasi-threads
+50 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@emnapi/wasi-threads' ]
+51 verbose reify failed optional dependency /opt/msm/frontend/node_modules/tslib
+52 silly reify mark deleted [ '/opt/msm/frontend/node_modules/tslib' ]
+53 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@tybys/wasm-util
+54 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@tybys/wasm-util' ]
+55 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-openharmony-arm64
+56 silly reify mark deleted [
+56 silly reify   '/opt/msm/frontend/node_modules/@rolldown/binding-openharmony-arm64'
+56 silly reify ]
+57 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-linux-s390x-gnu
+58 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-linux-s390x-gnu' ]
+59 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-linux-ppc64-gnu
+60 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-linux-ppc64-gnu' ]
+61 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-linux-arm64-musl
+62 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-linux-arm64-musl' ]
+63 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-linux-arm64-gnu
+64 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-linux-arm64-gnu' ]
+65 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-linux-arm-gnueabihf
+66 silly reify mark deleted [
+66 silly reify   '/opt/msm/frontend/node_modules/@rolldown/binding-linux-arm-gnueabihf'
+66 silly reify ]
+67 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-freebsd-x64
+68 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-freebsd-x64' ]
+69 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-darwin-x64
+70 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-darwin-x64' ]
+71 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-darwin-arm64
+72 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-darwin-arm64' ]
+73 verbose reify failed optional dependency /opt/msm/frontend/node_modules/@rolldown/binding-android-arm64
+74 silly reify mark deleted [ '/opt/msm/frontend/node_modules/@rolldown/binding-android-arm64' ]
+75 http cache tslib@https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz 0ms (cache hit)
+76 http cache @emnapi/wasi-threads@https://registry.npmjs.org/@emnapi/wasi-threads/-/wasi-threads-1.2.1.tgz 0ms (cache hit)
+77 http cache @emnapi/runtime@https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.10.0.tgz 0ms (cache hit)
+78 http cache @napi-rs/wasm-runtime@https://registry.npmjs.org/@napi-rs/wasm-runtime/-/wasm-runtime-1.1.4.tgz 0ms (cache hit)
+79 http cache @emnapi/core@https://registry.npmjs.org/@emnapi/core/-/core-1.10.0.tgz 0ms (cache hit)
+80 http cache @tybys/wasm-util@https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.2.tgz 0ms (cache hit)
+81 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 240ms
+82 silly audit report {
+82 silly audit report   'react-router': [
+82 silly audit report     {
+82 silly audit report       id: 1120064,
+82 silly audit report       url: 'https://github.com/advisories/GHSA-2j2x-hqr9-3h42',
+82 silly audit report       title: "React Router's same-origin redirect with path starting // causes open redirect via protocol-relative URL reinterpretation",
+82 silly audit report       severity: 'moderate',
+82 silly audit report       vulnerable_versions: '>=6.7.0 <6.30.4',
+82 silly audit report       cwe: [Array],
+82 silly audit report       cvss: [Object]
+82 silly audit report     }
+82 silly audit report   ]
+82 silly audit report }
+83 silly packumentCache corgi:https://registry.npmjs.org/react-router cache-miss
+84 http fetch GET 200 https://registry.npmjs.org/react-router 31ms (cache revalidated)
+85 silly packumentCache corgi:https://registry.npmjs.org/react-router set size:1333656 disposed:false
+86 silly packumentCache corgi:https://registry.npmjs.org/react-router-dom cache-miss
+87 http fetch GET 200 https://registry.npmjs.org/react-router-dom 28ms (cache revalidated)
+88 silly packumentCache corgi:https://registry.npmjs.org/react-router-dom set size:1058676 disposed:false
+89 silly ADD
+90 silly ADD
+91 silly ADD
+92 silly ADD
+93 silly ADD
+94 silly ADD
+95 silly ADD
+96 silly ADD
+97 silly ADD
+98 silly ADD
+99 silly ADD
+100 silly ADD
+101 silly ADD
+102 silly ADD
+103 silly ADD
+104 silly ADD
+105 silly ADD
+106 silly ADD
+107 silly ADD
+108 silly ADD
+109 silly ADD
+110 silly ADD
+111 silly ADD
+112 silly ADD
+113 silly ADD
+114 silly ADD
+115 silly ADD
+116 silly ADD
+117 silly ADD
+118 verbose cwd /opt/msm/frontend
+119 verbose os Linux 6.17.0-29-generic
+120 verbose node v22.22.2
+121 verbose npm  v10.9.7
+122 verbose exit 0
+123 info ok

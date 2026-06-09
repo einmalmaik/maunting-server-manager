@@ -49,6 +49,27 @@ from services.install_update_lock_service import (
 import logging
 logger = logging.getLogger(__name__)
 
+
+def _normalize_server_restart_mode(server: Server) -> None:
+    """Stellt sicher, dass nicht beide Auto-Restart-Modi (Intervall + feste Zeiten) gleichzeitig aktiv sind.
+
+    Intervall hat Vorrang (konsistent mit sync_server_restart_schedule).
+    Verhindert „sowohl als auch“-Zustände in der DB durch direkte PATCHes, Legacy-Daten,
+    fehlende Client-Normalisierung oder Migrationen.
+
+    KISS: zentrale Normalisierung an der Persistenzstelle.
+    """
+    interval = getattr(server, "restart_interval_hours", None)
+    times = getattr(server, "restart_times_utc", None) or getattr(server, "restart_time_utc", None)
+
+    if interval:
+        # Interval wins: clear any fixed times
+        server.restart_time_utc = None
+        server.restart_times_utc = None
+    elif times:
+        # Only fixed times: clear interval
+        server.restart_interval_hours = None
+
 # ── Leichtergewichtiger, passiver Cache für Update-Checks im Status-Endpoint ──
 # Zweck: Frontend-Badge (Update-Verfügbarkeit) ohne teure Calls (Workshop/Steam)
 # bei jedem Poll. KISS + defensiv: TTL-basiert, nie status kaputt machen.
@@ -189,6 +210,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         disk_limit_gb=req.disk_limit_gb,
         public_bind_ip=bind_ip,
     )
+    _normalize_server_restart_mode(server)
     db.add(server)
     db.commit()
     db.refresh(server)
@@ -362,6 +384,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     for key, val in payload.items():
         if key not in ("game_port", "query_port", "rcon_port", "ports", "port_protocols"):
             setattr(server, key, val)
+    _normalize_server_restart_mode(server)
     db.commit()
     db.refresh(server)
 

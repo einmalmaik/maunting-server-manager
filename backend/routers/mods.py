@@ -9,7 +9,7 @@ from database import get_db, SessionLocal
 from models import Mod, Server, User
 from schemas import ModResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
-from games import get_plugin
+from games import get_plugin, updater, _append_console_log
 from services.install_update_lock_service import (
     release_install_update_lock,
     acquire_install_update_lock_blocking,
@@ -20,7 +20,6 @@ from services.mod_install_status_service import (
     mark_mod_installed,
     mark_mod_installing,
 )
-from games import updater
 
 logger = logging.getLogger(__name__)
 
@@ -103,13 +102,27 @@ def install_mod_bg(server_id: int, workshop_id: str, action: str = "install", re
         acquire_install_update_lock_blocking(server.id, "mod_install")
         try:
             mark_mod_installing(server.id, workshop_id, action)
+            if action == "reinstall":
+                # Für explizites Re-Install vorherigen Workshop-Cache + Post-Install-Artefakte
+                # entfernen (cleanup_mod ist idempotent). Das stellt sicher, dass der
+                # nachfolgende Download frische Dateien erzeugt (Vermeidet "nicht verifiziert"
+                # bei Pre-Existing-Content) und Post-Actions (Symlinks/Copies) neu anlegt.
+                # Für normale "install"/"update" belassen wir den Smart-Update von SteamCMD.
+                try:
+                    plugin.cleanup_mod(server, workshop_id)
+                    _append_console_log(server.id, f"[MSM] Mod {workshop_id} Re-Install: Cache + Artefakte bereinigt\n")
+                except Exception as ce:  # defensiv, nicht fatal
+                    _append_console_log(server.id, f"[MSM] Mod {workshop_id} Re-Install Cleanup Warnung: {ce}\n")
             result = plugin.install_mod(server, workshop_id)
             success = isinstance(result, dict) and result.get("ok", True) is not False and "error" not in result
             if success:
                 updater.update_mod_metadata_after_success(server.id, workshop_id, remote_updated)
                 mark_mod_installed(server.id, workshop_id)
             else:
-                err = result.get("error") if isinstance(result, dict) else result
+                if isinstance(result, dict):
+                    err = result.get("error") or ("; ".join(result.get("errors") or []) if result.get("errors") else None)
+                else:
+                    err = result
                 mark_mod_failed(server.id, workshop_id, _safe_error(err))
         finally:
             release_install_update_lock(server.id)

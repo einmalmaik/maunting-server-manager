@@ -157,17 +157,48 @@ def queue_lifecycle_operation(
     Die Route prueft Auth/RBAC und harte Pre-Checks. Diese Funktion serialisiert
     dann pro Server, setzt sofort einen sichtbaren Queue-Status und startet den
     Worker mit frischer DB-Session.
+
+    Besonderheit "kill": Kill ist ein harter Force-Stop. Wir fuehren das
+    Container-Remove (force) SOFORT aus (auch wenn ein Start/Restart-Job
+    gerade laeuft), loeschen den aktiven Job-Flag und setzen "stopped".
+    Der ggf. laufende Lifecycle-Thread wird durch das Entfernen des Containers
+    in einen Fehlerzustand laufen und gibt den Lock frei.
+    Damit reagiert der Kill-Button sofort -- auch bei "In Warteschlange"
+    oder "starting" (generisch fuer alle Blueprint-Spiele).
     """
     if operation not in {"start", "stop", "restart", "kill"}:
         raise ValueError(f"Unbekannte Lifecycle-Operation: {operation}")
+
     if operation == "kill":
-        # Kill laeuft nach dem aktuell laufenden Lifecycle-Job (threading.Lock ist
-        # nicht-reentrant und wird vom aktiven Job gehalten). Damit ist kill
-        # kein echtes Interrupt, sondern ein "skip the queue" -- danach laeuft
-        # der Kill-Worker sobald der laufende Job fertig ist. Fuer ein hartes
-        # Interrupt waere eine separate Force-Remove-Pfad noetig (ausserhalb des
-        # per-server-Locks); aktuell nicht implementiert.
+        # HARD KILL PATH: Sofort, unabhaengig von aktivem Job.
+        # Das loest das User-Problem "Kill bringt den Server nicht aus der Warteschlange".
+        container = container_name_for(server.id)
+        try:
+            docker_service.remove(container, force=True)
+        except Exception:
+            pass
+
         _mark_job_done(server.id)
+        server.status = "stopped"
+        server.status_message = "Erzwungen beendet (Kill)"
+        server.last_started_at = None
+        db.commit()
+
+        ports_list = _ports(server)
+        try:
+            close_ports(ports_list)
+            from services.docker_iptables_service import revoke_server as iptables_revoke_server
+            iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        except Exception:
+            pass
+
+        _append_console_log(server.id, "[MSM] Server hart via Kill beendet (auch aus Queue/Start heraus, Docker auto-restarts disabled)\n")
+        return {
+            "message": "Server wurde erzwungen beendet",
+            "status": "stopped",
+            "operation": "kill",
+        }
+
     if not _mark_job_active(server.id):
         raise HTTPException(
             status_code=409,
@@ -428,6 +459,8 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     ports_list = _ports(server)
     open_ports(server.name, ports_list)
     iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
+    _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start möglich (Image-Pull/Steam-Update).\n")
     _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         result = plugin.start(server)
@@ -543,6 +576,8 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     ports_list = _ports(server)
     open_ports(server.name, ports_list)
     iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
+    _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start möglich (Image-Pull/Steam-Update).\n")
     _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         start_result = plugin.start(server)
