@@ -25,6 +25,7 @@ def _build_blueprint():
         steam=BlueprintSteamSource(
             appId="12345",
             platform="linux",
+            validate_=True,
         ),
     )
     mods = BlueprintMods(

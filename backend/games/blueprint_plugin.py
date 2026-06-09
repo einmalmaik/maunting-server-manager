@@ -115,7 +115,7 @@ class BlueprintPlugin(GamePlugin):
                         platform=platform_str,
                         # intentionally not passing steamcmd_image; use the dedicated STEAMCMD_IMAGE
                         # which has the pre-installed binary at the expected path
-                        validate=getattr(bp.source.steam, "validate", True),
+                        validate=getattr(bp.source.steam, "validate_", True),
                     ),
                     blueprint=bp,
                 )

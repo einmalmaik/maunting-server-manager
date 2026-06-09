@@ -276,7 +276,7 @@ def _is_safe_relative_template(
 
 
 class BlueprintMeta(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=128)
@@ -296,7 +296,7 @@ class BlueprintMeta(BaseModel):
 
 
 class BlueprintRuntime(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     image: str = Field(min_length=1, max_length=256)
     workdir: str | None = Field(default=None, max_length=512)
@@ -450,20 +450,24 @@ class BlueprintRuntime(BaseModel):
 
 
 class BlueprintPort(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: BlueprintPortName
     protocol: BlueprintPortProtocol
 
 
 class BlueprintSteamSource(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     appId: str
     platform: BlueprintSteamPlatform
     compatibility: BlueprintSteamCompatibility | None = None
     requiresLogin: bool = False
-    validate: bool = True  # if False: "+app_update <id>" without "validate" (faster, less error-prone for some Proton apps like SCUM); generic Blueprint control for ALL supported Steam games to avoid slow starts and 0x226 state errors on every start/restart
+    validate_: bool = Field(
+        default=True,
+        alias="validate",
+        description="if False: \"+app_update <id>\" without \"validate\" (faster, less error-prone for some Proton apps like SCUM); generic Blueprint control for ALL supported Steam games to avoid slow starts and 0x226 state errors on every start/restart",
+    )
 
     @field_validator("appId")
     @classmethod
@@ -487,7 +491,7 @@ class BlueprintSteamSource(BaseModel):
 
 
 class BlueprintHttpSource(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     url: str = Field(min_length=8, max_length=2048)
     archiveType: BlueprintArchiveType | None = None
@@ -529,7 +533,7 @@ class BlueprintHttpSource(BaseModel):
 
 
 class BlueprintManualSource(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     requiredFiles: list[str] = Field(min_length=1, max_length=16)
     instructions: str = Field(min_length=1, max_length=4096)
@@ -561,7 +565,7 @@ class BlueprintManualSource(BaseModel):
 
 
 class BlueprintSource(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     type: BlueprintSourceType
     updateStrategy: BlueprintUpdateStrategy | None = None
@@ -618,7 +622,7 @@ class BlueprintSource(BaseModel):
 
 
 class BlueprintMods(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     supportsMods: bool = False
     supportsSteamWorkshop: bool = False
@@ -711,7 +715,7 @@ class BlueprintMods(BaseModel):
 
 
 class BlueprintWorkshopFileAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     operation: BlueprintWorkshopFileOperation
     source: str = Field(min_length=1, max_length=512)
@@ -757,7 +761,7 @@ class BlueprintWorkshopFileAction(BaseModel):
 
 
 class BlueprintConfigPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     type: BlueprintConfigPatchType
     file: str = Field(min_length=1, max_length=512)
@@ -828,7 +832,7 @@ class BlueprintConfigPatch(BaseModel):
 
 
 class Blueprint(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     version: int
     meta: BlueprintMeta

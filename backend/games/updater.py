@@ -849,7 +849,7 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
             requires_login = bool(getattr(steam, "requiresLogin", False))
             platform = getattr(steam, "platform", None)
             platform_str = platform.value if platform else None
-            validate_flag = bool(getattr(steam, "validate", True))
+            validate_flag = bool(getattr(steam, "validate_", True))
             _append_console_log(
                 server_id,
                 f"[MSM] Server-Datei-Update: SteamCMD +app_update {app_id} {'validate' if validate_flag else '(no-validate)'} (synchron vor Start)\n"
