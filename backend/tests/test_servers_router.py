@@ -389,11 +389,11 @@ class TestKillServer:
                 headers={"X-CSRF-Token": csrf_token},
             )
             assert response.status_code == 200
-            assert response.json()["status"] == "queued"
+            assert response.json()["status"] == "stopped"
             assert response.json()["operation"] == "kill"
-            mock_thread.assert_called_once()
+            # kill is now immediate (no lifecycle thread for the force-kill path)
             db.refresh(test_server)
-            assert test_server.status == "queued"
+            assert test_server.status == "stopped"
             # no secrets/paths in response (data minimization)
             assert "container" not in str(response.json()).lower()
 
@@ -422,7 +422,7 @@ class TestKillServer:
             )
             assert second.status_code == 200
             db.refresh(test_server)
-            assert test_server.status == "queued"
+            assert test_server.status == "stopped"
 
     def test_kill_forbidden_without_permission(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_csrf_token: str):
         response = client.post(

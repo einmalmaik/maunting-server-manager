@@ -34,7 +34,7 @@ class TestSteamcmdAuthenticatedLogin:
                     app_id="123",
                     use_authenticated_login=True,
                 )
-                cmd = mock_eph.call_args.kwargs["command"]
+                cmd = mock_eph.call_args_list[0].kwargs["command"]
                 # command ist eine Liste: ["-c", "bash script ..."]
                 script = " ".join(cmd)
                 assert "+login" in script
