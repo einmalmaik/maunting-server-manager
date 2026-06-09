@@ -130,10 +130,17 @@ def _console_log_path(server_id: int) -> str:
 
 
 def _append_console_log(server_id: int, text: str) -> None:
+    """Append a console event line. The line is stored with an embedded UTC ISO
+    timestamp so that historical backlog reads can assign the *original* write
+    time instead of the time the console panel was opened.
+    Format in file: <iso-timestamp>\\t<raw-text>\\n
+    The \\t + ts prefix is stripped on read (in console_stream_service).
+    """
     try:
         log_path = _console_log_path(server_id)
+        ts = datetime.now(timezone.utc).isoformat()
         with open(log_path, "a", encoding="utf-8") as f:
-            f.write(text)
+            f.write(f"{ts}\t{text}")
             f.flush()
     except OSError as e:
         logger.warning("Could not write console log for server %s: %s", server_id, e)

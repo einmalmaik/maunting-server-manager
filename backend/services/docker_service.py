@@ -793,7 +793,7 @@ async def stream_logs(name: str, tail: int = 200) -> AsyncIterator[str]:
 
     host = resolve_docker_host()
     env = {**os.environ, "DOCKER_HOST": host}
-    cmd = ["docker", "logs", "--follow", "--tail", str(tail), name]
+    cmd = ["docker", "logs", "--follow", "--timestamps", "--tail", str(tail), name]
     proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
