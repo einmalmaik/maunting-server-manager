@@ -82,7 +82,7 @@ def _fetch_steam_mod_updated(app_id: str, workshop_id: str) -> datetime | None:
 
     try:
         query_data = {
-            "publishedfileids[0]": int(workshop_id),
+            "publishedfileids": [int(workshop_id)],
             "includevotes": False,
         }
         params = {

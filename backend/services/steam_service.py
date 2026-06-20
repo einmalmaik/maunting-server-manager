@@ -149,8 +149,8 @@ class SteamService:
         
         try:
             query_data = {
-                'publishedfileids[0]': int(publishedfileid),
-                'includevotes': True,
+                "publishedfileids": [int(publishedfileid)],
+                "includevotes": True,
             }
 
             params = {
