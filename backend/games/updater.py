@@ -161,6 +161,52 @@ def _fetch_http_last_modified(url: str) -> datetime | None:
     return None
 
 
+def _parse_appmanifest_build_id(manifest_path: Path) -> str | None:
+    """Liest buildid aus Steam appmanifest_*.acf (VDF-Text, kein vollständiger Parser)."""
+    try:
+        text = manifest_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    match = re.search(r'"buildid"\s+"(\d+)"', text)
+    return match.group(1) if match else None
+
+
+def _fetch_steam_public_branch_build(app_id: str) -> tuple[str | None, datetime | None]:
+    """
+    Remote buildid + timeupdated für Branch ``public`` (Dedicated-Server-Default).
+
+    Nutzt api.steamcmd.net (read-only, kein API-Key). Bei Fehler: (None, None).
+    """
+    url = f"https://api.steamcmd.net/v1/info/{app_id}"
+    headers = {"User-Agent": "MSM/1.0 (+steam-app-update-check)"}
+    try:
+        with httpx.Client(timeout=20.0, headers=headers, follow_redirects=True) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            payload = resp.json()
+        app_blob = (payload.get("data") or {}).get(str(app_id)) or {}
+        branches = (app_blob.get("depots") or {}).get("branches") or {}
+        public = branches.get("public") or {}
+        build_id = public.get("buildid")
+        if build_id is not None:
+            build_id = str(build_id)
+        ts_raw = public.get("timeupdated") or public.get("timebuildupdated")
+        remote_dt = None
+        if ts_raw is not None:
+            try:
+                remote_dt = datetime.fromtimestamp(int(ts_raw), tz=timezone.utc)
+            except (TypeError, ValueError):
+                remote_dt = None
+        return build_id, remote_dt
+    except Exception as exc:  # pragma: no cover - Netzwerk
+        logger.warning(
+            "Steam-App-Build-Check für App %s fehlgeschlagen: %s",
+            app_id,
+            type(exc).__name__,
+        )
+        return None, None
+
+
 # ── Workshop-Mod-Update-Check ────────────────────────────────────────────────
 
 def check_workshop_mod_updates(
@@ -333,7 +379,8 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
     nie auto-apply ohne Hook).
 
     Unterstützte Quellen (KISS):
-    - steam: keine passive Entscheidung; SteamCMD validate läuft im Start/Restart
+    - steam: Vergleich lokale appmanifest buildid vs. öffentlicher Steam-Branch
+      (api.steamcmd.net). Bei Abweichung → ``update`` für checkBased-Lifecycle.
     - http: HEAD-Request + Last-Modified Vergleich gegen max. lokale mtime
     - andere (dockerOnly etc.): immer "none" (keine MSM-Datei-Verantwortung)
 
@@ -400,18 +447,66 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
 
     server_id = getattr(server, "id", "?")
 
-    # ── Steam Source: kein lokales Manifest-Gate ────────────────────────────
+    # ── Steam Source: buildid-Vergleich (Dedicated Server, Branch public) ───
     if src_type == "steam":
         steam_app_id = ""
         if bp_source.steam:
             steam_app_id = str(bp_source.steam.appId or "")
+        manifest_path = install_dir / "steamapps" / f"appmanifest_{steam_app_id}.acf"
+        local_build = _parse_appmanifest_build_id(manifest_path) if manifest_path.is_file() else None
+        remote_build, remote_dt = _fetch_steam_public_branch_build(steam_app_id) if steam_app_id else (None, None)
+
+        result["remote_updated"] = remote_dt.isoformat() if remote_dt else None
+        if local_build:
+            result["local_mtime"] = local_build  # buildid als lokale Referenz (kein FS-mtime)
+
+        if not steam_app_id:
+            result["details"] = "Steam-Source ohne appId — Update-Check übersprungen."
+            return result
+
+        if remote_build is None:
+            result["details"] = (
+                f"Steam App {steam_app_id}: Remote-Build konnte nicht ermittelt werden "
+                "(Netz/API). Kein Update vor Neustart ausgelöst."
+            )
+            return result
+
+        if local_build is None:
+            result["action"] = "update"
+            result["reason"] = "missing"
+            result["details"] = (
+                f"Steam App {steam_app_id}: Kein appmanifest oder keine buildid lokal "
+                f"(Remote-Build {remote_build}). SteamCMD-Update vor Start empfohlen."
+            )
+            logger.info(
+                "Server-Datei-Check (Steam) Server %s: fehlende lokale buildid, remote=%s",
+                server_id,
+                remote_build,
+            )
+            return result
+
+        if local_build != remote_build:
+            result["action"] = "update"
+            result["reason"] = "new_version_available"
+            result["details"] = (
+                f"Steam App {steam_app_id}: Neuer Build verfügbar "
+                f"(lokal {local_build} → remote {remote_build})."
+            )
+            logger.info(
+                "Server-Datei-Update verfügbar (Steam) Server %s: %s → %s",
+                server_id,
+                local_build,
+                remote_build,
+            )
+            return result
+
         result["details"] = (
-            f"Steam-Source (App {steam_app_id or 'unbekannt'}): "
-            "Keine passive Update-Entscheidung. SteamCMD validate läuft beim Start/Restart."
+            f"Steam App {steam_app_id}: Build {local_build} ist aktuell (Branch public)."
         )
         logger.debug(
-            "Server-Datei-Check (Steam) Server %s: kein passives Gate",
+            "Server-Datei-Check (Steam) Server %s: buildid %s aktuell",
             server_id,
+            local_build,
         )
         return result
 

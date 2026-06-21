@@ -323,6 +323,7 @@ def run_steamcmd_install(
     use_authenticated_login: bool = False,
     platform: str | None = None,
     steamcmd_image: str | None = None,
+    validate: bool = True,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
@@ -372,8 +373,10 @@ def run_steamcmd_install(
     steam_args.extend([
         "+force_install_dir", CONTAINER_DATA_DIR,
         *login_args,
-        "+app_update", app_id, "validate",
+        "+app_update", app_id,
     ])
+    if validate:
+        steam_args.append("validate")
     if extra_args:
         steam_args.extend(extra_args)
     steam_args.append("+quit")
@@ -900,8 +903,8 @@ class GamePlugin(ABC):
     def check_for_server_file_update(self, server) -> dict:
         """
         Liefert passive Hinweise zu Server-Datei-Updates.
-        Für Steam entscheidet dieses Ergebnis nicht mehr über Start/Restart:
-        der Lifecycle führt SteamCMD-Validate für Steam-Blueprints immer aus.
+        Bei Steam (checkBased): buildid-Vergleich entscheidet, ob vor Start/Restart
+        ``perform_server_file_update`` (SteamCMD) läuft.
         """
         try:
             bp = self.get_blueprint()

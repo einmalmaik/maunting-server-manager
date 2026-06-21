@@ -151,22 +151,28 @@ def test_minimal_valid_docker_blueprint_roundtrip():
 
 
 def test_steam_blueprint_uses_real_check_server_file_update(tmp_path):
-    """Akzeptanz: Mindestens ein Steam-Blueprint-Test durchläuft den *echten* updater-Pfad."""
+    """Akzeptanz: Steam-Blueprint nutzt buildid-Check (Remote gemockt)."""
     bp = _load_native("dayz")
     plugin = BlueprintPlugin(bp)
+    app_id = str(bp.source.steam.appId)
 
     install = tmp_path / "dayz_install"
     install.mkdir()
-    # Mindestens eine Datei, damit nicht "missing"
     (install / "DayZServer.exe").write_text("fake")
+    manifest = install / "steamapps" / f"appmanifest_{app_id}.acf"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('"buildid"\t\t"9001"\n', encoding="utf-8")
 
     srv = _make_stub_server(install)
-    # Direkter realer Aufruf (nicht gemockt)
-    res = plugin.check_for_server_file_update(srv)
+    with patch(
+        "games.updater._fetch_steam_public_branch_build",
+        return_value=("9001", None),
+    ):
+        res = plugin.check_for_server_file_update(srv)
 
     assert res["source_type"] == "steam"
     assert res["action"] == "none"
-    assert "Steam" in res.get("details", "") or "passive" in res.get("details", "").lower()
+    assert "aktuell" in res.get("details", "").lower() or "9001" in res.get("details", "")
 
 
 # ── updateStrategy-Verhalten (real Plugin + Lifecycle-Decision) ─────────────
