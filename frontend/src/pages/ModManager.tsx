@@ -77,6 +77,7 @@ export function ModManager({ serverId }: ModManagerProps) {
   const [newWorkshopId, setNewWorkshopId] = useState('')
   const [newModName, setNewModName] = useState('')
   const [adding, setAdding] = useState(false)
+  const [reinstallingAll, setReinstallingAll] = useState(false)
 
   // Steam Workshop Browser (inline section)
   const [steamQuery, setSteamQuery] = useState('')
@@ -255,6 +256,29 @@ export function ModManager({ serverId }: ModManagerProps) {
     }
   }
 
+  const reinstallAllMods = async () => {
+    if (mods.length === 0) return
+    if (mods.some(hasActiveModInstall)) {
+      toast.error(t('mods.reinstallAllBlocked'))
+      return
+    }
+    const ok = await confirm({
+      message: t('mods.confirmReinstallAll', { count: mods.length }),
+      confirmText: t('mods.reinstallAll'),
+    })
+    if (!ok) return
+    setReinstallingAll(true)
+    try {
+      const data = await api<Mod[]>(`/mods/${serverId}/reinstall-all`, { method: 'POST' })
+      setMods(data)
+      toast.success(t('mods.reinstallAllQueued'))
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t('mods.reinstallAllFailed'))
+    } finally {
+      setReinstallingAll(false)
+    }
+  }
+
   const installExistingMod = async (mod: Mod, action: 'update' | 'reinstall') => {
     if (action === 'reinstall') {
       const ok = await confirm({
@@ -330,6 +354,7 @@ export function ModManager({ serverId }: ModManagerProps) {
   )
   const visibleInstalled = filteredMods.slice(0, installedShown)
   const hasMoreInstalled = filteredMods.length > visibleInstalled.length
+  const anyModInstallActive = mods.some(hasActiveModInstall)
 
   // Suche zeigt Suchtreffer-Grid, sonst das gewaehlte Browser-Tab-Grid.
   const isSearchMode = steamResults.length > 0
@@ -445,6 +470,15 @@ export function ModManager({ serverId }: ModManagerProps) {
               className="msm-input pl-10 text-sm"
             />
           </div>
+          <button
+            onClick={() => void reinstallAllMods()}
+            disabled={loading || reinstallingAll || mods.length === 0 || anyModInstallActive}
+            className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2 disabled:opacity-50"
+            title={t('mods.reinstallAllHint')}
+          >
+            <RotateCcw className={`w-4 h-4 ${reinstallingAll ? 'animate-spin' : ''}`} />
+            {t('mods.reinstallAll')}
+          </button>
           <button
             onClick={() => void checkModUpdates()}
             className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2"

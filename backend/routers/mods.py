@@ -133,6 +133,78 @@ def install_mod_bg(server_id: int, workshop_id: str, action: str = "install", re
         db.close()
 
 
+def reinstall_all_mods_bg(server_id: int, workshop_ids: list[str]) -> None:
+    db = SessionLocal()
+    try:
+        server = db.query(Server).filter(Server.id == server_id).first()
+        if not server:
+            logger.error("Server %s nicht gefunden (reinstall-all)", server_id)
+            return
+        plugin = get_plugin(server.game_type)
+        if not plugin or not plugin.supports_mods:
+            for wid in workshop_ids:
+                mark_mod_failed(server_id, wid, "Steam Workshop nicht in diesem Spiel aktiviert")
+            return
+
+        acquire_install_update_lock_blocking(server.id, "mod_reinstall_all")
+        try:
+            _append_console_log(
+                server.id,
+                f"[MSM] Neuinstallation für {len(workshop_ids)} Workshop-Mod(s) gestartet.\n",
+            )
+            for wid in workshop_ids:
+                mark_mod_installing(server.id, wid, "reinstall")
+                try:
+                    plugin.cleanup_mod(server, wid)
+                except Exception as exc:
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] Mod {wid} Cleanup-Warnung: {exc}\n",
+                    )
+
+            result = plugin.install_mods(server, workshop_ids)  # type: ignore[attr-defined]
+            batch_ok = isinstance(result, dict) and result.get("ok", True) is not False
+            items = result.get("items") if isinstance(result, dict) else {}
+            if not isinstance(items, dict):
+                items = {}
+
+            for wid in workshop_ids:
+                item = items.get(wid) or items.get(str(wid))
+                if batch_ok and item and item.get("ok", True) and not item.get("error"):
+                    updater.update_mod_metadata_after_success(server.id, wid, None)
+                    mark_mod_installed(server.id, wid)
+                    continue
+                if isinstance(item, dict):
+                    err = item.get("error") or (
+                        "; ".join(item.get("errors") or []) if item.get("errors") else None
+                    )
+                elif not batch_ok and isinstance(result, dict):
+                    err = result.get("error") or (
+                        "; ".join(result.get("errors") or []) if result.get("errors") else None
+                    )
+                else:
+                    err = "Installation fehlgeschlagen"
+                mark_mod_failed(server.id, wid, _safe_error(err))
+
+            try:
+                plugin.update_modlist(server)
+            except Exception as exc:
+                logger.warning("Modlist-Update nach reinstall-all fehlgeschlagen: %s", exc)
+
+            _append_console_log(
+                server.id,
+                "[MSM] Neuinstallation aller Workshop-Mods abgeschlossen.\n",
+            )
+        finally:
+            release_install_update_lock(server.id)
+    except Exception:
+        logger.exception("reinstall-all fehlgeschlagen für Server %s", server_id)
+        for wid in workshop_ids:
+            mark_mod_failed(server_id, wid, "Neuinstallation abgebrochen")
+    finally:
+        db.close()
+
+
 @router.get("/{server_id}", response_model=list[ModResponse])
 def list_mods(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     require_server_permission(user, server_id, db, "server.mods.read")
@@ -254,6 +326,54 @@ def install_existing_mod(
 
     background_tasks.add_task(install_mod_bg, server.id, mod.workshop_id, action, remote_updated)
     return mod
+
+
+@router.post("/{server_id}/reinstall-all", response_model=list[ModResponse])
+def reinstall_all_mods(
+    server_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    require_server_permission(user, server_id, db, "server.mods.write")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    if not plugin or not plugin.supports_mods:
+        raise HTTPException(status_code=400, detail="Steam Workshop nicht in diesem Spiel aktiviert")
+
+    mods = (
+        db.query(Mod)
+        .filter(Mod.server_id == server_id)
+        .order_by(Mod.load_order.asc())
+        .all()
+    )
+    if not mods:
+        raise HTTPException(status_code=400, detail="Keine Mods zum Neuinstallieren")
+
+    if any(m.install_status == INSTALL_RUNNING for m in mods):
+        raise HTTPException(status_code=409, detail="Mod-Installation läuft bereits")
+
+    workshop_ids: list[str] = []
+    for mod in mods:
+        _validate_workshop_id(mod.workshop_id)
+        mod.install_status = "pending"
+        mod.install_action = "reinstall"
+        mod.install_progress = 0
+        mod.install_eta_seconds = None
+        mod.install_error = None
+        workshop_ids.append(mod.workshop_id)
+    db.commit()
+
+    background_tasks.add_task(reinstall_all_mods_bg, server.id, workshop_ids)
+    return (
+        db.query(Mod)
+        .filter(Mod.server_id == server_id)
+        .order_by(Mod.load_order.asc())
+        .all()
+    )
 
 
 @router.patch("/{server_id}/{mod_id}", response_model=ModResponse)
