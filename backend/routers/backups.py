@@ -203,11 +203,18 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
 
         old_backup: str | None = None
         try:
-            if os.path.exists(server.install_dir):
-                old_backup = f"{server.install_dir}_pre_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-                shutil.move(server.install_dir, old_backup)
-            os.makedirs(server.install_dir, exist_ok=True)
-            _safe_extract_backup_tar(backup.filename, server.install_dir)
+            from services.backup_paths import read_backup_scope_from_archive
+
+            scope, _manifest = read_backup_scope_from_archive(backup.filename)
+            if scope == "selective":
+                os.makedirs(server.install_dir, exist_ok=True)
+                _safe_extract_backup_tar(backup.filename, server.install_dir)
+            else:
+                if os.path.exists(server.install_dir):
+                    old_backup = f"{server.install_dir}_pre_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+                    shutil.move(server.install_dir, old_backup)
+                os.makedirs(server.install_dir, exist_ok=True)
+                _safe_extract_backup_tar(backup.filename, server.install_dir)
         except Exception:
             # Best-effort Rollback: Der Server bleibt danach stopped/error statt
             # mit halb extrahierten Dateien als running markiert zu werden.

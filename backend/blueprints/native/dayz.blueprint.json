@@ -63,5 +63,11 @@
         "required": false
       }
     ]
+  },
+  "backup": {
+    "includePaths": [
+      "serverDZ.cfg",
+      "profiles"
+    ]
   }
 }

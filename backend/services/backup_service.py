@@ -2,7 +2,7 @@
 Zentrale Backup-Service für MSM.
 
 Single Source of Truth für alle Backup-Operationen (manuell, Auto-Start, Scheduler).
-Führt tar.gz des kompletten install_dir aus, schreibt DB-Record und führt sofort
+Führt tar.gz des install_dir oder blueprint-definierter Pfade aus, schreibt DB-Record und führt sofort
 Retention-Cleanup aus.
 
 Timeouts konfigurierbar:
@@ -69,19 +69,29 @@ def run_backup(
     filename = f"server_{server_id}_{timestamp}.tar.gz"
     filepath = os.path.join(backup_dir, filename)
 
-    # Tar ausführen (voller install_dir, .tar.gz, -C . für relative Pfade)
+    # Tar ausführen (voller install_dir oder Blueprint backup.includePaths)
+    from services.backup_paths import backup_plan_for_server, create_selective_backup_tar
+
+    plan = backup_plan_for_server(server)
     try:
         set_active_backup_status(server_id, "creating", est)
-        subprocess.run(
-            ["tar", "-czf", filepath, "-C", server.install_dir, "."],
-            check=True,
-            capture_output=True,
-            timeout=timeout_seconds,
-            env={
-                **os.environ,
-                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            },
-        )
+        if plan.scope == "selective":
+            create_selective_backup_tar(
+                filepath,
+                server.install_dir,
+                plan.include_paths,
+            )
+        else:
+            subprocess.run(
+                ["tar", "-czf", filepath, "-C", server.install_dir, "."],
+                check=True,
+                capture_output=True,
+                timeout=timeout_seconds,
+                env={
+                    **os.environ,
+                    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                },
+            )
         size_mb = os.path.getsize(filepath) // (1024 * 1024)
     except subprocess.TimeoutExpired as e:
         if os.path.exists(filepath):

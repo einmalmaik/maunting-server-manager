@@ -78,5 +78,12 @@
         "required": true
       }
     ]
+  },
+  "backup": {
+    "includePaths": [
+      "ConanSandbox/Saved/Config",
+      "ConanSandbox/Saved/SaveGames",
+      "ConanSandbox/Saved/game.db"
+    ]
   }
 }

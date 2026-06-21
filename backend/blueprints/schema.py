@@ -883,6 +883,33 @@ class BlueprintWorkshopFileAction(BaseModel):
         return self
 
 
+class BlueprintBackup(BaseModel):
+    """Relative Pfade/Globs unter install_dir (Config, Saves). Fehlt der Block → volles Backup."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    includePaths: list[str] = Field(min_length=1, max_length=32)
+
+    @field_validator("includePaths")
+    @classmethod
+    def _check_include_paths(cls, paths: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for raw in paths:
+            p = str(raw).strip()
+            if not p:
+                raise ValueError("backup.includePaths: leere Eintraege sind nicht erlaubt.")
+            if not _is_safe_relative_template(
+                p,
+                allowed_tokens=frozenset(),
+                allow_glob=True,
+            ):
+                raise ValueError(
+                    f"backup.includePaths: unsicherer Pfad '{p}'."
+                )
+            cleaned.append(p)
+        return cleaned
+
+
 class BlueprintConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -963,6 +990,7 @@ class Blueprint(BaseModel):
     ports: list[BlueprintPort] = Field(min_length=0)
     source: BlueprintSource
     mods: BlueprintMods | None = None
+    backup: BlueprintBackup | None = None
 
     @field_validator("version")
     @classmethod
