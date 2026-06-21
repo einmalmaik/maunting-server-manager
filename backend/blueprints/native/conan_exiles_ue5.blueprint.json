@@ -12,7 +12,7 @@
     "workdir": "/data",
     "user": "1000:1000",
     "env": {},
-    "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT}",
+    "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT} -MULTIHOME={BIND_IP}",
     "configPatches": [
       {
         "type": "ini",
@@ -27,6 +27,13 @@
         "section": "OnlineSubsystemNull",
         "key": "GameServerQueryPort",
         "value": "{QUERY_PORT}"
+      },
+      {
+        "type": "ini",
+        "file": "ConanSandbox/Saved/Config/LinuxServer/Engine.ini",
+        "section": "ConsoleVariables",
+        "key": "net.AllowEncryption",
+        "value": "0"
       },
       {
         "type": "ini",
