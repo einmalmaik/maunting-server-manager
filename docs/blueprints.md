@@ -120,6 +120,40 @@ konfiguriert sein.
 }
 ```
 
+#### `source.steam.branch` (optional)
+
+Steam-**Depot-Branch** für Dedicated-Server-Install und -Updates (nicht Workshop).
+
+| Wert | Bedeutung |
+|------|-----------|
+| weggelassen / `null` | **`public`** — Standard-Release-Branch |
+| z. B. `conan-exiles-legacy` | Beta-/Legacy-Branch; SteamCMD erhält `-beta <name>` |
+
+Der passive **Server-Datei-Update-Check** (`check_server_file_update`) vergleicht die
+lokale `buildid` aus `steamapps/appmanifest_<appId>.acf` mit der **gleichen**
+Branch-Metadaten auf api.steamcmd.net. Bei Abweichung und `updateStrategy: checkBased`
+läuft vor Start/Restart `+app_update` (optional mit `validate`, siehe `validate`).
+
+```json
+"steam": {
+  "appId": "443030",
+  "platform": "linux",
+  "branch": "conan-exiles-legacy",
+  "validate": false
+}
+```
+
+**Workshop-Mods** nutzen weiterhin `mods.workshopAppId` — unabhängig vom Server-Branch.
+
+#### Server-Binaries vs. Workshop-Mods (Update-Verhalten)
+
+| Was | Erkennung | Wann installiert | Auto-Neustart |
+|-----|-----------|------------------|---------------|
+| **Workshop-Mods** | Steam Web API `time_updated` (Scheduler, ~6 h) | Beim **Restart**, wenn Mod `outdated` | Nur Mods mit `auto_update` und Server **gestoppt** (Scheduler) |
+| **Spiel-Binaries (Steam App)** | `buildid`-Vergleich pro Blueprint-**branch** | Beim **Start/Restart**, wenn Check `update` oder `alwaysValidate` | **Nein** — MSM startet den Server nicht allein wegen eines Game-Updates neu; Betreiber startet/restartet manuell oder nutzt geplantes `auto_restart` (ohne Update-Trigger) |
+
+Badge **Server-Update** in der UI kommt vom gleichen Check (`server_file_update_available`).
+
 ### Beispiel: Discord-Bot aus einem ZIP
 
 Für Bots gibt es oft keine Ports. Das ZIP muss eine Startdatei enthalten, die
@@ -388,7 +422,8 @@ Mögliche Werte:
   (bei Steam: `+app_update ... validate`). Garantiert frische Binaries, kann
   auch ein Update erzwingen, wenn der passive Check "none" meldet.
 - `checkBased`: Nur updaten, wenn der passive Check (`updater.check_server_file_update`)
-  ein Update meldet. Spart teure Upstream-Calls bei stabilen Releases.
+  ein Update meldet. Bei **Steam**: Vergleich lokale vs. Remote-`buildid` für
+  `source.steam.branch` (Default `public`). Spart SteamCMD-Läufe, wenn der Build aktuell ist.
 - `none`: Kein Auto-Update durch MSM (z. B. dockerOnly, custom, manualUpload oder
   wenn der Betreiber manuell pflegt).
 
@@ -396,7 +431,7 @@ Mögliche Werte:
 
 | Source-Typ       | Default          | Begründung |
 |------------------|------------------|------------|
-| steam            | alwaysValidate   | SteamCMD-Validate ist die einzige verlässliche Quelle für Binary-Aktualität. |
+| steam            | checkBased       | Default seit Blueprint v1: buildid-Check + SteamCMD nur bei Bedarf; `alwaysValidate` erzwingt Validate bei jedem Start. |
 | http             | checkBased       | HEAD + Last-Modified vs. lokale mtime (siehe `games/updater.py`). |
 | dockerOnly / custom / manualUpload | none | MSM verwaltet keine Dateien; Verantwortung liegt beim Image oder User. |
 

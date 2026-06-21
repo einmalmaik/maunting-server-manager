@@ -165,7 +165,7 @@ def test_steam_blueprint_uses_real_check_server_file_update(tmp_path):
 
     srv = _make_stub_server(install)
     with patch(
-        "games.updater._fetch_steam_public_branch_build",
+        "games.updater._fetch_steam_branch_build",
         return_value=("9001", None),
     ):
         res = plugin.check_for_server_file_update(srv)

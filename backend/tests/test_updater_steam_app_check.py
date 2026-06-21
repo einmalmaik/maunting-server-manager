@@ -49,7 +49,7 @@ def test_steam_check_reports_update_when_build_differs(tmp_path):
     server = type("S", (), {"id": 1, "install_dir": str(install)})()
 
     with patch(
-        "games.updater._fetch_steam_public_branch_build",
+        "games.updater._fetch_steam_branch_build",
         return_value=("999", datetime(2026, 1, 1, tzinfo=timezone.utc)),
     ):
         res = check_server_file_update(server, bp)
@@ -71,10 +71,34 @@ def test_steam_check_none_when_build_matches(tmp_path):
     server = type("S", (), {"id": 2, "install_dir": str(install)})()
 
     with patch(
-        "games.updater._fetch_steam_public_branch_build",
+        "games.updater._fetch_steam_branch_build",
         return_value=("555", datetime(2026, 1, 1, tzinfo=timezone.utc)),
     ):
         res = check_server_file_update(server, bp)
 
     assert res["action"] == "none"
     assert res["reason"] == "up_to_date"
+
+
+def test_steam_check_uses_blueprint_branch(tmp_path):
+    data = _minimal_steam_blueprint_dict("443030")
+    data["source"]["steam"]["branch"] = "conan-exiles-legacy"
+    bp = load_blueprint_dict(data)
+    install = tmp_path / "srv"
+    install.mkdir()
+    (install / "game.bin").write_bytes(b"x")
+    manifest = install / "steamapps" / "appmanifest_443030.acf"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('"buildid"\t\t"111"\n', encoding="utf-8")
+
+    server = type("S", (), {"id": 3, "install_dir": str(install)})()
+
+    with patch(
+        "games.updater._fetch_steam_branch_build",
+        return_value=("222", datetime(2026, 1, 1, tzinfo=timezone.utc)),
+    ) as fetch_mock:
+        res = check_server_file_update(server, bp)
+
+    fetch_mock.assert_called_once_with("443030", "conan-exiles-legacy")
+    assert res["action"] == "update"
+    assert "conan-exiles-legacy" in res["details"]

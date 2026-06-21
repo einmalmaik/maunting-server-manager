@@ -324,6 +324,7 @@ def run_steamcmd_install(
     platform: str | None = None,
     steamcmd_image: str | None = None,
     validate: bool = True,
+    beta_branch: str | None = None,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
@@ -375,6 +376,9 @@ def run_steamcmd_install(
         *login_args,
         "+app_update", app_id,
     ])
+    branch = (beta_branch or "").strip() or None
+    if branch and branch != "public":
+        steam_args.extend(["-beta", branch])
     if validate:
         steam_args.append("validate")
     if extra_args:

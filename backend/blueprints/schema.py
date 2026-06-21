@@ -463,6 +463,14 @@ class BlueprintSteamSource(BaseModel):
     platform: BlueprintSteamPlatform
     compatibility: BlueprintSteamCompatibility | None = None
     requiresLogin: bool = False
+    branch: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Steam-Depot-Branch für +app_update und buildid-Check. "
+            "Weglassen oder null = public (Standard-Release)."
+        ),
+    )
     validate_: bool = Field(
         default=True,
         alias="validate",
@@ -474,6 +482,20 @@ class BlueprintSteamSource(BaseModel):
     def _check_app_id(cls, v: str) -> str:
         if not _NUMERIC_ID_RE.match(v):
             raise ValueError("source.steam.appId muss numerischer String sein (^\\\\d{1,10}$).")
+        return v
+
+    @field_validator("branch")
+    @classmethod
+    def _check_branch(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$", v):
+            raise ValueError(
+                "source.steam.branch: ungültiger Name (erlaubt: Buchstaben, Ziffern, . _ -)."
+            )
         return v
 
     @model_validator(mode="after")

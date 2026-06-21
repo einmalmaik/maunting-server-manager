@@ -439,6 +439,28 @@ def test_steam_requires_login_default_false() -> None:
     assert bp.source.steam.requiresLogin is False
 
 
+def test_steam_branch_optional_defaults_none() -> None:
+    d = _minimal_valid_dict()
+    bp = load_blueprint_dict(d)
+    assert bp.source.steam is not None
+    assert bp.source.steam.branch is None
+
+
+def test_steam_branch_accepts_legacy_name() -> None:
+    d = _minimal_valid_dict()
+    d["source"]["steam"]["branch"] = "conan-exiles-legacy"
+    bp = load_blueprint_dict(d)
+    assert bp.source.steam is not None
+    assert bp.source.steam.branch == "conan-exiles-legacy"
+
+
+def test_steam_branch_rejects_invalid_chars() -> None:
+    d = _minimal_valid_dict()
+    d["source"]["steam"]["branch"] = "bad branch!"
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
 def test_allows_multiple_custom_ports_with_same_protocol() -> None:
     d = _minimal_valid_dict()
     d["ports"] = [

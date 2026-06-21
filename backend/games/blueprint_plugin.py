@@ -103,7 +103,7 @@ class BlueprintPlugin(GamePlugin):
             def _install():
                 # Reinstall-Schutz (manuelle .cfg/.ini etc.): Cache vor, Restore nach.
                 # Frische Install: 0 Dateien → No-Op. Nutzt zentrale Helper aus updater.py.
-                from games.updater import perform_install_with_protection
+                from games.updater import _steam_effective_branch, perform_install_with_protection
                 platform_str = bp.source.steam.platform.value if bp.source.steam.platform else None
                 result = perform_install_with_protection(
                     server,
@@ -116,6 +116,7 @@ class BlueprintPlugin(GamePlugin):
                         # intentionally not passing steamcmd_image; use the dedicated STEAMCMD_IMAGE
                         # which has the pre-installed binary at the expected path
                         validate=getattr(bp.source.steam, "validate_", True),
+                        beta_branch=_steam_effective_branch(bp.source.steam),
                     ),
                     blueprint=bp,
                 )

@@ -171,12 +171,24 @@ def _parse_appmanifest_build_id(manifest_path: Path) -> str | None:
     return match.group(1) if match else None
 
 
-def _fetch_steam_public_branch_build(app_id: str) -> tuple[str | None, datetime | None]:
+def _steam_effective_branch(steam: Any | None) -> str:
+    """Blueprint ``source.steam.branch`` oder ``public``."""
+    if steam is None:
+        return "public"
+    raw = getattr(steam, "branch", None)
+    if raw is None:
+        return "public"
+    text = str(raw).strip()
+    return text if text else "public"
+
+
+def _fetch_steam_branch_build(app_id: str, branch: str = "public") -> tuple[str | None, datetime | None]:
     """
-    Remote buildid + timeupdated für Branch ``public`` (Dedicated-Server-Default).
+    Remote buildid + timeupdated für einen Steam-Depot-Branch.
 
     Nutzt api.steamcmd.net (read-only, kein API-Key). Bei Fehler: (None, None).
     """
+    branch_key = (branch or "public").strip() or "public"
     url = f"https://api.steamcmd.net/v1/info/{app_id}"
     headers = {"User-Agent": "MSM/1.0 (+steam-app-update-check)"}
     try:
@@ -186,11 +198,11 @@ def _fetch_steam_public_branch_build(app_id: str) -> tuple[str | None, datetime 
             payload = resp.json()
         app_blob = (payload.get("data") or {}).get(str(app_id)) or {}
         branches = (app_blob.get("depots") or {}).get("branches") or {}
-        public = branches.get("public") or {}
-        build_id = public.get("buildid")
+        entry = branches.get(branch_key) or {}
+        build_id = entry.get("buildid")
         if build_id is not None:
             build_id = str(build_id)
-        ts_raw = public.get("timeupdated") or public.get("timebuildupdated")
+        ts_raw = entry.get("timeupdated") or entry.get("timebuildupdated")
         remote_dt = None
         if ts_raw is not None:
             try:
@@ -447,14 +459,16 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
 
     server_id = getattr(server, "id", "?")
 
-    # ── Steam Source: buildid-Vergleich (Dedicated Server, Branch public) ───
+    # ── Steam Source: buildid-Vergleich (Dedicated Server, Blueprint-Branch) ─
     if src_type == "steam":
-        steam_app_id = ""
-        if bp_source.steam:
-            steam_app_id = str(bp_source.steam.appId or "")
+        steam_cfg = bp_source.steam
+        steam_app_id = str(steam_cfg.appId or "") if steam_cfg else ""
+        depot_branch = _steam_effective_branch(steam_cfg)
         manifest_path = install_dir / "steamapps" / f"appmanifest_{steam_app_id}.acf"
         local_build = _parse_appmanifest_build_id(manifest_path) if manifest_path.is_file() else None
-        remote_build, remote_dt = _fetch_steam_public_branch_build(steam_app_id) if steam_app_id else (None, None)
+        remote_build, remote_dt = (
+            _fetch_steam_branch_build(steam_app_id, depot_branch) if steam_app_id else (None, None)
+        )
 
         result["remote_updated"] = remote_dt.isoformat() if remote_dt else None
         if local_build:
@@ -466,8 +480,8 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
 
         if remote_build is None:
             result["details"] = (
-                f"Steam App {steam_app_id}: Remote-Build konnte nicht ermittelt werden "
-                "(Netz/API). Kein Update vor Neustart ausgelöst."
+                f"Steam App {steam_app_id} (Branch {depot_branch}): Remote-Build konnte nicht "
+                "ermittelt werden (Netz/API). Kein Update vor Neustart ausgelöst."
             )
             return result
 
@@ -475,12 +489,13 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
             result["action"] = "update"
             result["reason"] = "missing"
             result["details"] = (
-                f"Steam App {steam_app_id}: Kein appmanifest oder keine buildid lokal "
-                f"(Remote-Build {remote_build}). SteamCMD-Update vor Start empfohlen."
+                f"Steam App {steam_app_id} (Branch {depot_branch}): Kein appmanifest oder keine "
+                f"buildid lokal (Remote-Build {remote_build}). SteamCMD-Update vor Start empfohlen."
             )
             logger.info(
-                "Server-Datei-Check (Steam) Server %s: fehlende lokale buildid, remote=%s",
+                "Server-Datei-Check (Steam) Server %s branch=%s: fehlende lokale buildid, remote=%s",
                 server_id,
+                depot_branch,
                 remote_build,
             )
             return result
@@ -489,23 +504,25 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
             result["action"] = "update"
             result["reason"] = "new_version_available"
             result["details"] = (
-                f"Steam App {steam_app_id}: Neuer Build verfügbar "
+                f"Steam App {steam_app_id} (Branch {depot_branch}): Neuer Build verfügbar "
                 f"(lokal {local_build} → remote {remote_build})."
             )
             logger.info(
-                "Server-Datei-Update verfügbar (Steam) Server %s: %s → %s",
+                "Server-Datei-Update verfügbar (Steam) Server %s branch=%s: %s → %s",
                 server_id,
+                depot_branch,
                 local_build,
                 remote_build,
             )
             return result
 
         result["details"] = (
-            f"Steam App {steam_app_id}: Build {local_build} ist aktuell (Branch public)."
+            f"Steam App {steam_app_id}: Build {local_build} ist aktuell (Branch {depot_branch})."
         )
         logger.debug(
-            "Server-Datei-Check (Steam) Server %s: buildid %s aktuell",
+            "Server-Datei-Check (Steam) Server %s branch=%s: buildid %s aktuell",
             server_id,
+            depot_branch,
             local_build,
         )
         return result
@@ -945,9 +962,13 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
             platform = getattr(steam, "platform", None)
             platform_str = platform.value if platform else None
             validate_flag = bool(getattr(steam, "validate_", True))
+            depot_branch = _steam_effective_branch(steam)
+            beta_arg = depot_branch if depot_branch != "public" else None
+            branch_note = f" -beta {depot_branch}" if beta_arg else ""
             _append_console_log(
                 server_id,
-                f"[MSM] Server-Datei-Update: SteamCMD +app_update {app_id} {'validate' if validate_flag else '(no-validate)'} (synchron vor Start)\n"
+                f"[MSM] Server-Datei-Update: SteamCMD +app_update {app_id}{branch_note} "
+                f"{'validate' if validate_flag else '(no-validate)'} (synchron vor Start)\n"
             )
             return run_steamcmd_install(
                 server_id=server_id,
@@ -957,6 +978,7 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 platform=platform_str,
                 # dedicated STEAMCMD_IMAGE for the tool (pre-baked binary), not the game's runtime image
                 validate=validate_flag,
+                beta_branch=depot_branch,
             )
         elif source_type == BlueprintSourceType.HTTP:
             _append_console_log(
