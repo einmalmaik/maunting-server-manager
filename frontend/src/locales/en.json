@@ -129,6 +129,7 @@
       "steamValidate": "true (default): SteamCMD +app_update … validate. false: faster update without validate (e.g. large Proton/Wine apps).",
       "steamRequiresLogin": "true when the global Steam account in panel settings is required for this app.",
       "sourceHttp": "HTTPS URL to the server archive (zip/tar).",
+      "sourceGithub": "GitHub repo owner/repo, branch, optional subPath and setupCommands (argv). Private repos: MSM_GITHUB_CLONE_TOKEN on the host.",
       "sourceManual": "List of required files if users must upload them manually.",
       "modsSupportsMods": "Enables the Mod Manager tab for this server.",
       "modsSupportsSteamWorkshop": "Enables Steam Workshop integration.",
@@ -145,16 +146,16 @@
       "b1": "Set supportsMods=true, supportsSteamWorkshop=true, and add the workshopAppId in the 'mods' object. Set modInjection to 'startupArg' or 'file', depending on how the game loads mods.",
       "h2": "How do I patch a configuration file?",
       "b2": "Use 'runtime.configPatches'. Required fields per patch: type ('ini' or 'regex'), file (relative path), and value. For type=ini, section (INI section, e.g. 'URL') and key are also required. For type=regex, regex (search pattern as regular expression) is required instead. Port placeholders are allowed in value ({GAME_PORT} etc.) — but NOT {ENV.<KEY>} or {MOD_ARG}, as those are only valid in the startup command.",
-      "h3": "How do I host Discord bots or other open-source software (GitHub)?",
-      "b3": "First choose the source: 'steam' for SteamCMD, 'http' for a ZIP/TAR over HTTPS, 'dockerOnly' when everything is already inside the image, or 'manualUpload' when the user must upload files manually. Ports are roles, not fixed numbers: 'game' is the main port, 'query' is the server-list port, 'rcon' is the admin console, and 'voice' is a voice port. The user assigns the actual numbers when creating the server.",
+      "h3": "How do I host Discord bots or other apps from GitHub?",
+      "b3": "Use source.type=github (generic, not Discord-only): repo as owner/repo, branch (e.g. main), optional subPath for monorepos. checkBased pulls via git fetch/reset before start/restart. Optional setupCommands (argv lists, e.g. npm ci) after clone/pull. runtime.startupProfiles picks the start command (package.json → npm start, bot.py → python3 bot.py). Secrets (.env) are preserved by the config backup.",
       "b3_extra": "MSM's automatic updater will preserve your configuration files: Typical config extensions like .json, .env, .toml, .yaml, .yml, .ini, .cfg, or .txt (under 2MB in size, outside of system/data directories) are backed up temporarily during updates/reinstalls and restored automatically.",
       "nonSteamExampleTitle": "Example: Non-Steam Game (Hytale)",
       "steamExampleTitle": "Example: Steam Game (DayZ)",
-      "botExampleTitle": "Example: Discord Bot (GitHub ZIP)",
+      "botExampleTitle": "Example: Discord bot (GitHub branch + auto-pull)",
       "voiceExampleTitle": "Example: Open-Source Voice Server (Mumble)",
       "steamLegacyExampleTitle": "Example: Steam branch (Conan legacy)",
       "h4": "How does MSM check game updates vs Workshop mods?",
-      "b4": "Workshop mods are checked periodically via the Steam API (time_updated); outdated mods install on restart. The scheduler may restart stopped servers when a mod has auto_update enabled — not for game binaries alone.\n\nGame files (Steam app) compare the local buildid in steamapps/appmanifest_<appId>.acf with the blueprint branch (default public). If the check reports an update and updateStrategy is checkBased (Steam default), SteamCMD runs before start/restart. The server update badge and “Check game updates” appear only on Steam Workshop games (same as the mod manager tab). MSM does not auto-restart only because of a game update — you restart/start manually or use scheduled auto_restart (not update-triggered)."
+      "b4": "Workshop mods use the Steam API; outdated mods install on restart. Steam game binaries use buildid + branch. GitHub/HTTP sources compare remote vs local (commit or Last-Modified) and update on checkBased before start/restart. The update badge and “Check game updates” show for managed sources (steam, http, github) — workshop mods stay in the mod manager."
     },
     "updates": {
       "body": "Server binaries and Workshop mods are handled separately. Both can show status in the panel (mod status vs server update badge); installation happens during lifecycle (start/restart), not while the server is running.",
@@ -171,6 +172,10 @@
       "gameDetect": "buildid compare for source.steam.branch",
       "gameInstall": "On start/restart when check is positive or alwaysValidate; manual: “Check game updates” on server detail",
       "gameAutoRestart": "No — manual or auto_restart without update trigger",
+      "githubWhat": "Git sources (GitHub)",
+      "githubDetect": "git ls-remote vs local HEAD",
+      "githubInstall": "git fetch/reset + setupCommands before start/restart when checkBased",
+      "githubAutoRestart": "No",
       "branchNote": "Set legacy or beta branches with source.steam.branch. SteamCMD gets -beta <name> (except public). The update check uses the same branch metadata."
     },
     "troubleshooting": {

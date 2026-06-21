@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "generic_github_bot",
+    "name": "Generic GitHub Bot (Template)",
+    "category": "bot",
+    "author": "MSM",
+    "description": "Vorlage für Discord-/Telegram-Bots und andere Apps aus einem GitHub-Repo (Branch + Auto-Pull)."
+  },
+  "runtime": {
+    "image": "node:22-bookworm-slim",
+    "workdir": "/data",
+    "user": "1000:1000",
+    "env": {},
+    "startup": "node index.js",
+    "startupProfiles": [
+      { "whenFile": "package.json", "startup": "npm start" },
+      { "whenFile": "requirements.txt", "startup": "python3 main.py" },
+      { "whenFile": "bot.py", "startup": "python3 bot.py" }
+    ],
+    "requiredFiles": ["package.json"],
+    "ensureDirs": ["logs"]
+  },
+  "ports": [],
+  "source": {
+    "type": "github",
+    "updateStrategy": "checkBased",
+    "github": {
+      "repo": "your-org/your-bot",
+      "branch": "main",
+      "subPath": null,
+      "setupCommands": [
+        ["npm", "ci"]
+      ]
+    }
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false
+  }
+}

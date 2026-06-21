@@ -571,6 +571,50 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
 
         return result
 
+    # ── GitHub Source: ls-remote vs. lokaler HEAD ─────────────────────────────
+    if src_type == "github" and bp_source.github:
+        from blueprints.github_source import local_repo_sha, remote_branch_sha
+
+        gh = bp_source.github
+        repo = gh.repo.strip()
+        branch = (gh.branch or "main").strip() or "main"
+        remote_sha = remote_branch_sha(repo, branch)
+        local_sha = local_repo_sha(install_dir)
+
+        result["remote_commit"] = remote_sha
+        result["local_commit"] = local_sha
+
+        if remote_sha is None:
+            result["reason"] = "check_failed"
+            result["details"] = (
+                f"GitHub-Source: Branch '{branch}' von {repo} nicht per ls-remote erreichbar."
+            )
+            return result
+
+        if local_sha is None:
+            result["action"] = "update"
+            result["reason"] = "missing"
+            result["details"] = "GitHub-Source: Kein lokales Git-Repo — Installation erforderlich."
+            return result
+
+        if local_sha != remote_sha:
+            result["action"] = "update"
+            result["reason"] = "new_version_available"
+            result["details"] = (
+                f"GitHub {repo}@{branch}: neuer Commit "
+                f"(lokal {local_sha[:12]} → remote {remote_sha[:12]})."
+            )
+            logger.info(
+                "Server-Datei-Update verfügbar (GitHub) Server %s %s@%s",
+                server_id,
+                repo,
+                branch,
+            )
+            return result
+
+        result["details"] = f"GitHub {repo}@{branch}: Commit {local_sha[:12]} ist aktuell."
+        return result
+
     # dockerOnly, custom, manualUpload → MSM verwaltet keine Dateien
     result["reason"] = "up_to_date"
     result["details"] = (
@@ -986,6 +1030,16 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 "[MSM] Server-Datei-Update: HTTP-Source-Download/Entpacken (synchron vor Start)\n"
             )
             return install_http_source(blueprint, install_dir)
+        elif source_type == BlueprintSourceType.GITHUB:
+            from blueprints.github_source import install_github_source
+
+            gh = bp_source.github
+            branch = (gh.branch if gh else "main") or "main"
+            _append_console_log(
+                server_id,
+                f"[MSM] Server-Datei-Update: git pull origin {branch} (synchron vor Start)\n",
+            )
+            return install_github_source(blueprint, install_dir)
         else:
             # manualUpload / dockerOnly / custom → Check sollte nie "update" liefern.
             return {

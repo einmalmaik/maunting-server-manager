@@ -112,36 +112,13 @@ def render_argv(
     bind_ip: str | None = None,
     active_mod_ids: list[str] | None = None,
     extra_env: Mapping[str, str] | None = None,
+    host_install_dir: str | None = None,
 ) -> list[str]:
-    """Rendert ``blueprint.runtime.startup`` zu einer argv-Liste.
+    """Rendert ``runtime.startup`` (oder passendes ``startupProfile``) zu argv."""
+    from .github_source import resolve_startup_template
 
-    Parameter
-    ---------
-    install_dir
-        Container-seitiges Daten-Verzeichnis (typisch ``/data``).
-    ports
-        Mapping von Port-Rolle ("game"/"query"/"rcon"/"voice"/"web") auf
-        konkrete Portnummer. Fehlende Rollen werden zu leerem String und das
-        gesamte argv-Element wird entfernt, falls es ausschliesslich aus dem
-        leeren Token bestand.
-    active_mod_ids
-        Optional — aktive Mod-IDs in Lade-Reihenfolge. Wird via
-        :func:`build_mod_arg` zu ``{MOD_ARG}``.
-    extra_env
-        Werte fuer ``{ENV.<KEY>}``-Tokens. Werte werden NIE geloggt.
+    startup_template = resolve_startup_template(blueprint, host_install_dir)
 
-    Returns
-    -------
-    list[str]
-        argv-Liste fuer ``docker run … <argv>``.
-
-    Sicherheits-Garantien
-    ---------------------
-    - Tokens, die nicht in der Whitelist sind, fuehren zu
-      ``BlueprintValidationError``.
-    - Unbesetzte Tokens werden zu ``""``; argv-Elemente, die nach Substitution
-      leer waeren, werden gefiltert (sonst landet ein ``""``-Arg im Container).
-    """
     ports_map: dict[str, str] = {
         "GAME_PORT": "" if not ports.get("game") else str(ports["game"]),
         "QUERY_PORT": "" if not ports.get("query") else str(ports["query"]),
@@ -160,7 +137,7 @@ def render_argv(
 
     env_values: dict[str, str] = dict(extra_env or {})
 
-    raw_args = shlex.split(blueprint.runtime.startup)
+    raw_args = shlex.split(startup_template)
     rendered: list[str] = []
     for arg in raw_args:
         had_empty_token = False

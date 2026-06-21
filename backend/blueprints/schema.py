@@ -67,6 +67,7 @@ class BlueprintCategory(str, Enum):
 class BlueprintSourceType(str, Enum):
     STEAM = "steam"
     HTTP = "http"
+    GITHUB = "github"
     DOCKER_ONLY = "dockerOnly"
     CUSTOM = "custom"
     MANUAL_UPLOAD = "manualUpload"
@@ -303,6 +304,7 @@ class BlueprintRuntime(BaseModel):
     user: str | None = Field(default=None, max_length=32)
     env: dict[str, str] = Field(default_factory=dict)
     startup: str = Field(min_length=1, max_length=2048)
+    startupProfiles: list["BlueprintStartupProfile"] = Field(default_factory=list, max_length=8)
     ensureDirs: list[str] = Field(default_factory=list, max_length=16)
     requiredFiles: list[str] = Field(default_factory=list, max_length=16)
     configPatches: list["BlueprintConfigPatch"] = Field(default_factory=list, max_length=32)
@@ -448,6 +450,46 @@ class BlueprintRuntime(BaseModel):
             seen.add(path)
         return v
 
+    @field_validator("startupProfiles")
+    @classmethod
+    def _check_startup_profiles(cls, v: list["BlueprintStartupProfile"]) -> list["BlueprintStartupProfile"]:
+        seen: set[str] = set()
+        for profile in v:
+            path = profile.whenFile.strip()
+            if path in seen:
+                raise ValueError(f"runtime.startupProfiles: Duplikat whenFile '{path}'.")
+            seen.add(path)
+        return v
+
+
+class BlueprintStartupProfile(BaseModel):
+    """Startbefehl wenn Marker-Datei im Install-Ordner existiert."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    whenFile: str = Field(min_length=1, max_length=512)
+    startup: str = Field(min_length=1, max_length=2048)
+
+    @field_validator("whenFile")
+    @classmethod
+    def _check_when_file(cls, v: str) -> str:
+        v = v.strip()
+        if not _is_safe_relative_path(v):
+            raise ValueError(
+                f"runtime.startupProfiles.whenFile unsicher '{v}' (absolute/'..' verboten)."
+            )
+        return v
+
+    @field_validator("startup")
+    @classmethod
+    def _check_profile_startup(cls, v: str) -> str:
+        for seq in _FORBIDDEN_STARTUP_SEQ:
+            if seq in v:
+                raise ValueError(f"startupProfiles.startup: verbotene Sequenz '{seq}'.")
+        if "\x00" in v or "\n" in v or "\r" in v:
+            raise ValueError("startupProfiles.startup: verbotene Steuerzeichen.")
+        return v
+
 
 class BlueprintPort(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -554,6 +596,57 @@ class BlueprintHttpSource(BaseModel):
         return v
 
 
+class BlueprintGithubSource(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    repo: str = Field(min_length=3, max_length=211)
+    branch: str = Field(default="main", min_length=1, max_length=255)
+    subPath: str | None = Field(default=None, max_length=512)
+    setupCommands: list[list[str]] = Field(default_factory=list, max_length=8)
+
+    @field_validator("repo")
+    @classmethod
+    def _check_repo(cls, v: str) -> str:
+        v = v.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", v):
+            raise ValueError("source.github.repo muss owner/repo sein (nur github.com).")
+        if ".." in v or v.startswith("/"):
+            raise ValueError("source.github.repo: ungültiges Format.")
+        return v
+
+    @field_validator("branch")
+    @classmethod
+    def _check_branch(cls, v: str) -> str:
+        v = v.strip()
+        if not v or "\x00" in v or "/" in v or "\\" in v:
+            raise ValueError("source.github.branch: ungültiger Branch-Name.")
+        return v
+
+    @field_validator("subPath")
+    @classmethod
+    def _check_sub_path(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        if not _is_safe_relative_path(v):
+            raise ValueError("source.github.subPath muss relativer Pfad ohne '..' sein.")
+        return v
+
+    @field_validator("setupCommands")
+    @classmethod
+    def _check_setup_commands(cls, v: list[list[str]]) -> list[list[str]]:
+        out: list[list[str]] = []
+        for cmd in v:
+            if not cmd or len(cmd) > 32:
+                raise ValueError("source.github.setupCommands: leere oder zu lange Befehlsliste.")
+            for part in cmd:
+                if not isinstance(part, str) or not part.strip():
+                    raise ValueError("source.github.setupCommands: leere Argumente verboten.")
+                if "\x00" in part or "\n" in part:
+                    raise ValueError("source.github.setupCommands: verbotene Zeichen.")
+            out.append([p.strip() for p in cmd])
+        return out
+
+
 class BlueprintManualSource(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -593,6 +686,7 @@ class BlueprintSource(BaseModel):
     updateStrategy: BlueprintUpdateStrategy | None = None
     steam: BlueprintSteamSource | None = None
     http: BlueprintHttpSource | None = None
+    github: BlueprintGithubSource | None = None
     manual: BlueprintManualSource | None = None
 
     @model_validator(mode="after")
@@ -600,22 +694,27 @@ class BlueprintSource(BaseModel):
         if self.type == BlueprintSourceType.STEAM:
             if self.steam is None:
                 raise ValueError("source.type=steam benoetigt source.steam.")
-            if self.http is not None or self.manual is not None:
-                raise ValueError("source.type=steam darf source.http/manual nicht setzen.")
+            if self.http is not None or self.manual is not None or self.github is not None:
+                raise ValueError("source.type=steam darf nur source.steam setzen.")
         elif self.type == BlueprintSourceType.HTTP:
             if self.http is None:
                 raise ValueError("source.type=http benoetigt source.http.")
-            if self.steam is not None or self.manual is not None:
-                raise ValueError("source.type=http darf source.steam/manual nicht setzen.")
+            if self.steam is not None or self.manual is not None or self.github is not None:
+                raise ValueError("source.type=http darf nur source.http setzen.")
+        elif self.type == BlueprintSourceType.GITHUB:
+            if self.github is None:
+                raise ValueError("source.type=github benoetigt source.github.")
+            if self.steam is not None or self.http is not None or self.manual is not None:
+                raise ValueError("source.type=github darf nur source.github setzen.")
         elif self.type == BlueprintSourceType.MANUAL_UPLOAD:
             if self.manual is None:
                 raise ValueError("source.type=manualUpload benötigt source.manual.")
-            if self.steam is not None or self.http is not None:
-                raise ValueError("source.type=manualUpload darf source.steam/http nicht setzen.")
+            if self.steam is not None or self.http is not None or self.github is not None:
+                raise ValueError("source.type=manualUpload darf nur source.manual setzen.")
         else:  # dockerOnly / custom
-            if self.steam is not None or self.http is not None or self.manual is not None:
+            if self.steam is not None or self.http is not None or self.manual is not None or self.github is not None:
                 raise ValueError(
-                    f"source.type={self.type.value} darf weder source.steam, source.http noch source.manual setzen."
+                    f"source.type={self.type.value} darf keine source.steam/http/github/manual setzen."
                 )
         return self
 
@@ -629,6 +728,7 @@ class BlueprintSource(BaseModel):
         User kann per Blueprint explizit "alwaysValidate" setzen, wenn gewünscht.
         - steam: ``checkBased`` (schnelle Starts; Update nur bei Bedarf oder manuell)
         - http: ``checkBased`` (HEAD + Last-Modified).
+        - github: ``checkBased`` (git ls-remote vs. lokaler HEAD).
         - dockerOnly/custom/manualUpload: ``none`` (kein Auto-Update).
         """
         if self.updateStrategy is not None:
@@ -636,6 +736,7 @@ class BlueprintSource(BaseModel):
         defaults = {
             BlueprintSourceType.STEAM: BlueprintUpdateStrategy.CHECK_BASED,
             BlueprintSourceType.HTTP: BlueprintUpdateStrategy.CHECK_BASED,
+            BlueprintSourceType.GITHUB: BlueprintUpdateStrategy.CHECK_BASED,
             BlueprintSourceType.DOCKER_ONLY: BlueprintUpdateStrategy.NONE,
             BlueprintSourceType.CUSTOM: BlueprintUpdateStrategy.NONE,
             BlueprintSourceType.MANUAL_UPLOAD: BlueprintUpdateStrategy.NONE,
@@ -932,6 +1033,9 @@ def load_blueprint_file(path: Path | str) -> Blueprint:
             f"Blueprint-Datei {p} muss ein JSON-Objekt enthalten, kein {type(data).__name__}."
         )
     return load_blueprint_dict(data)
+
+
+BlueprintRuntime.model_rebuild()
 
 
 # ── Downloadbares Template ────────────────────────────────────────────────

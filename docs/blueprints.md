@@ -39,7 +39,7 @@ Die wichtigsten Blöcke:
 
 Faustregel: Wenn der Server schon komplett im Docker-Image steckt, nutze
 `source.type=dockerOnly`. Wenn MSM ein ZIP/TAR herunterladen soll, nutze
-`source.type=http`. Wenn SteamCMD die Dateien holen soll, nutze
+`source.type=http`. Für **Git-Repos (Discord-Bots, Node/Python-Apps)** mit Branch und Auto-Pull: `source.type=github`. Wenn SteamCMD die Dateien holen soll, nutze
 `source.type=steam`. Wenn der Nutzer Dateien selbst hochladen muss, nutze
 `source.type=manualUpload`.
 

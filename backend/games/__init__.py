@@ -20,6 +20,7 @@ from .base import (
     run_steamcmd_workshop_download_batch,
     write_workshop_modlist,
 )
+from blueprints.schema import BlueprintSourceType
 from .blueprint_plugin import BlueprintPlugin
 from services.port_role_service import blueprint_port_requirements
 
@@ -58,6 +59,12 @@ def list_game_info() -> list[dict]:
             continue
         bp_mods = bp.effective_mods()
         port_requirements = blueprint_port_requirements(bp.ports)
+        src_type = bp.source.type
+        supports_file_updates = src_type in (
+            BlueprintSourceType.STEAM,
+            BlueprintSourceType.HTTP,
+            BlueprintSourceType.GITHUB,
+        )
         out.append({
             "id": bp.meta.id,
             "name": bp.meta.name,
@@ -65,6 +72,7 @@ def list_game_info() -> list[dict]:
             "category": bp.meta.category.value,
             "mod_support": bp_mods.supportsMods,
             "supports_steam_workshop": bp_mods.supportsSteamWorkshop,
+            "supports_server_file_updates": supports_file_updates,
             "ports": [
                 {"name": p.name.value, "protocol": p.protocol.value, "role": role}
                 for p, (role, _protocol) in zip(bp.ports, port_requirements)

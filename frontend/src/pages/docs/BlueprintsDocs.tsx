@@ -194,21 +194,26 @@ export function BlueprintsDocs() {
       "name": "Custom Discord Bot",
       "category": "bot",
       "author": "Your Name",
-      "description": "Discord Bot loaded from a GitHub repository ZIP archive."
+      "description": "Bot from GitHub (branch + auto-pull). Startup via startupProfiles."
     },
     "runtime": {
-      "image": "node:20-alpine",
-      "env": {
-        "NODE_ENV": "production"
-      },
-      "startup": "sh start.sh"
+      "image": "node:22-bookworm-slim",
+      "workdir": "/data",
+      "env": { "NODE_ENV": "production" },
+      "startup": "node index.js",
+      "startupProfiles": [
+        { "whenFile": "package.json", "startup": "npm start" },
+        { "whenFile": "bot.py", "startup": "python3 bot.py" }
+      ]
     },
     "ports": [],
     "source": {
-      "type": "http",
-      "http": {
-        "url": "https://github.com/owner/repo/archive/refs/heads/main.zip",
-        "archiveType": "zip"
+      "type": "github",
+      "updateStrategy": "checkBased",
+      "github": {
+        "repo": "your-org/your-bot",
+        "branch": "main",
+        "setupCommands": [["npm", "ci"]]
       }
     }
   }
@@ -405,6 +410,7 @@ export function BlueprintsDocs() {
               <FieldRow field="source.updateStrategy" type="enum" required={false}>{t('docs.reference.sourceUpdateStrategy')}</FieldRow>
               <FieldRow field="source.steam" type="object" required={false}>{t('docs.reference.sourceSteam')}</FieldRow>
               <FieldRow field="source.http" type="object" required={false}>{t('docs.reference.sourceHttp')}</FieldRow>
+              <FieldRow field="source.github" type="object" required={false}>{t('docs.reference.sourceGithub')}</FieldRow>
               <FieldRow field="source.manual" type="object" required={false}>{t('docs.reference.sourceManual')}</FieldRow>
             </FieldTable>
 
@@ -504,6 +510,12 @@ export function BlueprintsDocs() {
                     <td className="px-4 py-3">{t('docs.updates.gameDetect')}</td>
                     <td className="px-4 py-3">{t('docs.updates.gameInstall')}</td>
                     <td className="px-4 py-3">{t('docs.updates.gameAutoRestart')}</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-3 font-medium">{t('docs.updates.githubWhat')}</td>
+                    <td className="px-4 py-3">{t('docs.updates.githubDetect')}</td>
+                    <td className="px-4 py-3">{t('docs.updates.githubInstall')}</td>
+                    <td className="px-4 py-3">{t('docs.updates.githubAutoRestart')}</td>
                   </tr>
                 </tbody>
               </table>

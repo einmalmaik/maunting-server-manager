@@ -184,6 +184,44 @@ class BlueprintPlugin(GamePlugin):
             threading.Thread(target=_http_install, daemon=True).start()
             return {"message": "Installation gestartet"}
 
+        if bp.source.type == BlueprintSourceType.GITHUB:
+            install_dir = server.install_dir
+            server_id = server.id
+
+            def _github_install():
+                from blueprints.github_source import install_github_source
+
+                _append_console_log(server_id, "[MSM] GitHub-Source: Clone/Pull startet\n")
+                reinstall = Path(install_dir).is_dir() and (Path(install_dir) / ".git").is_dir()
+                if reinstall:
+                    _append_console_log(
+                        server_id,
+                        "[MSM] Reinstall/Update: git pull auf konfigurierten Branch "
+                        "(Configs werden gesichert).\n",
+                    )
+                from games.updater import perform_install_with_protection
+
+                result = perform_install_with_protection(
+                    server,
+                    lambda: install_github_source(bp, install_dir),
+                    blueprint=bp,
+                )
+                if result.get("ok"):
+                    _append_console_log(
+                        server_id,
+                        f"[MSM] GitHub-Source OK (branch={result.get('branch')}, "
+                        f"commit={str(result.get('commit', ''))[:12]})\n",
+                    )
+                else:
+                    _append_console_log(
+                        server_id,
+                        f"[MSM] GitHub-Source fehlgeschlagen: {result.get('error')}\n",
+                    )
+                finish_install(server_id, result)
+
+            threading.Thread(target=_github_install, daemon=True).start()
+            return {"message": "Installation gestartet"}
+
         if bp.source.type == BlueprintSourceType.MANUAL_UPLOAD:
             assert bp.source.manual is not None
             install_dir = Path(server.install_dir)
@@ -263,6 +301,7 @@ class BlueprintPlugin(GamePlugin):
             bind_ip=server.public_bind_ip or None,
             active_mod_ids=active_mod_ids(server),
             extra_env=self._blueprint.runtime.env,
+            host_install_dir=server.install_dir,
         )
         if not argv or not self._uses_windows_compat_runtime():
             return argv

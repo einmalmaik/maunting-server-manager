@@ -57,6 +57,7 @@ export interface GameInfo {
   category?: string
   mod_support: boolean
   supports_steam_workshop: boolean
+  supports_server_file_updates?: boolean
   ports?: BlueprintPortDef[]
   source?: 'native' | 'community'
 }
@@ -70,7 +71,7 @@ export interface BlueprintListEntry {
   origin: 'native' | 'community'
   version: number
   image: string
-  source_type: 'steam' | 'http' | 'dockerOnly' | 'custom'
+  source_type: 'steam' | 'http' | 'github' | 'dockerOnly' | 'custom' | 'manualUpload'
   supports_mods: boolean
   supports_steam_workshop: boolean
   mod_injection: 'none' | 'startupArg' | 'file'

@@ -129,6 +129,7 @@
       "steamValidate": "true (Default): SteamCMD +app_update … validate. false: schnelleres Update ohne validate (z. B. große Proton/Wine-Apps).",
       "steamRequiresLogin": "true wenn der globale Steam-Account im Panel für diese App nötig ist (Einstellungen → Steam).",
       "sourceHttp": "HTTPS-URL zum Server-Archiv (zip/tar).",
+      "sourceGithub": "GitHub-Repo owner/repo, branch, optional subPath und setupCommands (argv). Privat: MSM_GITHUB_CLONE_TOKEN auf dem Host.",
       "sourceManual": "Liste der benötigten Dateien, wenn User diese manuell hochladen müssen.",
       "modsSupportsMods": "Aktiviert den Mod-Manager-Tab für diesen Server.",
       "modsSupportsSteamWorkshop": "Aktiviert Steam Workshop Integration.",
@@ -145,16 +146,16 @@
       "b1": "Setze im 'mods'-Objekt supportsMods=true, supportsSteamWorkshop=true und trage die workshopAppId ein. Stelle modInjection auf 'startupArg' oder 'file', je nachdem, wie das Spiel Mods lädt.",
       "h2": "Wie patche ich eine Konfigurationsdatei?",
       "b2": "Nutze 'runtime.configPatches'. Pflichtfelder pro Patch: type ('ini' oder 'regex'), file (relativer Pfad zur Datei) und value (Wert). Bei type=ini sind zusätzlich section (Sektion, z. B. 'URL') und key erforderlich. Bei type=regex ist stattdessen regex (Suchmuster als regulärer Ausdruck) erforderlich. Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.) — aber KEIN {ENV.<KEY>} und KEIN {MOD_ARG}, da diese nur im startup-Befehl sinnvoll sind.",
-      "h3": "Wie hoste ich Discord-Bots oder andere Open-Source-Software (GitHub)?",
-      "b3": "Wähle zuerst die Quelle: 'steam' für SteamCMD, 'http' für ein ZIP/TAR über HTTPS, 'dockerOnly' wenn alles schon im Image steckt, oder 'manualUpload' wenn der Nutzer Dateien selbst hochladen muss. Ports sind Rollen, keine festen Nummern: 'game' ist der Hauptport, 'query' der Serverlisten-Port, 'rcon' die Admin-Konsole und 'voice' ein Sprachport. Die Nummern vergibt der Nutzer später beim Server-Erstellen.",
+      "h3": "Wie hoste ich Discord-Bots oder andere Apps aus GitHub?",
+      "b3": "Nutze source.type=github (generisch, nicht nur Discord): repo als owner/repo, branch (z. B. main), optional subPath für Monorepos. updateStrategy checkBased zieht vor Start/Restart per git fetch/reset den neuesten Stand. Optional setupCommands (argv-Listen, z. B. npm ci) nach Clone/Pull. runtime.startupProfiles wählt automatisch den Startbefehl (package.json → npm start, bot.py → python3 bot.py). Secrets (.env) bleiben durch den Config-Schutz erhalten.",
       "b3_extra": "Hierbei schützt der automatische Updater von MSM deine Konfigurationsdateien: Alle typischen Config-Dateiendungen wie .json, .env, .toml, .yaml, .yml, .ini, .cfg oder .txt (unter 2MB Größe, außerhalb von Systemordnern) werden vor dem Herunterladen temporär gesichert und danach wiederhergestellt.",
       "nonSteamExampleTitle": "Beispiel: Nicht-Steam-Game (Hytale)",
       "steamExampleTitle": "Beispiel: Steam-Game (DayZ)",
-      "botExampleTitle": "Beispiel: Discord-Bot (GitHub-ZIP)",
+      "botExampleTitle": "Beispiel: Discord-Bot (GitHub Branch + Auto-Pull)",
       "voiceExampleTitle": "Beispiel: Open-Source-Voice-Server (Mumble)",
       "steamLegacyExampleTitle": "Beispiel: Steam-Branch (Conan Legacy)",
       "h4": "Wie prüft MSM Spiel-Updates und Workshop-Mods?",
-      "b4": "Workshop-Mods werden periodisch per Steam-API auf time_updated geprüft; veraltete Mods werden beim Neustart installiert. Optional startet der Scheduler gestoppte Server neu, wenn eine Mod auto_update aktiv ist — nicht für reine Spiel-Binaries.\n\nSpiel-Dateien (Steam App) vergleichen die lokale buildid in steamapps/appmanifest_<appId>.acf mit dem Blueprint-Branch (Default public). Meldet der Check ein Update und updateStrategy ist checkBased (Steam-Default), läuft vor Start/Restart SteamCMD. Badge und „Spiel-Updates prüfen“ siehst du nur bei Spielen mit Steam-Workshop (wie der Mod-Manager-Tab). MSM startet den Server nicht automatisch nur wegen eines Game-Updates — Restart/Start durch dich oder geplantes auto_restart (ohne Update-Trigger)."
+      "b4": "Workshop-Mods werden periodisch per Steam-API geprüft; veraltete Mods installieren beim Neustart. Spiel-Binaries (Steam) nutzen buildid + Branch. GitHub/HTTP-Quellen vergleichen Remote-Stand mit lokal (Commit bzw. Last-Modified) und pullen bei checkBased vor Start/Restart. Badge und „Spiel-Updates prüfen“ erscheinen bei Blueprints mit verwalteter Quelle (steam, http, github) — Workshop-Mods nur im Mod-Manager."
     },
     "updates": {
       "body": "Server-Binaries und Workshop-Mods werden getrennt behandelt. Beides kann im Panel sichtbar sein (Mod-Status bzw. Server-Update-Badge), die Installation passiert aber beim Lifecycle (Start/Restart), nicht live während der Laufzeit.",
@@ -171,6 +172,10 @@
       "gameDetect": "buildid-Vergleich für source.steam.branch",
       "gameInstall": "Beim Start/Restart bei positivem Check oder alwaysValidate; manuell: „Spiel-Updates prüfen“ auf der Server-Detailseite",
       "gameAutoRestart": "Nein — nur manuell oder auto_restart ohne Update-Trigger",
+      "githubWhat": "Git-Quellen (GitHub)",
+      "githubDetect": "git ls-remote vs. lokaler HEAD",
+      "githubInstall": "git fetch/reset + setupCommands vor Start/Restart bei checkBased",
+      "githubAutoRestart": "Nein",
       "branchNote": "Legacy- oder Beta-Branches setzt du mit source.steam.branch. SteamCMD erhält -beta <name> (außer public). Der Update-Check nutzt dieselbe Branch-Metadaten."
     },
     "troubleshooting": {

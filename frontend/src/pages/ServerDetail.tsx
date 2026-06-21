@@ -191,8 +191,8 @@ export function ServerDetail() {
     [games, server?.game_type],
   );
   const showModTab = !!gameInfo?.supports_steam_workshop;
-  /** Spiel-Binaries (Steam buildid): gleiche Voraussetzung wie Mod-Manager-Tab. */
-  const showSteamServerFileUpdates = showModTab;
+  /** Steam / HTTP / GitHub: manueller Datei-Update-Check (nicht Workshop-Mods). */
+  const showServerFileUpdates = !!gameInfo?.supports_server_file_updates;
 
   const tabs = useMemo(() => {
     const list: { key: TabKey; label: string; icon: typeof FileText }[] = [
@@ -566,7 +566,7 @@ export function ServerDetail() {
           </button>
         )}
 
-        {hasServerFiles && showSteamServerFileUpdates && (
+        {hasServerFiles && showServerFileUpdates && (
           <button
             type="button"
             onClick={() => void checkServerFileUpdates()}
@@ -585,7 +585,7 @@ export function ServerDetail() {
         {serverUpdateBadge?.available &&
           serverUpdateBadge.reason !== "missing" &&
           hasServerFiles &&
-          showSteamServerFileUpdates && (
+          showServerFileUpdates && (
           <div className="flex items-center gap-2 self-center">
             <span
               className="font-mono-sm text-mono-sm px-2.5 py-1 rounded-full border bg-status-warning/10 border-status-warning/30 text-status-warning"
