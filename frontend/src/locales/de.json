@@ -79,6 +79,7 @@
       "reference": "Feldreferenz",
       "howto": "How-To Guides",
       "updates": "Steam-Updates & Branches",
+      "backups": "Backups (Config & Saves)",
       "troubleshooting": "Troubleshooting"
     },
     "intro": {
@@ -139,7 +140,8 @@
       "modsModStartupArgumentFormat": "Format des Startup-Arguments (z. B. -mod={mods};).",
       "modsModListFilePath": "Dateipfad der Modliste (z. B. ConanSandbox/Mods/modlist.txt).",
       "modsModListContent": "Format der Einträge in der Modliste (workshopIds, postInstallTargetBasenames).",
-      "modsPostInstall": "Liste von Dateioperationen, die nach Mod-Downloads ausgeführt werden."
+      "modsPostInstall": "Liste von Dateioperationen, die nach Mod-Downloads ausgeführt werden.",
+      "backupIncludePaths": "Optional. Relative Pfade/Globs unter install_dir für Backups (Config, Savegames, DB). Ohne backup-Block: volles Server-Verzeichnis. Restore überschreibt nur diese Pfade."
     },
     "howto": {
       "h1": "Wie aktiviere ich Steam Workshop?",
@@ -155,7 +157,9 @@
       "voiceExampleTitle": "Beispiel: Open-Source-Voice-Server (Mumble)",
       "steamLegacyExampleTitle": "Beispiel: Steam-Branch (Conan Legacy)",
       "h4": "Wie prüft MSM Spiel-Updates und Workshop-Mods?",
-      "b4": "Workshop-Mods werden periodisch per Steam-API geprüft; veraltete Mods installieren beim Neustart. Spiel-Binaries (Steam) nutzen buildid + Branch. GitHub/HTTP-Quellen vergleichen Remote-Stand mit lokal (Commit bzw. Last-Modified) und pullen bei checkBased vor Start/Restart. Badge und „Spiel-Updates prüfen“ erscheinen bei Blueprints mit verwalteter Quelle (steam, http, github) — Workshop-Mods nur im Mod-Manager."
+      "b4": "Workshop-Mods werden periodisch per Steam-API geprüft; veraltete Mods installieren beim Neustart. Spiel-Binaries (Steam) nutzen buildid + Branch. GitHub/HTTP-Quellen vergleichen Remote-Stand mit lokal (Commit bzw. Last-Modified) und pullen bei checkBased vor Start/Restart. Badge und „Spiel-Updates prüfen“ erscheinen bei Blueprints mit verwalteter Quelle (steam, http, github) — Workshop-Mods nur im Mod-Manager.",
+      "h5": "Wie begrenze ich Backups auf Config und Savegames?",
+      "b5": "Optional top-level backup mit includePaths: relative Pfade oder Globs (z. B. ConanSandbox/Saved/Config, profiles). MSM packt nur existierende Treffer ins Archiv — empfohlen bei großen Steam-Spielen."
     },
     "updates": {
       "body": "Server-Binaries und Workshop-Mods werden getrennt behandelt. Beides kann im Panel sichtbar sein (Mod-Status bzw. Server-Update-Badge), die Installation passiert aber beim Lifecycle (Start/Restart), nicht live während der Laufzeit.",
@@ -178,6 +182,13 @@
       "githubAutoRestart": "Nein",
       "branchNote": "Legacy- oder Beta-Branches setzt du mit source.steam.branch. SteamCMD erhält -beta <name> (außer public). Der Update-Check nutzt dieselbe Branch-Metadaten."
     },
+    "backups": {
+      "body": "Mit backup.includePaths in der Blueprint sichert MSM nur Konfiguration und Savegames — nicht Steam, Workshop oder Binaries. Archive bleiben klein; Restore überschreibt nur die gelisteten Pfade.",
+      "exampleTitle": "Beispiel: Conan (Config, Saves, game.db)",
+      "restoreTitle": "Wiederherstellen",
+      "restoreNote": "Selective Backups enthalten .msm/backup-manifest.json. Alte Voll-Backups ohne Manifest ersetzen weiterhin den ganzen Ordner.",
+      "panelNote": "Manuelles Backup, Auto-Backup und Backup vor Start nutzen dieselbe Blueprint-Logik."
+    },
     "troubleshooting": {
       "err1Title": "Ungültiges JSON",
       "err1Body": "Das Panel entfernt zwar // Kommentare, aber bei Syntax-Fehlern (wie fehlenden Kommas) schlägt der Upload fehl. Nutze einen JSON-Linter.",
@@ -196,7 +207,9 @@
       "err8Title": "Steam-Account nicht konfiguriert",
       "err8Body": "Einige Steam-Server oder Workshop-Downloads benötigen einen globalen Steam-Login. Hinterlege den Account unter Einstellungen. Passwörter werden nicht in Logs oder Toasts ausgegeben.",
       "err9Title": "Hytale OAuth oder Downloader-Zugriff schlägt fehl",
-      "err9Body": "Beim ersten Hytale-Start zeigt die Console einen OAuth-Link. Öffne ihn, gib den Code ein und nutze einen Hytale-Account mit Zugriff auf den Serverdownload. Bei 403 oder Unauthorized ist meist der Account nicht berechtigt, der Code abgelaufen oder die lokale Hytale-Downloader-Credential-Datei im Server-Verzeichnis muss erneuert werden."
+      "err9Body": "Beim ersten Hytale-Start zeigt die Console einen OAuth-Link. Öffne ihn, gib den Code ein und nutze einen Hytale-Account mit Zugriff auf den Serverdownload. Bei 403 oder Unauthorized ist meist der Account nicht berechtigt, der Code abgelaufen oder die lokale Hytale-Downloader-Credential-Datei im Server-Verzeichnis muss erneuert werden.",
+      "err10Title": "Permission-Repair / chmod: Operation not permitted",
+      "err10Body": "Oft nach root-owned Dateien im Server-Ordner (z. B. sudo-Sync). MSM bricht den Start dafür nicht mehr ab. Langfristig: Kopien über MSM oder chown auf Container-UID (runtime.user)."
     }
   },
   "servers": {
@@ -623,7 +636,7 @@
     "retention": "Aufbewahrung (Anzahl)",
     "backupName": "Name (optional)",
     "backupNamePlaceholder": "z.B. Vor Update v1.5",
-    "createModalHint": "Erstellt ein komprimiertes Archiv des Server-Verzeichnisses.",
+    "createModalHint": "Archiv gemäß Blueprint: mit backup.includePaths nur Config/Saves, sonst gesamtes Server-Verzeichnis.",
     "createNow": "Backup erstellen",
     "creating": "Backup wird erstellt...",
     "restoring": "Backup wird wiederhergestellt...",

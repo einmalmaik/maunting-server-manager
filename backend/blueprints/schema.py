@@ -1158,6 +1158,13 @@ COMMENTED_TEMPLATE_DE: str = """{
     "modListFilePath": null,
     "modListContent": "workshopIds",
     "postInstall": []
+  },
+  "backup": {
+    // Optional: nur diese relativen Pfade/Globs sichern (Config, Saves). Weglassen = volles install_dir.
+    "includePaths": [
+      "Saved/Config",
+      "Saved/SaveGames"
+    ]
   }
 }
 """
@@ -1251,6 +1258,13 @@ COMMENTED_TEMPLATE_EN: str = """{
     "modListFilePath": null,
     "modListContent": "workshopIds",
     "postInstall": []
+  },
+  "backup": {
+    // Optional: archive only these relative paths/globs (config, saves). Omit for full install_dir backup.
+    "includePaths": [
+      "Saved/Config",
+      "Saved/SaveGames"
+    ]
   }
 }
 """

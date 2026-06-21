@@ -901,20 +901,21 @@ def repair_bind_mount_permissions(
         return {"ok": False, "error": "Server-Verzeichnis existiert nicht", "stdout": "", "stderr": ""}
 
     target = shlex.quote(container_path.rstrip("/") or PERMISSION_REPAIR_CONTAINER_DIR)
+    # Kein set -e: einzelne chmod/chown-Fehler (z. B. root-owned Dateien unter
+    # Rootless Docker) duerfen den gesamten Start nicht abbrechen.
     script_parts = [
-        "set -e",
-        f"find {target} -xdev -type d -exec chmod a+rwX {{}} +",
-        f"find {target} -xdev -type f -exec chmod a+rwX {{}} +",
+        f"find {target} -xdev -type d -exec chmod a+rwX {{}} + 2>/dev/null || true",
+        f"find {target} -xdev -type f -exec chmod a+rwX {{}} + 2>/dev/null || true",
     ]
     if owner_uid_gid is not None:
         uid, gid = owner_uid_gid
         owner = f"{int(uid)}:{int(gid)}"
         script_parts.extend([
-            f"find {target} -xdev -type d -exec chown {owner} {{}} +",
-            f"find {target} -xdev -type f -exec chown {owner} {{}} +",
-            f"find {target} -xdev -type l -exec chown -h {owner} {{}} +",
+            f"find {target} -xdev -type d -exec chown {owner} {{}} + 2>/dev/null || true",
+            f"find {target} -xdev -type f -exec chown {owner} {{}} + 2>/dev/null || true",
+            f"find {target} -xdev -type l -exec chown -h {owner} {{}} + 2>/dev/null || true",
         ])
-    script = "; ".join(script_parts)
+    script = "; ".join(script_parts) + "; exit 0"
     return run_ephemeral(
         image=PERMISSION_REPAIR_IMAGE,
         command=["-c", script],

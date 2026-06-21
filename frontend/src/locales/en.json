@@ -79,6 +79,7 @@
       "reference": "Field Reference",
       "howto": "How-To Guides",
       "updates": "Steam updates & branches",
+      "backups": "Backups (config & saves)",
       "troubleshooting": "Troubleshooting"
     },
     "intro": {
@@ -139,7 +140,8 @@
       "modsModStartupArgumentFormat": "Format of the startup mod argument (e.g., -mod={mods};).",
       "modsModListFilePath": "File path of the mod list file (e.g., ConanSandbox/Mods/modlist.txt).",
       "modsModListContent": "Format of entries written to the mod list file (workshopIds, postInstallTargetBasenames).",
-      "modsPostInstall": "List of file operations run after mod downloads complete."
+      "modsPostInstall": "List of file operations run after mod downloads complete.",
+      "backupIncludePaths": "Optional. Relative paths/globs under install_dir for backups (config, saves, DB). Without a backup block: full server directory. Restore overwrites only these paths."
     },
     "howto": {
       "h1": "How do I enable Steam Workshop?",
@@ -155,7 +157,9 @@
       "voiceExampleTitle": "Example: Open-Source Voice Server (Mumble)",
       "steamLegacyExampleTitle": "Example: Steam branch (Conan legacy)",
       "h4": "How does MSM check game updates vs Workshop mods?",
-      "b4": "Workshop mods use the Steam API; outdated mods install on restart. Steam game binaries use buildid + branch. GitHub/HTTP sources compare remote vs local (commit or Last-Modified) and update on checkBased before start/restart. The update badge and “Check game updates” show for managed sources (steam, http, github) — workshop mods stay in the mod manager."
+      "b4": "Workshop mods use the Steam API; outdated mods install on restart. Steam game binaries use buildid + branch. GitHub/HTTP sources compare remote vs local (commit or Last-Modified) and update on checkBased before start/restart. The update badge and “Check game updates” show for managed sources (steam, http, github) — workshop mods stay in the mod manager.",
+      "h5": "How do I limit backups to config and saves?",
+      "b5": "Add an optional top-level backup block with includePaths: relative paths or globs (e.g. ConanSandbox/Saved/Config, profiles). MSM archives only existing matches — recommended for large Steam games."
     },
     "updates": {
       "body": "Server binaries and Workshop mods are handled separately. Both can show status in the panel (mod status vs server update badge); installation happens during lifecycle (start/restart), not while the server is running.",
@@ -178,6 +182,13 @@
       "githubAutoRestart": "No",
       "branchNote": "Set legacy or beta branches with source.steam.branch. SteamCMD gets -beta <name> (except public). The update check uses the same branch metadata."
     },
+    "backups": {
+      "body": "With backup.includePaths in the blueprint, MSM backs up only configuration and save data — not Steam, Workshop, or binaries. Archives stay small; restore overwrites only the listed paths.",
+      "exampleTitle": "Example: Conan (config, saves, game.db)",
+      "restoreTitle": "Restore",
+      "restoreNote": "Selective backups include .msm/backup-manifest.json. Legacy full backups without a manifest still replace the entire directory.",
+      "panelNote": "Manual backup, auto-backup, and backup-before-start use the same blueprint rules."
+    },
     "troubleshooting": {
       "err1Title": "Invalid JSON",
       "err1Body": "While the panel removes // comments, syntax errors (like missing commas) will still cause the upload to fail. Use a JSON linter.",
@@ -196,7 +207,9 @@
       "err8Title": "Steam account not configured",
       "err8Body": "Some Steam servers or Workshop downloads require a global Steam login. Configure the account in Settings. Passwords are not shown in logs or toasts.",
       "err9Title": "Hytale OAuth or downloader access failed",
-      "err9Body": "On the first Hytale start, the console shows an OAuth link. Open it, enter the code, and use a Hytale account with server-download access. If you see 403 or Unauthorized, the account usually lacks access, the code expired, or the local Hytale downloader credential file in that server directory must be renewed."
+      "err9Body": "On the first Hytale start, the console shows an OAuth link. Open it, enter the code, and use a Hytale account with server-download access. If you see 403 or Unauthorized, the account usually lacks access, the code expired, or the local Hytale downloader credential file in that server directory must be renewed.",
+      "err10Title": "Permission repair / chmod: Operation not permitted on start",
+      "err10Body": "Often caused by root-owned files in the server directory (e.g. manual sync with sudo) while MSM uses rootless Docker. MSM no longer aborts start for this; check the console hint. Prefer MSM-driven copies or chown to the container UID (runtime.user)."
     }
   },
   "servers": {
@@ -630,7 +643,7 @@
     "retention": "Retention (count)",
     "backupName": "Name (optional)",
     "backupNamePlaceholder": "e.g. Before update v1.5",
-    "createModalHint": "Creates a compressed archive of the server directory.",
+    "createModalHint": "Archive per blueprint: with backup.includePaths only config/saves, otherwise the full server directory.",
     "createNow": "Create Backup",
     "creating": "Creating backup...",
     "restoring": "Restoring backup...",

@@ -611,6 +611,7 @@ class BlueprintPlugin(GamePlugin):
                                 f"({len(purged)} Datei(en)) vor Pak-Kopie.\n",
                             )
                     shutil.copy2(source, target)
+                    self._try_chown_install_path(server, target)
                     continue
 
                 # Wichtig: unresolved_target (NICHT target.resolve()) fuer
@@ -631,6 +632,14 @@ class BlueprintPlugin(GamePlugin):
                 os.symlink(source, unresolved_target, target_is_directory=source.is_dir())
 
         return {}
+
+    def _try_chown_install_path(self, server, path: Path) -> None:
+        """Setzt Container-UID/GID auf kopierte Dateien (best effort)."""
+        try:
+            uid, gid = self.container_uid_gid(server)
+            os.chown(path, int(uid), int(gid))
+        except OSError:
+            pass
 
     def workshop_runtime_targets_ready(self, server, workshop_id: str) -> bool:
         """True wenn postInstall-Ziele (z. B. ConanSandbox/Mods/*.pak) existieren."""

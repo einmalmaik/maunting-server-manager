@@ -1146,8 +1146,16 @@ class GamePlugin(ABC):
             )
             if not repair.get("ok"):
                 err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
-                _append_console_log(server.id, f"[MSM] Permission-Repair fehlgeschlagen: {err}\n")
-                return {"error": err}
+                _append_console_log(
+                    server.id,
+                    f"[MSM] Permission-Repair Hinweis (Start wird fortgesetzt): {err}\n",
+                )
+            elif repair.get("stderr", "").strip():
+                _append_console_log(
+                    server.id,
+                    "[MSM] Permission-Repair: einige Dateien konnten nicht angepasst werden "
+                    "(z. B. root-owned unter Rootless Docker). Start wird fortgesetzt.\n",
+                )
 
         # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
         try:

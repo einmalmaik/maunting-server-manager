@@ -108,8 +108,19 @@ export function BlueprintsDocs() {
     { key: 'reference', title: t('docs.toc.reference') },
     { key: 'howto', title: t('docs.toc.howto') },
     { key: 'updates', title: t('docs.toc.updates') },
+    { key: 'backups', title: t('docs.toc.backups') },
     { key: 'troubleshooting', title: t('docs.toc.troubleshooting') },
   ]
+
+  const backupScopeExample = {
+    backup: {
+      includePaths: [
+        'ConanSandbox/Saved/Config',
+        'ConanSandbox/Saved/SaveGames',
+        'ConanSandbox/Saved/game.db',
+      ],
+    },
+  }
 
   const minimalExample = {
     "version": 1,
@@ -432,6 +443,7 @@ export function BlueprintsDocs() {
               <FieldRow field="mods.modListFilePath" type="string" required={false}>{t('docs.reference.modsModListFilePath')}</FieldRow>
               <FieldRow field="mods.modListContent" type="enum" required={false}>{t('docs.reference.modsModListContent')}</FieldRow>
               <FieldRow field="mods.postInstall" type="list" required={false}>{t('docs.reference.modsPostInstall')}</FieldRow>
+              <FieldRow field="backup.includePaths" type="list" required={false}>{t('docs.reference.backupIncludePaths')}</FieldRow>
             </FieldTable>
           </section>
 
@@ -482,6 +494,9 @@ export function BlueprintsDocs() {
 
             <h3 className="font-bold text-on-surface mt-8">{t('docs.howto.h4')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2 whitespace-pre-line">{t('docs.howto.b4')}</p>
+
+            <h3 className="font-bold text-on-surface mt-8">{t('docs.howto.h5')}</h3>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b5')}</p>
           </section>
 
           <section id="docs-updates" className="msm-card p-6 scroll-mt-20">
@@ -525,6 +540,17 @@ export function BlueprintsDocs() {
             </Alert>
           </section>
 
+          <section id="docs-backups" className="msm-card p-6 scroll-mt-20">
+            <h2 className="font-headline text-headline-sm font-bold text-on-surface mb-2">{t('docs.toc.backups')}</h2>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-4 whitespace-pre-line">{t('docs.backups.body')}</p>
+            <span className="font-semibold text-xs text-on-surface-variant block mb-1">{t('docs.backups.exampleTitle')}</span>
+            <CodeBlock example={backupScopeExample} />
+            <Alert type="info" title={t('docs.backups.restoreTitle')}>
+              {t('docs.backups.restoreNote')}
+            </Alert>
+            <p className="font-body-md text-body-md text-on-surface-variant mt-4">{t('docs.backups.panelNote')}</p>
+          </section>
+
           <section id="docs-troubleshooting" className="msm-card p-6 scroll-mt-20">
             <h2 className="font-headline text-headline-sm font-bold text-on-surface mb-2">{t('docs.toc.troubleshooting')}</h2>
             <div className="space-y-4">
@@ -554,6 +580,9 @@ export function BlueprintsDocs() {
               </Alert>
               <Alert type="warning" title={t('docs.troubleshooting.err9Title', 'Hytale OAuth or downloader access failed')}>
                 {t('docs.troubleshooting.err9Body', 'On the first Hytale start, the console shows an OAuth link. Open it, enter the code, and use a Hytale account with server-download access. If you see 403 or Unauthorized, refresh the login flow or remove the local Hytale downloader credential file in that server directory.')}
+              </Alert>
+              <Alert type="warning" title={t('docs.troubleshooting.err10Title')}>
+                {t('docs.troubleshooting.err10Body')}
               </Alert>
             </div>
           </section>
