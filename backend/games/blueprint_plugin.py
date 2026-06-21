@@ -632,6 +632,62 @@ class BlueprintPlugin(GamePlugin):
 
         return {}
 
+    def workshop_runtime_targets_ready(self, server, workshop_id: str) -> bool:
+        """True wenn postInstall-Ziele (z. B. ConanSandbox/Mods/*.pak) existieren."""
+        bp_mods = self._blueprint.effective_mods()
+        if not bp_mods.postInstall:
+            return True
+        base = Path(server.install_dir).resolve()
+        for action in bp_mods.postInstall:
+            sources = self._resolve_workshop_sources(base, action.source, workshop_id)
+            if action.required and not sources:
+                return False
+            for source in sources:
+                target_rel = self._render_workshop_path(
+                    action.target,
+                    workshop_id,
+                    basename=source.name,
+                )
+                target = base / target_rel
+                if not target.exists() and not target.is_symlink():
+                    return False
+        return True
+
+    def sync_workshop_runtime_artifacts(self, server, workshop_ids: list[str] | None = None) -> dict:
+        """Kopiert/symlinkt Workshop-Dateien nach postInstall-Zielen ohne erneuten Steam-Download."""
+        bp_mods = self._blueprint.effective_mods()
+        if not bp_mods.postInstall:
+            return {"ok": True, "synced": 0, "errors": []}
+
+        from database import SessionLocal
+        from models import Mod
+
+        db = SessionLocal()
+        try:
+            if workshop_ids is None:
+                rows = (
+                    db.query(Mod.workshop_id)
+                    .filter(Mod.server_id == server.id, Mod.enabled == True)  # noqa: E712
+                    .all()
+                )
+                workshop_ids = [str(r[0]) for r in rows if r[0]]
+        finally:
+            db.close()
+
+        synced = 0
+        errors: list[str] = []
+        for wid in workshop_ids:
+            wid = str(wid).strip()
+            if not wid:
+                continue
+            res = self._run_workshop_post_install_actions(server, wid)
+            if res.get("error"):
+                errors.append(f"{wid}: {res['error']}")
+            else:
+                synced += 1
+        self.update_modlist(server)
+        return {"ok": not errors, "synced": synced, "errors": errors}
+
     def cleanup_mod(self, server, workshop_id: str) -> dict:
         bp_mods = self._blueprint.effective_mods()
         if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:

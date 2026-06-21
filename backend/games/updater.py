@@ -344,6 +344,26 @@ def check_workshop_mod_updates(
                 update_status = "unknown"
                 update_reason = "steam_api_key_missing"
 
+        runtime_ready = True
+        if is_installed and action == "none":
+            try:
+                from games import get_plugin
+
+                plugin = get_plugin(getattr(server, "game_type", "") or "")
+                if plugin is not None and hasattr(plugin, "workshop_runtime_targets_ready"):
+                    runtime_ready = plugin.workshop_runtime_targets_ready(server, workshop_id)
+                    if not runtime_ready:
+                        action = "install"
+                        reason = "missing_runtime_copy"
+                        update_reason = update_reason or "missing_runtime_copy"
+            except Exception as exc:  # pragma: no cover
+                logger.warning(
+                    "Runtime-Check Workshop-Mod %s Server %s: %s",
+                    workshop_id,
+                    getattr(server, "id", "?"),
+                    exc,
+                )
+
         try:
             from services.mod_install_status_service import mark_mod_update_status
 
@@ -356,10 +376,7 @@ def check_workshop_mod_updates(
                 type(exc).__name__,
             )
 
-        # UI kann „pending“ zeigen, obwohl Workshop-Dateien schon da sind (abgebrochener
-        # Batch, Neustart ohne erneuten Download). Ohne das läuft perform_workshop_mod_updates
-        # nicht, weil action == "none" — Pending bleibt ewig.
-        if action == "none" and is_installed and update_status == "up_to_date":
+        if action == "none" and is_installed and update_status == "up_to_date" and runtime_ready:
             stale_install = getattr(mod, "install_status", None)
             if stale_install in ("pending", "installing"):
                 try:
