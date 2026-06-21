@@ -152,7 +152,9 @@ läuft vor Start/Restart `+app_update` (optional mit `validate`, siehe `validate
 | **Workshop-Mods** | Steam Web API `time_updated` (Scheduler, ~6 h) | Beim **Restart**, wenn Mod `outdated` | Nur Mods mit `auto_update` und Server **gestoppt** (Scheduler) |
 | **Spiel-Binaries (Steam App)** | `buildid`-Vergleich pro Blueprint-**branch** | Beim **Start/Restart**, wenn Check `update` oder `alwaysValidate` | **Nein** — MSM startet den Server nicht allein wegen eines Game-Updates neu; Betreiber startet/restartet manuell oder nutzt geplantes `auto_restart` (ohne Update-Trigger) |
 
-Badge **Server-Update** in der UI kommt vom gleichen Check (`server_file_update_available`).
+Badge **Server-Update** in der UI kommt vom gleichen Check (`server_file_update_available`). Auf der **Server-Detailseite** gibt es zusätzlich **„Spiel-Updates prüfen“** (wie im Mod-Manager), um den Check ohne 5-Minuten-Cache auszulösen.
+
+**Reinstall:** Lädt aktuelle Spiel-Binaries von Steam/HTTP; manuelle Configs werden gesichert und wiederhergestellt. Workshop-Mods werden **nicht** neu installiert (dafür Mod-Manager).
 
 ### Beispiel: Discord-Bot aus einem ZIP
 
