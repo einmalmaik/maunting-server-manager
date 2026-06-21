@@ -107,6 +107,7 @@ export function BlueprintsDocs() {
     { key: 'minimal', title: t('docs.toc.minimal') },
     { key: 'reference', title: t('docs.toc.reference') },
     { key: 'howto', title: t('docs.toc.howto') },
+    { key: 'updates', title: t('docs.toc.updates') },
     { key: 'troubleshooting', title: t('docs.toc.troubleshooting') },
   ]
 
@@ -231,6 +232,38 @@ export function BlueprintsDocs() {
     ],
     "source": {
       "type": "dockerOnly"
+    }
+  }
+
+  const steamLegacyExample = {
+    "version": 1,
+    "meta": {
+      "id": "conan_exiles_legacy",
+      "name": "Conan Exiles (Legacy Branch)",
+      "category": "steam_game"
+    },
+    "runtime": {
+      "image": "ghcr.io/ptero-eggs/yolks:wine_staging",
+      "workdir": "/data",
+      "env": {},
+      "startup": "wine64 /data/ConanSandboxServer.exe -log"
+    },
+    "ports": [
+      { "name": "game", "protocol": "udp" },
+      { "name": "query", "protocol": "udp" },
+      { "name": "rcon", "protocol": "tcp" }
+    ],
+    "source": {
+      "type": "steam",
+      "updateStrategy": "checkBased",
+      "steam": {
+        "appId": "443030",
+        "platform": "windows",
+        "compatibility": "proton",
+        "branch": "conan-exiles-legacy",
+        "validate": false,
+        "requiresLogin": true
+      }
     }
   }
 
@@ -369,9 +402,17 @@ export function BlueprintsDocs() {
             <h3 className="font-bold text-primary mt-6 mb-2">source</h3>
             <FieldTable>
               <FieldRow field="source.type" type="enum" required={true}>{t('docs.reference.sourceType')}</FieldRow>
+              <FieldRow field="source.updateStrategy" type="enum" required={false}>{t('docs.reference.sourceUpdateStrategy')}</FieldRow>
               <FieldRow field="source.steam" type="object" required={false}>{t('docs.reference.sourceSteam')}</FieldRow>
               <FieldRow field="source.http" type="object" required={false}>{t('docs.reference.sourceHttp')}</FieldRow>
               <FieldRow field="source.manual" type="object" required={false}>{t('docs.reference.sourceManual')}</FieldRow>
+            </FieldTable>
+
+            <h4 className="font-semibold text-on-surface-variant mt-3 mb-1 text-sm">{t('docs.reference.steamFieldsTitle')}</h4>
+            <FieldTable>
+              <FieldRow field="steam.branch" type="string" required={false}>{t('docs.reference.steamBranch')}</FieldRow>
+              <FieldRow field="steam.validate" type="boolean" required={false}>{t('docs.reference.steamValidate')}</FieldRow>
+              <FieldRow field="steam.requiresLogin" type="boolean" required={false}>{t('docs.reference.steamRequiresLogin')}</FieldRow>
             </FieldTable>
 
             <h3 className="font-bold text-primary mt-6 mb-2">mods</h3>
@@ -425,7 +466,51 @@ export function BlueprintsDocs() {
                 </span>
                 <CodeBlock example={voiceServerExample} />
               </div>
+              <div className="xl:col-span-2">
+                <span className="font-semibold text-xs text-on-surface-variant block mb-1">
+                  {t('docs.howto.steamLegacyExampleTitle')}
+                </span>
+                <CodeBlock example={steamLegacyExample} />
+              </div>
             </div>
+
+            <h3 className="font-bold text-on-surface mt-8">{t('docs.howto.h4')}</h3>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-2 whitespace-pre-line">{t('docs.howto.b4')}</p>
+          </section>
+
+          <section id="docs-updates" className="msm-card p-6 scroll-mt-20">
+            <h2 className="font-headline text-headline-sm font-bold text-on-surface mb-2">{t('docs.toc.updates')}</h2>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-4">{t('docs.updates.body')}</p>
+            <h3 className="font-bold text-on-surface mb-2">{t('docs.updates.tableTitle')}</h3>
+            <div className="overflow-x-auto my-4 border border-outline-variant/30 rounded-md">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-outline-variant/30 bg-surface-container-lowest text-on-surface-variant">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">{t('docs.updates.colWhat')}</th>
+                    <th className="px-4 py-2 font-medium">{t('docs.updates.colDetect')}</th>
+                    <th className="px-4 py-2 font-medium">{t('docs.updates.colInstall')}</th>
+                    <th className="px-4 py-2 font-medium">{t('docs.updates.colAutoRestart')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-outline-variant/10 text-on-surface">
+                  <tr>
+                    <td className="px-4 py-3 font-medium">{t('docs.updates.modsWhat')}</td>
+                    <td className="px-4 py-3">{t('docs.updates.modsDetect')}</td>
+                    <td className="px-4 py-3">{t('docs.updates.modsInstall')}</td>
+                    <td className="px-4 py-3">{t('docs.updates.modsAutoRestart')}</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-3 font-medium">{t('docs.updates.gameWhat')}</td>
+                    <td className="px-4 py-3">{t('docs.updates.gameDetect')}</td>
+                    <td className="px-4 py-3">{t('docs.updates.gameInstall')}</td>
+                    <td className="px-4 py-3">{t('docs.updates.gameAutoRestart')}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <Alert type="info" title={t('docs.reference.steamBranch')}>
+              {t('docs.updates.branchNote')}
+            </Alert>
           </section>
 
           <section id="docs-troubleshooting" className="msm-card p-6 scroll-mt-20">

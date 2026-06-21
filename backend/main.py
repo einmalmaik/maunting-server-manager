@@ -434,8 +434,8 @@ app.include_router(oauth_router)
 
 
 
-@app.get("/")
-def root():
+@app.get("/api/version")
+def app_version():
     return {"name": settings.app_name, "version": "1.0.0"}
 
 
