@@ -259,6 +259,16 @@ def test_check_workshop_clears_stale_pending_when_files_present(db, test_server,
         lambda _app, _wid: datetime(2026, 6, 1, tzinfo=timezone.utc),
     )
 
+    class _NoRuntimePlugin:
+        def workshop_runtime_targets_ready(self, _server, _wid):
+            return True
+
+    monkeypatch.setattr(
+        __import__("games", fromlist=["get_plugin"]),
+        "get_plugin",
+        lambda _gt: _NoRuntimePlugin(),
+    )
+
     blueprint = load_blueprint_dict(
         {
             "version": 1,
