@@ -96,6 +96,7 @@ export function ServerDetail() {
   const [games, setGames] = useState<GameInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [serverUpdateCheckLoading, setServerUpdateCheckLoading] = useState(false);
 
   // Stabiler Badge-State (KISS-Fix fuer Polling/Cache-Race-Flicker):
   // Badge (nur Server-Updates via Blueprint) bleibt sichtbar, sobald einmal true,
@@ -408,6 +409,41 @@ export function ServerDetail() {
     doAction("install");
   };
 
+  const checkServerFileUpdates = async () => {
+    if (!serverId) return;
+    setServerUpdateCheckLoading(true);
+    try {
+      const data = await api<{
+        server_file_update_available: boolean;
+        server_file_update_reason: string | null;
+      }>(`/servers/${serverId}/check-server-file-updates`, { method: "POST" });
+      setStatus((prev) =>
+        prev
+          ? {
+              ...prev,
+              server_file_update_available: data.server_file_update_available,
+              server_file_update_reason: data.server_file_update_reason,
+            }
+          : prev,
+      );
+      if (data.server_file_update_available) {
+        lastServerUpdateBadgeRef.current = {
+          available: true,
+          reason: data.server_file_update_reason,
+        };
+        toast.success(t("servers.serverFileUpdateCheckFound"));
+      } else {
+        lastServerUpdateBadgeRef.current = null;
+        toast.success(t("servers.serverFileUpdateCheckDone"));
+      }
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : String(err);
+      toast.error(t(raw, { defaultValue: raw }) || t("servers.serverFileUpdateCheckFailed"));
+    } finally {
+      setServerUpdateCheckLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -525,6 +561,20 @@ export function ServerDetail() {
           >
             <Download className="w-4 h-4" />
             {actionLoading === "install" ? t("common.loading") : installLabel}
+          </button>
+        )}
+
+        {hasServerFiles && (
+          <button
+            type="button"
+            onClick={() => void checkServerFileUpdates()}
+            disabled={!!actionLoading || serverUpdateCheckLoading}
+            className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${serverUpdateCheckLoading ? "animate-spin" : ""}`} />
+            {serverUpdateCheckLoading
+              ? t("common.loading")
+              : t("servers.checkServerFileUpdates")}
           </button>
         )}
 

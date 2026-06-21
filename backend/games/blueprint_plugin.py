@@ -59,6 +59,20 @@ Mod. Provider-neutraler Wert, gilt fuer jeden SteamCMD-gestuetzten Blueprint.
 """
 
 
+def _steam_install_is_reinstall(install_dir: str, app_id: str) -> bool:
+    """True wenn Server-Dateien bereits vorhanden (expliziter Reinstall-Pfad)."""
+    root = Path(install_dir)
+    if not root.is_dir():
+        return False
+    manifest = root / "steamapps" / f"appmanifest_{app_id}.acf"
+    if manifest.is_file():
+        return True
+    try:
+        return any(root.iterdir())
+    except OSError:
+        return False
+
+
 class BlueprintPlugin(GamePlugin):
     """GamePlugin, das seine Metadaten ausschliesslich aus einer Blueprint liest."""
 
@@ -105,6 +119,19 @@ class BlueprintPlugin(GamePlugin):
                 # Frische Install: 0 Dateien → No-Op. Nutzt zentrale Helper aus updater.py.
                 from games.updater import _steam_effective_branch, perform_install_with_protection
                 platform_str = bp.source.steam.platform.value if bp.source.steam.platform else None
+                reinstall = _steam_install_is_reinstall(install_dir, app_id)
+                # Reinstall: immer validate + aktuelle Binaries von Steam (Workshop unangetastet).
+                validate_flag = (
+                    True
+                    if reinstall
+                    else bool(getattr(bp.source.steam, "validate_", True))
+                )
+                if reinstall:
+                    _append_console_log(
+                        server_id,
+                        "[MSM] Reinstall: hole aktuelle Spiel-Binaries von Steam "
+                        "(Configs werden gesichert, Workshop-Mods nicht neu installiert).\n",
+                    )
                 result = perform_install_with_protection(
                     server,
                     lambda: run_steamcmd_install(
@@ -115,7 +142,7 @@ class BlueprintPlugin(GamePlugin):
                         platform=platform_str,
                         # intentionally not passing steamcmd_image; use the dedicated STEAMCMD_IMAGE
                         # which has the pre-installed binary at the expected path
-                        validate=getattr(bp.source.steam, "validate_", True),
+                        validate=validate_flag,
                         beta_branch=_steam_effective_branch(bp.source.steam),
                     ),
                     blueprint=bp,
@@ -131,6 +158,13 @@ class BlueprintPlugin(GamePlugin):
 
             def _http_install():
                 _append_console_log(server_id, "[MSM] HTTP-Source-Download startet\n")
+                reinstall = Path(install_dir).is_dir() and any(Path(install_dir).iterdir()) if Path(install_dir).exists() else False
+                if reinstall:
+                    _append_console_log(
+                        server_id,
+                        "[MSM] Reinstall: lade aktuelle Server-Dateien von der HTTP-Quelle "
+                        "(manuelle Configs werden gesichert, Workshop-Mods unverändert).\n",
+                    )
                 # Reinstall-Schutz (manuelle Configs): Cache vor, Restore nach dem Entpacken.
                 from games.updater import perform_install_with_protection
                 result = perform_install_with_protection(

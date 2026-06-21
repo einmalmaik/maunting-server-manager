@@ -43,7 +43,7 @@ describe('BlueprintsDocs page', () => {
 
   it('renders expected new structured sections', async () => {
     const { container } = renderDocs()
-    for (const key of ['intro', 'quickstart', 'minimal', 'reference', 'howto', 'troubleshooting']) {
+    for (const key of ['intro', 'quickstart', 'minimal', 'reference', 'howto', 'updates', 'troubleshooting']) {
       expect(container.querySelector(`#docs-${key}`)).toBeInTheDocument()
     }
   })

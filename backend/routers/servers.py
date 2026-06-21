@@ -653,28 +653,28 @@ def _disk_free_mb(path: str) -> int | None:
         return None
 
 
-def _get_cached_update_availability(server, plugin) -> dict:
-    """Leichtgewichtige, cached/passive Ermittlung der Update-Verfügbarkeit.
+def _get_cached_update_availability(server, plugin, *, force: bool = False) -> dict:
+    """Leichtgewichtige Ermittlung der Server-Datei-Update-Verfügbarkeit.
 
-    Ruft plugin.check_for_* NUR bei TTL-Miss (5min). Status-Endpoint bleibt schnell.
-    Defensiv + KISS: fängt alles ab, liefert Defaults, keine Seiteneffekte.
-    Mod-Updates werden autonom vorbereitet und sind kein Server-Update-Badge.
+    Ruft plugin.check_for_server_file_update nur bei TTL-Miss (5min) oder force=True.
+    Mod-Updates sind kein Server-Update-Badge (eigener Mod-Manager-Check).
     """
+    empty = {
+        "server_file_update_available": False,
+        "server_file_update_reason": None,
+        "mod_updates_available": [],
+    }
     if not plugin or not getattr(server, "id", None):
-        return {
-            "server_file_update_available": False,
-            "server_file_update_reason": None,
-            "mod_updates_available": [],
-        }
+        return empty
 
     sid = server.id
     now = time.time()
-    with _UPDATE_CACHE_LOCK:
-        cached = _UPDATE_CACHE.get(sid)
-    if cached and (now - cached.get("ts", 0) < _UPDATE_CACHE_TTL_SECONDS):
-        return cached["data"]
+    if not force:
+        with _UPDATE_CACHE_LOCK:
+            cached = _UPDATE_CACHE.get(sid)
+        if cached and (now - cached.get("ts", 0) < _UPDATE_CACHE_TTL_SECONDS):
+            return cached["data"]
 
-    # Cache-Miss → echte (aber seltene) Checks
     try:
         check_server = getattr(plugin, "check_for_server_file_update", None)
         server_update = check_server(server) if check_server else {}
@@ -692,20 +692,19 @@ def _get_cached_update_availability(server, plugin) -> dict:
             _UPDATE_CACHE[sid] = {"ts": now, "data": data}
         return data
     except Exception as exc:
-        # Niemals Status-Endpoint durch Update-Checks zum Absturz bringen.
-        # Badge zeigt einfach "kein Update" – sicher + wartbar.
         logger.warning(
             "Passive update check failed for server %s (non-fatal): %s",
             sid, exc
         )
-        fallback = {
-            "server_file_update_available": False,
-            "server_file_update_reason": None,
-            "mod_updates_available": [],
-        }
+        fallback = dict(empty)
         with _UPDATE_CACHE_LOCK:
             _UPDATE_CACHE[sid] = {"ts": now, "data": fallback}
         return fallback
+
+
+class ServerFileUpdateCheckResponse(BaseModel):
+    server_file_update_available: bool = False
+    server_file_update_reason: str | None = None
 
 
 @router.get("/{server_id}/status", response_model=ServerStatusResponse)
@@ -771,6 +770,32 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
         "server_file_update_reason": update_info["server_file_update_reason"],
         "mod_updates_available": update_info["mod_updates_available"],
         **_server_restart_status_fields(server),
+    }
+
+
+@router.post(
+    "/{server_id}/check-server-file-updates",
+    response_model=ServerFileUpdateCheckResponse,
+)
+def check_server_file_updates(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Manueller Spiel-/Server-Datei-Update-Check (wie Workshop „Updates prüfen“).
+
+    Umgeht den 5-Minuten-Status-Cache und aktualisiert die Badge-Daten.
+    """
+    require_server_permission(user, server_id, db, "server.view")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    plugin = get_plugin(server.game_type)
+    info = _get_cached_update_availability(server, plugin, force=True)
+    return {
+        "server_file_update_available": info["server_file_update_available"],
+        "server_file_update_reason": info["server_file_update_reason"],
     }
 
 

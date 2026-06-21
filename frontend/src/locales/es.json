@@ -70,6 +70,7 @@
       "minimal": "Ejemplo mínimo",
       "reference": "Referencia de campo",
       "howto": "Guías prácticas",
+      "updates": "Actualizaciones Steam y ramas",
       "troubleshooting": "Solución de problemas"
     },
     "intro": {
@@ -134,6 +135,23 @@
       "b3_extra": "El actualizador automático de MSM preservará sus archivos de configuración: las extensiones de configuración típicas como .json, .env, .toml, .yaml, .yml, .ini, .cfg o .txt (menos de 2 MB de tamaño, fuera de los directorios del sistema/datos) se respaldan temporalmente durante las actualizaciones/reinstalaciones y se restauran automáticamente.",
       "botExampleTitle": "Ejemplo: Discord Bot Blueprint (descarga de GitHub ZIP y actualización automática)"
     },
+    "updates": {
+      "body": "Los binarios del servidor y los mods de Workshop se gestionan por separado. Ambos pueden mostrarse en el panel; la instalación ocurre en start/restart.",
+      "tableTitle": "Resumen",
+      "colWhat": "Qué",
+      "colDetect": "Detección",
+      "colInstall": "Instalación",
+      "colAutoRestart": "Reinicio auto",
+      "modsWhat": "Mods Workshop",
+      "modsDetect": "API Steam (time_updated), programador ~6 h",
+      "modsInstall": "En reinicio si el mod está desactualizado",
+      "modsAutoRestart": "Solo con auto_update y servidor parado",
+      "gameWhat": "Binarios del juego (app Steam)",
+      "gameDetect": "Comparación buildid para source.steam.branch",
+      "gameInstall": "En start/restart o alwaysValidate; manual: botón en detalle del servidor",
+      "gameAutoRestart": "No — manual o auto_restart sin disparador de update",
+      "branchNote": "Ramas legacy/beta con source.steam.branch; SteamCMD usa -beta (excepto public)."
+    },
     "troubleshooting": {
       "err1Title": "JSON no válido",
       "err1Body": "Aunque el panel elimina // comentarios, los errores de sintaxis (como la falta de comas) seguirán provocando que la carga falle. Utilice un linter JSON.",
@@ -182,8 +200,12 @@
     "gameLogs": "Registros de juego",
     "install": "Instalar",
     "reinstall": "Reinstalar",
-    "reinstallConfirm": "¿Realmente reinstalar el servidor? Se reemplazarán los binarios y los mods de Workshop. Se conservarán los archivos de configuración manual.",
+    "reinstallConfirm": "¿Reinstalar el servidor? Se descargan los binarios actuales desde Steam/HTTP. Se conservan las configuraciones manuales. Los mods de Workshop no se reinstalan — usa el gestor de mods.",
     "serverFileUpdateAvailable": "Actualización del servidor disponible",
+    "checkServerFileUpdates": "Comprobar actualizaciones del juego",
+    "serverFileUpdateCheckDone": "No hay actualización del juego (comprobación hecha).",
+    "serverFileUpdateCheckFound": "Actualización disponible — se instalará en el próximo inicio/reinicio.",
+    "serverFileUpdateCheckFailed": "Error al comprobar actualizaciones del juego.",
     "deleted": "Servidor eliminado",
     "confirmDelete": "¿Realmente eliminar este servidor? Todos los datos serán eliminados permanentemente.",
     "createDescription": "Crea un nuevo servidor de juegos.",
