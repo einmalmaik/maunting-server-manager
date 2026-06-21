@@ -73,6 +73,30 @@ def _steam_install_is_reinstall(install_dir: str, app_id: str) -> bool:
         return False
 
 
+def _purge_conan_extracted_mod_cache(install_base: Path, pak_basename: str) -> list[str]:
+    """Loescht gecachte LinuxServer-Extracts nach Pak-Update (Conan-Mount)."""
+    stem = Path(pak_basename).stem
+    extracted = install_base / "ConanSandbox" / "Saved" / "ExtractedMods"
+    if not extracted.is_dir():
+        return []
+    removed: list[str] = []
+    for name in (
+        f"{stem}-LinuxServer.pak",
+        f"{stem}-LinuxServer.utoc",
+        f"{stem}-LinuxServer.ucas",
+    ):
+        path = extracted / name
+        if not path.is_file():
+            continue
+        try:
+            path.resolve(strict=False).relative_to(install_base.resolve())
+        except ValueError:
+            continue
+        path.unlink(missing_ok=True)
+        removed.append(str(path.relative_to(install_base)))
+    return removed
+
+
 class BlueprintPlugin(GamePlugin):
     """GamePlugin, das seine Metadaten ausschliesslich aus einer Blueprint liest."""
 
@@ -578,6 +602,14 @@ class BlueprintPlugin(GamePlugin):
                 if action.operation == BlueprintWorkshopFileOperation.COPY:
                     if not source.is_file():
                         return {"error": f"postInstall copy erwartet Datei: {source.name}"}
+                    if target_rel.replace("\\", "/").startswith("ConanSandbox/Mods/"):
+                        purged = _purge_conan_extracted_mod_cache(base, source.name)
+                        if purged:
+                            _append_console_log(
+                                server.id,
+                                f"[MSM] Mod {workshop_id}: ExtractedMods-Cache geleert "
+                                f"({len(purged)} Datei(en)) vor Pak-Kopie.\n",
+                            )
                     shutil.copy2(source, target)
                     continue
 

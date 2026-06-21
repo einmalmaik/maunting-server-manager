@@ -514,7 +514,7 @@ def _run_start(db: Session, server: Server, plugin) -> None:
                 f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt - "
                 "führe gebündelten Workshop-Download aus...\n",
             )
-            mod_res = plugin.perform_workshop_mod_updates(server, only_auto_update=True)
+            mod_res = plugin.perform_workshop_mod_updates(server, only_auto_update=False)
             if not mod_res.get("ok", False):
                 _append_console_log(
                     server.id,
@@ -629,7 +629,7 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
                 f"[MSM] {len(mod_updates)} Workshop-Mod(s) benötigen Update/Installation. "
                 "Download läuft vor dem Container-Start.\n",
             )
-            mod_res = plugin.perform_workshop_mod_updates(server, only_auto_update=True)
+            mod_res = plugin.perform_workshop_mod_updates(server, only_auto_update=False)
             if not mod_res.get("ok", False):
                 _append_console_log(
                     server.id,
