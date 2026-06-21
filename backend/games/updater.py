@@ -356,6 +356,24 @@ def check_workshop_mod_updates(
                 type(exc).__name__,
             )
 
+        # UI kann „pending“ zeigen, obwohl Workshop-Dateien schon da sind (abgebrochener
+        # Batch, Neustart ohne erneuten Download). Ohne das läuft perform_workshop_mod_updates
+        # nicht, weil action == "none" — Pending bleibt ewig.
+        if action == "none" and is_installed and update_status == "up_to_date":
+            stale_install = getattr(mod, "install_status", None)
+            if stale_install in ("pending", "installing"):
+                try:
+                    from services.mod_install_status_service import mark_mod_installed
+
+                    mark_mod_installed(server.id, workshop_id)
+                except Exception as exc:  # pragma: no cover
+                    logger.warning(
+                        "Install-Status-Reconcile Server %s Mod %s: %s",
+                        getattr(server, "id", "?"),
+                        workshop_id,
+                        exc,
+                    )
+
         results.append(
             {
                 "workshop_id": workshop_id,

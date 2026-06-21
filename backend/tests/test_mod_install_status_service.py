@@ -230,6 +230,59 @@ def test_installed_mod_without_metadata_stays_unknown_when_remote_metadata_exist
     assert mod.update_reason == "missing_local_metadata"
 
 
+def test_check_workshop_clears_stale_pending_when_files_present(db, test_server, tmp_path, monkeypatch):
+    workshop_app_id = "443030"
+    workshop_id = "9990001"
+    install_dir = Path(tmp_path)
+    local_mod_dir = install_dir / "steamapps" / "workshop" / "content" / workshop_app_id / workshop_id
+    local_mod_dir.mkdir(parents=True)
+    (local_mod_dir / "mod.pak").write_bytes(b"x")
+
+    test_server.install_dir = str(install_dir)
+    mod = Mod(
+        server_id=test_server.id,
+        workshop_id=workshop_id,
+        name="Stale Pending",
+        load_order=0,
+        auto_update=True,
+        enabled=True,
+        install_status="pending",
+        last_updated=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    db.add(mod)
+    db.commit()
+
+    monkeypatch.setattr(updater, "_has_steam_api_key", lambda: True)
+    monkeypatch.setattr(
+        updater,
+        "_fetch_steam_mod_updated",
+        lambda _app, _wid: datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+
+    blueprint = load_blueprint_dict(
+        {
+            "version": 1,
+            "meta": {"id": "conan_test", "name": "T", "category": "steam_game", "author": "x", "description": ""},
+            "runtime": {"image": "x", "workdir": "/data", "env": {}, "startup": "x"},
+            "ports": [],
+            "source": {"type": "steam", "steam": {"appId": "443030", "platform": "linux", "compatibility": "native"}},
+            "mods": {
+                "supportsMods": True,
+                "supportsSteamWorkshop": True,
+                "workshopAppId": workshop_app_id,
+                "modInjection": "startupArg",
+                "modStartupArgumentFormat": "-mod={mods}",
+            },
+        }
+    )
+
+    updates = updater.check_workshop_mod_updates(test_server, blueprint)
+    db.refresh(mod)
+
+    assert updates == []
+    assert mod.install_status == "installed"
+
+
 def test_perform_workshop_mod_updates_only_applies_auto_update_mods(db, test_server, monkeypatch):
     auto_mod = Mod(
         server_id=test_server.id,
