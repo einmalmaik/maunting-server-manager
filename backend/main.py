@@ -33,6 +33,7 @@ from routers import (
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
 from services.scheduler_service import start_scheduler, stop_scheduler, init_server_schedules
+from services.server_lifecycle_service import reconcile_orphaned_lifecycle_statuses
 
 
 # ── Auth-Endpunkte: 10/minute (strenger als global) ──
@@ -311,6 +312,13 @@ async def lifespan(app: FastAPI):
     from database import SessionLocal
     db = SessionLocal()
     try:
+        reconciled = reconcile_orphaned_lifecycle_statuses(db)
+        if reconciled:
+            import logging
+            logging.getLogger(__name__).info(
+                "Lifecycle-Status für %d Server nach Panel-Start mit Docker abgeglichen.",
+                reconciled,
+            )
         init_server_schedules(db)
     finally:
         db.close()

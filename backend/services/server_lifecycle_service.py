@@ -96,6 +96,84 @@ def should_preserve_lifecycle_status(server_id: int, status: str) -> bool:
     return status in _TRANSIENT_STATUSES and is_lifecycle_job_active(server_id)
 
 
+def reconcile_orphaned_lifecycle_statuses(db: Session) -> int:
+    """Nach Prozess-Neustart: DB kann noch ``starting``/``stopping`` zeigen, obwohl der
+    In-Memory-Job weg ist. Status an Docker-Realität anbinden, damit das Panel nicht
+    ewig „Startet…“ anzeigt und WebSockets sinnlos offen bleiben."""
+    servers = db.query(Server).filter(Server.status.in_(_TRANSIENT_STATUSES)).all()
+    changed = 0
+    for server in servers:
+        if is_lifecycle_job_active(server.id):
+            continue
+        plugin = get_plugin(server.game_type)
+        if not plugin:
+            server.status = "failed"
+            server.status_message = "Spiel-Typ nicht unterstützt"
+            changed += 1
+            continue
+        plugin_status = plugin.get_status(server)
+        server.status = plugin_status.status
+        server.status_message = (plugin_status.message or None) if plugin_status.message else None
+        if plugin_status.status == "running" and plugin_status.started_at is not None:
+            server.last_started_at = plugin_status.started_at
+        elif plugin_status.status != "running":
+            server.last_started_at = None
+        changed += 1
+    if changed:
+        db.commit()
+    return changed
+
+
+# Frisches Backup vor erneutem Start überspringen (verhindert doppelte 10GB+ tar.gz
+# innerhalb kurzer Zeit und verkürzt „hängendes“ Starting bei backup_on_start).
+_PRE_START_BACKUP_SKIP_MINUTES = 30
+
+
+def _run_pre_start_backup_if_enabled(db: Session, server: Server, *, context: str) -> None:
+    if not server.backup_on_start:
+        return
+    from models import Backup
+    from services.backup_service import run_backup
+
+    last = (
+        db.query(Backup)
+        .filter(Backup.server_id == server.id)
+        .order_by(Backup.created_at.desc())
+        .first()
+    )
+    if last and last.created_at is not None:
+        created = last.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age_min = (_utcnow() - created.astimezone(timezone.utc)).total_seconds() / 60.0
+        if age_min < _PRE_START_BACKUP_SKIP_MINUTES:
+            _append_console_log(
+                server.id,
+                f"[MSM] Backup vor {context} übersprungen: vor {int(age_min)} Min. bereits ein Backup "
+                f"(Schwelle {_PRE_START_BACKUP_SKIP_MINUTES} Min.).\n",
+            )
+            return
+
+    _append_console_log(
+        server.id,
+        f"[MSM] Backup vor {context} läuft (große Server-Verzeichnisse können mehrere Minuten "
+        f"dauern, Timeout 300s). Panel bleibt erreichbar, Konsole aktualisiert sich danach.\n",
+    )
+    try:
+        run_backup(server.id, db, timeout_seconds=300)
+        _append_console_log(server.id, f"[MSM] Backup vor {context} abgeschlossen.\n")
+    except Exception as exc:
+        _append_console_log(
+            server.id,
+            f"[MSM] Backup vor {context} fehlgeschlagen ({_safe_error_message(exc)}); "
+            f"{context} wird fortgesetzt.\n",
+        )
+        logger.warning(
+            "Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)",
+            server.id,
+        )
+
+
 def reset_lifecycle_jobs_for_tests() -> None:
     with _ACTIVE_JOBS_LOCK:
         _ACTIVE_JOBS.clear()
@@ -448,13 +526,11 @@ def _run_start(db: Session, server: Server, plugin) -> None:
             release_install_update_lock(server.id)
 
     db.refresh(server)
-    if server.backup_on_start:
-        from services.backup_service import run_backup
-
-        try:
-            run_backup(server.id, db, timeout_seconds=300)
-        except Exception:
-            logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
+    _append_console_log(
+        server.id,
+        "[MSM] Start-Vorbereitung: Datei-/Mod-Updates abgeschlossen, optional Backup, dann Container.\n",
+    )
+    _run_pre_start_backup_if_enabled(db, server, context="Start")
 
     ports_list = _ports(server)
     open_ports(server.name, ports_list)
@@ -565,13 +641,7 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
             release_install_update_lock(server.id)
 
     db.refresh(server)
-    if server.backup_on_start:
-        from services.backup_service import run_backup
-
-        try:
-            run_backup(server.id, db, timeout_seconds=300)
-        except Exception:
-            logger.warning("Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)", server.id)
+    _run_pre_start_backup_if_enabled(db, server, context="Restart")
 
     ports_list = _ports(server)
     open_ports(server.name, ports_list)
