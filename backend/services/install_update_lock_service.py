@@ -82,6 +82,16 @@ def reset_install_update_lock_for_tests() -> None:
         _ACTIVE = None
 
 
+def force_release_install_update_lock(server_id: int) -> bool:
+    """Admin/cancel: lock freigeben wenn es zu diesem Server gehoert."""
+    global _ACTIVE
+    with _LOCK:
+        if _ACTIVE is not None and _ACTIVE.server_id == server_id:
+            _ACTIVE = None
+            return True
+        return False
+
+
 def acquire_install_update_lock_blocking(
     server_id: int,
     operation: str,

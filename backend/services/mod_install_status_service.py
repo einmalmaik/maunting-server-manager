@@ -25,6 +25,7 @@ UPDATE_FAILED = "failed"
 
 _PROGRESS_RE = re.compile(r"progress:\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
 _BYTES_RE = re.compile(r"\((\d+)\s*/\s*(\d+)\)")
+_BRACKET_PERCENT_RE = re.compile(r"\[\s*(\d+)%\]")
 
 
 def _now() -> datetime:
@@ -47,6 +48,14 @@ def parse_steamcmd_progress(line: str) -> tuple[int | None, int | None, int | No
             progress = _clamp_percent(float(progress_match.group(1)))
         except ValueError:
             progress = None
+
+    if progress is None:
+        bracket_match = _BRACKET_PERCENT_RE.search(line)
+        if bracket_match:
+            try:
+                progress = _clamp_percent(float(bracket_match.group(1)))
+            except ValueError:
+                progress = None
 
     bytes_match = _BYTES_RE.search(line)
     if bytes_match:

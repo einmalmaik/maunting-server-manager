@@ -256,6 +256,23 @@ export function ModManager({ serverId }: ModManagerProps) {
     }
   }
 
+  const abortModInstalls = async () => {
+    if (!anyModInstallActive) return
+    const ok = await confirm({
+      message: t('mods.confirmAbortInstalls'),
+      confirmText: t('mods.abortInstalls'),
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      const data = await api<Mod[]>(`/mods/${serverId}/abort-installs`, { method: 'POST' })
+      setMods(data)
+      toast.success(t('mods.abortInstallsDone'))
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t('mods.abortInstallsFailed'))
+    }
+  }
+
   const reinstallAllMods = async () => {
     if (mods.length === 0) return
     if (mods.some(hasActiveModInstall)) {
@@ -470,6 +487,14 @@ export function ModManager({ serverId }: ModManagerProps) {
               className="msm-input pl-10 text-sm"
             />
           </div>
+          <button
+            onClick={() => void abortModInstalls()}
+            disabled={loading || !anyModInstallActive}
+            className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2 disabled:opacity-50"
+            title={t('mods.abortInstallsHint')}
+          >
+            {t('mods.abortInstalls')}
+          </button>
           <button
             onClick={() => void reinstallAllMods()}
             disabled={loading || reinstallingAll || mods.length === 0 || anyModInstallActive}

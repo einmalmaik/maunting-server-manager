@@ -25,6 +25,11 @@ def test_parse_steamcmd_progress_extracts_percent_and_bytes():
     assert total_bytes == 1000
 
 
+def test_parse_steamcmd_progress_extracts_bracket_percent():
+    progress, _, _ = parse_steamcmd_progress("[ 96%] Downloading update (461,234 of 479,000 KB)...")
+    assert progress == 96
+
+
 def test_mod_install_status_lifecycle_persists_progress(db, test_server):
     mod = Mod(
         server_id=test_server.id,

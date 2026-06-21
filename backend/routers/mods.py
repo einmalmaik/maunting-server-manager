@@ -150,8 +150,9 @@ def reinstall_all_mods_bg(server_id: int, workshop_ids: list[str]) -> None:
         try:
             _append_console_log(
                 server.id,
-                f"[MSM] Neuinstallation für {len(workshop_ids)} Workshop-Mod(s) gestartet.\n",
+                f"[MSM] Neuinstallation für {len(workshop_ids)} Workshop-Mod(s) gestartet (nacheinander).\n",
             )
+            ok_count = 0
             for wid in workshop_ids:
                 mark_mod_installing(server.id, wid, "reinstall")
                 try:
@@ -161,30 +162,31 @@ def reinstall_all_mods_bg(server_id: int, workshop_ids: list[str]) -> None:
                         server.id,
                         f"[MSM] Mod {wid} Cleanup-Warnung: {exc}\n",
                     )
-
-            result = plugin.install_mods(server, workshop_ids)  # type: ignore[attr-defined]
-            batch_ok = isinstance(result, dict) and result.get("ok", True) is not False
-            items = result.get("items") if isinstance(result, dict) else {}
-            if not isinstance(items, dict):
-                items = {}
-
-            for wid in workshop_ids:
-                item = items.get(wid) or items.get(str(wid))
-                if batch_ok and item and item.get("ok", True) and not item.get("error"):
+                try:
+                    result = plugin.install_mod(server, wid)
+                except Exception as exc:
+                    mark_mod_failed(server.id, wid, _safe_error(exc))
+                    _append_console_log(server.id, f"[MSM] Mod {wid}: fehlgeschlagen — {exc}\n")
+                    continue
+                success = (
+                    isinstance(result, dict)
+                    and result.get("ok", True) is not False
+                    and "error" not in result
+                )
+                if success:
                     updater.update_mod_metadata_after_success(server.id, wid, None)
                     mark_mod_installed(server.id, wid)
-                    continue
-                if isinstance(item, dict):
-                    err = item.get("error") or (
-                        "; ".join(item.get("errors") or []) if item.get("errors") else None
-                    )
-                elif not batch_ok and isinstance(result, dict):
-                    err = result.get("error") or (
-                        "; ".join(result.get("errors") or []) if result.get("errors") else None
-                    )
+                    ok_count += 1
+                    _append_console_log(server.id, f"[MSM] Mod {wid}: neu installiert\n")
                 else:
-                    err = "Installation fehlgeschlagen"
-                mark_mod_failed(server.id, wid, _safe_error(err))
+                    if isinstance(result, dict):
+                        err = result.get("error") or (
+                            "; ".join(result.get("errors") or []) if result.get("errors") else None
+                        )
+                    else:
+                        err = str(result)
+                    mark_mod_failed(server.id, wid, _safe_error(err))
+                    _append_console_log(server.id, f"[MSM] Mod {wid}: fehlgeschlagen — {err}\n")
 
             try:
                 plugin.update_modlist(server)
@@ -193,7 +195,7 @@ def reinstall_all_mods_bg(server_id: int, workshop_ids: list[str]) -> None:
 
             _append_console_log(
                 server.id,
-                "[MSM] Neuinstallation aller Workshop-Mods abgeschlossen.\n",
+                f"[MSM] Neuinstallation abgeschlossen ({ok_count}/{len(workshop_ids)} erfolgreich).\n",
             )
         finally:
             release_install_update_lock(server.id)
@@ -368,6 +370,49 @@ def reinstall_all_mods(
     db.commit()
 
     background_tasks.add_task(reinstall_all_mods_bg, server.id, workshop_ids)
+    return (
+        db.query(Mod)
+        .filter(Mod.server_id == server_id)
+        .order_by(Mod.load_order.asc())
+        .all()
+    )
+
+
+@router.post("/{server_id}/abort-installs", response_model=list[ModResponse])
+def abort_mod_installs(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    """Hängende Mod-Installationen zurücksetzen (UI-Status + Install-Lock)."""
+    require_server_permission(user, server_id, db, "server.mods.write")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+    from services.install_update_lock_service import force_release_install_update_lock
+    from services.mod_install_status_service import mark_mod_failed, mark_mod_installed
+
+    mods = db.query(Mod).filter(Mod.server_id == server_id).all()
+    changed = False
+    for mod in mods:
+        if mod.install_status == INSTALL_RUNNING:
+            mark_mod_failed(
+                server_id,
+                mod.workshop_id,
+                "Installation abgebrochen — bitte erneut starten (Server-Konsole prüfen).",
+            )
+            changed = True
+        elif mod.install_status == "pending" and mod.install_action == "reinstall":
+            mark_mod_installed(server_id, mod.workshop_id)
+            changed = True
+    force_release_install_update_lock(server_id)
+    if changed:
+        _append_console_log(
+            server_id,
+            "[MSM] Mod-Installationen manuell zurückgesetzt (abort-installs).\n",
+        )
     return (
         db.query(Mod)
         .filter(Mod.server_id == server_id)
