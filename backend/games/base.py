@@ -21,6 +21,7 @@ import logging
 import os
 import shlex
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -616,15 +617,47 @@ def run_steamcmd_workshop_download_batch(
         )
 
     items: dict[str, dict[str, object]] = {}
+    # Rootless Docker + overlayfs repair after workshop batch (with owner like main installs).
+    # This makes newly written workshop folders visible and owned correctly for the
+    # immediate host-side check.
+    try:
+        uid, gid = docker_service.container_runtime_uid_gid()
+        docker_service.repair_bind_mount_permissions(install_dir, owner_uid_gid=(uid, gid))
+    except Exception:
+        pass
+
+    full_log = "\n".join(live_output) + "\n" + (out or "")
+    verify_started_at = time.time()
     base = Path(install_dir).resolve()
     for item_id in item_ids:
         target = base / "steamapps" / "workshop" / "content" / workshop_app_id / item_id
         installed = False
-        if target.exists():
-            try:
-                installed = any(target.iterdir())
-            except OSError:
-                installed = False
+        success_marker = f"Success. Downloaded item {item_id} "
+        # Primary signal: SteamCMD success line — must not depend on target.exists().
+        # After ephemeral container exit, overlayfs/rootless bind mounts often lag;
+        # exists() was false for the whole batch while logs already showed success.
+        if success_marker in full_log:
+            installed = True
+            _append_console_log(
+                server_id,
+                f"[MSM] Mod {item_id}: trusted via SteamCMD success log (overlayfs visibility fix)\n",
+            )
+        if not installed and target.exists():
+            # Secondary: folder visible on host with content or recent mtime
+            for _ in range(10):
+                try:
+                    if any(target.iterdir()):
+                        installed = True
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.25)
+            if not installed:
+                try:
+                    if target.stat().st_mtime > verify_started_at - 900:
+                        installed = True
+                except OSError:
+                    pass
         # installed (Dateien liegen auf Platte) ist die Quelle der Wahrheit.
         # SteamCMD-OK ist ein Validierungs-Signal, das bei transienten Fehlern
         # (0x202, Rate-Limit, Netz-Hickup) fehlen kann — die Mod ist aber

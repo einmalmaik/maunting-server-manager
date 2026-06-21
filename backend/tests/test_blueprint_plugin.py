@@ -522,6 +522,39 @@ def test_dayz_blueprint_reinstall_succeeds_when_steamcmd_transiently_fails(tmp_p
     assert result.get("applied") == 1
 
 
+def test_workshop_batch_trusts_success_log_when_target_not_yet_visible(tmp_path) -> None:
+    """Regression: SteamCMD logs Success but host exists() lags after container exit."""
+    from games import base as base_mod
+    from unittest.mock import patch
+
+    success_line = (
+        'Success. Downloaded item 12345 to "/data/steamapps/workshop/content/221100/12345" '
+        "(1024 bytes) Unloading Steam API...OK"
+    )
+    ephemeral_ok = {"ok": True, "stdout": success_line, "stderr": ""}
+
+    captured: list[str] = []
+
+    def fake_log(server_id: int, text: str) -> None:
+        captured.append(text)
+
+    with patch("games.base.docker_service.run_ephemeral", return_value=ephemeral_ok), patch(
+        "games.base.docker_service.repair_bind_mount_permissions", return_value={"ok": True}
+    ), patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1001)), patch(
+        "games.base._append_console_log", side_effect=fake_log
+    ):
+        result = base_mod.run_steamcmd_workshop_download_batch(
+            server_id=63,
+            install_dir=str(tmp_path),
+            workshop_app_id="221100",
+            workshop_item_ids=["12345"],
+            retry=False,
+        )
+
+    assert result.get("items", {}).get("12345", {}).get("ok") is True, result
+    assert any("trusted via SteamCMD success log" in line for line in captured)
+
+
 def test_dayz_blueprint_renders_runtime_env_command_and_dirs(tmp_path) -> None:
     plugin = _native_plugin("dayz")
     server = _FakeServer(id=77, install_dir=str(tmp_path), game_port=2302, query_port=27016)
