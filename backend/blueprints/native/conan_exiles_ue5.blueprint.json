@@ -30,13 +30,6 @@
       },
       {
         "type": "ini",
-        "file": "ConanSandbox/Saved/Config/LinuxServer/Engine.ini",
-        "section": "ConsoleVariables",
-        "key": "net.AllowEncryption",
-        "value": "0"
-      },
-      {
-        "type": "ini",
         "file": "ConanSandbox/Saved/Config/LinuxServer/Game.ini",
         "section": "RconPlugin",
         "key": "RconPort",
