@@ -12,7 +12,7 @@
     "workdir": "/data",
     "user": "1000:1000",
     "env": {},
-    "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT} -MULTIHOME={BIND_IP}",
+    "startup": "/bin/bash /data/ConanSandboxServer.sh -log -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RconPort={RCON_PORT}",
     "configPatches": [
       {
         "type": "ini",
