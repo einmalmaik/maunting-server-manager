@@ -86,32 +86,41 @@ def _refresh_mod_update_availability(db: Session, server: Server, plugin, *, for
     return updates
 
 
+def _server_has_active_mod_jobs(db: Session, server_id: int) -> bool:
+    return (
+        db.query(Mod.id)
+        .filter(
+            Mod.server_id == server_id,
+            Mod.install_status.in_((INSTALL_RUNNING, "pending")),
+        )
+        .limit(1)
+        .first()
+        is not None
+    )
+
+
 def install_mod_bg(server_id: int, workshop_id: str, action: str = "install", remote_updated: str | None = None):
+    # Lock zuerst — ohne offene DB-Session warten (verhindert QueuePool-Timeout bei vielen Mods).
+    acquire_install_update_lock_blocking(server_id, "mod_install")
     db = SessionLocal()
     try:
         server = db.query(Server).filter(Server.id == server_id).first()
         if not server:
             logger.error("Server %s nicht gefunden in Background Task", server_id)
+            mark_mod_failed(server_id, workshop_id, "Server nicht gefunden")
             return
         plugin = get_plugin(server.game_type)
         if not plugin or not plugin.supports_mods:
             mark_mod_failed(server_id, workshop_id, "Steam Workshop nicht in diesem Spiel aktiviert")
             return
 
-        # Blockierenden Lock erwerben, um parallele SteamCMD-Aufrufe zu serialisieren
-        acquire_install_update_lock_blocking(server.id, "mod_install")
         try:
             mark_mod_installing(server.id, workshop_id, action)
             if action == "reinstall":
-                # Für explizites Re-Install vorherigen Workshop-Cache + Post-Install-Artefakte
-                # entfernen (cleanup_mod ist idempotent). Das stellt sicher, dass der
-                # nachfolgende Download frische Dateien erzeugt (Vermeidet "nicht verifiziert"
-                # bei Pre-Existing-Content) und Post-Actions (Symlinks/Copies) neu anlegt.
-                # Für normale "install"/"update" belassen wir den Smart-Update von SteamCMD.
                 try:
                     plugin.cleanup_mod(server, workshop_id)
                     _append_console_log(server.id, f"[MSM] Mod {workshop_id} Re-Install: Cache + Artefakte bereinigt\n")
-                except Exception as ce:  # defensiv, nicht fatal
+                except Exception as ce:
                     _append_console_log(server.id, f"[MSM] Mod {workshop_id} Re-Install Cleanup Warnung: {ce}\n")
             result = plugin.install_mod(server, workshop_id)
             success = isinstance(result, dict) and result.get("ok", True) is not False and "error" not in result
@@ -127,27 +136,34 @@ def install_mod_bg(server_id: int, workshop_id: str, action: str = "install", re
         finally:
             release_install_update_lock(server.id)
     except Exception as exc:
-        logger.exception("Fehler bei Hintergrund-Mod-Installation für Server %s (workshop_id: %s)", server_id, workshop_id)
+        logger.exception(
+            "Fehler bei Hintergrund-Mod-Installation für Server %s (workshop_id: %s)",
+            server_id,
+            workshop_id,
+        )
         mark_mod_failed(server_id, workshop_id, _safe_error(exc))
+        release_install_update_lock(server_id)
     finally:
         db.close()
 
 
 def reinstall_all_mods_bg(server_id: int, workshop_ids: list[str]) -> None:
-    db = SessionLocal()
+    acquire_install_update_lock_blocking(server_id, "mod_reinstall_all")
     try:
-        server = db.query(Server).filter(Server.id == server_id).first()
-        if not server:
-            logger.error("Server %s nicht gefunden (reinstall-all)", server_id)
-            return
-        plugin = get_plugin(server.game_type)
-        if not plugin or not plugin.supports_mods:
-            for wid in workshop_ids:
-                mark_mod_failed(server_id, wid, "Steam Workshop nicht in diesem Spiel aktiviert")
-            return
-
-        acquire_install_update_lock_blocking(server.id, "mod_reinstall_all")
+        db = SessionLocal()
         try:
+            server = db.query(Server).filter(Server.id == server_id).first()
+            if not server:
+                logger.error("Server %s nicht gefunden (reinstall-all)", server_id)
+                for wid in workshop_ids:
+                    mark_mod_failed(server_id, wid, "Server nicht gefunden")
+                return
+            plugin = get_plugin(server.game_type)
+            if not plugin or not plugin.supports_mods:
+                for wid in workshop_ids:
+                    mark_mod_failed(server_id, wid, "Steam Workshop nicht in diesem Spiel aktiviert")
+                return
+
             _append_console_log(
                 server.id,
                 f"[MSM] Neuinstallation für {len(workshop_ids)} Workshop-Mod(s) gestartet (nacheinander).\n",
@@ -198,13 +214,13 @@ def reinstall_all_mods_bg(server_id: int, workshop_ids: list[str]) -> None:
                 f"[MSM] Neuinstallation abgeschlossen ({ok_count}/{len(workshop_ids)} erfolgreich).\n",
             )
         finally:
-            release_install_update_lock(server.id)
+            db.close()
     except Exception:
         logger.exception("reinstall-all fehlgeschlagen für Server %s", server_id)
         for wid in workshop_ids:
             mark_mod_failed(server_id, wid, "Neuinstallation abgebrochen")
     finally:
-        db.close()
+        release_install_update_lock(server_id)
 
 
 @router.get("/{server_id}", response_model=list[ModResponse])
@@ -213,7 +229,9 @@ def list_mods(server_id: int, db: Session = Depends(get_db), user: User = Depend
     server = db.query(Server).filter(Server.id == server_id).first()
     if server:
         plugin = get_plugin(server.game_type)
-        _refresh_mod_update_availability(db, server, plugin)
+        # Kein schwerer Workshop-Check während laufender/pending Installs (Polling + SteamCMD = Pool-Timeout).
+        if not _server_has_active_mod_jobs(db, server_id):
+            _refresh_mod_update_availability(db, server, plugin)
     return db.query(Mod).filter(Mod.server_id == server_id).order_by(Mod.load_order.asc()).all()
 
 
