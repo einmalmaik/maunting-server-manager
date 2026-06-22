@@ -670,4 +670,4 @@ def test_conan_blueprint_post_install_copies_paks_and_formats_modlist(tmp_path) 
     assert result["ok"] is True
     assert result["applied"] == 1
     assert copied.read_text(encoding="utf-8") == "pak"
-    assert plugin.format_modlist_lines(server, [SimpleNamespace(workshop_id="999")]) == ["Example.pak"]
+    assert plugin.format_modlist_lines(server, [SimpleNamespace(workshop_id="999")]) == ["*Example.pak"]

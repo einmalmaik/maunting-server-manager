@@ -425,6 +425,14 @@ class BlueprintPlugin(GamePlugin):
                 "bitte Server neu installieren und Steam-Account/App-Zugriff pruefen."
             )
 
+        try:
+            self.update_modlist(server)
+        except Exception as exc:
+            _append_console_log(
+                server.id,
+                f"[MSM] update_modlist vor Start fehlgeschlagen (nicht kritisch): {exc}\n",
+            )
+
     def build_port_publishes(self, server) -> list[PortPublish]:
         """Port-Publishes aus der Blueprint statt UDP-Hartkodierung.
 
@@ -572,6 +580,8 @@ class BlueprintPlugin(GamePlugin):
                         continue
                     if target_path.exists():
                         lines.append(target_path.name)
+        if self._blueprint.meta.id == "conan_exiles_ue5":
+            return [f"*{line}" if line and not line.startswith("*") else line for line in lines]
         return lines
 
     def _run_workshop_post_install_actions(self, server, workshop_id: str) -> dict:

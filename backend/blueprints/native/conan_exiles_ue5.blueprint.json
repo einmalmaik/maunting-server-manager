@@ -48,6 +48,13 @@
         "section": "RconPlugin",
         "key": "RconEnabled",
         "value": "True"
+      },
+      {
+        "type": "ini",
+        "file": "ConanSandbox/Saved/Config/LinuxServer/ServerSettings.ini",
+        "section": "ServerSettings",
+        "key": "ServerModList",
+        "value": "modlist.txt"
       }
     ]
   },
