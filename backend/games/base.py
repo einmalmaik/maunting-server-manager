@@ -749,6 +749,26 @@ def active_mod_ids(server) -> list[str]:
     return [m.workshop_id for m in _query_active_mods(server.id)]
 
 
+def _finalize_modlist_lines(server, lines: list[str]) -> list[str]:
+    """Conan UE5: * vor .pak-Zeilen (Funcom/Hosting-Doku), dedupliziert."""
+    game_type = (getattr(server, "game_type", None) or "").strip()
+    if game_type != "conan_exiles_ue5":
+        return lines
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in lines:
+        line = (raw or "").strip()
+        if not line:
+            continue
+        if line.endswith(".pak") and not line.startswith("*"):
+            line = f"*{line}"
+        if line in seen:
+            continue
+        seen.add(line)
+        out.append(line)
+    return out
+
+
 def write_workshop_modlist(server, relative_path: str, lines: list[str]) -> None:
     """Schreibt eine Workshop-Modliste in eine sichere Datei unter ``install_dir``.
 
@@ -785,6 +805,7 @@ def write_workshop_modlist(server, relative_path: str, lines: list[str]) -> None
         return
 
     target_dir = os.path.dirname(target)
+    lines = _finalize_modlist_lines(server, lines)
     try:
         os.makedirs(target_dir, exist_ok=True)
         with open(target, "w", encoding="utf-8") as f:

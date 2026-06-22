@@ -20,6 +20,7 @@ from games.base import write_workshop_modlist
 class _Server:
     id: int
     install_dir: str
+    game_type: str = ""
 
 
 def test_write_modlist_happy_path(tmp_path: Path) -> None:
@@ -27,6 +28,17 @@ def test_write_modlist_happy_path(tmp_path: Path) -> None:
     write_workshop_modlist(server, "Mods/modlist.txt", ["a.pak", "b.pak"])
     out = (tmp_path / "Mods" / "modlist.txt").read_text(encoding="utf-8")
     assert out == "a.pak\nb.pak\n"
+
+
+def test_write_modlist_conan_ue5_prefixes_asterisk(tmp_path: Path) -> None:
+    server = _Server(id=10, install_dir=str(tmp_path), game_type="conan_exiles_ue5")
+    write_workshop_modlist(
+        server,
+        "ConanSandbox/Mods/modlist.txt",
+        ["Foo.pak", "*Bar.pak", "Foo.pak"],
+    )
+    out = (tmp_path / "ConanSandbox" / "Mods" / "modlist.txt").read_text(encoding="utf-8")
+    assert out == "*Foo.pak\n*Bar.pak\n"
 
 
 def test_write_modlist_rejects_absolute_path(tmp_path: Path) -> None:
