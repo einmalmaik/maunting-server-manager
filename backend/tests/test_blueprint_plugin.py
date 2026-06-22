@@ -671,3 +671,21 @@ def test_conan_blueprint_post_install_copies_paks_and_formats_modlist(tmp_path) 
     assert result["applied"] == 1
     assert copied.read_text(encoding="utf-8") == "pak"
     assert plugin.format_modlist_lines(server, [SimpleNamespace(workshop_id="999")]) == ["*Example.pak"]
+
+
+def test_conan_post_install_copy_falls_back_on_copy2_permission_error(tmp_path, monkeypatch) -> None:
+    plugin = _native_plugin("conan_exiles_ue5")
+    server = _FakeServer(id=79, install_dir=str(tmp_path))
+    workshop_dir = tmp_path / "steamapps" / "workshop" / "content" / "440900" / "1001"
+    workshop_dir.mkdir(parents=True)
+    pak = workshop_dir / "Perm.pak"
+    pak.write_bytes(b"pak-bytes")
+
+    def _boom(_src, _dst):
+        raise PermissionError("copystat")
+
+    monkeypatch.setattr("games.blueprint_plugin.shutil.copy2", _boom)
+    res = plugin._run_workshop_post_install_actions(server, "1001")
+    assert res == {}
+    copied = tmp_path / "ConanSandbox" / "Mods" / "Perm.pak"
+    assert copied.read_bytes() == b"pak-bytes"

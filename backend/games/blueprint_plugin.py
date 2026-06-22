@@ -620,7 +620,12 @@ class BlueprintPlugin(GamePlugin):
                                 f"[MSM] Mod {workshop_id}: ExtractedMods-Cache geleert "
                                 f"({len(purged)} Datei(en)) vor Pak-Kopie.\n",
                             )
-                    shutil.copy2(source, target)
+                    try:
+                        shutil.copy2(source, target)
+                    except PermissionError:
+                        # Rootless Docker + Bind-Mount: copy2/copystat kann EPERM werfen,
+                        # obwohl die Datei bereits kopiert wurde oder copyfile reicht.
+                        shutil.copyfile(source, target)
                     self._try_chown_install_path(server, target)
                     continue
 
