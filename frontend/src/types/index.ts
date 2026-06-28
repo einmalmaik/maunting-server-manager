@@ -41,6 +41,48 @@ export interface Server {
   created_at: string
 }
 
+export interface PostgresCredential {
+  database_id?: number | null
+  database_name: string
+  username: string
+  password: string
+  host: string
+  port: number
+}
+
+export interface ServerCreateResult extends Server {
+  postgres_credentials?: PostgresCredential[]
+}
+
+export interface PostgresDatabase {
+  id: number
+  name: string
+  owner_role: string
+  created_at: string
+}
+
+export interface PostgresUser {
+  id: number
+  username: string
+  password_mask: string
+  created_at: string
+  last_rotated_at: string | null
+}
+
+export interface PostgresResources {
+  databases: PostgresDatabase[]
+  users: PostgresUser[]
+}
+
+export interface PostgresRowsResult {
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+  limit?: number | null
+  offset?: number | null
+  row_count?: number | null
+  status?: string | null
+}
+
 export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'custom'
 export type BlueprintPortProtocol = 'tcp' | 'udp'
 

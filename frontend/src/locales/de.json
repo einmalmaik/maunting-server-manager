@@ -275,6 +275,14 @@
       "startBlockedBody": "Der Server kann erst gestartet werden, wenn eine Host-IP zugewiesen ist. Ohne explizite Bind-IP würde Docker die UFW-Regeln umgehen (Anti-Leak).",
       "assignNow": "IP zuweisen"
     },
+    "postgres": {
+      "enabled": "PostgreSQL-Datenbanken",
+      "hint": "Erstellt interne PostgreSQL-Datenbanken für diesen Server. Zugriff nur über msm-postgres im internen Docker-Netz.",
+      "count": "Anzahl",
+      "credentialsTitle": "PostgreSQL-Zugangsdaten",
+      "credentialsHint": "Diese Passwörter werden nur jetzt angezeigt. Danach speichert MSM nur maskierte Metadaten.",
+      "copyDsn": "Connection-String kopieren"
+    },
     "disk": {
       "usage": "Disk-Verbrauch",
       "softLimitWarning": "Disk-Verbrauch erreicht {percent} % des Soft-Limits ({usedMb} MB / {limitMb} MB). Bereinige alte Daten, sonst wird der Server bei 100 % automatisch gestoppt.",
@@ -370,7 +378,10 @@
     "server.backups.delete": "Backup löschen",
     "server.mods.read": "Mods auflisten, Workshop durchsuchen",
     "server.mods.write": "Mods abonnieren, entfernen, sortieren",
-    "server.mods.toggle": "Mods aktivieren oder deaktivieren"
+    "server.mods.toggle": "Mods aktivieren oder deaktivieren",
+    "server.databases.read": "PostgreSQL-Datenbanken lesen",
+    "server.databases.write": "PostgreSQL-Tabellen und Daten bearbeiten",
+    "server.databases.admin": "PostgreSQL-Datenbanken und User verwalten"
   },
   "serverPermissions": {
     "title": "Berechtigungen",
@@ -649,7 +660,8 @@
     "console": "Konsole",
     "mods": "Mod-Manager",
     "restarts": "Automatische Neustarts",
-    "backups": "Backups"
+    "backups": "Backups",
+    "databases": "Datenbanken"
   },
   "scheduler": {
     "title": "Scheduler",
@@ -910,6 +922,37 @@
     "reconnecting": "Verbindung verloren — verbinde neu…",
     "failed": "Verbindung fehlgeschlagen. Bitte Seite neu laden.",
     "rejected": "Verbindung abgelehnt (Auth/Origin/fehlende Rechte)."
+  },
+  "databases": {
+    "subtitle": "Servergebundene PostgreSQL-Verwaltung ohne öffentliche Freigabe.",
+    "emptyTitle": "Keine Datenbanken angelegt",
+    "emptyHint": "Starte die interne PostgreSQL-Provisionierung für diesen Server.",
+    "bootstrap": "PostgreSQL aktivieren",
+    "database": "Datenbank",
+    "user": "User",
+    "password": "Passwort",
+    "connectionUrl": "Connection-URL",
+    "host": "Host",
+    "port": "Port",
+    "newDatabasePlaceholder": "Name optional",
+    "createDatabase": "Datenbank erstellen",
+    "createUser": "User erstellen",
+    "deleteDatabase": "Datenbank löschen",
+    "deleteDatabaseConfirm": "Datenbank \"{{name}}\" wirklich löschen?",
+    "typeNameConfirm": "Zum Bestätigen Namen eingeben: {{name}}",
+    "rotate": "Rotieren",
+    "deleteUser": "User löschen",
+    "deleteUserConfirm": "Datenbank-User \"{{name}}\" wirklich löschen?",
+    "tables": "Tabellen",
+    "noTables": "Keine Tabellen vorhanden.",
+    "tableName": "Tabellenname",
+    "createTable": "Tabelle erstellen",
+    "rows": "Rows",
+    "searchRows": "Rows suchen",
+    "selectTable": "Tabelle auswählen, um Rows zu laden.",
+    "sqlConsole": "SQL-Konsole",
+    "runSql": "SQL ausführen",
+    "noSqlResult": "Noch kein SQL-Ergebnis."
   },
   "common": {
     "unlimited": "unbegrenzt",

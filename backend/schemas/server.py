@@ -12,7 +12,9 @@ from __future__ import annotations
 import ipaddress
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from schemas.postgres import PostgresOneTimeCredential
 
 
 def _validate_bind_ip(value: str | None) -> str | None:
@@ -103,6 +105,8 @@ class ServerCreate(BaseModel):
     # der Router automatisch die erste Public-IP des Hosts (siehe
     # network_interfaces_service.default_bind_ip).
     public_bind_ip: str | None = Field(None, max_length=64)
+    postgres_enabled: bool = False
+    postgres_database_count: int | None = Field(None, ge=1, le=20)
 
     @field_validator("public_bind_ip")
     @classmethod
@@ -113,6 +117,14 @@ class ServerCreate(BaseModel):
     @classmethod
     def _check_restart_times(cls, v: str | None) -> str | None:
         return _validate_restart_times(v)
+
+    @model_validator(mode="after")
+    def _check_postgres_count(self) -> "ServerCreate":
+        if self.postgres_enabled and self.postgres_database_count is None:
+            self.postgres_database_count = 1
+        if not self.postgres_enabled:
+            self.postgres_database_count = None
+        return self
 
 
 class ServerUpdate(BaseModel):
@@ -179,6 +191,10 @@ class ServerResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ServerCreateResponse(ServerResponse):
+    postgres_credentials: list[PostgresOneTimeCredential] = Field(default_factory=list)
 
 
 class ServerStatusResponse(BaseModel):

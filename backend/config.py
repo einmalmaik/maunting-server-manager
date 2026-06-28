@@ -54,6 +54,18 @@ class Settings(BaseSettings):
     # Produktion: /opt/msm/servers  |  Dev: ./servers
     servers_dir: str = "/opt/msm/servers"
 
+    # Verwaltetes PostgreSQL fuer Game-Server-Datenbanken.
+    # Der Host-Port ist absichtlich nur an Loopback gebunden. Game-Container
+    # erreichen PostgreSQL ueber das interne Docker-Netz und msm-postgres:5432.
+    managed_postgres_image: str = "postgres:17-alpine"
+    managed_postgres_container_name: str = "msm-postgres"
+    managed_postgres_network: str = "msm-internal"
+    managed_postgres_host: str = "127.0.0.1"
+    managed_postgres_port: int = 15432
+    managed_postgres_data_dir: str = "/opt/msm/postgres"
+    managed_postgres_statement_timeout_ms: int = 5000
+    managed_postgres_row_limit: int = 500
+
     # Rootless Docker. Produktion: unix:///run/user/<msm_uid>/docker.sock
     # Leer = docker_service berechnet den Rootless-Default fuer den laufenden User.
     docker_host: str = ""

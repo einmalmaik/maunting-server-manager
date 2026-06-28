@@ -275,6 +275,14 @@
       "startBlockedBody": "The server can only start once a host IP is assigned. Without an explicit bind IP, Docker would bypass UFW (anti-leak).",
       "assignNow": "Assign IP"
     },
+    "postgres": {
+      "enabled": "PostgreSQL databases",
+      "hint": "Creates internal PostgreSQL databases for this server. Access only via msm-postgres on the internal Docker network.",
+      "count": "Count",
+      "credentialsTitle": "PostgreSQL credentials",
+      "credentialsHint": "These passwords are shown only now. Afterwards MSM stores only masked metadata.",
+      "copyDsn": "Copy connection string"
+    },
     "disk": {
       "usage": "Disk usage",
       "softLimitWarning": "Disk usage hit {percent}% of the soft limit ({usedMb} MB / {limitMb} MB). Clean up old data — at 100% the server will be stopped automatically.",
@@ -370,7 +378,10 @@
     "server.backups.delete": "Delete backup",
     "server.mods.read": "List mods, search workshop",
     "server.mods.write": "Subscribe, remove, reorder mods",
-    "server.mods.toggle": "Enable or disable mods"
+    "server.mods.toggle": "Enable or disable mods",
+    "server.databases.read": "Read PostgreSQL databases",
+    "server.databases.write": "Edit PostgreSQL tables and data",
+    "server.databases.admin": "Manage PostgreSQL databases and users"
   },
   "serverPermissions": {
     "title": "Permissions",
@@ -586,7 +597,8 @@
     "console": "Console",
     "mods": "Mods",
     "restarts": "Auto-Restart",
-    "backups": "Backups"
+    "backups": "Backups",
+    "databases": "Databases"
   },
   "files": {
     "title": "File Manager",
@@ -910,6 +922,37 @@
     "reconnecting": "Connection lost — reconnecting…",
     "failed": "Connection failed. Please reload the page.",
     "rejected": "Connection rejected (auth/origin/missing permissions)."
+  },
+  "databases": {
+    "subtitle": "Server-scoped PostgreSQL management without public exposure.",
+    "emptyTitle": "No databases created",
+    "emptyHint": "Start internal PostgreSQL provisioning for this server.",
+    "bootstrap": "Enable PostgreSQL",
+    "database": "Database",
+    "user": "User",
+    "password": "Password",
+    "connectionUrl": "Connection URL",
+    "host": "Host",
+    "port": "Port",
+    "newDatabasePlaceholder": "Name optional",
+    "createDatabase": "Create database",
+    "createUser": "Create user",
+    "deleteDatabase": "Delete database",
+    "deleteDatabaseConfirm": "Really delete database \"{{name}}\"?",
+    "typeNameConfirm": "Type the name to confirm: {{name}}",
+    "rotate": "Rotate",
+    "deleteUser": "Delete user",
+    "deleteUserConfirm": "Really delete database user \"{{name}}\"?",
+    "tables": "Tables",
+    "noTables": "No tables yet.",
+    "tableName": "Table name",
+    "createTable": "Create table",
+    "rows": "Rows",
+    "searchRows": "Search rows",
+    "selectTable": "Select a table to load rows.",
+    "sqlConsole": "SQL console",
+    "runSql": "Run SQL",
+    "noSqlResult": "No SQL result yet."
   },
   "common": {
     "unlimited": "unlimited",

@@ -653,7 +653,7 @@ class BlueprintPlugin(GamePlugin):
         try:
             uid, gid = self.container_uid_gid(server)
             os.chown(path, int(uid), int(gid))
-        except OSError:
+        except (AttributeError, OSError):
             pass
 
     def workshop_runtime_targets_ready(self, server, workshop_id: str) -> bool:

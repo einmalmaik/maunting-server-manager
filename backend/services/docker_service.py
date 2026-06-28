@@ -291,6 +291,29 @@ def _volumes_dict(volumes: list[VolumeBind] | None) -> dict[str, dict[str, str]]
     return {volume.host_path: volume.binding() for volume in volumes}
 
 
+def ensure_network(name: str, *, internal: bool = False) -> dict:
+    """Create a Docker bridge network if it does not exist."""
+
+    client, error = _client_or_error()
+    if error:
+        return error
+    try:
+        client.networks.get(name)
+        return {"ok": True, "stdout": "", "stderr": ""}
+    except NotFound:
+        pass
+    except (DockerException, OSError) as exc:
+        logger.warning("docker network lookup failed")
+        return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
+
+    try:
+        client.networks.create(name, driver="bridge", internal=internal)
+        return {"ok": True, "stdout": "", "stderr": ""}
+    except (DockerException, OSError) as exc:
+        logger.warning("docker network create failed")
+        return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
+
+
 def _tmpfs_dict(tmpfs_paths: list[str] | None) -> dict[str, str] | None:
     if not tmpfs_paths:
         return None
@@ -448,6 +471,8 @@ def run_container(
     read_only_rootfs: bool = True,
     tmpfs_paths: list[str] | None = None,
     extra_args: list[str] | None = None,
+    network: str | None = None,
+    extra_networks: list[str] | None = None,
     detach: bool = True,
     startup_check_seconds: float = 0.0,
     server_id: int | None = None,  # for pull progress logging to console during long image pulls
@@ -498,6 +523,9 @@ def run_container(
         "user": user,
         "working_dir": workdir,
     }
+    if network:
+        kwargs["network"] = network
+    networks = [network_name for network_name in (extra_networks or []) if network_name]
     if cpu_limit_percent is not None and cpu_limit_percent > 0:
         kwargs["nano_cpus"] = int(round(cpu_limit_percent / 100.0, 2) * 1_000_000_000)
     if ram_limit_mb is not None and ram_limit_mb > 0:
@@ -507,6 +535,12 @@ def run_container(
     kwargs = {key: value for key, value in kwargs.items() if value is not None}
     try:
         container = client.containers.run(**kwargs)
+        for network_name in networks:
+            try:
+                client.networks.get(network_name).connect(container)
+            except (DockerException, OSError) as exc:
+                logger.warning("docker network connect failed")
+                return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
         container_id = getattr(container, "id", "") if detach else ""
         if detach and startup_check_seconds > 0:
             time.sleep(startup_check_seconds)

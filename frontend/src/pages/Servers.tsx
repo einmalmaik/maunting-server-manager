@@ -5,9 +5,10 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import type { Server, GameInfo } from '@/types'
+import type { Server, GameInfo, PostgresCredential, ServerCreateResult } from '@/types'
 import { labelRole, mapBlueprintPorts } from '@/utils/portRoles'
-import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive } from 'lucide-react'
+import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive, Database } from 'lucide-react'
+import { PostgresCredentialsDialog } from '@/components/server/PostgresCredentialsDialog'
 
 export function Servers() {
   const { t } = useTranslation()
@@ -18,6 +19,7 @@ export function Servers() {
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [oneTimeCredentials, setOneTimeCredentials] = useState<PostgresCredential[]>([])
   const { interfaces, defaultBindIp } = useHostInterfaces()
   const [form, setForm] = useState({
     name: '',
@@ -30,6 +32,8 @@ export function Servers() {
     rcon_port: '',
     ports: {} as Record<string, string>,
     public_bind_ip: '',
+    postgres_enabled: false,
+    postgres_database_count: '1',
   })
 
   // Default-Bind-IP setzen, sobald sie vom Backend kommt.
@@ -83,7 +87,7 @@ export function Servers() {
         portsPayload[role] = valStr ? parseInt(valStr) : null
       })
 
-      await api<Server>('/servers', {
+      const created = await api<ServerCreateResult>('/servers', {
         method: 'POST',
         body: JSON.stringify({
           name: form.name,
@@ -96,8 +100,13 @@ export function Servers() {
           rcon_port: form.rcon_port ? parseInt(form.rcon_port) : null,
           ports: portsPayload,
           public_bind_ip: form.public_bind_ip || null,
+          postgres_enabled: form.postgres_enabled,
+          postgres_database_count: form.postgres_enabled ? parseInt(form.postgres_database_count || '1') : null,
         }),
       })
+      if (created.postgres_credentials?.length) {
+        setOneTimeCredentials(created.postgres_credentials)
+      }
       setShowCreate(false)
       setForm({
         name: '',
@@ -110,6 +119,8 @@ export function Servers() {
         rcon_port: '',
         ports: {},
         public_bind_ip: defaultBindIp || '',
+        postgres_enabled: false,
+        postgres_database_count: '1',
       })
       fetchServers()
     } catch (err: any) {
@@ -396,6 +407,48 @@ export function Servers() {
                   </div>
                 )
               })()}
+              <div className="rounded-lg border border-outline-variant bg-surface-container/50 p-4">
+                <label className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-2">
+                    <Database className="w-4 h-4 text-secondary" />
+                    <span>
+                      <span className="block font-label-md text-label-md text-on-surface">
+                        {t('servers.postgres.enabled')}
+                      </span>
+                      <span className="block font-body-md text-xs text-on-surface-variant mt-1">
+                        {t('servers.postgres.hint')}
+                      </span>
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={form.postgres_enabled}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        postgres_enabled: e.target.checked,
+                        postgres_database_count: e.target.checked ? form.postgres_database_count || '1' : '1',
+                      })
+                    }
+                    className="h-4 w-4 accent-secondary"
+                  />
+                </label>
+                {form.postgres_enabled && (
+                  <div className="mt-4 max-w-36">
+                    <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                      {t('servers.postgres.count')}
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={form.postgres_database_count}
+                      onChange={(e) => setForm({ ...form, postgres_database_count: e.target.value || '1' })}
+                      className="msm-input"
+                    />
+                  </div>
+                )}
+              </div>
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -416,6 +469,7 @@ export function Servers() {
           </div>
         </div>
       )}
+      <PostgresCredentialsDialog credentials={oneTimeCredentials} onClose={() => setOneTimeCredentials([])} />
     </div>
   )
 }
