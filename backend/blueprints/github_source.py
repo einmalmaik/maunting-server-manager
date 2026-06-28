@@ -13,6 +13,7 @@ import logging
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from .schema import Blueprint, BlueprintSourceType
@@ -26,10 +27,22 @@ _MAX_SETUP_ARGS = 32
 
 # npm race condition: TAR_ENTRY_ERROR ENOENT entsteht, wenn parallele Worker
 # Dateien in Unterordnern anlegen wollen, bevor das Elternverzeichnis existiert
-# (typisch auf overlayfs/rootless Docker). Retry nach Cleanup loest das fast immer.
+# (typisch auf overlayfs/rootless Docker). Retry nach Cleanup loest das fast immer,
+# aber nur wenn der zweite Lauf single-threaded laeuft (--network-concurrency=1).
 _NPM_TAR_ENTRY_ERROR_RE = re.compile(
     r"npm\s+warn\s+tar\s+TAR_ENTRY_ERROR\s+ENOENT", re.IGNORECASE
 )
+
+# Maximale Anzahl Retries bei TAR_ENTRY_ERROR (insgesamt 4 Laeufe: 1 + 3 Retries).
+# Backoff in Sekunden zwischen den Versuchen, damit andere Worker/Caches sich beruhigen.
+_NPM_TAR_RETRY_MAX = 3
+_NPM_TAR_RETRY_BACKOFF = (5, 15, 30)
+
+# npm-Argumente, die wir automatisch beim ersten Lauf ergaenzen, um parallele
+# Downloads zu reduzieren. Sie werden VOR argv eingefuegt und ersetzen/ueberschreiben
+# bestehende gleichnamige Flags NICHT (nur defaults).
+_NPM_STABILIZE_FLAGS = ("--no-audit", "--no-fund", "--prefer-offline")
+_NPM_STABILIZE_FORCE = ("--no-audit", "--no-fund", "--network-concurrency=1")
 
 
 class GithubSourceError(RuntimeError):
@@ -131,12 +144,52 @@ def _is_npm_tar_entry_error(stderr: str, stdout: str, argv0: str) -> bool:
 
     Tritt typisch auf overlayfs/rootless Docker auf, wenn Worker Dateien in
     Unterordnern anlegen wollen, bevor das Elternverzeichnis existiert.
-    Retry nach Cleanup von ``node_modules`` loest den Fehler praktisch immer.
+    Wird durch ``--network-concurrency=1`` + Cleanup praktisch immer geloest.
     """
     if Path(argv0).name not in {"npm", "npx"}:
         return False
     haystack = f"{stderr or ''}\n{stdout or ''}"
     return bool(_NPM_TAR_ENTRY_ERROR_RE.search(haystack))
+
+
+def _is_npm_invocation(argv: list[str]) -> bool:
+    """True, wenn argv ein npm/npx-Top-Level-Befehl ist (nicht Subcommand wie ``npm run build``)."""
+    return len(argv) >= 2 and Path(argv[0]).name in {"npm", "npx"}
+
+
+def _is_npm_install(argv: list[str]) -> bool:
+    """True, wenn argv einer der Befehle ist, der den pacote-Race ausloest.
+
+    ``npm ci``, ``npm i``, ``npm install`` und ``npx <pkg>`` (beim ersten Lauf
+    mit fehlendem Cache) koennen TAR_ENTRY_ERROR werfen. ``npm run ...`` nicht.
+
+    Flags (``--foo`` / ``--foo=bar``) werden uebersprungen, damit die Erkennung
+    auch dann greift, wenn wir selbst bereits Flags injiziert haben.
+    """
+    if not _is_npm_invocation(argv):
+        return False
+    for arg in argv[1:]:
+        if not arg.startswith("-"):
+            return arg in {"ci", "i", "install", "add", "update", "upgrade"}
+    return False
+
+
+def _inject_npm_flags(argv: list[str], flags: tuple[str, ...]) -> list[str]:
+    """Fuegt flags ZWISCHEN argv[0] und argv[1] ein, ohne bestehende Flags zu
+    duplizieren.
+
+    Beispiel: argv=['npm','ci'], flags=('--no-audit','--no-fund')
+      → ['npm','--no-audit','--no-fund','ci']
+    """
+    if len(argv) < 2:
+        return list(argv)
+    out = [argv[0]]
+    existing = {a.split("=", 1)[0] for a in argv[1:] if a.startswith("--")}
+    for f in flags:
+        if f.split("=", 1)[0] not in existing:
+            out.append(f)
+    out.extend(argv[1:])
+    return out
 
 
 def _safe_rmtree(path: Path) -> None:
@@ -147,33 +200,26 @@ def _safe_rmtree(path: Path) -> None:
 
 
 def _run_argv_with_retry(argv: list[str], *, cwd: Path, timeout: int = 900) -> None:
-    """Fuehrt argv aus; bei npm-TAR_ENTRY_ERROR wird ``node_modules`` aufgeraeumt
-    und der gleiche Befehl genau einmal wiederholt. Andere Fehler werden sofort
-    als ``GithubSourceError`` gemeldet."""
-    proc = subprocess.run(
-        argv,
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=_git_env(),
-    )
-    if proc.returncode == 0:
-        return
+    """Fuehrt argv aus.
 
-    stderr = proc.stderr or ""
-    stdout = proc.stdout or ""
+    - Bei ``npm ci``/``npm install``/``npx <pkg>``: ergaenzt automatisch
+      ``--no-audit --no-fund --prefer-offline`` und (bei Retries)
+      ``--network-concurrency=1``, um den pacote-Race auf overlayfs zu
+      entschaerfen.
+    - Bei TAR_ENTRY_ERROR: cleant ``cwd/node_modules``, wartet kurz
+      (5/15/30s Backoff) und probiert bis zu ``_NPM_TAR_RETRY_MAX`` mal.
+    - Andere Fehler werden sofort als ``GithubSourceError`` gemeldet.
+    """
+    current_argv: list[str] = list(argv)
+    if _is_npm_install(current_argv):
+        current_argv = _inject_npm_flags(current_argv, _NPM_STABILIZE_FLAGS)
 
-    if _is_npm_tar_entry_error(stderr, stdout, argv[0]):
-        node_modules = cwd / "node_modules"
-        logger.warning(
-            "npm TAR_ENTRY_ERROR erkannt in %s, raeume %s auf und retry.",
-            cwd,
-            node_modules,
-        )
-        _safe_rmtree(node_modules)
+    last_stderr = ""
+    last_stdout = ""
+
+    for attempt in range(_NPM_TAR_RETRY_MAX + 1):
         proc = subprocess.run(
-            argv,
+            current_argv,
             cwd=str(cwd),
             capture_output=True,
             text=True,
@@ -181,14 +227,43 @@ def _run_argv_with_retry(argv: list[str], *, cwd: Path, timeout: int = 900) -> N
             env=_git_env(),
         )
         if proc.returncode == 0:
-            logger.info("npm-Retry nach TAR_ENTRY_ERROR erfolgreich.")
+            if attempt > 0:
+                logger.info(
+                    "npm-Retry %d/%d nach TAR_ENTRY_ERROR erfolgreich.",
+                    attempt,
+                    _NPM_TAR_RETRY_MAX,
+                )
             return
-        stderr = proc.stderr or ""
-        stdout = proc.stdout or ""
+
+        last_stderr = proc.stderr or ""
+        last_stdout = proc.stdout or ""
+
+        if attempt >= _NPM_TAR_RETRY_MAX:
+            break
+        if not _is_npm_tar_entry_error(last_stderr, last_stdout, current_argv[0]):
+            break
+
+        backoff = _NPM_TAR_RETRY_BACKOFF[attempt]
+        node_modules = cwd / "node_modules"
+        logger.warning(
+            "npm TAR_ENTRY_ERROR erkannt in %s (Versuch %d/%d), "
+            "raeume %s auf, warte %ds und retry mit --network-concurrency=1.",
+            cwd,
+            attempt + 1,
+            _NPM_TAR_RETRY_MAX + 1,
+            node_modules,
+            backoff,
+        )
+        _safe_rmtree(node_modules)
+        time.sleep(backoff)
+        # Vor dem naechsten Lauf: --network-concurrency=1 injizieren, um den
+        # pacote-Race zu entschaerfen (single-threaded downloads/extraktion).
+        if _is_npm_install(current_argv):
+            current_argv = _inject_npm_flags(current_argv, _NPM_STABILIZE_FORCE)
 
     raise GithubSourceError(
         f"setupCommand fehlgeschlagen ({argv[0]}): "
-        f"{(stderr or stdout or '')[:400]}"
+        f"{(last_stderr or last_stdout or '')[:400]}"
     )
 
 
