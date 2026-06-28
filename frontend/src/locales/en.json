@@ -960,7 +960,22 @@
     "selectExtension": "Select extension...",
     "installExtension": "Install extension",
     "extensionInstalled": "Extension \"{{name}}\" installed",
-    "dropExtensionHint": "Uninstall extension \"{{name}}\""
+    "dropExtensionHint": "Uninstall extension \"{{name}}\"",
+    "powerUser": "Power user",
+    "powerUserActive": "Superuser active",
+    "powerUserActiveHint": "This owner role has Postgres SUPERUSER. Store the password securely — it is not saved by the panel.",
+    "powerUserInactiveHint": "Enable superuser if your migration script needs role-level DDL (e.g. CREATE ROLE for Discord bot global roles).",
+    "powerUserEnable": "Enable superuser",
+    "powerUserEnableConfirm": "The owner role of this database will be promoted to Postgres SUPERUSER. That allows actions outside this database too. The password is shown only once — you must copy it now.",
+    "powerUserEnableConfirmBtn": "Enable superuser",
+    "powerUserRotate": "Rotate password",
+    "powerUserDemote": "Revoke superuser",
+    "powerUserDemoteConfirm": "Demote owner role \"{{name}}\" back to normal permissions? It loses SUPERUSER but keeps DB owner rights.",
+    "powerUserDemoted": "Superuser revoked",
+    "powerUserDialogTitle": "Power-User Credentials",
+    "powerUserDialogWarn": "This password is NOT saved by the panel and cannot be shown again. Store it securely now (e.g. in a password manager).",
+    "powerUserDialogHint": "Connect via the docker network (msm-internal) only, or via msm-postgres:5432. External access requires tunneling.",
+    "powerUserDialogClose": "Close — I have stored the password"
   },
   "common": {
     "unlimited": "unlimited",

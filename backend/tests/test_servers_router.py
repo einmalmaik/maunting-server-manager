@@ -142,9 +142,10 @@ class TestCreateServer:
             "database_id": 1,
             "database_name": "msm_s1_db1",
             "username": "msm_s1_u1",
-            "password": "one-time-secret",
+            "password": "***",
             "host": "msm-postgres",
             "port": 5432,
+            "is_superuser": False,
         }]
         with patch("routers.servers.os.makedirs"), \
              patch("routers.servers.os.chmod"), \

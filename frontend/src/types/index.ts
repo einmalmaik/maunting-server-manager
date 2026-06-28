@@ -48,6 +48,15 @@ export interface PostgresCredential {
   password: string
   host: string
   port: number
+  is_superuser?: boolean
+}
+
+export interface PostgresPowerUserCredential {
+  username: string
+  password: string
+  host: string
+  port: number
+  database_name: string
 }
 
 export interface ServerCreateResult extends Server {
@@ -58,6 +67,8 @@ export interface PostgresDatabase {
   id: number
   name: string
   owner_role: string
+  is_superuser?: boolean
+  power_credentials_issued_at?: string | null
   created_at: string
 }
 

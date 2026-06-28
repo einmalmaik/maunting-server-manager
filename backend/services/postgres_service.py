@@ -184,7 +184,13 @@ def list_resources(db: Session, server_id: int) -> dict[str, list[Any]]:
     }
 
 
-def provision_server_databases(db: Session, server: Server, count: int) -> list[dict[str, Any]]:
+def provision_server_databases(
+    db: Session,
+    server: Server,
+    count: int,
+    *,
+    power_user: bool = False,
+) -> list[dict[str, Any]]:
     if count < 1:
         raise ValueError("Mindestens eine PostgreSQL-Datenbank ist erforderlich.")
     ensure_internal_postgres()
@@ -193,7 +199,11 @@ def provision_server_databases(db: Session, server: Server, count: int) -> list[
         existing = db.query(PostgresDatabase).filter(PostgresDatabase.server_id == server.id).count()
         for offset in range(1, count + 1):
             db_name, owner_role, user_name = _next_names(server.id, existing + offset)
-            credentials.append(_create_database_and_user(db, server.id, db_name, owner_role, user_name))
+            credentials.append(
+                _create_database_and_user(
+                    db, server.id, db_name, owner_role, user_name, power_user=power_user
+                )
+            )
         db.commit()
         return credentials
     except Exception:
@@ -211,6 +221,8 @@ def _create_database_and_user(
     db_name: str,
     owner_role: str,
     user_name: str,
+    *,
+    power_user: bool = False,
 ) -> dict[str, Any]:
     db_name = _validate_identifier(db_name)
     owner_role = _validate_identifier(owner_role)
@@ -218,15 +230,23 @@ def _create_database_and_user(
     owner_password = _generate_password()
     user_password = _generate_password()
 
+    # Power-User-Modus: Owner-Rolle bekommt Postgres-SUPERUSER. Damit kann der
+    # MSM-Server-Owner via psql/Migration-Tool DDL auf Rollen-Ebene machen
+    # (z. B. CREATE ROLE fuer Discord-Bot-Global-Roles, GRANT auf andere Rollen).
+    # Postgresische Superuser sind system-global -- die Credentials werden NICHT
+    # persistiert (One-Time), und die Rolle wird beim DB-Drop mit aufgeraeumt.
+    owner_create_stmt = (
+        sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s SUPERUSER").format(sql.Identifier(owner_role))
+        if power_user
+        else sql.SQL(
+            "CREATE ROLE {} LOGIN PASSWORD %s NOSUPERUSER NOCREATEDB NOCREATEROLE"
+        ).format(sql.Identifier(owner_role))
+    )
+
     conn = _admin_connect()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s NOSUPERUSER NOCREATEDB NOCREATEROLE").format(
-                    sql.Identifier(owner_role)
-                ),
-                (owner_password,),
-            )
+            cur.execute(owner_create_stmt, (owner_password,))
             conn.commit()
             cur.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(db_name), sql.Identifier(owner_role)))
             conn.commit()
@@ -272,6 +292,8 @@ def _create_database_and_user(
         name=db_name,
         owner_role=owner_role,
         owner_password_encrypted=AuthService.encrypt_2fa_secret(owner_password),
+        is_superuser=power_user,
+        power_credentials_issued_at=datetime.now(timezone.utc) if power_user else None,
     )
     user = PostgresUser(server_id=server_id, username=user_name, password_mask=_mask_secret(user_password))
     db.add(database)
@@ -286,6 +308,7 @@ def _create_database_and_user(
         "password": user_password,
         "host": settings.managed_postgres_container_name,
         "port": 5432,
+        "is_superuser": power_user,
     }
 
 
@@ -890,3 +913,102 @@ def drop_extension(db: Session, server_id: int, database_id: int, name: str) -> 
         conn.commit()
     finally:
         conn.close()
+
+
+
+def promote_owner_to_superuser(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
+    """Promote the existing DB owner role to SUPERUSER and rotate its password.
+
+    Used to upgrade an already-provisioned database (created without the
+    power_user flag) so the MSM server owner can do migrations that need
+    role-level DDL (CREATE ROLE, GRANT on system catalogs, ...).
+
+    Returns the new one-time password. The panel does NOT persist it.
+    """
+    database = _database_row(db, server_id, database_id)
+    if database.is_superuser:
+        raise ValueError("Owner-Rolle hat bereits Superuser-Rechte.")
+    new_password = _generate_password()
+    conn = _admin_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("ALTER ROLE {} WITH SUPERUSER LOGIN PASSWORD %s").format(
+                    sql.Identifier(database.owner_role)
+                ),
+                (new_password,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    database.is_superuser = True
+    database.owner_password_encrypted = AuthService.encrypt_2fa_secret(new_password)
+    database.power_credentials_issued_at = datetime.now(timezone.utc)
+    db.commit()
+    return {
+        "username": database.owner_role,
+        "password": new_password,
+        "host": settings.managed_postgres_container_name,
+        "port": 5432,
+        "database_name": database.name,
+    }
+
+
+def rotate_power_user_password(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
+    """Rotate the password of an already-superuser owner role.
+
+    Returns the new one-time password. Use this when the old password was
+    forgotten or compromised; the role keeps its SUPERUSER attribute.
+    """
+    database = _database_row(db, server_id, database_id)
+    if not database.is_superuser:
+        raise ValueError("Owner-Rolle ist kein Superuser -- erst promote_owner_to_superuser aufrufen.")
+    new_password = _generate_password()
+    conn = _admin_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD %s").format(
+                    sql.Identifier(database.owner_role)
+                ),
+                (new_password,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    database.owner_password_encrypted = AuthService.encrypt_2fa_secret(new_password)
+    database.power_credentials_issued_at = datetime.now(timezone.utc)
+    db.commit()
+    return {
+        "username": database.owner_role,
+        "password": new_password,
+        "host": settings.managed_postgres_container_name,
+        "port": 5432,
+        "database_name": database.name,
+    }
+
+
+def demote_owner_from_superuser(db: Session, server_id: int, database_id: int) -> None:
+    """Demote an existing superuser owner back to a normal role.
+
+    The owner keeps DB ownership + CREATEDB/CREATEROLE-capability (granted
+    via the trusted-extension allowlist), but loses SUPERUSER. Useful
+    after a migration is finished.
+    """
+    database = _database_row(db, server_id, database_id)
+    if not database.is_superuser:
+        raise ValueError("Owner-Rolle ist kein Superuser.")
+    conn = _admin_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("ALTER ROLE {} WITH NOSUPERUSER NOCREATEDB NOCREATEROLE").format(
+                    sql.Identifier(database.owner_role)
+                )
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    database.is_superuser = False
+    database.power_credentials_issued_at = None
+    db.commit()

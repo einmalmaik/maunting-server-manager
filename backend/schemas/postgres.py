@@ -13,12 +13,15 @@ class PostgresOneTimeCredential(BaseModel):
     password: str
     host: str
     port: int
+    is_superuser: bool = False
 
 
 class PostgresDatabaseResponse(BaseModel):
     id: int
     name: str
     owner_role: str
+    is_superuser: bool = False
+    power_credentials_issued_at: datetime | None = None
     created_at: datetime
 
     class Config:
@@ -143,4 +146,18 @@ class PostgresExtensionRequest(BaseModel):
 
 class PostgresExtensionDropRequest(BaseModel):
     database_id: int = Field(..., ge=1)
+    confirm_name: str = Field(..., min_length=1, max_length=63)
+
+
+class PostgresPowerUserResponse(BaseModel):
+    username: str
+    password: str
+    host: str
+    port: int
+    database_name: str
+
+
+class PostgresPowerUserDemoteRequest(BaseModel):
+    database_id: int = Field(..., ge=1)
+    username: str = Field(..., min_length=1, max_length=63)
     confirm_name: str = Field(..., min_length=1, max_length=63)

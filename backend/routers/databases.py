@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user, require_server_permission, verify_csrf
+from config import settings
 from models import PostgresDatabase, PostgresUser, Server, User
 from schemas.postgres import (
     PostgresBootstrapRequest,
@@ -17,6 +18,8 @@ from schemas.postgres import (
     PostgresExtensionDropRequest,
     PostgresExtensionInfo,
     PostgresExtensionRequest,
+    PostgresPowerUserDemoteRequest,
+    PostgresPowerUserResponse,
     PostgresResourcesResponse,
     PostgresRotatePasswordResponse,
     PostgresRowsRequest,
@@ -293,6 +296,71 @@ def drop_installed_extension(
     try:
         postgres_service.drop_extension(db, server_id, body.database_id, extension_name)
         return postgres_service.list_extensions(db, server_id, body.database_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/power-user", response_model=PostgresPowerUserResponse)
+def promote_to_power_user(
+    server_id: int,
+    body: PostgresDatabaseRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    """Promote a normal DB owner role to SUPERUSER. Returns one-time credentials."""
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.admin")
+    try:
+        return postgres_service.promote_owner_to_superuser(db, server_id, body.database_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/power-user/rotate", response_model=PostgresPowerUserResponse)
+def rotate_power_user_credentials(
+    server_id: int,
+    body: PostgresDatabaseRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    """Rotate the password of an existing superuser owner role. Returns new one-time credentials."""
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.admin")
+    try:
+        return postgres_service.rotate_power_user_password(db, server_id, body.database_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.delete("/power-user/demote", response_model=PostgresPowerUserResponse)
+def demote_from_power_user(
+    server_id: int,
+    body: PostgresPowerUserDemoteRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    """Demote a superuser owner role back to normal. Confirmation username required."""
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.admin")
+    if body.confirm_name != body.username:
+        raise HTTPException(status_code=400, detail="Bestaetigungsname stimmt nicht ueberein")
+    try:
+        postgres_service.demote_owner_from_superuser(db, server_id, body.database_id)
+        database = db.query(PostgresDatabase).filter(
+            PostgresDatabase.server_id == server_id, PostgresDatabase.id == body.database_id
+        ).first()
+        if not database:
+            raise ValueError("Datenbank wurde fuer diesen Server nicht gefunden.")
+        return PostgresPowerUserResponse(
+            username=database.owner_role,
+            password="",
+            host=settings.managed_postgres_container_name,
+            port=5432,
+            database_name=database.name,
+        )
     except Exception as exc:
         raise _service_error(exc) from exc
 

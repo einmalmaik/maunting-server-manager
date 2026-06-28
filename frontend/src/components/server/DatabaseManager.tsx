@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Database, Package, Play, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Database, Package, Play, Plus, RefreshCw, Search, Shield, Trash2 } from "lucide-react";
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { confirm } from "@/stores/confirmStore";
-import type { PostgresCredential, PostgresDatabase, PostgresExtension, PostgresResources, PostgresRowsResult, PostgresSqlResult } from "@/types";
+import type { PostgresCredential, PostgresDatabase, PostgresExtension, PostgresPowerUserCredential, PostgresResources, PostgresRowsResult, PostgresSqlResult } from "@/types";
 import { PostgresCredentialsDialog } from "@/components/server/PostgresCredentialsDialog";
 
 // Whitelist muss mit backend/config.py uebereinstimmen -- der Backend-Filter
@@ -56,6 +56,8 @@ export function DatabaseManager({ serverId }: Props) {
   });
   const [extensions, setExtensions] = useState<PostgresExtension[]>([]);
   const [newExtension, setNewExtension] = useState("");
+  const [powerBusy, setPowerBusy] = useState<string | null>(null);
+  const [powerDialog, setPowerDialog] = useState<{ db: PostgresDatabase; password: string } | null>(null);
 
   const selectedDatabase = useMemo(
     () => resources.databases.find((db) => db.id === selectedDbId) || null,
@@ -429,6 +431,128 @@ export function DatabaseManager({ serverId }: Props) {
                   {t("databases.installExtension")}
                 </button>
               </div>
+
+              <div className="space-y-2 pt-2 border-t border-outline-variant">
+                <h4 className="font-headline text-body-sm text-on-surface flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-status-warning" />
+                  {t("databases.powerUser")}
+                </h4>
+                {selectedDatabase?.is_superuser ? (
+                  <div className="rounded-lg border border-status-warning/40 bg-status-warning/5 p-3 space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-mono">
+                      <span className="rounded-full bg-status-warning/20 text-status-warning px-2 py-0.5">
+                        {t("databases.powerUserActive")}
+                      </span>
+                      <span className="text-on-surface-variant truncate">
+                        {selectedDatabase.owner_role}
+                      </span>
+                    </div>
+                    <p className="text-xs text-on-surface-variant">
+                      {t("databases.powerUserActiveHint")}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        className="msm-btn-secondary text-xs px-3 py-1 inline-flex items-center gap-1"
+                        onClick={async () => {
+                          if (!selectedDbId) return;
+                          setPowerBusy("rotate");
+                          try {
+                            const cred = await api<PostgresPowerUserCredential>(
+                              `/servers/${serverId}/databases/power-user/rotate`,
+                              { method: "POST", body: JSON.stringify({ database_id: selectedDbId }) },
+                            );
+                            setPowerDialog({ db: selectedDatabase!, password: cred.password });
+                          } catch (err: any) {
+                            toast.error(err.message || t("common.error"));
+                          } finally {
+                            setPowerBusy(null);
+                          }
+                        }}
+                        disabled={powerBusy !== null}
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        {t("databases.powerUserRotate")}
+                      </button>
+                      <button
+                        className="msm-btn-secondary text-xs px-3 py-1 text-status-error inline-flex items-center gap-1"
+                        onClick={async () => {
+                          if (!selectedDbId) return;
+                          const ok = await confirm({
+                            title: t("databases.powerUserDemote"),
+                            message: t("databases.powerUserDemoteConfirm", {
+                              name: selectedDatabase!.owner_role,
+                            }),
+                            confirmText: t("common.delete"),
+                            danger: true,
+                          });
+                          if (!ok) return;
+                          const typed = window.prompt(t("databases.typeNameConfirm", {
+                            name: selectedDatabase!.owner_role,
+                          })) || "";
+                          if (typed !== selectedDatabase!.owner_role) return;
+                          setPowerBusy("demote");
+                          try {
+                            await api(`/servers/${serverId}/databases/power-user/demote`, {
+                              method: "DELETE",
+                              body: JSON.stringify({
+                                database_id: selectedDbId,
+                                username: selectedDatabase!.owner_role,
+                                confirm_name: typed,
+                              }),
+                            });
+                            await fetchResources();
+                            toast.success(t("databases.powerUserDemoted"));
+                          } catch (err: any) {
+                            toast.error(err.message || t("common.error"));
+                          } finally {
+                            setPowerBusy(null);
+                          }
+                        }}
+                        disabled={powerBusy !== null}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        {t("databases.powerUserDemote")}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-outline-variant bg-surface-container p-3 space-y-2">
+                    <p className="text-xs text-on-surface-variant">
+                      {t("databases.powerUserInactiveHint")}
+                    </p>
+                    <button
+                      className="msm-btn-secondary text-xs px-3 py-1 inline-flex items-center gap-1"
+                      onClick={async () => {
+                        if (!selectedDbId) return;
+                        const ok = await confirm({
+                          title: t("databases.powerUserEnable"),
+                          message: t("databases.powerUserEnableConfirm"),
+                          confirmText: t("databases.powerUserEnableConfirmBtn"),
+                          danger: true,
+                        });
+                        if (!ok) return;
+                        setPowerBusy("promote");
+                        try {
+                          const cred = await api<PostgresPowerUserCredential>(
+                            `/servers/${serverId}/databases/power-user`,
+                            { method: "POST", body: JSON.stringify({ database_id: selectedDbId }) },
+                          );
+                          setPowerDialog({ db: selectedDatabase!, password: cred.password });
+                          await fetchResources();
+                        } catch (err: any) {
+                          toast.error(err.message || t("common.error"));
+                        } finally {
+                          setPowerBusy(null);
+                        }
+                      }}
+                      disabled={powerBusy !== null || !selectedDbId}
+                    >
+                      <Shield className="w-3 h-3" />
+                      {t("databases.powerUserEnable")}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="space-y-4">
@@ -515,6 +639,56 @@ export function DatabaseManager({ serverId }: Props) {
         </>
       )}
       <PostgresCredentialsDialog credentials={credentials} onClose={() => setCredentials([])} />
+      <PowerUserDialog state={powerDialog} onClose={() => setPowerDialog(null)} />
+    </div>
+  );
+}
+
+function PowerUserDialog({
+  state,
+  onClose,
+}: {
+  state: { db: PostgresDatabase; password: string } | null;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!state) return null;
+  const { db, password } = state;
+  const connectionUrl = password
+    ? `postgresql://${db.owner_role}:${password}@${state.db.name === db.name ? db.name : "msm-postgres"}:5432/${db.name}`
+    : "";
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="msm-card p-6 max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-3">
+          <Shield className="w-5 h-5 text-status-warning" />
+          <h3 className="font-headline text-body-lg text-on-surface">
+            {t("databases.powerUserDialogTitle")}
+          </h3>
+        </div>
+        <div className="rounded-lg border border-status-warning/40 bg-status-warning/5 p-3 mb-4 text-sm">
+          {t("databases.powerUserDialogWarn")}
+        </div>
+        <dl className="space-y-2 text-sm font-mono">
+          <div className="flex"><dt className="w-28 text-on-surface-variant">host</dt><dd>msm-postgres</dd></div>
+          <div className="flex"><dt className="w-28 text-on-surface-variant">port</dt><dd>5432</dd></div>
+          <div className="flex"><dt className="w-28 text-on-surface-variant">database</dt><dd>{db.name}</dd></div>
+          <div className="flex"><dt className="w-28 text-on-surface-variant">username</dt><dd>{db.owner_role}</dd></div>
+          <div className="flex items-center gap-2">
+            <dt className="w-28 text-on-surface-variant">password</dt>
+            <dd className="bg-status-error/10 px-2 py-1 rounded break-all flex-1">{password}</dd>
+          </div>
+        </dl>
+        <div className="mt-4 p-3 rounded-lg border border-outline-variant bg-surface-container text-xs space-y-2">
+          <div className="font-mono text-on-surface-variant">psql "{connectionUrl}"</div>
+          <div className="text-on-surface-variant">
+            {t("databases.powerUserDialogHint")}
+          </div>
+        </div>
+        <button className="msm-btn-primary mt-4 w-full" onClick={onClose}>
+          {t("databases.powerUserDialogClose")}
+        </button>
+      </div>
     </div>
   );
 }
