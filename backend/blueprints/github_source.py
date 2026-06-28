@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -22,6 +23,13 @@ logger = logging.getLogger(__name__)
 _GITHUB_REPO_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,100}/[a-zA-Z0-9_.-]{1,100}$")
 _MAX_SETUP_COMMANDS = 8
 _MAX_SETUP_ARGS = 32
+
+# npm race condition: TAR_ENTRY_ERROR ENOENT entsteht, wenn parallele Worker
+# Dateien in Unterordnern anlegen wollen, bevor das Elternverzeichnis existiert
+# (typisch auf overlayfs/rootless Docker). Retry nach Cleanup loest das fast immer.
+_NPM_TAR_ENTRY_ERROR_RE = re.compile(
+    r"npm\s+warn\s+tar\s+TAR_ENTRY_ERROR\s+ENOENT", re.IGNORECASE
+)
 
 
 class GithubSourceError(RuntimeError):
@@ -118,6 +126,72 @@ def local_repo_sha(install_dir: Path) -> str | None:
     return (proc.stdout or "").strip() or None
 
 
+def _is_npm_tar_entry_error(stderr: str, stdout: str, argv0: str) -> bool:
+    """Erkennt den npm-Parallel-Extraktions-Race (TAR_ENTRY_ERROR ENOENT).
+
+    Tritt typisch auf overlayfs/rootless Docker auf, wenn Worker Dateien in
+    Unterordnern anlegen wollen, bevor das Elternverzeichnis existiert.
+    Retry nach Cleanup von ``node_modules`` loest den Fehler praktisch immer.
+    """
+    if Path(argv0).name not in {"npm", "npx"}:
+        return False
+    haystack = f"{stderr or ''}\n{stdout or ''}"
+    return bool(_NPM_TAR_ENTRY_ERROR_RE.search(haystack))
+
+
+def _safe_rmtree(path: Path) -> None:
+    """Loescht ein Verzeichnis; ignoriert FileNotFoundError."""
+    if not path.exists():
+        return
+    shutil.rmtree(path, ignore_errors=False)
+
+
+def _run_argv_with_retry(argv: list[str], *, cwd: Path, timeout: int = 900) -> None:
+    """Fuehrt argv aus; bei npm-TAR_ENTRY_ERROR wird ``node_modules`` aufgeraeumt
+    und der gleiche Befehl genau einmal wiederholt. Andere Fehler werden sofort
+    als ``GithubSourceError`` gemeldet."""
+    proc = subprocess.run(
+        argv,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=_git_env(),
+    )
+    if proc.returncode == 0:
+        return
+
+    stderr = proc.stderr or ""
+    stdout = proc.stdout or ""
+
+    if _is_npm_tar_entry_error(stderr, stdout, argv[0]):
+        node_modules = cwd / "node_modules"
+        logger.warning(
+            "npm TAR_ENTRY_ERROR erkannt in %s, raeume %s auf und retry.",
+            cwd,
+            node_modules,
+        )
+        _safe_rmtree(node_modules)
+        proc = subprocess.run(
+            argv,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=_git_env(),
+        )
+        if proc.returncode == 0:
+            logger.info("npm-Retry nach TAR_ENTRY_ERROR erfolgreich.")
+            return
+        stderr = proc.stderr or ""
+        stdout = proc.stdout or ""
+
+    raise GithubSourceError(
+        f"setupCommand fehlgeschlagen ({argv[0]}): "
+        f"{(stderr or stdout or '')[:400]}"
+    )
+
+
 def _run_setup_commands(install_dir: Path, blueprint: Blueprint) -> None:
     gh = blueprint.source.github
     if gh is None:
@@ -133,19 +207,7 @@ def _run_setup_commands(install_dir: Path, blueprint: Blueprint) -> None:
             raise GithubSourceError("setupCommands: ungültige argv-Liste")
         if any(";" in a or "|" in a or "&" in a for a in argv):
             raise GithubSourceError("setupCommands: Shell-Metazeichen verboten")
-        proc = subprocess.run(
-            argv,
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=900,
-            env=_git_env(),
-        )
-        if proc.returncode != 0:
-            raise GithubSourceError(
-                f"setupCommand fehlgeschlagen ({argv[0]}): "
-                f"{(proc.stderr or proc.stdout or '')[:400]}"
-            )
+        _run_argv_with_retry(argv, cwd=root)
 
 
 def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:

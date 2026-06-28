@@ -85,10 +85,131 @@ def test_clone_url_uses_panel_token(monkeypatch):
     importlib.reload(github_token_service)
     from services.panel_settings_service import PanelSettingsService
     PanelSettingsService.invalidate_cache()
-    PanelSettingsService.set("github_clone_token", "ghp_paneltoken")
+    PanelSettingsService.set("github_clone_token", "***")
 
     from blueprints.github_source import _clone_url
 
     url = _clone_url("octocat/Hello-World")
-    assert url == "https://x-access-token:ghp_paneltoken@github.com/octocat/Hello-World.git"
+    assert url == "https://x-access-token:***@github.com/octocat/Hello-World.git"
     PanelSettingsService.set("github_clone_token", "")
+
+
+# ── TAR_ENTRY_ERROR Retry-Logik ────────────────────────────────────────────────
+
+class _FakeProc:
+    def __init__(self, returncode: int, stderr: str = "", stdout: str = ""):
+        self.returncode = returncode
+        self.stderr = stderr
+        self.stdout = stdout
+
+
+def _write_pkg(tmp_path):
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+
+
+def test_setup_command_retries_npm_tar_entry_error(tmp_path, monkeypatch):
+    """npm TAR_ENTRY_ERROR → node_modules wird aufgeraeumt, Retry laeuft mit
+    demselben argv. Bei Erfolg kommt kein GithubSourceError."""
+    from blueprints.github_source import _run_setup_commands, _run_argv_with_retry
+
+    _write_pkg(tmp_path)
+    node_modules = tmp_path / "node_modules"
+    node_modules.mkdir()
+    (node_modules / "broken.txt").write_text("partial")
+
+    tar_err = (
+        "npm warn tar TAR_ENTRY_ERROR ENOENT: no such file or directory, "
+        "open '/x/node_modules/es-abstract/2025/SetFunctionLength.js'\n"
+    )
+    calls = {"n": 0}
+
+    def fake_run(argv, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _FakeProc(1, stderr=tar_err)
+        return _FakeProc(0, stdout="ok")
+
+    monkeypatch.setattr("blueprints.github_source.subprocess.run", fake_run)
+
+    _run_argv_with_retry(["npm", "ci"], cwd=tmp_path)
+    assert calls["n"] == 2
+    assert not node_modules.exists()
+
+
+def test_setup_command_no_retry_on_other_npm_errors(tmp_path, monkeypatch):
+    """npm-Fehler ohne TAR_ENTRY_ERROR wird nicht retried, Fehler propagiert."""
+    from blueprints.github_source import GithubSourceError, _run_argv_with_retry
+
+    _write_pkg(tmp_path)
+    calls = {"n": 0}
+
+    def fake_run(argv, **kwargs):
+        calls["n"] += 1
+        return _FakeProc(2, stderr="npm ERR! missing script: build")
+
+    monkeypatch.setattr("blueprints.github_source.subprocess.run", fake_run)
+
+    with pytest.raises(GithubSourceError) as exc:
+        _run_argv_with_retry(["npm", "run", "build"], cwd=tmp_path)
+    assert calls["n"] == 1
+    assert "npm ERR! missing script: build" in str(exc.value)
+
+
+def test_setup_command_no_retry_for_non_npm(tmp_path, monkeypatch):
+    """Nicht-npm-Befehle werden nicht retried, auch wenn ENOENT im Output steht."""
+    from blueprints.github_source import GithubSourceError, _run_argv_with_retry
+
+    _write_pkg(tmp_path)
+    calls = {"n": 0}
+
+    def fake_run(argv, **kwargs):
+        calls["n"] += 1
+        return _FakeProc(1, stderr="ENOENT: no such file")
+
+    monkeypatch.setattr("blueprints.github_source.subprocess.run", fake_run)
+
+    with pytest.raises(GithubSourceError):
+        _run_argv_with_retry(["python", "-m", "pip", "install"], cwd=tmp_path)
+    assert calls["n"] == 1
+
+
+def test_setup_command_retry_also_fails(tmp_path, monkeypatch):
+    """Retry nach TAR_ENTRY_ERROR schlaegt ebenfalls fehl → Fehler propagiert."""
+    from blueprints.github_source import GithubSourceError, _run_argv_with_retry
+
+    _write_pkg(tmp_path)
+    (tmp_path / "node_modules").mkdir()
+    calls = {"n": 0}
+
+    def fake_run(argv, **kwargs):
+        calls["n"] += 1
+        return _FakeProc(
+            1, stderr="npm warn tar TAR_ENTRY_ERROR ENOENT: again\n"
+        )
+
+    monkeypatch.setattr("blueprints.github_source.subprocess.run", fake_run)
+
+    with pytest.raises(GithubSourceError) as exc:
+        _run_argv_with_retry(["npm", "ci"], cwd=tmp_path)
+    assert calls["n"] == 2
+    assert "TAR_ENTRY_ERROR" in str(exc.value)
+
+
+def test_setup_command_first_run_succeeds(tmp_path, monkeypatch):
+    """Happy-Path: kein Retry, keine Aufraeumarbeiten."""
+    from blueprints.github_source import _run_argv_with_retry
+
+    _write_pkg(tmp_path)
+    (tmp_path / "node_modules").mkdir()
+    calls = {"n": 0}
+
+    def fake_run(argv, **kwargs):
+        calls["n"] += 1
+        return _FakeProc(0, stdout="added 42 packages")
+
+    monkeypatch.setattr("blueprints.github_source.subprocess.run", fake_run)
+
+    _run_argv_with_retry(["npm", "ci"], cwd=tmp_path)
+    assert calls["n"] == 1
+    # node_modules bleibt unangetastet
+    assert (tmp_path / "node_modules").exists()
