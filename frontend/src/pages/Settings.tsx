@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, KeyRound } from 'lucide-react'
+import { Globe, Mail, Gamepad2, KeyRound, Github } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
 import { SteamTab } from './settings/SteamTab'
 import { OAuthTab } from './settings/OAuthTab'
+import { GitHubTab } from './settings/GitHubTab'
 
-type TabId = 'general' | 'email' | 'steam' | 'oauth'
+type TabId = 'general' | 'email' | 'steam' | 'github' | 'oauth'
 
 const TABS: TabDef<TabId>[] = [
   { id: 'general', labelKey: 'settings.tabs.general', icon: Globe },
   { id: 'email', labelKey: 'settings.tabs.email', icon: Mail },
   { id: 'steam', labelKey: 'settings.tabs.steam', icon: Gamepad2 },
+  { id: 'github', labelKey: 'settings.tabs.github', icon: Github },
   { id: 'oauth', labelKey: 'settings.tabs.oauth', icon: KeyRound },
 ]
 
@@ -39,6 +41,7 @@ export function Settings() {
       {activeTab === 'general' && <GeneralTab />}
       {activeTab === 'email' && <EmailTab />}
       {activeTab === 'steam' && <SteamTab />}
+      {activeTab === 'github' && <GitHubTab />}
       {activeTab === 'oauth' && <OAuthTab />}
     </div>
   )

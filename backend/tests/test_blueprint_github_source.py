@@ -58,3 +58,37 @@ def test_resolve_startup_profile(tmp_path):
     bp = load_blueprint_dict(GITHUB_BOT)
     assert resolve_startup_template(bp, str(tmp_path)) == "npm start"
     assert resolve_startup_template(bp, None) == "node index.js"
+
+
+def test_clone_url_uses_none_when_no_token(monkeypatch):
+    """Ohne ENV/Setting wird die Public-URL ohne Token gebaut."""
+    monkeypatch.delenv("MSM_GITHUB_CLONE_TOKEN", raising=False)
+    from services import github_token_service
+    import importlib
+
+    importlib.reload(github_token_service)
+    from services.panel_settings_service import PanelSettingsService
+    PanelSettingsService.invalidate_cache()
+    PanelSettingsService.set("github_clone_token", "")
+
+    from blueprints.github_source import _clone_url
+
+    assert _clone_url("octocat/Hello-World") == "https://github.com/octocat/Hello-World.git"
+
+
+def test_clone_url_uses_panel_token(monkeypatch):
+    """Panel-Token (DB) fliesst in die Clone-URL ein."""
+    monkeypatch.delenv("MSM_GITHUB_CLONE_TOKEN", raising=False)
+    from services import github_token_service
+    import importlib
+
+    importlib.reload(github_token_service)
+    from services.panel_settings_service import PanelSettingsService
+    PanelSettingsService.invalidate_cache()
+    PanelSettingsService.set("github_clone_token", "ghp_paneltoken")
+
+    from blueprints.github_source import _clone_url
+
+    url = _clone_url("octocat/Hello-World")
+    assert url == "https://x-access-token:ghp_paneltoken@github.com/octocat/Hello-World.git"
+    PanelSettingsService.set("github_clone_token", "")

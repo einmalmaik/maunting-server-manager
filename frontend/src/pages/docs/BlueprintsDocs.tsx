@@ -425,6 +425,14 @@ export function BlueprintsDocs() {
               <FieldRow field="source.manual" type="object" required={false}>{t('docs.reference.sourceManual')}</FieldRow>
             </FieldTable>
 
+            <div className="mt-3 p-3 rounded-md border border-status-info/30 bg-status-info/10 text-sm text-on-surface">
+              <strong>{t('docs.reference.githubPrivateTitle', 'Private Repositories')}</strong>
+              <p className="mt-1">
+                {t('docs.reference.githubPrivateBody',
+                  'For private repos, set a GitHub Personal Access Token in Settings → GitHub. Public repos work without a token.')}
+              </p>
+            </div>
+
             <h4 className="font-semibold text-on-surface-variant mt-3 mb-1 text-sm">{t('docs.reference.steamFieldsTitle')}</h4>
             <FieldTable>
               <FieldRow field="steam.branch" type="string" required={false}>{t('docs.reference.steamBranch')}</FieldRow>
