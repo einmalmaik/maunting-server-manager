@@ -8,6 +8,7 @@ from typing import Any
 
 import psycopg2
 from psycopg2 import sql
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -75,7 +76,10 @@ def _db_host() -> str:
 
 
 def _admin_connect(database: str = CONTROL_DB):
-    return psycopg2.connect(
+    # ISOLATION_LEVEL_AUTOCOMMIT: CREATE DATABASE / CREATE ROLE muessen ausserhalb einer
+    # Transaktion laufen. NICHT als context manager verwenden -- psycopg2's __enter__()
+    # sendet sonst implizit BEGIN, und ein danach gesetztes autocommit wirkt nicht mehr.
+    conn = psycopg2.connect(
         host=_db_host(),
         port=settings.managed_postgres_port,
         dbname=database,
@@ -83,6 +87,8 @@ def _admin_connect(database: str = CONTROL_DB):
         password=_admin_password(),
         connect_timeout=5,
     )
+    conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+    return conn
 
 
 def _owner_connect(database: PostgresDatabase):
@@ -97,10 +103,12 @@ def _owner_connect(database: PostgresDatabase):
 
 
 def _execute_admin(statement: Any, params: tuple[Any, ...] = (), database: str = CONTROL_DB) -> None:
-    with _admin_connect(database) as conn:
-        conn.autocommit = True
+    conn = _admin_connect(database)
+    try:
         with conn.cursor() as cur:
             cur.execute(statement, params)
+    finally:
+        conn.close()
 
 
 def ensure_internal_postgres() -> None:
@@ -133,8 +141,17 @@ def ensure_internal_postgres() -> None:
         ],
         volumes=[VolumeBind(settings.managed_postgres_data_dir, "/var/lib/postgresql/data", read_only=False)],
         read_only_rootfs=False,
-        network=settings.managed_postgres_network,
+        # Container haengt an zwei Netzen: default-bridge fuer das host-loopback-Binding
+        # 127.0.0.1:<port> (Panel-Backend verbindet sich via psycopg2) UND
+        # msm-internal fuer DNS-aufloesbaren Zugriff aus Game-Server-Containern
+        # ("msm-postgres:5432"). msm-internal ist internal=True und hat damit keinen
+        # externen Ingress - die 127.0.0.1-Binding bleibt der einzige externe Pfad.
+        extra_networks=[settings.managed_postgres_network],
         startup_check_seconds=2.0,
+        # Postgres-Entrypoint braucht CHOWN/FOWNER fuer initdb-chown der data-Files
+        # und SETUID/SETGID fuer den Wechsel auf den postgres-User.
+        # DAC_OVERRIDE/DAC_READ_SEARCH ermoeglichen Zugriff auf Files mit 0700/0600.
+        cap_adds=["CHOWN", "FOWNER", "SETUID", "SETGID", "DAC_OVERRIDE", "DAC_READ_SEARCH"],
     )
     if not result.get("ok"):
         raise PostgresServiceError(result.get("error") or "PostgreSQL-Container konnte nicht gestartet werden.")
@@ -201,8 +218,8 @@ def _create_database_and_user(
     owner_password = _generate_password()
     user_password = _generate_password()
 
-    with _admin_connect() as conn:
-        conn.autocommit = True
+    conn = _admin_connect()
+    try:
         with conn.cursor() as cur:
             cur.execute(
                 sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s NOSUPERUSER NOCREATEDB NOCREATEROLE").format(
@@ -210,17 +227,25 @@ def _create_database_and_user(
                 ),
                 (owner_password,),
             )
+            conn.commit()
             cur.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(db_name), sql.Identifier(owner_role)))
+            conn.commit()
             cur.execute(sql.SQL("REVOKE ALL ON DATABASE {} FROM PUBLIC").format(sql.Identifier(db_name)))
+            conn.commit()
             cur.execute(
                 sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s NOSUPERUSER NOCREATEDB NOCREATEROLE").format(
                     sql.Identifier(user_name)
                 ),
                 (user_password,),
             )
+            conn.commit()
             cur.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(db_name), sql.Identifier(user_name)))
+            conn.commit()
+    finally:
+        conn.close()
 
-    with _admin_connect(db_name) as conn:
+    conn = _admin_connect(db_name)
+    try:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(sql.SQL("GRANT USAGE, CREATE ON SCHEMA public TO {}").format(sql.Identifier(user_name)))
@@ -234,6 +259,8 @@ def _create_database_and_user(
                     sql.Identifier(owner_role), sql.Identifier(user_name)
                 )
             )
+    finally:
+        conn.close()
 
     database = PostgresDatabase(
         server_id=server_id,
@@ -272,8 +299,8 @@ def create_user(db: Session, server_id: int, database_id: int, username: str | N
     next_index = db.query(PostgresUser).filter(PostgresUser.server_id == server_id).count() + 1
     user_name = _validate_identifier(username or f"msm_s{server_id}_u{next_index}")
     password = _generate_password()
-    with _admin_connect() as conn:
-        conn.autocommit = True
+    conn = _admin_connect()
+    try:
         with conn.cursor() as cur:
             cur.execute(
                 sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s NOSUPERUSER NOCREATEDB NOCREATEROLE").format(
@@ -281,8 +308,13 @@ def create_user(db: Session, server_id: int, database_id: int, username: str | N
                 ),
                 (password,),
             )
+            conn.commit()
             cur.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(database.name), sql.Identifier(user_name)))
-    with _admin_connect(database.name) as conn:
+            conn.commit()
+    finally:
+        conn.close()
+    conn = _admin_connect(database.name)
+    try:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(sql.SQL("GRANT USAGE, CREATE ON SCHEMA public TO {}").format(sql.Identifier(user_name)))
@@ -292,11 +324,13 @@ def create_user(db: Session, server_id: int, database_id: int, username: str | N
                 )
             )
             cur.execute(
-                sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {}").format(sql.Identifier(user_name))
+                sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {}").format(
+                    sql.Identifier(user_name)
+                )
             )
-
+    finally:
+        conn.close()
     user = PostgresUser(server_id=server_id, username=user_name, password_mask=_mask_secret(password))
-    db.add(user)
     db.flush()
     db.add(PostgresGrant(server_id=server_id, database_id=database.id, user_id=user.id, privilege="read_write"))
     db.commit()
@@ -351,14 +385,19 @@ def delete_user(db: Session, server_id: int, user_id: int) -> None:
 
 def _drop_database_and_roles(databases: list[str], owners: list[str], users: list[str]) -> None:
     ensure_internal_postgres()
-    with _admin_connect() as conn:
-        conn.autocommit = True
+    conn = _admin_connect()
+    try:
         with conn.cursor() as cur:
             for database in databases:
                 cur.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()", (database,))
+                conn.commit()
                 cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(database)))
+                conn.commit()
             for role in users + owners:
                 cur.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+                conn.commit()
+    finally:
+        conn.close()
 
 
 def drop_server_resources(db: Session, server_id: int) -> None:

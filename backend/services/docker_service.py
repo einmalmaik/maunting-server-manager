@@ -476,8 +476,15 @@ def run_container(
     detach: bool = True,
     startup_check_seconds: float = 0.0,
     server_id: int | None = None,  # for pull progress logging to console during long image pulls
+    cap_adds: list[str] | None = None,
 ) -> dict:
-    """Startet einen langlebigen Game-Server-Container."""
+    """Startet einen langlebigen Game-Server-Container.
+
+    ``cap_adds`` ergaenzt das globale ``cap_drop=ALL`` um spezifische Capabilities,
+    die der Container zwingend fuer sein Init braucht (z. B. der Postgres-Entrypoint
+    benoetigt CHOWN/FOWNER fuer ``initdb`` und SETUID/SETGID fuer den Wechsel auf
+    den postgres-User; siehe PERMISSION_REPAIR_CAPS).
+    """
 
     if extra_args:
         return {"ok": False, "error": "extra_args werden vom Docker SDK Adapter nicht unterstuetzt", "stdout": "", "stderr": ""}
@@ -514,6 +521,7 @@ def run_container(
         "restart_policy": {"Name": "no"},  # MSM lifecycle only - see comment above
         "log_config": LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None,
         "cap_drop": _HARDENING_CAP_DROP,
+        "cap_add": cap_adds or None,
         "security_opt": _HARDENING_SECURITY_OPT,
         "read_only": read_only_rootfs,
         "environment": env or None,

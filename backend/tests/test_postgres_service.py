@@ -22,11 +22,16 @@ def test_managed_postgres_starts_with_loopback_only_binding(monkeypatch):
 
     kwargs = run_container.call_args.kwargs
     assert kwargs["image"] == "postgres:17-alpine"
-    assert kwargs["network"] == "msm-internal"
+    # Container haengt am msm-internal-Netz fuer Game-Container-Konnektivitaet,
+    # nutzt aber default-bridge fuer das host-loopback-Binding (127.0.0.1:<port>).
+    assert kwargs.get("network") in (None,)  # kein primaeres User-Network (wg. Port-Binding)
+    assert kwargs["extra_networks"] == ["msm-internal"]
     assert kwargs["read_only_rootfs"] is False
     assert isinstance(kwargs["ports"][0], PortPublish)
     assert kwargs["ports"][0].host_ip == "127.0.0.1"
     assert kwargs["ports"][0].host_port == 15432
+    # Postgres-Entrypoint braucht diese Caps fuer initdb (chown/setuid)
+    assert set(kwargs["cap_adds"]) == {"CHOWN", "FOWNER", "SETUID", "SETGID", "DAC_OVERRIDE", "DAC_READ_SEARCH"}
 
 
 def test_managed_postgres_rejects_public_host_binding(monkeypatch):
