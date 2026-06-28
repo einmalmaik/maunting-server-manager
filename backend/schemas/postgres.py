@@ -112,3 +112,19 @@ class PostgresRotatePasswordResponse(BaseModel):
     password: str
     host: str
     port: int
+
+
+class PostgresExtensionInfo(BaseModel):
+    name: str
+    version: str | None = None
+    trusted: bool = True
+
+
+class PostgresExtensionRequest(BaseModel):
+    database_id: int = Field(..., ge=1)
+    name: str = Field(..., min_length=1, max_length=63)
+
+
+class PostgresExtensionDropRequest(BaseModel):
+    database_id: int = Field(..., ge=1)
+    confirm_name: str = Field(..., min_length=1, max_length=63)

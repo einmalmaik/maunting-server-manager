@@ -45,3 +45,22 @@ def test_identifier_validation_rejects_unsafe_names():
         postgres_service._validate_identifier("public; drop database postgres")
     with pytest.raises(ValueError):
         postgres_service._validate_identifier("../secret")
+
+
+def test_extension_whitelist_allows_pgcrypto():
+    assert postgres_service._validate_extension_name("pgcrypto") == "pgcrypto"
+    assert postgres_service._validate_extension_name("  PGCrypto  ") == "pgcrypto"
+
+
+def test_extension_whitelist_rejects_unknown():
+    with pytest.raises(ValueError):
+        postgres_service._validate_extension_name("postgis")
+    with pytest.raises(ValueError):
+        postgres_service._validate_extension_name("pg_stat_statements")
+
+
+def test_extension_whitelist_rejects_unsafe_names():
+    with pytest.raises(ValueError):
+        postgres_service._validate_extension_name("pgcrypto; DROP DATABASE postgres")
+    with pytest.raises(ValueError):
+        postgres_service._validate_extension_name("")

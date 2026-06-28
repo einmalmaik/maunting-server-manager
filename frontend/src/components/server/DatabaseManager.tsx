@@ -1,11 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Database, Play, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Database, Package, Play, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { confirm } from "@/stores/confirmStore";
-import type { PostgresCredential, PostgresDatabase, PostgresResources, PostgresRowsResult } from "@/types";
+import type { PostgresCredential, PostgresDatabase, PostgresExtension, PostgresResources, PostgresRowsResult } from "@/types";
 import { PostgresCredentialsDialog } from "@/components/server/PostgresCredentialsDialog";
+
+// Whitelist muss mit backend/config.py uebereinstimmen -- der Backend-Filter
+// ist die eigentliche Sicherheitsgrenze. Hier nur als UI-Hint, damit der
+// User nicht raten muss.
+const AVAILABLE_EXTENSIONS = [
+  { name: "pgcrypto", hint: "UUID/Crypto" },
+  { name: "uuid-ossp", hint: "UUID" },
+  { name: "citext", hint: "Case-insensitive Text" },
+  { name: "hstore", hint: "Key/Value" },
+  { name: "pg_trgm", hint: "Volltextsuche" },
+  { name: "btree_gin", hint: "GIN-Index" },
+  { name: "btree_gist", hint: "GiST-Index" },
+  { name: "fuzzystrmatch", hint: "Levenshtein" },
+  { name: "unaccent", hint: "Akzent-Suche" },
+  { name: "isn", hint: "ISBN/ISSN" },
+  { name: "ltree", hint: "Hierarchien" },
+  { name: "tablefunc", hint: "crosstab()" },
+  { name: "lo", hint: "Large Objects" },
+  { name: "tcn", hint: "Trigger-Notify" },
+];
 
 interface Props {
   serverId: number;
@@ -34,6 +54,8 @@ export function DatabaseManager({ serverId }: Props) {
     name: "",
     columns: "id:integer:pk\nname:text:not_null",
   });
+  const [extensions, setExtensions] = useState<PostgresExtension[]>([]);
+  const [newExtension, setNewExtension] = useState("");
 
   const selectedDatabase = useMemo(
     () => resources.databases.find((db) => db.id === selectedDbId) || null,
@@ -55,6 +77,14 @@ export function DatabaseManager({ serverId }: Props) {
     setSelectedTable((current) => current ?? data.tables[0] ?? null);
   };
 
+  const fetchExtensions = async (databaseId: number) => {
+    const data = await api<PostgresExtension[]>(`/servers/${serverId}/databases/extensions/list`, {
+      method: "POST",
+      body: JSON.stringify({ database_id: databaseId }),
+    });
+    setExtensions(data);
+  };
+
   useEffect(() => {
     setLoading(true);
     fetchResources()
@@ -66,9 +96,11 @@ export function DatabaseManager({ serverId }: Props) {
     if (!selectedDbId) {
       setTables([]);
       setSelectedTable(null);
+      setExtensions([]);
       return;
     }
     fetchTables(selectedDbId).catch((err) => toast.error(err.message || t("common.error")));
+    fetchExtensions(selectedDbId).catch((err) => toast.error(err.message || t("common.error")));
   }, [selectedDbId]);
 
   const runBusy = async (key: string, action: () => Promise<void>) => {
@@ -203,6 +235,30 @@ export function DatabaseManager({ serverId }: Props) {
       await fetchTables(selectedDbId);
     });
 
+  const installExtension = () =>
+    runBusy("install-extension", async () => {
+      if (!selectedDbId || !newExtension.trim()) return;
+      const updated = await api<PostgresExtension[]>(`/servers/${serverId}/databases/extensions`, {
+        method: "POST",
+        body: JSON.stringify({ database_id: selectedDbId, name: newExtension.trim() }),
+      });
+      setExtensions(updated);
+      setNewExtension("");
+      toast.success(t("databases.extensionInstalled", { name: newExtension.trim() }));
+    });
+
+  const dropExtension = (name: string) =>
+    runBusy(`drop-extension-${name}`, async () => {
+      if (!selectedDbId) return;
+      const typed = window.prompt(t("databases.typeNameConfirm", { name })) || "";
+      if (typed !== name) return;
+      const updated = await api<PostgresExtension[]>(`/servers/${serverId}/databases/extensions/${name}`, {
+        method: "DELETE",
+        body: JSON.stringify({ database_id: selectedDbId, confirm_name: typed }),
+      });
+      setExtensions(updated);
+    });
+
   const runSql = () =>
     runBusy("sql", async () => {
       if (!selectedDbId) return;
@@ -314,6 +370,63 @@ export function DatabaseManager({ serverId }: Props) {
                 <button className="msm-btn-secondary w-full inline-flex items-center justify-center gap-2 py-2" onClick={createTable}>
                   <Plus className="w-4 h-4" />
                   {t("databases.createTable")}
+                </button>
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-outline-variant">
+                <h4 className="font-headline text-body-sm text-on-surface flex items-center gap-2">
+                  <Package className="w-4 h-4" />
+                  {t("databases.extensions")}
+                </h4>
+                {extensions.length === 0 ? (
+                  <p className="text-sm text-on-surface-variant">{t("databases.noExtensions")}</p>
+                ) : (
+                  <div className="space-y-1">
+                    {extensions.map((ext) => (
+                      <div
+                        key={ext.name}
+                        className="flex items-center justify-between rounded-lg border border-outline-variant bg-surface-container px-3 py-2"
+                      >
+                        <div>
+                          <div className="font-mono text-sm text-on-surface">{ext.name}</div>
+                          {ext.version && (
+                            <div className="font-mono text-xs text-on-surface-variant">v{ext.version}</div>
+                          )}
+                        </div>
+                        <button
+                          className="msm-btn-secondary px-2 py-1 text-status-error"
+                          onClick={() => dropExtension(ext.name)}
+                          disabled={busy === `drop-extension-${ext.name}`}
+                          title={t("databases.dropExtensionHint", { name: ext.name })}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <select
+                  className="msm-input"
+                  value={newExtension}
+                  onChange={(e) => setNewExtension(e.target.value)}
+                  disabled={!selectedDbId || busy === "install-extension"}
+                >
+                  <option value="">{t("databases.selectExtension")}</option>
+                  {AVAILABLE_EXTENSIONS.filter((ext) => !extensions.some((installed) => installed.name === ext.name)).map(
+                    (ext) => (
+                      <option key={ext.name} value={ext.name}>
+                        {ext.name} — {ext.hint}
+                      </option>
+                    ),
+                  )}
+                </select>
+                <button
+                  className="msm-btn-secondary w-full inline-flex items-center justify-center gap-2 py-2"
+                  onClick={installExtension}
+                  disabled={!selectedDbId || !newExtension.trim() || busy === "install-extension"}
+                >
+                  <Plus className="w-4 h-4" />
+                  {t("databases.installExtension")}
                 </button>
               </div>
             </div>

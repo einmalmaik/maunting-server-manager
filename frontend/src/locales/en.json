@@ -952,7 +952,13 @@
     "selectTable": "Select a table to load rows.",
     "sqlConsole": "SQL console",
     "runSql": "Run SQL",
-    "noSqlResult": "No SQL result yet."
+    "noSqlResult": "No SQL result yet.",
+    "extensions": "Extensions",
+    "noExtensions": "No extensions installed.",
+    "selectExtension": "Select extension...",
+    "installExtension": "Install extension",
+    "extensionInstalled": "Extension \"{{name}}\" installed",
+    "dropExtensionHint": "Uninstall extension \"{{name}}\""
   },
   "common": {
     "unlimited": "unlimited",

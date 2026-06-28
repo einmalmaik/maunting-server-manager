@@ -83,6 +83,12 @@ export interface PostgresRowsResult {
   status?: string | null
 }
 
+export interface PostgresExtension {
+  name: string
+  version?: string | null
+  trusted?: boolean
+}
+
 export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'custom'
 export type BlueprintPortProtocol = 'tcp' | 'udp'
 

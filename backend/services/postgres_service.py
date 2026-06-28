@@ -230,6 +230,11 @@ def _create_database_and_user(
             conn.commit()
             cur.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(db_name), sql.Identifier(owner_role)))
             conn.commit()
+            # GRANT CREATE auf die DB: der Owner darf damit "trusted" Extensions installieren
+            # (pgcrypto, pg_trgm, citext, ...). Nicht-trusted Extensions (postgis etc.)
+            # bleiben unerreichbar, weil weder Owner noch User Superuser sind.
+            cur.execute(sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(sql.Identifier(db_name), sql.Identifier(owner_role)))
+            conn.commit()
             cur.execute(sql.SQL("REVOKE ALL ON DATABASE {} FROM PUBLIC").format(sql.Identifier(db_name)))
             conn.commit()
             cur.execute(
@@ -534,3 +539,58 @@ def execute_sql(db: Session, server_id: int, database_id: int, statement: str, l
                 rows = [dict(zip(columns, row, strict=False)) for row in cur.fetchmany(limit)]
                 return {"columns": columns, "rows": rows, "row_count": len(rows), "status": cur.statusmessage}
             return {"columns": [], "rows": [], "row_count": cur.rowcount, "status": cur.statusmessage}
+
+
+def _validate_extension_name(name: str) -> str:
+    cleaned = (name or "").strip().lower()
+    if not IDENTIFIER_RE.fullmatch(cleaned):
+        raise ValueError("Ungueltiger Extension-Name.")
+    if cleaned not in settings.trusted_postgres_extensions:
+        raise ValueError(f"Extension '{cleaned}' ist nicht erlaubt.")
+    return cleaned
+
+
+def list_extensions(db: Session, server_id: int, database_id: int) -> list[dict[str, Any]]:
+    database = _database_row(db, server_id, database_id)
+    conn = _owner_connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT e.extname, e.extversion, c.relname IS NOT NULL AS is_default
+                FROM pg_extension e
+                LEFT JOIN pg_depend d ON d.objid = e.oid AND d.deptype = 'e'
+                LEFT JOIN pg_class c ON c.oid = d.refobjid AND c.relname = 'pg_available_extensions'
+                ORDER BY e.extname
+                """
+            )
+            return [
+                {"name": name, "version": version, "trusted": bool(is_default)}
+                for name, version, is_default in cur.fetchall()
+            ]
+    finally:
+        conn.close()
+
+
+def install_extension(db: Session, server_id: int, database_id: int, name: str) -> None:
+    database = _database_row(db, server_id, database_id)
+    ext = _validate_extension_name(name)
+    conn = _owner_connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(sql.Identifier(ext)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def drop_extension(db: Session, server_id: int, database_id: int, name: str) -> None:
+    database = _database_row(db, server_id, database_id)
+    ext = _validate_extension_name(name)
+    conn = _owner_connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL("DROP EXTENSION IF EXISTS {}").format(sql.Identifier(ext)))
+        conn.commit()
+    finally:
+        conn.close()

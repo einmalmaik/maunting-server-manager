@@ -952,7 +952,13 @@
     "selectTable": "Tabelle auswählen, um Rows zu laden.",
     "sqlConsole": "SQL-Konsole",
     "runSql": "SQL ausführen",
-    "noSqlResult": "Noch kein SQL-Ergebnis."
+    "noSqlResult": "Noch kein SQL-Ergebnis.",
+    "extensions": "Extensions",
+    "noExtensions": "Keine Extensions installiert.",
+    "selectExtension": "Extension auswählen...",
+    "installExtension": "Extension installieren",
+    "extensionInstalled": "Extension \"{{name}}\" installiert",
+    "dropExtensionHint": "Extension \"{{name}}\" deinstallieren"
   },
   "common": {
     "unlimited": "unbegrenzt",

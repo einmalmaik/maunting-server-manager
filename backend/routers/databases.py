@@ -14,6 +14,9 @@ from schemas.postgres import (
     PostgresCreateUserRequest,
     PostgresDatabaseRequest,
     PostgresDropTableRequest,
+    PostgresExtensionDropRequest,
+    PostgresExtensionInfo,
+    PostgresExtensionRequest,
     PostgresResourcesResponse,
     PostgresRowsRequest,
     PostgresRowsResponse,
@@ -237,6 +240,58 @@ def read_rows(
             body.offset,
             body.search,
         )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/extensions", response_model=list[PostgresExtensionInfo])
+def install_extension(
+    server_id: int,
+    body: PostgresExtensionRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.write")
+    try:
+        postgres_service.install_extension(db, server_id, body.database_id, body.name)
+        return postgres_service.list_extensions(db, server_id, body.database_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/extensions/list", response_model=list[PostgresExtensionInfo])
+def list_installed_extensions(
+    server_id: int,
+    body: PostgresDatabaseRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.read")
+    try:
+        return postgres_service.list_extensions(db, server_id, body.database_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.delete("/extensions/{extension_name}", response_model=list[PostgresExtensionInfo])
+def drop_installed_extension(
+    server_id: int,
+    extension_name: str,
+    body: PostgresExtensionDropRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.write")
+    if body.confirm_name != extension_name:
+        raise HTTPException(status_code=400, detail="Bestaetigungsname stimmt nicht ueberein")
+    try:
+        postgres_service.drop_extension(db, server_id, body.database_id, extension_name)
+        return postgres_service.list_extensions(db, server_id, body.database_id)
     except Exception as exc:
         raise _service_error(exc) from exc
 
