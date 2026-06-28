@@ -4,7 +4,7 @@ import { Database, Package, Play, Plus, RefreshCw, Search, Trash2 } from "lucide
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { confirm } from "@/stores/confirmStore";
-import type { PostgresCredential, PostgresDatabase, PostgresExtension, PostgresResources, PostgresRowsResult } from "@/types";
+import type { PostgresCredential, PostgresDatabase, PostgresExtension, PostgresResources, PostgresRowsResult, PostgresSqlResult } from "@/types";
 import { PostgresCredentialsDialog } from "@/components/server/PostgresCredentialsDialog";
 
 // Whitelist muss mit backend/config.py uebereinstimmen -- der Backend-Filter
@@ -48,7 +48,7 @@ export function DatabaseManager({ serverId }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [sqlText, setSqlText] = useState("select now();");
-  const [sqlResult, setSqlResult] = useState<PostgresRowsResult | null>(null);
+  const [sqlResult, setSqlResult] = useState<PostgresSqlResult | null>(null);
   const [newDbName, setNewDbName] = useState("");
   const [newTable, setNewTable] = useState({
     name: "",
@@ -262,7 +262,7 @@ export function DatabaseManager({ serverId }: Props) {
   const runSql = () =>
     runBusy("sql", async () => {
       if (!selectedDbId) return;
-      const result = await api<PostgresRowsResult>(`/servers/${serverId}/databases/sql`, {
+      const result = await api<PostgresSqlResult>(`/servers/${serverId}/databases/sql`, {
         method: "POST",
         body: JSON.stringify({ database_id: selectedDbId, sql: sqlText, limit: 500 }),
       });
@@ -447,17 +447,67 @@ export function DatabaseManager({ serverId }: Props) {
               </div>
 
               <div className="msm-card p-5">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <h3 className="font-headline text-body-md text-on-surface">{t("databases.sqlConsole")}</h3>
-                  <span className="rounded-full border border-status-warning/30 bg-status-warning/10 px-2 py-0.5 text-xs text-status-warning">5s / 500</span>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full border border-status-warning/30 bg-status-warning/10 px-2 py-0.5 text-xs text-status-warning">
+                      5s · 500 rows
+                    </span>
+                    {sqlResult && (
+                      <span className="rounded-full border border-outline-variant bg-surface-container px-2 py-0.5 text-xs text-on-surface-variant font-mono">
+                        {sqlResult.statements.length} stmt · {sqlResult.total_duration_ms}ms
+                      </span>
+                    )}
+                    <button
+                      className="msm-btn-secondary px-2 py-1 text-xs inline-flex items-center gap-1"
+                      onClick={() => setSqlText("")}
+                      title={t("databases.clearSql")}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      {t("databases.clearSql")}
+                    </button>
+                  </div>
                 </div>
-                <textarea className="msm-input min-h-32 font-mono text-sm" value={sqlText} onChange={(e) => setSqlText(e.target.value)} />
-                <button className="msm-btn-primary mt-3 inline-flex items-center gap-2 px-4 py-2" onClick={runSql} disabled={!selectedDbId || busy === "sql"}>
-                  <Play className="w-4 h-4" />
-                  {t("databases.runSql")}
-                </button>
+                <textarea
+                  className="msm-input min-h-40 font-mono text-sm leading-relaxed"
+                  value={sqlText}
+                  onChange={(e) => setSqlText(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Ctrl+Enter fuehrt aus, Tab rückt ein (statt Fokus zu wechseln).
+                    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                      e.preventDefault();
+                      void runSql();
+                    }
+                    if (e.key === "Tab" && !e.shiftKey) {
+                      e.preventDefault();
+                      const target = e.currentTarget;
+                      const start = target.selectionStart;
+                      const end = target.selectionEnd;
+                      const next = sqlText.substring(0, start) + "  " + sqlText.substring(end);
+                      setSqlText(next);
+                      requestAnimationFrame(() => {
+                        target.selectionStart = target.selectionEnd = start + 2;
+                      });
+                    }
+                  }}
+                  placeholder="SELECT * FROM users;"
+                  spellCheck={false}
+                />
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
+                    onClick={runSql}
+                    disabled={!selectedDbId || busy === "sql"}
+                  >
+                    <Play className="w-4 h-4" />
+                    {t("databases.runSql")}
+                  </button>
+                  <span className="text-xs text-on-surface-variant">
+                    {t("databases.sqlHint")}
+                  </span>
+                </div>
                 <div className="mt-4">
-                  <ResultTable result={sqlResult} emptyText={t("databases.noSqlResult")} />
+                  <SqlResultsView result={sqlResult} emptyText={t("databases.noSqlResult")} />
                 </div>
               </div>
             </div>
@@ -465,6 +515,60 @@ export function DatabaseManager({ serverId }: Props) {
         </>
       )}
       <PostgresCredentialsDialog credentials={credentials} onClose={() => setCredentials([])} />
+    </div>
+  );
+}
+
+function SqlResultsView({ result, emptyText }: { result: PostgresSqlResult | null; emptyText: string }) {
+  if (!result) return <p className="text-sm text-on-surface-variant">{emptyText}</p>;
+  return (
+    <div className="space-y-3">
+      {result.statements.map((entry, index) => (
+        <div
+          key={index}
+          className={`rounded-lg border p-3 ${entry.error ? "border-status-error/40 bg-status-error/5" : "border-outline-variant bg-surface-container"}`}
+        >
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <code className="text-xs font-mono text-on-surface-variant truncate flex-1" title={entry.statement}>
+              <span className="text-on-surface-variant/70 mr-1">[{index + 1}]</span>
+              {entry.statement.length > 120 ? entry.statement.slice(0, 117) + "..." : entry.statement}
+            </code>
+            {entry.duration_ms != null && (
+              <span className="text-xs font-mono text-on-surface-variant">{entry.duration_ms}ms</span>
+            )}
+          </div>
+          {entry.error ? (
+            <pre className="font-mono text-xs text-status-error whitespace-pre-wrap break-all">
+              {entry.error}
+            </pre>
+          ) : entry.columns.length > 0 ? (
+            <div className="overflow-auto rounded border border-outline-variant bg-surface">
+              <table className="min-w-full text-xs">
+                <thead className="bg-surface-container-highest text-on-surface">
+                  <tr>
+                    {entry.columns.map((column) => (
+                      <th key={column} className="px-2 py-1 text-left font-mono font-medium">{column}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-outline-variant">
+                  {entry.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex} className="text-on-surface-variant">
+                      {entry.columns.map((column) => (
+                        <td key={column} className="px-2 py-1 font-mono align-top whitespace-pre-wrap break-all">
+                          {row[column] === null ? <span className="text-on-surface-variant/50">NULL</span> : String(row[column] ?? "")}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="font-mono text-xs text-on-surface-variant">{entry.status || "OK"}</p>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

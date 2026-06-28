@@ -83,6 +83,22 @@ export interface PostgresRowsResult {
   status?: string | null
 }
 
+export interface PostgresSqlStatementResult {
+  statement: string
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+  row_count: number | null
+  status: string | null
+  error: string | null
+  duration_ms: number | null
+}
+
+export interface PostgresSqlResult {
+  statements: PostgresSqlStatementResult[]
+  total_duration_ms: number
+  statement_timeout_ms: number
+}
+
 export interface PostgresExtension {
   name: string
   version?: string | null

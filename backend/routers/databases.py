@@ -18,10 +18,11 @@ from schemas.postgres import (
     PostgresExtensionInfo,
     PostgresExtensionRequest,
     PostgresResourcesResponse,
+    PostgresRotatePasswordResponse,
     PostgresRowsRequest,
     PostgresRowsResponse,
-    PostgresRotatePasswordResponse,
     PostgresSqlRequest,
+    PostgresSqlResponse,
     PostgresTableRequest,
 )
 from services import postgres_service
@@ -296,7 +297,7 @@ def drop_installed_extension(
         raise _service_error(exc) from exc
 
 
-@router.post("/sql", response_model=PostgresRowsResponse)
+@router.post("/sql", response_model=PostgresSqlResponse)
 def execute_sql(
     server_id: int,
     body: PostgresSqlRequest,

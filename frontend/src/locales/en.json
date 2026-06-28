@@ -953,6 +953,8 @@
     "sqlConsole": "SQL console",
     "runSql": "Run SQL",
     "noSqlResult": "No SQL result yet.",
+    "sqlHint": "Ctrl+Enter to run · Tab to indent",
+    "clearSql": "Clear",
     "extensions": "Extensions",
     "noExtensions": "No extensions installed.",
     "selectExtension": "Select extension...",

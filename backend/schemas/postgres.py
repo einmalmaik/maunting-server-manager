@@ -107,11 +107,27 @@ class PostgresRowsResponse(BaseModel):
     status: str | None = None
 
 
+class PostgresSqlStatementResult(BaseModel):
+    statement: str
+    columns: list[str] = []
+    rows: list[dict[str, Any]] = []
+    row_count: int | None = None
+    status: str | None = None
+    error: str | None = None
+    duration_ms: int | None = None
+
+
 class PostgresRotatePasswordResponse(BaseModel):
     username: str
     password: str
     host: str
     port: int
+
+
+class PostgresSqlResponse(BaseModel):
+    statements: list[PostgresSqlStatementResult]
+    total_duration_ms: int
+    statement_timeout_ms: int
 
 
 class PostgresExtensionInfo(BaseModel):

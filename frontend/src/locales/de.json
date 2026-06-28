@@ -953,6 +953,8 @@
     "sqlConsole": "SQL-Konsole",
     "runSql": "SQL ausführen",
     "noSqlResult": "Noch kein SQL-Ergebnis.",
+    "sqlHint": "Strg+Enter zum Ausführen · Tab zum Einrücken",
+    "clearSql": "Leeren",
     "extensions": "Extensions",
     "noExtensions": "Keine Extensions installiert.",
     "selectExtension": "Extension auswählen...",

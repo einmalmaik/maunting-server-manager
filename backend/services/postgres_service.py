@@ -521,24 +521,320 @@ def read_rows(
             return {"columns": columns, "rows": rows, "limit": limit, "offset": offset}
 
 
+def _split_sql_statements(text: str) -> list[str]:
+    """Split a SQL script into individual statements.
+
+    Respectiert:
+    - Single-Quoted-String-Literale ('...'' mit '' als Escape)
+    - Double-Quoted-Identifier ("...")
+    - Dollar-Quoted-Strings ($$...$$ oder $tag$...$tag$)
+    - Line-Comments (-- ...) und Block-Comments (/* ... */)
+    - Leere Statements werden uebersprungen
+    """
+    statements: list[str] = []
+    buf: list[str] = []
+    i = 0
+    n = len(text)
+    in_single = False
+    in_double = False
+    in_line_comment = False
+    in_block_comment = False
+    dollar_tag: str | None = None
+    paren_depth = 0
+
+    def flush() -> None:
+        stmt = "".join(buf).strip()
+        # Fuehrende Line- und Block-Kommentare entfernen, damit Statements wie
+        # "-- Kommentar\nSELECT 1" als reines "SELECT 1" in der Liste landen.
+        while stmt:
+            if stmt.startswith("--"):
+                nl = stmt.find("\n")
+                if nl == -1:
+                    stmt = ""
+                    break
+                stmt = stmt[nl + 1 :].lstrip()
+                continue
+            if stmt.startswith("/*"):
+                end = stmt.find("*/")
+                if end == -1:
+                    stmt = ""
+                    break
+                stmt = stmt[end + 2 :].lstrip()
+                continue
+            break
+        if stmt:
+            statements.append(stmt)
+        buf.clear()
+
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if in_line_comment:
+            buf.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+        if in_block_comment:
+            buf.append(ch)
+            if ch == "*" and nxt == "/":
+                buf.append(nxt)
+                i += 2
+                in_block_comment = False
+                continue
+            i += 1
+            continue
+        if in_single:
+            buf.append(ch)
+            if ch == "'":
+                # '' ist Escape in Postgres, bleibt im String
+                if nxt == "'":
+                    buf.append(nxt)
+                    i += 2
+                    continue
+                in_single = False
+            i += 1
+            continue
+        if in_double:
+            buf.append(ch)
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+        if dollar_tag is not None:
+            buf.append(ch)
+            if text.startswith(dollar_tag, i):
+                buf.extend(dollar_tag[1:])
+                i += len(dollar_tag)
+                dollar_tag = None
+            else:
+                i += 1
+            continue
+        # Normal-Modus
+        if ch == "-" and nxt == "-":
+            in_line_comment = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "/" and nxt == "*":
+            in_block_comment = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "'":
+            in_single = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            in_double = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "$":
+            # Versuche einen Dollar-Tag zu lesen: $[A-Za-z_][A-Za-z0-9_]*$ | $$
+            j = i + 1
+            if j < n and text[j] == "$":
+                dollar_tag = "$$"
+                buf.append("$$")
+                i = j + 1
+                continue
+            tag_start = j
+            while j < n and (text[j].isalnum() or text[j] == "_"):
+                j += 1
+            if j < n and text[j] == "$" and j > tag_start:
+                dollar_tag = text[i : j + 1]
+                buf.append(dollar_tag)
+                i = j + 1
+                continue
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "(":
+            paren_depth += 1
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == ")":
+            paren_depth = max(0, paren_depth - 1)
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == ";" and paren_depth == 0:
+            flush()
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+
+    # Letztes Statement (ohne schliessendes ;)
+    flush()
+    return statements
+
+
+_WRITE_KEYWORDS = (
+    "insert",
+    "update",
+    "delete",
+    "create",
+    "drop",
+    "alter",
+    "truncate",
+    "grant",
+    "revoke",
+    "copy",
+    "vacuum",
+    "analyze",
+    "cluster",
+    "reindex",
+    "set",
+    "reset",
+    "begin",
+    "commit",
+    "rollback",
+    "savepoint",
+    "lock",
+    "call",
+    "do",
+    "notify",
+    "listen",
+    "unlisten",
+    "refresh",
+    "checkpoint",
+)
+
+
+def _is_read_only(stmt: str) -> bool:
+    """Heuristik: ist ein Statement read-only (SELECT/WITH/SHOW/EXPLAIN/VALUES)?
+
+    EXPLAIN wird als read-only behandelt, sofern das gewrappte Statement selbst
+    read-only ist (sonst kann EXPLAIN ANALYZE tatsaechlich schreiben).
+    """
+    stripped = stmt.lstrip()
+    if not stripped:
+        return True
+    # Kommentar-Präfixe entfernen
+    while stripped.startswith("--") or stripped.startswith("/*"):
+        if stripped.startswith("--"):
+            nl = stripped.find("\n")
+            stripped = stripped[nl + 1 :].lstrip() if nl != -1 else ""
+        else:
+            end = stripped.find("*/")
+            stripped = stripped[end + 2 :].lstrip() if end != -1 else ""
+    tokens = stripped.split()
+    if not tokens:
+        return True
+    head = tokens[0].lower()
+    if head == "explain":
+        # Heuristik: zweites Wort gibt das gewrappte Statement an. Ist dieses
+        # ein Write-Keyword (INSERT/UPDATE/DELETE/...), dann ist der Explain-Write
+        # ebenfalls ein Write.
+        if len(tokens) >= 2 and tokens[1].lower().split("(")[0] in _WRITE_KEYWORDS:
+            return False
+        return True
+    return head not in _WRITE_KEYWORDS
+
+
 def execute_sql(db: Session, server_id: int, database_id: int, statement: str, limit: int) -> dict[str, Any]:
+    """Multi-Statement SQL execution, similar to psql.
+
+    Returns per-statement results plus total duration and the applied
+    statement_timeout. Read-only scripts run in a READ ONLY transaction;
+    any write keyword switches to the default read/write mode.
+    """
     database = _database_row(db, server_id, database_id)
     cleaned = (statement or "").strip()
     if not cleaned:
         raise ValueError("SQL darf nicht leer sein.")
-    single = cleaned[:-1].strip() if cleaned.endswith(";") else cleaned
-    if ";" in single:
-        raise ValueError("Nur ein SQL-Statement pro Ausfuehrung ist erlaubt.")
-    limit = min(max(limit, 1), settings.managed_postgres_row_limit)
-    with _owner_connect(database) as conn:
-        with conn.cursor() as cur:
-            cur.execute("SET LOCAL statement_timeout = %s", (settings.managed_postgres_statement_timeout_ms,))
-            cur.execute(single)
-            if cur.description:
-                columns = [desc[0] for desc in cur.description]
-                rows = [dict(zip(columns, row, strict=False)) for row in cur.fetchmany(limit)]
-                return {"columns": columns, "rows": rows, "row_count": len(rows), "status": cur.statusmessage}
-            return {"columns": [], "rows": [], "row_count": cur.rowcount, "status": cur.statusmessage}
+    statements = _split_sql_statements(cleaned)
+    if not statements:
+        raise ValueError("Keine ausfuehrbaren SQL-Statements gefunden.")
+    row_limit = min(max(limit, 1), settings.managed_postgres_row_limit)
+    timeout_ms = settings.managed_postgres_statement_timeout_ms
+    has_write = any(not _is_read_only(s) for s in statements)
+
+    results: list[dict[str, Any]] = []
+    import time as _time
+
+    conn = _owner_connect(database)
+    try:
+        if has_write:
+            # Schreib-Statements in normaler Transaktion; bei Fehler Rollback
+            with conn.cursor() as cur:
+                cur.execute("SET statement_timeout = %s", (timeout_ms,))
+                for stmt in statements:
+                    start = _time.monotonic()
+                    entry: dict[str, Any] = {
+                        "statement": stmt,
+                        "columns": [],
+                        "rows": [],
+                        "row_count": None,
+                        "status": None,
+                        "error": None,
+                        "duration_ms": None,
+                    }
+                    try:
+                        cur.execute(stmt)
+                        if cur.description:
+                            entry["columns"] = [desc[0] for desc in cur.description]
+                            entry["rows"] = [
+                                dict(zip(entry["columns"], row, strict=False))
+                                for row in cur.fetchmany(row_limit)
+                            ]
+                        entry["row_count"] = cur.rowcount
+                        entry["status"] = cur.statusmessage
+                    except Exception as exc:  # noqa: BLE001
+                        conn.rollback()
+                        entry["error"] = f"{type(exc).__name__}: {exc}"
+                        results.append(entry)
+                        break
+                    else:
+                        entry["duration_ms"] = int((_time.monotonic() - start) * 1000)
+                        results.append(entry)
+                conn.commit()
+        else:
+            # Read-only-Statements in einer einzigen READ ONLY Transaktion
+            conn.set_session(readonly=True, autocommit=False)
+            with conn.cursor() as cur:
+                cur.execute("SET statement_timeout = %s", (timeout_ms,))
+                for stmt in statements:
+                    start = _time.monotonic()
+                    entry = {
+                        "statement": stmt,
+                        "columns": [],
+                        "rows": [],
+                        "row_count": None,
+                        "status": None,
+                        "error": None,
+                        "duration_ms": None,
+                    }
+                    try:
+                        cur.execute(stmt)
+                        if cur.description:
+                            entry["columns"] = [desc[0] for desc in cur.description]
+                            entry["rows"] = [
+                                dict(zip(entry["columns"], row, strict=False))
+                                for row in cur.fetchmany(row_limit)
+                            ]
+                        entry["row_count"] = cur.rowcount
+                        entry["status"] = cur.statusmessage
+                    except Exception as exc:  # noqa: BLE001
+                        conn.rollback()
+                        entry["error"] = f"{type(exc).__name__}: {exc}"
+                        results.append(entry)
+                        break
+                    else:
+                        entry["duration_ms"] = int((_time.monotonic() - start) * 1000)
+                        results.append(entry)
+                conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "statements": results,
+        "total_duration_ms": sum((r.get("duration_ms") or 0) for r in results),
+        "statement_timeout_ms": timeout_ms,
+    }
 
 
 def _validate_extension_name(name: str) -> str:
