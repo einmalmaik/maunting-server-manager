@@ -14,8 +14,8 @@ import re
 import subprocess
 from pathlib import Path
 
-from config import settings
 from .schema import Blueprint, BlueprintSourceType
+from services.github_token_service import resolve_token as _resolve_github_token
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def _repo_slug(github_cfg) -> str:
 
 
 def _clone_url(repo: str) -> str:
-    token = (getattr(settings, "github_clone_token", None) or "").strip()
+    token = _resolve_github_token()
     if token:
         return f"https://x-access-token:{token}@github.com/{repo}.git"
     return f"https://github.com/{repo}.git"
@@ -75,7 +75,11 @@ def _run_git(args: list[str], *, cwd: Path | None = None, timeout: int = 600) ->
 
 def remote_branch_sha(repo: str, branch: str) -> str | None:
     """Liefert Commit-SHA von ``refs/heads/<branch>`` via ls-remote."""
-    url = f"https://github.com/{repo}.git"
+    token = _resolve_github_token()
+    if token:
+        url = f"https://x-access-token:{token}@github.com/{repo}.git"
+    else:
+        url = f"https://github.com/{repo}.git"
     ref = f"refs/heads/{branch}"
     try:
         proc = subprocess.run(
