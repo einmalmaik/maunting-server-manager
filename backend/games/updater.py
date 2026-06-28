@@ -345,7 +345,13 @@ def check_workshop_mod_updates(
                 update_reason = "steam_api_key_missing"
 
         runtime_ready = True
-        if is_installed and action == "none":
+        # Runtime-Target-Check nur auslösen, wenn wir überhaupt eine Aussage
+        # über den Update-Stand haben. Bei ``unknown`` (kein ``last_updated``
+        # lokal und/oder kein Steam-API-Key) wissen wir nicht, ob die Mod
+        # aktuell ist — eine "install missing_runtime_copy"-Aktion wäre eine
+        # Aussage über die Version, die wir nicht treffen können. Statt
+        #dessen Status als ``unknown`` belassen und nichts tun.
+        if is_installed and action == "none" and update_status in ("up_to_date", "outdated"):
             try:
                 from games import get_plugin
 

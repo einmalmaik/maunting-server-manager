@@ -395,7 +395,14 @@ class TestGamePluginStartPermissions:
         assert kwargs["volumes"] == [VolumeBind(str(tmp_path), "/home/container", read_only=False)]
         assert calls == ["repair", "prepare"]
 
-    def test_start_stops_before_container_run_when_permission_repair_fails(self, tmp_path):
+    def test_start_continues_with_warning_when_permission_repair_fails(self, tmp_path):
+        """Bei Repair-Fehler wird der Start NICHT hart abgebrochen — best-effort.
+
+        Hintergrund: unter Rootless Docker schlägt ``chown`` auf manchen
+        Dateien mit EPERM fehl, ohne dass wir das auf Application-Ebene
+        sicher beheben können. Der Start läuft weiter und die Warnung landet
+        im Server-Console-Log. (Siehe ``references/msm-permission-repair-chmod-eperm-rootless.md``.)
+        """
         plugin = _StartPlugin()
         server = SimpleNamespace(
             id=43,
@@ -403,6 +410,7 @@ class TestGamePluginStartPermissions:
             cpu_limit_percent=None,
             ram_limit_mb=None,
         )
+        calls: list[str] = []
 
         with patch("services.docker_service.is_available", return_value=True), \
              patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1002)), \
@@ -410,11 +418,22 @@ class TestGamePluginStartPermissions:
                  "games.base.docker_service.repair_bind_mount_permissions",
                  return_value={"ok": False, "error": "repair failed"},
              ), \
-             patch("games.base.docker_service.run_container") as mock_run:
+             patch.object(plugin, "prepare_runtime") as mock_prepare, \
+             patch(
+                 "games.base.docker_service.run_container",
+                 return_value={"ok": True, "stdout": "", "stderr": ""},
+             ) as mock_run:
+            mock_prepare.side_effect = lambda srv: calls.append("prepare")
+            mock_run.side_effect = lambda **kwargs: calls.append("run") or {"ok": True}
             result = plugin.start(server)
 
-        assert result == {"error": "repair failed"}
-        mock_run.assert_not_called()
+        # Server startet trotzdem (best-effort), nicht mit Fehler abbrechen
+        assert result["message"] == "Server gestartet"
+        assert "container" in result
+        # repair (mit ok=False) + prepare + run sind alle durchgelaufen
+        assert calls == ["prepare", "run"]
+        mock_prepare.assert_called_once_with(server)
+        mock_run.assert_called_once()
 
 
 
@@ -753,6 +772,16 @@ class TestSteamCMDHelpers:
         assert kwargs["env"].get("HOME") == "/data"
 
     def test_workshop_batch_download_uses_one_ephemeral_container_for_many_mods(self, tmp_path):
+        """Ein Workshop-Batch = genau EIN SteamCMD-Container + ein Repair-Pass.
+
+        Hintergrund: seit dem Rootless-Docker-Bind-Mount-Visibility-Fix
+        ruft ``run_steamcmd_workshop_download_batch`` nach dem SteamCMD-Lauf
+        zusätzlich ``repair_bind_mount_permissions`` auf, damit das OverlayFS
+        die Workshop-Ordner sofort hostseitig sichtbar macht. Der eigentliche
+        Workshop-Batch bleibt aber EIN Container — das ist hier die zu
+        sichernde Invariante.
+        (Siehe ``references/msm-steam-workshop-batch-download-rootless-verification.md``.)
+        """
         from games.base import run_steamcmd_workshop_download_batch
 
         item_ids = [str(1000 + i) for i in range(20)]
@@ -765,6 +794,7 @@ class TestSteamCMDHelpers:
             return {"ok": True, "stdout": "ok", "stderr": ""}
 
         with patch("games.base.docker_service.run_ephemeral", side_effect=mark_downloaded) as mock_eph, \
+             patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1001)), \
              patch("games.base.docker_service.host_uid_gid", return_value=(1001, 1001)):
             result = run_steamcmd_workshop_download_batch(
                 server_id=1,
@@ -775,8 +805,17 @@ class TestSteamCMDHelpers:
 
         assert result["ok"] is True
         assert result["applied"] == 20
-        mock_eph.assert_called_once()
-        script = mock_eph.call_args_list[0].kwargs["command"][1]
+
+        # Der Workshop-Batch-Container darf nur einmal gestartet werden
+        workshop_calls = [
+            c for c in mock_eph.call_args_list
+            if c.kwargs.get("command") and "+workshop_download_item" in c.kwargs["command"][1]
+        ]
+        assert len(workshop_calls) == 1, (
+            f"Workshop-Batch-Container muss genau einmal laufen, "
+            f"gefunden: {len(workshop_calls)}"
+        )
+        script = workshop_calls[0].kwargs["command"][1]
         assert script.count("+workshop_download_item") == 20
 
     def test_single_workshop_download_surfaces_item_error(self, tmp_path):

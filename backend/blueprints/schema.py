@@ -709,8 +709,21 @@ class BlueprintSource(BaseModel):
         elif self.type == BlueprintSourceType.MANUAL_UPLOAD:
             if self.manual is None:
                 raise ValueError("source.type=manualUpload benötigt source.manual.")
-            if self.steam is not None or self.http is not None or self.github is not None:
-                raise ValueError("source.type=manualUpload darf nur source.manual setzen.")
+            extras = [
+                name
+                for name, present in (
+                    ("steam", self.steam is not None),
+                    ("http", self.http is not None),
+                    ("github", self.github is not None),
+                )
+                if present
+            ]
+            if extras:
+                joined = "/".join(extras)
+                raise ValueError(
+                    f"source.type=manualUpload darf nur source.manual setzen "
+                    f"(unerwartet: steam/http/github oder Teilmenge davon, hier: {joined})."
+                )
         else:  # dockerOnly / custom
             if self.steam is not None or self.http is not None or self.manual is not None or self.github is not None:
                 raise ValueError(
