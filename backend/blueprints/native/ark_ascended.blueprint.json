@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "ark_ascended",
+    "name": "ARK: Survival Ascended (ASA)",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "ARK: Survival Ascended Dedicated Server (App-ID 2430930) via SteamCMD. Windows-Binary wird ueber GE-Proton/Wine gestartet. Maps: TheIsland_WP, ScorchedEarth_WP, TheCenter_WP, Aberration_WP, Extinction_WP, Ragnarok_WP, Valguero_WP, Astraeos_WP, LostColony_WP, Fjordur_WP, ClubArk_WP."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/yolks:wine_10",
+    "workdir": "/home/container",
+    "user": "1000:1000",
+    "env": {
+      "WINEDEBUG": "-all",
+      "WINEESYNC": "1",
+      "WINEFSYNC": "1",
+      "SERVER_NAME": "My-ASA-Server-by-MSM",
+      "MAX_PLAYERS": "70",
+      "SERVER_PASSWORD": "",
+      "ADMIN_PASSWORD": "",
+      "MAP_NAME": "TheIsland_WP"
+    },
+    "startup": "./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?SessionName={ENV.SERVER_NAME}?ServerPassword={ENV.SERVER_PASSWORD}?ServerAdminPassword={ENV.ADMIN_PASSWORD} -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -game -server -log -NoBattlEye",
+    "ensureDirs": [
+      "ShooterGame/Saved/Config/WindowsServer",
+      "ShooterGame/Saved/SavedArks",
+      "ShooterGame/Saved/Logs"
+    ],
+    "requiredFiles": [
+      "ShooterGame/Binaries/Win64/ArkAscendedServer.exe"
+    ],
+    "configPatches": [],
+    "stopGracePeriodSeconds": 60,
+    "startupCheckSeconds": 90.0
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon", "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "2430930",
+      "platform": "windows",
+      "compatibility": "proton",
+      "requiresLogin": false,
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  },
+  "backup": {
+    "includePaths": [
+      "ShooterGame/Saved/Config",
+      "ShooterGame/Saved/SavedArks",
+      "ShooterGame/Saved/Logs"
+    ]
+  }
+}
