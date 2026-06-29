@@ -533,7 +533,8 @@
     "console": "وحدة التحكم",
     "mods": "تعديل",
     "restarts": "إعادة التشغيل التلقائي",
-    "backups": "النسخ الاحتياطية"
+    "backups": "النسخ الاحتياطية",
+    "webhooks": "Webhooks"
   },
   "files": {
     "title": "مدير الملفات",
@@ -751,13 +752,13 @@
     "viewRelease": "عرض الإصدار",
     "manualUpdateCommand": "التحديث على الخادم:"
   },
-"connection": {
+  "connection": {
     "connecting": "جارٍ الاتصال…",
     "reconnecting": "فُقد الاتصال — إعادة الاتصال…",
     "failed": "فشل الاتصال. يرجى إعادة تحميل الصفحة.",
     "rejected": "رُفض الاتصال (المصادقة/الأصل/الأذونات مفقودة)."
   },
-    "common": {
+  "common": {
     "unlimited": "غير محدود",
     "save": "حفظ",
     "cancel": "إلغاء",
@@ -785,5 +786,19 @@
   "Passwort ungültig": "كلمة المرور غير صالحة",
   "2FA-Code erforderlich": "مطلوب رمز 2FA",
   "Ungültiger 2FA-Code": "رمز 2FA غير صالح",
-  "Owner-Account kann nicht gelöscht werden": "لا يمكن حذف حساب المالك"
+  "Owner-Account kann nicht gelöscht werden": "لا يمكن حذف حساب المالك",
+  "webhook": {
+    "outTitle": "Webhooks إلى أنظمة خارجية",
+    "outSubtitle": "يرسل MSM تحديثات الحالة وعدد اللاعبين إلى URL تحدده هنا — مثل بوت Discord يعرض حالة الخادم.",
+    "add": "إضافة webhook",
+    "label": "التسمية (اختياري)",
+    "targetUrl": "عنوان URL المستهدف",
+    "active": "نشط",
+    "inactive": "متوقف",
+    "created": "تم إنشاء webhook",
+    "rotate": "تدوير المفتاح",
+    "pause": "إيقاف مؤقت",
+    "resume": "استئناف",
+    "delete": "حذف"
+  }
 }

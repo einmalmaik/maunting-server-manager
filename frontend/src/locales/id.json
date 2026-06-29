@@ -533,7 +533,8 @@
     "console": "Menghibur",
     "mods": "Modifikasi",
     "restarts": "Mulai Ulang Otomatis",
-    "backups": "Cadangan"
+    "backups": "Cadangan",
+    "webhooks": "Webhooks"
   },
   "files": {
     "title": "Manajer File",
@@ -751,13 +752,13 @@
     "viewRelease": "Lihat rilis",
     "manualUpdateCommand": "Pembaruan di server:"
   },
-"connection": {
+  "connection": {
     "connecting": "Menghubungkan…",
     "reconnecting": "Koneksi terputus — menyambungkan ulang…",
     "failed": "Koneksi gagal. Silakan muat ulang halaman.",
     "rejected": "Koneksi ditolak (autentikasi/asal/izin tidak ada)."
   },
-    "common": {
+  "common": {
     "unlimited": "tidak terbatas",
     "save": "Simpan",
     "cancel": "Batalkan",
@@ -785,5 +786,19 @@
   "Passwort ungültig": "Kata sandi tidak valid",
   "2FA-Code erforderlich": "Diperlukan kode 2FA",
   "Ungültiger 2FA-Code": "Kode 2FA tidak valid",
-  "Owner-Account kann nicht gelöscht werden": "Akun pemilik tidak dapat dihapus"
+  "Owner-Account kann nicht gelöscht werden": "Akun pemilik tidak dapat dihapus",
+  "webhook": {
+    "outTitle": "Webhook ke sistem pihak ketiga",
+    "outSubtitle": "MSM secara aktif mengirim pembaruan status dan jumlah pemain ke URL yang Anda berikan di sini — misalnya bot Discord yang menampilkan status server.",
+    "add": "Tambah webhook",
+    "label": "Label (opsional)",
+    "targetUrl": "URL tujuan",
+    "active": "Aktif",
+    "inactive": "Dijeda",
+    "created": "Webhook dibuat",
+    "rotate": "Rotasi secret",
+    "pause": "Jeda",
+    "resume": "Lanjutkan",
+    "delete": "Hapus"
+  }
 }

@@ -533,7 +533,8 @@
     "console": "Консоль",
     "mods": "Моды",
     "restarts": "Автоматический перезапуск",
-    "backups": "Резервные копии"
+    "backups": "Резервные копии",
+    "webhooks": "Webhooks"
   },
   "files": {
     "title": "Файловый менеджер",
@@ -751,13 +752,13 @@
     "viewRelease": "Посмотреть выпуск",
     "manualUpdateCommand": "Обновление на сервере:"
   },
-"connection": {
+  "connection": {
     "connecting": "Подключение…",
     "reconnecting": "Соединение потеряно — переподключение…",
     "failed": "Не удалось подключиться. Перезагрузите страницу.",
     "rejected": "Соединение отклонено (аутентификация/источник/нет прав)."
   },
-    "common": {
+  "common": {
     "unlimited": "неограниченный",
     "save": "Сохранить",
     "cancel": "Отмена",
@@ -785,5 +786,19 @@
   "Passwort ungültig": "Неверный пароль",
   "2FA-Code erforderlich": "Требуется код 2FA",
   "Ungültiger 2FA-Code": "Неверный код 2FA",
-  "Owner-Account kann nicht gelöscht werden": "Аккаунт владельца не может быть удален"
+  "Owner-Account kann nicht gelöscht werden": "Аккаунт владельца не может быть удален",
+  "webhook": {
+    "outTitle": "Webhooks во внешние системы",
+    "outSubtitle": "MSM активно отправляет обновления статуса и числа игроков на URL, который вы указываете здесь — например, бот Discord, отображающий состояние сервера.",
+    "add": "Добавить webhook",
+    "label": "Метка (необязательно)",
+    "targetUrl": "URL-адрес назначения",
+    "active": "Активно",
+    "inactive": "Приостановлено",
+    "created": "Webhook создан",
+    "rotate": "Сменить секрет",
+    "pause": "Приостановить",
+    "resume": "Возобновить",
+    "delete": "Удалить"
+  }
 }

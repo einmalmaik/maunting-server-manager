@@ -533,7 +533,8 @@
     "console": "কনসোল",
     "mods": "মোডস",
     "restarts": "অটো-রিস্টার্ট",
-    "backups": "ব্যাকআপ"
+    "backups": "ব্যাকআপ",
+    "webhooks": "Webhook"
   },
   "files": {
     "title": "ফাইল ম্যানেজার",
@@ -751,13 +752,13 @@
     "viewRelease": "রিলিজ দেখুন",
     "manualUpdateCommand": "সার্ভারে আপডেট:"
   },
-"connection": {
+  "connection": {
     "connecting": "সংযুক্ত হচ্ছে…",
     "reconnecting": "সংযোগ হারানো হয়েছে — পুনঃ সংযোগ হচ্ছে…",
     "failed": "সংযোগ ব্যর্থ। পৃষ্ঠা পুনরায় লোড করুন।",
     "rejected": "সংযোগ প্রত্যাখ্যাত (প্রমাণীকরণ/উৎস/অনুমতি অনুপস্থিত)।"
   },
-    "common": {
+  "common": {
     "unlimited": "সীমাহীন",
     "save": "সংরক্ষণ করুন",
     "cancel": "বাতিল করুন",
@@ -785,5 +786,19 @@
   "Passwort ungültig": "অবৈধ পাসওয়ার্ড",
   "2FA-Code erforderlich": "2FA কোড প্রয়োজন",
   "Ungültiger 2FA-Code": "অবৈধ 2FA কোড",
-  "Owner-Account kann nicht gelöscht werden": "মালিক অ্যাকাউন্ট মুছে ফেলা যাবে না"
+  "Owner-Account kann nicht gelöscht werden": "মালিক অ্যাকাউন্ট মুছে ফেলা যাবে না",
+  "webhook": {
+    "outTitle": "তৃতীয় পক্ষের সিস্টেমে Webhook",
+    "outSubtitle": "MSM সক্রিয়ভাবে সার্ভারের স্ট্যাটাস এবং প্লেয়ার সংখ্যা আপডেট পাঠায় এমন একটি URL-এ যা আপনি এখানে দিচ্ছেন — যেমন একটি Discord বট যা সার্ভারের স্ট্যাটাস দেখায়।",
+    "add": "Webhook যোগ করুন",
+    "label": "লেবেল (ঐচ্ছিক)",
+    "targetUrl": "লক্ষ্য URL",
+    "active": "সক্রিয়",
+    "inactive": "বিরত",
+    "created": "Webhook তৈরি হয়েছে",
+    "rotate": "সিক্রেট ঘুরান",
+    "pause": "বিরতি",
+    "resume": "পুনরায় শুরু",
+    "delete": "মুছুন"
+  }
 }

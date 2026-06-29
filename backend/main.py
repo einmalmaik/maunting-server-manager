@@ -30,6 +30,7 @@ from routers import (
     blueprints_router,
     oauth_router,
     databases_router,
+    webhooks_outbound_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -435,6 +436,9 @@ app.include_router(roles_router)
 app.include_router(permissions_router)
 app.include_router(blueprints_router)
 app.include_router(databases_router)
+# Ausgehende Webhooks (MSM → Drittsystem wie Discord-Bot): per-Server
+# Subscriptions mit Secret-Auth ueber X-Webhook-Secret-Header.
+app.include_router(webhooks_outbound_router)
 # OAuth-Endpoints liegen absichtlich NICHT unter auth_rate_limit, weil das
 # Rate-Limit pro IP und pro Minute gilt (10/min). Bei Shared-IPs (Unternehmen,
 # Schulen, mobile Carrier) wuerde der Login-Flow sonst regelmaessig 429

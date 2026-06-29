@@ -533,7 +533,8 @@
     "console": "सांत्वना देना",
     "mods": "मॉड्स",
     "restarts": "स्वतः पुनः प्रारंभ करें",
-    "backups": "बैकअप"
+    "backups": "बैकअप",
+    "webhooks": "Webhooks"
   },
   "files": {
     "title": "फ़ाइल प्रबंधक",
@@ -751,13 +752,13 @@
     "viewRelease": "रिलीज देखें",
     "manualUpdateCommand": "सर्वर पर अपडेट करें:"
   },
-"connection": {
+  "connection": {
     "connecting": "कनेक्ट हो रहा है…",
     "reconnecting": "कनेक्शन टूट गया — पुनः कनेक्ट हो रहा है…",
     "failed": "कनेक्शन विफल। कृपया पृष्ठ पुनः लोड करें।",
     "rejected": "कनेक्शन अस्वीकृत (प्रमाणीकरण/उत्पत्ति/अनुमतियाँ अनुपलब्ध)।"
   },
-    "common": {
+  "common": {
     "unlimited": "असीमित",
     "save": "सहेजें",
     "cancel": "रद्द करें",
@@ -785,5 +786,19 @@
   "Passwort ungültig": "अमान्य पासवर्ड",
   "2FA-Code erforderlich": "2FA कोड आवश्यक है",
   "Ungültiger 2FA-Code": "अमान्य 2FA कोड",
-  "Owner-Account kann nicht gelöscht werden": "स्वामी खाता हटाया नहीं जा सकता"
+  "Owner-Account kann nicht gelöscht werden": "स्वामी खाता हटाया नहीं जा सकता",
+  "webhook": {
+    "outTitle": "तृतीय-पक्ष सिस्टम के लिए Webhooks",
+    "outSubtitle": "MSM यहाँ आपके दिए गए URL पर सक्रिय रूप से सर्वर स्थिति और खिलाड़ी-संख्या अपडेट भेजता है — जैसे कि कोई Discord बॉट जो सर्वर की स्थिति दिखाता है।",
+    "add": "Webhook जोड़ें",
+    "label": "लेबल (वैकल्पिक)",
+    "targetUrl": "लक्ष्य URL",
+    "active": "सक्रिय",
+    "inactive": "रुका हुआ",
+    "created": "Webhook बनाया गया",
+    "rotate": "सीक्रेट बदलें",
+    "pause": "रोकें",
+    "resume": "फिर शुरू",
+    "delete": "हटाएँ"
+  }
 }

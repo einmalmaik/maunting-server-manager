@@ -12,6 +12,7 @@ from .permissions import router as permissions_router
 from .blueprints import router as blueprints_router
 from .oauth import router as oauth_router
 from .databases import router as databases_router
+from .webhooks_outbound import router as webhooks_outbound_router
 
 __all__ = [
     "auth_router",
@@ -28,4 +29,5 @@ __all__ = [
     "blueprints_router",
     "oauth_router",
     "databases_router",
-]
+    "webhooks_outbound_router",
+]  # noqa: E501

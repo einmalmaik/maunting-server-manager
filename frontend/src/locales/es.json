@@ -555,7 +555,8 @@
     "console": "Consola",
     "mods": "Modificaciones",
     "restarts": "Reinicio automático",
-    "backups": "Copias de seguridad"
+    "backups": "Copias de seguridad",
+    "webhooks": "Webhooks"
   },
   "files": {
     "title": "Administrador de archivos",
@@ -773,13 +774,13 @@
     "viewRelease": "Ver comunicado",
     "manualUpdateCommand": "Actualización en el servidor:"
   },
-"connection": {
+  "connection": {
     "connecting": "Conectando…",
     "reconnecting": "Conexión perdida — reconectando…",
     "failed": "Conexión fallida. Recarga la página.",
     "rejected": "Conexión rechazada (autenticación/origen/permisos faltantes)."
   },
-    "common": {
+  "common": {
     "unlimited": "ilimitado",
     "save": "Guardar",
     "cancel": "Cancelar",
@@ -807,5 +808,19 @@
   "Passwort ungültig": "Contraseña no válida",
   "2FA-Code erforderlich": "Se requiere código 2FA",
   "Ungültiger 2FA-Code": "Código 2FA no válido",
-  "Owner-Account kann nicht gelöscht werden": "La cuenta del propietario no se puede eliminar"
+  "Owner-Account kann nicht gelöscht werden": "La cuenta del propietario no se puede eliminar",
+  "webhook": {
+    "outTitle": "Webhooks a sistemas externos",
+    "outSubtitle": "MSM envía activamente actualizaciones de estado y número de jugadores a una URL que indiques aquí — por ejemplo, un bot de Discord que muestra el estado del servidor.",
+    "add": "Añadir webhook",
+    "label": "Etiqueta (opcional)",
+    "targetUrl": "URL de destino",
+    "active": "Activo",
+    "inactive": "En pausa",
+    "created": "Webhook creado",
+    "rotate": "Rotar secreto",
+    "pause": "Pausar",
+    "resume": "Reanudar",
+    "delete": "Eliminar"
+  }
 }
