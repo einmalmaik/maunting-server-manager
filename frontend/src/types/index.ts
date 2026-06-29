@@ -41,6 +41,81 @@ export interface Server {
   created_at: string
 }
 
+export interface PostgresCredential {
+  database_id?: number | null
+  database_name: string
+  username: string
+  password: string
+  host: string
+  port: number
+  is_superuser?: boolean
+}
+
+export interface PostgresPowerUserCredential {
+  username: string
+  password: string
+  host: string
+  port: number
+  database_name: string
+}
+
+export interface ServerCreateResult extends Server {
+  postgres_credentials?: PostgresCredential[]
+}
+
+export interface PostgresDatabase {
+  id: number
+  name: string
+  owner_role: string
+  is_superuser?: boolean
+  power_credentials_issued_at?: string | null
+  created_at: string
+}
+
+export interface PostgresUser {
+  id: number
+  username: string
+  password_mask: string
+  created_at: string
+  last_rotated_at: string | null
+}
+
+export interface PostgresResources {
+  databases: PostgresDatabase[]
+  users: PostgresUser[]
+}
+
+export interface PostgresRowsResult {
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+  limit?: number | null
+  offset?: number | null
+  row_count?: number | null
+  status?: string | null
+}
+
+export interface PostgresSqlStatementResult {
+  statement: string
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+  row_count: number | null
+  status: string | null
+  error: string | null
+  duration_ms: number | null
+}
+
+export interface PostgresSqlResult {
+  statements: PostgresSqlStatementResult[]
+  total_duration_ms: number
+  statement_timeout_ms: number
+}
+
+export interface PostgresExtension {
+  name: string
+  version?: string | null
+  trusted?: boolean
+}
+
 export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'custom'
 export type BlueprintPortProtocol = 'tcp' | 'udp'
 

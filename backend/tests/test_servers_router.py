@@ -137,6 +137,61 @@ class TestCreateServer:
         # exists wurde mindestens einmal für den Guard aufgerufen.
         assert mock_exists.called
 
+    def test_create_with_postgres_returns_one_time_credentials(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str):
+        credentials = [{
+            "database_id": 1,
+            "database_name": "msm_s1_db1",
+            "username": "msm_s1_u1",
+            "password": "***",
+            "host": "msm-postgres",
+            "port": 5432,
+            "is_superuser": False,
+        }]
+        with patch("routers.servers.os.makedirs"), \
+             patch("routers.servers.os.chmod"), \
+             patch("routers.servers.os.path.exists", return_value=False), \
+             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
+             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.postgres_service.provision_server_databases", return_value=credentials):
+            response = client.post(
+                "/api/servers",
+                json={
+                    "name": "PG Server",
+                    "game_type": "dayz",
+                    "postgres_enabled": True,
+                    "postgres_database_count": 1,
+                },
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["postgres_credentials"] == credentials
+
+    def test_create_aborts_when_postgres_provisioning_fails(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, db: Session):
+        with patch("routers.servers.os.makedirs"), \
+             patch("routers.servers.os.chmod"), \
+             patch("routers.servers.os.path.exists", return_value=False), \
+             patch("routers.servers.shutil.rmtree"), \
+             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
+             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.postgres_service.provision_server_databases", side_effect=RuntimeError("pg down")), \
+             patch("routers.servers.postgres_service.drop_server_resources") as drop_resources:
+            response = client.post(
+                "/api/servers",
+                json={
+                    "name": "Broken PG Server",
+                    "game_type": "dayz",
+                    "postgres_enabled": True,
+                    "postgres_database_count": 1,
+                },
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        assert db.query(Server).filter(Server.name == "Broken PG Server").first() is None
+        assert drop_resources.called
+
 
 class TestDeleteServer:
     def test_owner_can_delete(self, client: TestClient, owner_user: User, owner_cookies: dict, test_server: Server, csrf_token: str):

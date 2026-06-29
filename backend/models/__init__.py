@@ -15,10 +15,14 @@ from .server_port import ServerPort
 from .oauth_provider import OAuthProvider
 from .oauth_user_link import OAuthUserLink
 from .login_challenge import LoginChallenge
+from .postgres_database import PostgresDatabase
+from .postgres_user import PostgresUser
+from .postgres_grant import PostgresGrant
 
 __all__ = [
     "User", "Server", "Role", "RolePermission", "ServerPermission",
     "Backup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",
+    "PostgresDatabase", "PostgresUser", "PostgresGrant",
 ]

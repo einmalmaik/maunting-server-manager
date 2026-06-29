@@ -14,7 +14,8 @@ from config import settings
 from database import SessionLocal
 from database import get_db
 from models import Server, User
-from schemas import ServerCreate, ServerResponse, ServerUpdate, ServerStatusResponse
+from schemas import ServerCreate, ServerCreateResponse, ServerResponse, ServerUpdate, ServerStatusResponse
+from schemas.postgres import PostgresOneTimeCredential
 from dependencies import (
     get_current_user,
     get_current_user_for_ws,
@@ -22,7 +23,7 @@ from dependencies import (
     require_server_permission,
     verify_csrf,
 )
-from services import permission_service
+from services import permission_service, postgres_service
 from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
 from games import get_plugin
 from games.base import container_name_for, _console_log_path, _append_console_log
@@ -145,8 +146,8 @@ def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current
     return permission_service.list_visible_servers(db, user)
 
 
-@router.post("", response_model=ServerResponse, status_code=201)
-async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(require_global("servers.create")), _: None = Depends(verify_csrf)) -> Server:
+@router.post("", response_model=ServerCreateResponse, status_code=201)
+async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(require_global("servers.create")), _: None = Depends(verify_csrf)) -> ServerCreateResponse:
 
     base_dir = os.path.abspath(settings.servers_dir)
 
@@ -226,6 +227,9 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
             raise _install_update_busy_error()
 
     install_started = False
+    created_install_dir = False
+    server_deleted = False
+    postgres_credentials: list[dict] = []
     try:
         from models.server_port import ServerPort
         for role, port_val, proto in allocated:
@@ -241,6 +245,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         if os.path.exists(install_dir):
             db.delete(server)
             db.commit()
+            server_deleted = True
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -258,6 +263,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         try:
             os.makedirs(install_dir, exist_ok=False)
             os.chmod(install_dir, 0o777)
+            created_install_dir = True
         except OSError as e:
             # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
             db.delete(server)
@@ -273,6 +279,16 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         server.container_name = container_name_for(server.id)
         db.commit()
         db.refresh(server)
+
+        if req.postgres_enabled:
+            try:
+                postgres_credentials = postgres_service.provision_server_databases(
+                    db,
+                    server,
+                    req.postgres_database_count or 1,
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail=f"PostgreSQL-Provisionierung fehlgeschlagen: {exc}") from exc
 
         # Auto-Install: Plugin startet Installation im Hintergrund.
         # Firewall-Regeln werden ERST beim Start angelegt (Lifecycle-Kopplung).
@@ -291,13 +307,33 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     except Exception:
         if install_lock_acquired and not install_started:
             release_install_update_lock(server.id)
+        if not install_started and not server_deleted:
+            try:
+                postgres_service.drop_server_resources(db, server.id)
+            except Exception:
+                db.rollback()
+            try:
+                db.delete(server)
+                db.commit()
+            except Exception:
+                db.rollback()
+            if created_install_dir and os.path.exists(server.install_dir):
+                try:
+                    shutil.rmtree(server.install_dir)
+                except OSError:
+                    logger.warning("Install-Verzeichnis konnte nach Create-Abbruch nicht entfernt werden")
         raise
 
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_server_installed_notification(user.email, user.username, server.name)
 
     sync_server_restart_schedule(server)
-    return server
+    response = ServerCreateResponse.model_validate(server)
+    response.postgres_credentials = [
+        PostgresOneTimeCredential.model_validate(item)
+        for item in postgres_credentials
+    ]
+    return response
 
 
 @router.get("/{server_id}", response_model=ServerResponse)
@@ -499,7 +535,17 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
                 detail=f"Abbruch (Atomar): Console-Log-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
             )
 
-    # 6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
+    # 6. Verwaltete PostgreSQL-Ressourcen loeschen. Bei Fehler bleibt der
+    # Server-Datensatz erhalten, damit der Cleanup erneut versucht werden kann.
+    try:
+        postgres_service.drop_server_resources(db, server.id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Abbruch: PostgreSQL-Ressourcen konnten nicht gelöscht werden. Bitte später erneut versuchen: {e}",
+        )
+
+    # 7. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
     db.delete(server)
     db.commit()
     return {

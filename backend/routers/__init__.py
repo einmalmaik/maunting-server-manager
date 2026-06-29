@@ -11,6 +11,7 @@ from .roles import router as roles_router
 from .permissions import router as permissions_router
 from .blueprints import router as blueprints_router
 from .oauth import router as oauth_router
+from .databases import router as databases_router
 
 __all__ = [
     "auth_router",
@@ -26,4 +27,5 @@ __all__ = [
     "permissions_router",
     "blueprints_router",
     "oauth_router",
+    "databases_router",
 ]

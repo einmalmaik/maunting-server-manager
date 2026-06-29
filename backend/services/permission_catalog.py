@@ -72,6 +72,9 @@ SERVER_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("server.mods.read",        "server", "Mods auflisten, Workshop durchsuchen"),
     PermissionDef("server.mods.write",       "server", "Mods abonnieren, entfernen, sortieren"),
     PermissionDef("server.mods.toggle",      "server", "Mods aktivieren oder deaktivieren"),
+    PermissionDef("server.databases.read",   "server", "PostgreSQL-Datenbanken lesen"),
+    PermissionDef("server.databases.write",  "server", "PostgreSQL-Tabellen und Daten bearbeiten"),
+    PermissionDef("server.databases.admin",  "server", "PostgreSQL-Datenbanken und User verwalten"),
 )
 
 

@@ -204,6 +204,44 @@ class TestRunContainer:
         client.api.pull.assert_not_called()
         client.containers.run.assert_called_once()
 
+    def test_run_container_sets_requested_primary_network(self):
+        client = MagicMock()
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image="postgres:17-alpine",
+                network="msm-internal",
+            )
+
+        assert result["ok"] is True
+        kwargs = client.containers.run.call_args.kwargs
+        assert kwargs["network"] == "msm-internal"
+
+    def test_run_container_connects_extra_network_after_start(self):
+        client = MagicMock()
+        created = SimpleNamespace(id="abc")
+        network = MagicMock()
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = created
+        client.networks.get.return_value = network
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/ptero-eggs/yolks:wine_staging",
+                extra_networks=["msm-internal"],
+            )
+
+        assert result["ok"] is True
+        kwargs = client.containers.run.call_args.kwargs
+        assert "network" not in kwargs
+        network.connect.assert_called_once_with(created)
+
     def test_run_container_uses_local_image_on_pull_failure_fallback(self):
         """Fallback: Image fehlt lokal, Pull schlaegt fehl, aber Image ist zwischenzeitlich
         verfuegbar (z. B. ein paralleler Job hat es gepullt). Dann darf der Container starten.

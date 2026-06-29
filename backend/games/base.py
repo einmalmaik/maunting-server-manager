@@ -880,6 +880,20 @@ class GamePlugin(ABC):
         """Default: nur install_dir → /data."""
         return default_volume_binds(server)
 
+    def container_extra_networks(self, server) -> list[str]:
+        """Optionale interne Netze fuer servergebundene Dienste."""
+        try:
+            from database import SessionLocal
+            from services.postgres_service import server_extra_networks
+
+            db = SessionLocal()
+            try:
+                return server_extra_networks(db, server.id)
+            finally:
+                db.close()
+        except Exception:
+            return []
+
     def container_workdir(self, server) -> str:
         return CONTAINER_DATA_DIR
 
@@ -1200,6 +1214,7 @@ class GamePlugin(ABC):
             workdir=self.container_workdir(server),
             read_only_rootfs=self.container_read_only_rootfs,
             tmpfs_paths=self.container_tmpfs_paths(server),
+            extra_networks=self.container_extra_networks(server),
             startup_check_seconds=getattr(getattr(self.get_blueprint(), "runtime", None), "startupCheckSeconds", None) or 2.0,
             server_id=server.id,  # enables pull progress in console
         )

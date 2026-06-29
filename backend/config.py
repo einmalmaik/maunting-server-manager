@@ -54,6 +54,42 @@ class Settings(BaseSettings):
     # Produktion: /opt/msm/servers  |  Dev: ./servers
     servers_dir: str = "/opt/msm/servers"
 
+    # Verwaltetes PostgreSQL fuer Game-Server-Datenbanken.
+    # Der Host-Port ist absichtlich nur an Loopback gebunden. Game-Container
+    # erreichen PostgreSQL ueber das interne Docker-Netz und msm-postgres:5432.
+    managed_postgres_image: str = "postgres:17-alpine"
+    managed_postgres_container_name: str = "msm-postgres"
+    managed_postgres_network: str = "msm-internal"
+    managed_postgres_host: str = "127.0.0.1"
+    managed_postgres_port: int = 15432
+    managed_postgres_data_dir: str = "/opt/msm/postgres"
+    managed_postgres_statement_timeout_ms: int = 5000
+    managed_postgres_row_limit: int = 500
+
+    # Trusted Postgres extensions, die Game-Server-Owner in ihrer DB selbst
+    # installieren duerfen (pgcrypto fuer UUID/Crypto, pg_trgm fuer Volltextsuche,
+    # citext fuer case-insensitive Vergleiche, ...). Diese Liste ist statisch im
+    # Code -- Erweiterung erfordert Code-Change + Review, damit kein User ueber
+    # eine dynamische Allowlist an eine nicht-trusted Extension kommt.
+    # Alle hier gelisteten Extensions sind in Postgres 17 als ``trusted`` markiert,
+    # d. h. der Owner einer DB darf sie ohne Superuser mit CREATE-Privileg installieren.
+    trusted_postgres_extensions: set[str] = {
+        "pgcrypto",        # UUID-Gen, Digest, Symmetric Encryption (haeufig gebraucht)
+        "uuid-ossp",       # alternative UUID-Implementierung
+        "citext",          # case-insensitive Text
+        "btree_gin",       # GIN-Index auf B-Tree-Typen
+        "btree_gist",      # GiST-Index auf B-Tree-Typen
+        "fuzzystrmatch",   # Levenshtein, Soundex, Metaphone
+        "hstore",          # Key/Value-Spalten
+        "pg_trgm",         # Trigramm-Index fuer LIKE/ILIKE-Suche
+        "tablefunc",       # crosstab() u. a.
+        "unaccent",        # Akzent-unabhaengige Textsuche
+        "isn",             # ISBN/ISSN/EAN-Validierung
+        "lo",              # Large Objects (Bilder, Bloobs in der DB)
+        "ltree",           # hierarchische Baumstrukturen
+        "tcn",             # Trigger-basiertes Change Notification
+    }
+
     # Rootless Docker. Produktion: unix:///run/user/<msm_uid>/docker.sock
     # Leer = docker_service berechnet den Rootless-Default fuer den laufenden User.
     docker_host: str = ""

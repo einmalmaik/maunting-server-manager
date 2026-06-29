@@ -29,6 +29,7 @@ from routers import (
     permissions_router,
     blueprints_router,
     oauth_router,
+    databases_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -433,6 +434,7 @@ app.include_router(files_router)
 app.include_router(roles_router)
 app.include_router(permissions_router)
 app.include_router(blueprints_router)
+app.include_router(databases_router)
 # OAuth-Endpoints liegen absichtlich NICHT unter auth_rate_limit, weil das
 # Rate-Limit pro IP und pro Minute gilt (10/min). Bei Shared-IPs (Unternehmen,
 # Schulen, mobile Carrier) wuerde der Login-Flow sonst regelmaessig 429
@@ -458,4 +460,3 @@ def health():
 import os
 if os.path.exists("/opt/msm/frontend/dist"):
     app.mount("/", StaticFiles(directory="/opt/msm/frontend/dist", html=True), name="frontend")
-
