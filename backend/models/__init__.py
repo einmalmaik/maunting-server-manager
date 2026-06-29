@@ -18,6 +18,8 @@ from .login_challenge import LoginChallenge
 from .postgres_database import PostgresDatabase
 from .postgres_user import PostgresUser
 from .postgres_grant import PostgresGrant
+from .webhook_subscription import WebhookSubscription
+from .webhook_delivery import WebhookDelivery
 
 __all__ = [
     "User", "Server", "Role", "RolePermission", "ServerPermission",
@@ -25,4 +27,5 @@ __all__ = [
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",
     "PostgresDatabase", "PostgresUser", "PostgresGrant",
-]
+    "WebhookSubscription", "WebhookDelivery",
+]  # noqa: E501

@@ -219,9 +219,46 @@ def _safe_error_message(value: object) -> str:
 
 
 def _set_status(db: Session, server: Server, status: str, message: str | None = None) -> None:
+    previous_status = server.status
     server.status = status
     server.status_message = message
     db.commit()
+
+    # Outbound-Webhook-Trigger: nur bei echten Status-Wechseln feuern
+    # (ueberspringt "transient" -> "transient"-Pings, die kein Event sind).
+    # Wird asyncron aus dem Main-Loop angestossen, damit der HTTP-Request
+    # nicht blockiert. Fehler im Webhook-Versand duerfen Lifecycle nie
+    # beeintraechtigen.
+    if previous_status != status:
+        from services.outbound_webhook_service import (
+            EVENT_STATUS_CHANGE,
+            build_status_payload,
+            dispatch_event,
+        )
+        try:
+            new_payload = build_status_payload(server)
+            # Sync dispatch (Fire-and-forget) — verfuegbare Subs
+            # werden in einem Background-Task rausgeschickt.
+            import asyncio as _asyncio
+            try:
+                loop = _asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                loop.create_task(
+                    dispatch_event(
+                        db, server=server,
+                        event_type=EVENT_STATUS_CHANGE,
+                        payload=new_payload,
+                    ),
+                    name=f"webhook-status-{server.id}",
+                )
+        except Exception as _exc:  # pragma: no cover — defensive
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "outbound-webhook: dispatch failed for server_id=%s (%s)",
+                server.id, _exc,
+            )
 
 
 def queue_lifecycle_operation(

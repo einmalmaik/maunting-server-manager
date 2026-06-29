@@ -533,7 +533,8 @@
     "console": "安慰",
     "mods": "模组",
     "restarts": "自动重启",
-    "backups": "备份"
+    "backups": "备份",
+    "webhooks": "Webhooks"
   },
   "files": {
     "title": "文件管理器",
@@ -751,13 +752,13 @@
     "viewRelease": "查看版本",
     "manualUpdateCommand": "服务器上的更新："
   },
-"connection": {
+  "connection": {
     "connecting": "正在连接…",
     "reconnecting": "连接已断开 — 正在重新连接…",
     "failed": "连接失败。请重新加载页面。",
     "rejected": "连接被拒绝（身份验证/来源/权限缺失）。"
   },
-    "common": {
+  "common": {
     "unlimited": "无限",
     "save": "保存",
     "cancel": "取消",
@@ -785,5 +786,19 @@
   "Passwort ungültig": "密码无效",
   "2FA-Code erforderlich": "需要 2FA 代码",
   "Ungültiger 2FA-Code": "2FA 代码无效",
-  "Owner-Account kann nicht gelöscht werden": "所有者帐户无法删除"
+  "Owner-Account kann nicht gelöscht werden": "所有者帐户无法删除",
+  "webhook": {
+    "outTitle": "向第三方系统发送 Webhooks",
+    "outSubtitle": "MSM 会主动向你在此填写的 URL 发送服务器状态和玩家数量更新 — 比如一个显示服务器状态的 Discord 机器人。",
+    "add": "添加 Webhook",
+    "label": "名称（可选）",
+    "targetUrl": "目标 URL",
+    "active": "已启用",
+    "inactive": "已暂停",
+    "created": "Webhook 已创建",
+    "rotate": "轮换密钥",
+    "pause": "暂停",
+    "resume": "继续",
+    "delete": "删除"
+  }
 }

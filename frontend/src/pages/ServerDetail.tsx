@@ -17,6 +17,7 @@ import {
   Square,
   Terminal,
   Trash2,
+  Webhook,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
@@ -28,11 +29,12 @@ import { Backups } from "./Backups";
 import { ServerConsolePanel } from "@/components/server/ServerConsolePanel";
 import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
 import { DatabaseManager } from "@/components/server/DatabaseManager";
+import { OutgoingWebhooksPanel } from "@/components/server/OutgoingWebhooksPanel";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
 
-type TabKey = "files" | "console" | "mods" | "restarts" | "backups" | "databases";
+type TabKey = "files" | "console" | "mods" | "restarts" | "backups" | "databases" | "webhooks";
 const VALID_TABS: TabKey[] = [
   "files",
   "console",
@@ -40,6 +42,7 @@ const VALID_TABS: TabKey[] = [
   "restarts",
   "backups",
   "databases",
+  "webhooks",
 ];
 
 interface ServerStatus {
@@ -211,6 +214,11 @@ export function ServerDetail() {
     });
     list.push({ key: "backups", label: t("tabs.backups"), icon: HardDrive });
     list.push({ key: "databases", label: t("tabs.databases"), icon: Database });
+    list.push({
+      key: "webhooks",
+      label: t("tabs.webhooks", { defaultValue: "Webhooks" }),
+      icon: Webhook,
+    });
     return list;
   }, [t, showModTab]);
 
@@ -805,6 +813,7 @@ export function ServerDetail() {
         )}
         {activeTab === "backups" && <Backups serverId={serverId} />}
         {activeTab === "databases" && <DatabaseManager serverId={serverId} />}
+        {activeTab === "webhooks" && <OutgoingWebhooksPanel serverId={serverId} />}
       </div>
 
       {/* Edit-Network Modal */}
