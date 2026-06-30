@@ -71,11 +71,68 @@ def _git_env() -> dict[str, str]:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = "/bin/false"
+    # Git-Dubious-Ownership-Schutz pro Aufruf ausschalten: ``safe.directory=*``
+    # via ``-c`` an git reicht als In-Process-Konfig, schreibt keinen State
+    # und ueberlebt Cron/Container-Restarts. Wird ergaenzt in ``_run_git``,
+    # sobald ``cwd`` gesetzt ist (siehe dort).
     return env
+
+
+def _ensure_safe_directory(cwd: Path | None) -> dict[str, str]:
+    """Bereitet die Env-Variablen vor, um Git-Dubious-Ownership zu umgehen.
+
+    Hintergrund: Git verweigert seit 2.35.2 ``fetch/reset`` in Repos, deren
+    Owner nicht der aktuelle Prozess-User ist ("detected dubious ownership").
+    MSM laeuft als gleichbleibender System-User (``msm``), aber ``install_dir``
+    kann z. B. durch fruehere root- oder Docker-Mounts einem anderen UID/GID
+    gehoeren. Per-repo ``safe.directory`` in ``.git/config`` wird von Git
+    erst NACH der Sicherheits-Pruefung gelesen, hilft also nicht.
+
+    Loesung: Wir setzen ``GIT_CONFIG_COUNT`` + ``GIT_CONFIG_KEY_0`` und
+    ``GIT_CONFIG_VALUE_0`` als Prozess-Env. Git wendet diese In-Memory-Konfig
+    vor der Sicherheits-Pruefung an. Kein dauerhafter State, idempotent,
+    robust gegen Cron-Jobs/Container-Restarts/Panel-Updates.
+
+    Optional schreiben wir zusaetzlich einen per-repo Eintrag -- der hilft
+    externen Tools (z. B. manuelles ``git fetch``), bleibt aber wirkungslos
+    fuer MSM ohne diesen Env-Trick (siehe oben). Die Schreibung schlaegt
+    stillschweigend fehl, wenn der Owner-Mismatch beim Schreiben selbst
+    blockiert; das ist okay.
+
+    Rueckgabe: das angereicherte Env-Dict (callable-sicher, kein Default-``os.environ``).
+    """
+    base = _git_env()
+    if cwd is None:
+        return base
+    # In-Memory-Config: Git liest das VOR der dubious-ownership-Pruefung.
+    # GIT_CONFIG_COUNT=1 + die zwei benannten Variablen ist die offizielle
+    # Schnittstelle dafuer (siehe ``git help config``).
+    base["GIT_CONFIG_COUNT"] = "1"
+    base["GIT_CONFIG_KEY_0"] = "safe.directory"
+    base["GIT_CONFIG_VALUE_0"] = "*"
+
+    # Per-Repo-Eintrag (robust gegen manuelle CLI-Aufrufe, optional).
+    # ``-c safe.directory=*`` ist noetig, weil sonst der Schreib-Befehl selbst
+    # am Ownership-Mismatch scheitert. ``capture_output=True``+``check=False``
+    # damit Fehler hier nicht eskalieren -- _run_git meldet den eigentlichen
+    # Fetch-Fehler.
+    try:
+        subprocess.run(
+            ["git", "-c", "safe.directory=*", "-C", str(cwd),
+             "config", "--local", "safe.directory", str(cwd)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=base,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return base
 
 
 def _run_git(args: list[str], *, cwd: Path | None = None, timeout: int = 600) -> None:
     cmd = ["git", *args]
+    env = _ensure_safe_directory(cwd)
     try:
         proc = subprocess.run(
             cmd,
@@ -83,7 +140,7 @@ def _run_git(args: list[str], *, cwd: Path | None = None, timeout: int = 600) ->
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=_git_env(),
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:
         raise GithubSourceError(f"git timeout: {' '.join(args[:4])}…") from exc
@@ -102,6 +159,8 @@ def remote_branch_sha(repo: str, branch: str) -> str | None:
     else:
         url = f"https://github.com/{repo}.git"
     ref = f"refs/heads/{branch}"
+    # ``ls-remote`` braucht keinen ``safe.directory``-Trick (kein lokales Repo),
+    # aber wir nutzen den Standard-Env fuer einheitliche Timeouts/Prompts.
     try:
         proc = subprocess.run(
             ["git", "ls-remote", url, ref],
@@ -124,13 +183,14 @@ def remote_branch_sha(repo: str, branch: str) -> str | None:
 def local_repo_sha(install_dir: Path) -> str | None:
     if not (install_dir / ".git").is_dir():
         return None
+    env = _ensure_safe_directory(install_dir)
     try:
         proc = subprocess.run(
             ["git", "-C", str(install_dir), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             timeout=30,
-            env=_git_env(),
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return None
@@ -224,7 +284,6 @@ def _run_argv_with_retry(argv: list[str], *, cwd: Path, timeout: int = 900) -> N
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=_git_env(),
         )
         if proc.returncode == 0:
             if attempt > 0:
