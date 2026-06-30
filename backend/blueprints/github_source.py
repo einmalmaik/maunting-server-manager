@@ -344,6 +344,83 @@ def _run_setup_commands(install_dir: Path, blueprint: Blueprint) -> None:
         _run_argv_with_retry(argv, cwd=root)
 
 
+# ── Self-healing fuer Dubious-Ownership / verlorene Execute-Bits ─────────────
+#
+# Hintergrund: Wenn ein ``install_dir`` einem anderen User gehoert als der
+# MSM-Prozess (z. B. durch fruehere root-Klon-Operationen oder eine
+# Container-Mount-Aktion), scheitern SetupCommands wie ``npm ci`` mit
+# EACCES beim Beschreiben von ``node_modules``. Verliert ``start.sh`` sein
+# Execute-Bit (etwa weil ``chmod`` aus dem Blueprint nicht durchlaeuft,
+# sobald ein frueherer Schritt abbricht), crash't der Container beim Start
+# mit "ERR_UNKNOWN_FILE_EXTENSION".
+#
+# Wir normalisieren hier das ``install_dir`` auf den aktuellen Prozess-User
+# und stellen sicher, dass die gaengigen Start-Skripte ausfuehrbar sind.
+#
+# Eigenschaften:
+# - Idempotent: nur Aktionen, wenn noetig (kein chown-churn).
+# - Defensiv: ``OperationNotPermitted`` wird geloggt, nicht eskaliert.
+# - KISS: kein neuer Manager, keine Subklasse -- reine Helferfunktion.
+# - Korrekt unter rootless Docker / MSM-as-msm: nutzt ``os.getuid()/getgid()``.
+def _ensure_install_dir_writable(install_dir: Path) -> None:
+    import os
+    import stat
+
+    if not install_dir.is_dir():
+        return
+
+    uid = os.getuid()
+    gid = os.getgid()
+
+    # 1. Owner-Normalisierung, aber nur wenn noetig (kein 0/0 selbst wenn
+    #    das Verzeichnis bereits 0/0 ist -- das spart I/O auf grossen Trees).
+    try:
+        st = install_dir.stat()
+    except OSError as exc:
+        logger.debug("ensure_install_dir_writable: stat failed for %s: %s", install_dir, exc)
+        return
+    if (st.st_uid, st.st_gid) != (uid, gid):
+        try:
+            subprocess.run(
+                ["chown", "-R", f"{uid}:{gid}", str(install_dir)],
+                capture_output=True,
+                text=True,
+                timeout=600,
+                env=_git_env(),
+            )
+            logger.info(
+                "ensure_install_dir_writable: chown -R %d:%d %s (war %d:%d)",
+                uid, gid, install_dir, st.st_uid, st.st_gid,
+            )
+        except (subprocess.TimeoutExpired, OSError, FileNotFoundError) as exc:
+            logger.warning(
+                "ensure_install_dir_writable: chown fehlgeschlagen auf %s: %s "
+                "(SetupCommands werden trotzdem versucht, koennen aber EACCES kriegen)",
+                install_dir, exc,
+            )
+
+    # 2. Execute-Bit fuer ``*.sh`` direkt unter install_dir (typische
+    #    Start-Skripte). Wird ausgefuehrt BEVOR ein spaeterer Blueprint-Schritt
+    #    (chmod +x) abbricht und einen Container mit nicht-ausfuehrbarem
+    #    Entrypoint-Cmd hinterlaesst.
+    try:
+        for entry in install_dir.iterdir():
+            if not entry.is_file():
+                continue
+            if entry.suffix != ".sh":
+                continue
+            try:
+                mode = entry.stat().st_mode
+                if mode & stat.S_IXUSR:
+                    continue
+                entry.chmod(0o755)
+                logger.info("ensure_install_dir_writable: chmod +x %s", entry)
+            except OSError as exc:
+                logger.debug("ensure_install_dir_writable: chmod fehlgeschlagen auf %s: %s", entry, exc)
+    except OSError as exc:
+        logger.debug("ensure_install_dir_writable: iterdir fehlgeschlagen auf %s: %s", install_dir, exc)
+
+
 def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:
     """Clone oder Pull (Reinstall/Update) in ``install_dir``."""
     if blueprint.source.type != BlueprintSourceType.GITHUB:
@@ -377,6 +454,9 @@ def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:
                 ["clone", "--branch", branch, "--depth", "1", clone_url, str(target)],
                 timeout=900,
             )
+        # Self-healing: Dubious-Ownership + verlorene Execute-Bits normalisieren
+        # BEVOR SetupCommands (npm ci / build) laufen. Siehe _ensure_install_dir_writable.
+        _ensure_install_dir_writable(target)
         _run_setup_commands(target, blueprint)
     except GithubSourceError as exc:
         return {"ok": False, "error": str(exc)}
