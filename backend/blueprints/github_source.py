@@ -473,9 +473,66 @@ def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:
     has_git = (target / ".git").is_dir()
     try:
         if has_git:
-            _run_git(["fetch", "origin", branch, "--depth", "1"], cwd=target)
+            # Frischer HEAD -- erst alle lokalen Mutationen weg, dann mit
+            # remote-HEAD gleichsetzen. Reihenfolge wichtig: erst fetch (um
+            # origin/<branch> zu aktualisieren), dann reset --hard (um Working
+            # Tree exakt auf das entfernte HEAD zu zwingen).
+            _run_git(["fetch", "origin", branch, "--depth", "1", "--prune"], cwd=target)
             _run_git(["checkout", "-B", branch, f"origin/{branch}"], cwd=target)
             _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target)
+            # Belt-and-suspenders: nochmaliger reset --hard. Falls zwischen den
+            # Befehlen ein externer Prozess (cron, anderes Skript) Commits macht
+            # oder Working-Tree-Files anlegt, wird der zweite reset das wieder
+            # einfangen. Idempotent und billig (ein no-op, wenn nichts passiert ist).
+            _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target)
+            # Falls das Repo Submodule hat: ebenfalls auf Origin-SHA syncen.
+            # Wir nutzen ``--init --recursive --force``, damit sowohl fehlende
+            # Submodule initialisiert als auch lokale Aenderungen ueberschrieben
+            # werden. Bei Repos ohne .gitmodules ein no-op.
+            try:
+                if (target / ".gitmodules").is_file():
+                    _run_git(
+                        ["submodule", "update", "--init", "--recursive", "--force"],
+                        cwd=target,
+                    )
+            except GithubSourceError:
+                # Submodule-Sync darf den gesamten Pull nicht blockieren --
+                # Repos ohne .gitmodules oder mit Lock-Problemen ueberspringen.
+                logger.warning(
+                    "GitHub-Source %s@%s: Submodule-Update fehlgeschlagen, "
+                    "weitere Schritte laufen trotzdem.", repo, branch,
+                )
+            # Head-Verifikation: Working Tree muss remote-HEAD entsprechen.
+            # Falls ein externer Prozess (z. B. paralleler Probe-Aufruf, ein
+            # Cronjob, ein anderes Admin-Skript) zwischen den obigen git-Befehlen
+            # und hier etwas am Tree geaendert hat, faellt das hier auf und wir
+            # brechen mit klarer Diagnose ab -- statt stillschweigend einen
+            # gemischten Stand zu bauen (das war der konkrete Bug, der zu
+            # dem inkohaerenten Working-Tree-Image gefuehrt hat).
+            verify_proc = subprocess.run(
+                ["git", "-C", str(target), "rev-parse", "HEAD"],
+                capture_output=True, text=True, env=_git_env(),
+            )
+            actual_head = (verify_proc.stdout or "").strip()
+            # Aktuellen Origin-HEAD nochmal frisch abfragen, damit auch ein
+            # race-freier Vergleich moeglich ist (origin/<branch> koennte
+            # seit dem reset --hard nochmal nachgewandert sein).
+            origin_sha_proc = subprocess.run(
+                ["git", "-C", str(target), "rev-parse", f"origin/{branch}"],
+                capture_output=True, text=True, env=_git_env(),
+            )
+            expected_head = (origin_sha_proc.stdout or "").strip()
+            if expected_head and actual_head != expected_head:
+                raise GithubSourceError(
+                    f"Working-Tree-HEAD weicht von origin/{branch} ab "
+                    f"(got {actual_head[:12]}, expected {expected_head[:12]}). "
+                    f"Ein externer Prozess hat den Tree waehrend des Pulls "
+                    f"geaendert. Bitte manuell bereinigen."
+                )
+            logger.info(
+                "GitHub-Source: Pull-Check OK -- branch=%s head=%s",
+                branch, actual_head[:12],
+            )
         else:
             if any(target.iterdir()):
                 raise GithubSourceError(
