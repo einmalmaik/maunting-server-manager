@@ -421,6 +421,38 @@ def _ensure_install_dir_writable(install_dir: Path) -> None:
         logger.debug("ensure_install_dir_writable: iterdir fehlgeschlagen auf %s: %s", install_dir, exc)
 
 
+def _best_effort_restore_node_modules(install_dir: Path) -> None:
+    """Bereinigt ``node_modules`` als Vorbereitung fuer ``npm ci``.
+
+    Hintergrund: Wenn das Repo vorher einem anderen User gehoert hat und
+    der Self-healing-Chown in ``_ensure_install_dir_writable`` fehl-
+    schlaegt (z. B. weil der MSM-Prozess keine CAP_CHOWN hat), bleiben
+    einige ``node_modules/*``-Subverzeichnisse unbesitzbar. ``npm ci``
+    bricht dann beim ``rmdir @alloc/quick-lru`` mit EACCES ab. Indem wir
+    das gesamte ``node_modules``-Verzeichnis einmal entfernen -- sofern
+    der MSM-Prozess ueberhaupt Schreibrechte hat -- startet ``npm ci``
+    bei Null und ohne Stolperfallen.
+
+    Defensiv: Permission-Fehler werden geloggt, nicht eskaliert. Wenn
+    ``_ensure_install_dir_writable`` erfolgreich war (MSM ist bereits
+    Eigentuemer), bleibt der Schritt ein no-op (shutil.rmtree ist schnell).
+    """
+    target = install_dir / "node_modules"
+    if not target.exists():
+        return
+    try:
+        # shutil.rmtree ist auf C-Ebene schnell, vermeidet aber Subprozesse.
+        # Wir umgehen damit auch 'rm -rf'-Probleme mit Mount-Flags.
+        shutil.rmtree(target, ignore_errors=False)
+        logger.info("best_effort_restore_node_modules: %s entfernt", target)
+    except OSError as exc:
+        logger.warning(
+            "best_effort_restore_node_modules: konnte %s nicht entfernen: %s "
+            "(npm ci wird trotzdem versucht; ggf. manuelles chown noetig)",
+            target, exc,
+        )
+
+
 def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:
     """Clone oder Pull (Reinstall/Update) in ``install_dir``."""
     if blueprint.source.type != BlueprintSourceType.GITHUB:
@@ -457,6 +489,15 @@ def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:
         # Self-healing: Dubious-Ownership + verlorene Execute-Bits normalisieren
         # BEVOR SetupCommands (npm ci / build) laufen. Siehe _ensure_install_dir_writable.
         _ensure_install_dir_writable(target)
+        # Workaround: wenn der chown oben mangels Capability fehlgeschlagen ist
+        # (z. B. MSM-as-msm auf root-owned FS), kann ``npm ci`` mit EACCES
+        # abbrechen, weil ``node_modules``-Subverzeichnisse dem falschen User
+        # gehoeren. Wir versuchen daher, ``node_modules`` einmalig wegzuräumen,
+        # sodass ``npm ci`` von Null aus installiert. Schlägt auch das fehl
+        # (z. B. weil der MSM-Prozess ueberhaupt kein Schreibrecht hat),
+        # gehen wir weiter und melden den Fehler klar ueber Logger -- die
+        # spaetere ``npm ci``-Fehlermeldung bleibt praezise.
+        _best_effort_restore_node_modules(target)
         _run_setup_commands(target, blueprint)
     except GithubSourceError as exc:
         return {"ok": False, "error": str(exc)}
