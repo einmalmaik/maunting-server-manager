@@ -743,3 +743,233 @@ class TestServerPortsRouter:
         query_port = next(p for p in response.json()["ports"] if p["role"] == "query")
         assert query_port["port"] == 27016
         assert query_port["protocol"] == "tcp"
+
+
+# ── Exec-Tab Endpoint (v1.4.7) ───────────────────────────────────────────
+#
+# POST /api/servers/{id}/exec -- Oneshot-Befehl im MSM-Container.
+#
+# Sicherheits-Invarianten, die jeder dieser Tests verifiziert:
+# - kein Host-Exec (Container-Name kommt nur aus container_name_for)
+# - kein Shell-Escape (argv wird verbatim durchgereicht)
+# - separate Permission server.console.exec (NICHT console.write)
+# - Blueprint-Gate (enableExec=true)
+# - Validierung: 1..32 args, je max 4096 Zeichen
+
+
+class TestExecEndpoint:
+    """Tests fuer POST /api/servers/{id}/exec.
+
+    Strategie: Wir monkey-patchen ``exec_service.run_in_container``, damit
+    wir Docker-Calls komplett vermeiden. Die Tests pruefen die Endpoint-
+    Logik (Auth, Permissions, Blueprint-Gate, Validierung, Response-Format).
+    """
+
+    def _post(self, client, cookies, csrf, server_id, command):
+        return client.post(
+            f"/api/servers/{server_id}/exec",
+            json={"command": command},
+            cookies=cookies,
+            headers={"X-CSRF-Token": csrf} if csrf else {},
+        )
+
+    def test_exec_endpoint_requires_csrf(
+        self, client, owner_cookies, test_server
+    ):
+        # Kein CSRF-Header -> 403
+        r = self._post(client, owner_cookies, csrf=None,
+                       server_id=test_server.id, command=["ls"])
+        assert r.status_code == 403
+
+    def test_exec_endpoint_validates_argv_min_length(
+        self, client, owner_cookies, test_server, csrf_token, monkeypatch
+    ):
+        # Leeres command -> 422 (Pydantic min_length=1)
+        def _fake_run(**kwargs):
+            raise AssertionError("run_in_container should not be called")
+        monkeypatch.setattr(
+            "routers.servers.exec_service.run_in_container", _fake_run
+        )
+        r = self._post(client, owner_cookies, csrf_token,
+                       server_id=test_server.id, command=[])
+        assert r.status_code == 422
+
+    def test_exec_endpoint_validates_argv_max_length(
+        self, client, owner_cookies, test_server, csrf_token, monkeypatch
+    ):
+        def _fake_run(**kwargs):
+            raise AssertionError("run_in_container should not be called")
+        monkeypatch.setattr(
+            "routers.servers.exec_service.run_in_container", _fake_run
+        )
+        # 33 Elemente -> 422 (Pydantic max_length=32)
+        r = self._post(
+            client, owner_cookies, csrf_token,
+            server_id=test_server.id, command=["x"] * 33,
+        )
+        assert r.status_code == 422
+
+    def test_exec_endpoint_rejects_nonexistent_server(
+        self, client, owner_cookies, csrf_token, monkeypatch
+    ):
+        # Server existiert nicht -> 404
+        monkeypatch.setattr(
+            "routers.servers.exec_service.run_in_container",
+            lambda **kw: (_ for _ in ()).throw(AssertionError),
+        )
+        r = self._post(
+            client, owner_cookies, csrf_token,
+            server_id=999999, command=["ls"],
+        )
+        assert r.status_code == 404
+
+    def test_exec_endpoint_rejects_when_blueprint_enable_exec_false(
+        self, client, owner_cookies, test_server, csrf_token, monkeypatch
+    ):
+        """Dayz-Default hat enableExec=False -> 403, auch fuer Owner."""
+        def _fake_run(**kwargs):
+            raise AssertionError(
+                "run_in_container should NOT be called when Blueprint "
+                "enableExec is False"
+            )
+        monkeypatch.setattr(
+            "routers.servers.exec_service.run_in_container", _fake_run
+        )
+        r = self._post(
+            client, owner_cookies, csrf_token,
+            server_id=test_server.id, command=["ls"],
+        )
+        # Detail-Text darf keine internen Pfade leaken.
+        assert r.status_code == 403
+        body = r.json()
+        assert "Exec" in body.get("detail", "")
+
+    def test_exec_endpoint_runs_argv_verbatim_no_shell(
+        self, client, owner_cookies, test_server, csrf_token, monkeypatch
+    ):
+        """Kern-Invariante: argv wird verbatim an den Service durchgereicht.
+        Wir simulieren einen Blueprint mit enableExec=True und pruefen, dass
+        der Service die exakt gleichen Strings bekommt, die der Client
+        geschickt hat -- inklusive Shell-Metazeichen, die als literaler
+        Dateiname behandelt werden (nicht als Shell-Escape).
+        """
+        # Dayz-Blueprint im Service-Lookup ueberschreiben mit enableExec=True.
+        class _Runtime:
+            enableExec = True
+            execTimeoutSeconds = 42
+        class _FakeBP:
+            runtime = _Runtime()
+        monkeypatch.setattr(
+            "routers.servers.exec_service.load_blueprint_for_server",
+            lambda s: _FakeBP(),
+        )
+
+        seen: dict = {}
+        def _fake_run(*, server_id, command, timeout, user_id):
+            seen["server_id"] = server_id
+            seen["command"] = command
+            seen["timeout"] = timeout
+            seen["user_id"] = user_id
+            return {"ok": True, "stdout": "out", "stderr": ""}
+        monkeypatch.setattr(
+            "routers.servers.exec_service.run_in_container", _fake_run
+        )
+
+        dangerous_argv = ["ls", "/data; rm -rf /tmp/x", "--with-dash"]
+        r = self._post(
+            client, owner_cookies, csrf_token,
+            server_id=test_server.id, command=dangerous_argv,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True
+        # Genau das argv ist angekommen -- KEIN String, KEIN sh -c.
+        assert seen["command"] == dangerous_argv
+        assert all(isinstance(a, str) for a in seen["command"])
+        # Timeout kommt aus Blueprint, nicht aus User-Input.
+        assert seen["timeout"] == 42
+
+    def test_exec_endpoint_passes_output_through_from_service(
+        self, client, owner_cookies, test_server, csrf_token, monkeypatch
+    ):
+        """Der Endpoint reicht die Service-Response 1:1 durch. Truncation
+        selbst wird im Service gemacht (siehe test_exec_service.py).
+
+        Hier verifizieren wir nur: was der Service zurueckgibt, kommt im
+        Response-Body identisch an (mit den Keys ok/stdout/stderr).
+        """
+        class _Runtime:
+            enableExec = True
+            execTimeoutSeconds = 60
+        class _FakeBP:
+            runtime = _Runtime()
+        monkeypatch.setattr(
+            "routers.servers.exec_service.load_blueprint_for_server",
+            lambda s: _FakeBP(),
+        )
+        # Wir geben hier KEINEN Riesen-String, sondern ein eindeutiges
+        # Marker-Paar, das nur in unserem Fake vorkommt. So sehen wir
+        # exakt, was der Endpoint durchreicht.
+        monkeypatch.setattr(
+            "routers.servers.exec_service.run_in_container",
+            lambda **kw: {
+                "ok": True,
+                "stdout": "stdout-MARKER-42\n",
+                "stderr": "stderr-MARKER-43\n",
+            },
+        )
+        r = self._post(
+            client, owner_cookies, csrf_token,
+            server_id=test_server.id, command=["echo", "hello"],
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["stdout"] == "stdout-MARKER-42\n"
+        assert body["stderr"] == "stderr-MARKER-43\n"
+
+    def test_exec_endpoint_returns_500_on_exec_failure(
+        self, client, owner_cookies, test_server, csrf_token, monkeypatch
+    ):
+        class _Runtime:
+            enableExec = True
+            execTimeoutSeconds = 60
+        class _FakeBP:
+            runtime = _Runtime()
+        monkeypatch.setattr(
+            "routers.servers.exec_service.load_blueprint_for_server",
+            lambda s: _FakeBP(),
+        )
+        monkeypatch.setattr(
+            "routers.servers.exec_service.run_in_container",
+            lambda **kw: {"ok": False, "stdout": "", "stderr": "",
+                         "error": "exit 1"},
+        )
+        r = self._post(
+            client, owner_cookies, csrf_token,
+            server_id=test_server.id, command=["false"],
+        )
+        assert r.status_code == 500
+
+    def test_exec_endpoint_returns_504_on_timeout(
+        self, client, owner_cookies, test_server, csrf_token, monkeypatch
+    ):
+        class _Runtime:
+            enableExec = True
+            execTimeoutSeconds = 60
+        class _FakeBP:
+            runtime = _Runtime()
+        monkeypatch.setattr(
+            "routers.servers.exec_service.load_blueprint_for_server",
+            lambda s: _FakeBP(),
+        )
+        monkeypatch.setattr(
+            "routers.servers.exec_service.run_in_container",
+            lambda **kw: {"ok": False, "stdout": "", "stderr": "",
+                         "error": "timeout nach 60s"},
+        )
+        r = self._post(
+            client, owner_cookies, csrf_token,
+            server_id=test_server.id, command=["sleep", "999"],
+        )
+        assert r.status_code == 504

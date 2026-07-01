@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -28,6 +28,7 @@ from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
 from games import get_plugin
 from games.base import container_name_for, _console_log_path, _append_console_log
 from services import EmailService, docker_service
+from services import exec_service
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
@@ -984,6 +985,103 @@ def server_console_input(
         # Generische Fehlermeldung - keine Container-Internas leaken.
         raise HTTPException(status_code=500, detail="Eingabe konnte nicht zugestellt werden")
     return {"ok": True}
+
+
+# ── Exec-Tab (v1.4.7+) ─────────────────────────────────────────────────────
+#
+# Oneshot-Befehl im MSM-Container des Servers. Sicherheit:
+# - Auth: Cookie + CSRF + neue Permission ``server.console.exec``.
+# - Blueprint-Gate: ``runtime.enableExec=true`` im Server-Blueprint.
+#   Wer die Permission hat, aber im Blueprint des Servers ist Exec aus,
+#   bekommt 403 -- so bleibt ein "neuer Exec-User pro Server"-Workflow
+#   sauber (Server-Owner aktivieren Exec pro Blueprint).
+# - argv-Liste, kein Shell-String. Wir bauen NIE ``["sh", "-c", userstring]``,
+#   also kann ein User mit ``server.console.exec`` keine Shell-Metazeichen
+#   eskalieren. ``container.exec_run(argv)`` fuehrt die args als exec-Args
+#   des Zielprozesses aus, ohne Shell dazwischen.
+# - Container-Name kommt ausschliesslich aus ``container_name_for(server.id)``;
+#   es gibt KEIN Feld im Request, mit dem der User den Container beeinflussen
+#   koennte. Damit ist "Host-Exec" oder "Container eines anderen Servers"
+#   strukturell ausgeschlossen.
+# - Output gedeckelt (256 KiB) im Service, Timeout (1..600s) aus Blueprint.
+# - Audit-Log (server_id, user_id, argv) im Service -- Output wird NICHT
+#   geloggt (kann Secrets enthalten).
+class ExecCommandBody(BaseModel):
+    """Body fuer POST /api/servers/{id}/exec.
+
+    Args als argv-Liste, nicht als String. Pydantic validiert:
+    - 1..32 Elemente (sonst 422)
+    - jedes Element: max 4096 Zeichen (sonst 422)
+    """
+
+    command: list[str] = Field(..., min_length=1, max_length=32)
+
+    @field_validator("command")
+    @classmethod
+    def _check_each_arg(cls, v: list[str]) -> list[str]:
+        for i, arg in enumerate(v):
+            if not isinstance(arg, str):
+                raise ValueError(f"command[{i}] muss ein String sein")
+            if len(arg) > 4096:
+                raise ValueError(
+                    f"command[{i}] zu lang ({len(arg)} > 4096 Zeichen)"
+                )
+        return v
+
+
+@router.post("/{server_id}/exec")
+def server_exec(
+    server_id: int,
+    body: ExecCommandBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Fuehrt ``body.command`` (argv) im Container von ``server_id`` aus.
+
+    Auth: Cookie + CSRF + ``server.console.exec``.
+    Blueprint-Gate: ``runtime.enableExec=true``.
+    Output gedeckelt; bei Fehler generische Statuscodes (500/504),
+    keine internen Pfade/Stacktraces im Response.
+    """
+    require_server_permission(user, server_id, db, "server.console.exec")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+    # Blueprint-Gate: per-Blueprint-Opt-in. Default ist False.
+    blueprint = exec_service.load_blueprint_for_server(server)
+    if blueprint is None or not getattr(
+        blueprint.runtime, "enableExec", False
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Exec ist im Blueprint dieses Servers deaktiviert",
+        )
+
+    timeout = int(getattr(blueprint.runtime, "execTimeoutSeconds", 60))
+
+    result = exec_service.run_in_container(
+        server_id=server_id,
+        command=body.command,
+        timeout=timeout,
+        user_id=user.id,
+    )
+
+    if not result["ok"]:
+        err = (result.get("error") or "").lower()
+        if "timeout" in err:
+            raise HTTPException(
+                status_code=504, detail="Exec-Timeout ueberschritten"
+            )
+        # Generische Fehlermeldung -- keine Container-Internas leaken.
+        raise HTTPException(status_code=500, detail="Exec fehlgeschlagen")
+
+    return {
+        "ok": True,
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+    }
 
 
 @router.get("/{server_id}/logs")
