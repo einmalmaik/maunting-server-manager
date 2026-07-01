@@ -9,14 +9,25 @@ import { type PanelTimeFormat } from '@/utils/timeFormat'
 
 interface Props {
   serverId: number
+  /**
+   * Welcher Modus gerendert wird.
+   * - "console" (default): klassische stdin-Konsole (POST /console/input).
+   *   Schreibt eine Zeile in den STDIN des laufenden Server-Prozesses.
+   * - "exec": One-Shot-Befehl im MSM-Container (POST /exec).
+   *   Sendet argv als Array; kein Shell-String, also keine Metazeichen-
+   *   Eskalation. Output wird in den Live-Stream gemischt.
+   */
+  mode?: ConsoleMode
 }
+
+type ConsoleMode = 'console' | 'exec'
 
 type LineTone = 'error' | 'warn' | 'success' | 'info' | 'default'
 type ConsoleLogLine = {
   marker: number
   text: string
   timestamp: string | null
-  source: 'msm' | 'docker' | 'unknown'
+  source: 'msm' | 'docker' | 'exec' | 'unknown'
 }
 type ConsoleFrame = {
   id?: number
@@ -169,9 +180,10 @@ const ConsoleLogLineDisplay = React.memo(function ConsoleLogLineDisplay({
   )
 })
 
-export function ServerConsolePanel({ serverId }: Props) {
+export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
   const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('server.console.write', serverId)
+  const canExec = useHasPermission('server.console.exec', serverId)
   const [logs, setLogs] = useState<ConsoleLogLine[]>([])
   const [timeFormat, setTimeFormat] = useState<PanelTimeFormat>('24h')
 
@@ -356,6 +368,129 @@ export function ServerConsolePanel({ serverId }: Props) {
     }
   }
 
+  // ── Exec-Modus (v1.4.7+) ──────────────────────────────────────────────
+  //
+  // POST /api/servers/{id}/exec mit argv-Array. Wir parsen die User-Eingabe
+  // als Whitespace-getrennte argv-Liste -- KEINE Shell-Parsing, KEIN shlex.
+  // Damit kann der User mit ``server.console.exec``-Permission beliebige
+  // Befehle ausfuehren, aber Shell-Metazeichen (``,``, ``;``, ``|``, ``$()``,
+  // Backticks) sind literaler Text, keine Eskalations-Vektoren -- weil das
+  // Backend das argv 1:1 an ``container.exec_run`` weiterreicht (siehe
+  // ``backend/services/exec_service.py``).
+  //
+  // Output (stdout + stderr) wird in den Live-Stream gemischt mit
+  // source="exec", damit der User die Exec-Ausgabe im Kontext der normalen
+  // Server-Logs sieht.
+  const appendExecOutput = (command: string, stdout: string, stderr: string, ok: boolean) => {
+    const ts = new Date().toISOString()
+    const lines: ConsoleLogLine[] = []
+    // Echo des eingegebenen Befehls (mit Prefix), damit im Stream klar ist,
+    // dass es ein Exec-Call war.
+    lines.push({
+      marker: nextSeqRef.current + 1 + lines.length,
+      text: `$ ${command}`,
+      timestamp: ts,
+      source: 'exec',
+    })
+    nextSeqRef.current += 1
+    if (stdout) {
+      for (const ln of stdout.split('\n')) {
+        lines.push({
+          marker: nextSeqRef.current + 1,
+          text: ln,
+          timestamp: ts,
+          source: 'exec',
+        })
+        nextSeqRef.current += 1
+      }
+    }
+    if (stderr) {
+      for (const ln of stderr.split('\n')) {
+        lines.push({
+          marker: nextSeqRef.current + 1,
+          text: ln,
+          timestamp: ts,
+          source: 'exec',
+        })
+        nextSeqRef.current += 1
+      }
+    }
+    if (!ok) {
+      lines.push({
+        marker: nextSeqRef.current + 1,
+        text: t('servers.execFailed'),
+        timestamp: ts,
+        source: 'exec',
+      })
+      nextSeqRef.current += 1
+    }
+    setLogs((prev) => [...prev, ...lines])
+  }
+
+  const sendExec = async () => {
+    const line = inputValue.trim()
+    if (!line) return
+    // argv parsen: simple Whitespace-Split. Bewusst NICHT shell-like --
+    // Quotes werden NICHT ausgewertet, Backslashes NICHT escapes.
+    // Beispiel: User tippt  ``ls "/data; rm -rf /"``  -> argv =
+    // ``["ls", '"/data;', 'rm', '-rf', '/"']``. Schluesselzeichen sind
+    // literaler Text, keine Eskalation. Backend verifiziert das ebenfalls
+    // (test_exec_endpoint_runs_argv_verbatim_no_shell).
+    const command = line.split(/\s+/).filter((s) => s.length > 0).slice(0, 32)
+    if (command.length === 0) return
+
+    setSending(true)
+    setHistory((prev) => [line, ...prev.filter((item) => item !== line)].slice(0, 50))
+    setHistoryIndex(-1)
+    setInputValue('')
+
+    try {
+      const result = await api<{ ok: boolean; stdout: string; stderr: string }>(
+        `/servers/${serverId}/exec`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ command }),
+        },
+      )
+      appendExecOutput(line, result.stdout, result.stderr, result.ok)
+    } catch (err) {
+      // 403/422/500/504: Backend liefert generische Messages.
+      // Wir zeigen die Fehlermeldung im Stream, damit der User weiss, was
+      // passiert ist -- ohne Container-Internas (Backend leakt keine).
+      const message = err instanceof Error ? err.message : t('servers.execFailed')
+      appendExecOutput(line, '', message, false)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // Welcher Input-Handler gerendert wird:
+  // - console-Modus: sendInput (POST /console/input, stdin)
+  // - exec-Modus: sendExec (POST /exec, argv-basiert)
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (mode === 'exec') {
+      void sendExec()
+    } else {
+      void sendInput()
+    }
+  }
+
+  // Welcher Permission-Gate gilt:
+  // - console: console.write
+  // - exec: console.exec
+  // - Blueprint-Gate wird im Backend erzwungen; das Frontend versteckt
+  //   den Input nur, wenn der User die Permission GAR NICHT hat. Selbst
+  //   wenn das Frontend den Input zeigt, lehnt das Backend sauber ab.
+  const showInputForm = mode === 'exec' ? canExec : canWrite
+  const inputPlaceholder =
+    mode === 'exec'
+      ? t('servers.execPlaceholder', { defaultValue: 'Befehl im Container ausführen (z. B. ls -la /data)' })
+      : t('servers.consolePlaceholder')
+  const sendLabel = mode === 'exec'
+    ? t('servers.execSend', { defaultValue: 'Ausführen' })
+    : t('servers.consoleSend')
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowUp') {
       e.preventDefault()
@@ -403,7 +538,11 @@ export function ServerConsolePanel({ serverId }: Props) {
       <div className="p-5 border-b border-outline flex items-center justify-between gap-3 flex-wrap">
         <div className="inline-flex items-center gap-3">
           <Terminal className="w-4 h-4 text-on-surface-variant" />
-          <h3 className="font-headline text-body-md text-on-surface">{t('servers.console')}</h3>
+          <h3 className="font-headline text-body-md text-on-surface">
+            {mode === 'exec'
+              ? t('servers.execTab', { defaultValue: 'Exec (Container)' })
+              : t('servers.console')}
+          </h3>
           {connStatus !== 'live' && (
             <span
               data-testid="console-conn-status"
@@ -493,12 +632,9 @@ export function ServerConsolePanel({ serverId }: Props) {
           )}
         </div>
 
-        {canWrite && (
+        {showInputForm && (
           <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              void sendInput()
-            }}
+            onSubmit={handleSubmit}
             className="mt-3 flex items-center gap-2"
             data-testid="console-input-form"
           >
@@ -507,7 +643,7 @@ export function ServerConsolePanel({ serverId }: Props) {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={t('servers.consolePlaceholder')}
+              placeholder={inputPlaceholder}
               disabled={sending}
               maxLength={1024}
               autoComplete="off"
@@ -522,7 +658,7 @@ export function ServerConsolePanel({ serverId }: Props) {
               data-testid="console-send"
             >
               <Send className="w-3.5 h-3.5" />
-              {t('servers.consoleSend')}
+              {sendLabel}
             </button>
           </form>
         )}
