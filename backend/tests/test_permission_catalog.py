@@ -58,7 +58,7 @@ def test_known_server_keys_present():
     must_have = {
         "server.view", "server.start", "server.stop", "server.restart", "server.install",
         "server.config.write", "server.network.manage", "server.resources.manage",
-        "server.console.read", "server.console.write",
+        "server.console.read", "server.console.write", "server.console.exec",
         "server.files.read", "server.files.write", "server.files.delete",
         "server.backups.read", "server.backups.create", "server.backups.restore", "server.backups.delete",
         "server.mods.read", "server.mods.write", "server.mods.toggle",
