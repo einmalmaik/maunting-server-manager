@@ -309,3 +309,165 @@ def test_setup_command_retry_adds_network_concurrency_1(tmp_path, monkeypatch):
     assert "--network-concurrency=1" in seen_argv[1]
     assert "--no-audit" in seen_argv[1]
     assert "--prefer-offline" in seen_argv[1]
+
+
+# ── Regression: Working-Tree-Mutationen duerfen Pull nicht blockieren ─────
+#
+# Hintergrund: Bis v1.4.5 rief ``install_github_source`` vor dem
+# ``git reset --hard origin/<branch>`` ein ``git checkout -B <branch> origin/<branch>``
+# auf. ``git checkout`` bricht ab, sobald der Working-Tree lokale Mutationen
+# hat (etwa weil ein User im Panel eine Datei manuell editiert hat oder ein
+# vorheriger ``npm ci`` Files angelegt hat, die nicht committet sind). Der
+# Checkout-Fehler eskalierte als ``GithubSourceError``, BEVOR das eigentliche
+# Reset lief -- mit dem Effekt, dass ``origin/<branch>`` zwar auf den neuen
+# SHA upgedated wurde, der Working-Tree aber stehen blieb. Auf
+# Singra-Discord-bot konkret: HEAD blieb auf PR #15 (a9c2f54), obwohl
+# origin/master bereits auf PR #17 (0570540) stand.
+#
+# Fix: ``checkout -B`` ist redundant -- ``reset --hard`` setzt HEAD+Tree
+# atomar ohne Working-Tree-Schutz. Der neue Pfad geht ueber
+# ``git branch -f`` + ``git reset --hard``.
+def _build_minimal_repo(tmp_path, *, with_subpath=False):
+    """Baut ein Bare-Upstream + initialen Clone auf v1. Liefert (upstream, clone)."""
+    import subprocess
+
+    upstream = tmp_path / "upstream.git"
+    clone = tmp_path / "clone"
+    src = tmp_path / "src"
+    src.mkdir()
+    # Bare-Upstream + Working-Copy in einem Rutsch, damit beide Branches
+    # dieselbe History teilen und Push ohne -f / fetch-first durchlaeuft.
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(upstream)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(src), "init", "--initial-branch=main"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(src), "config", "user.email", "t@t"], check=True)
+    subprocess.run(["git", "-C", str(src), "config", "user.name", "t"], check=True)
+    (src / "README.md").write_text("v1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(src), "add", "README.md"], check=True)
+    subprocess.run(["git", "-C", str(src), "commit", "-m", "v1"], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "-C", str(src), "remote", "add", "origin", str(upstream)],
+                   check=True)
+    subprocess.run(["git", "-C", str(src), "push", "origin", "main"], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "clone", "--depth", "1", str(upstream), str(clone)],
+                   check=True, capture_output=True)
+    return upstream, clone
+
+
+def _push_v2(upstream, src):
+    """Hängt einen v2-Commit an die existierende Working-Copy und pusht."""
+    import subprocess
+
+    (src / "README.md").write_text("v2\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(src), "add", "README.md"], check=True)
+    subprocess.run(["git", "-C", str(src), "commit", "-m", "v2"], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "-C", str(src), "push", "origin", "main"], check=True,
+                   capture_output=True)
+
+
+def test_pull_updates_working_tree_despite_dirty_workdir(tmp_path, monkeypatch):
+    """Reproducer fuer den "neuste Version wird nicht gepullt"-Bug.
+
+    Szenario: Lokaler Clone steht auf v1, Remote hat bereits v2. Working-Tree
+    hat lokale Mutationen (simuliert vorherigen npm-ci oder Admin-Edit). Der
+    Pull MUSS Working-Tree trotzdem auf v2 bringen -- ohne "git fehlgeschlagen:
+    Your local changes would be overwritten".
+    """
+    import subprocess
+
+    from blueprints.github_source import install_github_source
+    from blueprints.schema import load_blueprint_dict
+
+    upstream, clone = _build_minimal_repo(tmp_path)
+    src = tmp_path / "src"
+
+    # Working-Tree mutieren (das war der Ausloeser fuer den Bug).
+    (clone / "README.md").write_text("lokale mutation\n", encoding="utf-8")
+
+    # v2 nach upstream pushen.
+    _push_v2(upstream, src)
+
+    # Lokal origin auf das Bare-Repo umbiegen, damit install_github_source
+    # ohne Netz funktioniert. Wir mocken nur die Clone-URL-Berechnung.
+    monkeypatch.setattr(
+        "blueprints.github_source._clone_url",
+        lambda repo: str(upstream),
+    )
+
+    bp = load_blueprint_dict({
+        "version": 1,
+        "meta": {"id": "t", "name": "T", "category": "bot"},
+        "runtime": {"image": "node:22", "workdir": "/data",
+                    "startup": "node index.js"},
+        "ports": [],
+        "source": {
+            "type": "github",
+            "github": {"repo": "fake/repo", "branch": "main"},
+        },
+    })
+
+    result = install_github_source(bp, str(clone))
+
+    # Pull muss erfolgreich sein und Working-Tree MUSS v2-Inhalt haben.
+    assert result["ok"] is True, f"Pull schlug fehl: {result.get('error')!r}"
+    assert (clone / "README.md").read_text(encoding="utf-8") == "v2\n", (
+        "Working-Tree zeigt nach Pull immer noch alten/vormatierten Inhalt -- "
+        "das ist der 'pullt die neuste Version nicht'-Bug."
+    )
+    # HEAD muss auf den v2-Commit zeigen.
+    head = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    upstream_head = subprocess.run(
+        ["git", "--git-dir", str(upstream), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert head == upstream_head, (
+        f"Lokaler HEAD ({head[:12]}) != upstream HEAD ({upstream_head[:12]})"
+    )
+
+
+def test_pull_overwrites_uncommitted_setup_artifacts(tmp_path, monkeypatch):
+    """Spezialfall des obigen Tests: Working-Tree enthaelt Artefakte wie
+    ``node_modules/`` oder ``.env``-Files, die MSM selbst angelegt hat und
+    die durch den Pull ueberschrieben werden muessen.
+    """
+    import subprocess
+
+    from blueprints.github_source import install_github_source
+    from blueprints.schema import load_blueprint_dict
+
+    upstream, clone = _build_minimal_repo(tmp_path)
+    src = tmp_path / "src"
+
+    # Artefakte, wie sie nach einem ersten Install (npm ci) uebrig bleiben.
+    (clone / "node_modules").mkdir()
+    (clone / "node_modules" / "foo.txt").write_text("leftover\n")
+    (clone / ".env.local").write_text("LOCAL=1\n")
+
+    _push_v2(upstream, src)
+
+    monkeypatch.setattr(
+        "blueprints.github_source._clone_url",
+        lambda repo: str(upstream),
+    )
+
+    bp = load_blueprint_dict({
+        "version": 1,
+        "meta": {"id": "t", "name": "T", "category": "bot"},
+        "runtime": {"image": "node:22", "workdir": "/data",
+                    "startup": "node index.js"},
+        "ports": [],
+        "source": {
+            "type": "github",
+            "github": {"repo": "fake/repo", "branch": "main"},
+        },
+    })
+
+    result = install_github_source(bp, str(clone))
+    assert result["ok"] is True, f"Pull schlug fehl: {result.get('error')!r}"
+    assert (clone / "README.md").read_text(encoding="utf-8") == "v2\n"

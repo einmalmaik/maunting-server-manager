@@ -473,12 +473,41 @@ def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:
     has_git = (target / ".git").is_dir()
     try:
         if has_git:
-            # Frischer HEAD -- erst alle lokalen Mutationen weg, dann mit
-            # remote-HEAD gleichsetzen. Reihenfolge wichtig: erst fetch (um
-            # origin/<branch> zu aktualisieren), dann reset --hard (um Working
-            # Tree exakt auf das entfernte HEAD zu zwingen).
+            # Frischer HEAD -- erst fetch (origin/<branch> aktualisieren),
+            # dann Working Tree exakt auf das entfernte HEAD zwingen.
+            #
+            # Frueher stand hier ``git checkout -B <branch> origin/<branch>``
+            # VOR dem ``git reset --hard``. Das war ein Bug: ``git checkout``
+            # bricht ab, sobald der Working Tree lokale Mutationen hat
+            # (typisch nach SetupCommands wie ``npm ci``, die Files anlegen
+            # oder wenn ein Admin-User per Panel-Console manuell editiert
+            # hat). Der Checkout-Fehler eskalierte als ``GithubSourceError``,
+            # BEVOR das nachfolgende ``git reset --hard`` lief -- mit dem
+            # Effekt, dass ``origin/<branch>`` zwar auf den neuen SHA
+            # upgedated wurde, der Working-Tree aber auf dem alten Commit
+            # stehen blieb. Genau das war der "pullt die neuste Version
+            # nicht"-Bug (z. B. auf Singra-Discord-bot: HEAD blieb auf
+            # PR #15 statt auf den frischen PR #17 zu springen).
+            #
+            # Loesung: ``checkout -B`` weg, da redundant. ``reset --hard``
+            # setzt HEAD und Working Tree atomar auf ``origin/<branch>`` und
+            # ueberschreibt dabei Working-Tree-Mutationen ohne Schutz --
+            # exakt was wir wollen. Wenn ``<branch>`` lokal noch nicht
+            # existiert oder HEAD detached ist, muss er vorher angelegt
+            # werden. ``git branch -f`` wuerde auf neueren Git-Versionen
+            # (>=2.40) bei currently-checked-out-Branches aber scheitern
+            # ("cannot force update the branch ... used by worktree"). Wir
+            # nutzen daher nur dann ``branch -f``, wenn der Branch wirklich
+            # fehlt; sonst reicht ``reset --hard`` direkt.
             _run_git(["fetch", "origin", branch, "--depth", "1", "--prune"], cwd=target)
-            _run_git(["checkout", "-B", branch, f"origin/{branch}"], cwd=target)
+            existing_ref = subprocess.run(
+                ["git", "-C", str(target), "show-ref", "--verify", f"refs/heads/{branch}"],
+                capture_output=True, env=_git_env(),
+            )
+            if existing_ref.returncode != 0:
+                # Branch existiert lokal noch nicht (Edge-Case nach
+                # git-init-only oder Branch-Rename). Anlegen, dann reset.
+                _run_git(["branch", branch, f"origin/{branch}"], cwd=target)
             _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target)
             # Belt-and-suspenders: nochmaliger reset --hard. Falls zwischen den
             # Befehlen ein externer Prozess (cron, anderes Skript) Commits macht
