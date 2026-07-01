@@ -30,6 +30,7 @@ import logging
 from typing import Any
 
 from games.base import container_name_for
+from games import get_plugin
 from services import docker_service
 
 logger = logging.getLogger("msm.audit.exec")
@@ -44,6 +45,33 @@ MAX_OUTPUT_BYTES = 256 * 1024
 # angehaengt, damit der User weiss, dass abgeschnitten wurde (im
 # Gegensatz zu "der Befehl hat einfach nichts mehr ausgegeben").
 _TRUNCATION_MARKER = "\n...[truncated]"
+
+
+def load_blueprint_for_server(server) -> Any | None:
+    """Laedt den Blueprint, mit dem ``server`` installiert wurde.
+
+    Delegiert an ``get_plugin(server.game_type).get_blueprint()`` -- das ist
+    der einzige existierende Pfad in MSM, einen Blueprint zu einem Server zu
+    finden (Blueprints werden zur Laufzeit aus ``backend/blueprints/native``
+    und ``blueprints/community/*.blueprint.json`` geladen und in der Registry
+    indiziert).
+
+    Returns ``None``, wenn kein Plugin gefunden wird (z. B. weil der Server
+    zu einer ``game_type`` gehoert, die nicht mehr in der Registry ist --
+    kaputter/alten Stand). Der Endpoint behandelt ``None`` als "Exec
+    deaktiviert", so dass ein kaputter Server nie versehentlich Exec-Zugriff
+    erlaubt.
+
+    Hintergrund: Wir hatten keine Blueprint-Snapshot-Spalte im ``Server``-
+    Model. Ein expliziter Snapshot waere die saubere Loesung (dann wuerde
+    Exec auch funktionieren, wenn ein Community-Blueprint aus der Registry
+    entfernt wurde), aber das waere ein groesserer Schema-Bruch -- fuer
+    v1.4.7 reicht der Registry-Lookup. TODO v1.5: Server.blueprint_snapshot.
+    """
+    plugin = get_plugin(server.game_type)
+    if plugin is None:
+        return None
+    return plugin.get_blueprint()
 
 
 def _truncate_output(text: str, max_bytes: int = MAX_OUTPUT_BYTES) -> str:

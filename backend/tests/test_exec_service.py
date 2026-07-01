@@ -198,3 +198,36 @@ def test_run_in_container_logs_failure_path(monkeypatch, caplog):
     assert "false" in text and "99" in text and "3" in text
     assert "leaky-stdout" not in text
     assert "leaky-stderr" not in text
+
+
+# ── Task 7: Blueprint-Lookup-Helper ─────────────────────────────────────
+
+
+def test_load_blueprint_for_server_uses_plugin(monkeypatch):
+    """Der Helper delegiert an ``get_plugin(server.game_type).get_blueprint()``
+    -- das ist der einzige existierende Pfad, einen Blueprint pro Server zu
+    bekommen. Wichtig: Wenn kein Plugin gefunden wird (Server kaputt),
+    gibt der Helper None zurueck statt zu crashen.
+    """
+    from services import exec_service
+
+    fake_bp = type("BP", (), {"runtime": type("R", (), {"enableExec": True})()})()
+
+    class _FakePlugin:
+        def get_blueprint(self):
+            return fake_bp
+
+    monkeypatch.setattr(
+        exec_service, "get_plugin", lambda gt: _FakePlugin()
+    )
+    fake_server = type("S", (), {"game_type": "singra_backend"})()
+    bp = exec_service.load_blueprint_for_server(fake_server)
+    assert bp is fake_bp
+    assert bp.runtime.enableExec is True
+
+
+def test_load_blueprint_for_server_returns_none_when_no_plugin(monkeypatch):
+    from services import exec_service
+    monkeypatch.setattr(exec_service, "get_plugin", lambda gt: None)
+    fake_server = type("S", (), {"game_type": "unknown_game_xyz"})()
+    assert exec_service.load_blueprint_for_server(fake_server) is None
