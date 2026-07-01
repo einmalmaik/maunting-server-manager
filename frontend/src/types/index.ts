@@ -133,6 +133,8 @@ export interface GameInfo {
   mod_support: boolean
   supports_steam_workshop: boolean
   supports_server_file_updates?: boolean
+  // v1.4.7+: Exec-Tab-Opt-in aus dem Blueprint (runtime.enableExec).
+  enable_exec?: boolean
   ports?: BlueprintPortDef[]
   source?: 'native' | 'community'
 }

@@ -34,10 +34,11 @@ import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
 
-type TabKey = "files" | "console" | "mods" | "restarts" | "backups" | "databases" | "webhooks";
+type TabKey = "files" | "console" | "exec" | "mods" | "restarts" | "backups" | "databases" | "webhooks";
 const VALID_TABS: TabKey[] = [
   "files",
   "console",
+  "exec",
   "mods",
   "restarts",
   "backups",
@@ -205,6 +206,16 @@ export function ServerDetail() {
       { key: "files", label: t("tabs.files"), icon: FileText },
       { key: "console", label: t("tabs.console"), icon: Terminal },
     ];
+    // v1.4.7+: Exec-Tab nur anzeigen, wenn der Server-Blueprint Exec aktiviert
+    // hat (runtime.enableExec=true). Backend erzwungen das nochmal beim
+    // Endpoint -- das hier ist nur UI-Hygiene.
+    if (gameInfo?.enable_exec) {
+      list.push({
+        key: "exec",
+        label: t("tabs.exec", { defaultValue: "Exec" }),
+        icon: Terminal,
+      });
+    }
     if (showModTab)
       list.push({ key: "mods", label: t("tabs.mods"), icon: Package });
     list.push({
@@ -220,7 +231,7 @@ export function ServerDetail() {
       icon: Webhook,
     });
     return list;
-  }, [t, showModTab]);
+  }, [t, showModTab, gameInfo?.enable_exec]);
 
   const rawTab = (searchParams.get("tab") || "files") as TabKey;
   const activeTab: TabKey =
@@ -801,6 +812,9 @@ export function ServerDetail() {
       <div>
         {activeTab === "files" && <FileManager serverId={serverId} />}
         {activeTab === "console" && <ServerConsolePanel serverId={serverId} />}
+        {activeTab === "exec" && gameInfo?.enable_exec && (
+          <ServerConsolePanel serverId={serverId} mode="exec" />
+        )}
         {activeTab === "mods" && showModTab && (
           <ModManager serverId={serverId} />
         )}

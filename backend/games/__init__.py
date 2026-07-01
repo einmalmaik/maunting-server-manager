@@ -73,6 +73,10 @@ def list_game_info() -> list[dict]:
             "mod_support": bp_mods.supportsMods,
             "supports_steam_workshop": bp_mods.supportsSteamWorkshop,
             "supports_server_file_updates": supports_file_updates,
+            # v1.4.7+: Exec-Tab-Opt-in pro Blueprint. UI nutzt das, um den
+            # Tab nur dann anzuzeigen, wenn der Server-Blueprint das Feature
+            # aktiviert hat (Default: False).
+            "enable_exec": bool(getattr(bp.runtime, "enableExec", False)),
             "ports": [
                 {"name": p.name.value, "protocol": p.protocol.value, "role": role}
                 for p, (role, _protocol) in zip(bp.ports, port_requirements)
