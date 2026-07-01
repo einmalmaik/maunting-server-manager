@@ -658,6 +658,7 @@
   "tabs": {
     "files": "Dateimanager",
     "console": "Konsole",
+    "exec": "Exec",
     "mods": "Mod-Manager",
     "restarts": "Automatische Neustarts",
     "backups": "Backups",

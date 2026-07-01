@@ -595,6 +595,7 @@
   "tabs": {
     "files": "Files",
     "console": "Console",
+    "exec": "Exec",
     "mods": "Mods",
     "restarts": "Auto-Restart",
     "backups": "Backups",
