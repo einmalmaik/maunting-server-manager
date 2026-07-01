@@ -80,7 +80,8 @@
       "howto": "How-To Guides",
       "updates": "Steam-Updates & Branches",
       "backups": "Backups (Config & Saves)",
-      "troubleshooting": "Troubleshooting"
+      "troubleshooting": "Troubleshooting",
+      "exec": "Container-Befehle (Exec-Tab)"
     },
     "intro": {
       "body": "Eine Blueprint ist eine reine JSON-Definition für einen Server-Typ — also z. B. „DayZ-Server\" oder „Minecraft-Server\", noch nicht der laufende Server selbst. Sie sagt dem Panel, welches Docker-Image genutzt wird, welche Ports der Server braucht, wie er startet und woher die Server-Dateien kommen (Steam, HTTPS-Download, fertiges Image oder manuell). Aus einer Blueprint können beliebig viele Server-Instanzen erstellt werden.\n\nBlueprints enthalten niemals Skripte oder Hooks — sie werden vor dem Start streng vom Panel validiert. Dadurch bleibt das System sicher und performant."
@@ -112,6 +113,8 @@
       "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen (z. B. {ENV.SERVER_NAME}). Verbotene Zeichen: $, Backtick.",
       "runtimeEnsureDirs": "Relative Ordner, die vor jedem Start im Server-Verzeichnis angelegt werden. Geeignet für Profile-, Log-, Cache- oder Runtime-Ordner, die der Startbefehl erwartet.",
       "runtimeConfigPatches": "Liste von Konfigurations-Patches, die vor dem Start angewendet werden. Jeder Patch muss type, file und value enthalten (sowie section/key für 'ini' oder regex für 'regex').",
+      "runtimeEnableExec": "Exec-Tab aktivieren. Default: false. Self-Hosted, aber Befehle laufen NUR im MSM-verwalteten Container dieses Servers, NIEMALS auf dem Host oder in fremden Containern.",
+      "runtimeExecTimeoutSeconds": "Timeout pro Exec-Aufruf in Sekunden (1..600). Default: 60.",
       "configPatchFields": "↳ configPatches[ ] — Felder",
       "configPatchType": "Patch-Typ. Gültige Werte: ini, regex.",
       "configPatchFile": "Relativer Pfad zur Datei, z. B. Config/Server.ini. Keine absoluten Pfade und kein '..'.",
@@ -212,6 +215,23 @@
       "err9Body": "Beim ersten Hytale-Start zeigt die Console einen OAuth-Link. Öffne ihn, gib den Code ein und nutze einen Hytale-Account mit Zugriff auf den Serverdownload. Bei 403 oder Unauthorized ist meist der Account nicht berechtigt, der Code abgelaufen oder die lokale Hytale-Downloader-Credential-Datei im Server-Verzeichnis muss erneuert werden.",
       "err10Title": "Permission-Repair / chmod: Operation not permitted",
       "err10Body": "Oft nach root-owned Dateien im Server-Ordner (z. B. sudo-Sync). MSM bricht den Start dafür nicht mehr ab. Langfristig: Kopien über MSM oder chown auf Container-UID (runtime.user)."
+    },
+    "exec": {
+      "intro": "Mit dem Exec-Tab können authentifizierte User mit der Permission server.console.exec einmalige Befehle im MSM-verwalteten Container des Servers ausführen — z. B. docker compose logs, npm run build, ls -la /data. Self-Hosted, aber die Befehle laufen NUR im MSM-Container dieses einen Servers, niemals auf dem Host oder in fremden Containern.",
+      "safetyTitle": "Sicherheits-Modell",
+      "safety1": "argv statt Shell-String: Wir reichen das Befehls-Array 1:1 an docker exec weiter. Es gibt keine Shell dazwischen, also können Shell-Metazeichen (;, |, $(), Backticks) nicht eskaliert werden — sie sind literaler Text.",
+      "safety2": "Container-Name kommt nur aus container_name_for(server.id): Es gibt kein Request-Feld, mit dem der User den Zielcontainer beeinflussen kann. Host-Exec oder Container-eines-anderen-Servers ist strukturell ausgeschlossen.",
+      "safety3": "Blueprint-Gate: runtime.enableExec muss true sein, sonst lehnt der Endpoint auch für Owner mit Permission ab (403). Default ist false.",
+      "safety4": "Separate Permission server.console.exec (nicht console.write). Wer Exec bekommt, bekommt es explizit.",
+      "safety5": "Limits: 1..32 Argumente, je max 4096 Zeichen. Timeout 1..600 Sekunden aus Blueprint. Output gedeckelt auf 256 KiB mit [truncated]-Marker.",
+      "safety6": "Audit-Log: Server-ID, User-ID und argv werden geloggt. Output (kann sensible Daten enthalten) wird NICHT geloggt.",
+      "activateTitle": "Exec-Tab pro Blueprint aktivieren",
+      "activateBody": "Im Blueprint unter runtime:",
+      "useTitle": "Im Panel:",
+      "useStep1": "Öffne den Server-Detail-Dialog.",
+      "useStep2": "Klicke auf den Tab \"Exec\" (neben \"Konsole\").",
+      "useStep3": "Tippe einen Befehl ein, z. B. ls -la /data oder npm run build:api.",
+      "useStep4": "Klicke \"Ausführen\". Output erscheint im Stream darunter."
     }
   },
   "servers": {
@@ -240,6 +260,10 @@
     "consolePlaceholder": "Befehl eingeben…",
     "consoleSend": "Senden",
     "consoleInputFailed": "Eingabe konnte nicht zugestellt werden.",
+    "execTab": "Exec (Container)",
+    "execPlaceholder": "Befehl im Container ausführen (z. B. ls -la /data)",
+    "execSend": "Ausführen",
+    "execFailed": "Exec fehlgeschlagen",
     "gameLogs": "Game-Logs",
     "install": "Installieren",
     "reinstall": "Neu installieren",

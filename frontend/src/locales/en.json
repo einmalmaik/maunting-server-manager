@@ -80,7 +80,8 @@
       "howto": "How-To Guides",
       "updates": "Steam updates & branches",
       "backups": "Backups (config & saves)",
-      "troubleshooting": "Troubleshooting"
+      "troubleshooting": "Troubleshooting",
+      "exec": "Container Commands (Exec tab)"
     },
     "intro": {
       "body": "A blueprint is a pure JSON definition for a server type—e.g., 'DayZ Server' or 'Minecraft Server', not the running server itself. It tells the panel which Docker image to use, what ports are needed, how to start, and where to get the server files (Steam, HTTPS, Image, or manual). Countless server instances can be created from a single blueprint.\n\nBlueprints never contain scripts or hooks. They are strictly validated by the panel before execution, keeping the system fast and secure."
@@ -112,6 +113,8 @@
       "runtimeStartup": "Startup command (passed as argv, NO shell). Valid placeholders: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. Also {ENV.<KEY>} for custom env variables (e.g. {ENV.SERVER_NAME}). Forbidden characters: $, backtick.",
       "runtimeEnsureDirs": "Relative directories created inside the server directory before each start. Useful for profile, log, cache, or runtime folders expected by startup arguments.",
       "runtimeConfigPatches": "List of configuration patches applied before start. Each patch requires: type, file, and value (plus section/key for 'ini' or regex for 'regex').",
+      "runtimeEnableExec": "Enable the Exec tab. Default: false. Self-hosted, but commands run ONLY inside the MSM-managed container of this server, NEVER on the host or in other containers.",
+      "runtimeExecTimeoutSeconds": "Timeout per exec call in seconds (1..600). Default: 60.",
       "configPatchFields": "↳ configPatches[ ] — fields",
       "configPatchType": "Patch type. Valid values: ini, regex.",
       "configPatchFile": "Relative file path, e.g. Config/Server.ini. No absolute paths and no '..'.",
@@ -212,6 +215,23 @@
       "err9Body": "On the first Hytale start, the console shows an OAuth link. Open it, enter the code, and use a Hytale account with server-download access. If you see 403 or Unauthorized, the account usually lacks access, the code expired, or the local Hytale downloader credential file in that server directory must be renewed.",
       "err10Title": "Permission repair / chmod: Operation not permitted on start",
       "err10Body": "Often caused by root-owned files in the server directory (e.g. manual sync with sudo) while MSM uses rootless Docker. MSM no longer aborts start for this; check the console hint. Prefer MSM-driven copies or chown to the container UID (runtime.user)."
+    },
+    "exec": {
+      "intro": "The Exec tab lets authenticated users with the server.console.exec permission run one-shot commands inside the MSM-managed container of a server — e.g. docker compose logs, npm run build, ls -la /data. Self-hosted, but commands run ONLY inside the MSM container of that one server, never on the host or in other containers.",
+      "safetyTitle": "Security model",
+      "safety1": "argv instead of a shell string: we pass the command array 1:1 to docker exec. There is no shell in between, so shell metacharacters (;, |, $(), backticks) cannot be escalated — they are literal text.",
+      "safety2": "The container name comes only from container_name_for(server.id): there is no request field that lets the user influence the target container. Host exec or another server's container are structurally impossible.",
+      "safety3": "Blueprint gate: runtime.enableExec must be true, otherwise the endpoint returns 403 even for owners with the permission. Default is false.",
+      "safety4": "Separate server.console.exec permission (not console.write). Users get exec explicitly.",
+      "safety5": "Limits: 1..32 arguments, each max 4096 characters. Timeout 1..600 seconds from blueprint. Output capped at 256 KiB with a [truncated] marker.",
+      "safety6": "Audit log: server id, user id and argv are logged. Output (which may contain sensitive data) is NOT logged.",
+      "activateTitle": "Enable the Exec tab per blueprint",
+      "activateBody": "In the blueprint under runtime:",
+      "useTitle": "In the panel:",
+      "useStep1": "Open the server detail view.",
+      "useStep2": "Click the \"Exec\" tab (next to \"Console\").",
+      "useStep3": "Type a command, e.g. ls -la /data or npm run build:api.",
+      "useStep4": "Click \"Run\". Output appears in the stream below."
     }
   },
   "servers": {
@@ -240,6 +260,10 @@
     "consolePlaceholder": "Type command…",
     "consoleSend": "Send",
     "consoleInputFailed": "Input could not be delivered.",
+    "execTab": "Exec (Container)",
+    "execPlaceholder": "Run a command inside the container (e.g. ls -la /data)",
+    "execSend": "Run",
+    "execFailed": "Exec failed",
     "gameLogs": "Game Logs",
     "install": "Install",
     "reinstall": "Reinstall",
