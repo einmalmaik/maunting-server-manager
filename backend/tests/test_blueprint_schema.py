@@ -473,3 +473,54 @@ def test_allows_multiple_custom_ports_with_same_protocol() -> None:
     bp = load_blueprint_dict(d)
 
     assert [p.name.value for p in bp.ports] == ["game", "custom", "custom", "custom"]
+
+
+# ── Exec-Tab opt-in (v1.4.7) ─────────────────────────────────────────────
+#
+# Hintergrund: Mit dem Exec-Tab koennen User Befehle IM Container ausfuehren
+# (argv, kein Shell). Per Default aus, weil das eine sicherheitsrelevante
+# Funktion ist. Opt-in ueber ``runtime.enableExec``.
+
+
+def test_runtime_enable_exec_defaults_false() -> None:
+    """Default: Exec-Tab nicht aktiv (sicherer Out-of-the-box-Stand)."""
+    bp = load_blueprint_dict(_minimal_valid_dict())
+    assert bp.runtime.enableExec is False
+
+
+def test_runtime_enable_exec_true_accepted() -> None:
+    """Blueprint-Autor kann Exec explizit opt-in'en."""
+    d = _minimal_valid_dict()
+    d["runtime"]["enableExec"] = True
+    bp = load_blueprint_dict(d)
+    assert bp.runtime.enableExec is True
+
+
+def test_runtime_exec_timeout_defaults_60() -> None:
+    """Default-Timeout 60s, genug fuer Standard-CLI wie ``ls``, ``cat``, ``ps``."""
+    bp = load_blueprint_dict(_minimal_valid_dict())
+    assert bp.runtime.execTimeoutSeconds == 60
+
+
+def test_runtime_exec_timeout_accepts_valid_values() -> None:
+    """Erlaubte Bandbreite 1..600s."""
+    d = _minimal_valid_dict()
+    d["runtime"]["execTimeoutSeconds"] = 1
+    assert load_blueprint_dict(d).runtime.execTimeoutSeconds == 1
+    d["runtime"]["execTimeoutSeconds"] = 600
+    assert load_blueprint_dict(d).runtime.execTimeoutSeconds == 600
+
+
+def test_runtime_exec_timeout_rejects_zero() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["execTimeoutSeconds"] = 0
+    with pytest.raises((BlueprintValidationError, ValueError)):
+        load_blueprint_dict(d)
+
+
+def test_runtime_exec_timeout_rejects_over_600() -> None:
+    """Mehr als 10min darf ein einzelner Exec nicht blockieren (DoS-Schutz)."""
+    d = _minimal_valid_dict()
+    d["runtime"]["execTimeoutSeconds"] = 9999
+    with pytest.raises((BlueprintValidationError, ValueError)):
+        load_blueprint_dict(d)

@@ -313,6 +313,13 @@ class BlueprintRuntime(BaseModel):
     # Erlaubt pro-Blueprint Tuning. Default niedrig; für SCUM/Wine oft 45-120s nötig,
     # bis erste Console-Logs erscheinen (KISS: zentrale Config statt harter Defaults pro Game).
     startupCheckSeconds: float = Field(default=5.0, ge=0.0, le=300.0)
+    # Opt-in fuer den Exec-Tab (POST /servers/{id}/exec). Default aus,
+    # weil Exec sicherheitsrelevant ist (User fuehrt Befehle im Container
+    # aus). 1.4.7+
+    enableExec: bool = Field(default=False)
+    # Timeout fuer einzelne Exec-Aufrufe, in Sekunden. Hard-Cap 600s (10min),
+    # um DoS via hängenbleibende Befehle zu verhindern. 1.4.7+
+    execTimeoutSeconds: int = Field(default=60, ge=1, le=600)
 
     @field_validator("image")
     @classmethod
