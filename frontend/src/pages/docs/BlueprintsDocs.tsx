@@ -395,6 +395,17 @@ export function BlueprintsDocs() {
                 {t('docs.reference.runtimeEnsureDirs', 'Relative directories created inside the server directory before each start. Useful for profile, log, cache, or runtime folders expected by startup arguments.')}
               </FieldRow>
               <FieldRow field="runtime.configPatches" type="list" required={false}>{t('docs.reference.runtimeConfigPatches')}</FieldRow>
+              {/* v1.4.7+: Exec-Tab-Opt-in. Default false. Erlaubt authentifizierten
+                  Usern mit Permission ``server.console.exec``, One-Shot-Befehle
+                  im MSM-Container auszufuehren (argv, kein Shell). Siehe
+                  BlueprintsDocs-Sektion "Container-Befehle (Exec-Tab)" weiter
+                  unten. */}
+              <FieldRow field="runtime.enableExec" type="boolean" required={false}>
+                {t('docs.reference.runtimeEnableExec', 'Exec-Tab aktivieren. Default: false. Self-Hosted, aber Befehle laufen NUR im MSM-verwalteten Container dieses Servers, NIEMALS auf dem Host oder in fremden Containern.')}
+              </FieldRow>
+              <FieldRow field="runtime.execTimeoutSeconds" type="integer" required={false}>
+                {t('docs.reference.runtimeExecTimeoutSeconds', 'Timeout pro Exec-Aufruf in Sekunden (1..600). Default: 60.')}
+              </FieldRow>
             </FieldTable>
 
             <h4 className="font-semibold text-on-surface-variant mt-3 mb-1 text-sm">{t('docs.reference.configPatchFields')}</h4>
@@ -505,6 +516,47 @@ export function BlueprintsDocs() {
 
             <h3 className="font-bold text-on-surface mt-8">{t('docs.howto.h5')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b5')}</p>
+          </section>
+
+          {/* v1.4.7+: Exec-Tab Sektion. Erklaert das Sicherheitsmodell und
+              wie Blueprint-Autoren den Tab pro Server-Typ aktivieren. */}
+          <section id="docs-exec" className="msm-card p-6 scroll-mt-20">
+            <h2 className="font-headline text-headline-sm font-bold text-on-surface mb-2">
+              {t('docs.toc.exec', 'Container-Befehle (Exec-Tab)')}
+            </h2>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-3">
+              {t('docs.exec.intro', 'Mit dem Exec-Tab koennen authentifizierte User mit der Permission server.console.exec einmalige Befehle im MSM-verwalteten Container des Servers ausfuehren -- z. B. docker compose logs, npm run build, ls -la /data. Self-Hosted, aber die Befehle laufen NUR im MSM-Container dieses einen Servers, niemals auf dem Host oder in fremden Containern.')}
+            </p>
+
+            <h3 className="font-bold text-on-surface mt-4">{t('docs.exec.safetyTitle', 'Sicherheits-Modell')}</h3>
+            <ul className="list-disc ml-6 font-body-md text-body-md text-on-surface-variant mb-3">
+              <li>{t('docs.exec.safety1', 'argv statt Shell-String: Wir reichen das Befehls-Array 1:1 an docker exec weiter. Es gibt keine Shell dazwischen, also koennen Shell-Metazeichen (;, |, $(), Backticks) nicht eskaliert werden -- sie sind literaler Text.')}</li>
+              <li>{t('docs.exec.safety2', 'Container-Name kommt nur aus container_name_for(server.id): Es gibt kein Request-Feld, mit dem der User den Zielcontainer beeinflussen kann. Host-Exec oder Container-eines-anderen-Servers ist strukturell ausgeschlossen.')}</li>
+              <li>{t('docs.exec.safety3', 'Blueprint-Gate: runtime.enableExec muss true sein, sonst lehnt der Endpoint auch fuer Owner mit Permission ab (403). Default ist false.')}</li>
+              <li>{t('docs.exec.safety4', 'Separate Permission server.console.exec (nicht console.write). Wer Exec bekommt, bekommt es explizit.')}</li>
+              <li>{t('docs.exec.safety5', 'Limits: 1..32 Argumente, je max 4096 Zeichen. Timeout 1..600 Sekunden aus Blueprint. Output gedeckelt auf 256 KiB mit [truncated]-Marker.')}</li>
+              <li>{t('docs.exec.safety6', 'Audit-Log: Server-ID, User-ID und argv werden geloggt. Output (kann sensible Daten enthalten) wird NICHT geloggt.')}</li>
+            </ul>
+
+            <h3 className="font-bold text-on-surface mt-6">{t('docs.exec.activateTitle', 'Exec-Tab pro Blueprint aktivieren')}</h3>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-2">
+              {t('docs.exec.activateBody', 'Im Blueprint unter runtime:')}
+            </p>
+            <CodeBlock example={`"runtime": {
+  "image": "node:22-bookworm-slim",
+  "startup": "./start.sh",
+  "enableExec": true,
+  "execTimeoutSeconds": 120
+}`} />
+            <p className="font-body-md text-body-md text-on-surface-variant mt-3 mb-2">
+              {t('docs.exec.useTitle', 'Im Panel:')}
+            </p>
+            <ol className="list-decimal ml-6 font-body-md text-body-md text-on-surface-variant mb-3">
+              <li>{t('docs.exec.useStep1', 'Oeffne den Server-Detail-Dialog.')}</li>
+              <li>{t('docs.exec.useStep2', 'Klicke auf den Tab "Exec" (neben "Konsole").')}</li>
+              <li>{t('docs.exec.useStep3', 'Tippe einen Befehl ein, z. B. ls -la /data oder npm run build:api.')}</li>
+              <li>{t('docs.exec.useStep4', 'Klicke "Ausfuehren". Output erscheint im Stream darunter.')}</li>
+            </ol>
           </section>
 
           <section id="docs-updates" className="msm-card p-6 scroll-mt-20">
