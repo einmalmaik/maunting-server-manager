@@ -116,3 +116,43 @@ verhalten sich exakt wie vorher (Tab nicht sichtbar, Endpoint gibt
 **Nicht** getaggt. Diese Notes-Datei wird committed, das Tagging
 macht der User (du) manuell, wenn er bereit ist, v1.4.7 zu releasen.
 Damit bleibt der Release-Zeitpunkt in deiner Hand.
+
+## v1.4.7 Nachtraege -- GitHub-Source-Reliability & Blueprint-Haertung
+
+### GitHub-Source: Race-Toleranz bei lokalem Branch (fix)
+
+**Problem:** install_github_source brach mit 'git fehlgeschlagen (128):
+fatal: a branch named master already exists' ab, wenn der Blueprint-Branch
+lokal bereits existierte (Normalfall nach erstem Install). Die alte
+show-ref --verify + konditionale git branch Sequenz hatte ein
+TOCTOU-Race-Window, das bei parallelen Restart-Versuchen reproduzierbar
+auftrat.
+
+**Fix:** Neue idempotente Helferfunktion _create_local_branch_if_missing
+fuehrt git branch <name> origin/<name> immer aus und schluckt nur den
+benignen already-exists-Fehler. Alle anderen Fehler eskalieren weiter.
+Der nachfolgende git reset --hard origin/<branch> synct in beiden Faellen.
+
+### Config-Restore: tar --no-same-owner (Haertung)
+
+**Problem:** restore_manual_configs extrahierte Config-Backups mit der
+im Archiv eingebetteten UID. Bei UID-Mismatches (rootful vs. rootless Docker,
+Pterodactyl-Recycle) scheiterte tar -xf mit Exit 2.
+
+**Fix:** --no-same-owner Flag -- Restore laeuft unter der UID des
+MSM-Panel-Workers (msm), nicht unter einer archivierten UID.
+
+### Blueprint: setupCommands fuer Singra-Discord-Bot
+
+setupCommands auf npm ci, build:api, build:bot, chmod +x start.sh
+aktualisiert. build:web bewusst weggelassen (Frontend laeuft auf Vercel).
+Damit MSM bei jedem Restart automatisch pullt, baut und startet -- kein
+manueller Build mehr noetig.
+
+### Tests
+
+- Neuer Regressionstest: test_pull_tolerates_local_branch_already_exists_race
+- 99 Blueprint-Tests gruen (test_blueprint_github_source + test_blueprints_router
+  + test_blueprint_schema)
+- Beweis: Alter Pfad git branch main origin_main -> Exit 128; neuer Helper
+  -> already exists geschluckt, Reset laeuft durch.
