@@ -471,3 +471,81 @@ def test_pull_overwrites_uncommitted_setup_artifacts(tmp_path, monkeypatch):
     result = install_github_source(bp, str(clone))
     assert result["ok"] is True, f"Pull schlug fehl: {result.get('error')!r}"
     assert (clone / "README.md").read_text(encoding="utf-8") == "v2\n"
+
+
+def test_pull_tolerates_local_branch_already_exists_race(tmp_path, monkeypatch):
+    """Reproducer fuer den "fatal: a branch named 'master' already exists"-Bug.
+
+    Szenario: Der Blueprint-Branch existiert lokal bereits -- das ist der
+    Normalfall nach einem ersten Install (``git clone`` trackt den
+    konfigurierten Branch automatisch). Auf Servern mit mehreren kurz
+    aufeinanderfolgenden Restart-Versuchen (z. B. nach Blueprint- oder
+    Container-Aenderungen) kann ein weiterer Aufruf von
+    ``install_github_source`` waehrend der Abarbeitung denselben Branch
+    erneut anlegen wollen; die alte, bedingt ausgefuehrte
+    ``git branch <name> origin/<name>``-Variante schlug dann mit
+    ``fatal: a branch named '<branch>' already exists`` (Exit 128) fehl
+    und lies das Working-Tree auf dem alten HEAD stehen.
+
+    Symptom exakt aus dem Panel-Journal:
+        ``git fehlgeschlagen (128): fatal: a branch named 'master' already
+        exists``
+
+    Der Fix macht den Branch-Schritt race-tolerant: ``git branch`` wird
+    immer ausgefuehrt, der "already exists"-Fehler wird geschluckt, der
+    nachfolgende ``reset --hard origin/<branch>`` synct trotzdem.
+    """
+    import subprocess
+
+    from blueprints.github_source import install_github_source
+    from blueprints.schema import load_blueprint_dict
+
+    upstream, clone = _build_minimal_repo(tmp_path)
+    src = tmp_path / "src"
+
+    # ``clone`` trackt nach ``git clone`` bereits ``main``. Wir simulieren
+    # den produktiven Pfad nach einem ersten Install: der lokale Branch
+    # existiert bereits, ein erneuter ``install_github_source``-Aufruf
+    # muss trotzdem funktionieren.
+    assert subprocess.run(
+        ["git", "-C", str(clone), "show-ref", "--verify", "refs/heads/main"],
+        capture_output=True,
+    ).returncode == 0, "Branch sollte nach Clone bereits existieren"
+
+    # v2 nach upstream pushen, damit der Pull etwas zu tun hat.
+    _push_v2(upstream, src)
+
+    monkeypatch.setattr(
+        "blueprints.github_source._clone_url",
+        lambda repo: str(upstream),
+    )
+
+    bp = load_blueprint_dict({
+        "version": 1,
+        "meta": {"id": "t", "name": "T", "category": "bot"},
+        "runtime": {"image": "node:22", "workdir": "/data",
+                    "startup": "node index.js"},
+        "ports": [],
+        "source": {
+            "type": "github",
+            "github": {"repo": "fake/repo", "branch": "main"},
+        },
+    })
+
+    result = install_github_source(bp, str(clone))
+    assert result["ok"] is True, (
+        f"Pull schlug fehl trotz existierendem lokalen Branch: "
+        f"{result.get('error')!r}"
+    )
+    assert (clone / "README.md").read_text(encoding="utf-8") == "v2\n"
+    head = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    upstream_head = subprocess.run(
+        ["git", "-C", str(src), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert head == upstream_head, (
+        f"Lokaler HEAD ({head[:12]}) != upstream HEAD ({upstream_head[:12]})"
+    )

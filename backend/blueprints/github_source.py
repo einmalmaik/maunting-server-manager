@@ -130,6 +130,58 @@ def _ensure_safe_directory(cwd: Path | None) -> dict[str, str]:
     return base
 
 
+def _create_local_branch_if_missing(cwd: Path, branch: str) -> None:
+    """Legt ``refs/heads/<branch>`` auf ``origin/<branch>`` an, falls fehlend.
+
+    Konsequent idempotent: fuehrt ``git branch <branch> origin/<branch>``
+    immer aus und schluckt den einzigen benignen Fehlerfall (``fatal: a
+    branch named '<branch>' already exists``). Der wird durch eine
+    TOCTOU-Race verursacht -- ein paralleler Prozess (Cron, zweiter
+    Restart-Versuch, manueller Pull-Request zwischen Existenz-Pruefung
+    und ``git branch``) hat den lokalen Branch in der Zwischenzeit selbst
+    angelegt. Auf Servern mit mehreren kurz aufeinanderfolgenden
+    Restart-Versuchen (z. B. nach Blueprint-Aenderungen) reproduzierbar
+    beobachtbar. Alle anderen Fehler (``not a valid object name``,
+    fehlgeschlagenes fetch o. ae.) eskalieren weiterhin als
+    ``GithubSourceError`` -- der anschliessende ``git reset --hard
+    origin/<branch>`` braucht den lokalen Branch zwingend.
+
+    Eine vorgeschaltete ``rev-parse --verify``-Pruefung wurde bewusst
+    weggelassen: sie verkuerzt das Race-Window nur, schliesst es aber
+    nicht, und der bedingte Pfad produziert dann sowohl die redundante
+    Subprocess-Runde als auch den Race-bedingten Fehler im unguenstigsten
+    Fall genau dort, wo der Code laenger ist als noetig.
+    """
+    cmd = ["git", "-C", str(cwd), "branch", branch, f"origin/{branch}"]
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=_ensure_safe_directory(cwd),
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise GithubSourceError(f"git timeout: branch {branch}") from exc
+    if proc.returncode == 0:
+        return
+    err = (proc.stderr or proc.stdout or "").strip()
+    err_sanitized = re.sub(r"x-access-token:[^@\s]+@", "x-access-token:***@", err)
+    if "already exists" in err_sanitized:
+        # TOCTOU-Race gegen einen parallelen Prozess -- genau der einzige
+        # Fehlerfall, den wir hier schlucken duerfen, weil der Branch
+        # jetzt existiert und der nachfolgende ``reset --hard`` ihn
+        # sowieso auf origin/<branch> zwingt.
+        logger.info(
+            "branch_already_exists (race-tolerant): %s in %s",
+            branch, cwd,
+        )
+        return
+    raise GithubSourceError(
+        f"git fehlgeschlagen ({proc.returncode}): {err_sanitized[:500]}"
+    )
+
+
 def _run_git(args: list[str], *, cwd: Path | None = None, timeout: int = 600) -> None:
     cmd = ["git", *args]
     env = _ensure_safe_directory(cwd)
@@ -492,22 +544,27 @@ def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:
             # Loesung: ``checkout -B`` weg, da redundant. ``reset --hard``
             # setzt HEAD und Working Tree atomar auf ``origin/<branch>`` und
             # ueberschreibt dabei Working-Tree-Mutationen ohne Schutz --
-            # exakt was wir wollen. Wenn ``<branch>`` lokal noch nicht
-            # existiert oder HEAD detached ist, muss er vorher angelegt
-            # werden. ``git branch -f`` wuerde auf neueren Git-Versionen
-            # (>=2.40) bei currently-checked-out-Branches aber scheitern
-            # ("cannot force update the branch ... used by worktree"). Wir
-            # nutzen daher nur dann ``branch -f``, wenn der Branch wirklich
-            # fehlt; sonst reicht ``reset --hard`` direkt.
+            # exakt was wir wollen.
+            #
+            # Frueher gab es hier zusaetzlich ein ``show-ref --verify`` +
+            # konditional ``git branch <name> origin/<name>``. Das wurde
+            # mittlerweile entfernt, weil der Branch-Befehl ohnehin idempotent
+            # den Exit-Code 128 mit "fatal: a branch named '<branch>' already
+            # exists" liefern kann, sobald zwischen der Existenz-Pruefung
+            # und dem Branch-Befehl ein externer Prozess (Cron, paralleler
+            # Restart, manueller Pull-Request) denselben Branch angelegt
+            # hat. Das Race-Window ist klein, aber auf Servern mit
+            # mehreren kurz aufeinanderfolgenden Restart-Versuchen (z. B.
+            # nach Blueprint-Aenderungen) reproduzierbar beobachtbar.
+            #
+            # Stattdessen: Branch IMMER anlegen und den "already exists"-
+            # Fehler schlucken -- alles andere macht der nachfolgende
+            # ``reset --hard``. ``git branch -f`` waere keine Alternative
+            # (scheitert auf Git >=2.40 mit "cannot force update the
+            # branch ... used by worktree", sobald der Branch bereits
+            # der currently-checked-out-Branch irgendeiner Worktree ist).
             _run_git(["fetch", "origin", branch, "--depth", "1", "--prune"], cwd=target)
-            existing_ref = subprocess.run(
-                ["git", "-C", str(target), "show-ref", "--verify", f"refs/heads/{branch}"],
-                capture_output=True, env=_git_env(),
-            )
-            if existing_ref.returncode != 0:
-                # Branch existiert lokal noch nicht (Edge-Case nach
-                # git-init-only oder Branch-Rename). Anlegen, dann reset.
-                _run_git(["branch", branch, f"origin/{branch}"], cwd=target)
+            _create_local_branch_if_missing(target, branch)
             _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target)
             # Belt-and-suspenders: nochmaliger reset --hard. Falls zwischen den
             # Befehlen ein externer Prozess (cron, anderes Skript) Commits macht

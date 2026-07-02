@@ -831,8 +831,13 @@ def restore_manual_configs(server: Any) -> dict[str, Any]:
         return {"restored_files": 0, "message": "Kein Config-Cache vorhanden."}
 
     try:
-        # tar entpacken (überschreibt nur, was im Archiv ist)
-        cmd = ["tar", "-xf", str(cache_file), "-C", str(install_dir)]
+        # tar entpacken. ``--no-same-owner``: Restore laeuft unter der
+        # UID des ausfuehrenden Prozesses (msm), nicht unter einer im
+        # Archiv eingebetteten UID -- schuetzt vor Exit-2, wenn das
+        # Archiv auf einer anderen UID erzeugt wurde (z. B. spaetere
+        # rootful-Docker-Pulls).
+        cmd = ["tar", "-xf", str(cache_file), "-C", str(install_dir),
+               "--no-same-owner"]
         subprocess.run(cmd, check=True, capture_output=True, timeout=120)
 
         _append_console_log(
