@@ -1012,3 +1012,256 @@ def demote_owner_from_superuser(db: Session, server_id: int, database_id: int) -
     database.is_superuser = False
     database.power_credentials_issued_at = None
     db.commit()
+
+
+# ── phpMyAdmin-aehnlicher Export/Import (pg_dump / psql) ────────────────────
+#
+# Hintergrund: MSM haengt alle Server-DBs an EINEM geteilten Postgres-Container
+# (``settings.managed_postgres_container_name``). Dumps muessen daher alle DBs
+# umfassen, die diesem Server gehoeren (Power-User sieht mehrere, Owner eine).
+#
+# Sicherheit:
+# - Nur der Server-Owner darf dumpen / restoren -- Permission wird im Router geprueft.
+# - pg_dump laeuft als POSTGRES-Admin (kennt alle DBs), aber wir filtern auf
+#   die DB-Liste des Servers.
+# - Restore schreibt IMMER in alle Server-eigenen DBs (DROP+CREATE-Schema-Reset).
+# - Kein SQL-Pass-through aus User-Sicht direkt in pg_dump-argumente (sichere
+#   Identifier-Behandlung ueber psycopg2.sql.Identifier).
+#
+# Streams: pg_dump produziert SQL als Stream -- wir geben es als ``text/plain``
+# an Fastify weiter (siehe Route). Restore liest das SQL als kompletten String,
+# weil UI es als file-Upload sendet (keine SQL-Bomb-Gefahr durch Memory-Mitsammen).
+
+
+def _server_database_names(db: Session, server_id: int) -> list[str]:
+    """Liefert alle DB-Namen, die zu diesem Server gehoeren (in lexikografischer
+    Reihenfolge fuer reproduzierbare Dumps).
+
+    Wir nutzen die ``PostgresDatabase``-Tabelle als Single Source of Truth --
+    das verhindert, dass gleichnamige DBs aus anderen Servern mit eingedumpt
+    werden (Container ist geteilt).
+    """
+    rows = (
+        db.query(PostgresDatabase.name)
+        .filter(PostgresDatabase.server_id == server_id)
+        .order_by(PostgresDatabase.name.asc())
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+def dump_server_databases(db: Session, server_id: int) -> tuple[str, list[str], int, str, int]:
+    """Wrapper -- delegiert an ``_pg_dump_server_dbs`` (siehe dort).
+
+    Existiert nur als stabiler Public-API-Anker; der gesamte body lebt in
+    der echten Implementierung.
+    """
+    sql, names, size, sha, dur = _pg_dump_server_dbs(db, server_id)
+    return sql, names, size, sha, dur
+
+
+def _pg_dump_server_dbs(db: Session, server_id: int) -> tuple[str, list[str], int, str, int]:
+    """Server-seitiger pg_dump ueber docker_service.exec_in auf den geteilten Postgres-Container.
+
+    Liefert (sql_text, db_names, byte_size, sha256_hex, duration_ms). Idempotent:
+    jeder Lauf erzeugt eine frische, vollstaendige Kopie aller Server-DBs (mit
+    ``--clean``, sodass ein ``psql``-Restore idempotent gegen die DB laufen kann).
+
+    KISS-Note: ``docker_service.exec_in`` hat keine env-Param-API, daher
+    packen wir ``PGPASSWORD=...`` in das shell-gequotete Kommando. Da wir
+    den container-internen pg_dump-Pfad und das Passwort selbst kontrollieren,
+    besteht hier keine Injection-Gefahr.
+    """
+    import time as _time
+    import hashlib
+    import shlex
+
+    db_names = _server_database_names(db, server_id)
+    if not db_names:
+        raise ValueError("Server hat keine Postgres-Datenbanken.")
+    started = _time.monotonic()
+    admin_pw = _admin_password()
+    container = settings.managed_postgres_container_name
+
+    # Statischer Header -- hilft bei der Restore-Verifikation.
+    out_parts: list[str] = [
+        "-- MSM Postgres Dump\n",
+        f"-- Server ID: {server_id}\n",
+        f"-- Databases: {', '.join(db_names)}\n",
+        f"-- Generated: {_time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime())}\n",
+        "-- Format: pg_dump --format=plain --no-owner --no-acl --clean (RESTORE via psql)\n",
+        "\n",
+    ]
+
+    # Doppel-quoten fuer die Shell-Eingabe (in-container: sh -c). Passwort und
+    # Username sind keine User-Eingaben -- sondern Settings -- daher kein
+    # zusaetzliches Escaping noetig, ausser fuer SQLite-Anfuehrungszeichen.
+    pw_quoted = admin_pw.replace("'", "'\\''")
+    user_quoted = ADMIN_USER.replace("'", "'\\''")
+
+    for db_name in db_names:
+        # pg_dump --format=plain --no-owner --no-acl --clean --if-exists
+        # pg_dump exit 0 garantiert -- psql ist nicht im Image.
+        cmd_in_container = (
+            "pg_dump "
+            "--format=plain --no-owner --no-acl --clean --if-exists "
+            f"--dbname={shlex.quote(db_name)} "
+            f"--username={shlex.quote(ADMIN_USER)}"
+        )
+        full_cmd = ["sh", "-c", f"PGPASSWORD='{pw_quoted}' {cmd_in_container}"]
+
+        result = docker_service.exec_in(container, full_cmd, timeout=180)
+        if not result.get("ok"):
+            raise RuntimeError(
+                f"pg_dump fuer {db_name} fehlgeschlagen: "
+                f"{(result.get('error') or result.get('stderr') or '')[:400]}"
+            )
+        body = result.get("stdout") or ""
+        if not body.strip():
+            # DB hatte keine schema-qualifizierten Objekte -- ueberspringen.
+            continue
+        out_parts.append(f"\n-- ===== Database: {db_name} =====\n")
+        out_parts.append(body)
+        if not body.endswith("\n"):
+            out_parts.append("\n")
+
+    sql_text = "".join(out_parts)
+    raw_bytes = sql_text.encode("utf-8")
+    sha = hashlib.sha256(raw_bytes).hexdigest()
+    duration_ms = int((_time.monotonic() - started) * 1000)
+    return sql_text, db_names, len(raw_bytes), sha, duration_ms
+
+
+def restore_sql_to_server_dbs(db: Session, server_id: int, sql_text: str) -> dict[str, Any]:
+    """Stellt ein komplettes SQL-Dump in alle Server-eigenen DBs wieder her.
+
+    Verhalten:
+    - Fuer JEDE Server-DB wird eine eigene psycopg2-Connection geoeffnet.
+    - Innerhalb einer Transaktion: SQL via ``cursor.execute(sql_text)``.
+    - Schlaegt fehl, wenn die DB nicht existiert (sollte der User aber restored
+      haben -- wir erwarten, dass alle DBs bereits existieren).
+
+    Returns: ``{"ok": True, "databases": [names], "bytes": int, "duration_ms": int}``
+    """
+    import time as _time
+    db_names = _server_database_names(db, server_id)
+    if not db_names:
+        raise ValueError("Server hat keine Postgres-Datenbanken.")
+    started = _time.monotonic()
+    bytes_in = len(sql_text.encode("utf-8"))
+
+    import psycopg2
+
+    host = settings.managed_postgres_host or "127.0.0.1"
+    port = settings.managed_postgres_port
+    admin_pw = _admin_password()
+
+    failed: list[dict[str, str]] = []
+    for db_name in db_names:
+        try:
+            conn = psycopg2.connect(
+                host=host,
+                port=port,
+                dbname=db_name,
+                user=ADMIN_USER,
+                password=admin_pw,
+                connect_timeout=5,
+            )
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(sql_text)
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+        except Exception as exc:
+            failed.append({"database": db_name, "error": str(exc)})
+
+    duration_ms = int((_time.monotonic() - started) * 1000)
+    if failed:
+        # Sammelfehler, damit der UI weiss welche DBs nicht gingen
+        raise RuntimeError(
+            "Restore teilweise fehlgeschlagen: "
+            + "; ".join(f"{f['database']}: {f['error'][:120]}" for f in failed)
+        )
+    return {
+        "ok": True,
+        "databases": db_names,
+        "bytes": bytes_in,
+        "duration_ms": duration_ms,
+    }
+
+
+def backup_pg_dump_for_archive(db: Session, server_id: int) -> tuple[bytes, str, list[str]]:
+    """Erzeugt einen kompakten pg_dump-Blob fuer die Backup-Integration.
+
+    Liefert (sql_bytes, sha256_hex, db_names) -- der Caller packt das in das
+    Backup-tar als ``.msm/postgres.sql``. Bei Servern ohne DBs wird ``b""`` geliefert.
+    """
+    db_names = _server_database_names(db, server_id)
+    if not db_names:
+        return b"", "", []
+    sql_text, _names, _size, sha, _dur = _pg_dump_server_dbs(db, server_id)
+    return sql_text.encode("utf-8"), sha, db_names
+
+
+def restore_pg_dump_from_archive(db: Session, server_id: int, sql_bytes: bytes) -> dict[str, Any]:
+    """Stellt ein in einem Backup-tar gefundenes ``.msm/postgres.sql`` wieder her."""
+    if not sql_bytes:
+        return {"ok": True, "skipped": True, "reason": "Backup enthaelt keinen Postgres-Dump"}
+    sql_text = sql_bytes.decode("utf-8", errors="replace")
+    result = restore_sql_to_server_dbs(db, server_id, sql_text)
+    return {"ok": True, "skipped": False, **result}
+
+
+def _clean_pg_dump_for_restore(sql_text: str) -> str:
+    """Bereinigt einen ``pg_dump --clean --if-exists``-Stream fuer
+    ``cursor.execute()`` auf einer bereits offenen DB-Connection.
+
+    Was raus muss:
+    - ``CREATE DATABASE <name>`` -- wir sind bereits in der DB.
+    - ``\\\\connect <name>`` -- psql-meta-Befehl, in cursor.execute() nicht erlaubt.
+    - ``\\\\restrict <token>`` und ``\\\\unrestrict <token>`` -- schuetzen den
+      gesamten Dump-Block. Wir entfernen BEIDE -- kein Problem, weil die
+      Tabellen danach mit expliziten INSERTs gefuellt werden und unsere
+      Connection als Postgres-Admin bereits Vollzugriff hat.
+    - Reine Kommentar-Banner (``-- ...``-Zeilen), die nicht der Section-Markierung
+      ``-- ===== Database: ... =====`` dienen -- spart Speicher und reduziert
+      Parser-Last.
+
+    KISS: zeilenbasiert, keine Regex-Magie.
+    """
+    skip_until: str | None = None
+    out: list[str] = []
+    for raw in sql_text.split("\n"):
+        line = raw.rstrip("\r")
+        stripped = line.lstrip()
+        if skip_until is not None:
+            # Restrict-Block: Zeilen bis '\\unrestrict' weglassen
+            if stripped.startswith("\\unrestrict"):
+                skip_until = None
+            continue
+        if stripped.startswith("\\restrict"):
+            skip_until = "\\unrestrict"
+            continue
+        if not stripped:
+            # Leerzeilen drinnen behalten wir klein
+            if out and out[-1] != "":
+                out.append("")
+            continue
+        if stripped.startswith("CREATE DATABASE "):
+            continue
+        if stripped.startswith("\\connect "):
+            continue
+        # Allgemeine Banner-Kommentare (-- ...) weg -- spart Platz, kein Inhalt.
+        # Wichtig: ``-- ===== Database: ... =====`` ebenfalls weg, das ist nur
+        # Sektions-Trenner.
+        if stripped.startswith("--"):
+            continue
+        out.append(line)
+    # Doppelleerzeilen am Ende reduzieren
+    while out and out[-1] == "":
+        out.pop()
+    return "\n".join(out)

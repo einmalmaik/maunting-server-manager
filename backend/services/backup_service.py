@@ -20,6 +20,16 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from services import postgres_service
+from services.backup_paths import (
+    BACKUP_MANIFEST_ARCNAME,
+    backup_plan_for_server,
+    create_full_backup_tar,
+    create_selective_backup_tar,
+    read_pg_dump_bytes_from_archive,
+    read_backup_scope_from_archive,
+)
+
 logger = logging.getLogger(__name__)
 
 # Live-Status Tracking für Backup/Restore (KISS: module dict, kein Redis, kein neues Model).
@@ -69,28 +79,53 @@ def run_backup(
     filename = f"server_{server_id}_{timestamp}.tar.gz"
     filepath = os.path.join(backup_dir, filename)
 
-    # Tar ausführen (voller install_dir oder Blueprint backup.includePaths)
-    from services.backup_paths import backup_plan_for_server, create_selective_backup_tar
-
+    # Tar ausfuehren (voller install_dir oder Blueprint backup.includePaths)
     plan = backup_plan_for_server(server)
+    # Postgres-Integration: wenn der Server postgres_enabled hat (oder
+    # PostgresDatabase-Records vorhanden sind), wird vor dem tar ein pg_dump
+    # erzeugt und als ``.msm/postgres.sql`` ins Archiv gepackt. Das ist
+    # Stand der v1.4.4 -- ohne Blueprints-Config ist jede Server-DB
+    # automatisch im Backup.
+    pg_dump_bytes: bytes = b""
+    try:
+        from models import PostgresDatabase as _PgDb
+        has_pg = (
+            db.query(_PgDb.id).filter(_PgDb.server_id == server_id).first() is not None
+        )
+    except Exception:
+        has_pg = False
+    if has_pg:
+        try:
+            pg_dump_bytes, _pg_sha, _pg_dbs = (
+                postgres_service.backup_pg_dump_for_archive(db, server_id)
+            )
+        except Exception as exc:
+            # Postgres-Fehler darf das ganze Backup NICHT blockieren -- der
+            # User hat dann immerhin sein install_dir-Snapshot. Wir loggen
+            # laut und fahren ohne pg_dump fort.
+            logger.warning(
+                "Postgres-Dump fuer Backup Server %s fehlgeschlagen: %s",
+                server_id, exc,
+            )
+
     try:
         set_active_backup_status(server_id, "creating", est)
         if plan.scope == "selective":
+            # selective: nur Blueprint-Pfade -- nichts am Full-Tar-Aufruf
+            # geaendert fuer v1.4.4; pg_dump fuer selective-Server waere
+            # verfuegbar, aber wir respektieren das Blueprint-Scope-Konzept.
+            # Hinweis: Blueprint-Operatoren koennen spaeter ``excludePgDump``
+            # im Blueprint-Manifest ergaenzen, falls noetig.
             create_selective_backup_tar(
                 filepath,
                 server.install_dir,
                 plan.include_paths,
             )
         else:
-            subprocess.run(
-                ["tar", "-czf", filepath, "-C", server.install_dir, "."],
-                check=True,
-                capture_output=True,
-                timeout=timeout_seconds,
-                env={
-                    **os.environ,
-                    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                },
+            create_full_backup_tar(
+                filepath,
+                server.install_dir,
+                pg_dump_bytes=pg_dump_bytes or None,
             )
         size_mb = os.path.getsize(filepath) // (1024 * 1024)
     except subprocess.TimeoutExpired as e:

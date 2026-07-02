@@ -309,15 +309,16 @@ export function DatabaseManager({ serverId }: Props) {
                   <button
                     key={database.id}
                     type="button"
-                    className={`w-full flex items-center justify-between rounded-lg border px-3 py-2 text-left ${selectedDbId === database.id ? "border-secondary bg-secondary/10" : "border-outline-variant bg-surface-container"}`}
+                    title={database.name}
+                    className={`w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left min-w-0 ${selectedDbId === database.id ? "border-secondary bg-secondary/10" : "border-outline-variant bg-surface-container"}`}
                     onClick={() => {
                       setSelectedDbId(database.id);
                       setSelectedTable(null);
                       setRows(null);
                     }}
                   >
-                    <span className="font-mono text-sm text-on-surface">{database.name}</span>
-                    <Trash2 className="w-4 h-4 text-status-error" onClick={(event) => { event.stopPropagation(); void deleteDatabase(database); }} />
+                    <span className="font-mono text-sm text-on-surface truncate min-w-0 flex-1">{database.name}</span>
+                    <Trash2 className="w-4 h-4 text-status-error shrink-0" onClick={(event) => { event.stopPropagation(); void deleteDatabase(database); }} />
                   </button>
                 ))}
               </div>
@@ -331,12 +332,12 @@ export function DatabaseManager({ serverId }: Props) {
                   {t("databases.createUser")}
                 </button>
                 {resources.users.map((user) => (
-                  <div key={user.id} className="flex items-center justify-between rounded-lg border border-outline-variant bg-surface-container px-3 py-2">
-                    <div>
-                      <div className="font-mono text-sm text-on-surface">{user.username}</div>
-                      <div className="font-mono text-xs text-on-surface-variant">{user.password_mask}</div>
+                  <div key={user.id} className="flex items-center justify-between gap-2 rounded-lg border border-outline-variant bg-surface-container px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-mono text-sm text-on-surface truncate" title={user.username}>{user.username}</div>
+                      <div className="font-mono text-xs text-on-surface-variant truncate" title={user.password_mask}>{user.password_mask}</div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 shrink-0">
                       <button className="msm-btn-secondary inline-flex items-center gap-2 px-3 py-2" onClick={() => rotatePassword(user.id)}>
                         <RefreshCw className="w-4 h-4" />
                         {t("databases.rotate")}
@@ -354,11 +355,14 @@ export function DatabaseManager({ serverId }: Props) {
           <section className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">
             <div className="msm-card p-5 space-y-4">
               <h3 className="font-headline text-body-md text-on-surface">{t("databases.tables")}</h3>
-              <div className="space-y-2">
+              {/* phpMyAdmin-aehnlich: Tabellenliste in eigenem Scroll-Container,
+                  damit 50+ Tabellen das Layout nicht sprengen. */}
+              <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
                 {tables.map((table) => (
                   <button
                     key={`${table.schema}.${table.name}`}
-                    className={`w-full rounded-lg border px-3 py-2 text-left font-mono text-sm ${selectedTable?.name === table.name ? "border-secondary bg-secondary/10 text-on-surface" : "border-outline-variant bg-surface-container text-on-surface-variant"}`}
+                    title={`${table.schema}.${table.name}`}
+                    className={`w-full rounded-lg border px-3 py-2 text-left font-mono text-sm truncate ${selectedTable?.name === table.name ? "border-secondary bg-secondary/10 text-on-surface" : "border-outline-variant bg-surface-container text-on-surface-variant"}`}
                     onClick={() => { setSelectedTable(table); loadRows(table); }}
                   >
                     {table.schema}.{table.name}
@@ -387,16 +391,17 @@ export function DatabaseManager({ serverId }: Props) {
                     {extensions.map((ext) => (
                       <div
                         key={ext.name}
-                        className="flex items-center justify-between rounded-lg border border-outline-variant bg-surface-container px-3 py-2"
+                        title={ext.name}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-outline-variant bg-surface-container px-3 py-2 min-w-0"
                       >
-                        <div>
-                          <div className="font-mono text-sm text-on-surface">{ext.name}</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-mono text-sm text-on-surface truncate">{ext.name}</div>
                           {ext.version && (
                             <div className="font-mono text-xs text-on-surface-variant">v{ext.version}</div>
                           )}
                         </div>
                         <button
-                          className="msm-btn-secondary px-2 py-1 text-status-error"
+                          className="msm-btn-secondary px-2 py-1 text-status-error shrink-0"
                           onClick={() => dropExtension(ext.name)}
                           disabled={busy === `drop-extension-${ext.name}`}
                           title={t("databases.dropExtensionHint", { name: ext.name })}
@@ -555,7 +560,7 @@ export function DatabaseManager({ serverId }: Props) {
               </div>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4 min-w-0">
               <div className="msm-card p-5">
                 <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between mb-4">
                   <h3 className="font-headline text-body-md text-on-surface">{selectedTable ? `${selectedTable.schema}.${selectedTable.name}` : t("databases.rows")}</h3>
@@ -695,8 +700,10 @@ function PowerUserDialog({
 
 function SqlResultsView({ result, emptyText }: { result: PostgresSqlResult | null; emptyText: string }) {
   if (!result) return <p className="text-sm text-on-surface-variant">{emptyText}</p>;
+  // phpMyAdmin-aehnlich: alle Statements in einem scrollbaren Container,
+  // damit Multi-Statement-Queries nicht die SQL-Konsole uferlos machen.
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
       {result.statements.map((entry, index) => (
         <div
           key={index}
@@ -716,23 +723,35 @@ function SqlResultsView({ result, emptyText }: { result: PostgresSqlResult | nul
               {entry.error}
             </pre>
           ) : entry.columns.length > 0 ? (
-            <div className="overflow-auto rounded border border-outline-variant bg-surface">
+            <div className="overflow-auto max-h-[55vh] rounded border border-outline-variant bg-surface">
               <table className="min-w-full text-xs">
-                <thead className="bg-surface-container-highest text-on-surface">
+                <thead className="bg-surface-container-highest text-on-surface sticky top-0 z-10">
                   <tr>
                     {entry.columns.map((column) => (
-                      <th key={column} className="px-2 py-1 text-left font-mono font-medium">{column}</th>
+                      <th key={column} className="px-2 py-1 text-left font-mono font-medium whitespace-nowrap">{column}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant">
                   {entry.rows.map((row, rowIndex) => (
-                    <tr key={rowIndex} className="text-on-surface-variant">
-                      {entry.columns.map((column) => (
-                        <td key={column} className="px-2 py-1 font-mono align-top whitespace-pre-wrap break-all">
-                          {row[column] === null ? <span className="text-on-surface-variant/50">NULL</span> : String(row[column] ?? "")}
-                        </td>
-                      ))}
+                    <tr key={rowIndex} className="text-on-surface-variant hover:bg-surface-container">
+                      {entry.columns.map((column) => {
+                        const value = row[column];
+                        const display = value === null || value === undefined
+                          ? <span className="text-on-surface-variant/50 italic">NULL</span>
+                          : typeof value === "object"
+                            ? <code className="text-xs">{JSON.stringify(value)}</code>
+                            : <span className="font-mono">{String(value)}</span>;
+                        return (
+                          <td
+                            key={column}
+                            className="px-2 py-1 font-mono align-top whitespace-pre-wrap break-words max-w-[480px]"
+                            title={value === null || value === undefined ? "NULL" : String(value)}
+                          >
+                            {display}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -752,22 +771,39 @@ function ResultTable({ result, emptyText }: { result: PostgresRowsResult | null;
   if (!result.columns.length) {
     return <p className="font-mono text-sm text-on-surface-variant">{result.status || emptyText}</p>;
   }
+  // phpMyAdmin-aehnlich: Result-Table in eigenem Scroll-Container mit
+  // begrenzter Hoehe (60vh). Werte werden vollstaendig angezeigt -- dafuer
+  // horizontaler Scroll, falls eine Spalte extrem lang ist.
   return (
-    <div className="overflow-auto rounded-lg border border-outline-variant">
+    <div className="overflow-auto max-h-[60vh] rounded-lg border border-outline-variant">
       <table className="min-w-full text-sm">
-        <thead className="bg-surface-container-highest text-on-surface">
+        <thead className="bg-surface-container-highest text-on-surface sticky top-0 z-10">
           <tr>
             {result.columns.map((column) => (
-              <th key={column} className="px-3 py-2 text-left font-mono font-medium">{column}</th>
+              <th key={column} className="px-3 py-2 text-left font-mono font-medium whitespace-nowrap">{column}</th>
             ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-outline-variant">
           {result.rows.map((row, index) => (
-            <tr key={index} className="bg-surface-container text-on-surface-variant">
-              {result.columns.map((column) => (
-                <td key={column} className="px-3 py-2 font-mono align-top">{String(row[column] ?? "")}</td>
-              ))}
+            <tr key={index} className="bg-surface-container text-on-surface-variant hover:bg-surface-container-highest">
+              {result.columns.map((column) => {
+                const value = row[column];
+                const display = value === null || value === undefined
+                  ? <span className="text-on-surface-variant/50 italic">NULL</span>
+                  : typeof value === "object"
+                    ? <code className="text-xs">{JSON.stringify(value)}</code>
+                    : <span className="font-mono">{String(value)}</span>;
+                return (
+                  <td
+                    key={column}
+                    className="px-3 py-2 font-mono align-top whitespace-pre-wrap break-words max-w-[480px]"
+                    title={value === null || value === undefined ? "NULL" : String(value)}
+                  >
+                    {display}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

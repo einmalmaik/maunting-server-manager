@@ -161,3 +161,41 @@ class PostgresPowerUserDemoteRequest(BaseModel):
     database_id: int = Field(..., ge=1)
     username: str = Field(..., min_length=1, max_length=63)
     confirm_name: str = Field(..., min_length=1, max_length=63)
+
+
+class PostgresDumpRequest(BaseModel):
+    """Auswahl des Dump-Umfangs fuer ``pg_dump``.
+
+    Default: ``scope=all_dbs`` erfasst alle DBs des Servers (Power-User sieht
+    mehrere; Owner sieht eine). ``scope=database`` ist deprecated -- der Server
+    hat genau einen Postgres-Container mit allen DBs drin, daher macht
+    ``scope=all_dbs`` immer Sinn.
+    """
+    confirm_text: str | None = Field(
+        None,
+        max_length=128,
+        description="Sicherheits-Bestaetigung -- muss mit Server-Namen uebereinstimmen wenn Dump loeschend wirkt.",
+    )
+
+
+class PostgresRestoreRequest(BaseModel):
+    """Restore-Request fuer ``psql``-Restore aus hochgeladenem SQL-Dump.
+
+    Verhalten: SQL wird IMMER in ALLE DBs des Servers geschrieben
+    (alle existierenden Tabellen werden vorher gedroppt, damit ein sauberer
+    Restore gelingt). Wenn der Server nur eine DB hat, ist der Effekt identisch.
+    """
+    sql: str = Field(..., min_length=1, max_length=200_000_000)
+    confirm_text: str | None = Field(None, max_length=128)
+
+
+class PostgresDumpResponse(BaseModel):
+    """Metadata zu einem pg_dump-Lauf.
+
+    Das eigentliche SQL wird als ``text/plain`` (Stream) zurueckgegeben,
+    nicht als JSON. Dies ist nur die Status-Antwort.
+    """
+    database_names: list[str]
+    byte_size: int
+    sha256: str
+    duration_ms: int

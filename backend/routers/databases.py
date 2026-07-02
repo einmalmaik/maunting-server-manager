@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -15,12 +16,14 @@ from schemas.postgres import (
     PostgresCreateUserRequest,
     PostgresDatabaseRequest,
     PostgresDropTableRequest,
+    PostgresDumpRequest,
     PostgresExtensionDropRequest,
     PostgresExtensionInfo,
     PostgresExtensionRequest,
     PostgresPowerUserDemoteRequest,
     PostgresPowerUserResponse,
     PostgresResourcesResponse,
+    PostgresRestoreRequest,
     PostgresRotatePasswordResponse,
     PostgresRowsRequest,
     PostgresRowsResponse,
@@ -377,5 +380,77 @@ def execute_sql(
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
         return postgres_service.execute_sql(db, server_id, body.database_id, body.sql, body.limit)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+# ── pg_dump / psql round-trip fuer phpMyAdmin-aehnlichen Export/Import ──────
+
+
+@router.post("/export")
+def export_databases(
+    server_id: int,
+    body: PostgresDumpRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> Response:
+    """Streamt ein ``pg_dump``-SQL aller Server-DBs als ``application/sql``.
+
+    Dateiname: ``msm-server-<id>-<created_at>.sql``. SHA256 in ``X-MSM-Dump-SHA256``
+    Header (UI/CLI kann Integritaet pruefen). Permission: ``server.databases.admin``.
+
+    KISS: das SQL wird als Memory-String gebaut (nicht Streaming), weil die
+    Stripe-Groesse bei Server-DBs im einstelligen MB-Bereich bleibt -- Backup-
+    Streaming waere ein anderer Patch, kommt mit v1.5.x.
+    """
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.admin")
+    try:
+        sql_text, db_names, size_bytes, sha, dur_ms = (
+            postgres_service.dump_server_databases(db, server_id)
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+    if not db_names:
+        raise HTTPException(status_code=400, detail="Server hat keine Postgres-Datenbanken.")
+
+    from datetime import datetime, timezone
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    filename = f"msm-server-{server_id}-{timestamp}.sql"
+    payload = sql_text.encode("utf-8")
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Length": str(len(payload)),
+        "X-MSM-Dump-SHA256": sha,
+        "X-MSM-Dump-Duration-MS": str(dur_ms),
+        "X-MSM-Dump-DB-Names": ",".join(db_names),
+        "X-MSM-Dump-Size": str(size_bytes),
+    }
+    return Response(content=payload, media_type="application/sql; charset=utf-8", headers=headers)
+
+
+@router.post("/import")
+def import_database(
+    server_id: int,
+    body: PostgresRestoreRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Stellt ein uebermitteltes ``application/sql``-Dump wieder her.
+
+    Verhalten: SQL wird in ALLE DBs des Servers geschrieben (DROP+CREATE via
+    ``--clean``-Semantik). Permission: ``server.databases.admin``.
+
+    Sicherheit: kein SQL-Pass-through, das ist psycopg2-verifiziertes DDL/DML
+    auf bereits-authentifizierten Server-eigenen DBs. Groessen-Limit von
+    200MB schuetzt vor Memory-Bomben (im PostgresRestoreRequest-Schema).
+    """
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.admin")
+    try:
+        return postgres_service.restore_sql_to_server_dbs(db, server_id, body.sql)
     except Exception as exc:
         raise _service_error(exc) from exc

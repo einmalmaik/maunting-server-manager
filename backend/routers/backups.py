@@ -233,7 +233,39 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
         finally:
             clear_active_backup_status(server_id)
 
-        # Status zurücksetzen — Server ist jetzt installiert/stopped, nicht running
+        # Postgres-Restore (v1.4.4): wenn das Backup ein ``.msm/postgres.sql``
+        # enthaelt, wird das hier in ALLE Server-DBs eingespielt.
+        # Container wurde oben bereits gestoppt -- die Verbindung zum
+        # Postgres ist via localhost:15432 erreichbar (Admin-Passwort vorher gesetzt).
+        try:
+            from services.backup_paths import read_pg_dump_bytes_from_archive
+
+            pg_bytes = read_pg_dump_bytes_from_archive(backup.filename)
+            if pg_bytes:
+                from services import postgres_service as _pg
+
+                result = _pg.restore_pg_dump_from_archive(db, server.id, pg_bytes)
+                if result.get("ok"):
+                    logger.info(
+                        "Postgres-Restore fuer Server %s: %s DBs in %sms",
+                        server.id,
+                        len(result.get("databases", [])),
+                        result.get("duration_ms"),
+                    )
+                else:
+                    # Skip-kein-Postgres ist still; alles andere wird geloggt.
+                    msg = result.get("reason") or "unbekannt"
+                    logger.debug("Postgres-Restore skipped: %s", msg)
+        except Exception as exc:
+            # Postgres-Restore-Fehler blockiert den Filesystem-Restore NICHT
+            # -- der User hat dann seinen install_dir-Snapshot wieder und wir
+            # loggen das Problem laut.
+            logger.warning(
+                "Postgres-Restore fuer Server %s fehlgeschlagen: %s",
+                server.id, exc,
+            )
+
+        # Status zuruecksetzen -- Server ist jetzt installiert/stopped, nicht running
         server.status = "stopped"
         server.status_message = None
         db.commit()
