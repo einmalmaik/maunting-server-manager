@@ -464,7 +464,7 @@ async def _background_update_check_task() -> None:
                     .filter(
                         User.is_active == True,
                         User.email_notifications == True,
-                        User.email.isnot(None),
+                        User.email_encrypted.isnot(None),
                     )
                     .all()
                 )
