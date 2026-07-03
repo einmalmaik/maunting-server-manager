@@ -1,8 +1,8 @@
 """Globaler Steam-Account fuer SteamCMD-Logins (DayZ etc.).
 
 Sicherheits-Invarianten:
-- Passwort wird AT REST nur Fernet-encrypted gespeichert (Key abgeleitet
-  aus settings.secret_key, identisches Pattern wie 2FA-Secrets).
+- Passwort wird AT REST nur DIS-verschluesselt gespeichert (AES-256-GCM
+  ueber den DIS Sidecar, AAD gebunden an 'msm:steam:password').
 - ``get_decrypted_password`` ist die einzige Methode, die Klartext
   zurueckgibt. Wird ausschliesslich im SteamCMD-Install-Pfad aufgerufen
   und niemals geloggt.
@@ -10,13 +10,13 @@ Sicherheits-Invarianten:
   Username — niemals das Passwort, auch nicht maskiert.
 """
 
-from cryptography.fernet import InvalidToken
-
 from services.auth_service import AuthService
+from services.dis_client import DisDecryptionError
 from services.panel_settings_service import PanelSettingsService
 
 _USERNAME_KEY = "steam_account_username"
 _PASSWORD_KEY = "steam_account_password_enc"
+_AAD = "msm:steam:password"
 
 
 class SteamAccountService:
@@ -37,7 +37,7 @@ class SteamAccountService:
             raise ValueError("Username und Passwort müssen gesetzt sein.")
         if len(u) > 256 or len(password) > 1024:
             raise ValueError("Username/Passwort zu lang.")
-        enc = AuthService.encrypt_2fa_secret(password)
+        enc = AuthService.encrypt_secret(password, aad=_AAD)
         PanelSettingsService.set(_USERNAME_KEY, u)
         PanelSettingsService.set(_PASSWORD_KEY, enc)
 
@@ -57,8 +57,8 @@ class SteamAccountService:
         if not enc:
             raise RuntimeError("Steam-Account nicht konfiguriert.")
         try:
-            return AuthService.decrypt_2fa_secret(enc)
-        except InvalidToken as e:
+            return AuthService.decrypt_secret(enc, aad=_AAD)
+        except DisDecryptionError as e:
             raise RuntimeError(
                 "Steam-Account-Passwort kann nicht entschlüsselt werden — "
                 "vermutlich wurde der SECRET_KEY rotiert. Bitte Account neu hinterlegen."

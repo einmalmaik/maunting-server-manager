@@ -1,7 +1,7 @@
 """OAuth/OIDC-Service-Fassade.
 
 Verantwortlichkeiten:
-- Provider-CRUD (admin) mit Fernet-encrypted Client-Secrets.
+- Provider-CRUD (admin) mit DIS-encrypted Client-Secrets.
 - Public-Listing fuer Login-UI.
 - OAuth-Flow: authorize URL mit PKCE, Callback-Handling, User-Resolution,
   Auto-Registration (gated by global Panel-Switch) und Account-Linking
@@ -24,13 +24,13 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from cryptography.fernet import InvalidToken
 from sqlalchemy.orm import Session
 
 from config import settings
 from models import OAuthProvider, OAuthUserLink, User
 from services import login_challenge_service
 from services.auth_service import AuthService
+from services.dis_client import DisDecryptionError
 from services.oauth_presets import PRESETS, OAuthPreset, get_preset, known_preset
 from services.panel_settings_service import PanelSettingsService
 
@@ -89,33 +89,37 @@ def is_masked(value: str | None) -> bool:
     return bool(value) and value.startswith("*")
 
 
-# ── Secret-Encryption (Fernet, identisches Pattern wie 2FA/Steam) ─────
+# ── Secret-Encryption (DIS AES-256-GCM, AAD-gebunden) ──────────────────
+
+_OAUTH_SECRET_AAD = "msm:oauth:secret"
+_OAUTH_STATE_AAD = "msm:oauth:state"
+
 
 def encrypt_secret(plain: str) -> str:
-    return AuthService.encrypt_2fa_secret(plain)
+    return AuthService.encrypt_secret(plain, aad=_OAUTH_SECRET_AAD)
 
 
 def decrypt_secret(encrypted: str) -> str:
-    return AuthService.decrypt_2fa_secret(encrypted)
+    return AuthService.decrypt_secret(encrypted, aad=_OAUTH_SECRET_AAD)
 
 
-# ── State-Cookie: signiertes JSON via Fernet ───────────────────────────
+# ── State-Cookie: verschluesseltes JSON via DIS ───────────────────────
 
 def pack_state_cookie(payload: dict[str, Any]) -> str:
     """Verschluesselt ein JSON-Payload als opaque Cookie-Wert."""
-    raw = json.dumps(payload, separators=(",", ":")).encode()
-    return AuthService._get_fernet().encrypt(raw).decode()
+    raw = json.dumps(payload, separators=(",", ":"))
+    return AuthService.encrypt_secret(raw, aad=_OAUTH_STATE_AAD)
 
 
 def unpack_state_cookie(value: str | None) -> dict[str, Any] | None:
     if not value:
         return None
     try:
-        raw = AuthService._get_fernet().decrypt(value.encode())
-    except (InvalidToken, ValueError):
+        raw = AuthService.decrypt_secret(value, aad=_OAUTH_STATE_AAD)
+    except (DisDecryptionError, ValueError):
         return None
     try:
-        return json.loads(raw.decode())
+        return json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
 
@@ -334,7 +338,7 @@ def create_provider(
     norm_scope = _normalize_scope(scope)
 
     # Secret-Encryption nur wenn Secret uebergeben wurde. Die Maske wird
-    # mit-gespeichert, damit der Listing-Pfad keinen Fernet-Decrypt mehr
+    # mit-gespeichert, damit der Listing-Pfad keinen DIS-Decrypt mehr
     # machen muss (P1.3 aus Code-Review).
     secret_enc: str | None = None
     secret_mask: str | None = None
@@ -489,7 +493,7 @@ def build_authorization_url(
 
     Ein einziger Callback-Endpunkt (build_redirect_uri) bedient Login UND
     Account-Linking. Die Unterscheidung laeuft ueber das ``mode``-Feld im
-    State-Payload (Fernet-encrypted) — der Callback liest es und dispatcht.
+    State-Payload (DIS-encrypted) — der Callback liest es und dispatcht.
 
     Args:
         mode: "login" fuer anonymen Login, "link" fuer Account-Linking.
@@ -739,7 +743,7 @@ def resolve_user(
     # einlinken. Auto-Registration prueft denselben Switch (requires_verified_email)
     # bereits — hier war die Luecke.
     if is_linking_allowed() and profile.email and profile.email_verified:
-        existing = db.query(User).filter(User.email == profile.email).first()
+        existing = db.query(User).filter(User.email_hash == User._email_hash(profile.email)).first()
         if existing is not None and existing.is_active:
             return ResolutionResult(existing, "link")
 
@@ -767,7 +771,7 @@ def register_user_from_oauth(
     """Legt einen neuen User aus dem OAuth-Profil an. Wirft ValueError bei Konflikt."""
     if not profile.email:
         raise ValueError("OAuth-Profil enthaelt keine E-Mail")
-    if db.query(User).filter(User.email == profile.email).first():
+    if db.query(User).filter(User.email_hash == User._email_hash(profile.email)).first():
         raise ValueError("E-Mail ist bereits vergeben")
     username_base = profile.username or profile.email.split("@", 1)[0]
     username = _generate_unique_username(db, username_base)

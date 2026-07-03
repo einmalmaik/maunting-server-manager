@@ -1,45 +1,69 @@
-"""In-Memory-Store fuer Klartext-Webhook-Secrets.
+"""DB-gestuetzter Secret-Store fuer Webhook-Secrets (DIS-verschluesselt).
 
-Bewusst klein, threadsicher, nur Prozess-Lifetime. Hintergrund:
+Frueher In-Memory (Prozess-Lifetime), jetzt persistent in der
+``webhook_subscriptions`` Tabelle mit DIS AES-256-GCM verschluesselt.
+Das loest das Problem, dass Secrets nach einem Restart verloren gingen.
 
-- Wir duerfen KEINEN symmetrisch-verschluesselten Secret-Storage bauen
-  (Security.md §4 verbietet eigene Krypto).
-- Wir brauchen das Klartext-Secret NUR beim Versand, also Prozess-Lifetime
-  ist ausreichend — nach Restart rotiert der User entweder manuell oder
-  akzeptiert, dass alte Subscriptions erst nach Re-Setup wieder feuern.
-- Diese Datei wird vom Outbound-Service UND vom Router (enable/rotate)
-  importiert. Es gibt bewusst KEINE Persistenz.
-
-Persistente Speicherung waere ueber Pterodactyl-Wings-Pattern
-(env-only) oder Vault moeglich. Out-of-scope fuer Phase 1.
+Sicherheits-Invarianten:
+- Klartext-Secrets werden NIE im Plain gespeichert — nur DIS-verschluesselt.
+- ``get`` ist die einzige Methode, die Klartext zurueckgibt (nur beim Versand).
+- Secrets werden nie geloggt.
 """
 from __future__ import annotations
 
-import threading
-from typing import Dict
-
-
-_LOCK = threading.Lock()
-_STORE: Dict[int, str] = {}
+from database import SessionLocal
+from models import WebhookSubscription
+from services.auth_service import AuthService
 
 
 def put(subscription_id: int, secret: str) -> None:
     if not secret:
         return
-    with _LOCK:
-        _STORE[subscription_id] = secret
+    enc = AuthService.encrypt_secret(secret, aad=f"msm:webhook:{subscription_id}:secret")
+    db = SessionLocal()
+    try:
+        sub = db.get(WebhookSubscription, subscription_id)
+        if sub:
+            sub.secret_encrypted = enc
+            db.commit()
+    finally:
+        db.close()
 
 
 def get(subscription_id: int) -> str | None:
-    with _LOCK:
-        return _STORE.get(subscription_id)
+    db = SessionLocal()
+    try:
+        sub = db.get(WebhookSubscription, subscription_id)
+        if not sub or not sub.secret_encrypted:
+            return None
+        try:
+            return AuthService.decrypt_secret(
+                sub.secret_encrypted,
+                aad=f"msm:webhook:{subscription_id}:secret",
+            )
+        except Exception:
+            return None
+    finally:
+        db.close()
 
 
 def delete(subscription_id: int) -> None:
-    with _LOCK:
-        _STORE.pop(subscription_id, None)
+    db = SessionLocal()
+    try:
+        sub = db.get(WebhookSubscription, subscription_id)
+        if sub:
+            sub.secret_encrypted = None
+            db.commit()
+    finally:
+        db.close()
 
 
 def reset_for_tests() -> None:
-    with _LOCK:
-        _STORE.clear()
+    """Loescht alle verschluesselten Secrets ( fuer Test-Isolation)."""
+    db = SessionLocal()
+    try:
+        for sub in db.query(WebhookSubscription).all():
+            sub.secret_encrypted = None
+        db.commit()
+    finally:
+        db.close()

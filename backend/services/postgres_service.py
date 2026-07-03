@@ -59,13 +59,13 @@ def _encrypted_admin_password() -> str:
     if encrypted:
         return encrypted
     password = _generate_password()
-    encrypted = AuthService.encrypt_2fa_secret(password)
+    encrypted = AuthService.encrypt_secret(password, aad="msm:pg:admin")
     PanelSettingsService.set(ADMIN_PASSWORD_KEY, encrypted)
     return encrypted
 
 
 def _admin_password() -> str:
-    return AuthService.decrypt_2fa_secret(_encrypted_admin_password())
+    return AuthService.decrypt_secret(_encrypted_admin_password(), aad="msm:pg:admin")
 
 
 def _db_host() -> str:
@@ -97,7 +97,7 @@ def _owner_connect(database: PostgresDatabase):
         port=settings.managed_postgres_port,
         dbname=database.name,
         user=database.owner_role,
-        password=AuthService.decrypt_2fa_secret(database.owner_password_encrypted),
+        password=AuthService.decrypt_secret(database.owner_password_encrypted, aad="msm:pg:db:owner"),
         connect_timeout=5,
     )
 
@@ -291,7 +291,7 @@ def _create_database_and_user(
         server_id=server_id,
         name=db_name,
         owner_role=owner_role,
-        owner_password_encrypted=AuthService.encrypt_2fa_secret(owner_password),
+        owner_password_encrypted=AuthService.encrypt_secret(owner_password, aad="msm:pg:db:owner"),
         is_superuser=power_user,
         power_credentials_issued_at=datetime.now(timezone.utc) if power_user else None,
     )
@@ -942,7 +942,7 @@ def promote_owner_to_superuser(db: Session, server_id: int, database_id: int) ->
     finally:
         conn.close()
     database.is_superuser = True
-    database.owner_password_encrypted = AuthService.encrypt_2fa_secret(new_password)
+    database.owner_password_encrypted = AuthService.encrypt_secret(new_password, aad="msm:pg:db:owner")
     database.power_credentials_issued_at = datetime.now(timezone.utc)
     db.commit()
     return {
@@ -976,7 +976,7 @@ def rotate_power_user_password(db: Session, server_id: int, database_id: int) ->
         conn.commit()
     finally:
         conn.close()
-    database.owner_password_encrypted = AuthService.encrypt_2fa_secret(new_password)
+    database.owner_password_encrypted = AuthService.encrypt_secret(new_password, aad="msm:pg:db:owner")
     database.power_credentials_issued_at = datetime.now(timezone.utc)
     db.commit()
     return {
