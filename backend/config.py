@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 30  # 30 Tage Refresh-Token
     csrf_token_expire_minutes: int = 60 * 24  # 24h CSRF-Token
 
+    # DIS Sidecar (lokaler Node-Prozess, wrappt @msdis/shield)
+    # Alle Krypto-Operationen (AES-256-GCM, Argon2id, TOTP) laufen ueber DIS.
+    # Das Panel selbst enthaelt keine eigene Kryptographie.
+    dis_sidecar_url: str = "http://127.0.0.1:9100"
+    dis_sidecar_token: str = ""
+
     # Email — SMTP oder Resend (resend.com)
     # Resend API-Key hat Vorrang vor SMTP wenn beides gesetzt
     email_provider: str = "smtp"  # "smtp" | "resend"
