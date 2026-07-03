@@ -14,7 +14,7 @@ class OAuthProvider(Base):
     hinterlegt. Bei custom_* duerfen sie ueberschrieben werden.
 
     Sicherheit: ``client_secret`` wird NIE im Klartext gespeichert. Bei
-    ``set_secret`` wird Fernet-Encryption angewendet (Key abgeleitet aus
+    ``set_secret`` wird DIS AES-256-GCM Encryption angewendet (Key abgeleitet aus
     ``settings.secret_key`` — identisches Pattern wie 2FA/Steam-Account).
     """
 
@@ -36,11 +36,11 @@ class OAuthProvider(Base):
 
     # OAuth/OIDC-Client-Konfiguration
     client_id: Mapped[str] = mapped_column(String(512), nullable=False)
-    # Fernet-encrypted; leer = kein Secret hinterlegt (z. B. PKCE-only Provider)
+    # DIS-encrypted; leer = kein Secret hinterlegt (z. B. PKCE-only Provider)
     client_secret_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)
     # Maske des Klartext-Secrets (z. B. "********cdef") — wird bei
     # Create/Update berechnet und mit-geschrieben. Vermeidet, dass der
-    # Listing-Pfad fuer jeden Provider einen Fernet-Decrypt macht, nur um
+    # Listing-Pfad fuer jeden Provider einen DIS-Decrypt macht, nur um
     # die letzten 4 Zeichen anzuzeigen. KISS + Performance.
     client_secret_mask: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
