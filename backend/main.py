@@ -57,6 +57,24 @@ async def lifespan(app: FastAPI):
     # Startup
     os.makedirs(settings.servers_dir, exist_ok=True)
     os.makedirs("/opt/msm/backups", exist_ok=True)
+
+    # DIS Sidecar health check — fail-closed in production (no own crypto)
+    from services.dis_client import DisClient
+    if not DisClient.health_check():
+        if settings.debug:
+            import logging
+            logging.getLogger("msm").warning(
+                "DIS Sidecar nicht erreichbar — Debug-Modus, fahre fort. "
+                "Production wuerde hier abbrechen."
+            )
+        else:
+            raise RuntimeError(
+                "CRITICAL: DIS Sidecar nicht erreichbar. "
+                "Starte den Sidecar zuerst (systemctl start msm-dis-sidecar). "
+                "Das Panel enthaelt keine eigene Kryptographie und kann "
+                "ohne DIS nicht operieren."
+            )
+
     Base.metadata.create_all(bind=engine)
 
     # Migration: fehlende Spalten nachträglich hinzufügen
@@ -67,6 +85,31 @@ async def lifespan(app: FastAPI):
         if 'email_notifications' not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_notifications BOOLEAN DEFAULT true"))
+        # E-Mail-Verschluesselung: email_encrypted + email_hash Spalten
+        if 'email_encrypted' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_encrypted VARCHAR(4096)"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_hash VARCHAR(64)"))
+                conn.execute(text("CREATE INDEX ix_users_email_hash ON users (email_hash)"))
+            # Bestehende Klartext-E-Mails verschluesseln
+            from database import SessionLocal as _SL
+            from models import User as _U
+            from services.dis_client import DisClient as _DC
+            _db = _SL()
+            try:
+                for _u in _db.query(_U).filter(_U.email_encrypted.is_(None)).all():
+                    if _u.email_plain:
+                        _u.email = _u.email_plain  # setter verschluesselt + hasht
+                _db.commit()
+            finally:
+                _db.close()
+
+    # Migration: webhook_subscriptions.secret_encrypted Spalte hinzufuegen
+    if 'webhook_subscriptions' in inspector.get_table_names():
+        wh_cols = [c['name'] for c in inspector.get_columns('webhook_subscriptions')]
+        if 'secret_encrypted' not in wh_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE webhook_subscriptions ADD COLUMN secret_encrypted VARCHAR(4096)"))
 
     # Migration: server_ports Tabelle anlegen & Daten migrieren
     if 'server_ports' not in inspector.get_table_names():
@@ -326,7 +369,7 @@ async def lifespan(app: FastAPI):
         db.close()
 
     # Migration: oauth_providers.client_secret_mask (P1.3) — vermeidet
-    # Fernet-Decrypt im Listing-Pfad. Die Spalte wird beim naechsten
+    # DIS-Decrypt im Listing-Pfad. Die Spalte wird beim naechsten
     # Create/Update des Providers automatisch befuellt; alte Provider
     # bekommen NULL (Fallback im Response-Builder).
     if 'oauth_providers' in inspector.get_table_names():

@@ -30,6 +30,45 @@ db_module.engine = create_engine(
 db_module.SessionLocal = db_module.sessionmaker(
     autocommit=False, autoflush=False, bind=db_module.engine
 )
+
+# ── DIS Sidecar mock (tests use local crypto, no Node required) ────────
+# Production code calls DisClient for all crypto. In tests we patch the
+# static methods with simple reversible operations so no Node sidecar is
+# needed. TOTP uses a standard-library implementation (tests/_totp.py).
+import base64 as _b64
+import hashlib as _hl
+import secrets as _sec
+
+from services.dis_client import DisClient
+
+def _mock_encrypt(plaintext: str, aad: str | None = None) -> str:
+    return "test-enc-" + plaintext.encode().hex()
+
+def _mock_decrypt(ciphertext: str, aad: str | None = None) -> str:
+    if ciphertext.startswith("test-enc-"):
+        return bytes.fromhex(ciphertext[9:]).decode()
+    return ciphertext
+
+def _mock_hash_password(password: str) -> str:
+    return "msm-pw-v1:test:" + _hl.sha256(password.encode()).hexdigest()
+
+def _mock_verify_password(password: str, stored_hash: str) -> bool:
+    return stored_hash == _mock_hash_password(password)
+
+def _mock_totp_verify(secret: str, code: str, window: int = 1) -> bool:
+    from tests._totp import totp_now
+    return totp_now(secret) == code.strip()
+
+DisClient.encrypt = staticmethod(_mock_encrypt)
+DisClient.decrypt = staticmethod(_mock_decrypt)
+DisClient.hash_password = staticmethod(_mock_hash_password)
+DisClient.verify_password = staticmethod(_mock_verify_password)
+DisClient.is_dis_hash = staticmethod(lambda h: h.startswith("msm-pw-v1:"))
+DisClient.generate_totp_secret = staticmethod(lambda: _b64.b32encode(_sec.token_bytes(20)).decode().rstrip("="))
+DisClient.verify_totp = staticmethod(_mock_totp_verify)
+DisClient.build_totp_uri = staticmethod(lambda issuer, label, secret: f"otpauth://totp/{issuer}:{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30")
+DisClient.health_check = staticmethod(lambda: True)
+
 from main import app
 from models import User, RefreshToken, Server, Role, ServerPermission
 from services.auth_service import AuthService

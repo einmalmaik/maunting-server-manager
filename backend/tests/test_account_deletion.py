@@ -1,4 +1,4 @@
-import pyotp
+from tests._totp import totp_now, random_totp_secret
 import pytest
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
@@ -100,8 +100,8 @@ class TestAccountDeletion:
 
     def test_delete_requires_otp_when_2fa_enabled(self, client: TestClient, db: Session, normal_user: User, normal_cookies: dict):
         # Enable 2FA for normal user
-        secret = pyotp.random_base32()
-        normal_user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret(secret)
+        secret = random_totp_secret()
+        normal_user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{normal_user.id}:2fa")
         normal_user.two_factor_enabled = True
         db.commit()
 
@@ -143,11 +143,10 @@ class TestAccountDeletion:
         assert response.status_code in (401, 422)
 
         # Try with valid TOTP code
-        totp = pyotp.TOTP(secret)
         response = client.request(
             "DELETE",
             "/api/auth/delete-account",
-            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": totp.now()},
+            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": totp_now(secret)},
             cookies=normal_cookies,
             headers={"X-CSRF-Token": csrf},
         )

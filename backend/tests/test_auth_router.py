@@ -69,7 +69,7 @@ class TestLogin:
 
     def test_login_2fa_required(self, client: TestClient, db: Session, owner_user: User):
         from services.auth_service import AuthService
-        owner_user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret("JBSWY3DPEHPK3PXP")
+        owner_user.two_factor_secret_encrypted = AuthService.encrypt_secret("JBSWY3DPEHPK3PXP", aad=f"msm:user:{owner_user.id}:2fa")
         owner_user.two_factor_enabled = True
         db.commit()
         response = client.post("/api/auth/login", json={
@@ -377,11 +377,11 @@ class TestSetupVerification:
 
 class Test2FABackupCodes:
     def test_login_with_backup_code(self, client: TestClient, db: Session, owner_user: User):
-        import pyotp
+        from tests._totp import totp_now, random_totp_secret
         from services.backup_code_service import BackupCodeService
         from services.auth_service import AuthService as _AuthService
-        secret = pyotp.random_base32()
-        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        secret = random_totp_secret()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_secret(secret, aad=f"msm:user:{owner_user.id}:2fa")
         owner_user.two_factor_enabled = True
         db.commit()
         codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
@@ -403,11 +403,11 @@ class Test2FABackupCodes:
         assert res2.json()["requires_2fa"] is False
 
     def test_backup_code_used_twice_fails(self, client: TestClient, db: Session, owner_user: User):
-        import pyotp
+        from tests._totp import totp_now, random_totp_secret
         from services.backup_code_service import BackupCodeService
         from services.auth_service import AuthService as _AuthService
-        secret = pyotp.random_base32()
-        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        secret = random_totp_secret()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_secret(secret, aad=f"msm:user:{owner_user.id}:2fa")
         owner_user.two_factor_enabled = True
         db.commit()
         codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
@@ -427,10 +427,10 @@ class Test2FABackupCodes:
         assert res2.status_code == 401
 
     def test_2fa_disable_requires_current_otp(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
-        import pyotp
+        from tests._totp import totp_now, random_totp_secret
         from services.auth_service import AuthService as _AuthService
-        secret = pyotp.random_base32()
-        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        secret = random_totp_secret()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_secret(secret, aad=f"msm:user:{owner_user.id}:2fa")
         owner_user.two_factor_enabled = True
         db.commit()
         csrf = owner_cookies.get("__Secure-csrf_token")
@@ -443,11 +443,11 @@ class Test2FABackupCodes:
         assert res.status_code == 400
 
     def test_2fa_disable_with_backup_code_fails(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
-        import pyotp
+        from tests._totp import totp_now, random_totp_secret
         from services.backup_code_service import BackupCodeService
         from services.auth_service import AuthService as _AuthService
-        secret = pyotp.random_base32()
-        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        secret = random_totp_secret()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_secret(secret, aad=f"msm:user:{owner_user.id}:2fa")
         owner_user.two_factor_enabled = True
         db.commit()
         codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
@@ -461,12 +461,12 @@ class Test2FABackupCodes:
         assert res.status_code == 400
 
     def test_backup_code_generation_replaces_old_codes(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
-        import pyotp
+        from tests._totp import totp_now, random_totp_secret
         from services.auth_service import AuthService as _AuthService
         from services.backup_code_service import BackupCodeService
 
-        secret = pyotp.random_base32()
-        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_2fa_secret(secret)
+        secret = random_totp_secret()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_secret(secret, aad=f"msm:user:{owner_user.id}:2fa")
         owner_user.two_factor_enabled = True
         db.commit()
         csrf = owner_cookies.get("__Secure-csrf_token")

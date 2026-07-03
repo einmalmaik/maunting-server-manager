@@ -10,7 +10,7 @@ Schwerpunkt: Security-Gates
 
 from __future__ import annotations
 
-import pyotp
+from tests._totp import totp_now, random_totp_secret
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -530,7 +530,7 @@ class TestOAuth2FA:
     def test_2fa_with_invalid_otp_returns_401(
         self, client: TestClient, db: Session, regular_user: User
     ):
-        regular_user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret("JBSWY3DPEHPK3PXP")
+        regular_user.two_factor_secret_encrypted = AuthService.encrypt_secret("JBSWY3DPEHPK3PXP", aad=f"msm:user:{regular_user.id}:2fa")
         regular_user.two_factor_enabled = True
         db.commit()
         provider = _create_provider(db, slug="gh-2fa", preset="github")
@@ -545,13 +545,13 @@ class TestOAuth2FA:
         self, client: TestClient, db: Session, regular_user: User
     ):
         secret = "JBSWY3DPEHPK3PXP"
-        regular_user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret(secret)
+        regular_user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{regular_user.id}:2fa")
         regular_user.two_factor_enabled = True
         regular_user.email_verified = True
         db.commit()
         provider = _create_provider(db, slug="gh-2faok", preset="github")
         token = oauth_service.create_2fa_challenge(db, regular_user, provider)
-        otp = pyotp.TOTP(secret).now()
+        otp = totp_now(secret)
         res = client.post(
             "/api/oauth/gh-2faok/2fa",
             json={"challenge": token, "otp_code": otp},
@@ -573,14 +573,14 @@ class TestOAuth2FA:
         self, client: TestClient, db: Session, regular_user: User
     ):
         secret = "JBSWY3DPEHPK3PXP"
-        regular_user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret(secret)
+        regular_user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{regular_user.id}:2fa")
         regular_user.two_factor_enabled = True
         regular_user.email_verified = True
         db.commit()
         p1 = _create_provider(db, slug="gh-aa", preset="github")
         p2 = _create_provider(db, slug="gh-bb", preset="github")
         token = oauth_service.create_2fa_challenge(db, regular_user, p1)
-        otp = pyotp.TOTP(secret).now()
+        otp = totp_now(secret)
         res = client.post(
             f"/api/oauth/{p2.slug}/2fa",  # falscher Slug
             json={"challenge": token, "otp_code": otp},
@@ -692,7 +692,7 @@ class TestLinkStart:
 
 class TestUnifiedCallback:
     """Beide Flows (Login + Linking) teilen sich /api/oauth/{slug}/callback.
-    Die Trennung passiert ueber das mode-Feld im State-Cookie (Fernet-encrypted).
+    Die Trennung passiert ueber das mode-Feld im State-Cookie (DIS-encrypted).
     Damit muss in der IdP-Console nur EINE redirect_uri registriert werden.
     """
 
