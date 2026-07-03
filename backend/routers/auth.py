@@ -5,13 +5,12 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-import pyotp
-
 from config import settings
 from cookies import _set_auth_cookies, _clear_auth_cookies
 from database import get_db
 from dependencies import get_current_user, get_current_owner, verify_csrf
 from models import User, EmailVerification
+from services.dis_client import DisClient
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest
 from schemas import ResendVerificationRequest
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest
@@ -195,6 +194,7 @@ def login_verify(
     user = AuthService.get_user_by_username(db, req.username)
     if not user or not AuthService.verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
+    AuthService.rehash_password_if_needed(db, user, req.password)
     if not user.is_active:
         raise HTTPException(status_code=401, detail="Account deaktiviert")
     if user.email_verified:
@@ -215,11 +215,7 @@ def login_verify(
     if user.two_factor_enabled:
         if not req.otp_code:
             return {"access_token": "", "token_type": "", "requires_2fa": True, "requires_verification": False, "email": user.email}
-        secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted) if user.two_factor_secret_encrypted else None
-        if not secret:
-            raise HTTPException(status_code=401, detail="2FA-Secret nicht gefunden")
-        totp = pyotp.TOTP(secret)
-        if not totp.verify(req.otp_code):
+        if not AuthService.verify_current_2fa_code(user, req.otp_code):
             backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
             if not backup_valid:
                 raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
@@ -258,13 +254,7 @@ async def login(
     if user.two_factor_enabled:
         if not req.otp_code:
             return {"requires_2fa": True, "access_token": "", "token_type": "", "requires_verification": False, "email": user.email}
-        secret = None
-        if user.two_factor_secret_encrypted:
-            secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted)
-        if not secret:
-            raise HTTPException(status_code=401, detail="2FA-Secret nicht gefunden")
-        totp = pyotp.TOTP(secret)
-        if not totp.verify(req.otp_code):
+        if not AuthService.verify_current_2fa_code(user, req.otp_code):
             # Backup-Code als Fallback pruefen
             backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
             if not backup_valid:
@@ -377,11 +367,7 @@ async def change_password(
     if user.two_factor_enabled:
         if not req.otp_code:
             raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
-        secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted) if user.two_factor_secret_encrypted else None
-        if not secret:
-            raise HTTPException(status_code=401, detail="2FA-Secret nicht gefunden")
-        totp = pyotp.TOTP(secret)
-        if not totp.verify(req.otp_code):
+        if not AuthService.verify_current_2fa_code(user, req.otp_code):
             raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
 
     AuthService.reset_password(db, user, req.new_password)
@@ -404,11 +390,7 @@ async def change_email(
     if user.two_factor_enabled:
         if not req.otp_code:
             raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
-        secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted) if user.two_factor_secret_encrypted else None
-        if not secret:
-            raise HTTPException(status_code=401, detail="2FA-Secret nicht gefunden")
-        totp = pyotp.TOTP(secret)
-        if not totp.verify(req.otp_code):
+        if not AuthService.verify_current_2fa_code(user, req.otp_code):
             raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
 
     user.email = req.email
@@ -503,11 +485,11 @@ def delete_account(
 
 @router.post("/2fa/setup")
 def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
-    secret = pyotp.random_base32()
-    user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret(secret)
+    secret = DisClient.generate_totp_secret()
+    user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
     user.two_factor_enabled = False
     db.commit()
-    uri = pyotp.totp.TOTP(secret).provisioning_uri(name=user.email, issuer_name="Maunting Server Manager")
+    uri = DisClient.build_totp_uri("Maunting Server Manager", user.email, secret)
     return {"secret": secret, "uri": uri}
 
 
@@ -515,9 +497,7 @@ def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_
 async def enable_2fa(otp_code: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     if not user.two_factor_secret_encrypted:
         raise HTTPException(status_code=400, detail="2FA nicht eingerichtet")
-    secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted)
-    totp = pyotp.TOTP(secret)
-    if not totp.verify(otp_code):
+    if not AuthService.verify_current_2fa_code(user, otp_code):
         raise HTTPException(status_code=400, detail="Ungültiger Code")
     user.two_factor_enabled = True
     db.commit()
@@ -536,9 +516,7 @@ async def disable_2fa(
     """2FA deaktivieren — ERFORDERT aktuellen 2FA-Code. Backup-Codes funktionieren NICHT."""
     if not user.two_factor_enabled or not user.two_factor_secret_encrypted:
         raise HTTPException(status_code=400, detail="2FA nicht aktiviert")
-    secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted)
-    totp = pyotp.TOTP(secret)
-    if not totp.verify(otp_code):
+    if not AuthService.verify_current_2fa_code(user, otp_code):
         raise HTTPException(status_code=400, detail="Ungültiger 2FA-Code")
     user.two_factor_enabled = False
     user.two_factor_secret_encrypted = None

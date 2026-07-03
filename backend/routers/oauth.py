@@ -8,7 +8,7 @@ Drei Bereiche, klare Security-Gates:
    - Secrets werden im Response maskiert
 
 2) Public-Flow auf /api/oauth/{slug}/{start,callback,2fa}
-   - Anonym, mit State-Cookie (Fernet-encrypted)
+   - Anonym, mit State-Cookie (DIS-encrypted)
    - PKCE
    - Kein direkter Zugriff auf IdP-Secrets zur Laufzeit noetig
    - 2FA-Gate ueber LoginChallenge
@@ -80,7 +80,7 @@ def _truncate_for_log(value: str | None, max_len: int = 16) -> str:
 
 def _provider_to_response(p: OAuthProvider) -> dict[str, Any]:
     # Maske kommt direkt aus der DB-Spalte `client_secret_mask` (wird beim
-    # Create/Update berechnet). Kein Fernet-Decrypt im Read-Pfad mehr noetig.
+    # Create/Update berechnet). Kein DIS-Decrypt im Read-Pfad mehr noetig.
     # Fuer sehr alte Provider ohne gesetzte Maske (vor der P1.3-Migration):
     # Fallback "****" signalisiert "Secret ist gesetzt, aber Maske unbekannt".
     # Der Admin kann durch erneutes Speichern die Maske neu berechnen.
@@ -443,7 +443,7 @@ def oauth_callback(
         if not state_cookie:
             _log.warning("OAuth state mismatch (slug=%s, mode=%s): no __Secure-oauth_state cookie on request", slug, mode)
         elif payload is None:
-            _log.warning("OAuth state mismatch (slug=%s, mode=%s): cookie present but Fernet decrypt failed", slug, mode)
+            _log.warning("OAuth state mismatch (slug=%s, mode=%s): cookie present but DIS decrypt failed", slug, mode)
         else:
             # State-Werte koennen potenziell lang sein (URL-kontrolliert) —
             # fuer den Log auf 16 Zeichen kuerzen, damit Log-Aggregatoren
@@ -628,7 +628,7 @@ def oauth_link_start(
     """Startet einen Linking-Flow fuer den aktuell eingeloggten User.
 
     Der IdP redirected am Ende auf den geteilten ``/{slug}/callback`` — der
-    Mode wird ueber das (Fernet-encrypted) State-Cookie transportiert.
+    Mode wird ueber das (DIS-encrypted) State-Cookie transportiert.
     """
     if not oauth_service.is_linking_allowed():
         raise HTTPException(status_code=403, detail="Account-Linking ist deaktiviert")
