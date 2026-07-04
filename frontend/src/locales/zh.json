@@ -670,7 +670,37 @@
     "panelConfig": "面板配置",
     "provider": "提供者",
     "providerSmtp": "邮件传输协议",
-    "providerResend": "重新发送"
+    "providerResend": "重新发送",
+    "tabs": {
+      "backup": "备份"
+    },
+    "backup": {
+      "statusTitle": "备份状态",
+      "s3Configured": "S3: 已配置",
+      "s3NotConfigured": "S3: 未配置",
+      "passwordSet": "密码: 已设置",
+      "passwordNotSet": "密码: 未设置",
+      "s3Title": "S3 配置",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "新的 access key",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "新的 secret key",
+      "region": "区域",
+      "optional": "可选",
+      "testConnection": "测试连接",
+      "saveS3": "保存 S3 配置",
+      "s3Saved": "S3 配置已保存",
+      "passwordTitle": "备份密码",
+      "passwordSetLabel": "备份密码已设置",
+      "passwordNotSetLabel": "备份密码未设置",
+      "newPassword": "新的备份密码",
+      "newPasswordPlaceholder": "输入新密码",
+      "passwordHint": "加密存储。密码永远不会返回，且加密/解密备份时需要。",
+      "savePassword": "保存密码",
+      "passwordSaved": "备份密码已保存"
+    }
   },
   "profile": {
     "title": "公司简介",

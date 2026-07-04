@@ -670,7 +670,37 @@
     "panelConfig": "Конфигурация панели",
     "provider": "Поставщик",
     "providerSmtp": "SMTP",
-    "providerResend": "Отправить повторно"
+    "providerResend": "Отправить повторно",
+    "tabs": {
+      "backup": "Резервное копирование"
+    },
+    "backup": {
+      "statusTitle": "Статус резервного копирования",
+      "s3Configured": "S3: Настроено",
+      "s3NotConfigured": "S3: Не настроено",
+      "passwordSet": "Пароль: Задан",
+      "passwordNotSet": "Пароль: Не задан",
+      "s3Title": "Конфигурация S3",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "Новый access key",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "Новый secret key",
+      "region": "Регион",
+      "optional": "необязательно",
+      "testConnection": "Проверить соединение",
+      "saveS3": "Сохранить конфигурацию S3",
+      "s3Saved": "Конфигурация S3 сохранена",
+      "passwordTitle": "Пароль резервного копирования",
+      "passwordSetLabel": "Пароль резервного копирования задан",
+      "passwordNotSetLabel": "Пароль резервного копирования не задан",
+      "newPassword": "Новый пароль резервного копирования",
+      "newPasswordPlaceholder": "Введите новый пароль",
+      "passwordHint": "Хранится в зашифрованном виде. Пароль никогда не возвращается и требуется для шифрования/расшифровки резервных копий.",
+      "savePassword": "Сохранить пароль",
+      "passwordSaved": "Пароль резервного копирования сохранён"
+    }
   },
   "profile": {
     "title": "Профиль",

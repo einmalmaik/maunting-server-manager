@@ -670,7 +670,37 @@
     "panelConfig": "تكوين اللوحة",
     "provider": "مزود",
     "providerSmtp": "SMTP",
-    "providerResend": "إعادة الإرسال"
+    "providerResend": "إعادة الإرسال",
+    "tabs": {
+      "backup": "نسخ احتياطي"
+    },
+    "backup": {
+      "statusTitle": "حالة النسخ الاحتياطي",
+      "s3Configured": "S3: تم التكوين",
+      "s3NotConfigured": "S3: غير مكون",
+      "passwordSet": "كلمة المرور: محددة",
+      "passwordNotSet": "كلمة المرور: غير محددة",
+      "s3Title": "تكوين S3",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "مفتاح وصول جديد",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "مفتاح سري جديد",
+      "region": "المنطقة",
+      "optional": "اختياري",
+      "testConnection": "اختبار الاتصال",
+      "saveS3": "حفظ تكوين S3",
+      "s3Saved": "تم حفظ تكوين S3",
+      "passwordTitle": "كلمة مرور النسخ الاحتياطي",
+      "passwordSetLabel": "تم تعيين كلمة مرور النسخ الاحتياطي",
+      "passwordNotSetLabel": "كلمة مرور النسخ الاحتياطي غير محددة",
+      "newPassword": "كلمة مرور نسخ احتياطي جديدة",
+      "newPasswordPlaceholder": "أدخل كلمة مرور جديدة",
+      "passwordHint": "تُخزن مشفرة. لا يتم إرجاع كلمة المرور أبداً وهي مطلوبة لتشفير/فك تشفير النسخ الاحتياطية.",
+      "savePassword": "حفظ كلمة المرور",
+      "passwordSaved": "تم حفظ كلمة مرور النسخ الاحتياطي"
+    }
   },
   "profile": {
     "title": "الملف الشخصي",

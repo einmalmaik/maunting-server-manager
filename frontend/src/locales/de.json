@@ -766,7 +766,8 @@
       "email": "E-Mail",
       "steam": "Steam",
       "github": "GitHub",
-      "oauth": "OAuth / Social Login"
+      "oauth": "OAuth / Social Login",
+      "backup": "Backup"
     },
     "githubTokenTitle": "GitHub Personal Access Token",
     "githubWhyNeeded": "Erforderlich für Blueprints vom Typ source.type=github, um private Repositories zu klonen oder zu pullen. Öffentliche Repos funktionieren ohne Token.",
@@ -837,6 +838,33 @@
       "editTitle": "OAuth-Provider bearbeiten",
       "redirectUri": "Callback-URL (im IdP hinterlegen)",
       "redirectUriHint": "Exakt diese URL als Redirect-URI im OAuth-Client des IdPs eintragen."
+    },
+    "backup": {
+      "statusTitle": "Backup-Status",
+      "s3Configured": "S3: Konfiguriert",
+      "s3NotConfigured": "S3: Nicht konfiguriert",
+      "passwordSet": "Backup-Passwort: Gesetzt",
+      "passwordNotSet": "Backup-Passwort: Nicht gesetzt",
+      "s3Title": "S3-Konfiguration",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "Neuer Access Key",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "Neuer Secret Key",
+      "region": "Region",
+      "optional": "optional",
+      "testConnection": "Verbindung testen",
+      "saveS3": "S3-Konfiguration speichern",
+      "s3Saved": "S3-Konfiguration gespeichert",
+      "passwordTitle": "Backup-Passwort",
+      "passwordSetLabel": "Backup-Passwort gesetzt",
+      "passwordNotSetLabel": "Backup-Passwort nicht gesetzt",
+      "newPassword": "Neues Backup-Passwort",
+      "newPasswordPlaceholder": "Neues Passwort eingeben",
+      "passwordHint": "Wird verschlüsselt gespeichert. Das Passwort wird niemals zurückgegeben und benötigt, um Backups zu verschlüsseln/entschlüsseln.",
+      "savePassword": "Passwort speichern",
+      "passwordSaved": "Backup-Passwort gespeichert"
     }
   },
   "profile": {

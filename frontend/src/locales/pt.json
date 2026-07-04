@@ -670,7 +670,37 @@
     "panelConfig": "Configuração do painel",
     "provider": "Provedor",
     "providerSmtp": "SMTP",
-    "providerResend": "Reenviar"
+    "providerResend": "Reenviar",
+    "tabs": {
+      "backup": "Backup"
+    },
+    "backup": {
+      "statusTitle": "Status do backup",
+      "s3Configured": "S3: Configurado",
+      "s3NotConfigured": "S3: Não configurado",
+      "passwordSet": "Senha: Definida",
+      "passwordNotSet": "Senha: Não definida",
+      "s3Title": "Configuração S3",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "Novo access key",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "Novo secret key",
+      "region": "Região",
+      "optional": "opcional",
+      "testConnection": "Testar conexão",
+      "saveS3": "Salvar configuração S3",
+      "s3Saved": "Configuração S3 salva",
+      "passwordTitle": "Senha de backup",
+      "passwordSetLabel": "Senha de backup definida",
+      "passwordNotSetLabel": "Senha de backup não definida",
+      "newPassword": "Nova senha de backup",
+      "newPasswordPlaceholder": "Digite a nova senha",
+      "passwordHint": "Armazenada criptografada. A senha nunca é retornada e é necessária para criptografar/descriptografar backups.",
+      "savePassword": "Salvar senha",
+      "passwordSaved": "Senha de backup salva"
+    }
   },
   "profile": {
     "title": "Perfil",

@@ -670,7 +670,37 @@
     "panelConfig": "প্যানেল কনফিগারেশন",
     "provider": "প্রদানকারী",
     "providerSmtp": "SMTP",
-    "providerResend": "আবার পাঠান"
+    "providerResend": "আবার পাঠান",
+    "tabs": {
+      "backup": "ব্যাকআপ"
+    },
+    "backup": {
+      "statusTitle": "ব্যাকআপ অবস্থা",
+      "s3Configured": "S3: কনফিগার করা",
+      "s3NotConfigured": "S3: কনফিগার নয়",
+      "passwordSet": "পাসওয়ার্ড: সেট করা",
+      "passwordNotSet": "পাসওয়ার্ড: সেট নয়",
+      "s3Title": "S3 কনফিগারেশন",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "নতুন access key",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "নতুন secret key",
+      "region": "অঞ্চল",
+      "optional": "ঐচ্ছিক",
+      "testConnection": "সংযোগ পরীক্ষা",
+      "saveS3": "S3 কনফিগারেশন সংরক্ষণ",
+      "s3Saved": "S3 কনফিগারেশন সংরক্ষিত",
+      "passwordTitle": "ব্যাকআপ পাসওয়ার্ড",
+      "passwordSetLabel": "ব্যাকআপ পাসওয়ার্ড সেট করা",
+      "passwordNotSetLabel": "ব্যাকআপ পাসওয়ার্ড সেট নয়",
+      "newPassword": "নতুন ব্যাকআপ পাসওয়ার্ড",
+      "newPasswordPlaceholder": "নতুন পাসওয়ার্ড লিখুন",
+      "passwordHint": "এনক্রিপ্টেড অবস্থায় সংরক্ষিত। পাসওয়ার্ড কখনো ফেরত দেওয়া হয় না এবং ব্যাকআপ এনক্রিপ্ট/ডিক্রিপ্ট করতে প্রয়োজন।",
+      "savePassword": "পাসওয়ার্ড সংরক্ষণ",
+      "passwordSaved": "ব্যাকআপ পাসওয়ার্ড সংরক্ষিত"
+    }
   },
   "profile": {
     "title": "প্রোফাইল",

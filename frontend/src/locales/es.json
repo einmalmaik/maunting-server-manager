@@ -692,7 +692,37 @@
     "panelConfig": "Configuración del panel",
     "provider": "Proveedor",
     "providerSmtp": "SMTP",
-    "providerResend": "Reenviar"
+    "providerResend": "Reenviar",
+    "tabs": {
+      "backup": "Copia de seguridad"
+    },
+    "backup": {
+      "statusTitle": "Estado de copia de seguridad",
+      "s3Configured": "S3: Configurado",
+      "s3NotConfigured": "S3: No configurado",
+      "passwordSet": "Contraseña de copia: Establecida",
+      "passwordNotSet": "Contraseña de copia: No establecida",
+      "s3Title": "Configuración S3",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "Nuevo access key",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "Nuevo secret key",
+      "region": "Región",
+      "optional": "opcional",
+      "testConnection": "Probar conexión",
+      "saveS3": "Guardar configuración S3",
+      "s3Saved": "Configuración S3 guardada",
+      "passwordTitle": "Contraseña de copia de seguridad",
+      "passwordSetLabel": "Contraseña de copia establecida",
+      "passwordNotSetLabel": "Contraseña de copia no establecida",
+      "newPassword": "Nueva contraseña de copia",
+      "newPasswordPlaceholder": "Introducir nueva contraseña",
+      "passwordHint": "Se almacena cifrada. La contraseña nunca se devuelve y es necesaria para cifrar/descifrar copias.",
+      "savePassword": "Guardar contraseña",
+      "passwordSaved": "Contraseña de copia guardada"
+    }
   },
   "profile": {
     "title": "Perfil",

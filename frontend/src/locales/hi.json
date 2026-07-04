@@ -670,7 +670,37 @@
     "panelConfig": "पैनल विन्यास",
     "provider": "प्रदाता",
     "providerSmtp": "एसएमटीपी",
-    "providerResend": "पुनः भेजें"
+    "providerResend": "पुनः भेजें",
+    "tabs": {
+      "backup": "बैकअप"
+    },
+    "backup": {
+      "statusTitle": "बैकअप स्थिति",
+      "s3Configured": "S3: कॉन्फ़िगर किया गया",
+      "s3NotConfigured": "S3: कॉन्फ़िगर नहीं",
+      "passwordSet": "पासवर्ड: सेट है",
+      "passwordNotSet": "पासवर्ड: सेट नहीं",
+      "s3Title": "S3 कॉन्फ़िगरेशन",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "नया access key",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "नया secret key",
+      "region": "क्षेत्र",
+      "optional": "वैकल्पिक",
+      "testConnection": "कनेक्शन परीक्षण",
+      "saveS3": "S3 कॉन्फ़िगरेशन सहेजें",
+      "s3Saved": "S3 कॉन्फ़िगरेशन सहेजा गया",
+      "passwordTitle": "बैकअप पासवर्ड",
+      "passwordSetLabel": "बैकअप पासवर्ड सेट है",
+      "passwordNotSetLabel": "बैकअप पासवर्ड सेट नहीं",
+      "newPassword": "नया बैकअप पासवर्ड",
+      "newPasswordPlaceholder": "नया पासवर्ड दर्ज करें",
+      "passwordHint": "एन्क्रिप्टेड रूप में संग्रहीत। पासवर्ड कभी वापस नहीं किया जाता और बैकअप को एन्क्रिप्ट/डिक्रिप्ट करने के लिए आवश्यक है।",
+      "savePassword": "पासवर्ड सहेजें",
+      "passwordSaved": "बैकअप पासवर्ड सहेजा गया"
+    }
   },
   "profile": {
     "title": "प्रोफाइल",

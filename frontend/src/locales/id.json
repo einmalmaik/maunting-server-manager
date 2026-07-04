@@ -670,7 +670,37 @@
     "panelConfig": "Konfigurasi Panel",
     "provider": "Penyedia",
     "providerSmtp": "SMTP",
-    "providerResend": "Kirim ulang"
+    "providerResend": "Kirim ulang",
+    "tabs": {
+      "backup": "Cadangan"
+    },
+    "backup": {
+      "statusTitle": "Status cadangan",
+      "s3Configured": "S3: Dikonfigurasi",
+      "s3NotConfigured": "S3: Belum dikonfigurasi",
+      "passwordSet": "Kata sandi: Diatur",
+      "passwordNotSet": "Kata sandi: Belum diatur",
+      "s3Title": "Konfigurasi S3",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "Access key baru",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "Secret key baru",
+      "region": "Wilayah",
+      "optional": "opsional",
+      "testConnection": "Uji koneksi",
+      "saveS3": "Simpan konfigurasi S3",
+      "s3Saved": "Konfigurasi S3 disimpan",
+      "passwordTitle": "Kata sandi cadangan",
+      "passwordSetLabel": "Kata sandi cadangan diatur",
+      "passwordNotSetLabel": "Kata sandi cadangan belum diatur",
+      "newPassword": "Kata sandi cadangan baru",
+      "newPasswordPlaceholder": "Masukkan kata sandi baru",
+      "passwordHint": "Disimpan terenkripsi. Kata sandi tidak pernah dikembalikan dan diperlukan untuk mengenkripsi/mendekripsi cadangan.",
+      "savePassword": "Simpan kata sandi",
+      "passwordSaved": "Kata sandi cadangan disimpan"
+    }
   },
   "profile": {
     "title": "Profil",

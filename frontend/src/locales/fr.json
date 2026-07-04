@@ -670,7 +670,37 @@
     "panelConfig": "Configuration du panneau",
     "provider": "Fournisseur",
     "providerSmtp": "SMTP",
-    "providerResend": "Renvoyer"
+    "providerResend": "Renvoyer",
+    "tabs": {
+      "backup": "Sauvegarde"
+    },
+    "backup": {
+      "statusTitle": "État de la sauvegarde",
+      "s3Configured": "S3 : Configuré",
+      "s3NotConfigured": "S3 : Non configuré",
+      "passwordSet": "Mot de passe : Défini",
+      "passwordNotSet": "Mot de passe : Non défini",
+      "s3Title": "Configuration S3",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "accessKey": "Access Key",
+      "accessKeyPlaceholder": "Nouvel access key",
+      "secretKey": "Secret Key",
+      "secretKeyPlaceholder": "Nouveau secret key",
+      "region": "Région",
+      "optional": "optionnel",
+      "testConnection": "Tester la connexion",
+      "saveS3": "Enregistrer la configuration S3",
+      "s3Saved": "Configuration S3 enregistrée",
+      "passwordTitle": "Mot de passe de sauvegarde",
+      "passwordSetLabel": "Mot de passe de sauvegarde défini",
+      "passwordNotSetLabel": "Mot de passe de sauvegarde non défini",
+      "newPassword": "Nouveau mot de passe de sauvegarde",
+      "newPasswordPlaceholder": "Saisir un nouveau mot de passe",
+      "passwordHint": "Stocké chiffré. Le mot de passe n'est jamais renvoyé et est requis pour chiffrer/déchiffrer les sauvegardes.",
+      "savePassword": "Enregistrer le mot de passe",
+      "passwordSaved": "Mot de passe de sauvegarde enregistré"
+    }
   },
   "profile": {
     "title": "Profil",
