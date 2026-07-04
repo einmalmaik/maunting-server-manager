@@ -366,9 +366,9 @@ export function Backups({ serverId }: BackupsProps) {
           </p>
           {s3Status && (
             <span
-              className={`msm-status-badge inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+              className={`msm-badge msm-badge-success inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
                 s3Status.s3_configured
-                  ? "border-success/40 bg-success/10 text-success"
+                  ? "border-status-success/40 bg-status-success/10 text-status-success"
                   : "border-outline-variant bg-surface-container text-on-surface-variant"
               }`}
               title={
@@ -547,7 +547,7 @@ export function Backups({ serverId }: BackupsProps) {
                 {/* Cloud-Icon: gefuellt fuer S3-backed, gedimmt fuer lokal */}
                 {isS3Backed ? (
                   <span title={t("backups.cloudBackedTooltip")} className="flex-shrink-0">
-                    <Cloud className="w-5 h-5 text-success" />
+                    <Cloud className="w-5 h-5 text-status-success" />
                   </span>
                 ) : (
                   <span title={t("backups.localOnlyTooltip")} className="flex-shrink-0">

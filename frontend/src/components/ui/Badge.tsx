@@ -8,7 +8,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
   ({ className = '', variant = 'default', children, ...props }, ref) => {
     const variants = {
       default: 'bg-muted text-muted-foreground border-border',
-      success: 'bg-success/10 text-success border-success/30',
+      success: 'bg-status-success/10 text-status-success border-status-success/30',
       warning: 'bg-warning/10 text-warning border-warning/30',
       destructive: 'bg-destructive/10 text-destructive border-destructive/30',
       info: 'bg-primary/10 text-primary border-primary/30',
