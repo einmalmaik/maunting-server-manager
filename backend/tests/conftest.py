@@ -10,6 +10,10 @@ os.environ["MSM_DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["MSM_SECRET_KEY"] = "test-secret-key-32-chars-long!!!"
 os.environ["MSM_DEBUG"] = "true"
 os.environ["MSM_TESTING"] = "true"
+# AWS-Test-Credentials fuer moto (S3-Mocking)
+os.environ["AWS_ACCESS_KEY_ID"] = "AKIAIOSFODNN7EXAMPLE"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["MSM_PANEL_URL"] = "http://localhost:3000"
 os.environ["MSM_ACCESS_TOKEN_EXPIRE_MINUTES"] = "15"
 
@@ -89,6 +93,174 @@ DisClient.generate_totp_secret = staticmethod(lambda: _b64.b32encode(_sec.token_
 DisClient.verify_totp = staticmethod(_mock_totp_verify)
 DisClient.build_totp_uri = staticmethod(lambda issuer, label, secret: f"otpauth://totp/{issuer}:{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30")
 DisClient.health_check = staticmethod(lambda: True)
+
+# ── DIS Streaming Crypto mock (backup init-key / encrypt / decrypt / invalidate) ──
+# BackupCryptoService ruft die DIS-Streaming-Endpunkte direkt via httpx auf.
+# In Tests mocken wir httpx.post (fuer init-key/invalidate-key) und httpx.stream
+# (fuer encrypt-stream/decrypt-stream), sodass kein Node-Sidecar noetig ist.
+# Die Mock-Operationen sind reversibel (XOR 0x42) und nutzen das echte Frame-Format,
+# sodass Round-Trip-Tests (VAL-DIS-022) den Frame-Parser mitueben.
+import struct as _struct
+import uuid as _uuid
+
+import httpx as _httpx
+
+_dis_streaming_keys: set[str] = set()
+_MOCK_XOR_BYTE = 0x42  # simpler reversibler Mock (keine echte Krypto in Tests)
+_MOCK_NONCE = b"\x00" * 12  # 12-Byte Nonce (Mock)
+_MOCK_FRAME_LEN = 4  # 4-Byte BE uint32 Laengenfeld
+_MOCK_TAG_LEN = 4  # 4-Byte Mock-Auth-Tag (echtes DIS: 16 Byte GCM tag)
+_MOCK_STREAM_CHUNK = 64 * 1024  # 64 KiB wie echtes DIS
+
+
+def _mock_encrypt_frames(plaintext: bytes) -> bytes:
+    """Produziert Frames im DIS-Format aus Plaintext (Mock: XOR +Checksum-Tag)."""
+    out = bytearray()
+    for i in range(0, len(plaintext), _MOCK_STREAM_CHUNK):
+        chunk = plaintext[i:i + _MOCK_STREAM_CHUNK]
+        ct = bytes(b ^ _MOCK_XOR_BYTE for b in chunk)
+        tag = _hl.sha256(chunk).digest()[:_MOCK_TAG_LEN]  # Mock-Auth-Tag
+        frame_len = 12 + len(ct) + _MOCK_TAG_LEN
+        out += _struct.pack(">I", frame_len)
+        out += _MOCK_NONCE
+        out += ct
+        out += tag
+    return bytes(out)
+
+
+def _mock_decrypt_frames(encrypted: bytes) -> bytes:
+    """Parst DIS-Frames und gibt Plaintext zurueck (Mock: XOR +Tag-Verifikation)."""
+    out = bytearray()
+    off = 0
+    while off < len(encrypted):
+        if off + _MOCK_FRAME_LEN > len(encrypted):
+            raise ValueError("TruncatedFrameLength")
+        frame_len = _struct.unpack(">I", encrypted[off:off + _MOCK_FRAME_LEN])[0]
+        off += _MOCK_FRAME_LEN
+        if frame_len < 12 + _MOCK_TAG_LEN:
+            raise ValueError("InvalidFrameLength")
+        if off + frame_len > len(encrypted):
+            raise ValueError("TruncatedFrame")
+        ct = encrypted[off + 12:off + frame_len - _MOCK_TAG_LEN]
+        tag = encrypted[off + frame_len - _MOCK_TAG_LEN:off + frame_len]
+        off += frame_len
+        pt = bytes(b ^ _MOCK_XOR_BYTE for b in ct)
+        expected_tag = _hl.sha256(pt).digest()[:_MOCK_TAG_LEN]
+        if tag != expected_tag:
+            raise ValueError("AuthTagMismatch")  # Tamper erkannt
+        out += pt
+    return bytes(out)
+
+
+def _extract_body(obj) -> bytes:
+    """Extrahiert Bytes aus file-like, bytes oder iterable."""
+    if obj is None:
+        return b""
+    if hasattr(obj, "read"):
+        return obj.read()
+    if isinstance(obj, (bytes, bytearray)):
+        return bytes(obj)
+    if hasattr(obj, "__iter__"):
+        return b"".join(obj)
+    return b""
+
+
+class _MockStreamResponse:
+    """Mock httpx StreamingResponse mit iter_bytes und raise_for_status."""
+
+    def __init__(self, status_code: int, body: bytes, content_type: str = "application/octet-stream"):
+        self.status_code = status_code
+        self._body = body
+        self.headers = {"content-type": content_type}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise _httpx.HTTPStatusError(
+                "DIS mock error", request=_httpx.Request("POST", "http://mock"), response=_httpx.Response(self.status_code)
+            )
+
+    def iter_bytes(self, chunk_size: int = 1024 * 64):
+        if self._body:
+            yield self._body
+
+    @property
+    def content(self):
+        return self._body
+
+
+class _MockStreamCM:
+    """Context-Manager fuer httpx.stream Mock."""
+
+    def __init__(self, response: _MockStreamResponse):
+        self._response = response
+
+    def __enter__(self):
+        return self._response
+
+    def __exit__(self, *exc):
+        return False
+
+
+_original_httpx_post = _httpx.post
+_original_httpx_stream = _httpx.stream
+
+
+def _mock_httpx_post(url: str, *args, **kwargs):
+    """Intercept DIS /backup/init-key und /backup/invalidate-key."""
+    if "/backup/init-key" in url:
+        import json as _json
+        body = kwargs.get("json") or {}
+        password = body.get("password")
+        salt = body.get("salt")
+        if not password or not salt:
+            return _httpx.Response(400, json={"error": "MissingPassword"})
+        key_id = str(_uuid.uuid4())
+        _dis_streaming_keys.add(key_id)
+        return _httpx.Response(200, json={"key_id": key_id})
+    if "/backup/invalidate-key" in url:
+        body = kwargs.get("json") or {}
+        key_id = body.get("key_id")
+        if not key_id:
+            return _httpx.Response(400, json={"error": "MissingKeyId"})
+        _dis_streaming_keys.discard(key_id)
+        return _httpx.Response(200, json={"ok": True})
+    return _original_httpx_post(url, *args, **kwargs)
+
+
+def _mock_httpx_stream(method: str, url: str, *args, **kwargs):
+    """Intercept DIS /backup/encrypt-stream und /backup/decrypt-stream."""
+    if "/backup/encrypt-stream" in url:
+        headers = kwargs.get("headers") or {}
+        key_id = headers.get("X-Backup-Key-Id") or headers.get("x-backup-key-id")
+        if not key_id or key_id not in _dis_streaming_keys:
+            return _MockStreamCM(_MockStreamResponse(400, b'{"error":"KeyNotFound"}', "application/json"))
+        plaintext = _extract_body(kwargs.get("content") or kwargs.get("data"))
+        encrypted = _mock_encrypt_frames(plaintext)
+        return _MockStreamCM(_MockStreamResponse(200, encrypted))
+    if "/backup/decrypt-stream" in url:
+        headers = kwargs.get("headers") or {}
+        key_id = headers.get("X-Backup-Key-Id") or headers.get("x-backup-key-id")
+        if not key_id or key_id not in _dis_streaming_keys:
+            return _MockStreamCM(_MockStreamResponse(400, b'{"error":"KeyNotFound"}', "application/json"))
+        encrypted = _extract_body(kwargs.get("content") or kwargs.get("data"))
+        try:
+            plaintext = _mock_decrypt_frames(encrypted)
+        except Exception:
+            return _MockStreamCM(_MockStreamResponse(400, b'{"error":"DecryptionFailed"}', "application/json"))
+        return _MockStreamCM(_MockStreamResponse(200, plaintext))
+    return _original_httpx_stream(method, url, *args, **kwargs)
+
+
+_httpx.post = _mock_httpx_post
+_httpx.stream = _mock_httpx_stream
+
+
+@pytest.fixture(autouse=True)
+def _reset_dis_streaming_keys():
+    """Reset DIS-Streaming-Mock Keys vor jedem Test."""
+    _dis_streaming_keys.clear()
+    yield
+
 
 from main import app
 from models import User, RefreshToken, Server, Role, ServerPermission
