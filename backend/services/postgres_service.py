@@ -79,6 +79,7 @@ def _admin_connect(database: str = CONTROL_DB):
     # ISOLATION_LEVEL_AUTOCOMMIT: CREATE DATABASE / CREATE ROLE muessen ausserhalb einer
     # Transaktion laufen. NICHT als context manager verwenden -- psycopg2's __enter__()
     # sendet sonst implizit BEGIN, und ein danach gesetztes autocommit wirkt nicht mehr.
+    ensure_internal_postgres()
     conn = psycopg2.connect(
         host=_db_host(),
         port=settings.managed_postgres_port,
@@ -92,6 +93,7 @@ def _admin_connect(database: str = CONTROL_DB):
 
 
 def _owner_connect(database: PostgresDatabase):
+    ensure_internal_postgres()
     return psycopg2.connect(
         host=_db_host(),
         port=settings.managed_postgres_port,

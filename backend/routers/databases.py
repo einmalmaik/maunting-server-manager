@@ -45,6 +45,8 @@ def _ensure_server(db: Session, server_id: int) -> Server:
 
 
 def _service_error(exc: Exception) -> HTTPException:
+    import traceback
+    traceback.print_exc()
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, PostgresServiceError):
