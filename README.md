@@ -2,7 +2,6 @@
 > [!IMPORTANT]
 >
 >This panel is a work in progress. Production use is not recommended.
-Release planned for June 20, 2026.
 
 
 # Maunting Server Manager
