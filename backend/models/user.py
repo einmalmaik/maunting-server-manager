@@ -67,12 +67,15 @@ class User(Base):
     def email(self) -> str | None:
         if self.email_encrypted:
             from services.dis_client import DisClient
-            try:
-                return DisClient.decrypt(self.email_encrypted, aad="msm:user:email")
-            except Exception:
-                pass
-        # Fallback fuer pre-Migration Rows (email_plain hat noch Klartext)
-        return self.email_plain
+            return DisClient.decrypt(self.email_encrypted, aad="msm:user:email")
+        if self.email_plain:
+            # Echte Pre-Migration Erkennung: falls email_plain ein SHA-256 Hash ist, handelt es sich
+            # um eine bereits migrierte Zeile, bei der aber email_encrypted fehlt (Datenkorruption/Fehler).
+            if len(self.email_plain) == 64 and all(c in "0123456789abcdefABCDEF" for c in self.email_plain):
+                from services.dis_client import DisDecryptionError
+                raise DisDecryptionError("Inconsistent database state: email_encrypted is missing but email_plain is hashed.")
+            return self.email_plain
+        return None
 
     @email.setter
     def email(self, value: str | None) -> None:

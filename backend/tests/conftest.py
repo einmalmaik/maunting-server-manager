@@ -42,12 +42,32 @@ import secrets as _sec
 from services.dis_client import DisClient
 
 def _mock_encrypt(plaintext: str, aad: str | None = None) -> str:
-    return "test-enc-" + plaintext.encode().hex()
+    aad_str = aad if aad is not None else ""
+    return "test-enc-v1:" + aad_str.encode().hex() + ":" + plaintext.encode().hex()
 
 def _mock_decrypt(ciphertext: str, aad: str | None = None) -> str:
+    from services.dis_client import DisDecryptionError
+    if ciphertext.startswith("test-enc-v1:"):
+        parts = ciphertext.split(":")
+        if len(parts) == 3:
+            expected_aad = aad if aad is not None else ""
+            try:
+                stored_aad = bytes.fromhex(parts[1]).decode()
+            except Exception:
+                raise DisDecryptionError("DIS Decryption failed")
+            if stored_aad != expected_aad:
+                raise DisDecryptionError("DIS Decryption AAD mismatch")
+            try:
+                return bytes.fromhex(parts[2]).decode()
+            except Exception:
+                raise DisDecryptionError("DIS Decryption failed")
+        raise DisDecryptionError("DIS Decryption invalid format")
     if ciphertext.startswith("test-enc-"):
-        return bytes.fromhex(ciphertext[9:]).decode()
-    return ciphertext
+        try:
+            return bytes.fromhex(ciphertext[9:]).decode()
+        except Exception:
+            raise DisDecryptionError("DIS Decryption failed")
+    raise DisDecryptionError("DIS Decryption failed")
 
 def _mock_hash_password(password: str) -> str:
     return "msm-pw-v1:test:" + _hl.sha256(password.encode()).hexdigest()

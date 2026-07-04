@@ -1031,15 +1031,24 @@ if $RUN_FRONTEND_BUILD; then
     ok "Frontend gebaut"
 fi
 
-# ── DIS Sidecar: npm install (@msdis/shield) ──
-if $RUN_FRONTEND_BUILD; then
-    log "Installiere DIS Sidecar-Abhaengigkeiten..."
+# ── DIS Sidecar: npm ci (@msdis/shield) ──
+RUN_SIDECAR_SETUP=false
+if ! $REINSTALL_MODE; then
+    RUN_SIDECAR_SETUP=true
+elif $KEEP_SETTINGS; then
+    RUN_SIDECAR_SETUP=true
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CODE_CHANGED; then
+    RUN_SIDECAR_SETUP=true
+fi
+
+if $RUN_SIDECAR_SETUP; then
+    log "Installiere DIS Sidecar-Abhängigkeiten..."
     if ! su - "$MSM_USER" -c "
         set -e
         cd $MSM_DIR/dis-sidecar
-        npm install -q
+        npm ci -q --omit=dev
     " 2>&1 | tee -a "$LOG_FILE"; then
-        err "DIS Sidecar npm install fehlgeschlagen. Pruefe dis-sidecar/package.json."
+        err "DIS Sidecar npm ci fehlgeschlagen. Prüfe dis-sidecar/package.json und package-lock.json."
     fi
     ok "DIS Sidecar bereit"
 fi
@@ -1476,7 +1485,7 @@ if $SYSTEMD_AVAILABLE; then
             cd $MSM_DIR/backend
             source venv/bin/activate
             python3 scripts/migrate_to_dis.py
-        " 2>&1 | tee -a "$LOG_FILE" || warn "DIS-Migration: Hinweis/Fehler (siehe Log)"
+        " 2>&1 | tee -a "$LOG_FILE" || err "DIS-Migration fehlgeschlagen! Migration abgebrochen. Prüfe das Log: $LOG_FILE"
     fi
 
     systemctl restart msm-panel.service 2>/dev/null || systemctl start msm-panel.service 2>/dev/null || true

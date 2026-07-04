@@ -71,3 +71,4 @@ backend-dev.log
 backend-dev.err
 PATCHNOTES-ms-oauth-feature.md
 postgres/
+/dis-sidecar/node_modules

@@ -13,8 +13,13 @@ Passwort-Hashes werden hier NICHT migriert — das passiert lazy beim Login
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import os
 import sys
+
+# Ensure backend root is in sys.path so config, database, etc. can be imported
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from cryptography.fernet import Fernet
 
@@ -26,7 +31,8 @@ from services.dis_client import DisClient
 
 def _old_fernet() -> Fernet:
     """Rekonstruiert den alten Fernet-Key aus settings.secret_key."""
-    key = hashlib.sha256(settings.secret_key.encode()).digest()
+    digest = hashlib.sha256(settings.secret_key.encode()).digest()
+    key = base64.urlsafe_b64encode(digest)
     return Fernet(key)
 
 
