@@ -4,6 +4,7 @@ from .role import Role
 from .role_permission import RolePermission
 from .server_permission import ServerPermission
 from .backup import Backup
+from .panel_backup import PanelBackup
 from .mod import Mod
 from .audit_log import AuditLog
 from .refresh_token import RefreshToken
@@ -23,7 +24,7 @@ from .webhook_delivery import WebhookDelivery
 
 __all__ = [
     "User", "Server", "Role", "RolePermission", "ServerPermission",
-    "Backup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
+    "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",
     "PostgresDatabase", "PostgresUser", "PostgresGrant",

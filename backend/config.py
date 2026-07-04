@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     # Produktion: /opt/msm/servers  |  Dev: ./servers
     servers_dir: str = "/opt/msm/servers"
 
+    # Panel-Backup-Konfiguration
+    # Produktion: Config-Dateien (.env, install.sh, ...) liegen unter /opt/msm/
+    # und Panel-Backups werden unter /opt/msm/backups/panel/ gespeichert.
+    # Dev/Test kann beides ueber env ueberschreiben (z.B. auf tmp_path).
+    panel_config_dir: str = "/opt/msm"
+    panel_backup_dir: str = "/opt/msm/backups/panel"
+
     # Verwaltetes PostgreSQL fuer Game-Server-Datenbanken.
     # Der Host-Port ist absichtlich nur an Loopback gebunden. Game-Container
     # erreichen PostgreSQL ueber das interne Docker-Netz und msm-postgres:5432.
