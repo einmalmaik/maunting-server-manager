@@ -30,8 +30,15 @@ from schemas.panel_backup import (
     PanelBackupCreateRequest,
     PanelBackupListItem,
     PanelBackupResponse,
+    PanelBackupSettings,
+    PanelBackupSettingsPatch,
 )
-from services.panel_backup_service import create_panel_backup, delete_panel_backup
+from services.panel_backup_service import (
+    create_panel_backup,
+    delete_panel_backup,
+    get_panel_backup_settings,
+    update_panel_backup_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +115,63 @@ def list_panel_backups_endpoint(
         }
         for b in backups
     ]
+
+
+@router.get("/settings", response_model=PanelBackupSettings)
+def get_panel_backup_settings_endpoint(
+    _=Depends(require_global("panel.settings.write")),
+) -> dict:
+    """Gibt Panel-Backup-Settings zurueck (enabled, interval_hours, retention_count).
+
+    Admin-only (panel.settings.write). Keine CSRF-Pruefung (GET ist read-only).
+
+    Defaults bei fehlenden Werten: enabled=False, interval_hours=24,
+    retention_count=7 (VAL-PANEL-SETTINGS-001).
+
+    Response enthaelt KEINE Secrets (S3-Credentials, Passwort, Salt) —
+    nur nicht-sensitive Scheduler/Retention-Konfiguration (VAL-PANEL-SETTINGS-003).
+    """
+    return get_panel_backup_settings()
+
+
+@router.patch("/settings", response_model=PanelBackupSettings)
+def patch_panel_backup_settings_endpoint(
+    req: PanelBackupSettingsPatch,
+    db: Session = Depends(get_db),
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Aktualisiert Panel-Backup-Settings (partial PATCH).
+
+    Admin-only (panel.settings.write) + CSRF.
+
+    Validierung (VAL-PANEL-SETTINGS-002):
+      - interval_hours > 0 (sonst 400)
+      - retention_count >= 1 (sonst 400)
+    Partial PATCH: nur angegebene Felder werden aktualisiert.
+
+    Nach erfolgreicher Aktualisierung wird der Scheduler live rescheduled
+    (VAL-PANEL-SCHED-004): enabled=False entfernt den Job, Aenderung von
+    interval_hours rescheduled den bestehenden Job.
+    """
+    from services.scheduler_service import sync_panel_backup_schedule
+
+    try:
+        updated = update_panel_backup_settings(
+            enabled=req.enabled,
+            interval_hours=req.interval_hours,
+            retention_count=req.retention_count,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # Scheduler live reschedule/remove (VAL-PANEL-SCHED-004).
+    try:
+        sync_panel_backup_schedule()
+    except Exception as exc:
+        logger.warning("Scheduler reschedule failed: %s", type(exc).__name__)
+
+    return updated
 
 
 @router.delete("/{backup_id}", status_code=200)

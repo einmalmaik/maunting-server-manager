@@ -8,6 +8,31 @@ class PanelBackupCreateRequest(BaseModel):
     name: str | None = None
 
 
+class PanelBackupSettings(BaseModel):
+    """Panel-Backup-Settings (Scheduler + Retention).
+
+    Enthaelt bewusst KEINE Secrets (S3-Credentials, Passwort, Salt) —
+    nur nicht-sensitive Scheduler/Retention-Konfiguration (VAL-PANEL-SETTINGS-003).
+    """
+    enabled: bool
+    interval_hours: int
+    retention_count: int
+
+    class Config:
+        from_attributes = True
+
+
+class PanelBackupSettingsPatch(BaseModel):
+    """Partial-PATCH fuer Panel-Backup-Settings.
+
+    Alle Felder optional — nur angegebene Felder werden aktualisiert.
+    Validierung (interval_hours > 0, retention_count >= 1) erfolgt im Service.
+    """
+    enabled: bool | None = None
+    interval_hours: int | None = None
+    retention_count: int | None = None
+
+
 class PanelBackupResponse(BaseModel):
     """Panel-Backup-Record ohne sensitive Pfade (local_path, s3_key).
 

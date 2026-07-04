@@ -250,6 +250,10 @@ def remove_restart_jobs(server_id: int) -> None:
             remove_job(job.id)
 
 
+# Job-ID fuer den geplanten Panel-Backup-Job (eindeutig, global).
+PANEL_BACKUP_JOB_ID = "panel_backup_job"
+
+
 def sync_server_restart_schedule(server) -> None:
     """Synchronisiert DB-Settings eines Servers in APScheduler.
 
@@ -313,6 +317,64 @@ def schedule_backup(
     )
 
     return job.id
+
+
+async def _panel_backup_task() -> None:
+    """Top-level job task: geplantes Panel-Backup (DB-Dump + Configs + S3 + Retention).
+
+    Ruft panel_backup_service.create_panel_backup auf. Fehler werden abgefangen
+    (Best-Effort), damit der Scheduler nicht crashed (VAL-PANEL-SCHED-005).
+    S3-Upload und Retention passieren innerhalb create_panel_backup.
+    """
+    db = SessionLocal()
+    try:
+        from services.panel_backup_service import create_panel_backup
+        create_panel_backup(db)
+    except Exception:
+        # Generische Warning — keine Secrets, kein Crash (VAL-PANEL-SCHED-005).
+        logger.warning(
+            "Scheduled panel backup failed (details redacted for security)"
+        )
+    finally:
+        db.close()
+
+
+def sync_panel_backup_schedule() -> None:
+    """Synchronisiert panel_settings (backup.panel_*) in APScheduler.
+
+    - enabled=False -> Job entfernen (VAL-PANEL-SCHED-002)
+    - enabled=True -> IntervalTrigger mit interval_hours (VAL-PANEL-SCHED-001)
+    - Aenderungen werden live rescheduled (VAL-PANEL-SCHED-004)
+
+    Wird aufgerufen: beim Panel-Start (init_server_schedules) und nach
+    PATCH /api/panel-backups/settings.
+    """
+    from services.panel_backup_service import get_panel_backup_settings
+
+    settings = get_panel_backup_settings()
+    if not settings["enabled"]:
+        remove_job(PANEL_BACKUP_JOB_ID)
+        return
+
+    interval = settings["interval_hours"]
+    if interval <= 0:
+        remove_job(PANEL_BACKUP_JOB_ID)
+        return
+
+    scheduler = get_scheduler()
+    # start_date in Zukunft, damit IntervalTrigger nicht sofort feuert
+    # (analog schedule_server_restart — verhindert unerwartetes Backup direkt
+    # nach Config-Aenderung oder Panel-Start).
+    start_date = _utcnow() + timedelta(hours=interval)
+    scheduler.add_job(
+        func=_panel_backup_task,
+        trigger=IntervalTrigger(hours=interval, start_date=start_date),
+        id=PANEL_BACKUP_JOB_ID,
+        name="Panel Auto-Backup",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
 
 
 def remove_job(job_id: str) -> bool:
@@ -639,6 +701,14 @@ def init_server_schedules(db):
             except Exception as e:
                 import logging
                 logging.warning("Failed to schedule backup for server %s: %s", server.id, e)
+
+    # Panel-Backup-Scheduler aus panel_settings wiederherstellen
+    # (VAL-CROSS-008: Panel-Neustart -> Scheduler nimmt Jobs wieder auf).
+    try:
+        sync_panel_backup_schedule()
+    except Exception as e:
+        import logging
+        logging.warning("Failed to sync panel backup schedule: %s", e)
 
     # Hinweis zum restart_time_utc / restart_times_utc Pattern (wie in models/server.py):
     # Backup nutzt aktuell ausschließlich Interval (backup_interval_hours).

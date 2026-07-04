@@ -68,9 +68,14 @@ _ARC_CONFIG_PREFIX = "configs"
 # S3-Object-Key-Schema: msm-backups/panel/panel_{timestamp}_{id}.enc
 _S3_KEY_PREFIX = "msm-backups/panel"
 
-# Default-Retention fuer Panel-Backups (panel_settings: backup.panel_retention_count).
-_DEFAULT_RETENTION = 7
+# Panel-Backup-Settings (panel_settings): Scheduler + Retention.
+_KEY_ENABLED = "backup.panel_enabled"
+_KEY_INTERVAL = "backup.panel_interval_hours"
 _KEY_RETENTION = "backup.panel_retention_count"
+
+_DEFAULT_ENABLED = False
+_DEFAULT_INTERVAL = 24
+_DEFAULT_RETENTION = 7
 
 # Timeout fuer pg_dump / sqlite3 (Sekunden).
 _DUMP_TIMEOUT = 300
@@ -167,6 +172,82 @@ def create_panel_backup(db: Session, *, name: str | None = None) -> "PanelBackup
         # Temp-Verzeichnis immer bereinigen (auch bei Erfolg — tar.gz liegt ja
         # bereits im backup_dir).
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def get_panel_backup_settings() -> dict:
+    """Gibt Panel-Backup-Settings zurueck (mit Defaults bei fehlenden Werten).
+
+    Returns: {"enabled": bool, "interval_hours": int, "retention_count": int}
+
+    Defaults (VAL-PANEL-SETTINGS-001): enabled=False, interval_hours=24,
+    retention_count=7. Ungueltige/fehlende Werte werden auf Defaults gesetzt.
+    """
+    from services.panel_settings_service import PanelSettingsService
+
+    enabled_raw = PanelSettingsService.get(_KEY_ENABLED)
+    enabled = _parse_bool(enabled_raw, _DEFAULT_ENABLED)
+
+    interval = _parse_int(
+        PanelSettingsService.get(_KEY_INTERVAL), _DEFAULT_INTERVAL
+    )
+    retention = _parse_int(
+        PanelSettingsService.get(_KEY_RETENTION), _DEFAULT_RETENTION
+    )
+
+    return {
+        "enabled": enabled,
+        "interval_hours": interval,
+        "retention_count": retention,
+    }
+
+
+def update_panel_backup_settings(
+    *,
+    enabled: bool | None = None,
+    interval_hours: int | None = None,
+    retention_count: int | None = None,
+) -> dict:
+    """Aktualisiert Panel-Backup-Settings (partial PATCH).
+
+    Nur angegebene Felder werden geschrieben (partial PATCH,
+    VAL-PANEL-SETTINGS-002). Validierung:
+      - interval_hours > 0
+      - retention_count >= 1
+    Bei ungueltigen Werten wird ValueError geworfen (Router gibt 400 zurueck).
+
+    Returns: aktualisierte Settings (get_panel_backup_settings).
+    """
+    from services.panel_settings_service import PanelSettingsService
+
+    if enabled is not None:
+        PanelSettingsService.set(_KEY_ENABLED, "true" if enabled else "false")
+
+    if interval_hours is not None:
+        if interval_hours <= 0:
+            raise ValueError("interval_hours muss groesser als 0 sein")
+        PanelSettingsService.set(_KEY_INTERVAL, str(int(interval_hours)))
+
+    if retention_count is not None:
+        if retention_count < 1:
+            raise ValueError("retention_count muss mindestens 1 sein")
+        PanelSettingsService.set(_KEY_RETENTION, str(int(retention_count)))
+
+    return get_panel_backup_settings()
+
+
+def _parse_bool(raw: str, default: bool) -> bool:
+    if not raw:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _parse_int(raw: str, default: int) -> int:
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return default
 
 
 def cleanup_old_panel_backups(db: Session, *, keep: int | None = None) -> None:
