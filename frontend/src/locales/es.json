@@ -619,7 +619,17 @@
     "createNow": "Crear copia de seguridad",
     "creating": "Creando copia de seguridad...",
     "restoring": "Restaurando copia de seguridad...",
-    "runningSince": "En funcionamiento desde:"
+    "runningSince": "En funcionamiento desde:",
+    "s3Active": "S3: Activo",
+    "s3NotConfigured": "S3: No configurado",
+    "s3ActiveTooltip": "La copia de seguridad en la nube S3 está configurada y activa",
+    "s3NotConfiguredTooltip": "La copia de seguridad en la nube S3 no está configurada",
+    "cloudBackedTooltip": "Almacenado en la nube S3 (cifrado)",
+    "localOnlyTooltip": "Almacenado solo localmente",
+    "uploadToCloud": "Subir a la nube",
+    "uploadedToCloud": "Copia de seguridad subida a la nube",
+    "restoreFromCloud": "Restaurar desde la nube",
+    "confirmRestoreFromCloud": "¿Restaurar copia de seguridad desde la nube? Se sobrescribirán los datos actuales. La copia de seguridad se descargará y descifrará."
   },
   "scheduler": {
     "title": "Programador",

@@ -687,7 +687,17 @@
     "createNow": "Create Backup",
     "creating": "Creating backup...",
     "restoring": "Restoring backup...",
-    "runningSince": "Running since:"
+    "runningSince": "Running since:",
+    "s3Active": "S3: Active",
+    "s3NotConfigured": "S3: Not configured",
+    "s3ActiveTooltip": "S3 cloud backup is configured and active",
+    "s3NotConfiguredTooltip": "S3 cloud backup is not configured",
+    "cloudBackedTooltip": "Stored in S3 cloud (encrypted)",
+    "localOnlyTooltip": "Stored locally only",
+    "uploadToCloud": "Upload to Cloud",
+    "uploadedToCloud": "Backup uploaded to cloud",
+    "restoreFromCloud": "Restore from Cloud",
+    "confirmRestoreFromCloud": "Restore backup from the cloud? Current data will be overwritten. The backup will be downloaded and decrypted."
   },
   "scheduler": {
     "title": "Scheduler",

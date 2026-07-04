@@ -597,7 +597,17 @@
     "createNow": "إنشاء نسخة احتياطية",
     "creating": "جارٍ إنشاء نسخة احتياطية...",
     "restoring": "جارٍ استعادة النسخة الاحتياطية...",
-    "runningSince": "تشغيل منذ:"
+    "runningSince": "تشغيل منذ:",
+    "s3Active": "S3: نشط",
+    "s3NotConfigured": "S3: غير مهيأ",
+    "s3ActiveTooltip": "النسخ الاحتياطي السحابي S3 مهيأ ونشط",
+    "s3NotConfiguredTooltip": "النسخ الاحتياطي السحابي S3 غير مهيأ",
+    "cloudBackedTooltip": "مخزن في السحابة S3 (مشفّر)",
+    "localOnlyTooltip": "مخزن محليًا فقط",
+    "uploadToCloud": "رفع إلى السحابة",
+    "uploadedToCloud": "تم رفع النسخة الاحتياطية إلى السحابة",
+    "restoreFromCloud": "استعادة من السحابة",
+    "confirmRestoreFromCloud": "استعادة النسخة الاحتياطية من السحابة؟ سيتم استبدال البيانات الحالية. سيتم تنزيل النسخة الاحتياطية وفك تشفيرها."
   },
   "scheduler": {
     "title": "مجدول",

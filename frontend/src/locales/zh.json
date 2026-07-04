@@ -597,7 +597,17 @@
     "createNow": "创建备份",
     "creating": "正在创建备份...",
     "restoring": "正在恢复备份...",
-    "runningSince": "运行时间："
+    "runningSince": "运行时间：",
+    "s3Active": "S3：已启用",
+    "s3NotConfigured": "S3：未配置",
+    "s3ActiveTooltip": "S3 云备份已配置并启用",
+    "s3NotConfiguredTooltip": "S3 云备份未配置",
+    "cloudBackedTooltip": "存储在 S3 云中（已加密）",
+    "localOnlyTooltip": "仅本地存储",
+    "uploadToCloud": "上传到云端",
+    "uploadedToCloud": "备份已上传到云端",
+    "restoreFromCloud": "从云端恢复",
+    "confirmRestoreFromCloud": "从云端恢复备份？当前数据将被覆盖。备份将被下载并解密。"
   },
   "scheduler": {
     "title": "调度程序",

@@ -597,7 +597,17 @@
     "createNow": "बैकअप बनाएं",
     "creating": "बैकअप बनाया जा रहा है...",
     "restoring": "बैकअप बहाल किया जा रहा है...",
-    "runningSince": "तब से चल रहा है:"
+    "runningSince": "तब से चल रहा है:",
+    "s3Active": "S3: सक्रिय",
+    "s3NotConfigured": "S3: कॉन्फ़िगर नहीं",
+    "s3ActiveTooltip": "S3 क्लाउड बैकअप कॉन्फ़िगर और सक्रिय है",
+    "s3NotConfiguredTooltip": "S3 क्लाउड बैकअप कॉन्फ़िगर नहीं है",
+    "cloudBackedTooltip": "S3 क्लाउड में संग्रहीत (एन्क्रिप्टेड)",
+    "localOnlyTooltip": "केवल स्थानीय रूप से संग्रहीत",
+    "uploadToCloud": "क्लाउड में अपलोड करें",
+    "uploadedToCloud": "बैकअप क्लाउड में अपलोड किया गया",
+    "restoreFromCloud": "क्लाउड से पुनर्स्थापित करें",
+    "confirmRestoreFromCloud": "क्लाउड से बैकअप पुनर्स्थापित करें? वर्तमान डेटा अधिलेखित हो जाएगा। बैकअप डाउनलोड और डिक्रिप्ट किया जाएगा।"
   },
   "scheduler": {
     "title": "अनुसूचक",

@@ -63,7 +63,25 @@ router = APIRouter(prefix="/api/backups", tags=["backups"])
 @router.get("/{server_id}", response_model=list[BackupResponse])
 def list_backups(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     require_server_permission(user, server_id, db, "server.backups.read")
-    return db.query(Backup).filter(Backup.server_id == server_id).order_by(Backup.created_at.desc()).all()
+    rows = db.query(Backup).filter(Backup.server_id == server_id).order_by(Backup.created_at.desc()).all()
+    # local_exists pro Backup berechnen, damit das Frontend weiss, ob ein
+    # Restore lokal moeglich ist oder nur aus der Cloud (S3) geht.
+    return [
+        BackupResponse(
+            id=b.id,
+            server_id=b.server_id,
+            name=b.name,
+            filename=b.filename,
+            size_mb=b.size_mb,
+            created_at=b.created_at,
+            expires_at=b.expires_at,
+            s3_key=b.s3_key,
+            s3_bucket=b.s3_bucket,
+            encrypted=b.encrypted,
+            local_exists=os.path.exists(b.filename),
+        )
+        for b in rows
+    ]
 
 
 @router.post("/{server_id}")

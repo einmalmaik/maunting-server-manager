@@ -597,7 +597,17 @@
     "createNow": "Buat Cadangan",
     "creating": "Membuat cadangan...",
     "restoring": "Memulihkan cadangan...",
-    "runningSince": "Berjalan sejak:"
+    "runningSince": "Berjalan sejak:",
+    "s3Active": "S3: Aktif",
+    "s3NotConfigured": "S3: Belum dikonfigurasi",
+    "s3ActiveTooltip": "Cadangan cloud S3 telah dikonfigurasi dan aktif",
+    "s3NotConfiguredTooltip": "Cadangan cloud S3 belum dikonfigurasi",
+    "cloudBackedTooltip": "Disimpan di cloud S3 (terenkripsi)",
+    "localOnlyTooltip": "Hanya disimpan secara lokal",
+    "uploadToCloud": "Unggah ke Cloud",
+    "uploadedToCloud": "Cadangan diunggah ke cloud",
+    "restoreFromCloud": "Pulihkan dari Cloud",
+    "confirmRestoreFromCloud": "Pulihkan cadangan dari cloud? Data saat ini akan ditimpa. Cadangan akan diunduh dan didekripsi."
   },
   "scheduler": {
     "title": "Penjadwal",

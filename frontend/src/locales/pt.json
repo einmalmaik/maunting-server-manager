@@ -597,7 +597,17 @@
     "createNow": "Criar backup",
     "creating": "Criando backup...",
     "restoring": "Restaurando backup...",
-    "runningSince": "Em execução desde:"
+    "runningSince": "Em execução desde:",
+    "s3Active": "S3: Ativo",
+    "s3NotConfigured": "S3: Não configurado",
+    "s3ActiveTooltip": "O backup na nuvem S3 está configurado e ativo",
+    "s3NotConfiguredTooltip": "O backup na nuvem S3 não está configurado",
+    "cloudBackedTooltip": "Armazenado na nuvem S3 (criptografado)",
+    "localOnlyTooltip": "Armazenado apenas localmente",
+    "uploadToCloud": "Enviar para a nuvem",
+    "uploadedToCloud": "Backup enviado para a nuvem",
+    "restoreFromCloud": "Restaurar da nuvem",
+    "confirmRestoreFromCloud": "Restaurar backup da nuvem? Os dados atuais serão sobrescritos. O backup será baixado e descriptografado."
   },
   "scheduler": {
     "title": "Agendador",

@@ -597,7 +597,17 @@
     "createNow": "Créer une sauvegarde",
     "creating": "Création d'une sauvegarde...",
     "restoring": "Restauration de la sauvegarde...",
-    "runningSince": "En cours depuis :"
+    "runningSince": "En cours depuis :",
+    "s3Active": "S3 : Actif",
+    "s3NotConfigured": "S3 : Non configuré",
+    "s3ActiveTooltip": "La sauvegarde cloud S3 est configurée et active",
+    "s3NotConfiguredTooltip": "La sauvegarde cloud S3 n'est pas configurée",
+    "cloudBackedTooltip": "Stocké dans le cloud S3 (chiffré)",
+    "localOnlyTooltip": "Stocké localement uniquement",
+    "uploadToCloud": "Télécharger vers le cloud",
+    "uploadedToCloud": "Sauvegarde téléchargée vers le cloud",
+    "restoreFromCloud": "Restaurer depuis le cloud",
+    "confirmRestoreFromCloud": "Restaurer la sauvegarde depuis le cloud ? Les données actuelles seront écrasées. La sauvegarde sera téléchargée et déchiffrée."
   },
   "scheduler": {
     "title": "Planificateur",

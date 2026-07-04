@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { confirm } from "@/stores/confirmStore";
-import { HardDrive, Plus, RotateCcw, Trash2, Settings } from "lucide-react";
+import { HardDrive, Plus, RotateCcw, Trash2, Settings, Cloud, CloudOff, UploadCloud } from "lucide-react";
 
 interface Backup {
   id: number;
@@ -13,6 +13,12 @@ interface Backup {
   size_mb: number | null;
   created_at: string;
   expires_at: string | null;
+  // S3-Cloud-Status (M2). Lokale Backups haben s3_key=null, encrypted=false.
+  s3_key: string | null;
+  s3_bucket: string | null;
+  encrypted: boolean;
+  // Ob die lokale Datei noch existiert (false = nur in S3 verfuegbar).
+  local_exists: boolean;
 }
 
 interface BackupSettings {
@@ -26,6 +32,12 @@ interface BackupStatus {
   operation: "creating" | "restoring" | null;
   started_at: string | null;
   estimated_size_mb: number | null;
+}
+
+interface S3Status {
+  s3_configured: boolean;
+  backup_password_set: boolean;
+  last_panel_backup: string | null;
 }
 
 interface CreateBackupResponse {
@@ -65,6 +77,11 @@ export function Backups({ serverId }: BackupsProps) {
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
+  // S3-Cloud-Status (Badge im Header). Admin-only Endpoint — bei 403 wird
+  // der Badge einfach nicht gezeigt (Non-Admin sieht weiterhin Cloud-Icons
+  // pro Backup aus der List-Antwort).
+  const [s3Status, setS3Status] = useState<S3Status | null>(null);
+
   const fetchBackups = async () => {
     if (!serverId) return;
     try {
@@ -97,10 +114,21 @@ export function Backups({ serverId }: BackupsProps) {
     }
   };
 
+  const fetchS3Status = async () => {
+    try {
+      const s = await api<S3Status>("/backup-config/status");
+      setS3Status(s);
+    } catch {
+      // 403 (Non-Admin) oder anderer Fehler — Badge wird nicht gezeigt.
+      setS3Status(null);
+    }
+  };
+
   useEffect(() => {
     fetchBackups();
     fetchSettings();
     fetchStatus(); // AUFGABE 1: sofort bei Mount (Tab-Wechsel)
+    fetchS3Status();
   }, [serverId]);
 
   // Live-Status Polling (alle 2s) mit Cache-Buster
@@ -227,6 +255,41 @@ export function Backups({ serverId }: BackupsProps) {
     }
   };
 
+  const uploadToCloud = async (backupId: number) => {
+    setActionLoading(`upload-${backupId}`);
+    try {
+      await api(`/backups/${serverId}/${backupId}/upload-to-cloud`, {
+        method: "POST",
+      });
+      toast.success(t("backups.uploadedToCloud"));
+      await fetchBackups();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t("common.error"));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const restoreFromCloud = async (backupId: number) => {
+    if (
+      !(await confirm({
+        message: t("backups.confirmRestoreFromCloud"),
+        danger: true,
+        confirmText: t("backups.restoreFromCloud"),
+      }))
+    )
+      return;
+    setActionLoading(`restore-${backupId}`);
+    try {
+      await api(`/backups/${serverId}/restore/${backupId}`, { method: "POST" });
+      toast.success(t("backups.restored"));
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t("common.error"));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const saveSettings = async () => {
     if (!settings) return;
     setSettingsSaving(true);
@@ -297,9 +360,34 @@ export function Backups({ serverId }: BackupsProps) {
 
       {/* Header (Tab-Body) */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="font-body-md text-body-md text-on-surface-variant">
-          {t("backups.subtitle")}
-        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <p className="font-body-md text-body-md text-on-surface-variant">
+            {t("backups.subtitle")}
+          </p>
+          {s3Status && (
+            <span
+              className={`msm-status-badge inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+                s3Status.s3_configured
+                  ? "border-success/40 bg-success/10 text-success"
+                  : "border-outline-variant bg-surface-container text-on-surface-variant"
+              }`}
+              title={
+                s3Status.s3_configured
+                  ? t("backups.s3ActiveTooltip")
+                  : t("backups.s3NotConfiguredTooltip")
+              }
+            >
+              {s3Status.s3_configured ? (
+                <Cloud className="w-3.5 h-3.5" />
+              ) : (
+                <CloudOff className="w-3.5 h-3.5" />
+              )}
+              {s3Status.s3_configured
+                ? t("backups.s3Active")
+                : t("backups.s3NotConfigured")}
+            </span>
+          )}
+        </div>
         <div className="flex gap-2">
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -431,7 +519,10 @@ export function Backups({ serverId }: BackupsProps) {
         </div>
       ) : (
         <div className="space-y-3">
-          {backups.map((backup) => (
+          {backups.map((backup) => {
+            const isS3Backed = !!backup.s3_key && backup.encrypted;
+            const onlyInCloud = isS3Backed && !backup.local_exists;
+            return (
             <div
               key={backup.id}
               className="msm-card p-4 flex items-center justify-between"
@@ -452,16 +543,55 @@ export function Backups({ serverId }: BackupsProps) {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => restoreBackup(backup.id)}
-                  disabled={isActive || !!actionLoading}
-                  className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
-                  title={t("backups.restore")}
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  {t("backups.restore")}
-                </button>
+              <div className="flex items-center gap-2">
+                {/* Cloud-Icon: gefuellt fuer S3-backed, gedimmt fuer lokal */}
+                {isS3Backed ? (
+                  <span title={t("backups.cloudBackedTooltip")} className="flex-shrink-0">
+                    <Cloud className="w-5 h-5 text-success" />
+                  </span>
+                ) : (
+                  <span title={t("backups.localOnlyTooltip")} className="flex-shrink-0">
+                    <CloudOff className="w-5 h-5 text-on-surface-variant/40" />
+                  </span>
+                )}
+                {/* In Cloud hochladen: nur fuer reine lokale Backups */}
+                {!isS3Backed && backup.local_exists && (
+                  <button
+                    onClick={() => uploadToCloud(backup.id)}
+                    disabled={isActive || !!actionLoading}
+                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    title={t("backups.uploadToCloud")}
+                  >
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    {actionLoading === `upload-${backup.id}`
+                      ? t("common.loading")
+                      : t("backups.uploadToCloud")}
+                  </button>
+                )}
+                {/* Restore: lokal oder aus Cloud */}
+                {onlyInCloud ? (
+                  <button
+                    onClick={() => restoreFromCloud(backup.id)}
+                    disabled={isActive || !!actionLoading}
+                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    title={t("backups.restoreFromCloud")}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    {actionLoading === `restore-${backup.id}`
+                      ? t("common.loading")
+                      : t("backups.restoreFromCloud")}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => restoreBackup(backup.id)}
+                    disabled={isActive || !!actionLoading}
+                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    title={t("backups.restore")}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    {t("backups.restore")}
+                  </button>
+                )}
                 <button
                   onClick={() => deleteBackup(backup.id)}
                   disabled={isActive || !!actionLoading}
@@ -472,7 +602,8 @@ export function Backups({ serverId }: BackupsProps) {
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -677,7 +677,17 @@
     "createNow": "Backup erstellen",
     "creating": "Backup wird erstellt...",
     "restoring": "Backup wird wiederhergestellt...",
-    "runningSince": "Läuft seit:"
+    "runningSince": "Läuft seit:",
+    "s3Active": "S3: Aktiv",
+    "s3NotConfigured": "S3: Nicht konfiguriert",
+    "s3ActiveTooltip": "S3-Cloud-Backup ist konfiguriert und aktiv",
+    "s3NotConfiguredTooltip": "S3-Cloud-Backup ist nicht konfiguriert",
+    "cloudBackedTooltip": "In S3-Cloud gespeichert (verschlüsselt)",
+    "localOnlyTooltip": "Nur lokal gespeichert",
+    "uploadToCloud": "In Cloud hochladen",
+    "uploadedToCloud": "Backup in Cloud hochgeladen",
+    "restoreFromCloud": "Aus Cloud wiederherstellen",
+    "confirmRestoreFromCloud": "Backup aus der Cloud wiederherstellen? Aktuelle Daten werden überschrieben. Das Backup wird dafür heruntergeladen und entschlüsselt."
   },
   "tabs": {
     "files": "Dateimanager",

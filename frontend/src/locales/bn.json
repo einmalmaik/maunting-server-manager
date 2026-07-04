@@ -597,7 +597,17 @@
     "createNow": "ব্যাকআপ তৈরি করুন",
     "creating": "ব্যাকআপ তৈরি করা হচ্ছে...",
     "restoring": "ব্যাকআপ পুনরুদ্ধার করা হচ্ছে...",
-    "runningSince": "থেকে চলছে:"
+    "runningSince": "থেকে চলছে:",
+    "s3Active": "S3: সক্রিয়",
+    "s3NotConfigured": "S3: কনফিগার করা নেই",
+    "s3ActiveTooltip": "S3 ক্লাউড ব্যাকআপ কনফিগার এবং সক্রিয়",
+    "s3NotConfiguredTooltip": "S3 ক্লাউড ব্যাকআপ কনফিগার করা নেই",
+    "cloudBackedTooltip": "S3 ক্লাউডে সংরক্ষিত (এনক্রিপ্টেড)",
+    "localOnlyTooltip": "শুধুমাত্র স্থানীয়ভাবে সংরক্ষিত",
+    "uploadToCloud": "ক্লাউডে আপলোড করুন",
+    "uploadedToCloud": "ব্যাকআপ ক্লাউডে আপলোড করা হয়েছে",
+    "restoreFromCloud": "ক্লাউড থেকে পুনরুদ্ধার করুন",
+    "confirmRestoreFromCloud": "ক্লাউড থেকে ব্যাকআপ পুনরুদ্ধার করবেন? বর্তমান ডেটা ওভাররাইট হবে। ব্যাকআপ ডাউনলোড এবং ডিক্রিপ্ট করা হবে।"
   },
   "scheduler": {
     "title": "সময়সূচী",

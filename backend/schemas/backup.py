@@ -14,6 +14,9 @@ class BackupResponse(BaseModel):
     s3_key: str | None = None
     s3_bucket: str | None = None
     encrypted: bool = False
+    # Ob die lokale Backup-Datei noch existiert (Frontend nutzt dies, um
+    # "Aus Cloud wiederherstellen" anzuzeigen, wenn lokal fehlt aber S3 da).
+    local_exists: bool = True
 
     class Config:
         from_attributes = True
