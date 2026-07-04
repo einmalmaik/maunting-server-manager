@@ -219,6 +219,17 @@ def cleanup_old_backups(
         .all()
     )
     for b in old:
+        # S3-Delete (best-effort, nur wenn s3_key vorhanden).
+        # Ein S3-Fehler bricht die Retention nicht ab (Warning-Log, keine Secrets).
+        if b.s3_key:
+            try:
+                from services.s3_service import S3Service
+                S3Service.delete_object(b.s3_key)
+            except Exception as e:
+                logger.warning(
+                    "S3-Delete fehlgeschlagen (Backup %s): %s",
+                    b.id, type(e).__name__,
+                )
         if os.path.exists(b.filename):
             try:
                 os.remove(b.filename)

@@ -150,3 +150,20 @@ def _upload_to_s3(backup, db: Session, server_id: int) -> None:
                     "Key-Invalidierung fehlgeschlagen (Server %s, Backup %s)",
                     server_id, backup.id,
                 )
+
+
+def upload_backup_to_cloud(backup, db: Session, server_id: int) -> bool:
+    """Laedt ein bestehendes lokales Backup verschluesselt zu S3 hoch.
+
+    Idempotent: wenn bereits hochgeladen (s3_key + encrypted=True), wird kein
+    Re-Upload durchgefuehrt (Rueckgabe True).
+
+    Returns True wenn Backup in S3 ist (Erfolg oder bereits vorhanden),
+    False bei Upload-Fehler.
+    """
+    # Idempotenz: bereits hochgeladen → kein Re-Upload.
+    if backup.s3_key and backup.encrypted:
+        return True
+
+    _upload_to_s3(backup, db, server_id)
+    return bool(backup.s3_key and backup.encrypted)

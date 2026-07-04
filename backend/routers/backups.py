@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import tarfile
@@ -12,6 +13,8 @@ from models import Backup, Server, User
 from schemas import BackupResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _is_loopback_request(request: Request) -> bool:
@@ -273,12 +276,62 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
     return {"message": "Backup wiederhergestellt"}
 
 
+@router.post("/{server_id}/{backup_id}/upload-to-cloud")
+def upload_to_cloud(server_id: int, backup_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+    """Laedt ein bestehendes lokales Backup verschluesselt in S3 hoch.
+
+    Setzt s3_key, encrypted=True. Idempotent (bereits hochgeladen → 2xx).
+    Erfordert S3 konfiguriert + Backup-Passwort gesetzt (sonst 4xx).
+    404 wenn Backup nicht gefunden oder lokale Datei fehlt.
+    """
+    require_server_permission(user, server_id, db, "server.backups.create")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    backup = db.query(Backup).filter(Backup.id == backup_id, Backup.server_id == server_id).first()
+    if not server or not backup:
+        raise HTTPException(status_code=404, detail="Server oder Backup nicht gefunden")
+
+    from services.backup_config_service import BackupConfigService
+
+    # Idempotenz: bereits in S3 hochgeladen → 2xx ohne Re-Upload.
+    if backup.s3_key and backup.encrypted:
+        return {"message": "Backup bereits in Cloud hochgeladen"}
+
+    # S3 + Passwort erforderlich.
+    if not BackupConfigService.is_s3_configured():
+        raise HTTPException(status_code=400, detail="S3 ist nicht konfiguriert")
+    if not BackupConfigService.is_backup_password_set():
+        raise HTTPException(status_code=400, detail="Backup-Passwort nicht gesetzt")
+
+    # Lokale Datei muss existieren (Upload-Quelle).
+    if not os.path.exists(backup.filename):
+        raise HTTPException(status_code=404, detail="Backup-Datei nicht gefunden")
+
+    from services.backup_orchestrator import upload_backup_to_cloud
+    success = upload_backup_to_cloud(backup, db, server_id)
+    if success:
+        return {"message": "Backup in Cloud hochgeladen"}
+    raise HTTPException(status_code=500, detail="Cloud-Upload fehlgeschlagen")
+
+
 @router.delete("/{server_id}/{backup_id}")
 def delete_backup(server_id: int, backup_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     require_server_permission(user, server_id, db, "server.backups.delete")
     backup = db.query(Backup).filter(Backup.id == backup_id, Backup.server_id == server_id).first()
     if not backup:
         raise HTTPException(status_code=404, detail="Backup nicht gefunden")
+
+    # S3-Delete (best-effort, nur wenn s3_key vorhanden).
+    # S3-Fehler blockiert nicht das lokale Delete (Warning-Log, keine Secrets).
+    if backup.s3_key:
+        try:
+            from services.s3_service import S3Service
+            S3Service.delete_object(backup.s3_key)
+        except Exception as exc:
+            logger.warning(
+                "S3-Delete fehlgeschlagen (Backup %s): %s",
+                backup.id, type(exc).__name__,
+            )
+
     if os.path.exists(backup.filename):
         try:
             os.remove(backup.filename)
