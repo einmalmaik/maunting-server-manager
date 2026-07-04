@@ -4,42 +4,59 @@ from uuid import uuid4
 import hashlib
 import secrets
 
-from cryptography.fernet import Fernet
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from config import settings
 from models import User, RefreshToken
+from services.dis_client import DisClient
 
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+# Temporaer fuer Passwort-Migration (passlib -> DIS Argon2id).
+# Wird entfernt sobald alle User mindestens einmal eingeloggt waren
+# und ihre Hashes im msm-pw-v1: Format vorliegen.
+_pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
 class AuthService:
     # ── Password ──
     @staticmethod
     def hash_password(password: str) -> str:
-        return pwd_context.hash(password)
+        return DisClient.hash_password(password)
 
     @staticmethod
     def verify_password(plain: str, hashed: str) -> bool:
-        return pwd_context.verify(plain, hashed)
-
-    # ── 2FA Secret Encryption ──
-    @staticmethod
-    def _get_fernet() -> Fernet:
-        key = base64.urlsafe_b64encode(hashlib.sha256(settings.secret_key.encode()).digest())
-        return Fernet(key)
-
-    @staticmethod
-    def encrypt_2fa_secret(secret: str) -> str:
-        f = AuthService._get_fernet()
-        return f.encrypt(secret.encode()).decode()
+        # DIS-Hash (msm-pw-v1:) -> Sidecar verifiziert
+        if DisClient.is_dis_hash(hashed):
+            return DisClient.verify_password(plain, hashed)
+        # Legacy passlib-Hash ($argon2...) -> passlib verifiziert (Migration)
+        try:
+            return _pwd_context.verify(plain, hashed)
+        except Exception:
+            return False
 
     @staticmethod
-    def decrypt_2fa_secret(encrypted: str) -> str:
-        f = AuthService._get_fernet()
-        return f.decrypt(encrypted.encode()).decode()
+    def rehash_password_if_needed(db: Session, user: User, plain_password: str) -> None:
+        """Re-hasht ein Passwort mit DIS wenn der Hash noch im legacy Format ist.
+
+        Wird nach erfolgreichem Login aufgerufen (lazy Migration passlib -> DIS).
+        """
+        if not DisClient.is_dis_hash(user.password_hash):
+            user.password_hash = DisClient.hash_password(plain_password)
+            db.commit()
+
+    # ── Secret Encryption (DIS AES-256-GCM) ──
+    # Alle Secrets werden ueber den DIS Sidecar verschluesselt.
+    # AAD (Associated Authenticated Data) bindet den Ciphertext an seinen
+    # Context und verhindert Swap-Angriffe.
+
+    @staticmethod
+    def encrypt_secret(plaintext: str, aad: str | None = None) -> str:
+        return DisClient.encrypt(plaintext, aad)
+
+    @staticmethod
+    def decrypt_secret(ciphertext: str, aad: str | None = None) -> str:
+        return DisClient.decrypt(ciphertext, aad)
 
     # ── Access Token (JWT) ──
     @staticmethod
@@ -121,6 +138,15 @@ class AuthService:
     def generate_token() -> str:
         return uuid4().hex
 
+    @staticmethod
+    def _hash_reset_token(token: str) -> str:
+        import hmac
+        return hmac.new(
+            settings.secret_key.encode(),
+            token.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
     # ── User CRUD ──
     @staticmethod
     def get_user_by_username(db: Session, username: str) -> User | None:
@@ -128,7 +154,7 @@ class AuthService:
 
     @staticmethod
     def get_user_by_email(db: Session, email: str) -> User | None:
-        return db.query(User).filter(User.email == email).first()
+        return db.query(User).filter(User.email_hash == User._email_hash(email)).first()
 
     @staticmethod
     def get_user_by_id(db: Session, user_id: int) -> User | None:
@@ -167,7 +193,7 @@ class AuthService:
     @staticmethod
     def set_password_reset_token(db: Session, user: User) -> str:
         token = AuthService.generate_token()
-        user.password_reset_token = token
+        user.password_reset_token = AuthService._hash_reset_token(token)
         user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         db.commit()
         return token
@@ -185,13 +211,14 @@ class AuthService:
     def verify_current_2fa_code(user: User, otp_code: str) -> bool:
         if not user.two_factor_secret_encrypted:
             return False
-        import pyotp
         try:
-            secret = AuthService.decrypt_2fa_secret(user.two_factor_secret_encrypted)
+            secret = AuthService.decrypt_secret(
+                user.two_factor_secret_encrypted,
+                aad=f"msm:user:{user.id}:2fa",
+            )
             if not secret:
                 return False
-            totp = pyotp.TOTP(secret)
-            return totp.verify(otp_code)
+            return DisClient.verify_totp(secret, otp_code)
         except Exception:
             return False
 
@@ -206,7 +233,10 @@ class AuthService:
         db.query(JwtBlacklist).filter(JwtBlacklist.user_id == user.id).delete()
         
         # Delete EmailVerification items
-        db.query(EmailVerification).filter(EmailVerification.email == user.email).delete()
+        from services.email_verification_service import EmailVerificationService
+        db.query(EmailVerification).filter(
+            EmailVerification.email_hash == EmailVerificationService._email_hash(user.email)
+        ).delete()
 
         # Set user_id to None on AuditLog items
         db.query(AuditLog).filter(AuditLog.user_id == user.id).update({"user_id": None})

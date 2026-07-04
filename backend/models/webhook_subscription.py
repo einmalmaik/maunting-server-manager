@@ -56,6 +56,9 @@ class WebhookSubscription(Base):
     # Auth gegen den Empfaenger (Header X-Webhook-Secret)
     secret_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     secret_hint: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # DIS-verschluesselter Klartext-Secret (AES-256-GCM, AAD msm:webhook:{id}:secret)
+    # Wird beim Versand entschluesselt. Ersetzt den frueheren In-Memory-Store.
+    secret_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)
 
     # Aktivierung
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

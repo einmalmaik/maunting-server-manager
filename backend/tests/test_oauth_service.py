@@ -5,7 +5,7 @@ Schwerpunkt: Security-Invarianten
 - Maskierte Werte werden nicht ueberschrieben
 - Resolution: Default OFF fuer Auto-Registration und Linking
 - 2FA wird nicht umgangen
-- State-Cookie ist Fernet-encrypted und verfaellt nach Timeout
+- State-Cookie ist DIS-encrypted und verfaellt nach Timeout
 """
 
 from __future__ import annotations
@@ -81,14 +81,14 @@ class TestSecretHandling:
         assert oauth_service.decrypt_secret(enc) == plain
 
 
-# ── State-Cookie (Fernet) ──────────────────────────────────────────────
+# ── State-Cookie (DIS) ──────────────────────────────────────────────
 
 class TestStateCookie:
     def test_pack_unpack_roundtrip(self):
         payload = {"state": "abc", "code_verifier": "v", "user_id": 42}
         encrypted = oauth_service.pack_state_cookie(payload)
-        # Fernet-Token beginnt mit "gAAAAA"
-        assert encrypted.startswith("gAAAAA")
+        # DIS-mock encrypt produces "test-enc-" prefix
+        assert encrypted.startswith("test-enc-")
         assert oauth_service.unpack_state_cookie(encrypted) == payload
 
     def test_unpack_tampered_returns_none(self):
@@ -297,7 +297,7 @@ class TestResolveUser:
     def test_login_via_existing_link(self, db: Session, regular_user: User):
         provider = _make_provider(db, slug="gh", preset="github")
         link = OAuthUserLink(
-            provider_id=provider.id, user_id=regular_user.id, subject="123"
+            provider_id=provider.id, user_id=regular_user.id, subject=OAuthUserLink._hash_subject("123")
         )
         db.add(link)
         db.commit()
@@ -308,12 +308,12 @@ class TestResolveUser:
 
     def test_needs_2fa_when_user_has_2fa(self, db: Session, regular_user: User):
         # 2FA einrichten (plain secret + enable flag)
-        regular_user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret("JBSWY3DPEHPK3PXP")
+        regular_user.two_factor_secret_encrypted = AuthService.encrypt_secret("JBSWY3DPEHPK3PXP", aad=f"msm:user:{regular_user.id}:2fa")
         regular_user.two_factor_enabled = True
         db.commit()
         provider = _make_provider(db, slug="gh", preset="github")
         link = OAuthUserLink(
-            provider_id=provider.id, user_id=regular_user.id, subject="123"
+            provider_id=provider.id, user_id=regular_user.id, subject=OAuthUserLink._hash_subject("123")
         )
         db.add(link)
         db.commit()
@@ -473,17 +473,17 @@ class TestLoginChallenge:
 
 class TestComplete2FAChallenge:
     def _enable_2fa(self, db: Session, user: User, secret: str = "JBSWY3DPEHPK3PXP") -> None:
-        user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret(secret)
+        user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
         user.two_factor_enabled = True
         db.commit()
 
     def test_completes_with_correct_otp(self, db: Session, regular_user: User):
-        import pyotp
+        from tests._totp import totp_now, random_totp_secret
         secret = "JBSWY3DPEHPK3PXP"
         self._enable_2fa(db, regular_user, secret)
         provider = _make_provider(db, slug="gh", preset="github")
         token = oauth_service.create_2fa_challenge(db, regular_user, provider)
-        otp = pyotp.TOTP(secret).now()
+        otp = totp_now(secret)
         result = oauth_service.complete_2fa_challenge(db, token, otp)
         assert result is not None
         user, prov = result
@@ -498,12 +498,12 @@ class TestComplete2FAChallenge:
         assert result is None
 
     def test_challenge_reusable_after_consume(self, db: Session, regular_user: User):
-        import pyotp
+        from tests._totp import totp_now, random_totp_secret
         secret = "JBSWY3DPEHPK3PXP"
         self._enable_2fa(db, regular_user, secret)
         provider = _make_provider(db, slug="gh", preset="github")
         token = oauth_service.create_2fa_challenge(db, regular_user, provider)
-        otp = pyotp.TOTP(secret).now()
+        otp = totp_now(secret)
         first = oauth_service.complete_2fa_challenge(db, token, otp)
         second = oauth_service.complete_2fa_challenge(db, token, otp)
         assert first is not None
@@ -550,8 +550,8 @@ class TestBuildAuthorizationURL:
         assert "code_challenge=" in auth_url
         assert "code_challenge_method=S256" in auth_url
         assert "state=" in auth_url
-        # State-Cookie ist Fernet-Token
-        assert encrypted.startswith("gAAAAA")
+        # State-Cookie ist DIS-encrypted
+        assert encrypted.startswith("test-enc-")
         # Payload enthaelt code_verifier + state
         payload = oauth_service.unpack_state_cookie(encrypted)
         assert payload is not None

@@ -3,7 +3,7 @@
 Sicherheits-Invarianten:
 - Response-Modelle geben Client-Secrets NUR maskiert zurueck (max. 4 Zeichen Sicht).
 - Create/Update akzeptieren Client-Secrets im Klartext und speichern sie
-  Fernet-encrypted (im Service-Layer, nicht hier).
+  DIS-encrypted (im Service-Layer, nicht hier).
 - ``client_secret`` ist im Create-Body OPTIONAL — einige Provider (z. B. PKCE-only)
   benoetigen keins.
 """

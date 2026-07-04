@@ -124,3 +124,17 @@ class TestEmailSendingHelpers:
         assert "Konto erfolgreich erstellt" in args[1]
         html = args[3] if len(args) > 3 else None
         assert "Konto erfolgreich erstellt" in (html or "")
+
+    def test_smtp_resend_decryption(self):
+        from services.auth_service import AuthService
+        from services.panel_settings_service import PanelSettingsService
+        
+        # Test SMTP Password
+        enc_smtp = AuthService.encrypt_secret("secret-smtp-pass", aad="msm:settings:smtp_password")
+        PanelSettingsService.set("smtp_password_encrypted", enc_smtp)
+        assert EmailService._get_setting("smtp_password") == "secret-smtp-pass"
+        
+        # Test Resend API Key
+        enc_resend = AuthService.encrypt_secret("secret-resend-key", aad="msm:settings:resend_api_key")
+        PanelSettingsService.set("resend_api_key_encrypted", enc_resend)
+        assert EmailService._get_setting("resend_api_key") == "secret-resend-key"

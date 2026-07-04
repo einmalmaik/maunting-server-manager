@@ -27,6 +27,7 @@ const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ def
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
 import { useAuthStore } from '@/stores/authStore'
 import { CookieConsent } from './components/ui/CookieConsent'
+import { DisBadge } from './components/DisBadge'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
@@ -55,6 +56,9 @@ function App() {
 
   return (
     <>
+      <div className="fixed bottom-4 right-4 z-[9999] pointer-events-auto">
+        <DisBadge />
+      </div>
       <Suspense fallback={
         <Loader fullScreen label="Maunting Server Manager" />
       }>

@@ -1,7 +1,7 @@
 """Tests fuer SteamAccountService.
 
 Sicherheits-Invarianten:
-- Passwort ist AT REST Fernet-encrypted (nicht Klartext).
+- Passwort ist AT REST DIS-encrypted (nicht Klartext).
 - ``get_decrypted_password`` liefert nach Set→Get das Klartext-Passwort.
 - GET-Response enthaelt niemals das Passwort.
 - Passwort taucht in keinem Log-Record auf.
@@ -32,7 +32,7 @@ class TestSteamAccountService:
         from services.panel_settings_service import PanelSettingsService
         raw = PanelSettingsService.get("steam_account_password_enc", "")
         assert raw != "mypass"
-        assert raw.startswith("gAAAAAB")  # Fernet-Praefix
+        assert raw.startswith("test-enc-")  # DIS-mock prefix
         SteamAccountService.clear()
 
     def test_clear_removes_both_keys(self) -> None:
@@ -44,14 +44,16 @@ class TestSteamAccountService:
 
     def test_decrypt_fails_gracefully_after_key_rotation(self, monkeypatch) -> None:
         SteamAccountService.set("u", "p")
-        # Simuliere SECRET_KEY-Rotation durch Falschen Key
-        import base64
-        from cryptography.fernet import Fernet
-        fake_key = base64.urlsafe_b64encode(b"0" * 32)
+        # Simuliere DIS-Entschluesselungsfehler (z. B. nach Key-Rotation)
+        from services.dis_client import DisDecryptionError
+
+        def _raise_dis_error(*a, **kw):
+            raise DisDecryptionError("mock key rotation")
+
         monkeypatch.setattr(
             AuthService,
-            "_get_fernet",
-            staticmethod(lambda: Fernet(fake_key)),
+            "decrypt_secret",
+            staticmethod(_raise_dis_error),
         )
         with pytest.raises(RuntimeError, match="SECRET_KEY rotiert"):
             SteamAccountService.get_decrypted_password()

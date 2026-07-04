@@ -44,6 +44,32 @@ class EmailService:
     @staticmethod
     def _get_setting(key: str) -> str:
         """Liest Setting aus DB (Vorrang) oder Umgebungsvariable."""
+        if key == "smtp_password":
+            enc = PanelSettingsService.get("smtp_password_encrypted", "")
+            if enc:
+                try:
+                    from services.auth_service import AuthService
+                    return AuthService.decrypt_secret(enc, aad="msm:settings:smtp_password")
+                except Exception:
+                    pass
+            db_val = PanelSettingsService.get("smtp_password", "")
+            if db_val:
+                return db_val
+            return getattr(settings, "smtp_password", "")
+
+        if key == "resend_api_key":
+            enc = PanelSettingsService.get("resend_api_key_encrypted", "")
+            if enc:
+                try:
+                    from services.auth_service import AuthService
+                    return AuthService.decrypt_secret(enc, aad="msm:settings:resend_api_key")
+                except Exception:
+                    pass
+            db_val = PanelSettingsService.get("resend_api_key", "")
+            if db_val:
+                return db_val
+            return getattr(settings, "resend_api_key", "")
+
         db_val = PanelSettingsService.get(key, "")
         if db_val:
             return db_val

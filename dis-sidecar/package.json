@@ -1,0 +1,13 @@
+{
+  "name": "msm-dis-sidecar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DIS Sidecar for Maunting Server Manager — local crypto service wrapping @msdis/shield",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "dependencies": {
+    "@msdis/shield": "0.2.0"
+  }
+}

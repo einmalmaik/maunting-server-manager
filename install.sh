@@ -527,6 +527,7 @@ if $SHOULD_COPY_FILES; then
 
         cp -r "$SCRIPT_DIR/backend" "$MSM_DIR/"
         cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
+        cp -r "$SCRIPT_DIR/dis-sidecar" "$MSM_DIR/" 2>/dev/null || true
         cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
@@ -855,6 +856,18 @@ else
     SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
 fi
 
+# DIS Sidecar: Salt + Token generieren (oder beibehalten bei Re-Install)
+if $REINSTALL_MODE && [[ -f "$MSM_DIR/backend/.env" ]]; then
+    DIS_SALT=$(grep -E '^MSM_DIS_SALT=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    DIS_TOKEN=$(grep -E '^MSM_DIS_SIDECAR_TOKEN=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+fi
+if [[ -z "$DIS_SALT" ]]; then
+    DIS_SALT=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+fi
+if [[ -z "$DIS_TOKEN" ]]; then
+    DIS_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+fi
+
 PANEL_URL="http://localhost"
 if [[ -n "$DOMAIN" ]]; then
     PANEL_URL="https://$DOMAIN"
@@ -904,6 +917,9 @@ MSM_ALGORITHM="HS256"
 MSM_ACCESS_TOKEN_EXPIRE_MINUTES=15
 MSM_REFRESH_TOKEN_EXPIRE_DAYS=30
 MSM_CSRF_TOKEN_EXPIRE_MINUTES=1440
+MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"
+MSM_DIS_SIDECAR_TOKEN="$DIS_TOKEN"
+MSM_DIS_SALT="$DIS_SALT"
 MSM_EMAIL_PROVIDER="$EMAIL_PROVIDER"
 MSM_SMTP_HOST="$SMTP_HOST"
 MSM_SMTP_PORT=$SMTP_PORT
@@ -1013,6 +1029,30 @@ if $RUN_FRONTEND_BUILD; then
         err "Frontend-Build fehlgeschlagen. Prüfe npm-Log und package.json."
     fi
     ok "Frontend gebaut"
+fi
+
+# ── DIS Sidecar: npm ci (@msdis/shield) ──
+RUN_SIDECAR_SETUP=false
+if [[ ! -d "$MSM_DIR/dis-sidecar/node_modules" ]]; then
+    RUN_SIDECAR_SETUP=true
+elif ! $REINSTALL_MODE; then
+    RUN_SIDECAR_SETUP=true
+elif $KEEP_SETTINGS; then
+    RUN_SIDECAR_SETUP=true
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CODE_CHANGED; then
+    RUN_SIDECAR_SETUP=true
+fi
+
+if $RUN_SIDECAR_SETUP; then
+    log "Installiere DIS Sidecar-Abhängigkeiten..."
+    if ! su - "$MSM_USER" -c "
+        set -e
+        cd $MSM_DIR/dis-sidecar
+        npm ci -q --omit=dev
+    " 2>&1 | tee -a "$LOG_FILE"; then
+        err "DIS Sidecar npm ci fehlgeschlagen. Prüfe dis-sidecar/package.json und package-lock.json."
+    fi
+    ok "DIS Sidecar bereit"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -1185,11 +1225,39 @@ fi
 
 if $RUN_SYSTEMD_SETUP; then
     log "Registriere systemd Service..."
+
+    # ── DIS Sidecar Service (vor dem Panel starten) ──
+    cat > /etc/systemd/system/msm-dis-sidecar.service <<EOF
+[Unit]
+Description=MSM DIS Sidecar (Crypto Service)
+After=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/dis-sidecar
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="MSM_SECRET_KEY=$SECRET_KEY"
+Environment="MSM_DIS_SALT=$DIS_SALT"
+Environment="MSM_DIS_SIDECAR_TOKEN=$DIS_TOKEN"
+Environment="MSM_DIS_SIDECAR_URL=http://127.0.0.1:9100"
+ExecStart=/usr/bin/node $MSM_DIR/dis-sidecar/server.mjs
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     cat > /etc/systemd/system/msm-panel.service <<EOF
 [Unit]
 Description=Maunting Server Manager Panel
-After=network.target redis-server.service
+After=network.target redis-server.service msm-dis-sidecar.service
 Wants=redis-server.service
+Requires=msm-dis-sidecar.service
 
 [Service]
 Type=simple
@@ -1225,6 +1293,7 @@ EOF
 
     if $SYSTEMD_AVAILABLE; then
         systemctl daemon-reload
+        systemctl enable msm-dis-sidecar.service
         systemctl enable msm-panel.service
 
         # Update-Timer (optional — deaktiviert per Default)
@@ -1404,6 +1473,23 @@ fi
 # ═══════════════════════════════════════════════════════════════
 log "Starte Panel-Service..."
 if $SYSTEMD_AVAILABLE; then
+    # DIS Sidecar zuerst starten (Panel haengt davon ab)
+    systemctl restart msm-dis-sidecar.service 2>/dev/null || systemctl start msm-dis-sidecar.service 2>/dev/null || true
+    sleep 1
+    if ! systemctl is-active --quiet msm-dis-sidecar.service; then
+        warn "DIS Sidecar startet nicht. Pruefe: journalctl -u msm-dis-sidecar -n 50"
+    fi
+
+    # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
+    if [[ -f "$MSM_DIR/backend/msm.db" ]] || [[ "$DB_URL" == postgresql* ]]; then
+        log "Pruefe DIS-Migration (Fernet -> DIS)..."
+        su - "$MSM_USER" -c "
+            cd $MSM_DIR/backend
+            source venv/bin/activate
+            python3 scripts/migrate_to_dis.py
+        " 2>&1 | tee -a "$LOG_FILE" || err "DIS-Migration fehlgeschlagen! Migration abgebrochen. Prüfe das Log: $LOG_FILE"
+    fi
+
     systemctl restart msm-panel.service 2>/dev/null || systemctl start msm-panel.service 2>/dev/null || true
     sleep 2
     if systemctl is-active --quiet msm-panel.service; then

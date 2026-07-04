@@ -1,4 +1,4 @@
-import pyotp
+from tests._totp import totp_now, random_totp_secret
 import pytest
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
@@ -48,8 +48,9 @@ class TestAccountDeletion:
         jwt_bl = JwtBlacklist(jti="test_jti", user_id=user_id, expires_at=datetime.now(timezone.utc) + timedelta(hours=1))
         db.add(jwt_bl)
         
+        from services.email_verification_service import EmailVerificationService
         ev = EmailVerification(
-            email=user_email,
+            email_hash=EmailVerificationService._email_hash(user_email),
             code_hash="test_hash",
             purpose="register",
             expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
@@ -79,7 +80,10 @@ class TestAccountDeletion:
         assert db.query(User).filter(User.id == user_id).first() is None
         assert db.query(RefreshToken).filter(RefreshToken.user_id == user_id).first() is None
         assert db.query(JwtBlacklist).filter(JwtBlacklist.user_id == user_id).first() is None
-        assert db.query(EmailVerification).filter(EmailVerification.email == user_email).first() is None
+        from services.email_verification_service import EmailVerificationService
+        assert db.query(EmailVerification).filter(
+            EmailVerification.email_hash == EmailVerificationService._email_hash(user_email)
+        ).first() is None
         
         # Audit log must remain but user_id set to None
         db_log = db.query(AuditLog).filter(AuditLog.action == "test_action").first()
@@ -100,8 +104,8 @@ class TestAccountDeletion:
 
     def test_delete_requires_otp_when_2fa_enabled(self, client: TestClient, db: Session, normal_user: User, normal_cookies: dict):
         # Enable 2FA for normal user
-        secret = pyotp.random_base32()
-        normal_user.two_factor_secret_encrypted = AuthService.encrypt_2fa_secret(secret)
+        secret = random_totp_secret()
+        normal_user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{normal_user.id}:2fa")
         normal_user.two_factor_enabled = True
         db.commit()
 
@@ -143,11 +147,10 @@ class TestAccountDeletion:
         assert response.status_code in (401, 422)
 
         # Try with valid TOTP code
-        totp = pyotp.TOTP(secret)
         response = client.request(
             "DELETE",
             "/api/auth/delete-account",
-            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": totp.now()},
+            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": totp_now(secret)},
             cookies=normal_cookies,
             headers={"X-CSRF-Token": csrf},
         )
@@ -188,7 +191,7 @@ class TestAccountDeletion:
         link = OAuthUserLink(
             provider_id=provider.id, 
             user_id=user.id, 
-            subject="social-xyz", 
+            subject=OAuthUserLink._hash_subject("social-xyz"), 
             email_at_link=user.email,
             username_at_link=user.username
         )
@@ -272,7 +275,7 @@ class TestAccountDeletion:
         link = OAuthUserLink(
             provider_id=provider.id,
             user_id=user.id,
-            subject="custom-subject-xyz",
+            subject=OAuthUserLink._hash_subject("custom-subject-xyz"),
             email_at_link=user.email,
             username_at_link=user.username,
         )

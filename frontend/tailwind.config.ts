@@ -47,6 +47,13 @@ const config: Config = {
         'card-foreground': '#e7f4f7',
         // Primary (Logo ice cyan)
         'primary': '#b9f6ff',
+        // DIS Design DNA ice colors
+        'ice': {
+          100: 'hsl(188 29% 95%)',
+          200: 'hsl(196 19% 67%)',
+          300: 'hsl(194 44% 68%)',
+          500: 'hsl(193 45% 86%)',
+        },
         'primary-foreground': '#031316',
         'on-primary': '#031316',
         'primary-container': '#0c3b45',

@@ -11,7 +11,7 @@ class EmailVerification(Base):
     __tablename__ = "email_verifications"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    email_hash: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     code_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA256 des 6-stelligen Codes
     purpose: Mapped[str] = mapped_column(String(32), nullable=False)  # "setup" oder "register"
     verified: Mapped[bool] = mapped_column(default=False)
