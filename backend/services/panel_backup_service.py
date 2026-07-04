@@ -226,6 +226,55 @@ def cleanup_old_panel_backups(db: Session, *, keep: int | None = None) -> None:
 # ── S3-Upload (Best-Effort) ──────────────────────────────────────────────
 
 
+def delete_panel_backup(db: Session, backup_id: int) -> bool:
+    """Loescht ein Panel-Backup aus lokalem FS, S3 und DB (Best-Effort S3).
+
+    Reihenfolge: S3 (best-effort) -> lokal (best-effort) -> DB-Row.
+    S3-Fehler blockieren NICHT das lokale Loeschen (Warning-Log, keine Secrets).
+    Idempotent auf fehlender lokaler Datei (lokal-Delete skipped still loescht DB).
+    Idempotent auf fehlendem S3-Objekt (S3 delete_object ist idempotent).
+
+    Returns: True wenn ein Record geloescht wurde, False wenn id nicht existiert
+    (idempotent auf nicht-existenter ID — kein Fehler).
+    """
+    from models import PanelBackup  # Inline-Import gegen Zyklen
+
+    backup = db.query(PanelBackup).filter(PanelBackup.id == backup_id).first()
+    if backup is None:
+        # Idempotent: nicht-existente ID ist kein Fehler.
+        return False
+
+    # 1. S3-Delete (best-effort, nur wenn s3_key vorhanden).
+    if backup.s3_key:
+        try:
+            from services.s3_service import S3Service
+            S3Service.delete_object(backup.s3_key)
+        except Exception as exc:
+            # Generische Warning — keine Secrets, kein Pfad-Leak.
+            logger.warning(
+                "S3-Delete fehlgeschlagen (Panel-Backup %s): %s — lokales Loeschen wird fortgesetzt",
+                backup_id, type(exc).__name__,
+            )
+
+    # 2. Lokale Datei loeschen (best-effort). Fehlende Datei ist OK (idempotent).
+    if backup.local_path:
+        try:
+            if os.path.exists(backup.local_path):
+                os.remove(backup.local_path)
+        except OSError as exc:
+            logger.warning(
+                "Konnte Panel-Backup-Datei nicht loeschen (id=%s): %s — DB-Row wird trotzdem entfernt",
+                backup_id, type(exc).__name__,
+            )
+
+    # 3. DB-Row entfernen (immer, auch wenn FS/S3-Fehler).
+    db.delete(backup)
+    db.commit()
+
+    logger.info("Panel-Backup geloescht (id=%s)", backup_id)
+    return True
+
+
 def _maybe_upload_to_s3(
     backup, db: Session, local_path: str, timestamp: str
 ) -> None:
