@@ -166,29 +166,77 @@ def auto_backup(server_id: int, request: Request, db: Session = Depends(get_db))
 
 @router.post("/{server_id}/restore/{backup_id}")
 async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    """Stellt ein Backup wieder her.
+    """Stellt ein Backup wieder her (von lokal oder S3).
 
     Stoppt den Docker-Container VOR dem Extrahieren — sonst greift der laufende
     Server-Prozess auf Dateien zu, die wir gerade ersetzen, und das install_dir
     kann nicht atomar ersetzt werden. Container wird NICHT automatisch wieder
     gestartet; das übernimmt der Nutzer (UI bietet Start-Button).
 
-    Verwendet denselben Lifecycle-Lock wie Start/Stop/Restart, damit während
-    des Restore kein paralleler Start gegen ein halb ersetztes install_dir läuft.
+    Restore-Quellen (Prioritaet):
+    1. Lokale Datei existiert → bestehende Restore-Logik (unveraendert).
+    2. Lokale Datei fehlt, s3_key vorhanden → S3-Download + DIS-Decrypt
+       lokal speichern, dann bestehende Restore-Logik.
+       Download/Decrypt erfolgt VOR dem Container-Stop, damit bei Fehlern
+       (S3 unreachable, falsches Passwort) der Server unberührt bleibt.
+    3. Weder lokal noch S3 → 404.
+
+    Verwendet denselben Lifecycle-Lock wie Start/Stop/Restart (non-blocking:
+    concurrent Restore → 409). Der DIS-Backup-Key wird immer invalidiert
+    (try/finally in fetch_backup_from_s3).
     """
     require_server_permission(user, server_id, db, "server.backups.restore")
     server = db.query(Server).filter(Server.id == server_id).first()
     backup = db.query(Backup).filter(Backup.id == backup_id, Backup.server_id == server_id).first()
     if not server or not backup:
         raise HTTPException(status_code=404, detail="Server oder Backup nicht gefunden")
-    if not os.path.exists(backup.filename):
+
+    local_exists = os.path.exists(backup.filename)
+    if not local_exists and not backup.s3_key:
+        # Weder lokale Datei noch S3-Backup → 404 (kein State-Change).
         raise HTTPException(status_code=404, detail="Backup-Datei nicht gefunden")
 
-    from services.server_lifecycle_service import acquire_lock_async, get_server_lifecycle_lock
+    from services.server_lifecycle_service import get_server_lifecycle_lock
 
     lock = get_server_lifecycle_lock(server.id)
-    async with acquire_lock_async(lock):
+    # Non-blocking acquire: concurrent Restore / Lifecycle-Op → 409.
+    if not lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Server ist belegt — eine andere Operation läuft")
+    try:
         db.refresh(server)
+
+        # S3-Restore: Download + Decrypt VOR Container-Stop.
+        # Bei Fehlern bleibt install_dir unveraendert und der Container laeuft weiter.
+        if not local_exists:
+            from services.backup_orchestrator import fetch_backup_from_s3
+            from services.s3_service import S3NotConfiguredError, S3OperationError
+            from services.backup_crypto_service import BackupDecryptionError, BackupCryptoError
+            try:
+                fetch_backup_from_s3(backup, db)
+            except BackupDecryptionError:
+                # Falsches Passwort oder manipulierter Stream — klare User-Meldung.
+                raise HTTPException(
+                    status_code=400,
+                    detail="Entschlüsselung fehlgeschlagen: falsches Passwort oder manipuliertes Backup",
+                )
+            except (S3NotConfiguredError, S3OperationError):
+                # S3 nicht erreichbar / Objekt fehlt — klarer Fehler.
+                raise HTTPException(
+                    status_code=502,
+                    detail="Cloud-Backup nicht verfügbar",
+                )
+            except BackupCryptoError:
+                # DIS nicht erreichbar oder anderer DIS-Fehler.
+                raise HTTPException(
+                    status_code=502,
+                    detail="Cloud-Backup nicht verfügbar",
+                )
+            except Exception:
+                logger.warning(
+                    "S3-Restore fehlgeschlagen (Server %s, Backup %s)",
+                    server_id, backup_id,
+                )
+                raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
 
         # Container stoppen, falls er läuft — Bind-Mount-Konsistenz
         from games.base import container_name_for
@@ -272,6 +320,9 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
         server.status = "stopped"
         server.status_message = None
         db.commit()
+    finally:
+        # Lock IMMER freigeben (Erfolg, Fehler, HTTPException) — kein Deadlock.
+        lock.release()
 
     return {"message": "Backup wiederhergestellt"}
 

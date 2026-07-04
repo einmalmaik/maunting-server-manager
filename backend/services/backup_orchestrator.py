@@ -167,3 +167,53 @@ def upload_backup_to_cloud(backup, db: Session, server_id: int) -> bool:
 
     _upload_to_s3(backup, db, server_id)
     return bool(backup.s3_key and backup.encrypted)
+
+
+def fetch_backup_from_s3(backup, db: Session) -> None:
+    """Laedt ein Backup von S3 herunter, entschluesselt es via DIS und speichert es lokal.
+
+    Wird vom Restore-Endpoint verwendet, wenn die lokale Datei fehlt aber ein
+    s3_key vorhanden ist. Nach erfolgreichem Aufruf existiert die Datei unter
+    ``backup.filename`` und die bestehende Restore-Logik (Container stoppen,
+    Extrahieren, DB-Reset) kann ausgefuehrt werden.
+
+    Key-Lifecycle: init_key vor Download/Decrypt, invalidate_key immer danach
+    (try/finally — auch bei Fehler).
+
+    Wirft bei:
+    - S3NotConfiguredError / S3OperationError: S3-Fehler (Provider nicht erreichbar, Objekt fehlt)
+    - BackupDecryptionError: Entschluesselung fehlgeschlagen (falsches Passwort / manipuliert)
+    - BackupCryptoError: DIS nicht erreichbar oder anderer DIS-Fehler
+
+    Der Caller (Router) fangt diese ab und gibt klare User-Meldungen zurueck.
+    """
+    from services.backup_config_service import BackupConfigService
+    from services.backup_crypto_service import BackupCryptoService
+    from services.s3_service import S3Service
+
+    key_id: str | None = None
+    try:
+        password = BackupConfigService.get_backup_password()
+        salt = BackupConfigService.get_backup_salt()
+        key_id = BackupCryptoService.init_key(password, salt)
+
+        # S3-Download → DIS decrypt-stream → lokale Datei.
+        # StreamBody.iter_chunks() liefert einen Iterator[bytes], den httpx
+        # direkt an DIS weiterstreamt (kein Puffern der ganzen Datei im Speicher).
+        body = S3Service.download_stream(backup.s3_key)
+        BackupCryptoService.decrypt_to_file(body.iter_chunks(), key_id, backup.filename)
+
+        logger.info(
+            "S3-Restore: Download + Decrypt erfolgreich (Backup %s)",
+            backup.id,
+        )
+    finally:
+        # Key IMMER invalidieren (Erfolg und Fehler) — kein Key-Leak.
+        if key_id:
+            try:
+                BackupCryptoService.invalidate_key(key_id)
+            except Exception:
+                logger.warning(
+                    "Key-Invalidierung fehlgeschlagen (Backup %s)",
+                    backup.id,
+                )

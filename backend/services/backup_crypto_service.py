@@ -34,6 +34,16 @@ class BackupCryptoError(Exception):
     """DIS-Streaming-Verschluesselung fehlgeschlagen."""
 
 
+class BackupDecryptionError(BackupCryptoError):
+    """Entschluesselung fehlgeschlagen (falsches Passwort / manipulierter Stream).
+
+    DIS meldet HTTP 400 DecryptionFailed — der Key stimmt nicht mit dem
+    verschluesselten Objekt ueberein (Passwort geaendert, falscher Salt,
+    oder Daten manipuliert). Der Caller kann darauf eine klare User-Meldung
+    zurueckgeben (statt eines generischen 500).
+    """
+
+
 class BackupCryptoService:
     """Statische Fassade fuer DIS-Streaming-Verschluesselung."""
 
@@ -135,6 +145,11 @@ class BackupCryptoService:
             headers=headers,
             timeout=_STREAM_TIMEOUT,
         ) as resp:
+            if resp.status_code == 400:
+                # DecryptionFailed: falsches Passwort, falscher Salt, oder manipulierter Stream.
+                # Klare Ausnahme fuer aufrufenden Code, damit eine verstaendliche
+                # Fehlermeldung an den User gegeben werden kann (kein generisches 500).
+                raise BackupDecryptionError("Entschluesselung fehlgeschlagen")
             if resp.status_code != 200:
                 raise BackupCryptoError(
                     f"DIS decrypt-stream fehlgeschlagen: HTTP {resp.status_code}"
