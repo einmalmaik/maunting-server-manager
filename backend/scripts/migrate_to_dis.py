@@ -125,7 +125,7 @@ def migrate() -> None:
 
 if __name__ == "__main__":
     # Ensure tables exist
-    from models import Base
+    from database import Base
     Base.metadata.create_all(bind=engine)
 
     # Check sidecar is running
