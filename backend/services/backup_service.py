@@ -44,6 +44,8 @@ def run_backup(
     *,
     name: str | None = None,
     timeout_seconds: int = 600,
+    encrypted: bool = False,
+    encryption_algorithm: str | None = None,
 ) -> "Backup":
     """
     Führt ein vollständiges Backup aus + DB-Record + sofortigen Retention-Cleanup.
@@ -120,12 +122,18 @@ def run_backup(
                 filepath,
                 server.install_dir,
                 plan.include_paths,
+                server_id=server_id,
+                encrypted=encrypted,
+                encryption_algorithm=encryption_algorithm,
             )
         else:
             create_full_backup_tar(
                 filepath,
                 server.install_dir,
                 pg_dump_bytes=pg_dump_bytes or None,
+                server_id=server_id,
+                encrypted=encrypted,
+                encryption_algorithm=encryption_algorithm,
             )
         size_mb = os.path.getsize(filepath) // (1024 * 1024)
     except subprocess.TimeoutExpired as e:

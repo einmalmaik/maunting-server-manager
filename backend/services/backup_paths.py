@@ -75,10 +75,34 @@ def resolve_backup_members(install_dir: str, include_paths: list[str] | tuple[st
     return sorted(members)
 
 
-def build_manifest(scope: str, include_paths: list[str] | tuple[str, ...] | None = None) -> dict:
-    payload: dict = {"version": BACKUP_MANIFEST_VERSION, "scope": scope}
+def build_manifest(
+    scope: str,
+    include_paths: list[str] | tuple[str, ...] | None = None,
+    *,
+    server_id: int | None = None,
+    encrypted: bool = False,
+    encryption_algorithm: str | None = None,
+) -> dict:
+    """Erstellt das Backup-Manifest.
+
+    Pflicht-Felder: version, scope, timestamp, server_id.
+    Erweiterte Felder (fuer S3-uploaded Backups): encrypted, encryption_algorithm.
+    Fuer rein lokale Backups bleibt encrypted False/abwesend.
+    """
+    from datetime import datetime, timezone
+
+    payload: dict = {
+        "version": BACKUP_MANIFEST_VERSION,
+        "scope": scope,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if server_id is not None:
+        payload["server_id"] = server_id
     if scope == "selective" and include_paths:
         payload["includePaths"] = list(include_paths)
+    if encrypted:
+        payload["encrypted"] = True
+        payload["encryption_algorithm"] = encryption_algorithm or "AES-256-GCM"
     return payload
 
 
@@ -107,6 +131,10 @@ def create_selective_backup_tar(
     filepath: str,
     install_dir: str,
     include_paths: list[str] | tuple[str, ...],
+    *,
+    server_id: int | None = None,
+    encrypted: bool = False,
+    encryption_algorithm: str | None = None,
 ) -> None:
     import io
     import tarfile
@@ -117,7 +145,13 @@ def create_selective_backup_tar(
             "Keine Backup-Dateien gefunden. Prüfe Blueprint backup.includePaths und ob Config/Saves existieren."
         )
 
-    manifest = build_manifest("selective", include_paths)
+    manifest = build_manifest(
+        "selective",
+        include_paths,
+        server_id=server_id,
+        encrypted=encrypted,
+        encryption_algorithm=encryption_algorithm,
+    )
     manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
 
     os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
@@ -143,6 +177,9 @@ def create_full_backup_tar(
     install_dir: str,
     *,
     pg_dump_bytes: bytes | None = None,
+    server_id: int | None = None,
+    encrypted: bool = False,
+    encryption_algorithm: str | None = None,
 ) -> None:
     """Vollstaendiges install_dir-Snapshot als .tar.gz (Ersatz fuer ``tar -czf``).
 
@@ -159,6 +196,7 @@ def create_full_backup_tar(
     2. Atomic -- entweder das gesamte Archiv existiert oder gar nichts
        (tarfile-Context-Manager garantiert das).
     """
+    import io
     import tarfile
     from pathlib import Path as _P
 
@@ -167,7 +205,12 @@ def create_full_backup_tar(
     if not base.is_dir():
         raise FileNotFoundError(f"install_dir fehlt: {base}")
 
-    manifest = build_manifest("full")
+    manifest = build_manifest(
+        "full",
+        server_id=server_id,
+        encrypted=encrypted,
+        encryption_algorithm=encryption_algorithm,
+    )
     manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
 
     with tarfile.open(filepath, "w:gz") as tar:
@@ -192,7 +235,7 @@ def create_full_backup_tar(
                 if path.is_file():
                     # Folgt ggf. Symlinks nicht (Sicherheit) -- GNU tar --no-acl
                     # Analog; wir nutzen rekursiv ohne follow.
-                    tar.add(str(path), arcname=rel, recursive=False, follow_symlinks=False)
+                    tar.add(str(path), arcname=rel, recursive=False)
             except OSError:
                 # Race: Datei zwischen rglob und add geloescht -- ueberspringen,
                 # kein hartes Failure (Backup ist Best-Effort).

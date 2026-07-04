@@ -72,9 +72,9 @@ def create_backup(server_id: int, body: CreateBackupRequest | None = None, db: S
 
     # Kein Duplikat-Check mehr (Single Source of Truth im Service); generische Fehlermeldung
     # (verhindert Leak von install_dir / Pfaden in HTTP-Details und Logs).
-    from services.backup_service import run_backup as central_run_backup
+    from services.backup_orchestrator import create_server_backup
     try:
-        backup = central_run_backup(server_id, db, name=body.name if body else None, timeout_seconds=600)
+        backup = create_server_backup(server_id, db, name=body.name if body else None, timeout_seconds=600)
     except FileNotFoundError:
         raise HTTPException(status_code=400, detail="Server-Verzeichnis existiert nicht. Ist der Server installiert?")
     except Exception:
