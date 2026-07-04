@@ -456,20 +456,19 @@ class TestBackupsRouter:
         assert "deaktiviert" in r.json()["message"].lower()
 
     def test_auto_backup_with_header_and_flag_true_calls_run_backup(self, client, test_server, db):
-        """c) Mit korrektem Header + backup_on_start=True → run_backup wird aufgerufen."""
+        """c) Mit korrektem Header + backup_on_start=True → Orchestrator wird aufgerufen."""
         test_server.backup_on_start = True
         db.commit()
 
-        with patch("services.backup_service.run_backup") as mock_run:
+        with patch("services.backup_orchestrator.create_server_backup") as mock_orch:
             fake_backup = MagicMock(id=123)
-            mock_run.return_value = fake_backup
+            mock_orch.return_value = fake_backup
             r = client.post(f"/api/backups/{test_server.id}/auto", headers={"X-MSM-Internal-Auto": "1"})
             assert r.status_code == 200
             assert "erstellt" in r.json()["message"].lower()
-            # Wichtig: Der im Router via Depends(get_db) erhaltene Session ist nicht
-            # exakt dieselbe Instanz wie der Test-fixture. Deshalb nur auf Argumente prüfen.
-            mock_run.assert_called_once()
-            args, kwargs = mock_run.call_args
+            # Orchestrator wird aufgerufen (S3-Upload passiert automatisch wenn konfiguriert)
+            mock_orch.assert_called_once()
+            args, kwargs = mock_orch.call_args
             assert args[0] == test_server.id
             assert kwargs.get("timeout_seconds") == 300
 
@@ -479,19 +478,19 @@ class TestBackupsRouter:
         db.commit()
 
         with patch("routers.backups.settings.debug", False), \
-             patch("services.backup_service.run_backup") as mock_run:
+             patch("services.backup_orchestrator.create_server_backup") as mock_orch:
             r = client.post(
                 f"/api/backups/{test_server.id}/auto",
                 headers={"X-MSM-Internal-Auto": "1"},
             )
 
         assert r.status_code == 403
-        mock_run.assert_not_called()
+        mock_orch.assert_not_called()
 
     def test_auto_backup_calls_service_and_graceful_on_error(self, client, test_server, db):
         test_server.backup_on_start = True
         db.commit()
-        with patch("services.backup_service.run_backup", side_effect=RuntimeError("x")):
+        with patch("services.backup_orchestrator.create_server_backup", side_effect=RuntimeError("x")):
             r = client.post(f"/api/backups/{test_server.id}/auto", headers={"X-MSM-Internal-Auto": "1"})
             assert r.status_code == 200
             assert "fehlgeschlagen" in r.json()["message"].lower()
@@ -659,14 +658,19 @@ class TestBackupsRouter:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestSchedulerBackupDelegation:
-    """_backup_server_task delegiert ausschließlich an backup_service (keine tar-Logik)."""
+    """_backup_server_task delegiert an den Backup-Orchestrator (lokal + S3 Best-Effort).
 
-    def test_backup_server_task_calls_run_backup_and_closes_db(self):
-        """16. Scheduler ruft nur noch den zentralen Service (keine Duplikate mehr)."""
+    VAL-SCHED-001: Scheduler ruft backup_orchestrator.create_server_backup auf
+    (nicht mehr legacy backup_service.run_backup direkt), damit geplante Backups
+    automatisch verschluesselt in S3 hochgeladen werden, sobald S3 konfiguriert ist.
+    """
+
+    def test_backup_server_task_calls_orchestrator_and_closes_db(self):
+        """16. Scheduler ruft den Orchestrator (keine Duplikate mehr, S3 via Orchestrator)."""
         from services.scheduler_service import _backup_server_task
 
         with patch("services.scheduler_service.SessionLocal") as sl, \
-             patch("services.backup_service.run_backup") as run_mock:
+             patch("services.backup_orchestrator.create_server_backup") as orch_mock:
 
             fake_db = MagicMock()
             fake_srv = MagicMock(id=42)
@@ -677,14 +681,14 @@ class TestSchedulerBackupDelegation:
             import asyncio
             asyncio.run(_backup_server_task(42))
 
-            run_mock.assert_called_once_with(42, fake_db, timeout_seconds=300)
+            orch_mock.assert_called_once_with(42, fake_db, timeout_seconds=300)
             fake_db.close.assert_called_once()
 
     def test_backup_server_task_noop_on_unknown_server(self):
         from services.scheduler_service import _backup_server_task
 
         with patch("services.scheduler_service.SessionLocal") as sl, \
-             patch("services.backup_service.run_backup") as run_mock:
+             patch("services.backup_orchestrator.create_server_backup") as orch_mock:
 
             fake_db = MagicMock()
             fake_db.query.return_value.filter.return_value.first.return_value = None
@@ -693,7 +697,27 @@ class TestSchedulerBackupDelegation:
             import asyncio
             asyncio.run(_backup_server_task(99999))
 
-            run_mock.assert_not_called()
+            orch_mock.assert_not_called()
+            fake_db.close.assert_called_once()
+
+    def test_backup_server_task_swallows_orchestrator_error(self):
+        """VAL-SCHED-003: Fehler im Orchestrator crashen den Scheduler-Job nicht."""
+        from services.scheduler_service import _backup_server_task
+
+        with patch("services.scheduler_service.SessionLocal") as sl, \
+             patch("services.backup_orchestrator.create_server_backup",
+                   side_effect=RuntimeError("boom")) as orch_mock:
+
+            fake_db = MagicMock()
+            fake_srv = MagicMock(id=42)
+            fake_db.query.return_value.filter.return_value.first.return_value = fake_srv
+            sl.return_value = fake_db
+
+            import asyncio
+            # Sollte KEINE Exception propagieren (Scheduler bleibt am Leben)
+            asyncio.run(_backup_server_task(42))
+
+            orch_mock.assert_called_once()
             fake_db.close.assert_called_once()
 
 

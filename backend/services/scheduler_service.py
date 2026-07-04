@@ -167,7 +167,13 @@ async def _restart_server_task(server_id: int) -> None:
 
 
 async def _backup_server_task(server_id: int) -> None:
-    """Top-level job task: delegates to central backup_service (no duplicated tar logic)."""
+    """Top-level job task: delegates to backup_orchestrator (lokal + S3 Best-Effort).
+
+    Verwendet bewusst den Orchestrator (nicht mehr direkt backup_service.run_backup),
+    damit geplante Backups automatisch verschluesselt in S3 hochgeladen werden, sobald
+    S3 konfiguriert und ein Backup-Passwort gesetzt ist. S3-Fehler blockieren weder
+    das lokale Backup noch den Scheduler (Best-Effort, Warning-Log ohne Secrets).
+    """
     from models import Server  # only for existence check (service does the rest)
 
     db = SessionLocal()
@@ -176,10 +182,10 @@ async def _backup_server_task(server_id: int) -> None:
         if not server:
             return
 
-        from services.backup_service import run_backup
-        # Scheduler path: kürzerer Timeout (300s), damit der Scheduler-Loop nicht zu lange blockiert.
-        # Service übernimmt tar + DB-Record + Retention-Cleanup.
-        run_backup(server_id, db, timeout_seconds=300)
+        from services.backup_orchestrator import create_server_backup
+        # Scheduler path: kuerzerer Timeout (300s), damit der Scheduler-Loop nicht zu lange blockiert.
+        # Orchestrator uebernimmt tar + DB-Record + Retention-Cleanup + S3-Upload (Best-Effort).
+        create_server_backup(server_id, db, timeout_seconds=300)
     except Exception:
         import logging
         logging.warning("Auto-backup failed for server %s (details redacted for security)", server_id)

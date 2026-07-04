@@ -152,11 +152,11 @@ def auto_backup(server_id: int, request: Request, db: Session = Depends(get_db))
     if not server or not server.backup_on_start:
         return {"message": "Auto-Backup deaktiviert"}
 
-    from services.backup_service import run_backup as central_run_backup
+    from services.backup_orchestrator import create_server_backup
     import logging
     logger = logging.getLogger(__name__)
     try:
-        backup = central_run_backup(server_id, db, timeout_seconds=300)
+        backup = create_server_backup(server_id, db, timeout_seconds=300)
         return {"message": "Auto-Backup erstellt", "backup_id": backup.id}
     except Exception:
         # Niemals crashen des Callers (Plugins rufen fire-and-forget ohne Error-Handling)

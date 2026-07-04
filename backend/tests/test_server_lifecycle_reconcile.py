@@ -38,10 +38,33 @@ def test_pre_start_backup_skipped_when_recent_backup_exists():
     with patch(
         "services.server_lifecycle_service._append_console_log"
     ) as log_mock, patch(
-        "services.backup_service.run_backup"
+        "services.backup_orchestrator.create_server_backup"
     ) as backup_mock:
         fake_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = recent
         _run_pre_start_backup_if_enabled(fake_db, server, context="Start")
 
     backup_mock.assert_not_called()
     assert any("übersprungen" in str(c.args[1]) for c in log_mock.call_args_list)
+
+
+def test_pre_start_backup_uses_orchestrator_when_no_recent_backup():
+    """VAL-SCHED-002: Auto-Backup-on-Start verwendet den Orchestrator (S3-Upload)."""
+    from datetime import datetime, timezone, timedelta
+
+    server = Server(id=5, backup_on_start=True)
+    fake_db = MagicMock(spec=Session)
+    # Backup ist alt genug (> 30 Min) → kein Skip
+    old = SimpleNamespace(created_at=datetime.now(timezone.utc) - timedelta(hours=2))
+
+    with patch(
+        "services.server_lifecycle_service._append_console_log"
+    ), patch(
+        "services.backup_orchestrator.create_server_backup"
+    ) as orch_mock:
+        fake_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = old
+        _run_pre_start_backup_if_enabled(fake_db, server, context="Start")
+
+    orch_mock.assert_called_once()
+    args, kwargs = orch_mock.call_args
+    assert args[0] == 5
+    assert kwargs.get("timeout_seconds") == 300

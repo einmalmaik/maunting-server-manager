@@ -133,7 +133,7 @@ def _run_pre_start_backup_if_enabled(db: Session, server: Server, *, context: st
     if not server.backup_on_start:
         return
     from models import Backup
-    from services.backup_service import run_backup
+    from services.backup_orchestrator import create_server_backup
 
     last = (
         db.query(Backup)
@@ -160,7 +160,8 @@ def _run_pre_start_backup_if_enabled(db: Session, server: Server, *, context: st
         f"dauern, Timeout 300s). Panel bleibt erreichbar, Konsole aktualisiert sich danach.\n",
     )
     try:
-        run_backup(server.id, db, timeout_seconds=300)
+        # Orchestrator uebernimmt lokales tar.gz + S3-Upload (Best-Effort, wenn konfiguriert).
+        create_server_backup(server.id, db, timeout_seconds=300)
         _append_console_log(server.id, f"[MSM] Backup vor {context} abgeschlossen.\n")
     except Exception as exc:
         _append_console_log(
