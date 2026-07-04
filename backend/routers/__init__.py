@@ -13,6 +13,7 @@ from .blueprints import router as blueprints_router
 from .oauth import router as oauth_router
 from .databases import router as databases_router
 from .webhooks_outbound import router as webhooks_outbound_router
+from .backup_config import router as backup_config_router
 
 __all__ = [
     "auth_router",
@@ -30,4 +31,5 @@ __all__ = [
     "oauth_router",
     "databases_router",
     "webhooks_outbound_router",
+    "backup_config_router",
 ]  # noqa: E501

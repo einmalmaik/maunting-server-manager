@@ -31,6 +31,7 @@ from routers import (
     oauth_router,
     databases_router,
     webhooks_outbound_router,
+    backup_config_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -503,6 +504,9 @@ app.include_router(webhooks_outbound_router)
 # liefern. Stattdessen schuetzen die State-Cookie-Validierung + PKCE + 5-Min
 # LoginChallenge gegen Brute-Force auf dem OAuth-Pfad.
 app.include_router(oauth_router)
+# Backup-Config (S3-Settings + Backup-Passwort). Admin-only (panel.settings.write),
+# CSRF auf allen Write-Endpunkten. Credentials verschluesselt via DIS.
+app.include_router(backup_config_router)
 
 
 

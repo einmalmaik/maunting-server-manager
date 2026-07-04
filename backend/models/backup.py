@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Integer, String, DateTime, ForeignKey, BigInteger
+from sqlalchemy import Boolean, Integer, String, DateTime, ForeignKey, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -18,5 +18,11 @@ class Backup(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # S3-Cloud-Backup-Erweiterung (M1). Alle Felder nullable, damit bestehende
+    # lokale Backups unberuehrt bleiben (Migration-Pfad: Default null/False).
+    s3_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    s3_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    encrypted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     server: Mapped["Server"] = relationship("Server", back_populates="backups")

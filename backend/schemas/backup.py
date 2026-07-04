@@ -10,6 +10,10 @@ class BackupResponse(BaseModel):
     size_mb: int | None
     created_at: datetime
     expires_at: datetime | None
+    # S3-Cloud-Status (M1). Lokale Backups haben s3_key=None, encrypted=False.
+    s3_key: str | None = None
+    s3_bucket: str | None = None
+    encrypted: bool = False
 
     class Config:
         from_attributes = True
