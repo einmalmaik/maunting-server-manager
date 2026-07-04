@@ -620,7 +620,7 @@ class TestLinkedAccounts:
     ):
         p = _create_provider(db, slug="gh-unlink", preset="github")
         link = OAuthUserLink(
-            provider_id=p.id, user_id=regular_user.id, subject="sub-unlink"
+            provider_id=p.id, user_id=regular_user.id, subject=OAuthUserLink._hash_subject("sub-unlink")
         )
         db.add(link)
         db.commit()
@@ -640,7 +640,7 @@ class TestLinkedAccounts:
     ):
         p = _create_provider(db, slug="gh-info", preset="github")
         link = OAuthUserLink(
-            provider_id=p.id, user_id=regular_user.id, subject="sub-info"
+            provider_id=p.id, user_id=regular_user.id, subject=OAuthUserLink._hash_subject("sub-info")
         )
         db.add(link)
         db.commit()

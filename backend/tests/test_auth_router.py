@@ -118,8 +118,9 @@ class TestLogin:
 
         user = AuthService.create_user(db, "expired", "expired@test.de", "ExpiredPass123!")
         user.email_verified = False
+        from services.email_verification_service import EmailVerificationService
         db.add(EmailVerification(
-            email=user.email,
+            email_hash=EmailVerificationService._email_hash(user.email),
             code_hash="expired-test-code-hash",
             purpose="register",
             expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),

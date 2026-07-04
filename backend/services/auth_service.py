@@ -138,6 +138,15 @@ class AuthService:
     def generate_token() -> str:
         return uuid4().hex
 
+    @staticmethod
+    def _hash_reset_token(token: str) -> str:
+        import hmac
+        return hmac.new(
+            settings.secret_key.encode(),
+            token.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
     # ── User CRUD ──
     @staticmethod
     def get_user_by_username(db: Session, username: str) -> User | None:
@@ -184,7 +193,7 @@ class AuthService:
     @staticmethod
     def set_password_reset_token(db: Session, user: User) -> str:
         token = AuthService.generate_token()
-        user.password_reset_token = token
+        user.password_reset_token = AuthService._hash_reset_token(token)
         user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         db.commit()
         return token
@@ -224,7 +233,10 @@ class AuthService:
         db.query(JwtBlacklist).filter(JwtBlacklist.user_id == user.id).delete()
         
         # Delete EmailVerification items
-        db.query(EmailVerification).filter(EmailVerification.email == user.email).delete()
+        from services.email_verification_service import EmailVerificationService
+        db.query(EmailVerification).filter(
+            EmailVerification.email_hash == EmailVerificationService._email_hash(user.email)
+        ).delete()
 
         # Set user_id to None on AuditLog items
         db.query(AuditLog).filter(AuditLog.user_id == user.id).update({"user_id": None})

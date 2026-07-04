@@ -155,3 +155,11 @@ class TestRefreshToken:
             RefreshToken.user_id == owner_user.id,
             RefreshToken.revoked_at.is_(None),
         ).count() == 0
+
+    def test_password_reset_token_hashing(self, db: Session, owner_user: User):
+        token = AuthService.set_password_reset_token(db, owner_user)
+        # Der zurueckgegebene Token darf nicht der DB-Wert sein (da dieser gehasht ist)
+        assert token != owner_user.password_reset_token
+        assert len(owner_user.password_reset_token) == 64  # SHA-256 hex is 64 chars
+        # Der Hash in der DB muss genau dem _hash_reset_token entsprechen
+        assert owner_user.password_reset_token == AuthService._hash_reset_token(token)

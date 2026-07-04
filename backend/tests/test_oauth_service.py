@@ -297,7 +297,7 @@ class TestResolveUser:
     def test_login_via_existing_link(self, db: Session, regular_user: User):
         provider = _make_provider(db, slug="gh", preset="github")
         link = OAuthUserLink(
-            provider_id=provider.id, user_id=regular_user.id, subject="123"
+            provider_id=provider.id, user_id=regular_user.id, subject=OAuthUserLink._hash_subject("123")
         )
         db.add(link)
         db.commit()
@@ -313,7 +313,7 @@ class TestResolveUser:
         db.commit()
         provider = _make_provider(db, slug="gh", preset="github")
         link = OAuthUserLink(
-            provider_id=provider.id, user_id=regular_user.id, subject="123"
+            provider_id=provider.id, user_id=regular_user.id, subject=OAuthUserLink._hash_subject("123")
         )
         db.add(link)
         db.commit()

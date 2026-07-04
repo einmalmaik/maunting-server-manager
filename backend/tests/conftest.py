@@ -9,6 +9,7 @@ import os
 os.environ["MSM_DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["MSM_SECRET_KEY"] = "test-secret-key-32-chars-long!!!"
 os.environ["MSM_DEBUG"] = "true"
+os.environ["MSM_TESTING"] = "true"
 os.environ["MSM_PANEL_URL"] = "http://localhost:3000"
 os.environ["MSM_ACCESS_TOKEN_EXPIRE_MINUTES"] = "15"
 

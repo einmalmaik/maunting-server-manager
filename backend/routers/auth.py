@@ -68,7 +68,9 @@ async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> 
     else:
         _log_smtp_missing(req.email)
         # Setup-User und Verifikationseintrag wieder entfernen
-        db.query(EmailVerification).filter(EmailVerification.email == req.email).delete()
+        db.query(EmailVerification).filter(
+            EmailVerification.email_hash == EmailVerificationService._email_hash(req.email)
+        ).delete()
         db.delete(user)
         db.commit()
         raise HTTPException(
@@ -418,8 +420,9 @@ def reset_password(
     req: PasswordResetConfirm,
     db: Session = Depends(get_db),
 ) -> dict:
+    token_hash = AuthService._hash_reset_token(req.token)
     user = db.query(User).filter(
-        User.password_reset_token == req.token,
+        User.password_reset_token == token_hash,
         User.password_reset_expires > datetime.now(timezone.utc),
     ).first()
     if not user:

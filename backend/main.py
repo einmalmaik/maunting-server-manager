@@ -58,22 +58,18 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.servers_dir, exist_ok=True)
     os.makedirs("/opt/msm/backups", exist_ok=True)
 
-    # DIS Sidecar health check — fail-closed in production (no own crypto)
+    # DIS Sidecar health check — fail-closed in production and debug (no own crypto)
+    # Only bypassed if explicitly testing (e.g. pytest)
+    import sys
+    is_testing = os.getenv("MSM_TESTING") == "true" or "pytest" in sys.modules
     from services.dis_client import DisClient
-    if not DisClient.health_check():
-        if settings.debug:
-            import logging
-            logging.getLogger("msm").warning(
-                "DIS Sidecar nicht erreichbar — Debug-Modus, fahre fort. "
-                "Production wuerde hier abbrechen."
-            )
-        else:
-            raise RuntimeError(
-                "CRITICAL: DIS Sidecar nicht erreichbar. "
-                "Starte den Sidecar zuerst (systemctl start msm-dis-sidecar). "
-                "Das Panel enthaelt keine eigene Kryptographie und kann "
-                "ohne DIS nicht operieren."
-            )
+    if not is_testing and not DisClient.health_check():
+        raise RuntimeError(
+            "CRITICAL: DIS Sidecar nicht erreichbar. "
+            "Starte den Sidecar zuerst (systemctl start msm-dis-sidecar). "
+            "Das Panel enthaelt keine eigene Kryptographie und kann "
+            "ohne DIS nicht operieren."
+        )
 
     Base.metadata.create_all(bind=engine)
 
@@ -110,6 +106,25 @@ async def lifespan(app: FastAPI):
         if 'secret_encrypted' not in wh_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE webhook_subscriptions ADD COLUMN secret_encrypted VARCHAR(4096)"))
+
+    # Migration: email_verifications table cleanup for hashing
+    if 'email_verifications' in inspector.get_table_names():
+        ev_cols = [c['name'] for c in inspector.get_columns('email_verifications')]
+        if 'email' in ev_cols and 'email_hash' not in ev_cols:
+            # Ephemerale Tabelle neu aufbauen
+            with engine.begin() as conn:
+                conn.execute(text("DROP TABLE email_verifications"))
+            Base.metadata.create_all(bind=engine)
+
+    # Migration: oauth_user_links encryption columns
+    if 'oauth_user_links' in inspector.get_table_names():
+        ol_cols = [c['name'] for c in inspector.get_columns('oauth_user_links')]
+        if 'email_at_link_encrypted' not in ol_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE oauth_user_links ADD COLUMN email_at_link_encrypted VARCHAR(4096)"))
+        if 'username_at_link_encrypted' not in ol_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE oauth_user_links ADD COLUMN username_at_link_encrypted VARCHAR(4096)"))
 
     # Migration: server_ports Tabelle anlegen & Daten migrieren
     if 'server_ports' not in inspector.get_table_names():

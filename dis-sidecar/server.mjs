@@ -32,6 +32,7 @@ const PORT = parseInt(process.env.MSM_DIS_SIDECAR_PORT || '9100', 10);
 const TOKEN = process.env.MSM_DIS_SIDECAR_TOKEN || '';
 const SECRET_KEY = process.env.MSM_SECRET_KEY || '';
 const SALT_B64 = process.env.MSM_DIS_SALT || '';
+const NODE_ENV = process.env.NODE_ENV || 'production';
 
 if (!SECRET_KEY) {
   console.error('FATAL: MSM_SECRET_KEY not set');
@@ -39,6 +40,10 @@ if (!SECRET_KEY) {
 }
 if (!SALT_B64) {
   console.error('FATAL: MSM_DIS_SALT not set');
+  process.exit(1);
+}
+if (NODE_ENV === 'production' && (!TOKEN || TOKEN.trim() === '')) {
+  console.error('FATAL: MSM_DIS_SIDECAR_TOKEN not set in production');
   process.exit(1);
 }
 
@@ -73,7 +78,12 @@ const PW_PARAMS = {
 // ── HTTP server ──────────────────────────────────────────────────────────
 /** @param {import('node:http').IncomingMessage} req */
 function checkAuth(req) {
-  if (!TOKEN) return true;
+  if (!TOKEN) {
+    if (NODE_ENV === 'production') {
+      return false;
+    }
+    return true;
+  }
   return req.headers.authorization === `Bearer ${TOKEN}`;
 }
 

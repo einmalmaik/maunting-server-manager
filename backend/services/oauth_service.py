@@ -716,11 +716,12 @@ def resolve_user(
     - Auto-Registration erlaubt → register.
     - Sonst: forbidden mit Grund.
     """
+    subj_hash = OAuthUserLink._hash_subject(profile.subject)
     link = (
         db.query(OAuthUserLink)
         .filter(
             OAuthUserLink.provider_id == provider.id,
-            OAuthUserLink.subject == profile.subject,
+            OAuthUserLink.subject == subj_hash,
         )
         .first()
     )
@@ -794,11 +795,12 @@ def link_provider_to_user(
     db: Session, provider: OAuthProvider, user: User, profile: NormalizedProfile
 ) -> OAuthUserLink:
     """Verknuepft eine IdP-Identitaet mit einem bestehenden User. Idempotent pro (provider, subject)."""
+    subj_hash = OAuthUserLink._hash_subject(profile.subject)
     existing = (
         db.query(OAuthUserLink)
         .filter(
             OAuthUserLink.provider_id == provider.id,
-            OAuthUserLink.subject == profile.subject,
+            OAuthUserLink.subject == subj_hash,
         )
         .first()
     )
@@ -814,7 +816,7 @@ def link_provider_to_user(
     link = OAuthUserLink(
         provider_id=provider.id,
         user_id=user.id,
-        subject=profile.subject,
+        subject=subj_hash,
         email_at_link=profile.email,
         username_at_link=profile.username,
     )

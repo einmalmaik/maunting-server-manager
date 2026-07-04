@@ -1033,7 +1033,9 @@ fi
 
 # ── DIS Sidecar: npm ci (@msdis/shield) ──
 RUN_SIDECAR_SETUP=false
-if ! $REINSTALL_MODE; then
+if [[ ! -d "$MSM_DIR/dis-sidecar/node_modules" ]]; then
+    RUN_SIDECAR_SETUP=true
+elif ! $REINSTALL_MODE; then
     RUN_SIDECAR_SETUP=true
 elif $KEEP_SETTINGS; then
     RUN_SIDECAR_SETUP=true

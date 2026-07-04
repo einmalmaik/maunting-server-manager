@@ -6,7 +6,7 @@ from cryptography.fernet import Fernet
 
 from config import settings
 from database import SessionLocal
-from models import User, OAuthProvider, PostgresDatabase, PanelSetting, Server
+from models import User, OAuthProvider, PostgresDatabase, PanelSetting, Server, OAuthUserLink
 from scripts.migrate_to_dis import migrate, _old_fernet, _is_fernet
 from services.dis_client import DisClient, DisDecryptionError
 
@@ -16,7 +16,7 @@ def test_old_fernet_reconstruction():
     # settings.secret_key ist in conftest.py auf "test-secret-key-32-chars-long!!!" gesetzt.
     fernet = _old_fernet()
     plaintext = "my-secret-data"
-    
+
     # Manuelle korrekte Generierung des Fernet-Schlüssels
     digest = hashlib.sha256(settings.secret_key.encode()).digest()
     key = base64.urlsafe_b64encode(digest)
@@ -59,6 +59,7 @@ def test_migrate_all_secrets(monkeypatch):
             two_factor_secret_encrypted=fernet.encrypt(b"secrettotp").decode(),
             email_plain="user@example.com",
             email_encrypted=None,
+            password_reset_token="legacy-token",
         )
         db.add(user)
         db.flush()  # We need user.id for AAD
@@ -72,6 +73,17 @@ def test_migrate_all_secrets(monkeypatch):
             client_secret_encrypted=fernet.encrypt(b"github-client-secret").decode(),
         )
         db.add(provider)
+        db.flush()
+        
+        # OAuth Link (Plaintext details)
+        link = OAuthUserLink(
+            provider_id=provider.id,
+            user_id=user.id,
+            subject="plain-subject-123",
+        )
+        link.email_at_link_plain = "oauth@example.com"
+        link.username_at_link_plain = "oauthuser"
+        db.add(link)
         
         # c) PostgresDatabase owner password (Fernet)
         pg_db = PostgresDatabase(
@@ -82,7 +94,7 @@ def test_migrate_all_secrets(monkeypatch):
         )
         db.add(pg_db)
         
-        # d) PanelSettings: Steam password, Postgres admin password (Fernet), GitHub Token (Plaintext)
+        # d) PanelSettings: Steam password, Postgres admin password (Fernet), GitHub Token (Plaintext), SMTP/Resend
         setting_steam = PanelSetting(
             key="steam_account_password_enc",
             value=fernet.encrypt(b"steampass").decode(),
@@ -95,7 +107,15 @@ def test_migrate_all_secrets(monkeypatch):
             key="github_clone_token",
             value="github_pat_12345",
         )
-        db.add_all([setting_steam, setting_pg_admin, setting_github])
+        setting_smtp = PanelSetting(
+            key="smtp_password",
+            value="smtp-plain-pass",
+        )
+        setting_resend = PanelSetting(
+            key="resend_api_key",
+            value="resend-plain-key",
+        )
+        db.add_all([setting_steam, setting_pg_admin, setting_github, setting_smtp, setting_resend])
         db.commit()
 
         # 3. Migration ausführen
@@ -121,6 +141,9 @@ def test_migrate_all_secrets(monkeypatch):
         assert user_migrated.email_hash == User._email_hash("user@example.com")
         assert user_migrated.email_plain == user_migrated.email_hash
         assert user_migrated.email == "user@example.com"
+        
+        # Password reset token must be invalidated (None)
+        assert user_migrated.password_reset_token is None
 
         # b) OAuth check
         provider_migrated = db.query(OAuthProvider).filter_by(name="GitHub").one()
@@ -130,6 +153,16 @@ def test_migrate_all_secrets(monkeypatch):
             aad="msm:oauth:secret"
         )
         assert plaintext_oauth == "github-client-secret"
+
+        # OAuth User Link check
+        link_migrated = db.query(OAuthUserLink).filter_by(user_id=user_migrated.id).one()
+        assert link_migrated.subject == OAuthUserLink._hash_subject("plain-subject-123")
+        assert link_migrated.email_at_link_encrypted.startswith("test-enc-v1:")
+        assert link_migrated.email_at_link == "oauth@example.com"
+        assert link_migrated.email_at_link_plain is None
+        assert link_migrated.username_at_link_encrypted.startswith("test-enc-v1:")
+        assert link_migrated.username_at_link == "oauthuser"
+        assert link_migrated.username_at_link_plain is None
 
         # c) Postgres Database check
         pgdb_migrated = db.query(PostgresDatabase).filter_by(name="mydb").one()
@@ -156,6 +189,19 @@ def test_migrate_all_secrets(monkeypatch):
         github_enc = db.query(PanelSetting).filter_by(key="github_clone_token_enc").one()
         assert github_enc.value.startswith("test-enc-v1:")
         assert DisClient.decrypt(github_enc.value, aad="msm:github:token") == "github_pat_12345"
+
+        # SMTP & Resend settings check
+        smtp_plain = db.query(PanelSetting).filter_by(key="smtp_password").one()
+        assert smtp_plain.value == ""
+        smtp_enc = db.query(PanelSetting).filter_by(key="smtp_password_encrypted").one()
+        assert smtp_enc.value.startswith("test-enc-v1:")
+        assert DisClient.decrypt(smtp_enc.value, aad="msm:settings:smtp_password") == "smtp-plain-pass"
+
+        resend_plain = db.query(PanelSetting).filter_by(key="resend_api_key").one()
+        assert resend_plain.value == ""
+        resend_enc = db.query(PanelSetting).filter_by(key="resend_api_key_encrypted").one()
+        assert resend_enc.value.startswith("test-enc-v1:")
+        assert DisClient.decrypt(resend_enc.value, aad="msm:settings:resend_api_key") == "resend-plain-key"
 
     finally:
         db.close()

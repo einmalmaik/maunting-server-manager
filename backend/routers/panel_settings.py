@@ -39,10 +39,10 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "smtp_host": all_db.get("smtp_host", ""),
         "smtp_port": all_db.get("smtp_port", "587"),
         "smtp_user": all_db.get("smtp_user", ""),
-        "smtp_password": _mask_secret(all_db.get("smtp_password", "")),
+        "smtp_password": _mask_secret(EmailService._get_setting("smtp_password")),
         "smtp_from": all_db.get("smtp_from", ""),
         "smtp_tls": all_db.get("smtp_tls", "true"),
-        "resend_api_key": _mask_secret(all_db.get("resend_api_key", "")),
+        "resend_api_key": _mask_secret(EmailService._get_setting("resend_api_key")),
         "default_language": all_db.get("default_language", "de"),
         "email_configured": EmailService.is_configured(),
         "email_provider": EmailService._get_provider(),
@@ -81,13 +81,23 @@ def update_settings(
     Maskierte Werte (****1234) werden ignoriert — der Admin muss das
     Passwort/API-Key explizit neu eingeben, um es zu aendern.
     """
+    from services.auth_service import AuthService
     data = req.model_dump(exclude_none=True)
     for key, value in data.items():
         if key == "time_format" and value not in ("24h", "12h"):
             raise HTTPException(status_code=400, detail="Ungueltiges Zeitformat")
         if _is_masked(str(value)):
             continue
-        PanelSettingsService.set(key, str(value))
+        if key == "smtp_password":
+            enc = AuthService.encrypt_secret(str(value), aad="msm:settings:smtp_password")
+            PanelSettingsService.set("smtp_password_encrypted", enc)
+            PanelSettingsService.set("smtp_password", "")  # Lösche legacy plain-text
+        elif key == "resend_api_key":
+            enc = AuthService.encrypt_secret(str(value), aad="msm:settings:resend_api_key")
+            PanelSettingsService.set("resend_api_key_encrypted", enc)
+            PanelSettingsService.set("resend_api_key", "")  # Lösche legacy plain-text
+        else:
+            PanelSettingsService.set(key, str(value))
     return {"message": "Einstellungen gespeichert"}
 
 

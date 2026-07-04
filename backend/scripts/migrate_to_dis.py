@@ -48,7 +48,7 @@ def migrate() -> None:
     skipped = 0
 
     try:
-        # 1. Users: 2FA secrets
+        # 1. Users: 2FA secrets & Reset token invalidation
         for user in db.query(User).all():
             val = user.two_factor_secret_encrypted
             if val and _is_fernet(val):
@@ -59,6 +59,9 @@ def migrate() -> None:
                 migrated += 1
             elif val:
                 skipped += 1
+            if user.password_reset_token and len(user.password_reset_token) < 64:
+                user.password_reset_token = None
+                migrated += 1
 
         # 2. OAuth providers: client secrets
         for provider in db.query(OAuthProvider).all():
@@ -107,10 +110,39 @@ def migrate() -> None:
             gh_row.value = ""  # Legacy plain-text loeschen
             migrated += 1
 
+        # SMTP password migration (plain -> DIS encrypted)
+        smtp_row = db.query(PanelSetting).filter_by(key="smtp_password").first()
+        if smtp_row and smtp_row.value and not smtp_row.value.startswith("test-enc-v1:"):
+            enc = DisClient.encrypt(smtp_row.value.strip(), aad="msm:settings:smtp_password")
+            db.add(PanelSetting(key="smtp_password_encrypted", value=enc))
+            smtp_row.value = ""
+            migrated += 1
+
+        # Resend API key migration (plain -> DIS encrypted)
+        resend_row = db.query(PanelSetting).filter_by(key="resend_api_key").first()
+        if resend_row and resend_row.value and not resend_row.value.startswith("test-enc-v1:"):
+            enc = DisClient.encrypt(resend_row.value.strip(), aad="msm:settings:resend_api_key")
+            db.add(PanelSetting(key="resend_api_key_encrypted", value=enc))
+            resend_row.value = ""
+            migrated += 1
+
         # 6. Users: E-Mail-Verschluesselung (plain -> DIS encrypted + hash)
         for user in db.query(User).filter(User.email_encrypted.is_(None)).all():
             if user.email_plain:
                 user.email = user.email_plain  # Setter verschluesselt + hasht
+                migrated += 1
+
+        # 7. OAuthUserLink subject hashing and profile details encryption
+        from models.oauth_user_link import OAuthUserLink
+        for link in db.query(OAuthUserLink).all():
+            if link.subject and len(link.subject) < 64:
+                link.subject = OAuthUserLink._hash_subject(link.subject)
+                migrated += 1
+            if link.email_at_link_plain and not link.email_at_link_encrypted:
+                link.email_at_link = link.email_at_link_plain
+                migrated += 1
+            if link.username_at_link_plain and not link.username_at_link_encrypted:
+                link.username_at_link = link.username_at_link_plain
                 migrated += 1
 
         db.commit()

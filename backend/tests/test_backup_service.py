@@ -75,9 +75,9 @@ class TestRunBackupCore:
         backup_root.mkdir(parents=True, exist_ok=True)
 
         with patch("services.backup_service.os.makedirs") as mk_mock, \
-             patch("services.backup_service.subprocess.run") as subp_mock, \
+             patch("services.backup_service.create_full_backup_tar") as subp_mock, \
              patch("services.backup_service.os.path.getsize", return_value=42 * 1024 * 1024), \
-             patch("services.backup_paths.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
+             patch("services.backup_service.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
 
             # Simuliere erfolgreiches tar (Datei muss "existieren" für nachfolgenden getsize)
             def _create_fake_tar(*args, **kwargs):
@@ -96,17 +96,16 @@ class TestRunBackupCore:
         # Da der echte Aufruf durch unseren Side-Effect ersetzt wurde, simulieren wir einen
         # zweiten Run mit Call-Assertion auf den festen Teilen:
         with patch("services.backup_service.os.makedirs"), \
-             patch("services.backup_service.subprocess.run") as subp2, \
+             patch("services.backup_service.create_full_backup_tar") as subp2, \
              patch("services.backup_service.os.path.getsize", return_value=1), \
              patch("services.backup_service.cleanup_old_backups"), \
-             patch("services.backup_paths.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
+             patch("services.backup_service.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
             run_backup(test_server.id, db, timeout_seconds=5)
             args, _ = subp2.call_args
-            argv = args[0]
-            assert argv[0] == "tar"
-            assert "-czf" in argv
-            assert "-C" in argv
-            assert argv[-1] == "."   # relativer Dump des install_dir
+            # filepath
+            assert args[0].endswith(".tar.gz")
+            # install_dir
+            assert args[1] == test_server.install_dir
 
         assert backup is not None
         assert backup.server_id == test_server.id
@@ -131,10 +130,10 @@ class TestRunBackupCore:
         db.commit()
 
         with patch("services.backup_service.os.makedirs"), \
-             patch("services.backup_service.subprocess.run"), \
+             patch("services.backup_service.create_full_backup_tar"), \
              patch("services.backup_service.os.path.getsize", return_value=7), \
              patch("services.backup_service.cleanup_old_backups"), \
-             patch("services.backup_paths.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
+             patch("services.backup_service.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
             b1 = run_backup(test_server.id, db, name=None)
             b2 = run_backup(test_server.id, db, name="Vor Update v2.1")
 
@@ -156,10 +155,10 @@ class TestRunBackupCore:
 
         # CalledProcessError-Pfad
         with patch("services.backup_service.os.makedirs"), \
-             patch("services.backup_service.subprocess.run") as subp, \
+             patch("services.backup_service.create_full_backup_tar") as subp, \
              patch("services.backup_service.os.path.exists", return_value=True), \
              patch("services.backup_service.os.remove") as rm_mock, \
-             patch("services.backup_paths.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
+             patch("services.backup_service.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
             subp.side_effect = subprocess.CalledProcessError(1, ["tar"])
             with pytest.raises(RuntimeError, match="Backup fehlgeschlagen"):
                 run_backup(test_server.id, db, timeout_seconds=5)
@@ -170,9 +169,9 @@ class TestRunBackupCore:
 
         # Timeout-Pfad
         with patch("services.backup_service.os.makedirs"), \
-             patch("services.backup_service.subprocess.run") as subp, \
+             patch("services.backup_service.create_full_backup_tar") as subp, \
              patch("services.backup_service.os.remove"), \
-             patch("services.backup_paths.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
+             patch("services.backup_service.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
             subp.side_effect = subprocess.TimeoutExpired(["tar"], 1)
             with pytest.raises(RuntimeError, match="Timeout"):
                 run_backup(test_server.id, db, timeout_seconds=1)
@@ -190,9 +189,9 @@ class TestRunBackupCore:
         db.commit()
 
         with patch("services.backup_service.os.makedirs"), \
-             patch("services.backup_service.subprocess.run") as subp, \
+             patch("services.backup_service.create_full_backup_tar") as subp, \
              patch("services.backup_service.os.path.exists", return_value=False), \
-             patch("services.backup_paths.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
+             patch("services.backup_service.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
             subp.side_effect = RuntimeError("/secret/install/path leaked by tool")
             with caplog.at_level(logging.ERROR):
                 with pytest.raises(RuntimeError, match="Backup fehlgeschlagen"):
@@ -213,10 +212,10 @@ class TestRunBackupCore:
         db.commit()
 
         with patch("services.backup_service.os.makedirs"), \
-             patch("services.backup_service.subprocess.run"), \
+             patch("services.backup_service.create_full_backup_tar"), \
              patch("services.backup_service.os.path.getsize", return_value=10), \
              patch("services.backup_service.cleanup_old_backups", side_effect=Exception("boom")), \
-             patch("services.backup_paths.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
+             patch("services.backup_service.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
             # Retention-Fehler wird intern gefangen (Warning), Backup wird trotzdem zurückgegeben
             b = run_backup(test_server.id, db, timeout_seconds=5)
             assert b is not None
@@ -231,7 +230,7 @@ class TestRunBackupCore:
 
         before = db.query(Backup).filter(Backup.server_id == test_server.id).count()
 
-        with patch("services.backup_service.subprocess.run") as subp:
+        with patch("services.backup_service.create_full_backup_tar") as subp:
             with pytest.raises(FileNotFoundError, match="Server-Verzeichnis existiert nicht"):
                 run_backup(test_server.id, db)
             subp.assert_not_called()
@@ -248,11 +247,11 @@ class TestRunBackupCore:
         test_server.install_dir = str(install)
         db.commit()
 
-        with patch("services.backup_service.subprocess.run"), \
+        with patch("services.backup_service.create_full_backup_tar"), \
              patch("services.backup_service.os.path.getsize", return_value=1), \
              patch("services.backup_service.cleanup_old_backups"), \
              patch("services.backup_service.os.makedirs") as mk, \
-             patch("services.backup_paths.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
+             patch("services.backup_service.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
             run_backup(test_server.id, db, timeout_seconds=5)
             mk.assert_called()
             # exist_ok=True wird im Code verwendet (implizit geprüft durch Aufruf)
@@ -712,10 +711,10 @@ def test_no_sensitive_data_in_backup_records_or_filenames(db: Session, test_serv
     db.commit()
 
     with patch("services.backup_service.os.makedirs"), \
-         patch("services.backup_service.subprocess.run"), \
+         patch("services.backup_service.create_full_backup_tar"), \
          patch("services.backup_service.os.path.getsize", return_value=1), \
          patch("services.backup_service.cleanup_old_backups"), \
-         patch("services.backup_paths.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
+         patch("services.backup_service.backup_plan_for_server", return_value=_FULL_BACKUP_PLAN):
         b = run_backup(test_server.id, db, name="Update vor Passwort-Reset")  # harmloser User-Text
 
     assert "Passwort" in (b.name or "")   # erlaubt (User-Text)

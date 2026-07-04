@@ -13,6 +13,11 @@ class EmailVerificationService:
         return hashlib.sha256(code.encode()).hexdigest()
 
     @staticmethod
+    def _email_hash(email: str) -> str:
+        from config import settings
+        return hashlib.sha256((email + settings.secret_key).encode()).hexdigest()
+
+    @staticmethod
     def generate_code() -> str:
         """Generiert einen 6-stelligen numerischen Code."""
         return secrets.randbelow(900000) + 100000  # 100000 - 999999
@@ -21,8 +26,9 @@ class EmailVerificationService:
     def create_verification(db: Session, email: str, purpose: str) -> str:
         """Erstellt einen neuen Verifikations-Code. Loescht vorherige Codes fuer dieselbe Email+Purpose."""
         # Alte Codes loeschen
+        email_h = EmailVerificationService._email_hash(email)
         db.query(EmailVerification).filter(
-            EmailVerification.email == email,
+            EmailVerification.email_hash == email_h,
             EmailVerification.purpose == purpose,
         ).delete(synchronize_session=False)
 
@@ -30,7 +36,7 @@ class EmailVerificationService:
         code_hash = EmailVerificationService._hash_code(plain_code)
 
         ev = EmailVerification(
-            email=email,
+            email_hash=email_h,
             code_hash=code_hash,
             purpose=purpose,
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
@@ -50,8 +56,9 @@ class EmailVerificationService:
     @staticmethod
     def has_active_verification(db: Session, email: str, purposes: list[str]) -> bool:
         """Prueft, ob fuer eine E-Mail ein gueltiger unverbrauchter Code existiert."""
+        email_h = EmailVerificationService._email_hash(email)
         return db.query(EmailVerification).filter(
-            EmailVerification.email == email,
+            EmailVerification.email_hash == email_h,
             EmailVerification.purpose.in_(purposes),
             EmailVerification.verified == False,
             EmailVerification.expires_at > datetime.now(timezone.utc),
@@ -69,8 +76,9 @@ class EmailVerificationService:
     def verify_code(db: Session, email: str, purpose: str, code: str) -> bool:
         """Prueft einen Verifikations-Code. Gibt True zurueck wenn gueltig."""
         code_hash = EmailVerificationService._hash_code(code)
+        email_h = EmailVerificationService._email_hash(email)
         ev = db.query(EmailVerification).filter(
-            EmailVerification.email == email,
+            EmailVerification.email_hash == email_h,
             EmailVerification.purpose == purpose,
             EmailVerification.code_hash == code_hash,
             EmailVerification.verified == False,

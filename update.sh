@@ -50,7 +50,7 @@ restore_panel_ownership() {
     # git clean loescht untracked Dirs. Die .gitignore schuetzt jetzt die Daten-Pfade,
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
     # Es gibt scripts/reset-msm-docker.sh als Recovery (für den Docker-Store-Corruption-Fall).
-    for sub in backend frontend docs; do
+    for sub in backend frontend docs dis-sidecar; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" 2>/dev/null || true
         fi
@@ -372,6 +372,113 @@ su - msm -c "
     alembic upgrade head 2>/dev/null || python3 -c \"from database import engine, Base; from models import *; Base.metadata.create_all(engine)\"
 " 2>&1 | tee -a "$LOG_FILE"
 
+# ── DIS Config laden/generieren ──
+log "Lade/Generiere kryptografischen DIS-Config..."
+if [[ -f "$ENV_FILE" ]]; then
+    SECRET_KEY=$(grep -E '^MSM_SECRET_KEY=' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    DIS_SALT=$(grep -E '^MSM_DIS_SALT=' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    DIS_TOKEN=$(grep -E '^MSM_DIS_SIDECAR_TOKEN=' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+fi
+SECRET_KEY="${SECRET_KEY:-}"
+DIS_SALT="${DIS_SALT:-}"
+DIS_TOKEN="${DIS_TOKEN:-}"
+
+if [[ -z "$SECRET_KEY" ]]; then
+    SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
+    echo "MSM_SECRET_KEY=\"$SECRET_KEY\"" >> "$ENV_FILE"
+fi
+if [[ -z "$DIS_SALT" ]]; then
+    DIS_SALT=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    echo "MSM_DIS_SALT=\"$DIS_SALT\"" >> "$ENV_FILE"
+fi
+if [[ -z "$DIS_TOKEN" ]]; then
+    DIS_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    echo "MSM_DIS_SIDECAR_TOKEN=\"$DIS_TOKEN\"" >> "$ENV_FILE"
+fi
+if ! grep -q '^MSM_DIS_SIDECAR_URL=' "$ENV_FILE"; then
+    echo 'MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"' >> "$ENV_FILE"
+fi
+
+# ── DIS Sidecar Abhängigkeiten installieren ──
+log "Installiere DIS Sidecar-Abhängigkeiten..."
+if ! su - "$MSM_USER" -c "
+    set -e
+    cd $MSM_DIR/dis-sidecar
+    npm ci -q --omit=dev
+" 2>&1 | tee -a "$LOG_FILE"; then
+    err "DIS Sidecar npm ci fehlgeschlagen. Prüfe dis-sidecar/package.json und package-lock.json."
+fi
+ok "DIS Sidecar Abhängigkeiten installiert."
+
+# ── systemd Services registrieren ──
+if $SYSTEMD_AVAILABLE; then
+    log "Aktualisiere systemd Services..."
+    MSM_UID=$(id -u "$MSM_USER")
+    MSM_DOCKER_HOST="unix:///run/user/${MSM_UID}/docker.sock"
+
+    # DIS Sidecar Service
+    cat > /etc/systemd/system/msm-dis-sidecar.service <<EOF
+[Unit]
+Description=MSM DIS Sidecar (Crypto Service)
+After=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/dis-sidecar
+Environment="NODE_ENV=production"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="MSM_SECRET_KEY=$SECRET_KEY"
+Environment="MSM_DIS_SALT=$DIS_SALT"
+Environment="MSM_DIS_SIDECAR_TOKEN=$DIS_TOKEN"
+Environment="MSM_DIS_SIDECAR_URL=http://127.0.0.1:9100"
+ExecStart=/usr/bin/node $MSM_DIR/dis-sidecar/server.mjs
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Panel Service
+    cat > /etc/systemd/system/msm-panel.service <<EOF
+[Unit]
+Description=Maunting Server Manager Panel
+After=network.target redis-server.service msm-dis-sidecar.service
+Wants=redis-server.service
+Requires=msm-dis-sidecar.service
+
+[Service]
+Type=simple
+User=msm
+Group=msm
+WorkingDirectory=/opt/msm/backend
+Environment="PATH=/opt/msm/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+ExecStart=/opt/msm/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable msm-dis-sidecar.service
+    systemctl enable msm-panel.service
+    ok "systemd Services registriert."
+fi
+
 # ── Frontend bauen ──
 # Letzte Verteidigungslinie: selbst wenn alle vorherigen Pfade einen Chown
 # ausgelassen haben sollten (z.B. unerwarteter Code-Pfad), stellen wir hier
@@ -479,6 +586,23 @@ fi
 # ── Service neustarten ──
 log "Starte Services neu..."
 if $SYSTEMD_AVAILABLE; then
+    log "Starte DIS Sidecar..."
+    systemctl restart msm-dis-sidecar.service 2>/dev/null || systemctl start msm-dis-sidecar.service 2>/dev/null || true
+    sleep 1
+    if ! systemctl is-active --quiet msm-dis-sidecar.service; then
+        warn "DIS Sidecar startet nicht. Pruefe: journalctl -u msm-dis-sidecar -n 50"
+    fi
+
+    # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
+    if [[ -f "$MSM_DIR/backend/msm.db" ]] || grep -q '^MSM_DATABASE_URL=.*postgresql' "$ENV_FILE" 2>/dev/null; then
+        log "Pruefe DIS-Migration (Fernet -> DIS)..."
+        su - "$MSM_USER" -c "
+            cd $MSM_DIR/backend
+            source venv/bin/activate
+            python3 scripts/migrate_to_dis.py
+        " 2>&1 | tee -a "$LOG_FILE" || err "DIS-Migration fehlgeschlagen! Migration abgebrochen."
+    fi
+
     systemctl restart msm-panel.service
     systemctl restart caddy 2>/dev/null || true
 else
