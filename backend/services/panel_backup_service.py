@@ -356,6 +356,349 @@ def delete_panel_backup(db: Session, backup_id: int) -> bool:
     return True
 
 
+# ── Panel-Restore-Vorbereitung (M4) ──────────────────────────────────────
+
+
+class PanelRestoreError(Exception):
+    """Panel-Restore-Vorbereitung fehlgeschlagen (generisch, keine Secrets)."""
+
+
+class PanelRestoreNotFoundError(PanelRestoreError):
+    """Panel-Backup mit der angegebenen ID existiert nicht."""
+
+
+class PanelRestoreNoArchiveError(PanelRestoreError):
+    """Keine Archiv-Quelle verfuegbar (lokal fehlt, kein s3_key)."""
+
+
+class PanelRestoreDecryptError(PanelRestoreError):
+    """Entschluesselung fehlgeschlagen (falsches Passwort / manipulierter Stream)."""
+
+
+def prepare_panel_restore(backup_id: int, db: Session) -> dict:
+    """Bereitet Panel-Restore vor (Download + Decrypt + Script-Generierung).
+
+    Ablauf:
+    1. PanelBackup-Record laden (404 wenn nicht gefunden).
+    2. Archiv-Quelle ermitteln:
+       - Lokale Datei vorhanden: direkt verwenden (kein S3, kein Decrypt).
+       - Lokal fehlt, s3_key vorhanden: von S3 downloaden, via DIS
+         entschluesseln, lokal speichern (wiederherstellen der lokalen Kopie).
+       - Beides fehlt: Fehler (keine Archiv-Quelle).
+    3. Archiv in Temp-Verzeichnis entpacken (um manifest.json zu lesen).
+    4. Restore-Script generieren (bash, self-contained, idempotent).
+    5. Script ausfuehrbar machen (chmod +x).
+    6. Temp-Verzeichnis bereinigen (nur das Script bleibt im backup_dir).
+    7. Backup-Key invalidieren (try/finally, bei S3-Pfad).
+
+    Returns: {"script_path": str, "instructions": str}
+    """
+    from models import PanelBackup  # Inline-Import gegen Zyklen
+
+    backup = db.query(PanelBackup).filter(PanelBackup.id == backup_id).first()
+    if backup is None:
+        raise PanelRestoreNotFoundError(
+            "Panel-Backup nicht gefunden"
+        )
+
+    backup_dir = _get_backup_dir()
+    os.makedirs(backup_dir, exist_ok=True)
+
+    # Temp-Verzeichnis fuer die Extraktion (wird am Ende bereinigt).
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    tmp_dir = os.path.join(backup_dir, f".restore_tmp_{backup.id}_{ts}")
+
+    key_id: str | None = None
+    try:
+        # 1. Archiv-Quelle sicherstellen (lokal oder S3+decrypt).
+        key_id = _ensure_local_archive(backup, db)
+
+        # 2. Archiv in Temp-Verzeichnis entpacken.
+        _extract_archive_to_dir(backup.local_path, tmp_dir)
+
+        # 3. manifest.json lesen (db_type, config_list).
+        manifest = _read_manifest(tmp_dir)
+        db_type = manifest.get("db_type", backup.db_type or "postgresql")
+        config_list = manifest.get("config_list", [])
+
+        # 4. Restore-Script generieren.
+        script_path = _generate_restore_script(
+            backup_id=backup.id,
+            archive_path=backup.local_path,
+            db_type=db_type,
+            config_list=config_list,
+            timestamp=ts,
+        )
+
+        # 5. Script ausfuehrbar machen (chmod +x).
+        _make_executable(script_path)
+
+        # 6. Anweisungen (Deutsch, mit sudo bash und Warnung).
+        instructions = _build_restore_instructions(script_path)
+
+        logger.info(
+            "Panel-Restore vorbereitet (backup_id=%s, script generiert)",
+            backup.id,
+        )
+
+        return {
+            "script_path": script_path,
+            "instructions": instructions,
+        }
+    except PanelRestoreDecryptError:
+        raise
+    except Exception as exc:
+        # Generische Fehlermeldung — keine Secrets/Pfade leaken.
+        logger.warning(
+            "Panel-Restore-Vorbereitung fehlgeschlagen (backup_id=%s): %s",
+            backup.id, type(exc).__name__,
+        )
+        raise
+    finally:
+        # Temp-Verzeichnis immer bereinigen (VAL-PANEL-RESTORE-012).
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        # Backup-Key immer invalidieren (VAL-PANEL-RESTORE-004, success und failure).
+        if key_id:
+            try:
+                from services.backup_crypto_service import BackupCryptoService
+                BackupCryptoService.invalidate_key(key_id)
+            except Exception:
+                logger.warning(
+                    "Key-Invalidierung fehlgeschlagen (Panel-Restore backup_id=%s)",
+                    backup.id,
+                )
+
+
+def _ensure_local_archive(backup, db: Session) -> str | None:
+    """Stellt sicher, dass das Archiv lokal verfuegbar ist.
+
+    Wenn die lokale Datei existiert: direkt verwenden (kein S3, kein Decrypt).
+    Wenn lokal fehlt aber s3_key: von S3 downloaden, via DIS entschluesseln,
+    lokal speichern. Gibt key_id zurueck (oder None wenn kein S3-Pfad).
+
+    Wirft PanelRestoreNoArchiveError wenn keine Quelle verfuegbar.
+    Wirft PanelRestoreDecryptError bei Entschluesselungsfehler.
+    """
+    if backup.local_path and os.path.exists(backup.local_path):
+        # Lokale Datei vorhanden — direkt verwenden (VAL-PANEL-RESTORE-003).
+        logger.info(
+            "Panel-Restore: lokale Datei verwendet (backup_id=%s)", backup.id
+        )
+        return None
+
+    if not backup.s3_key:
+        raise PanelRestoreNoArchiveError(
+            "Keine Archiv-Quelle verfuegbar (lokal fehlt, kein S3-Key)"
+        )
+
+    # S3-Download + DIS-Entschluesselung (VAL-PANEL-RESTORE-002).
+    from services.backup_config_service import BackupConfigService
+    from services.backup_crypto_service import (
+        BackupCryptoService,
+        BackupDecryptionError,
+    )
+    from services.s3_service import S3Service
+
+    password = BackupConfigService.get_backup_password()
+    salt = BackupConfigService.get_backup_salt()
+    key_id = BackupCryptoService.init_key(password, salt)
+
+    try:
+        try:
+            body = S3Service.download_stream(backup.s3_key)
+            BackupCryptoService.decrypt_to_file(
+                body.iter_chunks(), key_id, backup.local_path
+            )
+            logger.info(
+                "Panel-Restore: S3-Download + Decrypt erfolgreich (backup_id=%s)",
+                backup.id,
+            )
+            return key_id
+        except BackupDecryptionError as exc:
+            # Falsches Passwort / manipulierter Stream — klare Fehlermeldung.
+            raise PanelRestoreDecryptError(
+                "Entschluesselung fehlgeschlagen"
+            ) from exc
+        except PanelRestoreError:
+            raise
+        except Exception as exc:
+            # S3-Fehler oder anderer Fehler — generisch, keine Secrets.
+            raise PanelRestoreError(
+                "Archiv-Download fehlgeschlagen"
+            ) from exc
+    except Exception:
+        # Bei jedem Fehler (Decrypt, S3, sonstiges): Key invalidieren
+        # bevor der Fehler weitergereicht wird (VAL-PANEL-RESTORE-004).
+        try:
+            BackupCryptoService.invalidate_key(key_id)
+        except Exception:
+            logger.warning(
+                "Key-Invalidierung nach Fehler fehlgeschlagen (backup_id=%s)",
+                backup.id,
+            )
+        raise
+
+
+def _extract_archive_to_dir(archive_path: str, target_dir: str) -> None:
+    """Entpackt ein Panel-Backup-tar.gz in target_dir."""
+    os.makedirs(target_dir, exist_ok=True)
+    with tarfile.open(archive_path, "r:gz") as tar:
+        # filter='data' verhindert Path-Traversal und gefaehrliche Metadaten
+        # (Python 3.12+ Empfehlung, schuetzt vor Tar-Slip).
+        try:
+            tar.extractall(path=target_dir, filter="data")
+        except TypeError:
+            # Aeltere Python-Versionen ohne filter-Parameter
+            tar.extractall(path=target_dir)
+
+
+def _read_manifest(extract_dir: str) -> dict:
+    """Liest manifest.json aus dem entpackten Archiv.
+
+    Fallback: leeres Dict wenn manifest.json fehlt (alte Archive).
+    """
+    manifest_path = os.path.join(extract_dir, _ARC_MANIFEST)
+    if not os.path.isfile(manifest_path):
+        return {}
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _generate_restore_script(
+    *,
+    backup_id: int,
+    archive_path: str,
+    db_type: str,
+    config_list: list[str],
+    timestamp: str,
+) -> str:
+    """Generiert das Restore-Script (bash) und speichert es im backup_dir.
+
+    Das Script ist self-contained: es extrahiert das Archiv zur Laufzeit in
+    ein temporares Verzeichnis, stoppt den Panel-Service, sichert die .env,
+    stellt die Datenbank und Configs wieder her und startet den Panel neu.
+
+    Sicherheits-Invarianten:
+    - Keine Plaintext-Secrets im Script (nur Pfad-Referenzen).
+    - DB-Verbindungsparameter werden zur Laufzeit aus der .env gelesen
+      (vor dem Ueberschreiben), nicht im Script eingebettet.
+    - Safety-Copies nutzen eindeutige Zeitstempel (idempotent, VAL-PANEL-RESTORE-011).
+
+    Returns: Pfad zum generierten Script.
+    """
+    backup_dir = _get_backup_dir()
+    os.makedirs(backup_dir, exist_ok=True)
+    script_filename = f"restore_{backup_id}.sh"
+    script_path = os.path.join(backup_dir, script_filename)
+
+    config_dir = _get_config_dir()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    lines: list[str] = []
+    lines.append("#!/bin/bash")
+    lines.append("# MSM Panel Restore Script - Generated by MSM Backup System")
+    lines.append(f"# Date: {now_iso}")
+    lines.append(f"# Backup ID: {backup_id}")
+    lines.append("#")
+    lines.append("# WARNING: This will stop the panel and replace the database!")
+    lines.append(f"# Run as: sudo bash {script_path}")
+    lines.append("")
+    lines.append("set -euo pipefail")
+    lines.append("")
+    lines.append(f'ARCHIVE_PATH="{archive_path}"')
+    lines.append(f'CONFIG_DIR="{config_dir}"')
+    lines.append("")
+    lines.append("# Temp directory for extraction (cleaned up on exit)")
+    lines.append('RESTORE_DIR=$(mktemp -d)')
+    lines.append('trap \'rm -rf "$RESTORE_DIR"\' EXIT')
+    lines.append("")
+    lines.append("# 1. Extract archive")
+    lines.append('tar -xzf "$ARCHIVE_PATH" -C "$RESTORE_DIR"')
+    lines.append("")
+    lines.append("# 2. Stop panel service")
+    lines.append("systemctl --user stop msm-panel.service")
+    lines.append("")
+    lines.append("# 3. Backup current .env (safety copy with unique timestamp)")
+    lines.append('ENV_BACKUP="$CONFIG_DIR/.env.pre_restore_$(date +%Y%m%d_%H%M%S)"')
+    lines.append('if [ -f "$CONFIG_DIR/.env" ]; then')
+    lines.append('    cp "$CONFIG_DIR/.env" "$ENV_BACKUP"')
+    lines.append('fi')
+    lines.append("")
+
+    if db_type == "sqlite3":
+        lines.append("# 4. Restore database (SQLite)")
+        lines.append("# Load current DATABASE_URL from .env (before overwrite)")
+        lines.append('set -a')
+        lines.append('. "$CONFIG_DIR/.env" 2>/dev/null || true')
+        lines.append('set +a')
+        lines.append('DB_PATH="${DATABASE_URL#sqlite:///}"')
+        lines.append('sqlite3 "$DB_PATH" < "$RESTORE_DIR/msm_db.sql"')
+    else:
+        lines.append("# 4. Restore database (PostgreSQL)")
+        lines.append("# Load current DATABASE_URL from .env (before overwrite)")
+        lines.append('set -a')
+        lines.append('. "$CONFIG_DIR/.env" 2>/dev/null || true')
+        lines.append('set +a')
+        lines.append('psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$RESTORE_DIR/msm_db.sql"')
+
+    lines.append("")
+    lines.append("# 5. Restore config files")
+
+    if config_list:
+        for name in config_list:
+            arc = f"{_ARC_CONFIG_PREFIX}/{name}"
+            lines.append(f'cp "$RESTORE_DIR/{arc}" "$CONFIG_DIR/{name}"')
+    else:
+        lines.append("# (no config files in manifest — skipping)")
+
+    lines.append("")
+    lines.append("# 6. Restart panel service")
+    lines.append("systemctl --user start msm-panel.service")
+    lines.append("")
+    lines.append('echo "Restore complete. Check panel status: systemctl --user status msm-panel.service"')
+    lines.append("")
+
+    content = "\n".join(lines)
+    with open(script_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(content)
+
+    return script_path
+
+
+def _make_executable(script_path: str) -> None:
+    """Setzt das Execute-Bit (chmod +x). Auf Windows ein No-op-Seat."""
+    try:
+        os.chmod(script_path, 0o755)
+    except OSError:
+        # Windows: chmod ist eingeschraenkt — kein harter Fehler.
+        pass
+
+
+def _build_restore_instructions(script_path: str) -> str:
+    """Erstellt deutsche Anweisungen fuer den Admin (mit sudo bash und Warnung).
+
+    Enthaelt:
+    - Warnung ueber Service-Stop und Datenverlust (VAL-PANEL-RESTORE-005).
+    - sudo bash Befehl (VAL-PANEL-RESTORE-005).
+    - Hinweis auf Status-Check nach dem Restore.
+    """
+    return (
+        "Restore-Skript wurde erstellt:\n"
+        f"  {script_path}\n"
+        "\n"
+        "WARNUNG: Dieses Skript stoppt den MSM-Panel-Dienst und "
+        "ueberschreibt die Datenbank und Konfigurationsdateien!\n"
+        "Sichern Sie aktuelle Daten, bevor Sie fortfahren. "
+        "Ein Datenverlust ist moeglich.\n"
+        "\n"
+        "Fuehren Sie das Skript mit Root-Rechten aus:\n"
+        f"  sudo bash {script_path}\n"
+        "\n"
+        "Nach dem Restore koennen Sie den Panel-Status pruefen:\n"
+        "  systemctl --user status msm-panel.service"
+    )
+
+
 def _maybe_upload_to_s3(
     backup, db: Session, local_path: str, timestamp: str
 ) -> None:

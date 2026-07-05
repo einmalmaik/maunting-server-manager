@@ -22,7 +22,7 @@ from .postgres import (
 from .permission import PermissionCatalogResponse, PermissionDefResponse, MePermissionsResponse
 from .role import RoleCreate, RoleUpdate, RoleResponse, AssignRoleRequest, ServerPermissionsRequest, ServerPermissionsResponse
 from .backup import BackupResponse
-from .panel_backup import PanelBackupCreateRequest, PanelBackupResponse
+from .panel_backup import PanelBackupCreateRequest, PanelBackupResponse, PanelRestorePrepResponse
 from .mod import ModResponse
 
 __all__ = [
@@ -32,5 +32,5 @@ __all__ = [
     "PermissionCatalogResponse", "PermissionDefResponse", "MePermissionsResponse",
     "RoleCreate", "RoleUpdate", "RoleResponse", "AssignRoleRequest",
     "ServerPermissionsRequest", "ServerPermissionsResponse",
-    "BackupResponse", "PanelBackupCreateRequest", "PanelBackupResponse", "ModResponse",
+    "BackupResponse", "PanelBackupCreateRequest", "PanelBackupResponse", "PanelRestorePrepResponse", "ModResponse",
 ]

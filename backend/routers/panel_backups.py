@@ -32,12 +32,19 @@ from schemas.panel_backup import (
     PanelBackupResponse,
     PanelBackupSettings,
     PanelBackupSettingsPatch,
+    PanelRestorePrepResponse,
 )
 from services.panel_backup_service import (
     create_panel_backup,
     delete_panel_backup,
     get_panel_backup_settings,
     update_panel_backup_settings,
+)
+from services.panel_backup_service import (
+    PanelRestoreDecryptError,
+    PanelRestoreNotFoundError,
+    PanelRestoreNoArchiveError,
+    prepare_panel_restore,
 )
 
 logger = logging.getLogger(__name__)
@@ -195,3 +202,56 @@ def delete_panel_backup_endpoint(
         # den gewuenschten Endzustand (Ressource existiert nicht) herstellt.
         return {"deleted": False, "id": backup_id}
     return {"deleted": True, "id": backup_id}
+
+
+@router.post(
+    "/{backup_id}/prepare-restore",
+    response_model=PanelRestorePrepResponse,
+    status_code=200,
+)
+def prepare_restore_endpoint(
+    backup_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Bereitet Panel-Restore vor (Download + Decrypt + Script-Generierung).
+
+    Admin-only (panel.settings.write) + CSRF.
+
+    Ablauf:
+    - Lokale Datei vorhanden: direkt verwenden (kein S3, kein Decrypt).
+    - Lokal fehlt, s3_key vorhanden: von S3 downloaden, via DIS entschluesseln.
+    - Beides fehlt: 404 (keine Archiv-Quelle).
+
+    Generiert ein ausfuehrbares bash-Script im Panel-Backup-Verzeichnis und
+    gibt dessen Pfad sowie deutsche Anweisungen (mit sudo bash und Warnung)
+    zurueck.
+
+    Bei Entschluesselungsfehler (falsches Passwort): 400 mit klarer Meldung.
+    Backup-Key wird immer invalidiert (try/finally, success und failure).
+    """
+    try:
+        result = prepare_panel_restore(backup_id, db)
+        return result
+    except PanelRestoreNotFoundError:
+        raise HTTPException(status_code=404, detail="Panel-Backup nicht gefunden")
+    except PanelRestoreNoArchiveError:
+        raise HTTPException(
+            status_code=404,
+            detail="Keine Archiv-Quelle verfuegbar (lokal und S3 fehlen)",
+        )
+    except PanelRestoreDecryptError:
+        # Falsches Passwort / manipulierter Stream — klare Meldung, keine Secrets.
+        raise HTTPException(
+            status_code=400,
+            detail="Entschluesselung fehlgeschlagen — Backup-Passwort pruefen",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Panel-Restore-Vorbereitung fehlgeschlagen: %s", type(exc).__name__
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Restore-Vorbereitung fehlgeschlagen. Siehe Server-Logs.",
+        )

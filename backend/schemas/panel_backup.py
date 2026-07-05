@@ -50,6 +50,19 @@ class PanelBackupResponse(BaseModel):
         from_attributes = True
 
 
+class PanelRestorePrepResponse(BaseModel):
+    """Response fuer POST /api/panel-backups/{id}/prepare-restore.
+
+    Enthaelt den Pfad zum generierten Restore-Script und deutsche Anweisungen
+    fuer den Admin. Keine Secrets im Response (nur Pfad + Text).
+    """
+    script_path: str
+    instructions: str
+
+    class Config:
+        from_attributes = True
+
+
 class PanelBackupListItem(BaseModel):
     """List-Item fuer GET /api/panel-backups (sorted desc by created_at).
 
