@@ -1246,5 +1246,14 @@
     "s3ItemPassword": "Entschlüsselung ist nur mit dem auf dieser Instanz gesetzten Backup-Passwort möglich",
     "s3ItemLocalOnly": "Keine Konfiguration: Backups verbleiben lokal — es werden keine Daten an Dritte übertragen",
     "section4Updated": "Es erfolgt keine Weitergabe von personenbezogenen Daten an Dritte. Technisch bedingt können verschlüsselte Backup-Daten auf externem, S3-kompatiblem Speicher abgelegt werden, sofern der Administrator dies konfiguriert (siehe Abschnitt 6). In diesem Fall erhält der Speicher-Anbieter ausschließlich verschlüsselte Daten."
+  },
+  "server": {
+    "authSetup": {
+      "required": "Setup-Autorisierung erforderlich",
+      "instructions": "Im Konsolen-Tab erscheint eine URL — bitte im Browser öffnen und Anmeldung abschließen. Der Server startet danach automatisch.",
+      "cancel": "Abbrechen",
+      "cancelled": "Auth-Setup abgebrochen",
+      "cancelFailed": "Auth-Setup konnte nicht abgebrochen werden"
+    }
   }
 }
