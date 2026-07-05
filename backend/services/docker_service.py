@@ -477,6 +477,7 @@ def run_container(
     startup_check_seconds: float = 0.0,
     server_id: int | None = None,  # for pull progress logging to console during long image pulls
     cap_adds: list[str] | None = None,
+    tty: bool = False,  # opt-in for interactive auth/setup flows; default off (existing callers unchanged)
 ) -> dict:
     """Startet einen langlebigen Game-Server-Container.
 
@@ -484,6 +485,10 @@ def run_container(
     die der Container zwingend fuer sein Init braucht (z. B. der Postgres-Entrypoint
     benoetigt CHOWN/FOWNER fuer ``initdb`` und SETUID/SETGID fuer den Wechsel auf
     den postgres-User; siehe PERMISSION_REPAIR_CAPS).
+
+    ``tty=True`` allokiert ein Pseudo-TTY im Container, noetig fuer interaktive
+    Auth-Flows (Device-Authorization-Grant mit URL+Code-Eingabe). Wird vom
+    Auth-Setup-Recovery-Pfad genutzt; nie vom normalen Server-Start.
     """
 
     if extra_args:
@@ -518,6 +523,7 @@ def run_container(
         "name": name,
         "detach": detach,
         "stdin_open": True,
+        "tty": tty,
         "restart_policy": {"Name": "no"},  # MSM lifecycle only - see comment above
         "log_config": LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None,
         "cap_drop": _HARDENING_CAP_DROP,
