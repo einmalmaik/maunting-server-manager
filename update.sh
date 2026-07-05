@@ -254,7 +254,7 @@ if [[ "$UPDATE_MODE" == "git" ]]; then
     restore_panel_ownership
 elif [[ -d ".git" ]]; then
     log "Aktualisiere via Git checkout..."
-    git fetch origin --tags
+    git fetch origin --tags --force
     git checkout "$LATEST_TAG" || {
         err "Konnte nicht auf $LATEST_TAG wechseln. Rollback..."
         git checkout "$CURRENT_VERSION" 2>/dev/null || true
