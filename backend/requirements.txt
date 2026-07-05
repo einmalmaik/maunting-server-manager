@@ -20,3 +20,14 @@ cryptography==42.0.8
 psycopg2-binary==2.9.9
 asyncpg==0.29.0
 docker==7.1.0
+
+# --- S3 Cloud-Backup (M1-M4 Backup-System) ---
+# boto3: S3-kompatible Object-Storage-API. Wird von services/s3_service.py
+# als Fassade gekapselt (Single Source of Truth fuer alle S3-Operationen).
+# Beruehrt Storage und S3-Credentials (verschluesselt via DIS in panel_settings,
+# AAD="msm:backup:s3"). Offiziell AWS-Library, auditiert, weit verbreitet.
+# botocore wird transitiv durch boto3==1.43.40 gepinnt (gleiche Version).
+# Dependency-Entscheidung dokumentiert in docs/agent-rules/dependencies.md
+# (Sektion: S3-Backup-Dependencies). Exit-Plan: S3Service-Fassade ermoeglicht
+# Austausch gegen alternative S3-Client-Library ohne Aenderung an Fachlogik.
+boto3==1.43.40

@@ -1,0 +1,13 @@
+# Dev/Test-Dependencies fuer das MSM-Backend.
+# Diese Datei ist NUR fuer Entwicklung und Tests gedacht, nicht fuer Produktion.
+# Installation:  venv\Scripts\python.exe -m pip install -r dev-requirements.txt
+
+# --- S3-Mocking fuer Tests (M1-M4 Backup-System) ---
+# moto[s3]: Mockt die S3-API in Tests, sodass keine echte S3-Verbindung
+# noetig ist. Wird in backend/tests/ via `from moto import mock_aws` genutzt.
+# Test-only - NICHT in Produktion installieren.
+# Bewertungsrisiko: Niedrig (Dev-Dependency, kein Zugriff auf Runtime-Daten,
+# keine Netzwerk-/Storage-/SSH-/Auth-Beruehrung in Produktion).
+# Dependency-Entscheidung dokumentiert in docs/agent-rules/dependencies.md
+# (Sektion: S3-Backup-Dependencies).
+moto[s3]==5.2.2

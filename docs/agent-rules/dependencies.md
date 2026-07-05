@@ -393,3 +393,105 @@ Schreibt es generierte Dateien mit sensiblen Daten?
 [ ] Alternative dokumentiert?
 
 [ ] Exit-Plan vorhanden?
+
+13. S3-Backup-Dependencies (M1-M4 Backup-System)
+
+Stand: 2026-07-05
+
+Dokumentiert die Pflichtpruefung (Sektion 3) fuer die beiden neuen
+Dependencies des MSM-Backup-Systems (S3-Cloud-Backups mit DIS-Verschluesselung).
+
+13.1 boto3==1.43.40 (Runtime-Dependency, mittleres/hohes Risiko)
+
+Problem:
+  S3-kompatibler Object-Storage fuer verschluesselte Off-Site-Backups.
+  Benoetigt fuer Upload, Download, Listing und Delete von Backup-Objekten bei
+  jedem S3-kompatiblen Provider (Backblaze B2, Wasabi, Hetzner, MinIO, AWS).
+
+Notwendigkeit:
+  Eigene S3-Implementierung (HTTP + SigV4 + Multipart) waere extrem aufwendig
+  und fehleranfaelligig. boto3 ist der offizielle AWS-Client, gilt als
+  De-facto-Standard, ist auditiert und wird aktiv gepflegt.
+
+Security:
+  Beruehrt Storage und S3-Credentials. Credentials werden verschluesselt via
+  DIS in panel_settings gespeichert (AAD="msm:backup:s3") und erst zur
+  Laufzeit in S3Service._get_client entschluesselt. Keine Credentials in
+  Logs oder Fehlermeldungen (generische Messages, ClientError wird ohne
+  Credential-Leak weitergereicht). botocore wird transitiv durch
+  boto3==1.43.40 gepinnt (gleiche Version, AWS-Versionierungsschema).
+
+Advisories/CVEs:
+  Zum Zeitpunkt der Einfuehrung (2026-07-05) keine bekannten offenen CVEs
+  fuer boto3 1.43.40 / botocore 1.43.40. Vor jedem Update erneut pruefen.
+
+Transitive Flaeche:
+  boto3 zieht botocore, s3transfer, jmespath, python-dateutil, urllib3.
+  Begrenzt und kontrolliert (alle AWS-offiziell).
+
+Lizenz: Apache-2.0 (kompatibel).
+
+Kapselung:
+  Import NUR in services/s3_service.py (S3Service-Fassade). Fachlogik und
+  Routers importieren boto3 nicht direkt. S3Service ist Single Source of
+  Truth fuer alle S3-Operationen (DRY).
+
+Tests:
+  backend/tests/test_s3_service.py und weitere Backup-Tests nutzen moto
+  fuer S3-Mocking. Siehe services.yaml test-* Befehle.
+
+Runtime:
+  Backend-Dev-Server startet, Backup-Config-API funktionieren, S3-Verbindungs-
+  test klappt mit echten Backblaze B2-Credentials (E2E-Validierung M1-M4).
+
+Entfernbarkeit / Exit-Plan:
+  S3Service-Fassade ermoeglicht Austausch gegen alternative S3-Client-Library
+  (z.B. aiobotocore, minio-py) ohne Aenderung an Fachlogik, Routers oder
+  Frontend. Nur services/s3_service.py waere anzupassen.
+
+13.2 moto[s3]==5.2.2 (Test-Only-Dependency, niedriges Risiko)
+
+Problem:
+  S3-API muss in Tests gemockt werden, ohne echte S3-Verbindung oder
+  Credentials. Ermöglicht deterministische, isolierte Backup-Tests.
+
+Notwendigkeit:
+  Echte S3-Aufrufe in Unit-/Integration-Tests waeren langsam, teuer und
+  wuerden echte Credentials benoetigen. moto mockt die S3-API in-memory.
+
+Security:
+  Test-only. KEIN Zugriff auf Runtime-Daten in Produktion. Keine Netzwerk-,
+  Storage-, SSH- oder Auth-Beruehrung ausserhalb von Tests. Wird nicht in
+  requirements.txt aufgefuehrt, sondern in dev-requirements.txt ( strikte
+  Trennung Prod vs. Test).
+
+Advisories/CVEs:
+  Zum Zeitpunkt der Einfuehrung (2026-07-05) keine bekannten offenen CVEs
+  fuer moto 5.2.2. Vor jedem Update erneut pruefen.
+
+Transitive Flaeche:
+  moto zieht weitere Submodule (responses, werkzeug, jinja2, u.a.). Begrenzt
+  und nur in Dev-Umgebung relevant.
+
+Lizenz: Apache-2.0 (kompatibel).
+
+Kapselung:
+  Import NUR in backend/tests/ (`from moto import mock_aws`). NIEMALS in
+  services/, routers/, models/ oder schemas/ importieren.
+
+Tests:
+  Selbst nicht Gegenstand von Tests, sondern Test-Infrastruktur.
+
+Entfernbarkeit / Exit-Plan:
+  Loeschen von dev-requirements.txt und Anpassung der Tests an alternativa
+  Mocking-Strategie (z.B. boto3-Stub) ermoeglicht Entfernung.
+
+13.3 Installations-Trennung
+
+- requirements.txt:    boto3==1.43.40 (Produktion + Dev)
+- dev-requirements.txt: moto[s3]==5.2.2 (NUR Dev/Test)
+- Prod-Install:        pip install -r requirements.txt
+- Dev-Install:         pip install -r requirements.txt -r dev-requirements.txt
+
+Diese Trennung stellt sicher, dass moto niemals in Produktion landet und
+die transitive Flaeche in Prod minimal bleibt.
