@@ -168,6 +168,10 @@ class ServerResponse(BaseModel):
     # Kein FE-Usage außer types (entfernt); Router-Responses bleiben kompatibel.
     status: str
     status_message: str | None
+    # True waehrend der Server-Container auf einen interaktiven Auth-Flow wartet
+    # (z.B. Hytale OAuth-Refresh expired). UI rendert dann einen Warn-Banner.
+    # Default False (kein laufender Auth-Flow) ist sicher fuer view-only User.
+    auth_required: bool = False
     auto_restart: bool
     restart_interval_hours: int | None
     restart_time_utc: str | None

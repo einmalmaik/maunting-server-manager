@@ -1246,5 +1246,14 @@
     "s3ItemPassword": "Decryption is only possible with the backup password set on this instance",
     "s3ItemLocalOnly": "No configuration: backups remain local — no data is transmitted to third parties",
     "section4Updated": "No personal data is shared with third parties. For technical reasons, encrypted backup data may be stored on external S3-compatible storage if the administrator configures it (see section 6). In that case, the storage provider receives only encrypted data."
+  },
+  "server": {
+    "authSetup": {
+      "required": "Setup authorization required",
+      "instructions": "A URL will appear in the console tab — please open it in your browser and complete the sign-in. The server will then start automatically.",
+      "cancel": "Cancel",
+      "cancelled": "Auth setup cancelled",
+      "cancelFailed": "Auth setup could not be cancelled"
+    }
   }
 }
