@@ -29,8 +29,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          # Test-Tooling — kein separates requirements-dev.txt im Repo.
-          pip install pytest
+          # Test-Tooling + dev-deps (moto[s3] fuer S3-Backup-Tests).
+          # dev-requirements.txt ist optional (moto nur fuer Tests noetig),
+          # aber ohne sie scheitert pytest collection in den Backup-Tests.
+          if [ -f backend/dev-requirements.txt ]; then
+            pip install -r backend/dev-requirements.txt
+          fi
+          # pytest als Fallback falls dev-requirements nicht existiert.
+          pip install pytest 2>/dev/null || true
 
       # Lifespan-Hook in backend/main.py legt /opt/msm/{servers,backups} an.
       # Damit der TestClient den Lifespan durchlaeuft, brauchen wir die
