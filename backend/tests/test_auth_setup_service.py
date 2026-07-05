@@ -4,12 +4,14 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from services.auth_setup_service import (
     detect_auth_required,
     move_credentials,
+    run_auth_setup_recovery,
     wait_for_credentials,
 )
 
@@ -188,3 +190,176 @@ def test_wait_does_not_return_when_only_bak_remains(tmp_path: Path):
     (tmp_path / "credentials.json.bak").write_text("{}")
     result = wait_for_credentials(tmp_path, timeout=0.5, poll_interval=0.2)
     assert result is None
+
+
+# ──────────────────────────────────────────────────────────────────
+# run_auth_setup_recovery (orchestration)
+# ──────────────────────────────────────────────────────────────────
+
+
+def test_recovery_returns_no_credentials_moved_when_no_files(tmp_path: Path):
+    """Wenn keine Credential-Files da sind, muss Recovery frueh abbrechen
+    ohne Container zu starten.
+    """
+    log_calls: list[str] = []
+    status_calls: list[tuple[bool, str | None]] = []
+    restart_calls: list[bool] = []
+
+    def on_log(text: str) -> None:
+        log_calls.append(text)
+
+    def on_status(auth_required: bool, status_message: str | None) -> None:
+        status_calls.append((auth_required, status_message))
+
+    def restart_callback() -> None:
+        restart_calls.append(True)
+
+    result = run_auth_setup_recovery(
+        server_id=99,
+        install_dir=tmp_path,
+        docker_image="alpine:latest",
+        container_command=None,
+        container_env=None,
+        port_publishes=[],
+        volume_binds=[],
+        cpu_limit_percent=None,
+        ram_limit_mb=None,
+        container_user="1000:1000",
+        container_workdir=None,
+        container_read_only_rootfs=False,
+        container_tmpfs_paths=None,
+        container_extra_networks=None,
+        container_name="test-99",
+        on_log=on_log,
+        on_status=on_status,
+        restart_callback=restart_callback,
+        wait_timeout=0.5,
+    )
+    assert result == "no_credentials_moved"
+    assert restart_calls == []
+    assert any("keine Credential-Dateien gefunden" in (m or "") for _, m in status_calls)
+
+
+def test_recovery_returns_container_start_failed(tmp_path: Path):
+    """Wenn docker_service.run_container fehlschlaegt, muss Recovery das erkennen."""
+    (tmp_path / "credentials.json").write_text("{}")
+
+    log_calls: list[str] = []
+    status_calls: list[tuple[bool, str | None]] = []
+    restart_calls: list[bool] = []
+
+    fake_run_container = MagicMock(return_value={"ok": False, "error": "image pull failed", "logs": ""})
+
+    with patch("services.docker_service.run_container", fake_run_container):
+        result = run_auth_setup_recovery(
+            server_id=99,
+            install_dir=tmp_path,
+            docker_image="alpine:latest",
+            container_command=None,
+            container_env=None,
+            port_publishes=[],
+            volume_binds=[],
+            cpu_limit_percent=None,
+            ram_limit_mb=None,
+            container_user="1000:1000",
+            container_workdir=None,
+            container_read_only_rootfs=False,
+            container_tmpfs_paths=None,
+            container_extra_networks=None,
+            container_name="test-99",
+            on_log=lambda t: log_calls.append(t),
+            on_status=lambda a, m: status_calls.append((a, m)),
+            restart_callback=lambda: restart_calls.append(True),
+            wait_timeout=0.5,
+        )
+    assert result == "container_start_failed"
+    assert restart_calls == []
+    assert any("konnte nicht starten" in (m or "") for _, m in status_calls)
+
+
+def test_recovery_returns_timeout_when_no_new_credentials(tmp_path: Path):
+    """Wenn wait_for_credentials nach Timeout nichts findet -> 'timeout' Return."""
+    (tmp_path / "credentials.json").write_text("{}")  # 1 file to move
+
+    fake_run_container = MagicMock(return_value={"ok": True, "stdout": "abc", "stderr": ""})
+    fake_stop = MagicMock(return_value={"ok": True})
+
+    log_calls: list[str] = []
+    status_calls: list[tuple[bool, str | None]] = []
+    restart_calls: list[bool] = []
+
+    with patch("services.docker_service.run_container", fake_run_container), \
+         patch("services.docker_service.stop", fake_stop):
+        result = run_auth_setup_recovery(
+            server_id=99,
+            install_dir=tmp_path,
+            docker_image="alpine:latest",
+            container_command=None,
+            container_env=None,
+            port_publishes=[],
+            volume_binds=[],
+            cpu_limit_percent=None,
+            ram_limit_mb=None,
+            container_user="1000:1000",
+            container_workdir=None,
+            container_read_only_rootfs=False,
+            container_tmpfs_paths=None,
+            container_extra_networks=None,
+            container_name="test-99",
+            on_log=lambda t: log_calls.append(t),
+            on_status=lambda a, m: status_calls.append((a, m)),
+            restart_callback=lambda: restart_calls.append(True),
+            wait_timeout=0.5,
+        )
+    assert result == "timeout"
+    assert restart_calls == []
+    fake_stop.assert_called_once()
+
+
+def test_recovery_returns_recovered_on_success(tmp_path: Path):
+    """Wenn wait_for_credentials eine neue Datei findet -> 'recovered' + restart_callback."""
+    (tmp_path / "credentials.json").write_text("{}")
+
+    fake_run_container = MagicMock(return_value={"ok": True, "stdout": "abc", "stderr": ""})
+    fake_stop = MagicMock(return_value={"ok": True})
+
+    # Simulate that the in-container flow writes a fresh credentials.json after 0.2s.
+    def writer():
+        time.sleep(0.2)
+        bak = tmp_path / "credentials.json.bak"
+        if bak.exists():
+            (tmp_path / "credentials.json").write_text("new")
+    threading.Thread(target=writer, daemon=True).start()
+
+    restart_calls: list[bool] = []
+
+    with patch("services.docker_service.run_container", fake_run_container), \
+         patch("services.docker_service.stop", fake_stop):
+        result = run_auth_setup_recovery(
+            server_id=99,
+            install_dir=tmp_path,
+            docker_image="alpine:latest",
+            container_command=None,
+            container_env=None,
+            port_publishes=[],
+            volume_binds=[],
+            cpu_limit_percent=None,
+            ram_limit_mb=None,
+            container_user="1000:1000",
+            container_workdir=None,
+            container_read_only_rootfs=False,
+            container_tmpfs_paths=None,
+            container_extra_networks=None,
+            container_name="test-99",
+            on_log=lambda t: None,
+            on_status=lambda a, m: None,
+            restart_callback=lambda: restart_calls.append(True),
+            wait_timeout=5.0,
+        )
+    assert result == "recovered"
+    assert restart_calls == [True]
+    fake_run_container.assert_called_once()
+    # TTY-Flag muss gesetzt sein
+    kwargs = fake_run_container.call_args.kwargs
+    assert kwargs.get("tty") is True
+    assert kwargs.get("startup_check_seconds") == 0.0

@@ -109,6 +109,13 @@ async def lifespan(app: FastAPI):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE webhook_subscriptions ADD COLUMN secret_encrypted VARCHAR(4096)"))
 
+    # Migration: servers.auth_required Spalte hinzufuegen (interaktive Auth-Recovery)
+    if 'servers' in inspector.get_table_names():
+        srv_cols = [c['name'] for c in inspector.get_columns('servers')]
+        if 'auth_required' not in srv_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN auth_required BOOLEAN NOT NULL DEFAULT false"))
+
     # Migration: email_verifications table cleanup for hashing
     if 'email_verifications' in inspector.get_table_names():
         ev_cols = [c['name'] for c in inspector.get_columns('email_verifications')]

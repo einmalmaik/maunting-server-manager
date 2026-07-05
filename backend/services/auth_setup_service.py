@@ -123,3 +123,103 @@ def wait_for_credentials(
         else:
             time.sleep(poll_interval)
     return None
+
+
+# ──────────────────────────────────────────────────────────────────
+# Background Recovery (orchestration)
+# ──────────────────────────────────────────────────────────────────
+#
+# Die Funktion ``run_auth_setup_recovery`` ist der Background-Task,
+# der nach einem Auth-Detect im Lifecycle-Thread gestartet wird. Sie
+# ist generisch: kennt kein Spiel, nur Blueprint-Plugin-API.
+
+
+def run_auth_setup_recovery(
+    *,
+    server_id: int,
+    install_dir: os.PathLike[str] | str,
+    docker_image: str,
+    container_command: list[str] | None,
+    container_env: dict[str, str] | None,
+    port_publishes: list,
+    volume_binds: list,
+    cpu_limit_percent: int | None,
+    ram_limit_mb: int | None,
+    container_user: str,
+    container_workdir: str | None,
+    container_read_only_rootfs: bool,
+    container_tmpfs_paths: list[str] | None,
+    container_extra_networks: list[str] | None,
+    container_name: str,
+    on_log,
+    on_status,
+    restart_callback,
+    wait_timeout: float = 300.0,
+) -> str:
+    """Orchestriert den Auth-Setup-Recovery-Flow.
+
+    Diese Funktion laeuft im Background-Thread. Sie macht:
+
+    1. Move credentials -> .bak (Auth-Flow wird erzwungen).
+    2. Startet Container mit tty=True, ohne startup_check.
+    3. Wartet bis wait_for_credentials neue Tokens findet.
+    4. Stoppt den Auth-Container und ruft restart_callback fuer Clean-Restart.
+
+    ``on_log(text)`` ist ein UI-Callback (z.B. _append_console_log) fuer Live-Output.
+    ``on_status(status, message)`` aktualisiert die DB-Spalten auth_required/status_message.
+    ``restart_callback()`` wird bei Erfolg aufgerufen (typischerweise eine
+    queue_lifecycle_operation("restart", ...) - Call).
+
+    Returnt einen Status-String ("recovered" | "no_credentials_moved" | "container_start_failed" | "timeout").
+    """
+    on_log(f"[MSM] Auth-Setup erkannt. Verschiebe Credentials...\n")
+
+    moved = move_credentials(install_dir)
+    if moved == 0:
+        on_status(False, "Auth-Setup erforderlich, aber keine Credential-Dateien gefunden.")
+        return "no_credentials_moved"
+
+    on_log(f"[MSM] {moved} Credential-Datei(en) verschoben. Starte Auth-Setup-Container (TTY)...\n")
+
+    # Import hier, um zirkulaere Imports zu vermeiden.
+    from services import docker_service
+
+    result = docker_service.run_container(
+        name=container_name,
+        image=docker_image,
+        command=container_command,
+        env=container_env,
+        ports=port_publishes,
+        volumes=volume_binds,
+        cpu_limit_percent=cpu_limit_percent,
+        ram_limit_mb=ram_limit_mb,
+        user=container_user,
+        workdir=container_workdir,
+        read_only_rootfs=container_read_only_rootfs,
+        tmpfs_paths=container_tmpfs_paths,
+        extra_networks=container_extra_networks,
+        detach=True,
+        startup_check_seconds=0.0,  # NICHT nach 2s abbrechen - wir wollen auf Input warten
+        server_id=server_id,
+        tty=True,  # Pseudo-TTY fuer interaktiven Auth-Flow
+    )
+    if not result["ok"]:
+        on_status(False, f"Auth-Setup-Container konnte nicht starten: {result['error']}")
+        return "container_start_failed"
+
+    on_log(
+        f"[MSM] Auth-Setup-Container laeuft. Bitte URL im Konsolen-Tab oeffnen "
+        f"und Anmeldung abschliessen (max. {int(wait_timeout)}s).\n"
+    )
+
+    found = wait_for_credentials(install_dir, timeout=wait_timeout)
+    if found is None:
+        on_status(False, "Auth-Setup Timeout. Bitte manuell pruefen.")
+        docker_service.stop(container_name, timeout=10)
+        return "timeout"
+
+    on_log(f"[MSM] Neue Credentials gefunden ({found.name}). Starte Server neu...\n")
+    docker_service.stop(container_name, timeout=15)
+    on_status(False, None)  # auth_required -> False, status_message -> None
+    restart_callback()
+    return "recovered"
