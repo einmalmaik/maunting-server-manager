@@ -227,38 +227,56 @@ class TestPrepareRestoreUsesLocal:
     """VAL-PANEL-RESTORE-003: Restore verwendet lokale Datei wenn vorhanden."""
 
     def test_no_s3_download_when_local_exists(self, db, tmp_path, monkeypatch):
-        """Lokale Datei vorhanden: kein S3-Download, kein DIS-Decrypt."""
+        """Lokale .tar.gz-Datei vorhanden: kein S3-Download, kein DIS-Decrypt.
+
+        VAL-PANEL-RESTORE-003: Wenn ein lokales .tar.gz existiert (kein Passwort
+        gesetzt → backward compat), wird kein S3-Download und kein DIS-Decrypt
+        benoetigt. Bei .enc-Backups (Passwort gesetzt) ist DIS-Decrypt erwartet.
+        """
         config_dir, _ = _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(config_dir, [".env"])
         _setup_s3_config()
-        _setup_backup_password()
+        # Kein Backup-Passwort → Backup ist .tar.gz (backward compat)
+        # S3-Key manuell setzen um den Fall "lokal + S3" zu simulieren
+        from services.backup_config_service import BackupConfigService
+        assert not BackupConfigService.is_backup_password_set()
 
         with mock_aws():
             _create_moto_bucket()
             backup = _create_backup(db, name="local-present")
-            assert backup.s3_key is not None
+            # Manuell S3-Key setzen (simuliert Backup mit Cloud-Kopie)
+            backup.s3_key = f"msm-backups/panel/test_{backup.id}.enc"
+            backup.s3_bucket = "test-bucket"
+            db.commit()
+            db.refresh(backup)
             assert os.path.exists(backup.local_path)
+            assert backup.local_path.endswith(".tar.gz")
 
             with patch("services.s3_service.S3Service.download_stream") as dl_mock:
                 with patch("services.backup_crypto_service.BackupCryptoService.decrypt_to_file") as dec_mock:
                     result = pbs.prepare_panel_restore(backup.id, db)
 
-            # Weder S3-Download noch DIS-Decrypt wurden aufgerufen
+            # Weder S3-Download noch DIS-Decrypt wurden aufgerufen (.tar.gz lokal)
             assert not dl_mock.called
             assert not dec_mock.called
             assert os.path.isfile(result["script_path"])
 
     def test_no_key_init_when_local_exists(self, db, tmp_path, monkeypatch):
-        """Lokale Datei vorhanden: kein DIS init_key (kein Key noetig)."""
+        """Lokale .tar.gz-Datei vorhanden: kein DIS init_key (kein Key noetig).
+
+        Bei .tar.gz (kein Passwort) ist kein DIS-Key noetig.
+        Bei .enc (Passwort gesetzt) waere init_key erwartet (Decrypt).
+        """
         config_dir, _ = _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(config_dir, [".env"])
         _setup_s3_config()
-        _setup_backup_password()
+        # Kein Backup-Passwort → .tar.gz (backward compat, kein Decrypt noetig)
 
         with mock_aws():
             _create_moto_bucket()
             backup = _create_backup(db, name="no-key-init")
             assert os.path.exists(backup.local_path)
+            assert backup.local_path.endswith(".tar.gz")
 
             with patch("services.backup_crypto_service.BackupCryptoService.init_key") as init_mock:
                 pbs.prepare_panel_restore(backup.id, db)

@@ -15,7 +15,9 @@ Deutsche Kommentare passend zum Projekt-Stil.
 
 import logging
 import os
+import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -46,13 +48,22 @@ def run_backup(
     timeout_seconds: int = 600,
     encrypted: bool = False,
     encryption_algorithm: str | None = None,
+    encrypt_local: bool = False,
 ) -> "Backup":
     """
     Führt ein vollständiges Backup aus + DB-Record + sofortigen Retention-Cleanup.
 
     Gibt den neuen Backup-Record zurück.
-    Wirft bei Fehlern (kein Server, kein install_dir, tar-Fehler/Timeout) → Caller
+    Wirft bei Fehlen (kein Server, kein install_dir, tar-Fehler/Timeout) → Caller
     behandelt (z. B. HTTP 4xx/5xx oder Warning-Log für Auto).
+
+    Parameter:
+      encrypted:           Manifest-Flag (ins tar.gz geschrieben) fuer S3/local-encrypted.
+      encryption_algorithm: Algorithmus-String fuer das Manifest.
+      encrypt_local:       Wenn True: tar.gz wird in 0700 temp-dir mit 0600-Permissions
+                           erstellt, danach via DIS zu .enc verschluesselt. Plaintext
+                           wird sicher geloescht. Backup.filename zeigt auf .enc.
+                           Wenn False: Plaintext tar.gz (backward compat).
 
     Garantiert: Bei Tar-Fehler wird keine DB-Record angelegt und keine
     partiellen Dateien im Backup-Verzeichnis hinterlassen.
@@ -78,8 +89,24 @@ def run_backup(
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     # Nur server_id + Timestamp im Dateinamen — verhindert Path-Traversal über server.name
     # (name bleibt im DB-Feld "name" für UI-Anzeige erhalten). KISS + Security.
-    filename = f"server_{server_id}_{timestamp}.tar.gz"
-    filepath = os.path.join(backup_dir, filename)
+
+    # Pfad-Strategie:
+    # encrypt_local=True  → tar.gz im 0700 temp-dir, dann .enc im backup_dir
+    # encrypt_local=False → tar.gz direkt im backup_dir (bestehendes Verhalten)
+    if encrypt_local:
+        final_filename = f"server_{server_id}_{timestamp}.enc"
+        final_filepath = os.path.join(backup_dir, final_filename)
+        tar_filename = f"server_{server_id}_{timestamp}.tar.gz"
+        tmp_dir = tempfile.mkdtemp(prefix="msm_backup_tmp_", dir=backup_dir)
+        try:
+            os.chmod(tmp_dir, 0o700)
+        except OSError:
+            pass  # Windows: chmod eingeschraenkt
+        tar_filepath = os.path.join(tmp_dir, tar_filename)
+    else:
+        final_filepath = os.path.join(backup_dir, f"server_{server_id}_{timestamp}.tar.gz")
+        tar_filepath = final_filepath
+        tmp_dir = None
 
     # Tar ausfuehren (voller install_dir oder Blueprint backup.includePaths)
     plan = backup_plan_for_server(server)
@@ -119,7 +146,7 @@ def run_backup(
             # Hinweis: Blueprint-Operatoren koennen spaeter ``excludePgDump``
             # im Blueprint-Manifest ergaenzen, falls noetig.
             create_selective_backup_tar(
-                filepath,
+                tar_filepath,
                 server.install_dir,
                 plan.include_paths,
                 server_id=server_id,
@@ -128,41 +155,69 @@ def run_backup(
             )
         else:
             create_full_backup_tar(
-                filepath,
+                tar_filepath,
                 server.install_dir,
                 pg_dump_bytes=pg_dump_bytes or None,
                 server_id=server_id,
                 encrypted=encrypted,
                 encryption_algorithm=encryption_algorithm,
             )
-        size_mb = os.path.getsize(filepath) // (1024 * 1024)
-    except subprocess.TimeoutExpired as e:
-        if os.path.exists(filepath):
+
+        if encrypt_local:
+            # 0600-Permissions auf Plaintext tar.gz im 0700 temp-dir
             try:
-                os.remove(filepath)
+                os.chmod(tar_filepath, 0o600)
             except OSError:
-                pass
+                pass  # Windows: chmod eingeschraenkt
+            # tar.gz via DIS zu .enc verschluesseln (Key-Lifecycle in Helper)
+            # Best-Effort: bei DIS-Fehler Fall back zu plaintext tar.gz (wie S3)
+            try:
+                _encrypt_local_backup(tar_filepath, final_filepath)
+                # Plaintext tar.gz sicher loeschen (shutil.rmtree tmp_dir unten
+                # ist redundant, aber explicit os.remove fuer Defense-in-Depth)
+                try:
+                    os.remove(tar_filepath)
+                except OSError:
+                    pass
+            except Exception as enc_exc:
+                # DIS nicht erreichbar: lokales Backup als plaintext (Best-Effort).
+                # tar.gz aus temp-dir in backup_dir verschieben, final_filepath anpassen.
+                logger.warning(
+                    "Lokale Verschluesselung fehlgeschlagen (%s) — Backup als plaintext (backward compat)",
+                    type(enc_exc).__name__,
+                )
+                final_filepath = os.path.join(
+                    backup_dir, f"server_{server_id}_{timestamp}.tar.gz"
+                )
+                try:
+                    shutil.move(tar_filepath, final_filepath)
+                except OSError:
+                    pass
+
+        size_mb = os.path.getsize(final_filepath) // (1024 * 1024)
+    except subprocess.TimeoutExpired as e:
+        _cleanup_file(final_filepath)
         logger.error("Backup-Timeout für Server %s nach %ss", server_id, timeout_seconds)
         clear_active_backup_status(server_id)
         raise RuntimeError(
             f"Backup fehlgeschlagen (Timeout nach {timeout_seconds}s)"
         ) from e
     except Exception as e:
-        if os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-            except OSError:
-                pass
+        _cleanup_file(final_filepath)
         logger.error("Backup fehlgeschlagen für Server %s (details redacted for security)", server_id)
         clear_active_backup_status(server_id)
         raise RuntimeError("Backup fehlgeschlagen") from e
+    finally:
+        # 0700 temp-dir immer bereinigen (entfernt Plaintext tar.gz Reste)
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # DB + Retention nach erfolgreichem Tar. Bei DB-Fehler: Best-Effort Cleanup der Tar-Datei
     # (verhindert Orphan .tar.gz ohne Record). Kein volles 2PC (KISS, keine neue Komplexität).
     try:
         backup = Backup(
             server_id=server_id,
-            filename=filepath,
+            filename=final_filepath,
             size_mb=size_mb,
             name=name or None,
         )
@@ -180,11 +235,7 @@ def run_backup(
             )
     except Exception as e:
         # Post-tar DB/Retention Fehler → Tar entfernen, um Orphan zu vermeiden
-        if os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-            except OSError:
-                pass
+        _cleanup_file(final_filepath)
         logger.error("Backup DB/Retention fehlgeschlagen für Server %s (Tar bereinigt, details redacted for security)", server_id)
         clear_active_backup_status(server_id)
         raise RuntimeError("Backup fehlgeschlagen") from e
@@ -265,3 +316,50 @@ def clear_active_backup_status(server_id: int) -> None:
 def get_active_backup_status(server_id: int) -> dict | None:
     """Liefert Snapshot oder None."""
     return _active_backups.get(server_id)
+
+
+def _cleanup_file(filepath: str) -> None:
+    """Best-Effort Datei-Loeschung (kein Fehler bei fehlender Datei)."""
+    if os.path.exists(filepath):
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+
+
+def _encrypt_local_backup(tar_path: str, enc_path: str) -> None:
+    """Verschluesselt eine lokale tar.gz-Datei zu .enc via DIS.
+
+    Stream: tar.gz -> DIS encrypt-stream -> .enc Datei.
+    Key-Lifecycle: init_key vor Verschluesselung, invalidate_key immer danach
+    (try/finally — auch bei Fehler).
+
+    Setzt 0600-Permissions auf die .enc-Datei (nur Owner darf lesen).
+    """
+    from services.backup_config_service import BackupConfigService
+    from services.backup_crypto_service import BackupCryptoService
+
+    key_id: str | None = None
+    try:
+        password = BackupConfigService.get_backup_password()
+        salt = BackupConfigService.get_backup_salt()
+        key_id = BackupCryptoService.init_key(password, salt)
+
+        # Stream: tar.gz -> DIS encrypt-stream -> .enc Datei
+        encrypted_stream = BackupCryptoService.encrypt_file_stream(tar_path, key_id)
+        with open(enc_path, "wb") as f:
+            for chunk in encrypted_stream:
+                f.write(chunk)
+        try:
+            os.chmod(enc_path, 0o600)
+        except OSError:
+            pass  # Windows: chmod eingeschraenkt
+    finally:
+        # Key IMMER invalidieren (Erfolg und Fehler) — kein Key-Leak.
+        if key_id:
+            try:
+                BackupCryptoService.invalidate_key(key_id)
+            except Exception:
+                logger.warning(
+                    "Key-Invalidierung fehlgeschlagen (lokale Verschluesselung)"
+                )

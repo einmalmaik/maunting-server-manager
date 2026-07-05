@@ -48,31 +48,41 @@ def create_server_backup(
 
     Gibt den Backup-Record zurueck. Wirft bei lokalem Backup-Fehler (wie run_backup).
     S3/DIS-Fehler werden NICHT propagiert (Best-Effort, Warning-Log).
+
+    Lokale Verschluesselung: wenn ein Backup-Passwort gesetzt ist, wird das
+    lokale tar.gz via DIS zu .enc verschluesselt (VAL-FIX-001/002/003).
+    Ohne Passwort: Plaintext tar.gz (backward compat, Warning-Log).
     """
     from services.backup_config_service import BackupConfigService
     from services.backup_service import run_backup
 
-    # Vorab pruefen ob S3-Upload moeglich ist (Intent bestimmt Manifest-Erweiterung).
-    s3_eligible = (
-        BackupConfigService.is_s3_configured()
-        and BackupConfigService.is_backup_password_set()
-    )
+    # Lokale Verschluesselung wenn Passwort gesetzt (unabhaengig von S3-Config).
+    password_set = BackupConfigService.is_backup_password_set()
+    s3_configured = BackupConfigService.is_s3_configured()
+    s3_eligible = s3_configured and password_set
+    encrypt_local = password_set  # VAL-FIX-001: local .enc when password set
 
-    if BackupConfigService.is_s3_configured() and not BackupConfigService.is_backup_password_set():
+    if s3_configured and not password_set:
         logger.warning(
             "S3 konfiguriert aber kein Backup-Passwort gesetzt — Server %s: nur lokales Backup",
             server_id,
         )
+    if not password_set:
+        logger.warning(
+            "Kein Backup-Passwort gesetzt — Server %s: lokales Backup als plaintext (backward compat)",
+            server_id,
+        )
 
-    # 1. Lokales tar.gz erstellen (bestehende Logik).
-    # Wenn S3-eligible: Manifest mit encrypted=true + algorithm erstellen.
+    # 1. Lokales Backup erstellen (tar.gz oder .enc wenn encrypt_local).
+    # encrypted-Flag steuert das Manifest im tar.gz (true wenn verschluesselt).
     backup = run_backup(
         server_id,
         db,
         name=name,
         timeout_seconds=timeout_seconds,
-        encrypted=s3_eligible,
-        encryption_algorithm=_ENCRYPTION_ALGORITHM if s3_eligible else None,
+        encrypted=encrypt_local,
+        encryption_algorithm=_ENCRYPTION_ALGORITHM if encrypt_local else None,
+        encrypt_local=encrypt_local,
     )
 
     # 2. S3-Upload (Best-Effort).
@@ -88,6 +98,12 @@ def _upload_to_s3(backup, db: Session, server_id: int) -> None:
 
     Best-Effort: bei Fehlern wird s3_key=null belassen und nur gewarnt.
     Key wird immer invalidiert (try/finally).
+
+    Zwei Pfade:
+    - .enc Datei (bereits lokal verschluesselt): direkt zu S3 hochladen,
+      kein DIS encrypt noetig (gleiche verschluesselte Bytes).
+    - .tar.gz Datei (legacy upload-to-cloud): via DIS encrypt-stream
+      verschluesseln und hochladen (bestehendes Verhalten).
     """
     from services.backup_config_service import BackupConfigService
     from services.backup_crypto_service import BackupCryptoService
@@ -103,18 +119,22 @@ def _upload_to_s3(backup, db: Session, server_id: int) -> None:
 
     key_id: str | None = None
     try:
-        password = BackupConfigService.get_backup_password()
-        salt = BackupConfigService.get_backup_salt()
-        key_id = BackupCryptoService.init_key(password, salt)
-
         # S3-Object-Key: msm-backups/servers/{id}/server_{id}_{timestamp}_{backup_id}.enc
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         s3_key = f"{_S3_KEY_PREFIX}/{server_id}/server_{server_id}_{timestamp}_{backup.id}.enc"
 
-        # Stream: lokale Datei -> DIS encrypt-stream -> S3 upload_stream.
-        # Keine temp verschluesselte Datei auf der Platte (reines Streaming).
-        encrypted_stream = BackupCryptoService.encrypt_file_stream(local_path, key_id)
-        S3Service.upload_stream(encrypted_stream, s3_key)
+        if local_path.endswith(".enc"):
+            # Bereits lokal verschluesselt — direkt zu S3 hochladen (kein DIS noetig).
+            # S3-Objekt enthaelt die gleichen verschluesselten Bytes wie die lokale .enc.
+            with open(local_path, "rb") as f:
+                S3Service.upload_stream(f, s3_key)
+        else:
+            # Legacy .tar.gz — via DIS encrypt-stream verschluesseln und hochladen.
+            password = BackupConfigService.get_backup_password()
+            salt = BackupConfigService.get_backup_salt()
+            key_id = BackupCryptoService.init_key(password, salt)
+            encrypted_stream = BackupCryptoService.encrypt_file_stream(local_path, key_id)
+            S3Service.upload_stream(encrypted_stream, s3_key)
 
         # Erfolg: s3_key, s3_bucket, encrypted=True speichern.
         bucket = BackupConfigService.get_s3_config().get("bucket") or ""
@@ -142,6 +162,7 @@ def _upload_to_s3(backup, db: Session, server_id: int) -> None:
         )
     finally:
         # Key IMMER invalidieren (Erfolg und Fehler) — kein Key-Leak.
+        # Nur wenn ein Key initialisiert wurde (.tar.gz legacy Pfad).
         if key_id:
             try:
                 BackupCryptoService.invalidate_key(key_id)
@@ -170,26 +191,44 @@ def upload_backup_to_cloud(backup, db: Session, server_id: int) -> bool:
 
 
 def fetch_backup_from_s3(backup, db: Session) -> None:
-    """Laedt ein Backup von S3 herunter, entschluesselt es via DIS und speichert es lokal.
+    """Laedt ein Backup von S3 herunter und speichert es lokal.
 
     Wird vom Restore-Endpoint verwendet, wenn die lokale Datei fehlt aber ein
     s3_key vorhanden ist. Nach erfolgreichem Aufruf existiert die Datei unter
-    ``backup.filename`` und die bestehende Restore-Logik (Container stoppen,
-    Extrahieren, DB-Reset) kann ausgefuehrt werden.
+    ``backup.filename`` und die bestehende Restore-Logik kann ausgefuehrt werden.
 
-    Key-Lifecycle: init_key vor Download/Decrypt, invalidate_key immer danach
-    (try/finally — auch bei Fehler).
+    Zwei Pfade:
+    - .enc Dateiname (neues Format): S3-Objekt ist bereits verschluesselt.
+      Direkt herunterladen als .enc — keine DIS-Entschluesselung noetig.
+      Die Entschluesselung erfolgt spaeter in der Restore-Logik.
+    - .tar.gz Dateiname (legacy): S3-Objekt ist verschluesselt, muss via DIS
+      entschluesselt werden um als .tar.gz lokal gespeichert zu werden.
+
+    Key-Lifecycle (nur legacy Pfad): init_key vor Download/Decrypt,
+    invalidate_key immer danach (try/finally — auch bei Fehler).
 
     Wirft bei:
-    - S3NotConfiguredError / S3OperationError: S3-Fehler (Provider nicht erreichbar, Objekt fehlt)
-    - BackupDecryptionError: Entschluesselung fehlgeschlagen (falsches Passwort / manipuliert)
-    - BackupCryptoError: DIS nicht erreichbar oder anderer DIS-Fehler
-
-    Der Caller (Router) fangt diese ab und gibt klare User-Meldungen zurueck.
+    - S3NotConfiguredError / S3OperationError: S3-Fehler
+    - BackupDecryptionError: Entschluesselung fehlgeschlagen (legacy Pfad)
+    - BackupCryptoError: DIS nicht erreichbar (legacy Pfad)
     """
+    from services.s3_service import S3Service
+
+    # Neues Format: .enc Dateiname → S3-Objekt direkt herunterladen (kein Decrypt)
+    if backup.filename.endswith(".enc"):
+        body = S3Service.download_stream(backup.s3_key)
+        with open(backup.filename, "wb") as f:
+            for chunk in body.iter_chunks():
+                f.write(chunk)
+        logger.info(
+            "S3-Restore: Download erfolgreich (Backup %s, .enc direkt)",
+            backup.id,
+        )
+        return
+
+    # Legacy Pfad: .tar.gz Dateiname → S3 download + DIS decrypt zu .tar.gz
     from services.backup_config_service import BackupConfigService
     from services.backup_crypto_service import BackupCryptoService
-    from services.s3_service import S3Service
 
     key_id: str | None = None
     try:
@@ -197,14 +236,12 @@ def fetch_backup_from_s3(backup, db: Session) -> None:
         salt = BackupConfigService.get_backup_salt()
         key_id = BackupCryptoService.init_key(password, salt)
 
-        # S3-Download → DIS decrypt-stream → lokale Datei.
-        # StreamBody.iter_chunks() liefert einen Iterator[bytes], den httpx
-        # direkt an DIS weiterstreamt (kein Puffern der ganzen Datei im Speicher).
+        # S3-Download → DIS decrypt-stream → lokale .tar.gz Datei.
         body = S3Service.download_stream(backup.s3_key)
         BackupCryptoService.decrypt_to_file(body.iter_chunks(), key_id, backup.filename)
 
         logger.info(
-            "S3-Restore: Download + Decrypt erfolgreich (Backup %s)",
+            "S3-Restore: Download + Decrypt erfolgreich (Backup %s, legacy .tar.gz)",
             backup.id,
         )
     finally:
@@ -216,4 +253,81 @@ def fetch_backup_from_s3(backup, db: Session) -> None:
                 logger.warning(
                     "Key-Invalidierung fehlgeschlagen (Backup %s)",
                     backup.id,
+                )
+
+
+def decrypt_local_backup_for_restore(enc_path: str) -> str:
+    """Entschluesselt eine lokale .enc-Backup-Datei zu einem temporaeren tar.gz.
+
+    Wird vom Restore-Endpoint verwendet, wenn das lokale Backup .enc ist
+    (Passwort war gesetzt bei Backup-Erstellung).
+
+    Ablauf (VAL-FIX-004):
+    1. 0700 temp-dir erstellen
+    2. .enc -> DIS decrypt-stream -> temp tar.gz (0600 Permissions)
+    3. Key invalidieren (try/finally)
+    4. Pfad zum temp tar.gz zurueckgeben (Caller muss temp-dir aufraeumen)
+
+    Wirft bei:
+    - BackupDecryptionError: falsches Passwort / manipulierter Stream
+    - BackupCryptoError: DIS nicht erreichbar
+
+    Returns: Pfad zum temporaeren tar.gz. Caller muss das temp-dir
+    (os.path.dirname(return_value)) nach der Extraktion aufraeumen.
+    """
+    import shutil
+    import tempfile
+
+    from services.backup_config_service import BackupConfigService
+    from services.backup_crypto_service import (
+        BackupCryptoService,
+        BackupDecryptionError,
+        BackupCryptoError,
+    )
+
+    # 0700 temp-dir fuer das entschluesselte tar.gz
+    tmp_dir = tempfile.mkdtemp(prefix="msm_restore_")
+    try:
+        os.chmod(tmp_dir, 0o700)
+    except OSError:
+        pass  # Windows
+
+    tar_filename = os.path.basename(enc_path).replace(".enc", ".tar.gz")
+    tar_path = os.path.join(tmp_dir, tar_filename)
+
+    key_id: str | None = None
+    try:
+        password = BackupConfigService.get_backup_password()
+        salt = BackupConfigService.get_backup_salt()
+        key_id = BackupCryptoService.init_key(password, salt)
+
+        # .enc -> DIS decrypt-stream -> temp tar.gz
+        with open(enc_path, "rb") as f:
+            BackupCryptoService.decrypt_to_file(f, key_id, tar_path)
+        try:
+            os.chmod(tar_path, 0o600)
+        except OSError:
+            pass  # Windows
+
+        logger.info(
+            "Lokales .enc Backup entschluesselt fuer Restore (temp tar.gz erstellt)"
+        )
+        return tar_path
+    except BackupDecryptionError:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+    except BackupCryptoError:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+    except Exception as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise BackupCryptoError(f"Entschluesselung fehlgeschlagen: {type(exc).__name__}") from exc
+    finally:
+        # Key IMMER invalidieren (Erfolg und Fehler) — kein Key-Leak.
+        if key_id:
+            try:
+                BackupCryptoService.invalidate_key(key_id)
+            except Exception:
+                logger.warning(
+                    "Key-Invalidierung fehlgeschlagen (Restore Decrypt)"
                 )

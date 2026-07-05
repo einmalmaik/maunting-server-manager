@@ -148,7 +148,7 @@ def _make_real_selective_tar(
 
 def _patch_run_backup(backup: Backup):
     """Patch run_backup im backup_service-Modul, um ein vordefiniertes Backup zurueckzugeben."""
-    def _fake(server_id, db, *, name=None, timeout_seconds=600, encrypted=False, encryption_algorithm=None):
+    def _fake(server_id, db, *, name=None, timeout_seconds=600, encrypted=False, encryption_algorithm=None, encrypt_local=False):
         return backup
     return patch("services.backup_service.run_backup", side_effect=_fake)
 

@@ -193,15 +193,16 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
 
     Restore-Quellen (Prioritaet):
     1. Lokale Datei existiert → bestehende Restore-Logik (unveraendert).
-    2. Lokale Datei fehlt, s3_key vorhanden → S3-Download + DIS-Decrypt
-       lokal speichern, dann bestehende Restore-Logik.
+       Wenn .enc: zuerst DIS-Entschluesselung zu temp tar.gz (vor Container-Stop).
+    2. Lokale Datei fehlt, s3_key vorhanden → S3-Download (+ ggf. DIS-Decrypt
+       fuer legacy .tar.gz) lokal speichern, dann wie 1.
        Download/Decrypt erfolgt VOR dem Container-Stop, damit bei Fehlern
        (S3 unreachable, falsches Passwort) der Server unberührt bleibt.
     3. Weder lokal noch S3 → 404.
 
     Verwendet denselben Lifecycle-Lock wie Start/Stop/Restart (non-blocking:
     concurrent Restore → 409). Der DIS-Backup-Key wird immer invalidiert
-    (try/finally in fetch_backup_from_s3).
+    (try/finally in fetch_backup_from_s3 / decrypt_local_backup_for_restore).
     """
     require_server_permission(user, server_id, db, "server.backups.restore")
     server = db.query(Server).filter(Server.id == server_id).first()
@@ -220,10 +221,18 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
     # Non-blocking acquire: concurrent Restore / Lifecycle-Op → 409.
     if not lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Server ist belegt — eine andere Operation läuft")
+
+    # tar_path: Pfad zum tar.gz das extrahiert wird.
+    # Bei .enc Backups: temp tar.gz nach DIS-Entschluesselung.
+    # Bei .tar.gz Backups: backup.filename direkt.
+    # decrypt_tmp_dir: muss am Ende aufgeraeumt werden (nur bei .enc Pfad).
+    tar_path: str = backup.filename
+    decrypt_tmp_dir: str | None = None
+
     try:
         db.refresh(server)
 
-        # S3-Restore: Download + Decrypt VOR Container-Stop.
+        # S3-Restore: Download (+ ggf. Decrypt) VOR Container-Stop.
         # Bei Fehlern bleibt install_dir unveraendert und der Container laeuft weiter.
         if not local_exists:
             from services.backup_orchestrator import fetch_backup_from_s3
@@ -256,6 +265,31 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
                 )
                 raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
 
+        # Lokale .enc-Entschluesselung VOR Container-Stop (VAL-FIX-004).
+        # Bei falschem Passwort / DIS-Fehler bleibt der Server unberuehrt.
+        if backup.filename.endswith(".enc"):
+            from services.backup_orchestrator import decrypt_local_backup_for_restore
+            from services.backup_crypto_service import BackupDecryptionError, BackupCryptoError
+            try:
+                tar_path = decrypt_local_backup_for_restore(backup.filename)
+                decrypt_tmp_dir = os.path.dirname(tar_path)
+            except BackupDecryptionError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Entschlüsselung fehlgeschlagen: falsches Passwort oder manipuliertes Backup",
+                )
+            except BackupCryptoError:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Verschlüsselungs-Service nicht verfügbar",
+                )
+            except Exception:
+                logger.warning(
+                    "Lokale .enc-Entschluesselung fehlgeschlagen (Server %s, Backup %s)",
+                    server_id, backup_id,
+                )
+                raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
+
         # Container stoppen, falls er läuft — Bind-Mount-Konsistenz
         from games.base import container_name_for
         from services import docker_service
@@ -274,16 +308,16 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
         try:
             from services.backup_paths import read_backup_scope_from_archive
 
-            scope, _manifest = read_backup_scope_from_archive(backup.filename)
+            scope, _manifest = read_backup_scope_from_archive(tar_path)
             if scope == "selective":
                 os.makedirs(server.install_dir, exist_ok=True)
-                _safe_extract_backup_tar(backup.filename, server.install_dir)
+                _safe_extract_backup_tar(tar_path, server.install_dir)
             else:
                 if os.path.exists(server.install_dir):
                     old_backup = f"{server.install_dir}_pre_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
                     shutil.move(server.install_dir, old_backup)
                 os.makedirs(server.install_dir, exist_ok=True)
-                _safe_extract_backup_tar(backup.filename, server.install_dir)
+                _safe_extract_backup_tar(tar_path, server.install_dir)
         except Exception:
             # Best-effort Rollback: Der Server bleibt danach stopped/error statt
             # mit halb extrahierten Dateien als running markiert zu werden.
@@ -309,7 +343,7 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
         try:
             from services.backup_paths import read_pg_dump_bytes_from_archive
 
-            pg_bytes = read_pg_dump_bytes_from_archive(backup.filename)
+            pg_bytes = read_pg_dump_bytes_from_archive(tar_path)
             if pg_bytes:
                 from services import postgres_service as _pg
 
@@ -341,6 +375,10 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
     finally:
         # Lock IMMER freigeben (Erfolg, Fehler, HTTPException) — kein Deadlock.
         lock.release()
+        # Temp-dir der .enc-Entschluesselung immer aufraeumen (VAL-FIX-004).
+        # Entfernt das temp tar.gz (Plaintext liegt nur temporaer vor).
+        if decrypt_tmp_dir:
+            shutil.rmtree(decrypt_tmp_dir, ignore_errors=True)
 
     return {"message": "Backup wiederhergestellt"}
 

@@ -149,7 +149,7 @@ class TestSchedulerS3Upload:
         # (der Orchestrator ruft run_backup intern auf), damit der echte Orchestrator
         # den S3-Upload ausfuehrt, ohne /opt/msm-Pfade zu benoetigen.
         def _fake_run_backup(server_id, db, *, name=None, timeout_seconds=600,
-                             encrypted=False, encryption_algorithm=None):
+                             encrypted=False, encryption_algorithm=None, encrypt_local=False):
             return backup_pre
 
         from services.scheduler_service import _backup_server_task
@@ -188,7 +188,7 @@ class TestSchedulerS3Upload:
         backup_pre = _make_real_tar(db, test_server, tmp_path)
 
         def _fake_run_backup(server_id, db, *, name=None, timeout_seconds=600,
-                             encrypted=False, encryption_algorithm=None):
+                             encrypted=False, encryption_algorithm=None, encrypt_local=False):
             return backup_pre
 
         from services.scheduler_service import _backup_server_task
@@ -232,7 +232,7 @@ class TestSchedulerS3FailureResilience:
         backup_pre = _make_real_tar(db, test_server, tmp_path)
 
         def _fake_run_backup(server_id, db, *, name=None, timeout_seconds=600,
-                             encrypted=False, encryption_algorithm=None):
+                             encrypted=False, encryption_algorithm=None, encrypt_local=False):
             return backup_pre
 
         from services.scheduler_service import _backup_server_task
@@ -271,7 +271,7 @@ class TestSchedulerS3FailureResilience:
         backup_pre = _make_real_tar(db, test_server, tmp_path)
 
         def _fake_run_backup(server_id, db, *, name=None, timeout_seconds=600,
-                             encrypted=False, encryption_algorithm=None):
+                             encrypted=False, encryption_algorithm=None, encrypt_local=False):
             return backup_pre
 
         from services.scheduler_service import _backup_server_task
@@ -304,7 +304,7 @@ class TestSchedulerS3FailureResilience:
         backup_pre = _make_real_tar(db, test_server, tmp_path)
 
         def _fake_run_backup(server_id, db, *, name=None, timeout_seconds=600,
-                             encrypted=False, encryption_algorithm=None):
+                             encrypted=False, encryption_algorithm=None, encrypt_local=False):
             return backup_pre
 
         from services.scheduler_service import _backup_server_task
@@ -364,7 +364,7 @@ class TestAutoBackupOnStart:
         backup_pre = _make_real_tar(db, test_server, tmp_path)
 
         def _fake_run_backup(server_id, db, *, name=None, timeout_seconds=600,
-                             encrypted=False, encryption_algorithm=None):
+                             encrypted=False, encryption_algorithm=None, encrypt_local=False):
             return backup_pre
 
         from fastapi.testclient import TestClient
@@ -409,7 +409,7 @@ class TestAutoBackupOnStart:
         backup_pre = _make_real_tar(db, test_server, tmp_path)
 
         def _fake_run_backup(server_id, db, *, name=None, timeout_seconds=600,
-                             encrypted=False, encryption_algorithm=None):
+                             encrypted=False, encryption_algorithm=None, encrypt_local=False):
             return backup_pre
 
         from fastapi.testclient import TestClient
@@ -452,7 +452,7 @@ class TestAutoBackupOnStart:
         backup_pre = _make_real_tar(db, test_server, tmp_path)
 
         def _fake_run_backup(server_id, db, *, name=None, timeout_seconds=600,
-                             encrypted=False, encryption_algorithm=None):
+                             encrypted=False, encryption_algorithm=None, encrypt_local=False):
             return backup_pre
 
         from fastapi.testclient import TestClient

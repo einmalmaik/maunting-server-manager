@@ -99,10 +99,21 @@ def create_panel_backup(db: Session, *, name: str | None = None) -> "PanelBackup
     backup_dir = _get_backup_dir()
     os.makedirs(backup_dir, exist_ok=True)
 
+    # Pruefen ob lokales Backup verschluesselt werden soll (Passwort gesetzt).
+    from services.backup_config_service import BackupConfigService
+    password_set = BackupConfigService.is_backup_password_set()
+    if not password_set:
+        logger.warning(
+            "Kein Backup-Passwort gesetzt — Panel-Backup wird als plaintext gespeichert (backward compat)"
+        )
+
     # Temp-Verzeichnis fuer den rohen DB-Dump (vor dem tar.gz). Wird am Ende
     # (egal ob Erfolg oder Fehler) bereinigt.
     tmp_dir = os.path.join(backup_dir, f".tmp_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}")
     os.makedirs(tmp_dir, exist_ok=True)
+
+    # Bei lokaler Verschluesselung: weiteres 0700 temp-dir fuer das Plaintext tar.gz
+    enc_tmp_dir: str | None = None
 
     try:
         # 1. DB-Dump erstellen (pg_dump oder sqlite3 .dump).
@@ -118,18 +129,65 @@ def create_panel_backup(db: Session, *, name: str | None = None) -> "PanelBackup
         manifest = _build_manifest(db_type, config_list)
         manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
 
-        # 4. tar.gz lokal speichern.
+        # 4. tar.gz erstellen (in temp-dir wenn Verschluesselung, sonst direkt im backup_dir).
         # Timestamp mit Mikrosekunden — verhindert Kollisionen bei schnellen
         # aufeinanderfolgenden Backups (gleiche Sekunde).
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"panel_{timestamp}.tar.gz"
-        local_path = os.path.join(backup_dir, filename)
+        tar_filename = f"panel_{timestamp}.tar.gz"
+
+        if password_set:
+            # 0700 temp-dir fuer Plaintext tar.gz (VAL-FIX-002)
+            import tempfile as _tf
+            enc_tmp_dir = _tf.mkdtemp(prefix="msm_panel_enc_", dir=backup_dir)
+            try:
+                os.chmod(enc_tmp_dir, 0o700)
+            except OSError:
+                pass
+            tar_path = os.path.join(enc_tmp_dir, tar_filename)
+        else:
+            tar_path = os.path.join(backup_dir, tar_filename)
+
         _write_archive(
-            local_path,
+            tar_path,
             db_dump_bytes=db_dump_bytes,
             manifest_bytes=manifest_bytes,
             config_blobs=config_blobs,
         )
+
+        if password_set:
+            # 0600 Permissions auf Plaintext tar.gz
+            try:
+                os.chmod(tar_path, 0o600)
+            except OSError:
+                pass
+            # tar.gz via DIS zu .enc verschluesseln (VAL-FIX-001)
+            # Best-Effort: bei DIS-Fehler Fall back zu plaintext tar.gz
+            enc_filename = f"panel_{timestamp}.enc"
+            enc_path = os.path.join(backup_dir, enc_filename)
+            try:
+                _encrypt_panel_local_backup(tar_path, enc_path)
+                # Plaintext tar.gz sicher loeschen
+                try:
+                    os.remove(tar_path)
+                except OSError:
+                    pass
+                local_path = enc_path
+            except Exception as enc_exc:
+                # DIS nicht erreichbar: lokales Backup als plaintext (Best-Effort).
+                logger.warning(
+                    "Lokale Verschluesselung fehlgeschlagen (%s) — Panel-Backup als plaintext (backward compat)",
+                    type(enc_exc).__name__,
+                )
+                # tar.gz in backup_dir verschieben
+                plain_path = os.path.join(backup_dir, f"panel_{timestamp}.tar.gz")
+                try:
+                    shutil.move(tar_path, plain_path)
+                except OSError:
+                    pass
+                local_path = plain_path
+        else:
+            local_path = tar_path
+
         size_mb = os.path.getsize(local_path) // (1024 * 1024)
 
         # 5. PanelBackup-Record persistieren (vor S3-Upload, damit die ID fuer
@@ -170,8 +228,11 @@ def create_panel_backup(db: Session, *, name: str | None = None) -> "PanelBackup
         raise
     finally:
         # Temp-Verzeichnis immer bereinigen (auch bei Erfolg — tar.gz liegt ja
-        # bereits im backup_dir).
+        # bereits im backup_dir bzw. .enc).
         shutil.rmtree(tmp_dir, ignore_errors=True)
+        # 0700 temp-dir fuer Plaintext tar.gz immer bereinigen (VAL-FIX-002)
+        if enc_tmp_dir:
+            shutil.rmtree(enc_tmp_dir, ignore_errors=True)
 
 
 def get_panel_backup_settings() -> dict:
@@ -382,14 +443,16 @@ def prepare_panel_restore(backup_id: int, db: Session) -> dict:
     1. PanelBackup-Record laden (404 wenn nicht gefunden).
     2. Archiv-Quelle ermitteln:
        - Lokale Datei vorhanden: direkt verwenden (kein S3, kein Decrypt).
-       - Lokal fehlt, s3_key vorhanden: von S3 downloaden, via DIS
-         entschluesseln, lokal speichern (wiederherstellen der lokalen Kopie).
+       - Lokal fehlt, s3_key vorhanden: von S3 downloaden (+ ggf. DIS
+         entschluesseln fuer legacy .tar.gz), lokal speichern.
        - Beides fehlt: Fehler (keine Archiv-Quelle).
-    3. Archiv in Temp-Verzeichnis entpacken (um manifest.json zu lesen).
-    4. Restore-Script generieren (bash, self-contained, idempotent).
-    5. Script ausfuehrbar machen (chmod +x).
-    6. Temp-Verzeichnis bereinigen (nur das Script bleibt im backup_dir).
-    7. Backup-Key invalidieren (try/finally, bei S3-Pfad).
+    3. Wenn .enc: DIS-Entschluesselung zu temp tar.gz (VAL-FIX-004).
+    4. Archiv (tar.gz) in Temp-Verzeichnis entpacken (um manifest.json zu lesen).
+    5. Restore-Script generieren (bash, self-contained, idempotent).
+       Bei .enc: Script enthaelt Decrypt-Schritt via MSM Python-Backend.
+    6. Script ausfuehrbar machen (chmod +x).
+    7. Temp-Verzeichnisse bereinigen (nur das Script bleibt im backup_dir).
+    8. Backup-Key invalidieren (try/finally, bei S3/Decrypt-Pfad).
 
     Returns: {"script_path": str, "instructions": str}
     """
@@ -407,38 +470,87 @@ def prepare_panel_restore(backup_id: int, db: Session) -> dict:
     # Temp-Verzeichnis fuer die Extraktion (wird am Ende bereinigt).
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     tmp_dir = os.path.join(backup_dir, f".restore_tmp_{backup.id}_{ts}")
+    # Temp-Verzeichnis fuer .enc-Entschluesselung (wird am Ende bereinigt).
+    decrypt_tmp_dir: str | None = None
 
     key_id: str | None = None
     try:
-        # 1. Archiv-Quelle sicherstellen (lokal oder S3+decrypt).
+        # 1. Archiv-Quelle sicherstellen (lokal oder S3+download).
         key_id = _ensure_local_archive(backup, db)
 
-        # 2. Archiv in Temp-Verzeichnis entpacken.
-        _extract_archive_to_dir(backup.local_path, tmp_dir)
+        # 2. Wenn .enc: zu temp tar.gz entschluesseln (VAL-FIX-004).
+        is_enc = backup.local_path.endswith(".enc")
+        if is_enc:
+            from services.backup_crypto_service import (
+                BackupCryptoService,
+                BackupDecryptionError,
+                BackupCryptoError,
+            )
+            import tempfile as _tf
 
-        # 3. manifest.json lesen (db_type, config_list).
+            decrypt_tmp_dir = _tf.mkdtemp(prefix="msm_panel_restore_")
+            try:
+                os.chmod(decrypt_tmp_dir, 0o700)
+            except OSError:
+                pass
+
+            from services.backup_config_service import BackupConfigService
+            dec_key_id: str | None = None
+            try:
+                password = BackupConfigService.get_backup_password()
+                salt = BackupConfigService.get_backup_salt()
+                dec_key_id = BackupCryptoService.init_key(password, salt)
+                tar_name = os.path.basename(backup.local_path).replace(".enc", ".tar.gz")
+                tar_path_for_extract = os.path.join(decrypt_tmp_dir, tar_name)
+                with open(backup.local_path, "rb") as f:
+                    BackupCryptoService.decrypt_to_file(f, dec_key_id, tar_path_for_extract)
+                try:
+                    os.chmod(tar_path_for_extract, 0o600)
+                except OSError:
+                    pass
+                archive_for_extract = tar_path_for_extract
+            except BackupDecryptionError:
+                raise PanelRestoreDecryptError("Entschluesselung fehlgeschlagen")
+            except BackupCryptoError:
+                raise PanelRestoreError("Verschlüsselungs-Service nicht verfügbar")
+            finally:
+                if dec_key_id:
+                    try:
+                        BackupCryptoService.invalidate_key(dec_key_id)
+                    except Exception:
+                        logger.warning(
+                            "Key-Invalidierung fehlgeschlagen (Panel-Restore .enc Decrypt)"
+                        )
+        else:
+            archive_for_extract = backup.local_path
+
+        # 3. Archiv (tar.gz) in Temp-Verzeichnis entpacken.
+        _extract_archive_to_dir(archive_for_extract, tmp_dir)
+
+        # 4. manifest.json lesen (db_type, config_list).
         manifest = _read_manifest(tmp_dir)
         db_type = manifest.get("db_type", backup.db_type or "postgresql")
         config_list = manifest.get("config_list", [])
 
-        # 4. Restore-Script generieren.
+        # 5. Restore-Script generieren.
         script_path = _generate_restore_script(
             backup_id=backup.id,
             archive_path=backup.local_path,
             db_type=db_type,
             config_list=config_list,
             timestamp=ts,
+            is_encrypted=is_enc,
         )
 
-        # 5. Script ausfuehrbar machen (chmod +x).
+        # 6. Script ausfuehrbar machen (chmod +x).
         _make_executable(script_path)
 
-        # 6. Anweisungen (Deutsch, mit sudo bash und Warnung).
+        # 7. Anweisungen (Deutsch, mit sudo bash und Warnung).
         instructions = _build_restore_instructions(script_path)
 
         logger.info(
-            "Panel-Restore vorbereitet (backup_id=%s, script generiert)",
-            backup.id,
+            "Panel-Restore vorbereitet (backup_id=%s, script generiert, encrypted=%s)",
+            backup.id, is_enc,
         )
 
         return {
@@ -457,6 +569,9 @@ def prepare_panel_restore(backup_id: int, db: Session) -> dict:
     finally:
         # Temp-Verzeichnis immer bereinigen (VAL-PANEL-RESTORE-012).
         shutil.rmtree(tmp_dir, ignore_errors=True)
+        # Decrypt-temp-dir bereinigen (VAL-FIX-004: temp tar.gz wird geloescht).
+        if decrypt_tmp_dir:
+            shutil.rmtree(decrypt_tmp_dir, ignore_errors=True)
         # Backup-Key immer invalidieren (VAL-PANEL-RESTORE-004, success und failure).
         if key_id:
             try:
@@ -473,11 +588,14 @@ def _ensure_local_archive(backup, db: Session) -> str | None:
     """Stellt sicher, dass das Archiv lokal verfuegbar ist.
 
     Wenn die lokale Datei existiert: direkt verwenden (kein S3, kein Decrypt).
-    Wenn lokal fehlt aber s3_key: von S3 downloaden, via DIS entschluesseln,
-    lokal speichern. Gibt key_id zurueck (oder None wenn kein S3-Pfad).
+    Wenn lokal fehlt aber s3_key:
+    - .enc Dateiname: S3-Objekt direkt herunterladen (bereits verschluesselt).
+      Entschluesselung erfolgt spaeter in prepare_panel_restore.
+    - .tar.gz Dateiname (legacy): S3 download + DIS entschluesseln zu .tar.gz.
+    Gibt key_id zurueck (oder None wenn kein S3-Pfad oder .enc Direkt-Download).
 
     Wirft PanelRestoreNoArchiveError wenn keine Quelle verfuegbar.
-    Wirft PanelRestoreDecryptError bei Entschluesselungsfehler.
+    Wirft PanelRestoreDecryptError bei Entschluesselungsfehler (legacy Pfad).
     """
     if backup.local_path and os.path.exists(backup.local_path):
         # Lokale Datei vorhanden — direkt verwenden (VAL-PANEL-RESTORE-003).
@@ -491,7 +609,25 @@ def _ensure_local_archive(backup, db: Session) -> str | None:
             "Keine Archiv-Quelle verfuegbar (lokal fehlt, kein S3-Key)"
         )
 
-    # S3-Download + DIS-Entschluesselung (VAL-PANEL-RESTORE-002).
+    # Neues Format: .enc Dateiname → S3 direkt herunterladen (kein Decrypt)
+    if backup.local_path and backup.local_path.endswith(".enc"):
+        from services.s3_service import S3Service
+        try:
+            body = S3Service.download_stream(backup.s3_key)
+            with open(backup.local_path, "wb") as f:
+                for chunk in body.iter_chunks():
+                    f.write(chunk)
+            logger.info(
+                "Panel-Restore: S3-Download erfolgreich (backup_id=%s, .enc direkt)",
+                backup.id,
+            )
+            return None
+        except Exception as exc:
+            raise PanelRestoreError(
+                "Archiv-Download fehlgeschlagen"
+            ) from exc
+
+    # Legacy Pfad: .tar.gz Dateiname → S3 download + DIS decrypt
     from services.backup_config_service import BackupConfigService
     from services.backup_crypto_service import (
         BackupCryptoService,
@@ -510,7 +646,7 @@ def _ensure_local_archive(backup, db: Session) -> str | None:
                 body.iter_chunks(), key_id, backup.local_path
             )
             logger.info(
-                "Panel-Restore: S3-Download + Decrypt erfolgreich (backup_id=%s)",
+                "Panel-Restore: S3-Download + Decrypt erfolgreich (backup_id=%s, legacy .tar.gz)",
                 backup.id,
             )
             return key_id
@@ -571,12 +707,17 @@ def _generate_restore_script(
     db_type: str,
     config_list: list[str],
     timestamp: str,
+    is_encrypted: bool = False,
 ) -> str:
     """Generiert das Restore-Script (bash) und speichert es im backup_dir.
 
     Das Script ist self-contained: es extrahiert das Archiv zur Laufzeit in
     ein temporares Verzeichnis, stoppt den Panel-Service, sichert die .env,
     stellt die Datenbank und Configs wieder her und startet den Panel neu.
+
+    Bei verschluesselten Backups (is_encrypted=True): das Script enthaelt
+    zusaetzlich einen Decrypt-Schritt, der das .enc-Archiv via MSM Python-
+    Backend zu einem temp tar.gz entschluesselt (VAL-FIX-004).
 
     Sicherheits-Invarianten:
     - Keine Plaintext-Secrets im Script (nur Pfad-Referenzen).
@@ -612,21 +753,63 @@ def _generate_restore_script(
     lines.append('RESTORE_DIR=$(mktemp -d)')
     lines.append('trap \'rm -rf "$RESTORE_DIR"\' EXIT')
     lines.append("")
-    lines.append("# 1. Extract archive")
-    lines.append('tar -xzf "$ARCHIVE_PATH" -C "$RESTORE_DIR"')
-    lines.append("")
-    lines.append("# 2. Stop panel service")
-    lines.append("systemctl --user stop msm-panel.service")
-    lines.append("")
-    lines.append("# 3. Backup current .env (safety copy with unique timestamp)")
+
+    if is_encrypted:
+        # .enc-Backup: zuerst via MSM Python-Backend entschluesseln, dann extrahieren.
+        # Der Decrypt-Schritt nutzt BackupCryptoService (DIS Sidecar). Das temp
+        # tar.gz wird nach der Extraktion bereinigt (trap erweitert).
+        lines.append("# 1. Decrypt encrypted archive (.enc -> temp tar.gz)")
+        lines.append('DECRYPT_TAR="$RESTORE_DIR/archive.tar.gz"')
+        # MSM Backend-Pfad (Production: /opt/msm/backend)
+        lines.append('MSM_BACKEND_DIR="$(dirname "$CONFIG_DIR")/backend"')
+        lines.append('if [ ! -d "$MSM_BACKEND_DIR" ]; then')
+        lines.append('    echo "MSM Backend nicht gefunden unter $MSM_BACKEND_DIR" >&2')
+        lines.append('    exit 1')
+        lines.append('fi')
+        lines.append('cd "$MSM_BACKEND_DIR"')
+        lines.append('venv/bin/python3 -c "\\')
+        lines.append('from services.backup_config_service import BackupConfigService\\')
+        lines.append('from services.backup_crypto_service import BackupCryptoService\\')
+        lines.append('import os, sys\\')
+        lines.append('pw = BackupConfigService.get_backup_password()\\')
+        lines.append('salt = BackupConfigService.get_backup_salt()\\')
+        lines.append('kid = BackupCryptoService.init_key(pw, salt)\\')
+        lines.append('try:\\')
+        lines.append('    with open(sys.argv[1], \\"rb\\") as f:\\')
+        lines.append('        BackupCryptoService.decrypt_to_file(f, kid, sys.argv[2])\\')
+        lines.append('finally:\\')
+        lines.append('    BackupCryptoService.invalidate_key(kid)\\')
+        lines.append('" "$ARCHIVE_PATH" "$DECRYPT_TAR"')
+        lines.append('trap \'rm -rf "$RESTORE_DIR"\' EXIT')
+        lines.append("")
+        lines.append("# 2. Extract decrypted archive")
+        lines.append('tar -xzf "$DECRYPT_TAR" -C "$RESTORE_DIR"')
+        lines.append("")
+        lines.append("# 3. Stop panel service")
+        lines.append("systemctl --user stop msm-panel.service")
+        lines.append("")
+        lines.append("# 4. Backup current .env (safety copy with unique timestamp)")
+    else:
+        lines.append("# 1. Extract archive")
+        lines.append('tar -xzf "$ARCHIVE_PATH" -C "$RESTORE_DIR"')
+        lines.append("")
+        lines.append("# 2. Stop panel service")
+        lines.append("systemctl --user stop msm-panel.service")
+        lines.append("")
+        lines.append("# 3. Backup current .env (safety copy with unique timestamp)")
     lines.append('ENV_BACKUP="$CONFIG_DIR/.env.pre_restore_$(date +%Y%m%d_%H%M%S)"')
     lines.append('if [ -f "$CONFIG_DIR/.env" ]; then')
     lines.append('    cp "$CONFIG_DIR/.env" "$ENV_BACKUP"')
     lines.append('fi')
     lines.append("")
 
+    # Step-Nummern verschieben sich bei .enc (Decrypt + Extract = 2 Schritte extra)
+    _step_db = 5 if is_encrypted else 4
+    _step_cfg = 6 if is_encrypted else 5
+    _step_restart = 7 if is_encrypted else 6
+
     if db_type == "sqlite3":
-        lines.append("# 4. Restore database (SQLite)")
+        lines.append(f"# {_step_db}. Restore database (SQLite)")
         lines.append("# Load current DATABASE_URL from .env (before overwrite)")
         lines.append('set -a')
         lines.append('. "$CONFIG_DIR/.env" 2>/dev/null || true')
@@ -634,7 +817,7 @@ def _generate_restore_script(
         lines.append('DB_PATH="${DATABASE_URL#sqlite:///}"')
         lines.append('sqlite3 "$DB_PATH" < "$RESTORE_DIR/msm_db.sql"')
     else:
-        lines.append("# 4. Restore database (PostgreSQL)")
+        lines.append(f"# {_step_db}. Restore database (PostgreSQL)")
         lines.append("# Load current DATABASE_URL from .env (before overwrite)")
         lines.append('set -a')
         lines.append('. "$CONFIG_DIR/.env" 2>/dev/null || true')
@@ -642,7 +825,7 @@ def _generate_restore_script(
         lines.append('psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$RESTORE_DIR/msm_db.sql"')
 
     lines.append("")
-    lines.append("# 5. Restore config files")
+    lines.append(f"# {_step_cfg}. Restore config files")
 
     if config_list:
         for name in config_list:
@@ -652,7 +835,7 @@ def _generate_restore_script(
         lines.append("# (no config files in manifest — skipping)")
 
     lines.append("")
-    lines.append("# 6. Restart panel service")
+    lines.append(f"# {_step_restart}. Restart panel service")
     lines.append("systemctl --user start msm-panel.service")
     lines.append("")
     lines.append('echo "Restore complete. Check panel status: systemctl --user status msm-panel.service"')
@@ -706,6 +889,11 @@ def _maybe_upload_to_s3(
 
     Bei Fehlern (S3/DIS) wird s3_key=null belassen und nur gewarnt.
     Backup-Key wird immer invalidiert (try/finally).
+
+    Zwei Pfade:
+    - .enc Datei (bereits lokal verschluesselt): direkt zu S3 hochladen,
+      kein DIS encrypt noetig (gleiche verschluesselte Bytes).
+    - .tar.gz Datei (legacy Plaintext): via DIS encrypt-stream verschluesseln.
     """
     from services.backup_config_service import BackupConfigService
     from services.backup_crypto_service import BackupCryptoService
@@ -727,18 +915,22 @@ def _maybe_upload_to_s3(
 
     key_id: str | None = None
     try:
-        password = BackupConfigService.get_backup_password()
-        salt = BackupConfigService.get_backup_salt()
-        key_id = BackupCryptoService.init_key(password, salt)
-
         # S3-Object-Key: msm-backups/panel/panel_{timestamp}_{id}.enc
         s3_key = f"{_S3_KEY_PREFIX}/panel_{timestamp}_{backup.id}.enc"
 
-        # Stream: lokale Datei -> DIS encrypt-stream -> S3 upload_stream.
-        # Keine temp verschluesselte Datei (reines Streaming).
         from services.s3_service import S3Service
-        encrypted_stream = BackupCryptoService.encrypt_file_stream(local_path, key_id)
-        S3Service.upload_stream(encrypted_stream, s3_key)
+
+        if local_path.endswith(".enc"):
+            # Bereits lokal verschluesselt — direkt zu S3 hochladen (kein DIS noetig).
+            with open(local_path, "rb") as f:
+                S3Service.upload_stream(f, s3_key)
+        else:
+            # Legacy .tar.gz — via DIS encrypt-stream verschluesseln und hochladen.
+            password = BackupConfigService.get_backup_password()
+            salt = BackupConfigService.get_backup_salt()
+            key_id = BackupCryptoService.init_key(password, salt)
+            encrypted_stream = BackupCryptoService.encrypt_file_stream(local_path, key_id)
+            S3Service.upload_stream(encrypted_stream, s3_key)
 
         # Erfolg: s3_key, s3_bucket, encrypted=True speichern.
         bucket = BackupConfigService.get_s3_config().get("bucket") or ""
@@ -763,6 +955,7 @@ def _maybe_upload_to_s3(
         )
     finally:
         # Key IMMER invalidieren (Erfolg und Fehler) — kein Key-Leak.
+        # Nur wenn ein Key initialisiert wurde (.tar.gz legacy Pfad).
         if key_id:
             try:
                 BackupCryptoService.invalidate_key(key_id)
@@ -1008,6 +1201,40 @@ def _add_bytes(tar: tarfile.TarFile, arcname: str, data: bytes) -> None:
     info.size = len(data)
     info.mtime = 0  # reproduzierbare Archive
     tar.addfile(info, io.BytesIO(data))
+
+
+def _encrypt_panel_local_backup(tar_path: str, enc_path: str) -> None:
+    """Verschluesselt ein lokales Panel-Backup tar.gz zu .enc via DIS.
+
+    Stream: tar.gz -> DIS encrypt-stream -> .enc Datei.
+    Key-Lifecycle: init_key vor Verschluesselung, invalidate_key immer danach.
+    Setzt 0600-Permissions auf die .enc-Datei.
+    """
+    from services.backup_config_service import BackupConfigService
+    from services.backup_crypto_service import BackupCryptoService
+
+    key_id: str | None = None
+    try:
+        password = BackupConfigService.get_backup_password()
+        salt = BackupConfigService.get_backup_salt()
+        key_id = BackupCryptoService.init_key(password, salt)
+
+        encrypted_stream = BackupCryptoService.encrypt_file_stream(tar_path, key_id)
+        with open(enc_path, "wb") as f:
+            for chunk in encrypted_stream:
+                f.write(chunk)
+        try:
+            os.chmod(enc_path, 0o600)
+        except OSError:
+            pass  # Windows
+    finally:
+        if key_id:
+            try:
+                BackupCryptoService.invalidate_key(key_id)
+            except Exception:
+                logger.warning(
+                    "Key-Invalidierung fehlgeschlagen (Panel-Backup lokale Verschluesselung)"
+                )
 
 
 # ── Verzeichnis-Helper ───────────────────────────────────────────────────
