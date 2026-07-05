@@ -516,3 +516,158 @@ class TestSetServerPermissionsEscalation:
         )
         assert r.status_code == 200
         assert set(r.json()["permissions"]) == {"server.start", "server.stop"}
+
+
+class TestDeleteUserFKCleanup:
+    """Reproduziert den Production-Bug, bei dem DELETE /api/admin/users/{id}
+    mit ForeignKeyViolation fehlschlaegt, weil audit_logs/refresh_tokens/
+    jwt_blacklist/backup_codes FKs auf users.id haben ohne ON DELETE CASCADE.
+    """
+
+    def test_delete_user_with_audit_logs_succeeds(
+        self, client: TestClient, db: Session, regular_user: User, owner_cookies: dict
+    ):
+        """User mit vorhandenen Audit-Logs loeschbar — Audit-Log user_id wird auf NULL gesetzt."""
+        from models import AuditLog
+        # Audit-Log fuer den Victim-User anlegen
+        log = AuditLog(
+            user_id=regular_user.id,
+            action="test_action",
+            target_type="user",
+            target_id=regular_user.id,
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+        log_id = log.id
+
+        r = client.delete(
+            f"/api/admin/users/{regular_user.id}",
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 200
+        assert r.json() == {"message": "User gelöscht"}
+
+        # User ist weg
+        assert db.query(User).filter(User.id == regular_user.id).first() is None
+        # Audit-Log existiert noch (forensisch relevant), aber user_id ist NULL
+        db.expire_all()  # force re-fetch (umgeht Identity-Map-Stale-State)
+        surviving = db.query(AuditLog).filter(AuditLog.id == log_id).first()
+        assert surviving is not None
+        assert surviving.user_id is None
+
+    def test_delete_user_with_refresh_tokens_succeeds(
+        self, client: TestClient, db: Session, regular_user: User, owner_cookies: dict
+    ):
+        """User mit Refresh-Tokens loeschbar — Tokens werden mit-entfernt."""
+        from datetime import datetime, timezone, timedelta
+        from models import RefreshToken
+        user_id = regular_user.id  # vor dem Delete cachen, danach ist das ORM-Objekt "deleted"
+        rt = RefreshToken(
+            user_id=user_id,
+            token_hash="hashed-token-abc123",
+            family="family-xyz",
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+        db.add(rt)
+        db.commit()
+
+        r = client.delete(
+            f"/api/admin/users/{user_id}",
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 200
+
+        db.expire_all()  # force re-fetch (umgeht Identity-Map-Stale-State)
+        # Refresh-Token wurde mit-geloescht
+        assert db.query(RefreshToken).filter(RefreshToken.user_id == user_id).count() == 0
+
+    def test_delete_user_with_jwt_blacklist_succeeds(
+        self, client: TestClient, db: Session, regular_user: User, owner_cookies: dict
+    ):
+        """User mit JWT-Blacklist-Eintraegen loeschbar — Eintraege werden mit-entfernt."""
+        from models import JwtBlacklist
+        from datetime import datetime, timezone, timedelta
+        user_id = regular_user.id
+        jti = JwtBlacklist(
+            jti="blacklisted-jti-456",
+            user_id=user_id,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db.add(jti)
+        db.commit()
+
+        r = client.delete(
+            f"/api/admin/users/{user_id}",
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 200
+
+        db.expire_all()
+        # JWT-Blacklist-Eintrag wurde mit-geloescht
+        assert db.query(JwtBlacklist).filter(JwtBlacklist.jti == "blacklisted-jti-456").first() is None
+
+    def test_delete_user_with_backup_codes_succeeds(
+        self, client: TestClient, db: Session, regular_user: User, owner_cookies: dict
+    ):
+        """User mit Backup-Codes loeschbar — Codes werden mit-entfernt."""
+        from models import BackupCode
+        user_id = regular_user.id
+        bc = BackupCode(user_id=user_id, code_hash="hashed-code-789")
+        db.add(bc)
+        db.commit()
+
+        r = client.delete(
+            f"/api/admin/users/{user_id}",
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 200
+
+        db.expire_all()
+        # Backup-Code wurde mit-geloescht
+        assert db.query(BackupCode).filter(BackupCode.user_id == user_id).count() == 0
+
+    def test_delete_user_with_all_fk_dependencies_succeeds(
+        self, client: TestClient, db: Session, regular_user: User, owner_cookies: dict
+    ):
+        """End-to-End: User mit allen 4 FK-Typen gleichzeitig loeschbar (Production-Szenario)."""
+        from datetime import datetime, timezone, timedelta
+        from models import AuditLog, RefreshToken, JwtBlacklist, BackupCode
+        user_id = regular_user.id
+        db.add(AuditLog(user_id=user_id, action="login", target_type="user", target_id=user_id))
+        db.add(RefreshToken(
+            user_id=user_id, token_hash="h-rt", family="f-rt",
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+        ))
+        db.add(JwtBlacklist(
+            jti="bl-1", user_id=user_id,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        ))
+        db.add(BackupCode(user_id=user_id, code_hash="bc-1"))
+        db.commit()
+
+        r = client.delete(
+            f"/api/admin/users/{user_id}",
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 200
+        db.expire_all()
+        assert db.query(User).filter(User.id == user_id).first() is None
+
+    def test_delete_owner_blocked(
+        self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+    ):
+        """Owner kann weiterhin nicht geloescht werden (separater Schutz)."""
+        r = client.delete(
+            f"/api/admin/users/{owner_user.id}",
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 403
+        # Owner ist noch da
+        assert db.query(User).filter(User.id == owner_user.id).first() is not None

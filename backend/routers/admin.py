@@ -2,7 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Server, ServerPermission, User
+from models import (
+    AuditLog,
+    BackupCode,
+    JwtBlacklist,
+    RefreshToken,
+    Server,
+    ServerPermission,
+    User,
+)
 from schemas.user import AdminUserCreate, UserResponse, UserUpdate
 from schemas.role import (
     AssignRoleRequest,
@@ -146,6 +154,23 @@ def delete_user(
     if user.role_id is not None:
         target_keys = role_permission_keys(db, user.role_id)
         _ensure_no_global_escalation(db, actor, target_keys)
+
+    # FK-Cleanup: 4 abhängige Tabellen haben keine ON DELETE CASCADE-Regel
+    # (audit_logs / backup_codes / jwt_blacklist / refresh_tokens).
+    # Wir raeumen sie hier explizit auf, sonst blockt die FK-Constraint das DELETE.
+    # Audit-Logs NICHT loeschen (sicherheitsrelevant fuer Forensik) — nur user_id entkoppeln.
+    # Die anderen 3 sind reine Session-/Recovery-Hilfsdaten ohne Forensik-Wert.
+    # synchronize_session=False: nicht die Identity-Map aktualisieren, sondern
+    # direkt per bulk-DELETE/UPDATE arbeiten. Das ist schneller und sicherer
+    # bei Foreign-Key-Cleanups vor dem eigentlichen User-DELETE.
+    db.query(AuditLog).filter(AuditLog.user_id == user_id).update(
+        {AuditLog.user_id: None}, synchronize_session=False
+    )
+    db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(JwtBlacklist).filter(JwtBlacklist.user_id == user_id).delete(synchronize_session=False)
+    db.query(BackupCode).filter(BackupCode.user_id == user_id).delete(synchronize_session=False)
+    db.flush()  # FK-Cleanups jetzt in der DB sichtbar, bevor user-DELETE laeuft
+
     db.delete(user)
     db.commit()
     return {"message": "User gelöscht"}
