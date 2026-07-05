@@ -1,72 +1,3 @@
-# Environment files (anywhere in the repository)
-.env
-.env.*
-!.env.example
-
-# MSM console logs (per-server, runtime)
-backend/logs/
-
-# Community-Blueprints (User-Daten, getrennt vom App-Code)
-backend/data/blueprints/
-
-# Virtual environments (anywhere in the repository)
-.venv/
-venv/
-env/
-__pycache__/
-panel/frontend/node_modules/
-panel/frontend/dist/
-panel/frontend/tsconfig.app.tsbuildinfo
-*.pyc
-CLAUDE.md
-GEMINI.md
-cloud.md
-CLOUD.md
-
-.pytest-panel-remove-
-.pytest-panel-missing-mod-
-.pytest-panel-unsafe-remove-
-.pytest-panel-add-mod-
-
-# Databases
-*.db
-*.sqlite
-*.sqlite3
-
-# Claude Code local settings
-.claude/settings.local.json
-*.kiro
-/.pytest-panel-add-config-262
-/Design idee für mssm
-/frontend/node_modules
-/frontend/dist
-*.tar
-/backend/venv-wsl
-/.refact
-backend/maunting-server-manager.code-workspace
-
-# Production runtime data (when the git working tree root on the server is /opt/msm or similar)
-# These MUST be protected so that `git clean -fd` (even on prod deploys) does not delete servers, DBs, logs or community blueprints.
-# Note: git clean -fd by default respects .gitignore and will NOT remove these.
-/servers/
-/backups/
-/blueprints/
-/.setup_completed
-*.db
-*.sqlite
-*.sqlite3
-backend/logs/
-backend/data/
-
-# Rootless Docker data for the msm user (HOME=/opt/msm on prod). 
-# git clean -fd would otherwise nuke containerd blobs / image layers if .local is untracked.
-# This is what caused the "blob not found" / lease content errors after accidental clean.
-.local/
-.local/share/docker/
-.local/share/containers/
-/backend/.mypy_cache
-frontend/frontend-dev.log
-frontend/frontend-dev.err
 backend-dev.log
 backend-dev.err
 PATCHNOTES-ms-oauth-feature.md
@@ -80,3 +11,11 @@ postgres/
 /recovery/dist
 /recovery/src-tauri/target
 /recovery/src-tauri/gen
+
+# npm cache (committed by accident, never tracked)
+.npm/
+.npmrc
+
+# Release notes live next to the GitHub release, not in the repo tree
+RELEASE_NOTES_*.md
+.hermes/
