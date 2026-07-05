@@ -19,6 +19,8 @@ postgres/
 # Release notes live next to the GitHub release, not in the repo tree
 RELEASE_NOTES_*.md
 .hermes/
+
+# Build-Caches, Logs, venvs (vom remote-Branch uebernommen)
 /.refact
 /backend/.mypy_cache
 /backend/__pycache__
@@ -30,10 +32,18 @@ RELEASE_NOTES_*.md
 /backend/services/__pycache__
 /backend/tests/__pycache__
 /backend/venv-wsl
-/frontend/dist
-/frontend/node_modules
-/Design idee für mssm
 /backend/schemas/__pycache__
 /backend/games/__pycache__
 /backend/scripts/__pycache__
+/backend/venv
+/frontend/dist
+/frontend/node_modules
+/Design idee für mssm
+
+# Secrets / .env
 backend/.env
+
+# Databases (production runs on Postgres per .env; this protects SQLite dev/test DBs)
+*.db
+*.sqlite
+*.sqlite3
