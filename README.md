@@ -198,6 +198,67 @@ Die Game-Server-Ports werden **automatisch** aus der Range 27015-27999 vergeben.
 
 ---
 
+## Backup-System
+
+MSM besitzt ein vollständiges Backup-System mit lokalen Backups und verschlüsseltem Off-Site-Upload zu S3-kompatiblem Object Storage. Alle kryptografischen Operationen laufen über den **DIS Sidecar** (`@msdis/shield`) mit AES-256-GCM und Argon2id-Key-Derivation. Das Panel selbst implementiert keine eigene Kryptografie (Zero-Knowledge-Prinzip).
+
+### Überblick
+
+- **Server-Backups:** lokales `tar.gz` pro Game-Server + verschlüsselter Streaming-Upload zu S3
+- **Panel-Backups:** `pg_dump` der MSM-Datenbank + Konfigurationsdateien (`.env`, `install.sh` etc.), verschlüsselter S3-Upload
+- **Local + S3-Mirror:** lokale Backups für schnelle Recovery, S3 für verschlüsselten Off-Site-Schutz
+- **Best-Effort S3:** schlägt der S3-Upload fehl, bleibt das lokale Backup erhalten und blockiert nicht
+- **Retention:** konfigurierbare Aufbewahrung für lokale und S3-Backups (Server und Panel separat)
+- **Scheduler:** automatische Server- und Panel-Backups inklusive S3-Upload
+
+### S3-Konfiguration
+
+In den **Einstellungen → Backup** kannst du S3-kompatiblen Object Storage einrichten:
+
+- **S3-Endpoint** (z.B. MinIO, Hetzner S3, AWS S3)
+- **Access Key & Secret Key** — verschlüsselt via DIS mit AAD-Domain-Separation gespeichert
+- **Bucket & Region**
+
+S3-Credentials und das Backup-Passwort werden nie im Klartext gespeichert. Sie liegen verschlüsselt in den `panel_settings` und sind nur über den DIS Sidecar entschlüsselbar.
+
+### Backup-Passwort
+
+Das Backup-Passwort wird für die Verschlüsselung der S3-Uploads verwendet. Es wird ebenfalls via DIS verschlüsselt in den `panel_settings` abgelegt. Ohne DIS Sidecar und das gespeicherte Passwort lassen sich S3-Backups nicht entschlüsseln.
+
+### Server-Backups vs. Panel-Backups
+
+| | Server-Backup | Panel-Backup |
+|---|--------------|--------------|
+| **Inhalt** | Game-Server-Daten (`tar.gz`) | MSM-Datenbank (`pg_dump`) + Konfigurationsdateien |
+| **Lokal** | ja | ja |
+| **S3-Upload** | ja (verschlüsselt) | ja (verschlüsselt) |
+| **Retention** | konfigurierbar | konfigurierbar |
+| **Automatisch** | ja (Scheduler) | ja (Scheduler) |
+
+Für bestehende lokale Server-Backups gibt es zudem eine **Upload-to-Cloud**-Funktion, um ältere Backups nachträglich verschlüsselt zu S3 hochzuladen.
+
+### Restore-Optionen
+
+**Server-Backups:**
+- Wiederherstellung aus lokalem Backup
+- Wiederherstellung aus S3 (Download + Entschlüsselung + Restore)
+
+**Panel-Backups:**
+- Restore startet über die **PanelBackups**-Seite (Prepare-Restore)
+- Das Panel generiert ein Bash-Restore-Skript, das folgendes ausführt:
+  1. Panel stoppen
+  2. Datenbank aus `pg_dump` wiederherstellen
+  3. Konfigurationsdateien zurückspielen
+  4. Panel neu starten
+
+### Frontend
+
+- **Einstellungen → Backup-Tab:** S3-Konfiguration und Backup-Passwort verwalten
+- **Backups-Seite:** S3-Status-Badges und Cloud-Icons pro Backup
+- **PanelBackups-Seite:** Panel-Backups erstellen, löschen, Restore vorbereiten und Einstellungen verwalten
+
+---
+
 ## Auto-Update
 
 Wenn du Auto-Update aktiviert hast, passiert folgendes:
