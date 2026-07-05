@@ -88,6 +88,53 @@ export interface PostgresResources {
   users: PostgresUser[]
 }
 
+export interface PostgresTable {
+  schema: string
+  name: string
+  row_estimate?: number | null
+  size_bytes?: number | null
+}
+
+export interface PostgresDatabaseStats {
+  status: string
+  latency_ms?: number | null
+  size_bytes?: number | null
+  table_count: number
+  active_connections?: number | null
+  max_connections?: number | null
+  database_name: string
+  engine: string
+}
+
+export interface PostgresColumnInfo {
+  name: string
+  data_type: string
+  nullable: boolean
+  default?: string | null
+}
+
+export interface PostgresIndexInfo {
+  name: string
+  definition: string
+}
+
+export interface PostgresForeignKeyInfo {
+  name: string
+  column_name: string
+  foreign_table: string
+  foreign_column: string
+}
+
+export interface PostgresTableInfo {
+  schema: string
+  name: string
+  columns: PostgresColumnInfo[]
+  indexes: PostgresIndexInfo[]
+  foreign_keys: PostgresForeignKeyInfo[]
+  size_bytes?: number | null
+  row_estimate?: number | null
+}
+
 export interface PostgresRowsResult {
   columns: string[]
   rows: Array<Record<string, unknown>>

@@ -33,6 +33,7 @@ from routers import (
     webhooks_outbound_router,
     backup_config_router,
     panel_backups_router,
+    panel_database_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -516,6 +517,7 @@ app.include_router(oauth_router)
 # CSRF auf allen Write-Endpunkten. Credentials verschluesselt via DIS.
 app.include_router(backup_config_router)
 app.include_router(panel_backups_router)
+app.include_router(panel_database_router)
 
 
 
