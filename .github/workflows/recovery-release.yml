@@ -84,11 +84,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Linux system dependencies
+        # libayatana-appindicator3-dev ist der korrekte Build-Dependency fuer
+        # libappindicator-Crates (tray-icon) auf Ubuntu jammy. Das legacy
+        # libappindicator3-dev-Paket konflikiert mit libayatana und schlaegt
+        # die apt-Installation fehl (siehe v1.6.0 CI-Run, 2026-07-05).
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
             librsvg2-dev \
             patchelf \
             libgtk-3-dev \
