@@ -9,10 +9,49 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use flate2::read::GzDecoder;
 use tar::Archive;
 use tauri::command;
+
+// ---------------------------------------------------------------------------
+// Temp-file tracking (VAL-CROSS-004: cleanup on app close)
+// ---------------------------------------------------------------------------
+
+/// Global list of temp directories created by the frontend during a recovery
+/// session. Tracked so the `RunEvent::Exit` handler in `lib.rs` can delete
+/// every leftover temp dir even if the frontend didn't clean up explicitly.
+static TEMP_DIRS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Register a temp dir path for cleanup-on-exit.
+pub fn track_temp_dir(path: &str) {
+    if let Ok(mut dirs) = TEMP_DIRS.lock() {
+        if !dirs.iter().any(|p| p == path) {
+            dirs.push(path.to_string());
+        }
+    }
+}
+
+/// Remove a path from tracking (after explicit cleanup by the frontend).
+fn untrack_temp_dir(path: &str) {
+    if let Ok(mut dirs) = TEMP_DIRS.lock() {
+        dirs.retain(|p| p != path);
+    }
+}
+
+/// Delete every tracked temp directory. Called from the `RunEvent::Exit`
+/// handler in `lib.rs` so no decrypted artifacts remain on disk after the
+/// app closes (VAL-CROSS-004).
+pub fn cleanup_all_temp_dirs() {
+    let dirs: Vec<String> = TEMP_DIRS.lock().map(|d| d.clone()).unwrap_or_default();
+    for dir in dirs {
+        let _ = fs::remove_dir_all(&dir);
+    }
+    if let Ok(mut d) = TEMP_DIRS.lock() {
+        d.clear();
+    }
+}
 
 /// Recursive file-tree node serialized to the frontend.
 ///
@@ -236,6 +275,61 @@ pub fn read_text_file(path: String) -> Result<String, String> {
         ));
     }
     fs::read_to_string(&path).map_err(|e| format!("Datei nicht lesbar: {}", e))
+}
+
+// ---------------------------------------------------------------------------
+// Temp-file management commands (M2: recovery-full-ui)
+// ---------------------------------------------------------------------------
+
+/// Create a unique temp directory for a recovery session and register it for
+/// cleanup on app exit (VAL-CROSS-004). Returns the absolute path.
+#[command]
+pub fn create_temp_dir() -> Result<String, String> {
+    let mut buf = [0u8; 16];
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    buf.copy_from_slice(&nanos.to_le_bytes());
+    let suffix: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
+
+    let dir = std::env::temp_dir().join(format!("msm-recovery-{}", suffix));
+    fs::create_dir_all(&dir).map_err(|e| format!("Temp-Verzeichnis nicht erstellbar: {}", e))?;
+
+    let path = dir.display().to_string();
+    track_temp_dir(&path);
+    Ok(path)
+}
+
+/// Write raw bytes to a file inside a temp directory. Returns the full path
+/// of the written file. Used to persist the decrypted tar.gz before calling
+/// `extract_tar_gz`.
+#[command]
+pub fn write_temp_file(dir_path: String, filename: String, data: Vec<u8>) -> Result<String, String> {
+    let dir = PathBuf::from(&dir_path);
+    if !dir.is_dir() {
+        return Err(format!("Verzeichnis existiert nicht: {}", dir.display()));
+    }
+    let file_path = dir.join(&filename);
+    let mut file =
+        fs::File::create(&file_path).map_err(|e| format!("Datei nicht erstellbar: {}", e))?;
+    file.write_all(&data)
+        .map_err(|e| format!("Schreiben fehlgeschlagen: {}", e))?;
+    file.flush().map_err(|e| format!("Schreiben fehlgeschlagen: {}", e))?;
+    Ok(file_path.display().to_string())
+}
+
+/// Recursively delete a temp directory and remove it from exit-tracking.
+/// Called by the frontend when the user starts a new session (reset).
+#[command]
+pub fn cleanup_temp_dir(dir_path: String) -> Result<(), String> {
+    let path = PathBuf::from(&dir_path);
+    if path.exists() {
+        fs::remove_dir_all(&path).map_err(|e| format!("Löschen fehlgeschlagen: {}", e))?;
+    }
+    untrack_temp_dir(&dir_path);
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -554,6 +648,87 @@ mod tests {
         assert!(json.contains("\"is_dir\":true"));
         assert!(json.contains("\"size\":5"));
         assert!(json.contains("\"children\":[]"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Temp-file management tests (VAL-CROSS-004)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_create_temp_dir_creates_and_tracks() {
+        let path = create_temp_dir().expect("create_temp_dir should succeed");
+        assert!(Path::new(&path).exists(), "temp dir must exist on disk");
+        assert!(Path::new(&path).is_dir());
+
+        // Tracked in the global list.
+        let tracked = TEMP_DIRS.lock().unwrap().clone();
+        assert!(tracked.contains(&path), "temp dir must be tracked for cleanup");
+
+        // Clean up so the test doesn't leave artifacts.
+        fs::remove_dir_all(&path).unwrap();
+    }
+
+    #[test]
+    fn test_write_temp_file_writes_bytes() {
+        let dir = create_temp_dir().expect("create_temp_dir should succeed");
+        let data = vec![0x1fu8, 0x8b, 0x00, 0x01];
+        let file_path =
+            write_temp_file(dir.clone(), "test.tar.gz".into(), data.clone())
+                .expect("write_temp_file should succeed");
+
+        assert!(Path::new(&file_path).exists());
+        let read = fs::read(&file_path).unwrap();
+        assert_eq!(read, data);
+
+        // Cleanup
+        cleanup_temp_dir(dir).expect("cleanup should succeed");
+        assert!(!Path::new(&file_path).exists(), "file must be deleted after cleanup");
+    }
+
+    #[test]
+    fn test_cleanup_temp_dir_deletes_directory() {
+        let dir = create_temp_dir().expect("create_temp_dir should succeed");
+        fs::write(Path::new(&dir).join("nested.txt"), b"data").unwrap();
+        fs::create_dir_all(Path::new(&dir).join("sub")).unwrap();
+        fs::write(Path::new(&dir).join("sub").join("deep.txt"), b"deep").unwrap();
+
+        cleanup_temp_dir(dir.clone()).expect("cleanup should succeed");
+        assert!(!Path::new(&dir).exists(), "temp dir must not exist after cleanup");
+
+        // Untracked after cleanup.
+        let tracked = TEMP_DIRS.lock().unwrap().clone();
+        assert!(!tracked.contains(&dir), "cleaned dir must be untracked");
+    }
+
+    #[test]
+    fn test_cleanup_temp_dir_missing_path_is_ok() {
+        // Cleaning up a non-existent path should not error (idempotent).
+        let result = cleanup_temp_dir("/nonexistent/path/abc123".into());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_cleanup_all_temp_dirs_removes_everything() {
+        let dir1 = create_temp_dir().unwrap();
+        let dir2 = create_temp_dir().unwrap();
+        fs::write(Path::new(&dir1).join("a.txt"), b"a").unwrap();
+        fs::write(Path::new(&dir2).join("b.txt"), b"b").unwrap();
+
+        cleanup_all_temp_dirs();
+
+        assert!(!Path::new(&dir1).exists());
+        assert!(!Path::new(&dir2).exists());
+        assert!(TEMP_DIRS.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_write_temp_file_invalid_dir_returns_error() {
+        let result = write_temp_file(
+            "/nonexistent/dir/xyz".into(),
+            "file.txt".into(),
+            vec![1u8, 2u8],
+        );
+        assert!(result.is_err());
     }
 
     /// Simple unique temp dir helper (avoids pulling in the `tempfile`

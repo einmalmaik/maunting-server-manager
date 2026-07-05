@@ -127,8 +127,9 @@ export class DecryptError extends Error {
  *
  * @param encryptedFile  raw bytes of the `.enc` file
  * @param password       backup password (utf-8 string)
- * @param saltBase64     base64-encoded salt (as stored in MSM `panel_settings`
- *                       under `backup.salt`; the salt itself is not sensitive)
+ * @param saltBase64     base64-encoded salt (stored in the MSM database
+ *                       panel_settings table under key `backup.salt`;
+ *                       the salt itself is not sensitive)
  * @returns              the decrypted tar.gz bytes
  *
  * @throws {@link DecryptError} for empty/structurally invalid input.

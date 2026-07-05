@@ -1,5 +1,5 @@
 /**
- * App integration tests for the M1 step-flow UI.
+ * App integration tests for the full step-flow UI.
  *
  * Covers:
  * - VAL-UI-001: app renders with dark theme + Design-DNA tokens
@@ -10,11 +10,17 @@
  * - VAL-UI-008: DIS badge visible
  * - VAL-UI-009: German text with umlauts
  * - VAL-UI-010: i18n keys exist (de + en), locale switch works
+ * - VAL-EXTRACT-002: file tree shows files with sizes
+ * - VAL-EXTRACT-005: manifest.json highlighted
+ * - VAL-CROSS-001: full flow select → decrypt → extract → tree → save
  * - VAL-CROSS-002: no network requests
  * - VAL-CROSS-003: password not stored after decryption
+ * - VAL-CROSS-004: temp cleanup on reset
  *
  * The DIS `decryptBackup` function is mocked to avoid the Argon2id cost in
  * UI tests. The Tauri dialog + fs APIs are mocked via the FilePicker props.
+ * The tauri-commands (createTempDir, writeTempFile, extractTarGz,
+ * cleanupTempDir) are mocked at module level.
  */
 
 // @vitest-environment jsdom
@@ -23,6 +29,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import App from './App';
 import { gzipBytes, utf8, bytesToBase64, createTestEnc, deriveTestKey } from '@/lib/test-fixture';
+import type { FileTreeNode } from '@/lib/tauri-commands';
 
 // Mock decryptBackup so UI tests don't pay the Argon2id cost on every run.
 vi.mock('@/lib/decrypt', async (importOriginal) => {
@@ -30,6 +37,27 @@ vi.mock('@/lib/decrypt', async (importOriginal) => {
   return {
     ...actual,
     decryptBackup: vi.fn(),
+  };
+});
+
+// Mock tauri-commands (invoke wrappers) so no Tauri runtime is needed.
+const mockCreateTempDir = vi.fn();
+const mockWriteTempFile = vi.fn();
+const mockExtractTarGz = vi.fn();
+const mockCleanupTempDir = vi.fn();
+const mockSaveExtracted = vi.fn();
+const mockReadTextFile = vi.fn();
+
+vi.mock('@/lib/tauri-commands', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tauri-commands')>();
+  return {
+    ...actual,
+    createTempDir: (...args: unknown[]) => mockCreateTempDir(...args),
+    writeTempFile: (...args: unknown[]) => mockWriteTempFile(...args),
+    extractTarGz: (...args: unknown[]) => mockExtractTarGz(...args),
+    cleanupTempDir: (...args: unknown[]) => mockCleanupTempDir(...args),
+    saveExtracted: (...args: unknown[]) => mockSaveExtracted(...args),
+    readTextFile: (...args: unknown[]) => mockReadTextFile(...args),
   };
 });
 
@@ -45,6 +73,23 @@ async function makeEncFixture(): Promise<Uint8Array> {
   return createTestEnc(gzipBytes(utf8('hello-recovery')), key);
 }
 
+const MOCK_FILE_TREE: FileTreeNode = {
+  name: 'out',
+  path: '/tmp/out',
+  is_dir: true,
+  size: 0,
+  children: [
+    { name: 'a.txt', path: '/tmp/out/a.txt', is_dir: false, size: 6, children: [] },
+    {
+      name: 'manifest.json',
+      path: '/tmp/out/manifest.json',
+      is_dir: false,
+      size: 15,
+      children: [],
+    },
+  ],
+};
+
 let encFixture: Uint8Array<ArrayBuffer>;
 
 beforeEach(async () => {
@@ -55,6 +100,20 @@ beforeEach(async () => {
   encFixture = new Uint8Array(buf);
   encFixture.set(fixture);
   mockedDecrypt.mockReset();
+  mockCreateTempDir.mockReset();
+  mockWriteTempFile.mockReset();
+  mockExtractTarGz.mockReset();
+  mockCleanupTempDir.mockReset();
+  mockSaveExtracted.mockReset();
+  mockReadTextFile.mockReset();
+
+  // Default happy-path mocks for the full flow
+  mockCreateTempDir.mockResolvedValue('/tmp/msm-recovery-test');
+  mockWriteTempFile.mockResolvedValue('/tmp/msm-recovery-test/backup.tar.gz');
+  mockExtractTarGz.mockResolvedValue(MOCK_FILE_TREE);
+  mockCleanupTempDir.mockResolvedValue(undefined);
+  mockSaveExtracted.mockResolvedValue(undefined);
+  mockReadTextFile.mockResolvedValue('file content');
 });
 
 afterEach(() => {
@@ -85,24 +144,10 @@ describe('VAL-UI-002: File picker in app', () => {
     render(<App />);
     expect(screen.getByTestId('filepicker-button')).toBeDefined();
   });
-});
 
-describe('VAL-UI-005 / VAL-UI-006: decrypt → success flow', () => {
-  it('shows loading then success on valid decryption', async () => {
-    const decryptedBytes = gzipBytes(utf8('hello-recovery'));
-    mockedDecrypt.mockResolvedValue(decryptedBytes);
-
+  it('renders a drag & drop zone', () => {
     render(<App />);
-
-    // Pick a file via mocked Tauri dialog
-    const pickerBtn = screen.getByTestId('filepicker-button');
-    // We need to inject the mock dialog — the App doesn't expose props for it,
-    // so we mock the module-level Tauri APIs instead.
-    // Since App uses default imports, we mock them at module level below in a
-    // dedicated describe block. Here we just verify the flow with a direct
-    // approach: we can't easily inject, so this test is covered by the
-    // FilePicker unit tests + the module-mock flow below.
-    expect(pickerBtn).toBeDefined();
+    expect(screen.getByTestId('filepicker-dropzone')).toBeDefined();
   });
 });
 
@@ -122,12 +167,10 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 import { open as mockedOpen } from '@tauri-apps/plugin-dialog';
 import { readFile as mockedReadFile } from '@tauri-apps/plugin-fs';
 
-describe('VAL-UI-005 / VAL-UI-006 / VAL-UI-007: full step-flow', () => {
-  it('success: pick file → enter password+salt → decrypt → success', async () => {
+describe('VAL-CROSS-001: full flow — select → decrypt → extract → tree → save', () => {
+  it('success: pick file → enter password+salt → decrypt → extract → file tree', async () => {
     const decryptedBytes = gzipBytes(utf8('hello-recovery'));
     mockedDecrypt.mockResolvedValue(decryptedBytes);
-    vi.mocked(mockedOpen).mockResolvedValue('C:\\backups\\test.enc');
-    vi.mocked(mockedReadFile).mockResolvedValue(encFixture);
 
     render(<App />);
 
@@ -146,19 +189,128 @@ describe('VAL-UI-005 / VAL-UI-006 / VAL-UI-007: full step-flow', () => {
     // Click decrypt
     fireEvent.click(screen.getByTestId('decrypt-button'));
 
-    // Should reach success state
+    // Should reach success state with file tree
     await waitFor(() => {
       expect(screen.getByTestId('success-state')).toBeDefined();
     });
-    expect(screen.getByTestId('success-state').textContent).toContain('erfolgreich');
+
+    // File tree should be rendered with the mock data
+    expect(screen.getByTestId('file-tree')).toBeDefined();
+    expect(screen.getByTestId('tree-file-a.txt')).toBeDefined();
 
     // decryptBackup was called with the file bytes, password, and salt
     expect(mockedDecrypt).toHaveBeenCalledOnce();
     const args = mockedDecrypt.mock.calls[0];
     expect(args[1]).toBe('test-password');
     expect(args[2]).toBe(SALT_B64);
+
+    // Temp dir was created and extraction was called
+    expect(mockCreateTempDir).toHaveBeenCalledOnce();
+    expect(mockWriteTempFile).toHaveBeenCalledOnce();
+    expect(mockExtractTarGz).toHaveBeenCalledOnce();
   });
 
+  it('save: clicking save opens dialog and calls save_extracted', async () => {
+    const decryptedBytes = gzipBytes(utf8('hello-recovery'));
+    mockedDecrypt.mockResolvedValue(decryptedBytes);
+    vi.mocked(mockedOpen).mockResolvedValue('C:\\backups\\test.enc');
+    vi.mocked(mockedReadFile).mockResolvedValue(encFixture);
+
+    render(<App />);
+
+    // Full flow to get to success state
+    await fireEvent.click(screen.getByTestId('filepicker-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filepicker-selected').textContent).toContain('test.enc');
+    });
+    fireEvent.change(screen.getByTestId('password-field'), { target: { value: 'test-password' } });
+    fireEvent.change(screen.getByTestId('salt-field'), { target: { value: SALT_B64 } });
+    fireEvent.click(screen.getByTestId('decrypt-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('save-button')).toBeDefined();
+    });
+
+    // Mock the directory dialog for save
+    vi.mocked(mockedOpen).mockResolvedValue('C:\\output-dir');
+
+    // Click save
+    fireEvent.click(screen.getByTestId('save-button'));
+
+    await waitFor(() => {
+      expect(mockSaveExtracted).toHaveBeenCalledOnce();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('save-success')).toBeDefined();
+    });
+  });
+
+  it('reset: clicking "decrypt another file" cleans up temp dir', async () => {
+    const decryptedBytes = gzipBytes(utf8('hello-recovery'));
+    mockedDecrypt.mockResolvedValue(decryptedBytes);
+    vi.mocked(mockedOpen).mockResolvedValue('C:\\backups\\test.enc');
+    vi.mocked(mockedReadFile).mockResolvedValue(encFixture);
+
+    render(<App />);
+
+    await fireEvent.click(screen.getByTestId('filepicker-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filepicker-selected').textContent).toContain('test.enc');
+    });
+    fireEvent.change(screen.getByTestId('password-field'), { target: { value: 'test-password' } });
+    fireEvent.change(screen.getByTestId('salt-field'), { target: { value: SALT_B64 } });
+    fireEvent.click(screen.getByTestId('decrypt-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('success-state')).toBeDefined();
+    });
+
+    // Click retry / reset
+    fireEvent.click(screen.getByTestId('success-retry'));
+
+    await waitFor(() => {
+      expect(mockCleanupTempDir).toHaveBeenCalledOnce();
+    });
+
+    // Should be back to input state
+    expect(screen.getByTestId('input-card')).toBeDefined();
+  });
+});
+
+describe('VAL-UI-005: decrypt button loading state', () => {
+  it('shows loading state during decryption', async () => {
+    // Make decrypt hang so we can observe the loading state
+    let resolveDecrypt: (value: Uint8Array) => void = () => {};
+    mockedDecrypt.mockImplementation(
+      () => new Promise((resolve) => { resolveDecrypt = resolve; }),
+    );
+
+    render(<App />);
+
+    await fireEvent.click(screen.getByTestId('filepicker-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filepicker-selected').textContent).toContain('test.enc');
+    });
+    fireEvent.change(screen.getByTestId('password-field'), { target: { value: 'pw' } });
+    fireEvent.change(screen.getByTestId('salt-field'), { target: { value: SALT_B64 } });
+    fireEvent.click(screen.getByTestId('decrypt-button'));
+
+    // Should show loading state
+    await waitFor(() => {
+      expect(screen.getByTestId('decrypt-spinner')).toBeDefined();
+    });
+    expect((screen.getByTestId('decrypt-button') as HTMLButtonElement).disabled).toBe(true);
+
+    // Resolve to clean up
+    resolveDecrypt(gzipBytes(utf8('ok')));
+    await waitFor(() => {
+      expect(screen.getByTestId('success-state')).toBeDefined();
+    });
+  });
+});
+
+describe('VAL-UI-007: error states with German messages', () => {
   it('error: wrong password → German error message', async () => {
     mockedDecrypt.mockRejectedValue(new Error('Decryption failed'));
     vi.mocked(mockedOpen).mockResolvedValue('C:\\backups\\bad.enc');
@@ -210,6 +362,75 @@ describe('VAL-UI-005 / VAL-UI-006 / VAL-UI-007: full step-flow', () => {
     });
     const msg = screen.getByTestId('error-message').textContent ?? '';
     expect(msg).toContain('leer');
+  });
+
+  it('error: corrupt frame → specific frame error message', async () => {
+    mockedDecrypt.mockRejectedValue(new Error('Invalid frame format: truncated'));
+    vi.mocked(mockedOpen).mockResolvedValue('C:\\backups\\corrupt.enc');
+    vi.mocked(mockedReadFile).mockResolvedValue(encFixture);
+
+    render(<App />);
+
+    await fireEvent.click(screen.getByTestId('filepicker-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filepicker-selected').textContent).toContain('corrupt.enc');
+    });
+    fireEvent.change(screen.getByTestId('password-field'), { target: { value: 'pw' } });
+    fireEvent.change(screen.getByTestId('salt-field'), { target: { value: SALT_B64 } });
+    fireEvent.click(screen.getByTestId('decrypt-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('error-state')).toBeDefined();
+    });
+    const msg = screen.getByTestId('error-message').textContent ?? '';
+    expect(msg).toContain('Frame-Format');
+  });
+
+  it('error: extraction failure → extraction error message', async () => {
+    mockedDecrypt.mockResolvedValue(gzipBytes(utf8('ok')));
+    mockExtractTarGz.mockRejectedValue('Entpacken fehlgeschlagen: invalid gzip');
+    vi.mocked(mockedOpen).mockResolvedValue('C:\\backups\\test.enc');
+    vi.mocked(mockedReadFile).mockResolvedValue(encFixture);
+
+    render(<App />);
+
+    await fireEvent.click(screen.getByTestId('filepicker-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filepicker-selected').textContent).toContain('test.enc');
+    });
+    fireEvent.change(screen.getByTestId('password-field'), { target: { value: 'pw' } });
+    fireEvent.change(screen.getByTestId('salt-field'), { target: { value: SALT_B64 } });
+    fireEvent.click(screen.getByTestId('decrypt-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('error-state')).toBeDefined();
+    });
+    const msg = screen.getByTestId('error-message').textContent ?? '';
+    expect(msg).toContain('Entpacken');
+  });
+});
+
+describe('VAL-EXTRACT-005: manifest.json highlighted in tree', () => {
+  it('manifest.json appears with data-manifest attribute and badge', async () => {
+    mockedDecrypt.mockResolvedValue(gzipBytes(utf8('ok')));
+    vi.mocked(mockedOpen).mockResolvedValue('C:\\backups\\test.enc');
+    vi.mocked(mockedReadFile).mockResolvedValue(encFixture);
+
+    render(<App />);
+
+    await fireEvent.click(screen.getByTestId('filepicker-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filepicker-selected').textContent).toContain('test.enc');
+    });
+    fireEvent.change(screen.getByTestId('password-field'), { target: { value: 'pw' } });
+    fireEvent.change(screen.getByTestId('salt-field'), { target: { value: SALT_B64 } });
+    fireEvent.click(screen.getByTestId('decrypt-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tree-file-manifest.json')).toBeDefined();
+    });
+    expect(screen.getByTestId('tree-file-manifest.json').getAttribute('data-manifest')).toBe('true');
+    expect(screen.getByTestId('manifest-badge')).toBeDefined();
   });
 });
 

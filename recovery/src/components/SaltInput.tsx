@@ -1,10 +1,11 @@
 /**
  * SaltInput - base64 salt entry with a hint telling the user where to find it.
  *
- * The salt is NOT sensitive (it is stored in MSM `panel_settings` under
- * `backup.salt`), so the input uses `type="text"` (not password). The hint
- * text explicitly references `panel_settings` / `backup.salt` so users know
- * where to look (VAL-UI-004).
+ * The salt is NOT sensitive (it is stored in the MSM database in the
+ * `panel_settings` table under the key `backup.salt`), so the input uses
+ * `type="text"` (not password). The hint text explains that the salt is not
+ * visible in the MSM UI settings and how to retrieve it from the database
+ * (VAL-UI-004).
  */
 
 import { useLanguage } from '@/lib/useLanguage';

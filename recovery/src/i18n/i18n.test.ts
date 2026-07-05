@@ -50,13 +50,15 @@ describe('VAL-UI-010: translate switches locale', () => {
     expect(germanText).toMatch(/[äöüß]/);
   });
 
-  it('salt hint mentions panel_settings / backup.salt', () => {
+  it('salt hint mentions panel_settings / backup.salt and database', () => {
     const deHint = translate('de', 'salt.hint');
     const enHint = translate('en', 'salt.hint');
     expect(deHint).toContain('panel_settings');
     expect(deHint).toContain('backup.salt');
+    expect(deHint).toContain('Datenbank');
     expect(enHint).toContain('panel_settings');
     expect(enHint).toContain('backup.salt');
+    expect(enHint).toContain('database');
   });
 
   it('every locale has values for all keys (no empty strings)', () => {

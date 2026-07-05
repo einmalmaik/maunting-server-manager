@@ -58,7 +58,7 @@ describe('VAL-UI-004 + VAL-UI-009: SaltInput with hint', () => {
     expect(field.type).toBe('text');
   });
 
-  it('shows a hint mentioning panel_settings and backup.salt', () => {
+  it('shows a hint mentioning panel_settings, backup.salt and database', () => {
     render(
       <LanguageProvider>
         <SaltInput value="" onChange={() => {}} />
@@ -67,6 +67,7 @@ describe('VAL-UI-004 + VAL-UI-009: SaltInput with hint', () => {
     const hint = screen.getByTestId('salt-hint').textContent ?? '';
     expect(hint).toContain('panel_settings');
     expect(hint).toContain('backup.salt');
+    expect(hint).toContain('Datenbank');
   });
 
   it('German hint contains umlauts', () => {
@@ -75,7 +76,6 @@ describe('VAL-UI-004 + VAL-UI-009: SaltInput with hint', () => {
         <SaltInput value="" onChange={() => {}} />
       </LanguageProvider>,
     );
-    // German salt.hint: "Der Salt findet sich in MSM unter panel_settings als backup.salt. Salt ist nicht sensibel und kann frei eingegeben werden."
     const hint = screen.getByTestId('salt-hint').textContent ?? '';
     expect(hint).toMatch(/[äöüß]/);
   });
