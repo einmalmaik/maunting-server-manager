@@ -663,6 +663,39 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     )
 
 
+@router.post("/{server_id}/auth-setup/cancel")
+async def cancel_auth_setup(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+    """Bricht einen laufenden Auth-Setup-Recovery-Vorgang ab.
+
+    Wird aufgerufen, wenn der User den interaktiven Auth-Flow manuell abbrechen
+    will (z.B. weil er das Spiel doch nicht neu authentifizieren moechte oder
+    lieber die Credentials manuell austauscht).
+
+    Setzt ``auth_required=False``, ruft ``docker_service.stop`` auf den wartenden
+    Container, und loggt eine MSM-Message in die Konsole. Der eigentliche
+    Recovery-Thread prueft ``auth_required`` via on_status bei seinen naechsten
+    Status-Updates und beendet sich selbst.
+    """
+    require_server_permission(user, server_id, db, "server.start")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    if not server.auth_required:
+        raise HTTPException(status_code=409, detail="Server ist nicht im Auth-Setup-Modus")
+
+    from services import docker_service
+    container_name = container_name_for(server.id)
+    server.auth_required = False
+    server.status_message = "Auth-Setup vom User abgebrochen"
+    db.commit()
+    stop_result = docker_service.stop(container_name, timeout=10)
+    _append_console_log(server.id, "[MSM] Auth-Setup vom User abgebrochen.\n")
+    return {
+        "message": "Auth-Setup abgebrochen",
+        "container_stopped": stop_result.get("ok", False),
+    }
+
+
 @router.post("/{server_id}/kill")
 async def kill_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     """Erzwungenes Beenden (Docker force remove). Als Notfall auch während start/restart nutzbar (emergency override des Job-Locks).
