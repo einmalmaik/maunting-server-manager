@@ -786,7 +786,7 @@ def _generate_restore_script(
         lines.append('tar -xzf "$DECRYPT_TAR" -C "$RESTORE_DIR"')
         lines.append("")
         lines.append("# 3. Stop panel service")
-        lines.append("systemctl --user stop msm-panel.service")
+        lines.append("systemctl stop msm-panel.service")
         lines.append("")
         lines.append("# 4. Backup current .env (safety copy with unique timestamp)")
     else:
@@ -794,7 +794,7 @@ def _generate_restore_script(
         lines.append('tar -xzf "$ARCHIVE_PATH" -C "$RESTORE_DIR"')
         lines.append("")
         lines.append("# 2. Stop panel service")
-        lines.append("systemctl --user stop msm-panel.service")
+        lines.append("systemctl stop msm-panel.service")
         lines.append("")
         lines.append("# 3. Backup current .env (safety copy with unique timestamp)")
     lines.append('ENV_BACKUP="$CONFIG_DIR/.env.pre_restore_$(date +%Y%m%d_%H%M%S)"')
@@ -836,9 +836,9 @@ def _generate_restore_script(
 
     lines.append("")
     lines.append(f"# {_step_restart}. Restart panel service")
-    lines.append("systemctl --user start msm-panel.service")
+    lines.append("systemctl start msm-panel.service")
     lines.append("")
-    lines.append('echo "Restore complete. Check panel status: systemctl --user status msm-panel.service"')
+    lines.append('echo "Restore complete. Check panel status: systemctl status msm-panel.service"')
     lines.append("")
 
     content = "\n".join(lines)
@@ -878,7 +878,7 @@ def _build_restore_instructions(script_path: str) -> str:
         f"  sudo bash {script_path}\n"
         "\n"
         "Nach dem Restore koennen Sie den Panel-Status pruefen:\n"
-        "  systemctl --user status msm-panel.service"
+        "  systemctl status msm-panel.service"
     )
 
 

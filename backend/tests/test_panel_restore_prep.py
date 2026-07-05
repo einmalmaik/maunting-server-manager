@@ -439,14 +439,17 @@ class TestPrepareRestoreScriptStopAndBackup:
     """VAL-PANEL-RESTORE-007: Script stoppt Panel-Service und sichert .env."""
 
     def test_script_stops_panel_service(self, db, tmp_path, monkeypatch):
-        """Script enthaelt 'systemctl --user stop msm-panel.service'."""
+        """Script enthaelt 'systemctl stop msm-panel.service' (ohne --user, VAL-FIX-010)."""
         config_dir, _ = _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(config_dir, [".env"])
         backup = _create_backup(db)
 
         result = pbs.prepare_panel_restore(backup.id, db)
         content = _read_script(result["script_path"])
-        assert "systemctl --user stop msm-panel.service" in content
+        assert "systemctl stop msm-panel.service" in content
+        # MSM ist als System-Unit installiert (install.sh /etc/systemd/system/) —
+        # restore darf NICHT 'systemctl --user' verwenden (VAL-FIX-010).
+        assert "systemctl --user stop" not in content
 
     def test_script_backs_up_env(self, db, tmp_path, monkeypatch):
         """Script sichert .env mit pre_restore Zeitstempel."""
@@ -510,14 +513,16 @@ class TestPrepareRestoreScriptConfigs:
             assert "cp" in content
 
     def test_script_restarts_panel(self, db, tmp_path, monkeypatch):
-        """Script startet Panel via systemctl --user start."""
+        """Script startet Panel via systemctl start (ohne --user, VAL-FIX-010)."""
         config_dir, _ = _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(config_dir, [".env"])
         backup = _create_backup(db)
 
         result = pbs.prepare_panel_restore(backup.id, db)
         content = _read_script(result["script_path"])
-        assert "systemctl --user start msm-panel.service" in content
+        assert "systemctl start msm-panel.service" in content
+        # Restore darf NICHT 'systemctl --user' verwenden (VAL-FIX-010).
+        assert "systemctl --user start" not in content
 
     def test_script_has_status_hint(self, db, tmp_path, monkeypatch):
         """Script enthaelt echo mit Status-Hinweis."""
@@ -729,11 +734,11 @@ class TestPanelBackupFullCycle:
             assert lines[0] == "#!/bin/bash"
             assert "set -euo pipefail" in content
             # Script stops panel
-            assert "systemctl --user stop msm-panel.service" in content
+            assert "systemctl stop msm-panel.service" in content
             # Script restores DB
             assert "msm_db.sql" in content
             # Script restarts panel
-            assert "systemctl --user start msm-panel.service" in content
+            assert "systemctl start msm-panel.service" in content
             # No plaintext secrets
             assert TEST_ACCESS_KEY not in content
             assert TEST_SECRET_KEY not in content
@@ -757,8 +762,8 @@ class TestPanelBackupFullCycle:
         content = _read_script(result["script_path"])
         assert content.startswith("#!/bin/bash")
         assert "set -euo pipefail" in content
-        assert "systemctl --user stop msm-panel.service" in content
-        assert "systemctl --user start msm-panel.service" in content
+        assert "systemctl stop msm-panel.service" in content
+        assert "systemctl start msm-panel.service" in content
 
 
 # ── Key-Invalidierung nach Operation ─────────────────────────────────────
