@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from services.auth_setup_service import detect_auth_required
+
+import pytest
+
+from services.auth_setup_service import detect_auth_required, move_credentials
 
 
 def test_detects_hytale_auth_prompt():
@@ -67,3 +70,69 @@ def test_does_not_match_on_empty_logs():
 def test_case_insensitive():
     logs = ["OAUTH2: \"INVALID_GRANT\""]
     assert detect_auth_required(logs) is True
+
+
+# ──────────────────────────────────────────────────────────────────
+# move_credentials
+# ──────────────────────────────────────────────────────────────────
+
+
+def test_move_credentials_renames_known_files(tmp_path: Path):
+    (tmp_path / ".hytale-auth-tokens.json").write_text("{}")
+    (tmp_path / ".hytale-downloader-credentials.json").write_text("{}")
+    moved = move_credentials(tmp_path)
+    assert moved == 2
+    assert (tmp_path / ".hytale-auth-tokens.json.bak").exists()
+    assert (tmp_path / ".hytale-downloader-credentials.json.bak").exists()
+    assert not (tmp_path / ".hytale-auth-tokens.json").exists()
+    assert not (tmp_path / ".hytale-downloader-credentials.json").exists()
+
+
+def test_move_credentials_matches_generic_patterns(tmp_path: Path):
+    (tmp_path / "auth_token.json").write_text("{}")
+    (tmp_path / "credentials.json").write_text("{}")
+    (tmp_path / "server-config.json").write_text("{}")  # NOT a credential file
+    moved = move_credentials(tmp_path)
+    assert moved == 2
+    assert (tmp_path / "auth_token.json.bak").exists()
+    assert (tmp_path / "credentials.json.bak").exists()
+    assert (tmp_path / "server-config.json").exists()  # untouched
+
+
+def test_move_credentials_returns_zero_when_no_match(tmp_path: Path):
+    (tmp_path / "level.dat").write_text("data")
+    (tmp_path / "server.log").write_text("log")
+    moved = move_credentials(tmp_path)
+    assert moved == 0
+
+
+def test_move_credentials_idempotent(tmp_path: Path):
+    (tmp_path / "credentials.json").write_text("v1")
+    assert move_credentials(tmp_path) == 1
+    # Second run: the file is now .bak, the live file is gone, so 0 moves.
+    assert move_credentials(tmp_path) == 0
+    assert (tmp_path / "credentials.json.bak").read_text() == "v1"
+
+
+def test_move_credentials_overwrites_stale_backup(tmp_path: Path):
+    (tmp_path / "credentials.json").write_text("fresh")
+    (tmp_path / "credentials.json.bak").write_text("stale")
+    assert move_credentials(tmp_path) == 1
+    assert (tmp_path / "credentials.json.bak").read_text() == "fresh"
+
+
+def test_move_credentials_ignores_directories_and_non_json(tmp_path: Path):
+    (tmp_path / "subdir").mkdir()
+    (sub := tmp_path / "subdir" / "credentials.json").write_text("{}")
+    (tmp_path / "credentials.txt").write_text("not json")
+    moved = move_credentials(tmp_path)
+    assert moved == 0  # dir ignored, .txt ignored
+    assert sub.exists()  # still there because we don't recurse
+    assert (tmp_path / "credentials.txt").exists()
+
+
+def test_move_credentials_accepts_string_path(tmp_path: Path):
+    (tmp_path / "credentials.json").write_text("{}")
+    moved = move_credentials(str(tmp_path))
+    assert moved == 1
+    assert (tmp_path / "credentials.json.bak").exists()
