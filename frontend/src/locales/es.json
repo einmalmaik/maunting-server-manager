@@ -893,5 +893,14 @@
     "restoreModalScriptCopied": "Ruta del script copiada",
     "restoreModalClose": "Cerrar",
     "restoreModalWarning": "ADVERTENCIA: Este script detiene el servicio del panel MSM y sobrescribe la base de datos y los archivos de configuración!"
+  },
+  "privacy": {
+    "s3SectionHeading": "6. Copias de seguridad cifradas en la nube (S3)",
+    "s3SectionBody": "Cuando el administrador configura almacenamiento compatible con S3, las copias de seguridad cifradas pueden subirse a almacenamiento S3 externo operado por terceros. Estas copias se cifran en el lado del cliente (conocimiento cero): el proveedor de S3 recibe únicamente datos cifrados y no puede leer el contenido de las copias. La contraseña de descifrado nunca abandona esta instancia de MSM ni se transmite al proveedor de S3.",
+    "s3ItemEncryption": "El cifrado se realiza en el cliente antes de la subida (AES-256-GCM)",
+    "s3ItemZeroKnowledge": "El proveedor de S3 solo puede ver datos cifrados (conocimiento cero)",
+    "s3ItemPassword": "El descifrado solo es posible con la contraseña de copia configurada en esta instancia",
+    "s3ItemLocalOnly": "Sin configuración: las copias permanecen localmente — no se transmiten datos a terceros",
+    "section4Updated": "No se comparten datos personales con terceros. Por razones técnicas, los datos cifrados de copias pueden almacenarse en almacenamiento externo compatible con S3 si el administrador lo configura (ver sección 6). En ese caso, el proveedor de almacenamiento recibe únicamente datos cifrados."
   }
 }

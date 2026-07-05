@@ -871,5 +871,14 @@
     "restoreModalScriptCopied": "Path skrip disalin",
     "restoreModalClose": "Tutup",
     "restoreModalWarning": "PERINGATAN: Skrip ini menghentikan layanan panel MSM dan menimpa database serta file konfigurasi!"
+  },
+  "privacy": {
+    "s3SectionHeading": "6. Backup cloud terenkripsi (S3)",
+    "s3SectionBody": "Ketika administrator mengonfigurasi penyimpanan yang kompatibel dengan S3, backup terenkripsi dapat diunggah ke penyimpanan S3 eksternal yang dikelola oleh pihak ketiga. Backup ini dienkripsi di sisi klien (pengetahuan nol): penyedia S3 hanya menerima data terenkripsi dan tidak dapat membaca isi backup. Kata sandi dekripsi tidak pernah meninggalkan instansi MSM ini dan tidak pernah dikirim ke penyedia S3.",
+    "s3ItemEncryption": "Enkripsi dilakukan di sisi klien sebelum unggah (AES-256-GCM)",
+    "s3ItemZeroKnowledge": "Penyedia S3 hanya dapat melihat data terenkripsi (pengetahuan nol)",
+    "s3ItemPassword": "Dekripsi hanya dimungkinkan dengan kata sandi backup yang ditetapkan pada instansi ini",
+    "s3ItemLocalOnly": "Tanpa konfigurasi: backup tetap lokal — tidak ada data yang dikirim ke pihak ketiga",
+    "section4Updated": "Tidak ada data pribadi yang dibagikan dengan pihak ketiga. Karena alasan teknis, data backup terenkripsi mungkin disimpan di penyimpanan eksternal yang kompatibel dengan S3 jika administrator mengonfigurasinya (lihat bagian 6). Dalam kasus tersebut, penyedia penyimpanan hanya menerima data terenkripsi."
   }
 }

@@ -1237,5 +1237,14 @@
     "restoreModalScriptCopied": "Skript-Pfad kopiert",
     "restoreModalClose": "Schließen",
     "restoreModalWarning": "WARNUNG: Dieses Skript stoppt den MSM-Panel-Dienst und überschreibt die Datenbank und Konfigurationsdateien!"
+  },
+  "privacy": {
+    "s3SectionHeading": "6. Verschlüsselte Cloud-Backups (S3)",
+    "s3SectionBody": "Wenn der Administrator S3-kompatiblen Speicher konfiguriert, können verschlüsselte Backups auf externen S3-Speicher bei Drittanbietern hochgeladen werden. Diese Backups werden clientseitig verschlüsselt (Zero-Knowledge): Der S3-Anbieter erhält ausschließlich verschlüsselte Daten und kann die Backup-Inhalte nicht lesen. Das Passwort zur Entschlüsselung verlässt niemals diese MSM-Instanz und wird nicht an den S3-Anbieter übertragen.",
+    "s3ItemEncryption": "Verschlüsselung erfolgt vor dem Upload clientseitig (AES-256-GCM)",
+    "s3ItemZeroKnowledge": "S3-Anbieter kann ausschließlich verschlüsselte Daten einsehen (Zero-Knowledge)",
+    "s3ItemPassword": "Entschlüsselung ist nur mit dem auf dieser Instanz gesetzten Backup-Passwort möglich",
+    "s3ItemLocalOnly": "Keine Konfiguration: Backups verbleiben lokal — es werden keine Daten an Dritte übertragen",
+    "section4Updated": "Es erfolgt keine Weitergabe von personenbezogenen Daten an Dritte. Technisch bedingt können verschlüsselte Backup-Daten auf externem, S3-kompatiblem Speicher abgelegt werden, sofern der Administrator dies konfiguriert (siehe Abschnitt 6). In diesem Fall erhält der Speicher-Anbieter ausschließlich verschlüsselte Daten."
   }
 }

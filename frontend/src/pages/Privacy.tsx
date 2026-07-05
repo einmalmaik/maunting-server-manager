@@ -11,7 +11,7 @@ export function Privacy() {
     intro: 'Diese Instanz des Maunting Server Managers ist auf Datensparsamkeit ausgelegt und verarbeitet nur Daten, die für Account, Sicherheit und Panelbetrieb notwendig sind.',
     callout: 'Es werden keine Tracking-Daten erhoben und keine Analytics-Dienste eingebunden.',
     lastUpdated: '2026-07-05',
-    version: '1.0',
+    version: '1.1',
     meta: 'Maunting Server Manager',
     sections: [
       {
@@ -35,11 +35,21 @@ export function Privacy() {
       },
       {
         heading: '4. Weitergabe an Dritte',
-        body: 'Es erfolgt keine Weitergabe von Daten an Dritte. Alle Daten verbleiben lokal auf dem Server dieser Instanz.',
+        body: 'Es erfolgt keine Weitergabe von personenbezogenen Daten an Dritte. Technisch bedingt können verschlüsselte Backup-Daten auf externem, S3-kompatiblem Speicher abgelegt werden, sofern der Administrator dies konfiguriert (siehe Abschnitt 6). In diesem Fall erhält der Speicher-Anbieter ausschließlich verschlüsselte Daten.',
       },
       {
         heading: '5. Recht auf Löschung',
         body: 'Sie haben jederzeit das Recht, Ihren Account zu löschen. Bei einer Löschung werden alle mit Ihrem Account verknüpften personenbezogenen Daten unwiderruflich aus der Datenbank entfernt.',
+      },
+      {
+        heading: '6. Verschlüsselte Cloud-Backups (S3)',
+        body: 'Wenn der Administrator S3-kompatiblen Speicher konfiguriert, können verschlüsselte Backups auf externen S3-Speicher bei Drittanbietern hochgeladen werden. Diese Backups werden clientseitig verschlüsselt (Zero-Knowledge): Der S3-Anbieter erhält ausschließlich verschlüsselte Daten und kann die Backup-Inhalte nicht lesen. Das Passwort zur Entschlüsselung verlässt niemals diese MSM-Instanz und wird nicht an den S3-Anbieter übertragen.',
+        items: [
+          'Verschlüsselung erfolgt vor dem Upload clientseitig (AES-256-GCM)',
+          'S3-Anbieter kann ausschließlich verschlüsselte Daten einsehen (Zero-Knowledge)',
+          'Entschlüsselung ist nur mit dem auf dieser Instanz gesetzten Backup-Passwort möglich',
+          'Keine Konfiguration: Backups verbleiben lokal — es werden keine Daten an Dritte übertragen',
+        ],
       },
     ],
   }

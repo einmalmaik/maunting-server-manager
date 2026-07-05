@@ -871,5 +871,14 @@
     "restoreModalScriptCopied": "脚本路径已复制",
     "restoreModalClose": "关闭",
     "restoreModalWarning": "警告：此脚本会停止 MSM 面板服务并覆盖数据库和配置文件！"
+  },
+  "privacy": {
+    "s3SectionHeading": "6. 加密云备份 (S3)",
+    "s3SectionBody": "当管理员配置了 S3 兼容存储时，加密备份可能会上传到由第三方运营的外部 S3 存储。这些备份在客户端加密（零知识）：S3 提供商仅接收加密数据，无法读取备份内容。解密密码永远不会离开此 MSM 实例，也不会传输给 S3 提供商。",
+    "s3ItemEncryption": "加密在上传前于客户端执行（AES-256-GCM）",
+    "s3ItemZeroKnowledge": "S3 提供商只能查看加密数据（零知识）",
+    "s3ItemPassword": "仅可使用在此实例上设置的备份密码进行解密",
+    "s3ItemLocalOnly": "未配置：备份保留在本地 — 不会向第三方传输任何数据",
+    "section4Updated": "不会与第三方共享任何个人数据。由于技术原因，如果管理员进行了配置，加密备份数据可能会存储在外部 S3 兼容存储上（见第 6 节）。在这种情况下，存储提供商仅接收加密数据。"
   }
 }

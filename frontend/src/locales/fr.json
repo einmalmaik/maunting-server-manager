@@ -871,5 +871,14 @@
     "restoreModalScriptCopied": "Chemin du script copié",
     "restoreModalClose": "Fermer",
     "restoreModalWarning": "AVERTISSEMENT : Ce script arrête le service du panel MSM et écrase la base de données et les fichiers de configuration !"
+  },
+  "privacy": {
+    "s3SectionHeading": "6. Sauvegardes cloud chiffrées (S3)",
+    "s3SectionBody": "Lorsque l'administrateur configure un stockage compatible S3, les sauvegardes chiffrées peuvent être téléversées sur un stockage S3 externe exploité par des tiers. Ces sauvegardes sont chiffrées côté client (connaissance nulle) : le fournisseur S3 reçoit uniquement des données chiffrées et ne peut pas lire le contenu des sauvegardes. Le mot de passe de déchiffrement ne quitte jamais cette instance MSM et n'est jamais transmis au fournisseur S3.",
+    "s3ItemEncryption": "Le chiffrement est effectué côté client avant le téléversement (AES-256-GCM)",
+    "s3ItemZeroKnowledge": "Le fournisseur S3 ne peut consulter que des données chiffrées (connaissance nulle)",
+    "s3ItemPassword": "Le déchiffrement n'est possible qu'avec le mot de passe de sauvegarde défini sur cette instance",
+    "s3ItemLocalOnly": "Aucune configuration : les sauvegardes restent locales — aucune donnée n'est transmise à des tiers",
+    "section4Updated": "Aucune donnée personnelle n'est partagée avec des tiers. Pour des raisons techniques, les données chiffrées de sauvegarde peuvent être stockées sur un stockage externe compatible S3 si l'administrateur le configure (voir section 6). Dans ce cas, le fournisseur de stockage reçoit uniquement des données chiffrées."
   }
 }

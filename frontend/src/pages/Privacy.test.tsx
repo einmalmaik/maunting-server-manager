@@ -34,6 +34,18 @@ describe('Privacy page', () => {
     expect(screen.getByText('MSM Legal')).toBeInTheDocument();
   });
 
+  it('renders S3 encrypted backup section with zero-knowledge emphasis', () => {
+    useAuthStore.setState({ isAuthenticated: false });
+    renderPrivacy();
+
+    expect(screen.getByText('6. Verschlüsselte Cloud-Backups (S3)')).toBeInTheDocument();
+    // Zero-knowledge emphasis: provider cannot read data
+    expect(screen.getAllByText((c) => c.includes('Zero-Knowledge')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText((c) => c.includes('kann die Backup-Inhalte nicht lesen')).length).toBeGreaterThan(0);
+    // Encrypted before upload
+    expect(screen.getAllByText((c) => c.includes('clientseitig verschlüsselt')).length).toBeGreaterThan(0);
+  });
+
   it('renders privacy policy sections when authenticated (in-app page)', () => {
     useAuthStore.setState({ isAuthenticated: true });
     renderPrivacy();

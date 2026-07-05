@@ -1237,5 +1237,14 @@
     "restoreModalScriptCopied": "Script path copied",
     "restoreModalClose": "Close",
     "restoreModalWarning": "WARNING: This script stops the MSM panel service and overwrites the database and configuration files!"
+  },
+  "privacy": {
+    "s3SectionHeading": "6. Encrypted Cloud Backups (S3)",
+    "s3SectionBody": "When the administrator configures S3-compatible storage, encrypted backups may be uploaded to external S3 storage operated by third parties. These backups are encrypted client-side (zero-knowledge): the S3 provider receives only encrypted data and cannot read the backup contents. The decryption password never leaves this MSM instance and is never transmitted to the S3 provider.",
+    "s3ItemEncryption": "Encryption is performed client-side before upload (AES-256-GCM)",
+    "s3ItemZeroKnowledge": "S3 provider can only view encrypted data (zero-knowledge)",
+    "s3ItemPassword": "Decryption is only possible with the backup password set on this instance",
+    "s3ItemLocalOnly": "No configuration: backups remain local — no data is transmitted to third parties",
+    "section4Updated": "No personal data is shared with third parties. For technical reasons, encrypted backup data may be stored on external S3-compatible storage if the administrator configures it (see section 6). In that case, the storage provider receives only encrypted data."
   }
 }

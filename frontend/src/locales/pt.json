@@ -871,5 +871,14 @@
     "restoreModalScriptCopied": "Caminho do script copiado",
     "restoreModalClose": "Fechar",
     "restoreModalWarning": "AVISO: Este script interrompe o serviço do painel MSM e substitui o banco de dados e os arquivos de configuração!"
+  },
+  "privacy": {
+    "s3SectionHeading": "6. Backups em nuvem criptografados (S3)",
+    "s3SectionBody": "Quando o administrador configura armazenamento compatível com S3, backups criptografados podem ser enviados para armazenamento S3 externo operado por terceiros. Esses backups são criptografados no lado do cliente (conhecimento zero): o provedor S3 recebe apenas dados criptografados e não pode ler o conteúdo dos backups. A senha de descriptografia nunca sai desta instância do MSM e nunca é transmitida ao provedor S3.",
+    "s3ItemEncryption": "A criptografia é realizada no cliente antes do envio (AES-256-GCM)",
+    "s3ItemZeroKnowledge": "O provedor S3 só pode visualizar dados criptografados (conhecimento zero)",
+    "s3ItemPassword": "A descriptografia só é possível com a senha de backup definida nesta instância",
+    "s3ItemLocalOnly": "Sem configuração: os backups permanecem locais — nenhum dado é transmitido a terceiros",
+    "section4Updated": "Nenhum dado pessoal é compartilhado com terceiros. Por razões técnicas, dados criptografados de backup podem ser armazenados em armazenamento externo compatível com S3 se o administrador o configurar (ver seção 6). Nesse caso, o provedor de armazenamento recebe apenas dados criptografados."
   }
 }
