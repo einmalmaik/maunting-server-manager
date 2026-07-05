@@ -10,7 +10,8 @@
     "settings": "Settings",
     "blueprints": "Blueprints",
     "docs": "Help",
-    "logout": "Logout"
+    "logout": "Logout",
+    "panelBackups": "Panel Backups"
   },
   "routes": {
     "forbiddenTitle": "No access",
@@ -1193,5 +1194,24 @@
     "feedPayload": "Show payload",
     "attempt": "attempt",
     "copied": "Copied"
+  },
+  "panelBackups": {
+    "title": "Panel Backups",
+    "subtitle": "Backups of the MSM panel (database + configuration)",
+    "create": "Create Panel Backup",
+    "created": "Panel backup created successfully",
+    "confirmDelete": "Really delete this panel backup? This action cannot be undone.",
+    "deleted": "Panel backup deleted",
+    "settingsButton": "Settings",
+    "settingsTitle": "Panel Backup Settings",
+    "enabled": "Enable automatic backups",
+    "interval": "Interval",
+    "retention": "Retention (count)",
+    "retentionHint": "The oldest backups are automatically deleted when a new one is created.",
+    "noBackups": "No panel backups yet",
+    "createHint": "Create your first panel backup.",
+    "settingsSaved": "Settings saved",
+    "cloudTooltip": "Stored in S3 cloud (encrypted)",
+    "localTooltip": "Stored locally only"
   }
 }

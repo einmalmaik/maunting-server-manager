@@ -9,6 +9,7 @@ export const routeAccessRules = {
   roles: ['roles.manage'],
   settings: ['panel.settings.read'],
   blueprints: ['panel.settings.read'],
+  panelBackups: ['panel.settings.write'],
 } as const
 
 export function resolveRouteAccessState({

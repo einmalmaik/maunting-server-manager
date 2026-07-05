@@ -1,4 +1,4 @@
-﻿{
+{
   "panel": {
     "title": "Administrador del servidor de montaje"
   },
@@ -10,7 +10,8 @@
     "settings": "Configuración",
     "blueprints": "Planos",
     "docs": "Ayuda",
-    "logout": "Cerrar sesión"
+    "logout": "Cerrar sesión",
+    "panelBackups": "Copias del Panel"
   },
   "blueprints": {
     "pageTitle": "Administrar planos",
@@ -862,5 +863,24 @@
     "pause": "Pausar",
     "resume": "Reanudar",
     "delete": "Eliminar"
+  },
+  "panelBackups": {
+    "title": "Copias del Panel",
+    "subtitle": "Copias de seguridad del panel MSM (base de datos + configuración)",
+    "create": "Crear copia del panel",
+    "created": "Copia del panel creada correctamente",
+    "confirmDelete": "¿Seguro que deseas eliminar esta copia del panel? Esta acción no se puede deshacer.",
+    "deleted": "Copia del panel eliminada",
+    "settingsButton": "Ajustes",
+    "settingsTitle": "Ajustes de copias del panel",
+    "enabled": "Activar copias automáticas",
+    "interval": "Intervalo",
+    "retention": "Retención (cantidad)",
+    "retentionHint": "Las copias más antiguas se eliminan automáticamente al crear una nueva.",
+    "noBackups": "Aún no hay copias del panel",
+    "createHint": "Crea tu primera copia del panel.",
+    "settingsSaved": "Ajustes guardados",
+    "cloudTooltip": "Almacenada en la nube S3 (cifrada)",
+    "localTooltip": "Solo almacenada localmente"
   }
 }

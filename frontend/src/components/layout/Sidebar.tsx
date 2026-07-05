@@ -13,6 +13,7 @@ import {
   Plus,
   BookOpen,
   Boxes,
+  Database,
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -27,6 +28,7 @@ export function Sidebar() {
   const canManageRoles = useHasPermission('roles.manage')
   const canCreateServer = useHasPermission('servers.create')
   const canViewSettings = useHasPermission('panel.settings.read')
+  const canManagePanelBackups = useHasPermission('panel.settings.write')
 
   const handleLogout = async () => {
     await logout()
@@ -45,6 +47,9 @@ export function Sidebar() {
     ...((user?.is_owner || canViewSettings) ? [
       { to: '/settings', icon: Settings, label: t('nav.settings') },
       { to: '/blueprints', icon: Boxes, label: t('nav.blueprints') },
+    ] : []),
+    ...((user?.is_owner || canManagePanelBackups) ? [
+      { to: '/panel-backups', icon: Database, label: t('nav.panelBackups') },
     ] : []),
     { to: '/docs', icon: BookOpen, label: t('nav.docs') },
   ]

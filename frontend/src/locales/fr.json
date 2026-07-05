@@ -1,4 +1,4 @@
-﻿{
+{
   "panel": {
     "title": "Gestionnaire de serveur Maunting"
   },
@@ -10,7 +10,8 @@
     "settings": "Paramètres",
     "blueprints": "Plans",
     "docs": "Aide",
-    "logout": "Déconnexion"
+    "logout": "Déconnexion",
+    "panelBackups": "Sauvegardes du Panneau"
   },
   "blueprints": {
     "pageTitle": "Gérer les plans",
@@ -840,5 +841,24 @@
     "pause": "Mettre en pause",
     "resume": "Reprendre",
     "delete": "Supprimer"
+  },
+  "panelBackups": {
+    "title": "Sauvegardes du Panneau",
+    "subtitle": "Sauvegardes du panneau MSM (base de données + configuration)",
+    "create": "Créer une sauvegarde du panneau",
+    "created": "Sauvegarde du panneau créée avec succès",
+    "confirmDelete": "Voulez-vous vraiment supprimer cette sauvegarde du panneau ? Cette action est irréversible.",
+    "deleted": "Sauvegarde du panneau supprimée",
+    "settingsButton": "Paramètres",
+    "settingsTitle": "Paramètres de sauvegarde du panneau",
+    "enabled": "Activer les sauvegardes automatiques",
+    "interval": "Intervalle",
+    "retention": "Rétention (nombre)",
+    "retentionHint": "Les sauvegardes les plus anciennes sont automatiquement supprimées lors de la création d'une nouvelle.",
+    "noBackups": "Aucune sauvegarde du panneau",
+    "createHint": "Créez votre première sauvegarde du panneau.",
+    "settingsSaved": "Paramètres enregistrés",
+    "cloudTooltip": "Stockée dans le cloud S3 (chiffrée)",
+    "localTooltip": "Stockée localement uniquement"
   }
 }

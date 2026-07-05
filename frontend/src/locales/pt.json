@@ -1,4 +1,4 @@
-﻿{
+{
   "panel": {
     "title": "Gerenciador de servidores assustadores"
   },
@@ -10,7 +10,8 @@
     "settings": "Configurações",
     "blueprints": "Plantas",
     "docs": "Ajuda",
-    "logout": "Sair"
+    "logout": "Sair",
+    "panelBackups": "Backups do Painel"
   },
   "blueprints": {
     "pageTitle": "Gerenciar projetos",
@@ -840,5 +841,24 @@
     "pause": "Pausar",
     "resume": "Retomar",
     "delete": "Excluir"
+  },
+  "panelBackups": {
+    "title": "Backups do Painel",
+    "subtitle": "Backups do painel MSM (banco de dados + configuração)",
+    "create": "Criar backup do painel",
+    "created": "Backup do painel criado com sucesso",
+    "confirmDelete": "Tem certeza de que deseja excluir este backup do painel? Esta ação não pode ser desfeita.",
+    "deleted": "Backup do painel excluído",
+    "settingsButton": "Configurações",
+    "settingsTitle": "Configurações de backup do painel",
+    "enabled": "Ativar backups automáticos",
+    "interval": "Intervalo",
+    "retention": "Retenção (quantidade)",
+    "retentionHint": "Os backups mais antigos são excluídos automaticamente quando um novo é criado.",
+    "noBackups": "Nenhum backup do painel ainda",
+    "createHint": "Crie seu primeiro backup do painel.",
+    "settingsSaved": "Configurações salvas",
+    "cloudTooltip": "Armazenado na nuvem S3 (criptografado)",
+    "localTooltip": "Armazenado apenas localmente"
   }
 }

@@ -10,7 +10,8 @@
     "settings": "Einstellungen",
     "blueprints": "Blueprints",
     "docs": "Hilfe",
-    "logout": "Abmelden"
+    "logout": "Abmelden",
+    "panelBackups": "Panel-Backups"
   },
   "routes": {
     "forbiddenTitle": "Kein Zugriff",
@@ -1193,5 +1194,24 @@
     "feedPayload": "Payload anzeigen",
     "attempt": "Versuch",
     "copied": "Kopiert"
+  },
+  "panelBackups": {
+    "title": "Panel-Backups",
+    "subtitle": "Sicherungen des MSM-Panels (Datenbank + Konfiguration)",
+    "create": "Panel-Backup erstellen",
+    "created": "Panel-Backup erfolgreich erstellt",
+    "confirmDelete": "Panel-Backup wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
+    "deleted": "Panel-Backup gelöscht",
+    "settingsButton": "Einstellungen",
+    "settingsTitle": "Panel-Backup-Einstellungen",
+    "enabled": "Automatische Backups aktivieren",
+    "interval": "Intervall",
+    "retention": "Aufbewahrung (Anzahl)",
+    "retentionHint": "Die ältesten Backups werden automatisch gelöscht, wenn ein neues erstellt wird.",
+    "noBackups": "Keine Panel-Backups vorhanden",
+    "createHint": "Erstelle dein erstes Panel-Backup.",
+    "settingsSaved": "Einstellungen gespeichert",
+    "cloudTooltip": "In S3-Cloud gespeichert (verschlüsselt)",
+    "localTooltip": "Nur lokal gespeichert"
   }
 }

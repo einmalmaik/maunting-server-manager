@@ -1,4 +1,4 @@
-﻿{
+{
   "panel": {
     "title": "Manajer Server Maunting"
   },
@@ -10,7 +10,8 @@
     "settings": "Pengaturan",
     "blueprints": "cetak biru",
     "docs": "Bantuan",
-    "logout": "Keluar"
+    "logout": "Keluar",
+    "panelBackups": "Backup Panel"
   },
   "blueprints": {
     "pageTitle": "Kelola cetak biru",
@@ -840,5 +841,24 @@
     "pause": "Jeda",
     "resume": "Lanjutkan",
     "delete": "Hapus"
+  },
+  "panelBackups": {
+    "title": "Backup Panel",
+    "subtitle": "Cadangan panel MSM (basis data + konfigurasi)",
+    "create": "Buat Backup Panel",
+    "created": "Backup panel berhasil dibuat",
+    "confirmDelete": "Yakin ingin menghapus backup panel ini? Tindakan ini tidak dapat dibatalkan.",
+    "deleted": "Backup panel dihapus",
+    "settingsButton": "Pengaturan",
+    "settingsTitle": "Pengaturan Backup Panel",
+    "enabled": "Aktifkan pencadangan otomatis",
+    "interval": "Interval",
+    "retention": "Penyimpanan (jumlah)",
+    "retentionHint": "Cadangan terlama secara otomatis dihapus saat yang baru dibuat.",
+    "noBackups": "Belum ada backup panel",
+    "createHint": "Buat backup panel pertama Anda.",
+    "settingsSaved": "Pengaturan disimpan",
+    "cloudTooltip": "Disimpan di cloud S3 (terenkripsi)",
+    "localTooltip": "Hanya disimpan secara lokal"
   }
 }

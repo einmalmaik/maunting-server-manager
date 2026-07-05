@@ -1,4 +1,4 @@
-﻿{
+{
   "panel": {
     "title": "安装服务器管理器"
   },
@@ -10,7 +10,8 @@
     "settings": "设置",
     "blueprints": "蓝图",
     "docs": "帮助",
-    "logout": "退出"
+    "logout": "退出",
+    "panelBackups": "面板备份"
   },
   "blueprints": {
     "pageTitle": "管理蓝图",
@@ -840,5 +841,24 @@
     "pause": "暂停",
     "resume": "继续",
     "delete": "删除"
+  },
+  "panelBackups": {
+    "title": "面板备份",
+    "subtitle": "MSM 面板的备份（数据库 + 配置）",
+    "create": "创建面板备份",
+    "created": "面板备份创建成功",
+    "confirmDelete": "确定要删除此面板备份吗？此操作无法撤销。",
+    "deleted": "面板备份已删除",
+    "settingsButton": "设置",
+    "settingsTitle": "面板备份设置",
+    "enabled": "启用自动备份",
+    "interval": "间隔",
+    "retention": "保留（数量）",
+    "retentionHint": "创建新备份时，最旧的备份会自动删除。",
+    "noBackups": "暂无面板备份",
+    "createHint": "创建您的第一个面板备份。",
+    "settingsSaved": "设置已保存",
+    "cloudTooltip": "已存储在 S3 云端（已加密）",
+    "localTooltip": "仅本地存储"
   }
 }
