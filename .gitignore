@@ -74,3 +74,9 @@ postgres/
 /dis-sidecar/node_modules
 .factory-test-env
 /.cache
+
+# MSM Backup Recovery (Tauri app)
+/recovery/node_modules
+/recovery/dist
+/recovery/src-tauri/target
+/recovery/src-tauri/gen

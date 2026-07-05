@@ -1,0 +1,45 @@
+@import 'tailwindcss';
+
+/* MSM Backup Recovery - minimal foundation stylesheet.
+ * Design-DNA tokens (dark theme HSL, Inter font, DIS badge) are introduced
+ * fully in the `recovery-basic-ui` feature. This file only sets sensible
+ * defaults so the Tauri webview renders a legible dark surface. */
+
+:root {
+  color-scheme: dark;
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: hsl(222 22% 8%);
+  color: hsl(210 20% 92%);
+}
+
+.msm-app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.msm-dis-note {
+  font-size: 0.8125rem;
+  color: hsl(210 14% 60%);
+}
