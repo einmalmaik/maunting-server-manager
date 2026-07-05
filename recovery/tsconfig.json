@@ -23,7 +23,7 @@
     "noUncheckedSideEffectImports": true,
     "exactOptionalPropertyTypes": false,
 
-    "types": ["vite/client", "vitest/globals"],
+    "types": ["vite/client", "vitest/globals", "node"],
 
     "baseUrl": ".",
     "paths": {

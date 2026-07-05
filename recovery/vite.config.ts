@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { fileURLToPath } from 'node:url';
 
 // Tauri dev server uses port 1420 (Tauri default).
 const TAURI_PORT = 1420;
@@ -8,6 +9,11 @@ const TAURI_PORT = 1420;
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
 
   // Tauri expects a fixed port and the Vite default host.
   clearScreen: false,
