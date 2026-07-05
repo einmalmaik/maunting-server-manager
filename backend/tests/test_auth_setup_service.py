@@ -1,11 +1,17 @@
 """Tests fuer auth_setup_service — generischer Auth-Recovery fuer Game-Server-Container."""
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
-from services.auth_setup_service import detect_auth_required, move_credentials
+from services.auth_setup_service import (
+    detect_auth_required,
+    move_credentials,
+    wait_for_credentials,
+)
 
 
 def test_detects_hytale_auth_prompt():
@@ -136,3 +142,49 @@ def test_move_credentials_accepts_string_path(tmp_path: Path):
     moved = move_credentials(str(tmp_path))
     assert moved == 1
     assert (tmp_path / "credentials.json.bak").exists()
+
+
+# ──────────────────────────────────────────────────────────────────
+# wait_for_credentials
+# ──────────────────────────────────────────────────────────────────
+
+
+def test_wait_returns_when_file_reappears(tmp_path: Path):
+    (tmp_path / "credentials.json.bak").write_text("{}")
+    # Simulate the in-container auth flow creating the new file after 1.5s.
+    def writer():
+        time.sleep(1.5)
+        (tmp_path / "credentials.json").write_text("new")
+    threading.Thread(target=writer, daemon=True).start()
+    found = wait_for_credentials(tmp_path, timeout=5.0, poll_interval=0.5)
+    assert found is not None
+    assert found.name == "credentials.json"
+
+
+def test_wait_returns_none_on_timeout(tmp_path: Path):
+    # No .bak exists, no credential files at all.
+    result = wait_for_credentials(tmp_path, timeout=1.0, poll_interval=0.5)
+    assert result is None
+
+
+def test_wait_returns_immediately_when_unbacked_credential_already_exists(tmp_path: Path):
+    (tmp_path / "credentials.json").write_text("fresh")
+    # Already fresh, no .bak to wait for; returns immediately.
+    found = wait_for_credentials(tmp_path, timeout=0.5, poll_interval=0.1)
+    assert found is not None
+    assert found.name == "credentials.json"
+
+
+def test_wait_skips_non_credential_files(tmp_path: Path):
+    (tmp_path / "server-config.json").write_text("config")  # NOT credential pattern
+    (tmp_path / "level.dat").write_text("data")
+    # Should wait and time out because no credential files appear.
+    result = wait_for_credentials(tmp_path, timeout=0.5, poll_interval=0.2)
+    assert result is None
+
+
+def test_wait_does_not_return_when_only_bak_remains(tmp_path: Path):
+    # Only the .bak exists (the live file was moved away). Should wait, not return.
+    (tmp_path / "credentials.json.bak").write_text("{}")
+    result = wait_for_credentials(tmp_path, timeout=0.5, poll_interval=0.2)
+    assert result is None

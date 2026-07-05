@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
+from typing import Optional
 
 # OAuth/Auth-Fehler im Server-Log. Hytale, generic-discord-bots, anything
 # that uses oauth2 against a third-party token service matches this.
@@ -80,3 +82,44 @@ def move_credentials(install_dir: os.PathLike[str] | str) -> int:
         entry.rename(backup)
         moved += 1
     return moved
+
+
+def wait_for_credentials(
+    install_dir: os.PathLike[str] | str,
+    *,
+    timeout: float = 120.0,
+    poll_interval: float = 1.0,
+) -> Optional[Path]:
+    """Pollt ``install_dir`` auf frische Credential-Files.
+
+    Success-Bedingung: ein Live-Credential-File (kein ``.bak``-Pendant)
+    ist im Verzeichnis. Das ist genau der Zustand, den der In-Container-Auth-Flow
+    hinterlaesst: ``move_credentials`` hat das Original zu ``<name>.bak``
+    weggeschoben, der Container schreibt jetzt das frische File ohne
+    ``.bak``.
+
+    Returnt den Pfad des neuen Credential-Files, oder None bei Timeout.
+    """
+    base = Path(install_dir)
+    deadline = time.monotonic() + timeout
+    # Schnellerer Initial-Polling: erste 30s alle 0.5s, danach alle 2s.
+    fast_until = time.monotonic() + min(30.0, timeout)
+
+    while time.monotonic() < deadline:
+        for entry in base.iterdir():
+            if not entry.is_file():
+                continue
+            if not _is_credential_file(entry.name):
+                continue
+            # Live-Credential-Files haben einen Namen OHNE .bak.
+            # ``.bak``-Dateien sind die weg geschobenen Originale und
+            # zaehlen nicht als "frisch" - der Container hat sie nicht
+            # angelegt.
+            if entry.suffix == ".bak":
+                continue
+            return entry
+        if time.monotonic() < fast_until:
+            time.sleep(min(0.5, poll_interval / 2))
+        else:
+            time.sleep(poll_interval)
+    return None
