@@ -465,8 +465,8 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
        laufende Container).
     2. UFW-Regeln für Ports schließen.
     3. Install-Verzeichnis (Bind-Mount-Quelle) vom Host entfernen.
-    4. Backup-Verzeichnis (alle TAR-Archive) vom Host entfernen - DB-Cascade
-       räumt die Backup-Records selbst.
+    4. Backup-Verzeichnis (alle TAR-Archive) vom Host entfernen + S3-Objekte
+       der Backups best-effort löschen (vor Cascade, sonst verwaist).
     5. MSM-Console-Log-Verzeichnis entfernen.
     6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups).
     """
@@ -546,7 +546,22 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
             detail=f"Abbruch: PostgreSQL-Ressourcen konnten nicht gelöscht werden. Bitte später erneut versuchen: {e}",
         )
 
-    # 7. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
+    # 7. S3-Objekte der Backups best-effort löschen - VOR db.delete, da der
+    #    Cascade-Delete die Backup-Records (und damit s3_key) entfernt und
+    #    die S3-Objekte sonst permanent verwaisten. Local-Import + Warning-Log
+    #    wie in cleanup_old_backups / delete_backup (keine Secrets im Log).
+    for backup in server.backups:
+        if backup.s3_key:
+            try:
+                from services.s3_service import S3Service
+                S3Service.delete_object(backup.s3_key)
+            except Exception as e:
+                logger.warning(
+                    "S3-Delete fehlgeschlagen (Backup %s): %s",
+                    backup.id, type(e).__name__,
+                )
+
+    # 8. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
     db.delete(server)
     db.commit()
     return {
