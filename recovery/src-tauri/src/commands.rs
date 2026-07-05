@@ -392,11 +392,31 @@ pub fn write_temp_file(dir_path: String, filename: String, data: Vec<u8>) -> Res
 
 /// Recursively delete a temp directory and remove it from exit-tracking.
 /// Called by the frontend when the user starts a new session (reset).
+///
+/// On Windows, `fs::remove_dir_all` can fail with "Access is denied" when a
+/// file handle is briefly held by the OS, antivirus, or another process. To
+/// keep cleanup robust on Windows CI, the removal is retried up to 3 times
+/// with short 100ms delays between attempts.
 #[command]
 pub fn cleanup_temp_dir(dir_path: String) -> Result<(), String> {
     let path = PathBuf::from(&dir_path);
     if path.exists() {
-        fs::remove_dir_all(&path).map_err(|e| format!("Löschen fehlgeschlagen: {}", e))?;
+        let mut last_err = None;
+        for attempt in 0..3u32 {
+            match fs::remove_dir_all(&path) {
+                Ok(()) => {
+                    untrack_temp_dir(&dir_path);
+                    return Ok(());
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    if attempt < 2 {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }
+        }
+        return Err(format!("Löschen fehlgeschlagen: {}", last_err.unwrap()));
     }
     untrack_temp_dir(&dir_path);
     Ok(())
