@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability set for the MSM Backup Recovery app. Grants core, dialog, and scoped fs permissions so the M1 UI can pick and read .enc backup files for offline DIS decryption.",
+  "description": "Default capability set for the MSM Backup Recovery app. Grants core, dialog, and scoped fs permissions so the UI can pick and read .enc backup files for offline DIS decryption, and write the decrypted tar.gz to a temp directory before extraction.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "dialog:default",
-    "fs:default"
+    "fs:default",
+    "fs:allow-temp-write-recursive"
   ]
 }

@@ -192,6 +192,14 @@ body {
     }
   }
 
+  /* Progress bar (determinate, driven by per-frame progress callback) */
+  .msm-progress-fill-determinate {
+    height: 100%;
+    border-radius: 9999px;
+    background: var(--color-ring);
+    transition: width 0.3s ease;
+  }
+
   /* Spinner (for preview loading) */
   .msm-spinner {
     display: inline-block;

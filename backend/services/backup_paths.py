@@ -12,6 +12,39 @@ from typing import Literal
 BACKUP_MANIFEST_ARCNAME = ".msm/backup-manifest.json"
 BACKUP_MANIFEST_VERSION = 1
 
+# Directories that are always excluded from server backups.
+# These are regenerable caches, build artifacts, or VCS metadata
+# that bloat backups without providing restore value.
+_BACKUP_EXCLUDE_DIRS: frozenset[str] = frozenset({
+    "node_modules",
+    "__pycache__",
+    ".cache",
+    ".npm",
+    ".git",
+    ".pytest_cache",
+    "dist",
+    "build",
+    "target",
+})
+
+# File suffixes that are always excluded (regenerable or low-value).
+_BACKUP_EXCLUDE_SUFFIXES: tuple[str, ...] = (".log", ".pyc")
+
+
+def _backup_tar_filter(tarinfo):
+    """tarfile-Filter: schliesst Caches, Build-Artefakte und VCS-Metadaten aus.
+
+    Wird fuer ``tar.add(recursive=True, filter=...)`` verwendet.
+    Gibt ``None`` zurueck um den Eintrag (und bei Verzeichnissen deren
+    gesamten Inhalt) auszulassen.
+    """
+    parts = Path(tarinfo.name).parts
+    if any(part in _BACKUP_EXCLUDE_DIRS for part in parts):
+        return None
+    if tarinfo.isfile() and Path(tarinfo.name).suffix in _BACKUP_EXCLUDE_SUFFIXES:
+        return None
+    return tarinfo
+
 
 @dataclass(frozen=True)
 class BackupPlan:
@@ -166,7 +199,7 @@ def create_selective_backup_tar(
             full = base / rel
             if not full.exists():
                 continue
-            tar.add(str(full), arcname=rel, recursive=True)
+            tar.add(str(full), arcname=rel, recursive=True, filter=_backup_tar_filter)
 
 # Backup-Integration fuer Postgres-Dumps (v1.4.4 / M5-Fix: per-DB Dumps)
 # Legacy-Format (v1.4.4): einzelne .msm/postgres.sql mit kombiniertem Dump
@@ -247,17 +280,25 @@ def create_full_backup_tar(
             pg_info.size = len(pg_dump_bytes)
             tar.addfile(pg_info, io.BytesIO(pg_dump_bytes))
 
-        # Dateien aus install_dir -- rekursiv.
+        # Dateien aus install_dir -- rekursiv, mit Ausschluss von
+        # regenerierbaren Caches, Build-Artefakten und VCS-Metadaten.
         # Wir benutzen ``tar.add(str(base), arcname=".", recursive=True)`` und
         # nutzen dann das tarfile-internen setzten der arcnames. ABER: das wuerde
         # einen "."-Prefix erzeugen. Wir gehen stattdessen File fuer File durch:
         for path in base.rglob("*"):
             try:
-                rel = path.relative_to(base).as_posix()
+                rel = path.relative_to(base)
+                # Skip files inside excluded directories
+                if any(part in _BACKUP_EXCLUDE_DIRS for part in rel.parts):
+                    continue
+                rel_posix = rel.as_posix()
                 if path.is_file():
+                    # Skip excluded file types
+                    if path.suffix in _BACKUP_EXCLUDE_SUFFIXES:
+                        continue
                     # Folgt ggf. Symlinks nicht (Sicherheit) -- GNU tar --no-acl
                     # Analog; wir nutzen rekursiv ohne follow.
-                    tar.add(str(path), arcname=rel, recursive=False)
+                    tar.add(str(path), arcname=rel_posix, recursive=False)
             except OSError:
                 # Race: Datei zwischen rglob und add geloescht -- ueberspringen,
                 # kein hartes Failure (Backup ist Best-Effort).

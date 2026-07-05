@@ -16,6 +16,8 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { writeFile } from '@tauri-apps/plugin-fs';
+import { join } from '@tauri-apps/api/path';
 
 /** Recursive file-tree node (mirrors the Rust `FileTree` struct). */
 export interface FileTreeNode {
@@ -52,6 +54,17 @@ export async function saveExtracted(
 }
 
 /**
+ * Save the extracted backup files as a ZIP archive.
+ * Throws a string error from Rust on failure.
+ */
+export async function saveAsZip(
+  sourceDir: string,
+  zipPath: string,
+): Promise<void> {
+  await invoke('save_as_zip', { sourceDir, zipPath });
+}
+
+/**
  * Read a UTF-8 text file for preview. Throws if the file is missing, too
  * large, or not valid UTF-8.
  */
@@ -71,19 +84,21 @@ export async function createTempDir(): Promise<string> {
 /**
  * Write raw bytes to a file inside a temp directory. Returns the full path
  * of the written file.
+ *
+ * Uses the `@tauri-apps/plugin-fs` `writeFile` command, which serialises the
+ * `Uint8Array` as binary (Vec<u8>) over IPC. The previous implementation
+ * converted the entire buffer to a JS `Array<number>` via `Array.from`, which
+ * boxed every byte and was catastrophically slow + memory-hungry for large
+ * backups (50 MB => ~400 MB of boxed numbers).
  */
 export async function writeTempFile(
   dirPath: string,
   filename: string,
   data: Uint8Array,
 ): Promise<string> {
-  // Tauri serialises Uint8Array to a Rust `Vec<u8>` via serde bytes.
-  // We pass a regular array-like view so the IPC bridge handles the encoding.
-  return invoke<string>('write_temp_file', {
-    dirPath,
-    filename,
-    data: Array.from(data),
-  });
+  const filePath = await join(dirPath, filename);
+  await writeFile(filePath, data);
+  return filePath;
 }
 
 /**

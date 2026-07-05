@@ -66,6 +66,9 @@ function AppContent() {
   const [decryptedSize, setDecryptedSize] = useState(0);
   const [validationError, setValidationError] = useState<TranslationKey | null>(null);
   const [fileTree, setFileTree] = useState<FileTreeNode | null>(null);
+  // Progress feedback for the decrypt/extract steps (null = indeterminate).
+  const [progress, setProgress] = useState<number | null>(null);
+  const [progressLabel, setProgressLabel] = useState<string | undefined>(undefined);
 
   // Track temp dir for cleanup (VAL-CROSS-004). Use a ref so it persists
   // across re-renders without triggering re-render on assignment.
@@ -106,14 +109,25 @@ function AppContent() {
     }
 
     setValidationError(null);
+    setProgress(null);
+    setProgressLabel(undefined);
     setStep('decrypting');
 
     try {
       // 1. Decrypt with DIS (Argon2id + AES-256-GCM)
-      const decrypted = await decryptBackup(fileBytes, password, salt);
+      const decrypted = await decryptBackup(fileBytes, password, salt, (update) => {
+        if (update.stage === 'deriving') {
+          setProgressLabel(t('progress.deriving'));
+        } else {
+          setProgressLabel(t('progress.decrypting'));
+        }
+        setProgress(update.progress);
+      });
       setDecryptedSize(decrypted.length);
 
       // 2. Create temp dir and write the decrypted tar.gz
+      setProgressLabel(t('progress.extracting'));
+      setProgress(null); // extracting is indeterminate
       setStep('extracting');
       const tempDir = await createTempDir();
       tempDirRef.current = tempDir;
@@ -133,7 +147,7 @@ function AppContent() {
       // VAL-CROSS-003: clear the password from memory immediately after use.
       setPassword('');
     }
-  }, [fileBytes, password, salt, cleanupTemp]);
+  }, [fileBytes, password, salt, cleanupTemp, t]);
 
   const handleRetry = useCallback(() => {
     setStep('input');
@@ -141,6 +155,8 @@ function AppContent() {
     setDecryptedSize(0);
     setValidationError(null);
     setFileTree(null);
+    setProgress(null);
+    setProgressLabel(undefined);
   }, []);
 
   const handleReset = useCallback(async () => {
@@ -155,6 +171,8 @@ function AppContent() {
     setErrorMsgKey('state.error.default');
     setValidationError(null);
     setFileTree(null);
+    setProgress(null);
+    setProgressLabel(undefined);
   }, [cleanupTemp]);
 
   return (
@@ -218,7 +236,9 @@ function AppContent() {
             disabled={step !== 'input'}
           />
 
-          {step === 'decrypting' ? <ProgressBar /> : null}
+          {step === 'decrypting' ? (
+            <ProgressBar label={progressLabel} progress={progress ?? undefined} />
+          ) : null}
           {step === 'extracting' ? <ProgressBar label={t('progress.extracting')} /> : null}
         </section>
       ) : null}

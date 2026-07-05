@@ -1,8 +1,8 @@
 /**
  * SaveButton component tests (VAL-EXTRACT-006).
  *
- * Verifies that the save button opens a directory dialog, calls
- * save_extracted, and shows success/error feedback.
+ * Verifies that the save button opens a file-save dialog, calls
+ * save_as_zip, and shows success/error feedback.
  */
 
 // @vitest-environment jsdom
@@ -27,8 +27,8 @@ describe('VAL-EXTRACT-006: SaveButton', () => {
     expect(btn.textContent).toContain('speichern');
   });
 
-  it('opens directory dialog and calls save_extracted on click', async () => {
-    const mockDialog = vi.fn().mockResolvedValue('C:\\Users\\backup-output');
+  it('opens save dialog and calls save_as_zip on click', async () => {
+    const mockDialog = vi.fn().mockResolvedValue('C:\\Users\\backup-output.zip');
     const mockSave = vi.fn().mockResolvedValue(undefined);
 
     render(
@@ -48,7 +48,7 @@ describe('VAL-EXTRACT-006: SaveButton', () => {
     });
 
     await waitFor(() => {
-      expect(mockSave).toHaveBeenCalledWith('/tmp/extracted', 'C:\\Users\\backup-output');
+      expect(mockSave).toHaveBeenCalledWith('/tmp/extracted', 'C:\\Users\\backup-output.zip');
     });
 
     await waitFor(() => {

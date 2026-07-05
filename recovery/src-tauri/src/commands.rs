@@ -7,13 +7,16 @@
 // error strings (German-friendly) instead of opaque Rust debug output.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use flate2::read::GzDecoder;
 use tar::Archive;
 use tauri::command;
+use zip::CompressionMethod::Stored;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 // ---------------------------------------------------------------------------
 // Temp-file tracking (VAL-CROSS-004: cleanup on app close)
@@ -252,6 +255,73 @@ pub fn extract_tar_gz(tar_gz_path: String, output_dir: String) -> Result<FileTre
 #[command]
 pub fn save_extracted(source_dir: String, target_dir: String) -> Result<(), String> {
     copy_dir_contents(&source_dir, &target_dir)
+}
+
+/// Save all extracted files from `source_dir` as a ZIP archive at `zip_path`.
+///
+/// Uses no compression (`Stored`) because the source files are already from a
+/// backup archive — recompressing would waste CPU without meaningful size
+/// reduction. Symlinks are skipped for security (same as `copy_dir_contents`).
+#[command]
+pub fn save_as_zip(source_dir: String, zip_path: String) -> Result<(), String> {
+    let source = Path::new(&source_dir);
+    if !source.is_dir() {
+        return Err("Quellverzeichnis existiert nicht oder ist kein Verzeichnis.".into());
+    }
+
+    let file = fs::File::create(&zip_path)
+        .map_err(|e| format!("ZIP-Datei konnte nicht erstellt werden: {e}"))?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(Stored);
+
+    let mut buffer = Vec::new();
+    add_dir_to_zip(&mut zip, source, source, options, &mut buffer)?;
+
+    zip.finish()
+        .map_err(|e| format!("ZIP-Archiv konnte nicht abgeschlossen werden: {e}"))?;
+    Ok(())
+}
+
+/// Recursively add all files under `current` to the ZIP, using paths relative
+/// to `base` as archive entry names. Symlinks are skipped (security).
+fn add_dir_to_zip(
+    zip: &mut ZipWriter<fs::File>,
+    base: &Path,
+    current: &Path,
+    options: SimpleFileOptions,
+    buffer: &mut Vec<u8>,
+) -> Result<(), String> {
+    let entries = fs::read_dir(current)
+        .map_err(|e| format!("Verzeichnis konnte nicht gelesen werden: {e}"))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Verzeichniseintrag konnte nicht gelesen werden: {e}"))?;
+        let path = entry.path();
+        let name = path.strip_prefix(base)
+            .map_err(|e| format!("Pfad konnte nicht relativiert werden: {e}"))?
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        // Skip symlinks (security)
+        if path.is_symlink() {
+            continue;
+        }
+
+        if path.is_dir() {
+            add_dir_to_zip(zip, base, &path, options, buffer)?;
+        } else if path.is_file() {
+            zip.start_file(&name, options)
+                .map_err(|e| format!("Datei konnte nicht zum ZIP hinzugefügt werden: {e}"))?;
+            let mut f = fs::File::open(&path)
+                .map_err(|e| format!("Datei konnte nicht geöffnet werden: {e}"))?;
+            f.read_to_end(buffer)
+                .map_err(|e| format!("Datei konnte nicht gelesen werden: {e}"))?;
+            zip.write_all(buffer)
+                .map_err(|e| format!("Datei konnte nicht in ZIP geschrieben werden: {e}"))?;
+            buffer.clear();
+        }
+    }
+    Ok(())
 }
 
 /// Read a text file's content (UTF-8) for preview in the frontend.
@@ -591,6 +661,68 @@ mod tests {
         let result = save_extracted(
             tmp.join("nope").to_string_lossy().into_owned(),
             tmp.join("target").to_string_lossy().into_owned(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_as_zip_creates_valid_zip() {
+        let tmp = tempfile_dir();
+        let source = tmp.join("source");
+        let zip_path = tmp.join("output.zip");
+
+        // Source layout:
+        //   source/
+        //     hello.txt        -> "hello\n"
+        //     nested/
+        //       data.json     -> "{\"k\":1}\n"
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::write(source.join("hello.txt"), b"hello\n").unwrap();
+        fs::write(source.join("nested").join("data.json"), b"{\"k\":1}\n").unwrap();
+
+        save_as_zip(
+            source.to_string_lossy().into_owned(),
+            zip_path.to_string_lossy().into_owned(),
+        )
+        .expect("save_as_zip should succeed");
+
+        // Verify the ZIP file exists and has ZIP magic bytes
+        assert!(zip_path.exists());
+        let zip_bytes = fs::read(&zip_path).unwrap();
+        assert!(!zip_bytes.is_empty(), "ZIP file should not be empty");
+        assert_eq!(&zip_bytes[0..2], b"PK", "file must have ZIP magic bytes");
+
+        // Read back the ZIP and verify entries
+        let file = fs::File::open(&zip_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).expect("should be a valid ZIP");
+
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(
+            names.contains(&"hello.txt".to_string()),
+            "ZIP should contain hello.txt, got {:?}", names
+        );
+        assert!(
+            names.contains(&"nested/data.json".to_string()),
+            "ZIP should contain nested/data.json, got {:?}", names
+        );
+
+        // Verify content of hello.txt
+        let mut hello_file = archive
+            .by_name("hello.txt")
+            .expect("hello.txt should be in ZIP");
+        let mut content = String::new();
+        hello_file.read_to_string(&mut content).unwrap();
+        assert_eq!(content, "hello\n");
+    }
+
+    #[test]
+    fn test_save_as_zip_missing_source_returns_error() {
+        let tmp = tempfile_dir();
+        let result = save_as_zip(
+            tmp.join("nope").to_string_lossy().into_owned(),
+            tmp.join("out.zip").to_string_lossy().into_owned(),
         );
         assert!(result.is_err());
     }

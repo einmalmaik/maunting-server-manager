@@ -37,6 +37,7 @@ export const en: Record<LocaleKeys, string> = {
   'decrypt.button.loading': 'Decrypting …',
 
   'progress.decrypting': 'Decrypting backup …',
+  'progress.deriving': 'Deriving key …',
   'progress.extracting': 'Extracting files …',
 
   'state.success.title': 'Decryption successful',
@@ -69,8 +70,8 @@ export const en: Record<LocaleKeys, string> = {
 
   'save.button': 'Save extracted files',
   'save.button.saving': 'Saving …',
-  'save.dialog.title': 'Choose target directory',
-  'save.success': 'Files were saved successfully.',
+  'save.dialog.title': 'Save ZIP file',
+  'save.success': 'Files were saved successfully as a ZIP archive.',
   'save.error': 'Save failed. Please try again.',
 
   'dis.badge': 'Powered by DIS',
