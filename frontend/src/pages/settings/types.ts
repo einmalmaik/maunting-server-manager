@@ -17,6 +17,8 @@ export interface PanelSettings {
   github_token_configured: boolean
   github_token_source: 'env' | 'panel' | 'none'
   time_format: '24h' | '12h'
+  imprint_enabled: boolean
+  imprint_url: string
 }
 
 export const EMPTY_PANEL_SETTINGS: PanelSettings = {
@@ -38,4 +40,6 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   github_token_configured: false,
   github_token_source: 'none',
   time_format: '24h',
+  imprint_enabled: false,
+  imprint_url: '',
 }

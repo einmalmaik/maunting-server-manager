@@ -1,9 +1,13 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { BookOpen, KeyRound, ArrowRight, BookOpenCheck } from 'lucide-react'
+import { BookOpen, KeyRound, ArrowRight, BookOpenCheck, FileText, ExternalLink } from 'lucide-react'
+import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 
 export function Docs() {
   const { t } = useTranslation()
+  const legal = usePublicLegalSettings()
+  const imprintUrl = legal.imprint_enabled ? legal.imprint_url : ''
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
       <div className="flex items-center gap-3 mb-2">
@@ -31,6 +35,7 @@ export function Docs() {
           description={t('docsIndex.oauthDesc')}
           cta={t('docsIndex.oauthLink')}
         />
+        <LegalCard imprintUrl={imprintUrl} />
       </div>
     </div>
   )
@@ -64,5 +69,40 @@ function DocCard({
         <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
       </span>
     </Link>
+  )
+}
+
+function LegalCard({ imprintUrl }: { imprintUrl: string }) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="msm-card p-6 md:col-span-2">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center text-secondary">
+          <FileText className="w-6 h-6" />
+        </div>
+        <div>
+          <h2 className="font-headline text-headline-sm text-primary">{t('docsIndex.legalTitle')}</h2>
+          <p className="font-body-md text-sm text-on-surface-variant">{t('docsIndex.legalDesc')}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-3 pt-3">
+        <Link to="/privacy" className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2">
+          <FileText className="w-4 h-4" />
+          {t('docsIndex.privacyLink')}
+        </Link>
+        {imprintUrl && (
+          <a
+            href={imprintUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2"
+          >
+            <ExternalLink className="w-4 h-4" />
+            {t('docsIndex.imprintLink')}
+          </a>
+        )}
+      </div>
+    </div>
   )
 }

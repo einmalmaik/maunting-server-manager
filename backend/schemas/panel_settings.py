@@ -3,6 +3,8 @@ from pydantic import BaseModel
 
 class PanelSettingsResponse(BaseModel):
     panel_url: str = ""
+    imprint_enabled: bool = False
+    imprint_url: str = ""
     smtp_host: str = ""
     smtp_port: str = "587"
     smtp_user: str = ""
@@ -24,6 +26,8 @@ class PanelSettingsResponse(BaseModel):
 
 class PanelSettingsUpdate(BaseModel):
     panel_url: str | None = None
+    imprint_enabled: bool | None = None
+    imprint_url: str | None = None
     smtp_host: str | None = None
     smtp_port: str | None = None
     smtp_user: str | None = None

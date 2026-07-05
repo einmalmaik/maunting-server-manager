@@ -10,8 +10,8 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Shield, ArrowRight, Globe, KeyRound, Mail, Check } from 'lucide-react'
-import { supportedLocales } from '@/config/locales'
+import { Shield, ArrowRight, KeyRound, Mail, Check } from 'lucide-react'
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
 
 export function Login() {
   const { t } = useTranslation()
@@ -396,27 +396,12 @@ export function Login() {
 }
 
 function LoginShell({ children }: { children: React.ReactNode }) {
-  const { i18n } = useTranslation()
   return (
     <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
       <div className="absolute inset-0 msm-deep-grid opacity-50" />
       <div className="relative z-10 w-full max-w-md">
         <div className="flex justify-end mb-4">
-          <div className="flex items-center gap-1.5 text-on-surface-variant hover:text-primary transition-colors relative">
-            <Globe className="w-3.5 h-3.5 absolute left-1.5 pointer-events-none" />
-            <select
-              value={i18n.language}
-              onChange={(e) => i18n.changeLanguage(e.target.value)}
-              className="bg-transparent border-0 text-xs font-label-md pl-6 pr-4 py-1.5 cursor-pointer focus:outline-none focus:ring-0 text-on-surface-variant hover:text-primary transition-colors appearance-none"
-              style={{ paddingRight: '1rem' }}
-            >
-              {supportedLocales.map((locale) => (
-                <option key={locale.code} value={locale.code} className="bg-surface-container-high text-on-surface">
-                  {locale.nativeLabel}
-                </option>
-              ))}
-            </select>
-          </div>
+          <LanguageSwitcher />
         </div>
 
         <div className="flex items-center justify-center gap-3 mb-8">

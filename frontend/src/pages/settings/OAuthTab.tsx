@@ -8,6 +8,7 @@ import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { confirm } from '@/stores/confirmStore'
 import { Switch } from '@/components/ui/Switch'
+import { NumberStepper } from '@/components/ui/NumberStepper'
 
 interface FormState {
   id: number | null
@@ -623,11 +624,13 @@ function ProviderDialog({
             <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
               {t('settings.oauth.providerPosition')}
             </label>
-            <input
-              type="number"
+            <NumberStepper
               value={form.position}
-              onChange={(e) => setForm({ ...form, position: Number(e.target.value) })}
-              className="msm-input w-24"
+              onValueChange={(value) => setForm({ ...form, position: Number(value || 0) })}
+              min={0}
+              max={999}
+              step={1}
+              className="w-28"
             />
           </div>
 

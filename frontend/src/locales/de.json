@@ -778,7 +778,16 @@
       "steam": "Steam",
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
+      "imprint": "Impressum",
       "backup": "Backup"
+    },
+    "imprint": {
+      "title": "Impressum",
+      "description": "Verlinke das Betreiber-Impressum dieser Instanz. Ist der Schalter aus, bleibt die URL gespeichert, wird aber nicht öffentlich angezeigt.",
+      "show": "Impressum anzeigen",
+      "url": "Impressum-URL",
+      "urlHint": "Leer ist erlaubt. Wenn eine URL gesetzt ist, muss sie mit http:// oder https:// beginnen.",
+      "preview": "Impressum öffnen"
     },
     "githubTokenTitle": "GitHub Personal Access Token",
     "githubWhyNeeded": "Erforderlich für Blueprints vom Typ source.type=github, um private Repositories zu klonen oder zu pullen. Öffentliche Repos funktionieren ohne Token.",
@@ -1075,7 +1084,11 @@
     "blueprintsLink": "Blueprint-Doku öffnen",
     "oauthTitle": "OAuth & Social Login",
     "oauthDesc": "Login mit Google, Discord, GitHub, Microsoft, Twitter oder einem eigenen OIDC-Provider (Authentik, Keycloak, Zitadel).",
-    "oauthLink": "OAuth-Doku öffnen"
+    "oauthLink": "OAuth-Doku öffnen",
+    "legalTitle": "Rechtliches",
+    "legalDesc": "Datenschutzerklärung und optionales Betreiber-Impressum dieser Instanz.",
+    "privacyLink": "Datenschutz öffnen",
+    "imprintLink": "Impressum öffnen"
   },
   "docsOAuth": {
     "title": "OAuth & Social Login",

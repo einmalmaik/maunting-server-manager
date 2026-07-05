@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { NumberStepper } from '@/components/ui/NumberStepper'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
 export function EmailTab() {
@@ -145,11 +146,12 @@ export function EmailTab() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('settings.smtpPort')}
                 </label>
-                <input
-                  type="number"
-                  value={settings.smtp_port}
-                  onChange={(e) => setSettings({ ...settings, smtp_port: e.target.value })}
-                  className="msm-input"
+                <NumberStepper
+                  value={Number(settings.smtp_port || 587)}
+                  onValueChange={(value) => setSettings({ ...settings, smtp_port: String(value) })}
+                  min={1}
+                  max={65535}
+                  step={1}
                   placeholder="587"
                 />
               </div>

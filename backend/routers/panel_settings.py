@@ -1,6 +1,7 @@
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -36,6 +37,8 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
     steam_key = settings.steam_api_key or os.getenv("MSM_STEAM_API_KEY", "") or os.getenv("STEAM_API_KEY", "")
     return {
         "panel_url": all_db.get("panel_url", ""),
+        "imprint_enabled": all_db.get("imprint_enabled", "false") == "true",
+        "imprint_url": all_db.get("imprint_url", ""),
         "smtp_host": all_db.get("smtp_host", ""),
         "smtp_port": all_db.get("smtp_port", "587"),
         "smtp_user": all_db.get("smtp_user", ""),
@@ -69,6 +72,19 @@ def _is_masked(value: str) -> bool:
     return bool(value) and value.startswith("*")
 
 
+def _validate_imprint_url(value: str) -> str:
+    """Validiert die optionale Betreiber-Impressum-URL."""
+    url = value.strip()
+    if not url:
+        return ""
+    if len(url) > 2048 or any(ord(ch) < 32 for ch in url):
+        raise HTTPException(status_code=400, detail="Ungueltige Impressum-URL")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Ungueltige Impressum-URL")
+    return url
+
+
 @router.post("", status_code=200)
 def update_settings(
     req: PanelSettingsUpdate,
@@ -86,6 +102,10 @@ def update_settings(
     for key, value in data.items():
         if key == "time_format" and value not in ("24h", "12h"):
             raise HTTPException(status_code=400, detail="Ungueltiges Zeitformat")
+        if key == "imprint_url":
+            value = _validate_imprint_url(str(value))
+        if key == "imprint_enabled":
+            value = "true" if bool(value) else "false"
         if _is_masked(str(value)):
             continue
         if key == "smtp_password":

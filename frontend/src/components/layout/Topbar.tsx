@@ -4,13 +4,13 @@ import { useAuthStore } from '@/stores/authStore'
 import { useConfirmStore } from '@/stores/confirmStore'
 import { useNavigate } from 'react-router-dom'
 import { Logo } from '@/components/Logo'
-import { Globe, Bell, Menu, User, LogOut } from 'lucide-react'
+import { Bell, Menu, User, LogOut } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
-import { supportedLocales } from '@/config/locales'
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
 
 export function Topbar() {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { user, logout, updateUser } = useAuthStore()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -80,22 +80,7 @@ export function Topbar() {
 
         {/* Right Actions */}
         <div className="flex items-center gap-4">
-          {/* Language Selector Dropdown */}
-          <div className="hidden sm:flex items-center gap-1.5 text-on-surface-variant hover:text-primary transition-colors relative">
-            <Globe className="w-3.5 h-3.5 absolute left-1.5 pointer-events-none" />
-            <select
-              value={i18n.language}
-              onChange={(e) => i18n.changeLanguage(e.target.value)}
-              className="bg-transparent border-0 text-xs font-label-md pl-6 pr-4 py-1.5 cursor-pointer focus:outline-none focus:ring-0 text-on-surface-variant hover:text-primary transition-colors appearance-none"
-              style={{ paddingRight: '1rem' }}
-            >
-              {supportedLocales.map((locale) => (
-                <option key={locale.code} value={locale.code} className="bg-surface-container-high text-on-surface">
-                  {locale.nativeLabel}
-                </option>
-              ))}
-            </select>
-          </div>
+          <LanguageSwitcher className="hidden sm:block" />
 
           {/* Notifications Toggle */}
           <button

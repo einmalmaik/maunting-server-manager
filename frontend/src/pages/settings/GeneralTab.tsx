@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { supportedLocales } from '@/config/locales'
+import { Dropdown } from '@/components/ui/Dropdown'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
 export function GeneralTab() {
@@ -70,34 +71,29 @@ export function GeneralTab() {
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                 {t('settings.defaultLanguage')}
               </label>
-              <select
+              <Dropdown
                 value={settings.default_language}
-                onChange={(e) => {
-                  const lang = e.target.value
+                onChange={(lang) => {
                   setSettings({ ...settings, default_language: lang })
                   i18n.changeLanguage(lang)
                 }}
-                className="msm-input"
-              >
-                {supportedLocales.map((locale) => (
-                  <option key={locale.code} value={locale.code}>
-                    {locale.nativeLabel}
-                  </option>
-                ))}
-              </select>
+                options={supportedLocales.map((locale) => ({ value: locale.code, label: locale.nativeLabel }))}
+                disabled={!canWrite}
+              />
             </div>
             <div>
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                 {t('settings.timeFormat')}
               </label>
-              <select
+              <Dropdown
                 value={settings.time_format}
-                onChange={(e) => setSettings({ ...settings, time_format: e.target.value as '24h' | '12h' })}
-                className="msm-input"
-              >
-                <option value="24h">{t('settings.timeFormat24')}</option>
-                <option value="12h">{t('settings.timeFormat12')}</option>
-              </select>
+                onChange={(value) => setSettings({ ...settings, time_format: value as '24h' | '12h' })}
+                options={[
+                  { value: '24h', label: t('settings.timeFormat24') },
+                  { value: '12h', label: t('settings.timeFormat12') },
+                ]}
+                disabled={!canWrite}
+              />
               <p className="font-body-md text-xs text-on-surface-variant mt-1.5 inline-flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
                 {t('settings.timeFormatHint')}

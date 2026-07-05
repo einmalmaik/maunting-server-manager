@@ -22,41 +22,29 @@ describe('Privacy page', () => {
     useAuthStore.setState({ isAuthenticated: false });
     renderPrivacy();
 
-    // Check header elements
-    expect(screen.getByText('MauntingStudios')).toBeInTheDocument();
-    expect(screen.getByText('Infrastructure Control')).toBeInTheDocument();
-    expect(screen.getByAltText('MauntingStudios')).toHaveAttribute('src', '/logo.png');
-    
-    // Check back button (German localization is default or fallback)
-    expect(screen.getByRole('button')).toHaveTextContent(/Zurück|Back/);
+    expect(screen.getByRole('link', { name: /Zurück|Back/ })).toHaveAttribute('href', '/login');
 
-    // Check main title and content
-    expect(screen.getByText('Datenschutzerklärung')).toBeInTheDocument();
+    expect(screen.getAllByText('Datenschutzerklärung').length).toBeGreaterThan(0);
     expect(screen.getByText('1. Grundprinzip')).toBeInTheDocument();
-    expect(screen.getByText((content) => content.includes('Datensparsamkeit'))).toBeInTheDocument();
+    expect(screen.getAllByText((content) => content.includes('Datensparsamkeit')).length).toBeGreaterThan(0);
     expect(screen.getByText('2. Gespeicherte Daten')).toBeInTheDocument();
-    expect(screen.getByText('3. Cookies')).toBeInTheDocument();
+    expect(screen.getByText('3. Cookies und lokale Speicherung')).toBeInTheDocument();
     expect(screen.getByText('4. Weitergabe an Dritte')).toBeInTheDocument();
     expect(screen.getByText('5. Recht auf Löschung')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Datenschutz' })).toHaveAttribute('href', '/privacy');
-    expect(screen.queryByText(/Impressum/i)).toBeNull();
+    expect(screen.getByText('MSM Legal')).toBeInTheDocument();
   });
 
   it('renders privacy policy sections when authenticated (in-app page)', () => {
     useAuthStore.setState({ isAuthenticated: true });
     renderPrivacy();
 
-    // In-app layout should NOT have the back button or standard public header
-    expect(screen.queryByText('Infrastructure Control')).toBeNull();
-    expect(screen.queryByRole('button')).toBeNull();
-    expect(screen.getByAltText('MauntingStudios')).toHaveAttribute('src', '/logo.png');
+    expect(screen.getByRole('link', { name: /Zurück|Back/ })).toHaveAttribute('href', '/docs');
 
-    // Check main title and content are still loaded correctly
-    expect(screen.getByText('Datenschutzerklärung')).toBeInTheDocument();
+    expect(screen.getAllByText('Datenschutzerklärung').length).toBeGreaterThan(0);
     expect(screen.getByText('1. Grundprinzip')).toBeInTheDocument();
-    expect(screen.getByText((content) => content.includes('Datensparsamkeit'))).toBeInTheDocument();
+    expect(screen.getAllByText((content) => content.includes('Datensparsamkeit')).length).toBeGreaterThan(0);
     expect(screen.getByText('2. Gespeicherte Daten')).toBeInTheDocument();
-    expect(screen.getByText('3. Cookies')).toBeInTheDocument();
+    expect(screen.getByText('3. Cookies und lokale Speicherung')).toBeInTheDocument();
     expect(screen.getByText('4. Weitergabe an Dritte')).toBeInTheDocument();
     expect(screen.getByText('5. Recht auf Löschung')).toBeInTheDocument();
   });

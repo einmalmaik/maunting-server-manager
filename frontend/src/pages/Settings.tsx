@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, KeyRound, Github, Cloud } from 'lucide-react'
+import { Globe, Mail, Gamepad2, KeyRound, Github, Cloud, FileText } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
@@ -8,9 +8,10 @@ import { SteamTab } from './settings/SteamTab'
 import { OAuthTab } from './settings/OAuthTab'
 import { GitHubTab } from './settings/GitHubTab'
 import { BackupTab } from './settings/BackupTab'
+import { ImprintTab } from './settings/ImprintTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
-type TabId = 'general' | 'email' | 'steam' | 'github' | 'oauth' | 'backup'
+type TabId = 'general' | 'email' | 'steam' | 'github' | 'oauth' | 'imprint' | 'backup'
 
 export function Settings() {
   const { t } = useTranslation()
@@ -24,6 +25,7 @@ export function Settings() {
     { id: 'steam', labelKey: 'settings.tabs.steam', icon: Gamepad2 },
     { id: 'github', labelKey: 'settings.tabs.github', icon: Github },
     { id: 'oauth', labelKey: 'settings.tabs.oauth', icon: KeyRound },
+    { id: 'imprint', labelKey: 'settings.tabs.imprint', icon: FileText },
     ...(canManageBackup ? [{ id: 'backup' as TabId, labelKey: 'settings.tabs.backup', icon: Cloud }] : []),
   ]
 
@@ -48,6 +50,7 @@ export function Settings() {
       {activeTab === 'steam' && <SteamTab />}
       {activeTab === 'github' && <GitHubTab />}
       {activeTab === 'oauth' && <OAuthTab />}
+      {activeTab === 'imprint' && <ImprintTab />}
       {activeTab === 'backup' && <BackupTab />}
     </div>
   )

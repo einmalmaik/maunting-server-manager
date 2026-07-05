@@ -132,6 +132,77 @@ class TestTimeFormatEndpoints:
         assert res.status_code == 400
 
 
+class TestImprintSettingsEndpoints:
+    def test_get_settings_includes_imprint_defaults(self, client: TestClient, owner_cookies: dict):
+        res = client.get("/api/settings", cookies=owner_cookies)
+        assert res.status_code == 200
+        body = res.json()
+        assert body["imprint_enabled"] is False
+        assert body["imprint_url"] == ""
+
+    def test_update_settings_accepts_imprint_switch_and_url(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str
+    ):
+        res = client.post(
+            "/api/settings",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"imprint_enabled": True, "imprint_url": " https://example.test/impressum "},
+        )
+        assert res.status_code == 200
+
+        get_res = client.get("/api/settings", cookies=owner_cookies)
+        assert get_res.status_code == 200
+        body = get_res.json()
+        assert body["imprint_enabled"] is True
+        assert body["imprint_url"] == "https://example.test/impressum"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "javascript:alert(1)",
+            "/impressum",
+            "mailto:test@example.test",
+            "https://example.test/impressum\nX-Test: leak",
+            "https://example.test/" + ("x" * 2050),
+        ],
+    )
+    def test_update_settings_rejects_invalid_imprint_urls(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, url: str
+    ):
+        res = client.post(
+            "/api/settings",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"imprint_url": url},
+        )
+        assert res.status_code == 400
+
+    def test_public_legal_endpoint_exposes_only_legal_metadata(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str
+    ):
+        res = client.post(
+            "/api/settings",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={
+                "imprint_enabled": True,
+                "imprint_url": "https://example.test/impressum",
+                "smtp_host": "smtp.internal.test",
+            },
+        )
+        assert res.status_code == 200
+
+        public_res = client.get("/api/system/legal")
+        assert public_res.status_code == 200
+        body = public_res.json()
+        assert body == {
+            "imprint_enabled": True,
+            "imprint_url": "https://example.test/impressum",
+        }
+        assert "smtp.internal.test" not in str(body)
+
+
 # === Coverage for secret_key fail-fast (security #14) in existing panel test (no new file) ===
 class TestSecretKeyFailFast:
     def test_secret_key_fail_fast_runtimeerror_path_when_default_and_not_debug(self):

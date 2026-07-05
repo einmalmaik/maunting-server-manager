@@ -27,8 +27,8 @@ const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ def
 const PanelBackups = lazy(() => import('./pages/PanelBackups').then(module => ({ default: module.PanelBackups })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
 import { useAuthStore } from '@/stores/authStore'
-import { CookieConsent } from './components/ui/CookieConsent'
 import { DisBadge } from './components/DisBadge'
+import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
@@ -127,7 +127,7 @@ function App() {
         </Route>
       </Routes>
       </Suspense>
-      <CookieConsent />
+      <PrivacyAcknowledgementNotice />
       <ToastContainer />
       <ConfirmDialog />
     </>

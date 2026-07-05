@@ -778,7 +778,16 @@
       "steam": "Steam",
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
+      "imprint": "Imprint",
       "backup": "Backup"
+    },
+    "imprint": {
+      "title": "Imprint",
+      "description": "Link the operator imprint for this instance. When disabled, the URL stays saved but is not shown publicly.",
+      "show": "Show imprint",
+      "url": "Imprint URL",
+      "urlHint": "Empty is allowed. If set, the URL must start with http:// or https://.",
+      "preview": "Open imprint"
     },
     "githubTokenTitle": "GitHub Personal Access Token",
     "githubWhyNeeded": "Required for blueprints of type source.type=github to clone or pull private repositories. Public repos work without a token.",
@@ -1075,7 +1084,11 @@
     "blueprintsLink": "Open blueprint docs",
     "oauthTitle": "OAuth & Social Login",
     "oauthDesc": "Sign in with Google, Discord, GitHub, Microsoft, Twitter, or your own OIDC provider (Authentik, Keycloak, Zitadel).",
-    "oauthLink": "Open OAuth docs"
+    "oauthLink": "Open OAuth docs",
+    "legalTitle": "Legal",
+    "legalDesc": "Privacy policy and optional operator imprint for this instance.",
+    "privacyLink": "Open privacy policy",
+    "imprintLink": "Open imprint"
   },
   "docsOAuth": {
     "title": "OAuth & Social Login",

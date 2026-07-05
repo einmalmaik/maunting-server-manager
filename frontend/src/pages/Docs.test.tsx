@@ -1,10 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Docs } from './Docs'
 import i18n from '@/i18n'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useToastStore } from '@/stores/toastStore'
+
+vi.mock('@/hooks/usePublicLegalSettings', () => ({
+  usePublicLegalSettings: vi.fn(() => ({ imprint_enabled: false, imprint_url: '' })),
+}))
 
 function renderIndex() {
   return render(
@@ -36,6 +40,12 @@ describe('Docs index page', () => {
     renderIndex()
     const link = screen.getByRole('link', { name: /open oauth docs/i })
     expect(link.getAttribute('href')).toBe('/docs/oauth')
+  })
+
+  it('always links to privacy and hides imprint when disabled', () => {
+    renderIndex()
+    expect(screen.getByRole('link', { name: /open privacy policy/i })).toHaveAttribute('href', '/privacy')
+    expect(screen.queryByRole('link', { name: /open imprint/i })).toBeNull()
   })
 
   it('renders German index headline after language switch', async () => {

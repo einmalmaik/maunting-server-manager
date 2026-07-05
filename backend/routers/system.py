@@ -14,8 +14,23 @@ from dependencies import get_current_user, require_global
 from games import list_game_info
 from models import User
 from services import network_interfaces_service
+from services.panel_settings_service import PanelSettingsService
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+
+@router.get("/legal")
+def legal_settings() -> dict:
+    """Oeffentliche Legal-Metadaten fuer Footer und Hilfe.
+
+    Absichtlich schmal: keine anderen Panel-Settings oeffentlich machen.
+    """
+    enabled = PanelSettingsService.get("imprint_enabled", "false") == "true"
+    url = PanelSettingsService.get("imprint_url", "")
+    return {
+        "imprint_enabled": enabled,
+        "imprint_url": url if enabled else "",
+    }
 
 
 def _check_docker() -> dict:
