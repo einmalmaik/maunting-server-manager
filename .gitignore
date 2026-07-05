@@ -19,3 +19,21 @@ postgres/
 # Release notes live next to the GitHub release, not in the repo tree
 RELEASE_NOTES_*.md
 .hermes/
+/.refact
+/backend/.mypy_cache
+/backend/__pycache__
+/backend/blueprints/__pycache__
+/backend/logs
+/backend/middleware/__pycache__
+/backend/models/__pycache__
+/backend/routers/__pycache__
+/backend/services/__pycache__
+/backend/tests/__pycache__
+/backend/venv-wsl
+/frontend/dist
+/frontend/node_modules
+/Design idee für mssm
+/backend/schemas/__pycache__
+/backend/games/__pycache__
+/backend/scripts/__pycache__
+backend/.env
