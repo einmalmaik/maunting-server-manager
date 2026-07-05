@@ -859,6 +859,17 @@
     "createHint": "Создайте свою первую резервную копию панели.",
     "settingsSaved": "Настройки сохранены",
     "cloudTooltip": "Хранится в облаке S3 (зашифровано)",
-    "localTooltip": "Хранится только локально"
+    "localTooltip": "Хранится только локально",
+    "prepareRestore": "Подготовить восстановление",
+    "prepareRestoreLoading": "Подготовка …",
+    "prepareRestoreFailed": "Не удалось подготовить восстановление",
+    "restoreModalTitle": "Восстановление подготовлено",
+    "restoreModalSubtitle": "Запустите скрипт на сервере панели от имени root.",
+    "restoreModalScriptPath": "Путь к скрипту",
+    "restoreModalInstructions": "Инструкции",
+    "restoreModalCopyScript": "Копировать путь к скрипту",
+    "restoreModalScriptCopied": "Путь к скрипту скопирован",
+    "restoreModalClose": "Закрыть",
+    "restoreModalWarning": "ВНИМАНИЕ: Этот скрипт останавливает службу панели MSM и перезаписывает базу данных и файлы конфигурации!"
   }
 }

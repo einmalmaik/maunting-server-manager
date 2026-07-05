@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Database, Plus, Trash2, Cloud, CloudOff, Save, Settings as SettingsIcon } from 'lucide-react'
+import { Database, Plus, Trash2, Cloud, CloudOff, Save, Settings as SettingsIcon, Wrench, Copy, Check, X, AlertTriangle } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
@@ -21,6 +21,12 @@ interface PanelBackupSettings {
   enabled: boolean
   interval_hours: number
   retention_count: number
+}
+
+/** Restore-Vorbereitungs-Response (POST /api/panel-backups/{id}/prepare-restore). */
+interface PrepareRestoreResult {
+  script_path: string
+  instructions: string
 }
 
 const INTERVAL_OPTIONS = [
@@ -56,6 +62,9 @@ export function PanelBackups() {
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [savingSettings, setSavingSettings] = useState(false)
+  const [preparingId, setPreparingId] = useState<number | null>(null)
+  const [restoreResult, setRestoreResult] = useState<PrepareRestoreResult | null>(null)
+  const [scriptCopied, setScriptCopied] = useState(false)
 
   const fetchBackups = useCallback(async () => {
     try {
@@ -116,6 +125,42 @@ export function PanelBackups() {
       toast.error(err instanceof Error ? err.message : t('common.error'))
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  const prepareRestore = async (id: number) => {
+    setPreparingId(id)
+    setScriptCopied(false)
+    try {
+      const result = await api<PrepareRestoreResult>(
+        `/panel-backups/${id}/prepare-restore`,
+        { method: 'POST', body: JSON.stringify({}) },
+      )
+      setRestoreResult(result)
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t('panelBackups.prepareRestoreFailed'),
+      )
+    } finally {
+      setPreparingId(null)
+    }
+  }
+
+  const closeRestoreModal = () => {
+    setRestoreResult(null)
+    setScriptCopied(false)
+  }
+
+  const copyScriptPath = async () => {
+    if (!restoreResult) return
+    try {
+      await navigator.clipboard.writeText(restoreResult.script_path)
+      setScriptCopied(true)
+      window.setTimeout(() => setScriptCopied(false), 1500)
+    } catch {
+      // Clipboard ist Komfort, kein kritischer Pfad.
     }
   }
 
@@ -332,6 +377,21 @@ export function PanelBackups() {
                     </span>
                   )}
                   <button
+                    onClick={() => prepareRestore(backup.id)}
+                    disabled={preparingId === backup.id}
+                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    title={t('panelBackups.prepareRestore')}
+                  >
+                    {preparingId === backup.id ? (
+                      <span className="w-3.5 h-3.5 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Wrench className="w-3.5 h-3.5" />
+                    )}
+                    {preparingId === backup.id
+                      ? t('panelBackups.prepareRestoreLoading')
+                      : t('panelBackups.prepareRestore')}
+                  </button>
+                  <button
                     onClick={() => deleteBackup(backup.id)}
                     disabled={deletingId === backup.id}
                     className="msm-btn-danger flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
@@ -347,6 +407,92 @@ export function PanelBackups() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Restore Modal */}
+      {restoreResult && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="panel-restore-modal-title"
+        >
+          <div className="msm-card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2
+                  id="panel-restore-modal-title"
+                  className="font-headline text-headline-sm text-primary"
+                >
+                  {t('panelBackups.restoreModalTitle')}
+                </h2>
+                <p className="font-body-md text-sm text-on-surface-variant mt-1">
+                  {t('panelBackups.restoreModalSubtitle')}
+                </p>
+              </div>
+              <button
+                onClick={closeRestoreModal}
+                className="msm-btn-secondary p-1.5"
+                aria-label={t('panelBackups.restoreModalClose')}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Warnung */}
+            <div className="flex items-start gap-2 rounded-md border border-error/40 bg-error-container/20 p-3">
+              <AlertTriangle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
+              <p className="font-body-md text-sm text-on-surface">
+                {t('panelBackups.restoreModalWarning')}
+              </p>
+            </div>
+
+            {/* Skript-Pfad (mono, kopierbar) */}
+            <div>
+              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
+                {t('panelBackups.restoreModalScriptPath')}
+              </label>
+              <div className="flex items-stretch gap-2">
+                <code className="font-mono-sm text-sm bg-surface-container-high px-3 py-2 rounded-md flex-1 break-all">
+                  {restoreResult.script_path}
+                </code>
+                <button
+                  onClick={copyScriptPath}
+                  className="msm-btn-secondary flex items-center gap-1 px-3 py-2 text-sm"
+                  title={t('panelBackups.restoreModalCopyScript')}
+                >
+                  {scriptCopied ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                  {scriptCopied
+                    ? t('common.copied')
+                    : t('common.copy')}
+                </button>
+              </div>
+            </div>
+
+            {/* Anleitung (vom Backend generiert, deutsch mit Warnung + sudo bash) */}
+            <div>
+              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
+                {t('panelBackups.restoreModalInstructions')}
+              </label>
+              <pre className="font-mono-sm text-sm bg-surface-container-high px-3 py-3 rounded-md whitespace-pre-wrap break-words text-on-surface">
+                {restoreResult.instructions}
+              </pre>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={closeRestoreModal}
+                className="msm-btn-primary px-4 py-2"
+              >
+                {t('panelBackups.restoreModalClose')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

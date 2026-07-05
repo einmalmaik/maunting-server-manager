@@ -859,6 +859,17 @@
     "createHint": "अपना पहला पैनल बैकअप बनाएँ।",
     "settingsSaved": "सेटिंग्स सहेजी गईं",
     "cloudTooltip": "S3 क्लाउड में संग्रहीत (एन्क्रिप्टेड)",
-    "localTooltip": "केवल स्थानीय रूप से संग्रहीत"
+    "localTooltip": "केवल स्थानीय रूप से संग्रहीत",
+    "prepareRestore": "पुनर्स्थापना तैयार करें",
+    "prepareRestoreLoading": "तैयार कर रहे हैं …",
+    "prepareRestoreFailed": "पुनर्स्थापना तैयार नहीं की जा सकी",
+    "restoreModalTitle": "पुनर्स्थापना तैयार है",
+    "restoreModalSubtitle": "स्क्रिप्ट को पैनल सर्वर पर root के रूप में चलाएँ।",
+    "restoreModalScriptPath": "स्क्रिप्ट पथ",
+    "restoreModalInstructions": "निर्देश",
+    "restoreModalCopyScript": "स्क्रिप्ट पथ कॉपी करें",
+    "restoreModalScriptCopied": "स्क्रिप्ट पथ कॉपी हो गया",
+    "restoreModalClose": "बंद करें",
+    "restoreModalWarning": "चेतावनी: यह स्क्रिप्ट MSM पैनल सेवा को रोकती है और डेटाबेस तथा कॉन्फ़िगरेशन फ़ाइलों को अधिलेखित करती है!"
   }
 }

@@ -859,6 +859,17 @@
     "createHint": "Buat backup panel pertama Anda.",
     "settingsSaved": "Pengaturan disimpan",
     "cloudTooltip": "Disimpan di cloud S3 (terenkripsi)",
-    "localTooltip": "Hanya disimpan secara lokal"
+    "localTooltip": "Hanya disimpan secara lokal",
+    "prepareRestore": "Siapkan pemulihan",
+    "prepareRestoreLoading": "Menyiapkan …",
+    "prepareRestoreFailed": "Pemulihan tidak dapat disiapkan",
+    "restoreModalTitle": "Pemulihan disiapkan",
+    "restoreModalSubtitle": "Jalankan skrip di server panel sebagai root.",
+    "restoreModalScriptPath": "Path skrip",
+    "restoreModalInstructions": "Petunjuk",
+    "restoreModalCopyScript": "Salin path skrip",
+    "restoreModalScriptCopied": "Path skrip disalin",
+    "restoreModalClose": "Tutup",
+    "restoreModalWarning": "PERINGATAN: Skrip ini menghentikan layanan panel MSM dan menimpa database serta file konfigurasi!"
   }
 }

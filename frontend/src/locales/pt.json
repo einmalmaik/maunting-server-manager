@@ -859,6 +859,17 @@
     "createHint": "Crie seu primeiro backup do painel.",
     "settingsSaved": "Configurações salvas",
     "cloudTooltip": "Armazenado na nuvem S3 (criptografado)",
-    "localTooltip": "Armazenado apenas localmente"
+    "localTooltip": "Armazenado apenas localmente",
+    "prepareRestore": "Preparar restauração",
+    "prepareRestoreLoading": "Preparando …",
+    "prepareRestoreFailed": "Não foi possível preparar a restauração",
+    "restoreModalTitle": "Restauração preparada",
+    "restoreModalSubtitle": "Execute o script no servidor do painel como root.",
+    "restoreModalScriptPath": "Caminho do script",
+    "restoreModalInstructions": "Instruções",
+    "restoreModalCopyScript": "Copiar caminho do script",
+    "restoreModalScriptCopied": "Caminho do script copiado",
+    "restoreModalClose": "Fechar",
+    "restoreModalWarning": "AVISO: Este script interrompe o serviço do painel MSM e substitui o banco de dados e os arquivos de configuração!"
   }
 }

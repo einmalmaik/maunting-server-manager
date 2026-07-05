@@ -859,6 +859,17 @@
     "createHint": "আপনার প্রথম প্যানেল ব্যাকআপ তৈরি করুন।",
     "settingsSaved": "সেটিংস সংরক্ষিত হয়েছে",
     "cloudTooltip": "S3 ক্লাউডে সংরক্ষিত (এনক্রিপ্টেড)",
-    "localTooltip": "শুধুমাত্র স্থানীয়ভাবে সংরক্ষিত"
+    "localTooltip": "শুধুমাত্র স্থানীয়ভাবে সংরক্ষিত",
+    "prepareRestore": "পুনরুদ্ধার প্রস্তুত করুন",
+    "prepareRestoreLoading": "প্রস্তুত করা হচ্ছে …",
+    "prepareRestoreFailed": "পুনরুদ্ধার প্রস্তুত করা যায়নি",
+    "restoreModalTitle": "পুনরুদ্ধার প্রস্তুত",
+    "restoreModalSubtitle": "প্যানেল সার্ভারে root হিসাবে স্ক্রিপ্ট চালান।",
+    "restoreModalScriptPath": "স্ক্রিপ্ট পথ",
+    "restoreModalInstructions": "নির্দেশনা",
+    "restoreModalCopyScript": "স্ক্রিপ্ট পথ কপি করুন",
+    "restoreModalScriptCopied": "স্ক্রিপ্ট পথ কপি হয়েছে",
+    "restoreModalClose": "বন্ধ করুন",
+    "restoreModalWarning": "সতর্কতা: এই স্ক্রিপ্টটি MSM প্যানেল পরিষেবা বন্ধ করে এবং ডেটাবেস ও কনফিগারেশন ফাইল ওভাররাইট করে!"
   }
 }

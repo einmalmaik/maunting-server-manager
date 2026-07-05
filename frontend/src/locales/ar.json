@@ -859,6 +859,17 @@
     "createHint": "أنشئ أول نسخة احتياطية للوحة.",
     "settingsSaved": "تم حفظ الإعدادات",
     "cloudTooltip": "مخزنة في سحابة S3 (مشفرة)",
-    "localTooltip": "مخزنة محليًا فقط"
+    "localTooltip": "مخزنة محليًا فقط",
+    "prepareRestore": "تحضير الاستعادة",
+    "prepareRestoreLoading": "جارٍ التحضير …",
+    "prepareRestoreFailed": "تعذر تحضير الاستعادة",
+    "restoreModalTitle": "تم تحضير الاستعادة",
+    "restoreModalSubtitle": "قم بتشغيل البرنامج النصي على خادم اللوحة كجذر (root).",
+    "restoreModalScriptPath": "مسار البرنامج النصي",
+    "restoreModalInstructions": "التعليمات",
+    "restoreModalCopyScript": "نسخ مسار البرنامج النصي",
+    "restoreModalScriptCopied": "تم نسخ مسار البرنامج النصي",
+    "restoreModalClose": "إغلاق",
+    "restoreModalWarning": "تحذير: هذا البرنامج النصي يوقف خدمة لوحة MSM ويستبدل قاعدة البيانات وملفات التكوين!"
   }
 }

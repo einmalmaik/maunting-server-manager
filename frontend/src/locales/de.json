@@ -1212,6 +1212,17 @@
     "createHint": "Erstelle dein erstes Panel-Backup.",
     "settingsSaved": "Einstellungen gespeichert",
     "cloudTooltip": "In S3-Cloud gespeichert (verschlüsselt)",
-    "localTooltip": "Nur lokal gespeichert"
+    "localTooltip": "Nur lokal gespeichert",
+    "prepareRestore": "Restore vorbereiten",
+    "prepareRestoreLoading": "Bereit vor …",
+    "prepareRestoreFailed": "Restore konnte nicht vorbereitet werden",
+    "restoreModalTitle": "Restore vorbereitet",
+    "restoreModalSubtitle": "Führe das Skript auf dem Panel-Server als Root aus.",
+    "restoreModalScriptPath": "Skript-Pfad",
+    "restoreModalInstructions": "Anleitung",
+    "restoreModalCopyScript": "Skript-Pfad kopieren",
+    "restoreModalScriptCopied": "Skript-Pfad kopiert",
+    "restoreModalClose": "Schließen",
+    "restoreModalWarning": "WARNUNG: Dieses Skript stoppt den MSM-Panel-Dienst und überschreibt die Datenbank und Konfigurationsdateien!"
   }
 }

@@ -261,4 +261,117 @@ describe('PanelBackups', () => {
       expect(msg).toContain('rückgängig')
     })
   })
+
+  it('renders "Restore vorbereiten" button per backup row', async () => {
+    mockApi((p) => {
+      if (p === '/panel-backups') return [baseBackup()]
+      if (p === '/panel-backups/settings') return DEFAULT_SETTINGS
+      return undefined
+    })
+    renderPage()
+    expect(await screen.findByText('128 MB')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Restore vorbereiten/ })).toBeInTheDocument()
+  })
+
+  it('prepare-restore issues POST and shows modal with script path + instructions', async () => {
+    const calls: any[] = []
+    const scriptPath = '/opt/msm/backups/panel/restore_1.sh'
+    const instructions =
+      'Restore-Skript wurde erstellt:\n  ' + scriptPath + '\n\n' +
+      'WARNUNG: Dieses Skript stoppt den MSM-Panel-Dienst und ueberschreibt die Datenbank!\n' +
+      'Fuehren Sie das Skript mit Root-Rechten aus:\n  sudo bash ' + scriptPath
+    mockApi((p, opts) => {
+      calls.push({ p, opts })
+      if (p === '/panel-backups') return [baseBackup()]
+      if (p === '/panel-backups/settings') return DEFAULT_SETTINGS
+      if (p === '/panel-backups/1/prepare-restore' && opts?.method === 'POST') {
+        return { script_path: scriptPath, instructions }
+      }
+      return undefined
+    })
+    renderPage()
+    await screen.findByText('128 MB')
+
+    fireEvent.click(screen.getByRole('button', { name: /Restore vorbereiten/ }))
+    await waitFor(() => {
+      expect(calls.some((c) => c.p === '/panel-backups/1/prepare-restore' && c.opts?.method === 'POST')).toBe(true)
+    })
+    // Modal title appears
+    expect(await screen.findByText('Restore vorbereitet')).toBeInTheDocument()
+    // Script path shown in mono (copyable)
+    expect(screen.getByText(scriptPath)).toBeInTheDocument()
+    // Instructions shown (contain sudo bash + WARNUNG)
+    expect(screen.getAllByText(/sudo bash/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/WARNUNG/).length).toBeGreaterThan(0)
+    // Stop warning is visible
+    expect(screen.getAllByText(/stoppt den MSM-Panel-Dienst/).length).toBeGreaterThan(0)
+  })
+
+  it('prepare-restore failure shows error toast without crashing', async () => {
+    mockApi((p, opts) => {
+      if (p === '/panel-backups') return [baseBackup()]
+      if (p === '/panel-backups/settings') return DEFAULT_SETTINGS
+      if (p === '/panel-backups/1/prepare-restore' && opts?.method === 'POST') {
+        throw new Error('Restore konnte nicht vorbereitet werden')
+      }
+      return undefined
+    })
+    renderPage()
+    await screen.findByText('128 MB')
+
+    fireEvent.click(screen.getByRole('button', { name: /Restore vorbereiten/ }))
+    await waitFor(() => {
+      expect(useToastStore.getState().toasts.some((t) => t.type === 'error')).toBe(true)
+    })
+    // Modal should NOT appear on failure
+    expect(screen.queryByText('Restore vorbereitet')).not.toBeInTheDocument()
+  })
+
+  it('restore modal copy button copies script path to clipboard', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    const scriptPath = '/opt/msm/backups/panel/restore_1.sh'
+    mockApi((p, opts) => {
+      if (p === '/panel-backups') return [baseBackup()]
+      if (p === '/panel-backups/settings') return DEFAULT_SETTINGS
+      if (p === '/panel-backups/1/prepare-restore' && opts?.method === 'POST') {
+        return { script_path: scriptPath, instructions: 'sudo bash ' + scriptPath }
+      }
+      return undefined
+    })
+    renderPage()
+    await screen.findByText('128 MB')
+
+    fireEvent.click(screen.getByRole('button', { name: /Restore vorbereiten/ }))
+    await screen.findByText('Restore vorbereitet')
+
+    const copyBtn = screen.getByTitle('Skript-Pfad kopieren')
+    fireEvent.click(copyBtn)
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(scriptPath)
+    })
+  })
+
+  it('restore modal close button hides the modal', async () => {
+    const scriptPath = '/opt/msm/backups/panel/restore_1.sh'
+    mockApi((p, opts) => {
+      if (p === '/panel-backups') return [baseBackup()]
+      if (p === '/panel-backups/settings') return DEFAULT_SETTINGS
+      if (p === '/panel-backups/1/prepare-restore' && opts?.method === 'POST') {
+        return { script_path: scriptPath, instructions: 'sudo bash ' + scriptPath }
+      }
+      return undefined
+    })
+    renderPage()
+    await screen.findByText('128 MB')
+
+    fireEvent.click(screen.getByRole('button', { name: /Restore vorbereiten/ }))
+    expect(await screen.findByText('Restore vorbereitet')).toBeInTheDocument()
+
+    // Close via the X icon button (aria-label = Schließen)
+    fireEvent.click(screen.getByLabelText('Schließen'))
+    await waitFor(() => {
+      expect(screen.queryByText('Restore vorbereitet')).not.toBeInTheDocument()
+    })
+  })
 })

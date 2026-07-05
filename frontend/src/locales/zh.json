@@ -859,6 +859,17 @@
     "createHint": "创建您的第一个面板备份。",
     "settingsSaved": "设置已保存",
     "cloudTooltip": "已存储在 S3 云端（已加密）",
-    "localTooltip": "仅本地存储"
+    "localTooltip": "仅本地存储",
+    "prepareRestore": "准备恢复",
+    "prepareRestoreLoading": "准备中…",
+    "prepareRestoreFailed": "无法准备恢复",
+    "restoreModalTitle": "恢复已准备",
+    "restoreModalSubtitle": "在面板服务器上以 root 身份运行脚本。",
+    "restoreModalScriptPath": "脚本路径",
+    "restoreModalInstructions": "说明",
+    "restoreModalCopyScript": "复制脚本路径",
+    "restoreModalScriptCopied": "脚本路径已复制",
+    "restoreModalClose": "关闭",
+    "restoreModalWarning": "警告：此脚本会停止 MSM 面板服务并覆盖数据库和配置文件！"
   }
 }

@@ -1212,6 +1212,17 @@
     "createHint": "Create your first panel backup.",
     "settingsSaved": "Settings saved",
     "cloudTooltip": "Stored in S3 cloud (encrypted)",
-    "localTooltip": "Stored locally only"
+    "localTooltip": "Stored locally only",
+    "prepareRestore": "Prepare restore",
+    "prepareRestoreLoading": "Preparing …",
+    "prepareRestoreFailed": "Restore could not be prepared",
+    "restoreModalTitle": "Restore prepared",
+    "restoreModalSubtitle": "Run the script on the panel server as root.",
+    "restoreModalScriptPath": "Script path",
+    "restoreModalInstructions": "Instructions",
+    "restoreModalCopyScript": "Copy script path",
+    "restoreModalScriptCopied": "Script path copied",
+    "restoreModalClose": "Close",
+    "restoreModalWarning": "WARNING: This script stops the MSM panel service and overwrites the database and configuration files!"
   }
 }

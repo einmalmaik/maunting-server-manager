@@ -881,6 +881,17 @@
     "createHint": "Crea tu primera copia del panel.",
     "settingsSaved": "Ajustes guardados",
     "cloudTooltip": "Almacenada en la nube S3 (cifrada)",
-    "localTooltip": "Solo almacenada localmente"
+    "localTooltip": "Solo almacenada localmente",
+    "prepareRestore": "Preparar restauración",
+    "prepareRestoreLoading": "Preparando …",
+    "prepareRestoreFailed": "No se pudo preparar la restauración",
+    "restoreModalTitle": "Restauración preparada",
+    "restoreModalSubtitle": "Ejecute el script en el servidor del panel como root.",
+    "restoreModalScriptPath": "Ruta del script",
+    "restoreModalInstructions": "Instrucciones",
+    "restoreModalCopyScript": "Copiar ruta del script",
+    "restoreModalScriptCopied": "Ruta del script copiada",
+    "restoreModalClose": "Cerrar",
+    "restoreModalWarning": "ADVERTENCIA: Este script detiene el servicio del panel MSM y sobrescribe la base de datos y los archivos de configuración!"
   }
 }
