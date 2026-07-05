@@ -9,6 +9,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import { useAuthStore } from '@/stores/authStore'
 import { ServerPermissionsPanel } from '@/components/ServerPermissionsPanel'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { Dropdown } from '@/components/ui/Dropdown'
 import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
 
@@ -233,18 +234,13 @@ export function Users() {
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
                 {t('serverPermissions.selectServer')}
               </label>
-              <select
-                value={permServerId === '' ? '' : String(permServerId)}
-                onChange={(e) => setPermServerId(e.target.value ? Number(e.target.value) : '')}
-                className="msm-input text-sm"
-              >
-                <option value="">{t('serverPermissions.selectServerPlaceholder')}</option>
-                {servers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+              <Dropdown
+                value={permServerId === '' ? null : String(permServerId)}
+                onChange={(value) => setPermServerId(value ? Number(value) : '')}
+                placeholder={t('serverPermissions.selectServerPlaceholder')}
+                options={servers.map((s) => ({ value: String(s.id), label: s.name }))}
+                buttonClassName="text-sm"
+              />
             </div>
           </div>
           {typeof permServerId === 'number' && (
@@ -313,21 +309,19 @@ export function Users() {
                   {user.is_owner ? (
                     <span className="font-mono-sm text-mono-sm text-on-surface-variant">owner</span>
                   ) : canManagePermissions && user.id !== currentUser?.id ? (
-                    <select
-                      value={user.role_id ?? ''}
-                      onChange={(e) => assignRole(user, e.target.value ? Number(e.target.value) : null)}
-                      className="msm-input text-sm py-1"
+                    <Dropdown
+                      value={user.role_id != null ? String(user.role_id) : null}
+                      onChange={(value) => assignRole(user, value ? Number(value) : null)}
+                      placeholder={t('users.noRole')}
+                      options={roles.map((r) => ({
+                        value: String(r.id),
+                        label: r.is_system
+                          ? t(`roles.systemNames.${r.name}`, { defaultValue: r.name })
+                          : r.name,
+                      }))}
+                      buttonClassName="text-sm py-1"
                       aria-label={t('users.assignRole')}
-                    >
-                      <option value="">{t('users.noRole')}</option>
-                      {roles.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.is_system
-                            ? t(`roles.systemNames.${r.name}`, { defaultValue: r.name })
-                            : r.name}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   ) : (
                     <span className="font-mono-sm text-mono-sm text-on-surface-variant">
                       {(() => {

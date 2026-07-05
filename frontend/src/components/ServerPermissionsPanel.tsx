@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { rbacApi } from '@/api/rbac'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
+import { Dropdown } from '@/components/ui/Dropdown'
 import type { User } from '@/types'
 import type { PermissionCatalog } from '@/types/permissions'
 
@@ -150,17 +151,15 @@ export function ServerPermissionsPanel({ serverId }: Props) {
 
       {/* User hinzufuegen */}
       <div className="flex items-center gap-2">
-        <select
-          value={addingUserId}
-          onChange={(e) => setAddingUserId(e.target.value ? Number(e.target.value) : '')}
-          className="msm-input flex-1 text-sm py-2"
+        <Dropdown
+          value={addingUserId === '' ? null : String(addingUserId)}
+          onChange={(value) => setAddingUserId(value ? Number(value) : '')}
+          placeholder={t('serverPermissions.selectUser')}
+          options={usersWithoutDelegation.map((u) => ({ value: String(u.id), label: u.username }))}
+          className="flex-1"
+          buttonClassName="text-sm py-2"
           aria-label={t('serverPermissions.selectUser')}
-        >
-          <option value="">{t('serverPermissions.selectUser')}</option>
-          {usersWithoutDelegation.map((u) => (
-            <option key={u.id} value={u.id}>{u.username}</option>
-          ))}
-        </select>
+        />
         <button
           onClick={addUser}
           disabled={!addingUserId}

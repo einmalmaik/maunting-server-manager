@@ -1,4 +1,4 @@
-import { ReactNode, useMemo, useState } from 'react'
+import { ReactNode, useEffect, useMemo, useState } from 'react'
 import {
   ArrowUpDown,
   Boxes,
@@ -24,6 +24,8 @@ import {
   Users,
   Wand2,
 } from 'lucide-react'
+import { Dropdown } from '@/components/ui/Dropdown'
+import { Checkbox } from '@/components/ui/Checkbox'
 import type {
   PostgresDatabase,
   PostgresDatabaseStats,
@@ -31,9 +33,10 @@ import type {
   PostgresSqlResult,
   PostgresTable,
   PostgresTableInfo,
+  PostgresUser,
 } from '@/types'
 
-type TabKey = 'tables' | 'sql'
+type TabKey = 'tables' | 'sql' | 'users'
 
 export interface DatabaseConsoleProps {
   title: string
@@ -60,6 +63,7 @@ export interface DatabaseConsoleProps {
   onSqlTextChange: (value: string) => void
   onRunSql: () => void
   onCreateDatabase?: () => void
+  onDeleteDatabase?: () => void
   onCreateTable?: () => void
   onDropTable?: () => void
   onImport?: (file: File) => void
@@ -68,12 +72,11 @@ export interface DatabaseConsoleProps {
   onRotatePowerUser?: () => void
   onDemotePowerUser?: () => void
   onRefresh?: () => void
+  dbUsers?: PostgresUser[]
+  onCreateUser?: () => void
+  onRotateUser?: (userId: number) => void
+  onDeleteUser?: (userId: number) => void
 }
-
-const tabs: Array<{ key: TabKey; label: string; icon: typeof Table2 }> = [
-  { key: 'tables', label: 'Tabellen', icon: Table2 },
-  { key: 'sql', label: 'SQL-Konsole', icon: Play },
-]
 
 export function DatabaseConsole({
   title,
@@ -100,6 +103,7 @@ export function DatabaseConsole({
   onSqlTextChange,
   onRunSql,
   onCreateDatabase,
+  onDeleteDatabase,
   onCreateTable,
   onDropTable,
   onImport,
@@ -108,6 +112,10 @@ export function DatabaseConsole({
   onRotatePowerUser,
   onDemotePowerUser,
   onRefresh,
+  dbUsers,
+  onCreateUser,
+  onRotateUser,
+  onDeleteUser,
 }: DatabaseConsoleProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('tables')
   const [search, setSearch] = useState('')
@@ -117,8 +125,15 @@ export function DatabaseConsole({
   const [sortColumn, setSortColumn] = useState('')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => new Set())
+  const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set())
   const selectedDatabase = databases.find((db) => db.id === selectedDatabaseId) || databases[0] || null
   const groupedTables = useMemo(() => groupTables(tables), [tables])
+
+  const tabs: Array<{ key: TabKey; label: string; icon: typeof Table2 }> = [
+    { key: 'tables', label: 'Tabellen', icon: Table2 },
+    { key: 'sql', label: 'SQL-Konsole', icon: Play },
+    ...(onCreateUser ? [{ key: 'users' as TabKey, label: 'Benutzer', icon: Users }] : []),
+  ]
 
   const resultColumns = rows?.columns ?? []
   const processedRows = useMemo<PostgresRowsResult | null>(() => {
@@ -135,6 +150,27 @@ export function DatabaseConsole({
     const visibleColumns = hiddenColumns.size ? rows.columns.filter((col) => !hiddenColumns.has(col)) : rows.columns
     return { ...rows, columns: visibleColumns, rows: next }
   }, [rows, filterColumn, filterValue, sortColumn, sortDirection, hiddenColumns])
+
+  useEffect(() => {
+    setSelectedRowIndices(new Set())
+  }, [selectedTable?.name, processedRows])
+
+  const toggleRow = (index: number) => {
+    setSelectedRowIndices((current) => {
+      const next = new Set(current)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    const rowCount = processedRows?.rows.length ?? 0
+    setSelectedRowIndices((current) => {
+      if (current.size === rowCount) return new Set()
+      return new Set(Array.from({ length: rowCount }, (_, i) => i))
+    })
+  }
 
   const toggleColumn = (column: string) => {
     setHiddenColumns((current) => {
@@ -165,15 +201,30 @@ export function DatabaseConsole({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {selectedDatabase && (
-            <select
-              className="msm-input h-11 min-w-56"
-              value={selectedDatabase.id}
-              onChange={(event) => onSelectDatabase(Number(event.target.value))}
-            >
-              {databases.map((database) => (
-                <option key={database.id} value={database.id}>{database.name}</option>
-              ))}
-            </select>
+            <Dropdown
+              options={[
+                ...databases.map((db) => ({ value: String(db.id), label: db.name })),
+                ...(onDeleteDatabase
+                  ? [{
+                      value: '__delete__',
+                      label: 'Datenbank löschen',
+                      icon: <Trash2 className="h-4 w-4 text-status-error" />,
+                      disabled: !selectedDatabaseId,
+                    }]
+                  : []),
+              ]}
+              value={selectedDatabaseId != null ? String(selectedDatabaseId) : null}
+              placeholder="Datenbank auswählen"
+              onChange={(value) => {
+                if (value === '__delete__') {
+                  onDeleteDatabase?.()
+                } else {
+                  onSelectDatabase(Number(value))
+                }
+              }}
+              className="h-11 min-w-56"
+              buttonClassName="h-11"
+            />
           )}
           {onRefresh && (
             <button className="msm-btn-secondary h-11 px-3 inline-flex items-center gap-2" onClick={onRefresh}>
@@ -225,6 +276,16 @@ export function DatabaseConsole({
         })}
       </div>
 
+      {activeTab === 'users' && onCreateUser ? (
+        <UsersPanel
+          users={dbUsers ?? []}
+          canAdmin={canAdmin}
+          busy={busy}
+          onCreateUser={onCreateUser}
+          onRotateUser={onRotateUser}
+          onDeleteUser={onDeleteUser}
+        />
+      ) : (
       <div className="msm-database-console-grid">
         <aside className="msm-card p-4">
           <div className="relative">
@@ -283,6 +344,14 @@ export function DatabaseConsole({
                   <p className="text-xs text-on-surface-variant">{formatRows(tableInfo?.row_estimate)} Zeilen · {formatBytes(tableInfo?.size_bytes)}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {selectedRowIndices.size > 0 && (
+                    <div className="inline-flex items-center gap-2 rounded-md border border-outline-variant bg-surface-container-high px-3 py-1.5 text-xs text-on-surface-variant">
+                      <span>{selectedRowIndices.size} ausgewählt</span>
+                      <button className="text-secondary hover:text-primary" onClick={() => setSelectedRowIndices(new Set())}>
+                        Auswahl aufheben
+                      </button>
+                    </div>
+                  )}
                   <div className="relative min-w-64">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
                     <input
@@ -361,7 +430,13 @@ export function DatabaseConsole({
                   />
                 )}
               </div>
-              <RowsGrid result={processedRows} />
+              <RowsGrid
+                result={processedRows}
+                selectable
+                selectedIndices={selectedRowIndices}
+                onToggleRow={toggleRow}
+                onToggleAll={toggleAll}
+              />
             </section>
           )}
 
@@ -472,6 +547,78 @@ export function DatabaseConsole({
           </div>
         </aside>
       </div>
+      )}
+    </div>
+  )
+}
+
+function UsersPanel({ users, canAdmin, busy, onCreateUser, onRotateUser, onDeleteUser }: {
+  users: PostgresUser[]
+  canAdmin: boolean
+  busy?: string | null
+  onCreateUser?: () => void
+  onRotateUser?: (userId: number) => void
+  onDeleteUser?: (userId: number) => void
+}) {
+  return (
+    <div className="msm-card p-4">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="font-headline text-lg font-semibold text-on-surface">Datenbank-Benutzer</h3>
+          <p className="text-xs text-on-surface-variant">Zusätzliche Benutzer mit Zugriff auf die Datenbanken dieses Servers.</p>
+        </div>
+        {canAdmin && onCreateUser && (
+          <button className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2" onClick={onCreateUser} disabled={busy === 'create-user'}>
+            <Plus className="h-4 w-4" />
+            Benutzer erstellen
+          </button>
+        )}
+      </div>
+      {!users.length ? (
+        <div className="rounded-lg border border-outline-variant p-8 text-center text-sm text-on-surface-variant">
+          Keine Datenbank-Benutzer vorhanden.
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-outline-variant">
+          <table className="min-w-full text-sm">
+            <thead className="bg-surface-container-highest text-on-surface">
+              <tr>
+                <th className="px-3 py-2 text-left font-mono font-medium">Benutzername</th>
+                <th className="px-3 py-2 text-left font-mono font-medium">Passwort</th>
+                <th className="px-3 py-2 text-left font-mono font-medium">Erstellt</th>
+                <th className="px-3 py-2 text-left font-mono font-medium">Zuletzt rotiert</th>
+                {canAdmin && <th className="px-3 py-2 text-right font-mono font-medium">Aktionen</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-outline-variant">
+              {users.map((user) => (
+                <tr key={user.id} className="bg-surface-container text-on-surface-variant hover:bg-surface-container-high">
+                  <td className="px-3 py-2 font-mono text-xs text-on-surface">{user.username}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{user.password_mask}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{formatDate(user.created_at)}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{user.last_rotated_at ? formatDate(user.last_rotated_at) : '-'}</td>
+                  {canAdmin && (
+                    <td className="px-3 py-2 text-right">
+                      <div className="inline-flex gap-2">
+                        {onRotateUser && (
+                          <button className="msm-btn-secondary px-2 py-1 text-xs" onClick={() => onRotateUser(user.id)} disabled={busy === `rotate-user-${user.id}`}>
+                            Rotieren
+                          </button>
+                        )}
+                        {onDeleteUser && (
+                          <button className="msm-btn-destructive px-2 py-1 text-xs" onClick={() => onDeleteUser(user.id)} disabled={busy === `delete-user-${user.id}`}>
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
@@ -507,14 +654,26 @@ function MetricCard({ icon: Icon, label, value, hint, tone = 'default' }: {
   )
 }
 
-function RowsGrid({ result }: { result: PostgresRowsResult | null }) {
+function RowsGrid({ result, selectable, selectedIndices, onToggleRow, onToggleAll }: {
+  result: PostgresRowsResult | null
+  selectable?: boolean
+  selectedIndices?: Set<number>
+  onToggleRow?: (index: number) => void
+  onToggleAll?: () => void
+}) {
   if (!result) return <div className="rounded-lg border border-outline-variant p-8 text-center text-sm text-on-surface-variant">Tabelle auswählen.</div>
   if (!result.columns.length) return <p className="text-sm text-on-surface-variant">{result.status || 'Keine Daten.'}</p>
+  const allSelected = selectable && result.rows.length > 0 && selectedIndices?.size === result.rows.length
   return (
     <div className="max-h-[58vh] overflow-auto rounded-lg border border-outline-variant">
       <table className="min-w-full text-sm">
         <thead className="sticky top-0 z-10 bg-surface-container-highest text-on-surface">
           <tr>
+            {selectable && (
+              <th className="px-3 py-2">
+                <Checkbox checked={allSelected ?? false} onCheckedChange={() => onToggleAll?.()} />
+              </th>
+            )}
             {result.columns.map((column) => (
               <th key={column} className="px-3 py-2 text-left font-mono font-medium whitespace-nowrap">{column}</th>
             ))}
@@ -523,6 +682,11 @@ function RowsGrid({ result }: { result: PostgresRowsResult | null }) {
         <tbody className="divide-y divide-outline-variant">
           {result.rows.map((row, index) => (
             <tr key={index} className="bg-surface-container text-on-surface-variant hover:bg-surface-container-high">
+              {selectable && (
+                <td className="px-3 py-2">
+                  <Checkbox checked={selectedIndices?.has(index) ?? false} onCheckedChange={() => onToggleRow?.(index)} />
+                </td>
+              )}
               {result.columns.map((column) => (
                 <td key={column} className="max-w-[420px] px-3 py-2 align-top font-mono text-xs whitespace-pre-wrap break-words">
                   {formatValue(row[column])}
@@ -637,12 +801,13 @@ function FilterDropdown({ columns, filterColumn, filterValue, onFilterColumn, on
       <div className="space-y-3">
         <div className="space-y-1">
           <label className="text-xs text-on-surface-variant">Spalte</label>
-          <select className="msm-input h-9 text-sm" value={filterColumn} onChange={(event) => onFilterColumn(event.target.value)}>
-            <option value="">-- Spalte wählen --</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>{column}</option>
-            ))}
-          </select>
+          <Dropdown
+            options={columns.map((col) => ({ value: col, label: col }))}
+            value={filterColumn || null}
+            placeholder="-- Spalte wählen --"
+            onChange={(value) => onFilterColumn(value)}
+            buttonClassName="h-9 text-sm"
+          />
         </div>
         <div className="space-y-1">
           <label className="text-xs text-on-surface-variant">Wert enthält</label>
@@ -679,12 +844,13 @@ function SortDropdown({ columns, sortColumn, sortDirection, onSortColumn, onSort
       <div className="space-y-3">
         <div className="space-y-1">
           <label className="text-xs text-on-surface-variant">Spalte</label>
-          <select className="msm-input h-9 text-sm" value={sortColumn} onChange={(event) => onSortColumn(event.target.value)}>
-            <option value="">-- Spalte wählen --</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>{column}</option>
-            ))}
-          </select>
+          <Dropdown
+            options={columns.map((col) => ({ value: col, label: col }))}
+            value={sortColumn || null}
+            placeholder="-- Spalte wählen --"
+            onChange={(value) => onSortColumn(value)}
+            buttonClassName="h-9 text-sm"
+          />
         </div>
         <div className="space-y-1">
           <label className="text-xs text-on-surface-variant">Richtung</label>
@@ -769,6 +935,14 @@ function groupTables(tables: PostgresTable[]) {
     map.set(table.schema, [...(map.get(table.schema) || []), table])
   }
   return Array.from(map.entries()).map(([schema, grouped]) => ({ schema, tables: grouped }))
+}
+
+function formatDate(value: string): string {
+  try {
+    return new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+  } catch {
+    return value
+  }
 }
 
 function formatBytes(value?: number | null) {
