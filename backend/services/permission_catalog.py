@@ -31,6 +31,8 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("roles.manage",              "users",   "Rollen anlegen, bearbeiten, loeschen"),
     PermissionDef("panel.settings.read",       "panel",   "Panel-Einstellungen lesen"),
     PermissionDef("panel.settings.write",      "panel",   "Panel-Einstellungen aendern (Steam, E-Mail, ...)"),
+    PermissionDef("panel.database.read",       "panel",   "Panel-Datenbank lesen"),
+    PermissionDef("panel.database.admin",      "panel",   "Panel-Datenbank verwalten"),
     PermissionDef("servers.create",            "servers", "Neuen Server anlegen"),
     PermissionDef("servers.delete",            "servers", "Server loeschen (global, nicht delegierbar)"),
     PermissionDef("system.view",               "system",  "System-Ressourcen, Interfaces, Version"),

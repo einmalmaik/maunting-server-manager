@@ -11,7 +11,8 @@
     "blueprints": "Blueprints",
     "docs": "Help",
     "logout": "Logout",
-    "panelBackups": "Panel Backups"
+    "panelBackups": "Panel Backups",
+    "panelDatabase": "Panel Database"
   },
   "routes": {
     "forbiddenTitle": "No access",

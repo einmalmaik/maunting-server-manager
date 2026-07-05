@@ -15,6 +15,7 @@ from .databases import router as databases_router
 from .webhooks_outbound import router as webhooks_outbound_router
 from .backup_config import router as backup_config_router
 from .panel_backups import router as panel_backups_router
+from .panel_database import router as panel_database_router
 
 __all__ = [
     "auth_router",
@@ -34,4 +35,5 @@ __all__ = [
     "webhooks_outbound_router",
     "backup_config_router",
     "panel_backups_router",
+    "panel_database_router",
 ]  # noqa: E501

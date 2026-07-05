@@ -16,6 +16,7 @@ from schemas.postgres import (
     PostgresCreateUserRequest,
     PostgresDatabaseRequest,
     PostgresDropTableRequest,
+    PostgresDatabaseStats,
     PostgresDumpRequest,
     PostgresExtensionDropRequest,
     PostgresExtensionInfo,
@@ -29,7 +30,9 @@ from schemas.postgres import (
     PostgresRowsResponse,
     PostgresSqlRequest,
     PostgresSqlResponse,
+    PostgresTableInfo,
     PostgresTableRequest,
+    PostgresTableListItem,
 )
 from services import postgres_service
 from services.postgres_service import PostgresServiceError
@@ -177,11 +180,41 @@ def list_tables(
     body: PostgresDatabaseRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-):
+) -> dict[str, list[PostgresTableListItem]]:
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.read")
     try:
         return {"tables": postgres_service.list_tables(db, server_id, body.database_id)}
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/stats", response_model=PostgresDatabaseStats)
+def database_stats(
+    server_id: int,
+    body: PostgresDatabaseRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.read")
+    try:
+        return postgres_service.database_stats(db, server_id, body.database_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/tables/info", response_model=PostgresTableInfo)
+def describe_table(
+    server_id: int,
+    body: PostgresTableRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.read")
+    try:
+        return postgres_service.describe_table(db, server_id, body.database_id, body.schema_name, body.table_name)
     except Exception as exc:
         raise _service_error(exc) from exc
 

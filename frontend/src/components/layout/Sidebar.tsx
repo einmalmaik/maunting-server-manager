@@ -29,6 +29,7 @@ export function Sidebar() {
   const canCreateServer = useHasPermission('servers.create')
   const canViewSettings = useHasPermission('panel.settings.read')
   const canManagePanelBackups = useHasPermission('panel.settings.write')
+  const canReadPanelDatabase = useHasPermission('panel.database.read')
 
   const handleLogout = async () => {
     await logout()
@@ -50,6 +51,9 @@ export function Sidebar() {
     ] : []),
     ...((user?.is_owner || canManagePanelBackups) ? [
       { to: '/panel-backups', icon: Database, label: t('nav.panelBackups') },
+    ] : []),
+    ...((user?.is_owner || canReadPanelDatabase) ? [
+      { to: '/panel-database', icon: Database, label: t('nav.panelDatabase', 'Panel-Datenbank') },
     ] : []),
     { to: '/docs', icon: BookOpen, label: t('nav.docs') },
   ]

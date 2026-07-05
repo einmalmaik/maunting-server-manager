@@ -10,6 +10,7 @@ export const routeAccessRules = {
   settings: ['panel.settings.read'],
   blueprints: ['panel.settings.read'],
   panelBackups: ['panel.settings.write'],
+  panelDatabase: ['panel.database.read'],
 } as const
 
 export function resolveRouteAccessState({

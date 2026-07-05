@@ -11,7 +11,8 @@
     "blueprints": "Blueprints",
     "docs": "Hilfe",
     "logout": "Abmelden",
-    "panelBackups": "Panel-Backups"
+    "panelBackups": "Panel-Backups",
+    "panelDatabase": "Panel-Datenbank"
   },
   "routes": {
     "forbiddenTitle": "Kein Zugriff",
@@ -1038,18 +1039,18 @@
     "powerUser": "Power-User",
     "powerUserActive": "Superuser aktiv",
     "powerUserActiveHint": "Diese Owner-Rolle hat Postgres-SUPERUSER. Bewahre das Passwort sicher auf — es wird vom Panel nicht gespeichert.",
-    "powerUserInactiveHint": "Aktiviere Superuser, wenn dein Migrations-Skript rollenweite DDL braucht (z. B. CREATE ROLE fuer Discord-Bot-Global-Roles).",
+    "powerUserInactiveHint": "Aktiviere Superuser, wenn dein Migrations-Skript rollenweite DDL braucht (z. B. CREATE ROLE für Discord-Bot-Global-Roles).",
     "powerUserEnable": "Superuser aktivieren",
-    "powerUserEnableConfirm": "Die Owner-Rolle dieser Datenbank bekommt Postgres-SUPERUSER. Damit kann sie auch ausserhalb dieser DB Aktionen ausfuehren. Das Passwort wird nur einmal angezeigt — du musst es jetzt kopieren.",
+    "powerUserEnableConfirm": "Die Owner-Rolle dieser Datenbank bekommt Postgres-SUPERUSER. Damit kann sie auch außerhalb dieser DB Aktionen ausführen. Das Passwort wird nur einmal angezeigt — du musst es jetzt kopieren.",
     "powerUserEnableConfirmBtn": "Superuser aktivieren",
     "powerUserRotate": "Passwort rotieren",
     "powerUserDemote": "Superuser entziehen",
-    "powerUserDemoteConfirm": "Owner-Rolle \"{{name}}\" auf normale Berechtigungen zuruecksetzen? Sie verliert SUPERUSER, behält aber DB-Owner-Rechte.",
+    "powerUserDemoteConfirm": "Owner-Rolle \"{{name}}\" auf normale Berechtigungen zurücksetzen? Sie verliert SUPERUSER, behält aber DB-Owner-Rechte.",
     "powerUserDemoted": "Superuser entzogen",
     "powerUserDialogTitle": "Power-User Credentials",
     "powerUserDialogWarn": "Dieses Passwort wird vom Panel NICHT gespeichert und kann nicht wieder angezeigt werden. Bitte jetzt sicher notieren (z. B. in einem Passwort-Manager).",
-    "powerUserDialogHint": "Verbindung nur ueber das Docker-Netz (msm-internal) oder via msm-postgres:5432. Bei externem Zugriff muss der Port durch das Netz getunnelt werden.",
-    "powerUserDialogClose": "Schliessen — Passwort habe ich notiert"
+    "powerUserDialogHint": "Verbindung nur über das Docker-Netz (msm-internal) oder via msm-postgres:5432. Bei externem Zugriff muss der Port durch das Netz getunnelt werden.",
+    "powerUserDialogClose": "Schließen — Passwort habe ich notiert"
   },
   "common": {
     "unlimited": "unbegrenzt",

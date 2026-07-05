@@ -110,6 +110,53 @@ class PostgresRowsResponse(BaseModel):
     status: str | None = None
 
 
+class PostgresTableListItem(BaseModel):
+    schema: str
+    name: str
+    row_estimate: int | None = None
+    size_bytes: int | None = None
+
+
+class PostgresDatabaseStats(BaseModel):
+    status: str
+    latency_ms: int | None = None
+    size_bytes: int | None = None
+    table_count: int = 0
+    active_connections: int | None = None
+    max_connections: int | None = None
+    database_name: str
+    engine: str = "PostgreSQL"
+
+
+class PostgresColumnInfo(BaseModel):
+    name: str
+    data_type: str
+    nullable: bool
+    default: str | None = None
+
+
+class PostgresIndexInfo(BaseModel):
+    name: str
+    definition: str
+
+
+class PostgresForeignKeyInfo(BaseModel):
+    name: str
+    column_name: str
+    foreign_table: str
+    foreign_column: str
+
+
+class PostgresTableInfo(BaseModel):
+    schema: str
+    name: str
+    columns: list[PostgresColumnInfo]
+    indexes: list[PostgresIndexInfo]
+    foreign_keys: list[PostgresForeignKeyInfo]
+    size_bytes: int | None = None
+    row_estimate: int | None = None
+
+
 class PostgresSqlStatementResult(BaseModel):
     statement: str
     columns: list[str] = []

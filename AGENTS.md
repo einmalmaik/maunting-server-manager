@@ -20,6 +20,10 @@ Frontend-Regel:
 
 Sobald an sichtbarem Frontend, UI, Layout, Komponenten, Design-Tokens oder sichtbaren Produkttexten gearbeitet wird, muss die MauntingStudios Design-DNA aus C:\Users\einma\AppData\Local\Singra\workspace\maunting-design-dna gelesen und eingehalten werden.
 
+Zentrale Design-Komponenten:
+
+Das Verzeichnis frontend/src/Singra/UI/ enthält die zentralen, projektuebergreifend wiederverwendbaren Design-Komponenten des MSM-Projekts. Vor jeder Frontend-Arbeit ist dort zuerst nachzuschauen, ob bereits eine passende Komponente existiert, bevor eine neue gebaut oder eine bestehende an anderer Stelle dupliziert wird. Neue UI-Patterns, die projektuebergreifend nutzbar sind, sollen in Singra/UI/ abgelegt und in der MauntingStudios Design-DNA referenziert werden.
+
 1. Nicht verhandelbare Prioritäten
 
 Sicherheit vor Geschwindigkeit.

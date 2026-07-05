@@ -452,14 +452,131 @@ def list_tables(db: Session, server_id: int, database_id: int) -> list[dict[str,
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT table_schema, table_name
-                FROM information_schema.tables
-                WHERE table_type = 'BASE TABLE'
-                  AND table_schema NOT IN ('pg_catalog', 'information_schema')
-                ORDER BY table_schema, table_name
+                SELECT n.nspname,
+                       c.relname,
+                       GREATEST(c.reltuples::bigint, 0) AS row_estimate,
+                       pg_total_relation_size(c.oid) AS size_bytes
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relkind = 'r'
+                  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY n.nspname, c.relname
                 """
             )
-            return [{"schema": row[0], "name": row[1]} for row in cur.fetchall()]
+            return [
+                {"schema": row[0], "name": row[1], "row_estimate": row[2], "size_bytes": row[3]}
+                for row in cur.fetchall()
+            ]
+
+
+def database_stats(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
+    database = _database_row(db, server_id, database_id)
+    import time as _time
+
+    started = _time.monotonic()
+    with _owner_connect(database) as conn:
+        latency_ms = int((_time.monotonic() - started) * 1000)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  pg_database_size(current_database()) AS size_bytes,
+                  (SELECT count(*)
+                     FROM information_schema.tables
+                    WHERE table_type = 'BASE TABLE'
+                      AND table_schema NOT IN ('pg_catalog', 'information_schema')) AS table_count,
+                  (SELECT count(*)
+                     FROM pg_stat_activity
+                    WHERE datname = current_database()) AS active_connections,
+                  current_setting('max_connections')::int AS max_connections,
+                  current_database() AS database_name
+                """
+            )
+            row = cur.fetchone()
+    return {
+        "status": "healthy",
+        "latency_ms": latency_ms,
+        "size_bytes": row[0],
+        "table_count": row[1],
+        "active_connections": row[2],
+        "max_connections": row[3],
+        "database_name": row[4],
+        "engine": "PostgreSQL",
+    }
+
+
+def describe_table(db: Session, server_id: int, database_id: int, schema_name: str, table_name: str) -> dict[str, Any]:
+    database = _database_row(db, server_id, database_id)
+    schema_name = _validate_identifier(schema_name or "public")
+    table_name = _validate_identifier(table_name)
+    with _owner_connect(database) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT column_name, data_type, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_schema = %s AND table_name = %s
+                ORDER BY ordinal_position
+                """,
+                (schema_name, table_name),
+            )
+            columns = [
+                {"name": row[0], "data_type": row[1], "nullable": row[2] == "YES", "default": row[3]}
+                for row in cur.fetchall()
+            ]
+            if not columns:
+                raise ValueError("Tabelle wurde nicht gefunden.")
+            cur.execute(
+                """
+                SELECT indexname, indexdef
+                FROM pg_indexes
+                WHERE schemaname = %s AND tablename = %s
+                ORDER BY indexname
+                """,
+                (schema_name, table_name),
+            )
+            indexes = [{"name": row[0], "definition": row[1]} for row in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT tc.constraint_name, kcu.column_name, ccu.table_name, ccu.column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                JOIN information_schema.constraint_column_usage ccu
+                  ON ccu.constraint_name = tc.constraint_name
+                 AND ccu.table_schema = tc.table_schema
+                WHERE tc.constraint_type = 'FOREIGN KEY'
+                  AND tc.table_schema = %s
+                  AND tc.table_name = %s
+                ORDER BY tc.constraint_name
+                """,
+                (schema_name, table_name),
+            )
+            foreign_keys = [
+                {"name": row[0], "column_name": row[1], "foreign_table": row[2], "foreign_column": row[3]}
+                for row in cur.fetchall()
+            ]
+            cur.execute(
+                """
+                SELECT pg_total_relation_size(%s::regclass),
+                       GREATEST(c.reltuples::bigint, 0)
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = %s AND c.relname = %s
+                """,
+                (f"{schema_name}.{table_name}", schema_name, table_name),
+            )
+            size_row = cur.fetchone()
+    return {
+        "schema": schema_name,
+        "name": table_name,
+        "columns": columns,
+        "indexes": indexes,
+        "foreign_keys": foreign_keys,
+        "size_bytes": size_row[0] if size_row else None,
+        "row_estimate": size_row[1] if size_row else None,
+    }
 
 
 def create_table(db: Session, server_id: int, database_id: int, schema_name: str, table_name: str, columns: list[dict[str, Any]]) -> None:

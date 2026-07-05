@@ -25,6 +25,7 @@ const BlueprintsDocs = lazy(() => import('./pages/docs/BlueprintsDocs').then(mod
 const OAuthDocs = lazy(() => import('./pages/docs/OAuthDocs').then(module => ({ default: module.OAuthDocs })))
 const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ default: module.Blueprints })))
 const PanelBackups = lazy(() => import('./pages/PanelBackups').then(module => ({ default: module.PanelBackups })))
+const PanelDatabase = lazy(() => import('./pages/PanelDatabase').then(module => ({ default: module.PanelDatabase })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
 import { useAuthStore } from '@/stores/authStore'
 import { DisBadge } from './components/DisBadge'
@@ -120,6 +121,14 @@ function App() {
             element={
               <RequirePermission routeKey="panelBackups">
                 <PanelBackups />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="panel-database"
+            element={
+              <RequirePermission routeKey="panelDatabase">
+                <PanelDatabase />
               </RequirePermission>
             }
           />

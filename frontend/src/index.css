@@ -76,6 +76,23 @@
     @apply msm-panel rounded-lg;
   }
 
+  .msm-database-console-grid {
+    display: grid;
+    gap: 1rem;
+  }
+
+  @media (min-width: 1024px) {
+    .msm-database-console-grid {
+      grid-template-columns: 240px minmax(0, 1fr) 250px;
+    }
+  }
+
+  @media (min-width: 1536px) {
+    .msm-database-console-grid {
+      grid-template-columns: 340px minmax(0, 1fr) 320px;
+    }
+  }
+
   /* Primary Button - controlled logo cyan, high contrast on dark */
   .msm-btn-primary {
     @apply bg-primary text-on-primary font-label-md text-label-md rounded-md
