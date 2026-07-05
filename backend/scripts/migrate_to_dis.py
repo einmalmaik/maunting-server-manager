@@ -133,10 +133,34 @@ def migrate() -> None:
                 migrated += 1
 
         # 7. OAuthUserLink subject hashing and profile details encryption
+        # Idempotent + kollisionsresistent: wenn zwei Links dieselbe
+        # (provider_id, subject)-Identitaet auf verschiedene User mappen,
+        # gewinnt der bereits migrierte Link; das stale Duplikat wird entfernt.
         from models.oauth_user_link import OAuthUserLink
+
+        existing_hashes = {
+            (l.provider_id, l.subject)
+            for l in db.query(OAuthUserLink).all()
+            if l.subject and len(l.subject) == 64
+        }
+        new_hashes: set[tuple[int, str]] = set()
+
         for link in db.query(OAuthUserLink).all():
             if link.subject and len(link.subject) < 64:
-                link.subject = OAuthUserLink._hash_subject(link.subject)
+                new_subject = OAuthUserLink._hash_subject(link.subject)
+                key = (link.provider_id, new_subject)
+                if key in existing_hashes or key in new_hashes:
+                    print(
+                        f"[DIS Migration] WARN: Duplicate OAuth-Link entfernt "
+                        f"(id={link.id}, provider_id={link.provider_id}, "
+                        f"user_id={link.user_id}) — Identitaet bereits "
+                        f"mit anderem User verlinkt."
+                    )
+                    db.delete(link)
+                    skipped += 1
+                    continue
+                link.subject = new_subject
+                new_hashes.add(key)
                 migrated += 1
             if link.email_at_link_plain and not link.email_at_link_encrypted:
                 link.email_at_link = link.email_at_link_plain
