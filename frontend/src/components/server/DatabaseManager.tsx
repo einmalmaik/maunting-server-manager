@@ -6,6 +6,7 @@ import { DatabaseConsole } from '@/Singra/UI/DatabaseConsole'
 import { PostgresCredentialsDialog } from '@/components/server/PostgresCredentialsDialog'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { confirm } from '@/stores/confirmStore'
+import { prompt } from '@/stores/promptStore'
 import { toast } from '@/stores/toastStore'
 import type {
   PostgresCredential,
@@ -139,7 +140,12 @@ export function DatabaseManager({ serverId }: Props) {
   const createTable = () =>
     run('create-table', async () => {
       if (!selectedDbId) return
-      const name = window.prompt('Tabellenname')?.trim()
+      const name = await prompt({
+        title: 'Neue Tabelle',
+        message: 'Tabellenname eingeben:',
+        placeholder: 'z.B. users',
+        confirmText: 'Erstellen',
+      })
       if (!name) return
       await api(`/servers/${serverId}/databases/tables`, {
         method: 'POST',
@@ -166,8 +172,14 @@ export function DatabaseManager({ serverId }: Props) {
         danger: true,
       })
       if (!ok) return
-      const typed = window.prompt(`Zum Bestätigen "${selectedTable.name}" eingeben`) || ''
-      if (typed !== selectedTable.name) return
+      const typed = await prompt({
+        title: 'Tabelle löschen',
+        message: `Tabelle ${selectedTable.schema}.${selectedTable.name} wirklich löschen? Alle Daten gehen verloren.`,
+        expectedValue: selectedTable.name,
+        confirmText: 'Löschen',
+        danger: true,
+      })
+      if (!typed) return
       await api(`/servers/${serverId}/databases/tables/drop`, {
         method: 'POST',
         body: JSON.stringify({
@@ -190,8 +202,14 @@ export function DatabaseManager({ serverId }: Props) {
         danger: true,
       })
       if (!ok) return
-      const typed = window.prompt(`Zum Bestätigen "${selectedDatabase.name}" eingeben`) || ''
-      if (typed !== selectedDatabase.name) return
+      const typed = await prompt({
+        title: 'Datenbank löschen',
+        message: `Datenbank "${selectedDatabase.name}" wirklich löschen? Alle Daten gehen unwiderruflich verloren.`,
+        expectedValue: selectedDatabase.name,
+        confirmText: 'Löschen',
+        danger: true,
+      })
+      if (!typed) return
       await api(`/servers/${serverId}/databases/${selectedDbId}`, {
         method: 'DELETE',
         body: JSON.stringify({ confirm_name: typed }),
@@ -248,8 +266,14 @@ export function DatabaseManager({ serverId }: Props) {
     run(`power-${kind}`, async () => {
       if (!selectedDbId || !selectedDatabase) return
       if (kind === 'demote') {
-        const typed = window.prompt(`Zum Bestätigen "${selectedDatabase.owner_role}" eingeben`) || ''
-        if (typed !== selectedDatabase.owner_role) return
+        const typed = await prompt({
+          title: 'Superuser entziehen',
+          message: `Superuser-Rechte von "${selectedDatabase.owner_role}" entfernen?`,
+          expectedValue: selectedDatabase.owner_role,
+          confirmText: 'Entziehen',
+          danger: true,
+        })
+        if (!typed) return
         await api(`/servers/${serverId}/databases/power-user/demote`, {
           method: 'DELETE',
           body: JSON.stringify({ database_id: selectedDbId, username: selectedDatabase.owner_role, confirm_name: typed }),
@@ -269,7 +293,12 @@ export function DatabaseManager({ serverId }: Props) {
   const createUser = () =>
     run('create-user', async () => {
       if (!selectedDbId) return
-      const username = window.prompt('Benutzername für den neuen Datenbank-User')?.trim()
+      const username = await prompt({
+        title: 'Datenbank-Benutzer',
+        message: 'Benutzername für den neuen Datenbank-User:',
+        placeholder: 'z.B. app_user',
+        confirmText: 'Erstellen',
+      })
       if (!username) return
       const result = await api<{ credential: PostgresCredential }>(`/servers/${serverId}/databases/users`, {
         method: 'POST',
@@ -308,8 +337,14 @@ export function DatabaseManager({ serverId }: Props) {
         danger: true,
       })
       if (!ok) return
-      const typed = window.prompt(`Zum Bestätigen "${user.username}" eingeben`) || ''
-      if (typed !== user.username) return
+      const typed = await prompt({
+        title: 'Datenbank-User löschen',
+        message: `User "${user.username}" wirklich löschen?`,
+        expectedValue: user.username,
+        confirmText: 'Löschen',
+        danger: true,
+      })
+      if (!typed) return
       await api(`/servers/${serverId}/databases/users/${userId}`, {
         method: 'DELETE',
         body: JSON.stringify({ confirm_name: typed }),

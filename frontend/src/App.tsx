@@ -6,6 +6,7 @@ import { PublicOnlyRoute } from './components/PublicOnlyRoute'
 import { RequirePermission } from './components/RequirePermission'
 import { ToastContainer } from './components/ui/ToastContainer'
 import { ConfirmDialog } from './components/ui/ConfirmDialog'
+import { PromptDialog } from './components/ui/PromptDialog'
 import { Loader } from './components/ui/Loader'
 
 const SetupWizard = lazy(() => import('./pages/SetupWizard').then(module => ({ default: module.SetupWizard })))
@@ -139,6 +140,7 @@ function App() {
       <PrivacyAcknowledgementNotice />
       <ToastContainer />
       <ConfirmDialog />
+      <PromptDialog />
     </>
   )
 }
