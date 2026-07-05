@@ -274,7 +274,7 @@ def cleanup_old_backups(
         if b.s3_key:
             try:
                 from services.s3_service import S3Service
-                S3Service.delete_object(b.s3_key)
+                S3Service.delete_object(b.s3_key, bucket=b.s3_bucket)
             except Exception as e:
                 logger.warning(
                     "S3-Delete fehlgeschlagen (Backup %s): %s",

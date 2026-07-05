@@ -271,7 +271,7 @@ class TestRestoreFromS3:
                         headers={"X-CSRF-Token": csrf},
                     )
                     assert resp.status_code == 200
-                    mock_dl.assert_called_once_with(s3_key)
+                    mock_dl.assert_called_once_with(s3_key, bucket=TEST_BUCKET)
                     mock_dec.assert_called_once()
         finally:
             _teardown_override()

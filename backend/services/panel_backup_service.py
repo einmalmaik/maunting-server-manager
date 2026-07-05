@@ -341,7 +341,7 @@ def cleanup_old_panel_backups(db: Session, *, keep: int | None = None) -> None:
         if b.s3_key:
             try:
                 from services.s3_service import S3Service
-                S3Service.delete_object(b.s3_key)
+                S3Service.delete_object(b.s3_key, bucket=b.s3_bucket)
             except Exception as exc:
                 logger.warning(
                     "S3-Delete fehlgeschlagen (Panel-Backup %s): %s",
@@ -390,7 +390,7 @@ def delete_panel_backup(db: Session, backup_id: int) -> bool:
     if backup.s3_key:
         try:
             from services.s3_service import S3Service
-            S3Service.delete_object(backup.s3_key)
+            S3Service.delete_object(backup.s3_key, bucket=backup.s3_bucket)
         except Exception as exc:
             # Generische Warning — keine Secrets, kein Pfad-Leak.
             logger.warning(
@@ -613,7 +613,7 @@ def _ensure_local_archive(backup, db: Session) -> str | None:
     if backup.local_path and backup.local_path.endswith(".enc"):
         from services.s3_service import S3Service
         try:
-            body = S3Service.download_stream(backup.s3_key)
+            body = S3Service.download_stream(backup.s3_key, bucket=backup.s3_bucket)
             with open(backup.local_path, "wb") as f:
                 for chunk in body.iter_chunks():
                     f.write(chunk)
@@ -641,7 +641,7 @@ def _ensure_local_archive(backup, db: Session) -> str | None:
 
     try:
         try:
-            body = S3Service.download_stream(backup.s3_key)
+            body = S3Service.download_stream(backup.s3_key, bucket=backup.s3_bucket)
             BackupCryptoService.decrypt_to_file(
                 body.iter_chunks(), key_id, backup.local_path
             )

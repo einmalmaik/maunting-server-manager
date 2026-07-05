@@ -138,12 +138,17 @@ class S3Service:
             raise S3OperationError(f"S3-Upload fehlgeschlagen: {err_code}") from e
 
     @staticmethod
-    def download_stream(key: str):
-        """Laedt ein Objekt als Stream (boto3 StreamBody, lazy read)."""
+    def download_stream(key: str, bucket: str | None = None):
+        """Laedt ein Objekt als Stream (boto3 StreamBody, lazy read).
+
+        Optionaler `bucket` nutzt den Bucket, der beim Upload im Backup-Record
+        gespeichert wurde (falls die Config zwischenzeitlich geaendert wurde).
+        """
         cfg = S3Service._get_config()
         client = S3Service._get_client()
+        target_bucket = bucket or cfg["bucket"]
         try:
-            response = client.get_object(Bucket=cfg["bucket"], Key=key)
+            response = client.get_object(Bucket=target_bucket, Key=key)
         except ClientError as e:
             err_code = e.response.get("Error", {}).get("Code", "UnknownError")
             logger.warning("S3 download fehlgeschlagen (Key=%s): %s", key, err_code)
@@ -151,12 +156,17 @@ class S3Service:
         return response["Body"]
 
     @staticmethod
-    def list_objects(prefix: str) -> list[dict]:
-        """Listet Objekte mit Praefix (key, size, last_modified)."""
+    def list_objects(prefix: str, bucket: str | None = None) -> list[dict]:
+        """Listet Objekte mit Praefix (key, size, last_modified).
+
+        Optionaler `bucket` nutzt den Bucket, der beim Upload im Backup-Record
+        gespeichert wurde (falls die Config zwischenzeitlich geaendert wurde).
+        """
         cfg = S3Service._get_config()
         client = S3Service._get_client()
+        target_bucket = bucket or cfg["bucket"]
         try:
-            response = client.list_objects_v2(Bucket=cfg["bucket"], Prefix=prefix)
+            response = client.list_objects_v2(Bucket=target_bucket, Prefix=prefix)
         except ClientError as e:
             err_code = e.response.get("Error", {}).get("Code", "UnknownError")
             logger.warning("S3 list fehlgeschlagen (Prefix=%s): %s", prefix, err_code)
@@ -171,12 +181,18 @@ class S3Service:
         ]
 
     @staticmethod
-    def delete_object(key: str) -> None:
-        """Loescht ein Objekt (idempotent bei nicht-existentem Key)."""
+    def delete_object(key: str, bucket: str | None = None) -> None:
+        """Loescht ein Objekt (idempotent bei nicht-existentem Key).
+
+        Optionaler `bucket` nutzt den Bucket, der beim Upload im Backup-Record
+        gespeichert wurde. Ohne Angabe wird der aktuell konfigurierte Bucket
+        verwendet (Fallback fuer alte Records mit s3_bucket=None).
+        """
         cfg = S3Service._get_config()
         client = S3Service._get_client()
+        target_bucket = bucket or cfg["bucket"]
         try:
-            client.delete_object(Bucket=cfg["bucket"], Key=key)
+            client.delete_object(Bucket=target_bucket, Key=key)
         except ClientError as e:
             err_code = e.response.get("Error", {}).get("Code", "UnknownError")
             logger.warning("S3 delete fehlgeschlagen (Key=%s): %s", key, err_code)

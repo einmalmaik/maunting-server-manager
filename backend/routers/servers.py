@@ -554,7 +554,7 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
         if backup.s3_key:
             try:
                 from services.s3_service import S3Service
-                S3Service.delete_object(backup.s3_key)
+                S3Service.delete_object(backup.s3_key, bucket=backup.s3_bucket)
             except Exception as e:
                 logger.warning(
                     "S3-Delete fehlgeschlagen (Backup %s): %s",

@@ -26,6 +26,9 @@ from services.s3_service import (
 
 S3_AAD = "msm:backup:s3"
 TEST_BUCKET = "msm-test-bucket"
+# Zweiter Bucket fuer Tests, die den record-spezifischen Bucket pruefen
+# (Simuliert Bucket-Wechsel in der Config nach dem Upload).
+OTHER_BUCKET = "msm-other-bucket"
 # Endpoint leer lassen fuer moto-Tests (boto3 nutzt Default-AWS-Endpoint,
 # den moto interceptiert). In Produktion wird hier der Provider-Endpoint gesetzt.
 TEST_ENDPOINT = ""
@@ -54,6 +57,12 @@ def _create_moto_bucket() -> None:
     """Erstellt den Test-Bucket in moto."""
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket=TEST_BUCKET)
+
+
+def _create_other_moto_bucket() -> None:
+    """Erstellt den zweiten Test-Bucket in moto (simuliert alten Config-Bucket)."""
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket=OTHER_BUCKET)
 
 
 # ── VAL-S3-013: upload_stream ────────────────────────────────────────────
@@ -308,3 +317,81 @@ def test_delete_nonexistent_key_no_credential_leak():
     # Delete on missing key is idempotent in S3 → should not raise
     S3Service.delete_object("nonexistent")
     # Verify no error and no credentials in any exception (none raised)
+
+
+# ── VAL-S3-019: Record-spezifischer Bucket (Bucket-Mismatch-Fix) ─────────
+# Diese Tests pruefen, dass delete_object / download_stream / list_objects
+# den explizit uebergebenen `bucket` verwenden — nicht den aktuell
+# konfigurierten Bucket. Das verhindert den Bucket-Mismatch-Bug, bei dem
+# ein Config-Wechsel nach dem Upload dazu fuehrt, dass Deletes/Downloads
+# den falschen Bucket treffen.
+
+@mock_aws
+def test_delete_object_uses_explicit_bucket():
+    """delete_object mit bucket=OTHER loescht aus OTHER, nicht aus Config-Bucket."""
+    _setup_s3_config()
+    _create_moto_bucket()
+    _create_other_moto_bucket()
+    client = boto3.client("s3", region_name="us-east-1")
+    # Objekt liegt im alten Bucket (OTHER_BUCKET), nicht im Config-Bucket.
+    client.put_object(Bucket=OTHER_BUCKET, Key="mismatch-key", Body=b"old")
+    S3Service.delete_object("mismatch-key", bucket=OTHER_BUCKET)
+    other_objs = {
+        o["Key"] for o in client.list_objects_v2(Bucket=OTHER_BUCKET).get("Contents", [])
+    }
+    assert "mismatch-key" not in other_objs
+
+
+@mock_aws
+def test_delete_object_explicit_bucket_leaves_config_bucket_untouched():
+    """Ein Delete mit explizitem Bucket darf den Config-Bucket nicht beruehren."""
+    _setup_s3_config()
+    _create_moto_bucket()
+    _create_other_moto_bucket()
+    client = boto3.client("s3", region_name="us-east-1")
+    client.put_object(Bucket=TEST_BUCKET, Key="config-key", Body=b"cfg")
+    client.put_object(Bucket=OTHER_BUCKET, Key="record-key", Body=b"rec")
+    S3Service.delete_object("record-key", bucket=OTHER_BUCKET)
+    cfg_objs = {
+        o["Key"] for o in client.list_objects_v2(Bucket=TEST_BUCKET).get("Contents", [])
+    }
+    assert "config-key" in cfg_objs
+
+
+@mock_aws
+def test_download_stream_uses_explicit_bucket():
+    """download_stream mit bucket=OTHER holt aus OTHER, nicht aus Config-Bucket."""
+    _setup_s3_config()
+    _create_moto_bucket()
+    _create_other_moto_bucket()
+    client = boto3.client("s3", region_name="us-east-1")
+    client.put_object(Bucket=OTHER_BUCKET, Key="dl-other", Body=b"from-other")
+    body = S3Service.download_stream("dl-other", bucket=OTHER_BUCKET)
+    assert body.read() == b"from-other"
+
+
+@mock_aws
+def test_list_objects_uses_explicit_bucket():
+    """list_objects mit bucket=OTHER listet aus OTHER, nicht aus Config-Bucket."""
+    _setup_s3_config()
+    _create_moto_bucket()
+    _create_other_moto_bucket()
+    client = boto3.client("s3", region_name="us-east-1")
+    client.put_object(Bucket=OTHER_BUCKET, Key="msm-backups/other.enc", Body=b"x")
+    result = S3Service.list_objects("msm-backups/", bucket=OTHER_BUCKET)
+    keys = [obj["key"] for obj in result]
+    assert "msm-backups/other.enc" in keys
+
+
+@mock_aws
+def test_delete_object_bucket_none_falls_back_to_config():
+    """bucket=None (Default) nutzt weiterhin den konfigurierten Bucket."""
+    _setup_s3_config()
+    _create_moto_bucket()
+    client = boto3.client("s3", region_name="us-east-1")
+    client.put_object(Bucket=TEST_BUCKET, Key="fallback-key", Body=b"data")
+    S3Service.delete_object("fallback-key")
+    objs = {
+        o["Key"] for o in client.list_objects_v2(Bucket=TEST_BUCKET).get("Contents", [])
+    }
+    assert "fallback-key" not in objs

@@ -216,7 +216,7 @@ def fetch_backup_from_s3(backup, db: Session) -> None:
 
     # Neues Format: .enc Dateiname → S3-Objekt direkt herunterladen (kein Decrypt)
     if backup.filename.endswith(".enc"):
-        body = S3Service.download_stream(backup.s3_key)
+        body = S3Service.download_stream(backup.s3_key, bucket=backup.s3_bucket)
         with open(backup.filename, "wb") as f:
             for chunk in body.iter_chunks():
                 f.write(chunk)
@@ -237,7 +237,7 @@ def fetch_backup_from_s3(backup, db: Session) -> None:
         key_id = BackupCryptoService.init_key(password, salt)
 
         # S3-Download → DIS decrypt-stream → lokale .tar.gz Datei.
-        body = S3Service.download_stream(backup.s3_key)
+        body = S3Service.download_stream(backup.s3_key, bucket=backup.s3_bucket)
         BackupCryptoService.decrypt_to_file(body.iter_chunks(), key_id, backup.filename)
 
         logger.info(
