@@ -371,64 +371,103 @@ async function handleEncryptStream(req, res) {
   }
 }
 
-/** POST /backup/decrypt-stream — stream encrypted frames back to plaintext. */
+/** POST /backup/decrypt-stream — stream encrypted frames back to plaintext.
+ *
+ * Frames are decrypted and written to the response incrementally as they
+ * arrive, so the entire encrypted object is never buffered in memory. This
+ * allows large backups (100MB+) to be decrypted without OOM.
+ *
+ * Security: each frame carries its own AES-GCM auth tag. A successfully
+ * decrypted frame's plaintext is authenticated — writing it immediately is
+ * safe. If a later frame is tampered or truncated, the socket is destroyed
+ * so the caller receives an interrupted stream rather than corrupt output.
+ * If the error occurs before any frame has been written (e.g. first frame
+ * tampered, invalid frame length, or truncated input), a clean HTTP 400
+ * {error: "DecryptionFailed"} is returned with no plaintext leaked.
+ */
 async function handleDecryptStream(req, res) {
   const keyId = req.headers['x-backup-key-id'];
   const key = lookupBackupKey(res, keyId);
   if (!key) return;
 
-  // Read the full encrypted input first so that a tampered frame anywhere in
-  // the stream results in HTTP 400 with no partial plaintext leaked. The
-  // response is still sent with chunked transfer encoding.
-  const chunks = [];
-  let totalLen = 0;
+  let headersSent = false;
+  let buffer = Buffer.alloc(0);
+
+  /** Send 200 + chunked headers on first successful plaintext write. */
+  function beginStreaming() {
+    if (!headersSent) {
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Transfer-Encoding': 'chunked',
+      });
+      headersSent = true;
+    }
+  }
+
+  /** Handle a decryption/frame error: 400 if no plaintext sent yet, else destroy socket. */
+  function failDecrypt() {
+    if (headersSent) {
+      // Plaintext from earlier (authenticated) frames was already written.
+      // We cannot retroactively send a 400, so destroy the socket to signal
+      // the error. The caller detects the interrupted stream.
+      res.destroy();
+    } else {
+      jsonReply(res, 400, { error: 'DecryptionFailed' });
+    }
+  }
+
   try {
     for await (const chunk of req) {
-      chunks.push(chunk);
-      totalLen += chunk.length;
-    }
-  } catch {
-    return jsonReply(res, 400, { error: 'InvalidStream' });
-  }
-  const input = Buffer.concat(chunks, totalLen);
+      buffer = buffer.length > 0 ? Buffer.concat([buffer, chunk]) : chunk;
 
-  // Parse + decrypt frames into plaintext chunks.
-  const outChunks = [];
-  let off = 0;
-  try {
-    while (off < input.length) {
-      if (off + FRAME_LEN_FIELD > input.length) {
-        throw new Error('TruncatedFrameLength');
+      // Process as many complete frames as are available in the buffer.
+      let off = 0;
+      while (off + FRAME_LEN_FIELD <= buffer.length) {
+        const frameLen = buffer.readUInt32BE(off);
+        off += FRAME_LEN_FIELD;
+        if (frameLen < NONCE_LEN) {
+          // frame_length too small to contain a nonce — malformed.
+          return failDecrypt();
+        }
+        if (off + frameLen > buffer.length) {
+          // Not enough data for this frame yet — rewind and wait for more.
+          off -= FRAME_LEN_FIELD;
+          break;
+        }
+        const nonce = buffer.subarray(off, off + NONCE_LEN);
+        const ct = buffer.subarray(off + NONCE_LEN, off + frameLen);
+        off += frameLen;
+        if (ct.length < TAG_LEN) {
+          return failDecrypt();
+        }
+        let plaintext;
+        try {
+          plaintext = await aesGcmDecrypt(key, nonce, ct);
+        } catch {
+          // Auth-tag mismatch (tamper or wrong key).
+          return failDecrypt();
+        }
+        beginStreaming();
+        res.write(Buffer.from(plaintext));
       }
-      const frameLen = input.readUInt32BE(off);
-      off += FRAME_LEN_FIELD;
-      if (frameLen < NONCE_LEN) {
-        throw new Error('InvalidFrameLength');
-      }
-      if (off + frameLen > input.length) {
-        throw new Error('TruncatedFrame');
-      }
-      const nonce = input.subarray(off, off + NONCE_LEN);
-      const ct = input.subarray(off + NONCE_LEN, off + frameLen);
-      off += frameLen;
-      if (ct.length < TAG_LEN) {
-        throw new Error('InvalidCiphertext');
-      }
-      const plaintext = await aesGcmDecrypt(key, nonce, ct);
-      outChunks.push(Buffer.from(plaintext));
-    }
-  } catch {
-    // Auth-tag mismatch, truncation, or any frame error -> 400, no plaintext.
-    return jsonReply(res, 400, { error: 'DecryptionFailed' });
-  }
 
-  // All frames decrypted successfully; stream plaintext out (chunked).
-  res.writeHead(200, {
-    'Content-Type': 'application/octet-stream',
-    'Transfer-Encoding': 'chunked',
-  });
-  for (const c of outChunks) res.write(c);
-  res.end();
+      // Retain only the unprocessed tail. Copy into a new small Buffer so the
+      // large accumulated buffer can be garbage-collected (subarray keeps the
+      // original backing store alive).
+      buffer = off > 0 ? Buffer.from(buffer.subarray(off)) : buffer;
+    }
+
+    // Request stream ended. Any leftover bytes mean a truncated final frame.
+    if (buffer.length > 0) {
+      return failDecrypt();
+    }
+
+    // Clean end (empty input yields an empty plaintext response with 200).
+    beginStreaming();
+    res.end();
+  } catch {
+    failDecrypt();
+  }
 }
 
 server.listen(PORT, '127.0.0.1', () => {

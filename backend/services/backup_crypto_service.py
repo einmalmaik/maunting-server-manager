@@ -17,6 +17,7 @@ Sicherheits-Invarianten:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Iterator
 
 import httpx
@@ -130,6 +131,12 @@ class BackupCryptoService:
     def decrypt_to_file(encrypted_stream, key_id: str, output_path: str) -> None:
         """Stream-entschluesst verschluesselte Frames und schreibt in Datei.
 
+        Schreibt zunaechst in eine Temporaerdatei (<output_path>.tmp) und
+        benennt sie erst nach erfolgreicher Entschluesselung atomar um.
+        So bleibt die Zieldatei bei einem Fehler (falsches Passwort,
+        abgebrochener Stream) unversehrt bzw. wird nicht als korrupt
+        hinterlassen.
+
         Args:
             encrypted_stream: Iterator[bytes] oder file-like mit verschluesselten Frames.
             key_id: Gueltige DIS key_id.
@@ -138,22 +145,41 @@ class BackupCryptoService:
         url = BackupCryptoService._dis_url("/backup/decrypt-stream")
         headers = BackupCryptoService._auth_headers()
         headers["X-Backup-Key-Id"] = key_id
-        with httpx.stream(
-            "POST",
-            url,
-            content=encrypted_stream,
-            headers=headers,
-            timeout=_STREAM_TIMEOUT,
-        ) as resp:
-            if resp.status_code == 400:
-                # DecryptionFailed: falsches Passwort, falscher Salt, oder manipulierter Stream.
-                # Klare Ausnahme fuer aufrufenden Code, damit eine verstaendliche
-                # Fehlermeldung an den User gegeben werden kann (kein generisches 500).
-                raise BackupDecryptionError("Entschluesselung fehlgeschlagen")
-            if resp.status_code != 200:
-                raise BackupCryptoError(
-                    f"DIS decrypt-stream fehlgeschlagen: HTTP {resp.status_code}"
-                )
-            with open(output_path, "wb") as out:
-                for chunk in resp.iter_bytes():
-                    out.write(chunk)
+        tmp_path = output_path + ".tmp"
+        try:
+            with httpx.stream(
+                "POST",
+                url,
+                content=encrypted_stream,
+                headers=headers,
+                timeout=_STREAM_TIMEOUT,
+            ) as resp:
+                if resp.status_code == 400:
+                    # DecryptionFailed: falsches Passwort, falscher Salt, oder manipulierter Stream.
+                    # Klare Ausnahme fuer aufrufenden Code, damit eine verstaendliche
+                    # Fehlermeldung an den User gegeben werden kann (kein generisches 500).
+                    raise BackupDecryptionError("Entschluesselung fehlgeschlagen")
+                if resp.status_code != 200:
+                    raise BackupCryptoError(
+                        f"DIS decrypt-stream fehlgeschlagen: HTTP {resp.status_code}"
+                    )
+                with open(tmp_path, "wb") as out:
+                    for chunk in resp.iter_bytes():
+                        out.write(chunk)
+            # Atomares Rename: Zieldatei wird erst nach vollstaendiger,
+            # erfolgreicher Entschluesselung sichtbar.
+            os.replace(tmp_path, output_path)
+        except httpx.HTTPError as e:
+            # Stream abgebrochen (z.B. DIS zerstoert Socket bei Tamper-Erkennung
+            # in einem spaeteren Frame). Temp-Datei wird unten aufgeraeumt.
+            raise BackupDecryptionError(
+                "Entschluesselung fehlgeschlagen (Stream abgebrochen)"
+            ) from e
+        finally:
+            # Temp-Datei bei Fehler oder Erfolg aufraeumen.
+            # Nach erfolgreichem os.replace existiert tmp_path nicht mehr.
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass

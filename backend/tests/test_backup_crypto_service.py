@@ -236,3 +236,96 @@ def test_encrypt_output_not_plaintext(tmp_path):
     assert encrypted[:4] != data[:4]
     # The full encrypted output should not contain the plaintext as-is
     assert data not in encrypted
+
+
+# ── VAL-FIX-011: decrypt_to_file uses temp file + atomic rename ───────────
+
+def test_decrypt_to_file_atomic_rename_on_success(tmp_path):
+    """Bei Erfolg wird die Temp-Datei atomar zur Zieldatei umbenannt."""
+    data = b"atomic rename test " * 100
+    input_path = tmp_path / "atomic.bin"
+    output_path = tmp_path / "atomic_out.bin"
+    tmp_path_expected = str(output_path) + ".tmp"
+    input_path.write_bytes(data)
+
+    key_id = BackupCryptoService.init_key(TEST_PASSWORD, TEST_SALT)
+    try:
+        encrypted = list(BackupCryptoService.encrypt_file_stream(str(input_path), key_id))
+        BackupCryptoService.decrypt_to_file(iter(encrypted), key_id, str(output_path))
+    finally:
+        BackupCryptoService.invalidate_key(key_id)
+
+    # Zieldatei existiert mit korrektem Inhalt
+    assert output_path.exists()
+    assert output_path.read_bytes() == data
+    # Temp-Datei wurde aufgeraeumt (atomar umbenannt)
+    assert not os.path.exists(tmp_path_expected)
+
+
+def test_decrypt_to_file_no_output_on_failure(tmp_path):
+    """Bei Entschluesselungsfehler wird keine Zieldatei hinterlassen."""
+    data = b"will be tampered"
+    input_path = tmp_path / "tamper_src.bin"
+    output_path = tmp_path / "tamper_out.bin"
+    tmp_path_expected = str(output_path) + ".tmp"
+    input_path.write_bytes(data)
+
+    key_id = BackupCryptoService.init_key(TEST_PASSWORD, TEST_SALT)
+    try:
+        encrypted = b"".join(BackupCryptoService.encrypt_file_stream(str(input_path), key_id))
+        tampered = bytearray(encrypted)
+        tampered[-1] ^= 0xFF  # Auth-Tag manipulieren
+        with pytest.raises(BackupCryptoError):
+            BackupCryptoService.decrypt_to_file(
+                iter([bytes(tampered)]), key_id, str(output_path)
+            )
+    finally:
+        BackupCryptoService.invalidate_key(key_id)
+
+    # Weder Zieldatei noch Temp-Datei duerfen existieren
+    assert not output_path.exists(), "Zieldatei darf bei Fehler nicht existieren"
+    assert not os.path.exists(tmp_path_expected), "Temp-Datei muss aufgeraeumt werden"
+
+
+def test_decrypt_to_file_preserves_existing_on_failure(tmp_path):
+    """Bei Fehler bleibt eine bereits existierende Zieldatei unversehrt."""
+    original_content = b"existing valid content"
+    data = b"new data to decrypt"
+    input_path = tmp_path / "preserve_src.bin"
+    output_path = tmp_path / "preserve_out.bin"
+    output_path.write_bytes(original_content)  # Bestehende Datei
+
+    input_path.write_bytes(data)
+    key_id = BackupCryptoService.init_key(TEST_PASSWORD, TEST_SALT)
+    try:
+        encrypted = b"".join(BackupCryptoService.encrypt_file_stream(str(input_path), key_id))
+        tampered = bytearray(encrypted)
+        tampered[-1] ^= 0xFF
+        with pytest.raises(BackupCryptoError):
+            BackupCryptoService.decrypt_to_file(
+                iter([bytes(tampered)]), key_id, str(output_path)
+            )
+    finally:
+        BackupCryptoService.invalidate_key(key_id)
+
+    # Bestehende Datei ist unversehrt (nicht ueberschrieben)
+    assert output_path.read_bytes() == original_content
+
+
+def test_decrypt_to_file_large_streaming(tmp_path):
+    """Grosse Datei (5MB) wird korrekt entschlueselt (Streaming, keine OOM)."""
+    data = b"\x55" * (5 * 1024 * 1024)  # 5 MB — multiple 64KB frames
+    input_path = tmp_path / "large_src.bin"
+    output_path = tmp_path / "large_out.bin"
+    input_path.write_bytes(data)
+
+    key_id = BackupCryptoService.init_key(TEST_PASSWORD, TEST_SALT)
+    try:
+        encrypted = list(BackupCryptoService.encrypt_file_stream(str(input_path), key_id))
+        BackupCryptoService.decrypt_to_file(iter(encrypted), key_id, str(output_path))
+    finally:
+        BackupCryptoService.invalidate_key(key_id)
+
+    assert output_path.exists()
+    assert output_path.read_bytes() == data
+    assert _sha256(str(input_path)) == _sha256(str(output_path))
