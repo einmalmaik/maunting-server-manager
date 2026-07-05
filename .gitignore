@@ -47,3 +47,6 @@ backend/.env
 *.db
 *.sqlite
 *.sqlite3
+
+# Project rules live locally, not in the repo
+AGENTS.md
