@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
+import { ReactNode, useMemo, useState } from 'react'
 import {
-  Activity,
-  AlertTriangle,
+  ArrowUpDown,
   Boxes,
   CheckCircle2,
   Clock3,
+  Columns3,
   Database,
   Download,
   FileUp,
@@ -33,7 +33,7 @@ import type {
   PostgresTableInfo,
 } from '@/types'
 
-type TabKey = 'tables' | 'sql' | 'users' | 'backups' | 'logs' | 'monitoring' | 'settings'
+type TabKey = 'tables' | 'sql'
 
 export interface DatabaseConsoleProps {
   title: string
@@ -73,11 +73,6 @@ export interface DatabaseConsoleProps {
 const tabs: Array<{ key: TabKey; label: string; icon: typeof Table2 }> = [
   { key: 'tables', label: 'Tabellen', icon: Table2 },
   { key: 'sql', label: 'SQL-Konsole', icon: Play },
-  { key: 'users', label: 'Benutzer', icon: Users },
-  { key: 'backups', label: 'Backups', icon: Download },
-  { key: 'logs', label: 'Logs', icon: History },
-  { key: 'monitoring', label: 'Monitoring', icon: Activity },
-  { key: 'settings', label: 'Einstellungen', icon: Shield },
 ]
 
 export function DatabaseConsole({
@@ -116,8 +111,39 @@ export function DatabaseConsole({
 }: DatabaseConsoleProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('tables')
   const [search, setSearch] = useState('')
+  const [openDropdown, setOpenDropdown] = useState<'filter' | 'sort' | 'columns' | null>(null)
+  const [filterColumn, setFilterColumn] = useState('')
+  const [filterValue, setFilterValue] = useState('')
+  const [sortColumn, setSortColumn] = useState('')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => new Set())
   const selectedDatabase = databases.find((db) => db.id === selectedDatabaseId) || databases[0] || null
   const groupedTables = useMemo(() => groupTables(tables), [tables])
+
+  const resultColumns = rows?.columns ?? []
+  const processedRows = useMemo<PostgresRowsResult | null>(() => {
+    if (!rows) return null
+    let next = rows.rows
+    if (filterColumn && filterValue) {
+      const needle = filterValue.toLowerCase()
+      next = next.filter((row) => String(row[filterColumn] ?? '').toLowerCase().includes(needle))
+    }
+    if (sortColumn) {
+      const dir = sortDirection
+      next = [...next].sort((a, b) => compareValues(a[sortColumn], b[sortColumn], dir))
+    }
+    const visibleColumns = hiddenColumns.size ? rows.columns.filter((col) => !hiddenColumns.has(col)) : rows.columns
+    return { ...rows, columns: visibleColumns, rows: next }
+  }, [rows, filterColumn, filterValue, sortColumn, sortDirection, hiddenColumns])
+
+  const toggleColumn = (column: string) => {
+    setHiddenColumns((current) => {
+      const next = new Set(current)
+      if (next.has(column)) next.delete(column)
+      else next.add(column)
+      return next
+    })
+  }
 
   return (
     <div className="space-y-4">
@@ -199,209 +225,253 @@ export function DatabaseConsole({
         })}
       </div>
 
-      {activeTab !== 'tables' && activeTab !== 'sql' ? (
-        <FeaturePanel activeTab={activeTab} canAdmin={canAdmin} />
-      ) : (
-        <div className="msm-database-console-grid">
-          <aside className="msm-card p-4">
-            <div className="flex items-center justify-between gap-2">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
-                <input className="msm-input pl-9" placeholder="Tabellen suchen..." onChange={(e) => setSearch(e.target.value)} />
-              </div>
-              <button className="msm-btn-secondary h-10 w-10 inline-flex items-center justify-center" title="Filter">
-                <Filter className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="mt-4 max-h-[62vh] space-y-4 overflow-y-auto pr-1">
-              {groupedTables.map((group) => {
-                const visible = group.tables.filter((table) => table.name.toLowerCase().includes(search.toLowerCase()))
-                if (!visible.length) return null
-                return (
-                  <div key={group.schema}>
-                    <div className="mb-2 flex items-center justify-between text-xs text-on-surface-variant">
-                      <span className="font-semibold text-on-surface">{group.schema}</span>
-                      <span className="rounded-full border border-outline-variant px-2 py-0.5 font-mono">{visible.length}</span>
-                    </div>
-                    <div className="space-y-1">
-                      {visible.map((table) => (
-                        <button
-                          key={`${table.schema}.${table.name}`}
-                          className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left ${
-                            selectedTable?.schema === table.schema && selectedTable.name === table.name
-                              ? 'border-secondary bg-secondary/10 text-secondary'
-                              : 'border-transparent text-on-surface-variant hover:border-outline-variant hover:bg-surface-container-high'
-                          }`}
-                          onClick={() => onSelectTable(table)}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <Table2 className="h-4 w-4 shrink-0" />
-                            <span className="truncate font-mono text-sm">{table.name}</span>
-                          </span>
-                          <span className="shrink-0 font-mono text-xs">{formatRows(table.row_estimate)}</span>
-                        </button>
-                      ))}
-                    </div>
+      <div className="msm-database-console-grid">
+        <aside className="msm-card p-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
+            <input className="msm-input pl-9" placeholder="Tabellen suchen..." onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <div className="mt-4 max-h-[62vh] space-y-4 overflow-y-auto pr-1">
+            {groupedTables.map((group) => {
+              const visible = group.tables.filter((table) => table.name.toLowerCase().includes(search.toLowerCase()))
+              if (!visible.length) return null
+              return (
+                <div key={group.schema}>
+                  <div className="mb-2 flex items-center justify-between text-xs text-on-surface-variant">
+                    <span className="font-semibold text-on-surface">{group.schema}</span>
+                    <span className="rounded-full border border-outline-variant px-2 py-0.5 font-mono">{visible.length}</span>
                   </div>
-                )
-              })}
-            </div>
-            {canAdmin && onCreateTable && (
-              <button className="msm-btn-secondary mt-4 w-full py-2 inline-flex items-center justify-center gap-2" onClick={onCreateTable}>
-                <Plus className="h-4 w-4" />
-                Neue Tabelle erstellen
-              </button>
-            )}
-          </aside>
-
-          <main className="space-y-4 min-w-0">
-            {activeTab === 'tables' && (
-              <section className="msm-card p-4">
-                <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <h3 className="font-headline text-lg font-semibold text-on-surface">
-                      Tabelle: <span className="font-mono">{selectedTable?.name || '-'}</span>
-                    </h3>
-                    <p className="text-xs text-on-surface-variant">{formatRows(tableInfo?.row_estimate)} Zeilen · {formatBytes(tableInfo?.size_bytes)}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <div className="relative min-w-64">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
-                      <input
-                        className="msm-input pl-9"
-                        placeholder="In dieser Tabelle suchen..."
-                        onChange={(event) => setSearch(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') onSearchRows(search)
-                        }}
-                      />
-                    </div>
-                    <button className="msm-btn-secondary px-3 inline-flex items-center gap-2" onClick={() => onSearchRows(search)}>
-                      <Search className="h-4 w-4" />
-                      Suchen
-                    </button>
-                    {canAdmin && onDropTable && (
-                      <button className="msm-btn-destructive px-3 inline-flex items-center gap-2" onClick={onDropTable}>
-                        <Trash2 className="h-4 w-4" />
-                        Leeren
+                  <div className="space-y-1">
+                    {visible.map((table) => (
+                      <button
+                        key={`${table.schema}.${table.name}`}
+                        className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left ${
+                          selectedTable?.schema === table.schema && selectedTable.name === table.name
+                            ? 'border-secondary bg-secondary/10 text-secondary'
+                            : 'border-transparent text-on-surface-variant hover:border-outline-variant hover:bg-surface-container-high'
+                        }`}
+                        onClick={() => onSelectTable(table)}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Table2 className="h-4 w-4 shrink-0" />
+                          <span className="truncate font-mono text-sm">{table.name}</span>
+                        </span>
+                        <span className="shrink-0 font-mono text-xs">{formatRows(table.row_estimate)}</span>
                       </button>
-                    )}
+                    ))}
                   </div>
                 </div>
-                <RowsGrid result={rows} />
-              </section>
-            )}
+              )
+            })}
+          </div>
+          {canAdmin && onCreateTable && (
+            <button className="msm-btn-secondary mt-4 w-full py-2 inline-flex items-center justify-center gap-2" onClick={onCreateTable}>
+              <Plus className="h-4 w-4" />
+              Neue Tabelle erstellen
+            </button>
+          )}
+        </aside>
 
+        <main className="space-y-4 min-w-0">
+          {activeTab === 'tables' && (
             <section className="msm-card p-4">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-headline text-lg font-semibold text-on-surface">SQL-Konsole</h3>
-                <div className="flex flex-wrap gap-2">
-                  {onImport && (
-                    <label className="msm-btn-secondary cursor-pointer px-3 py-2 inline-flex items-center gap-2">
-                      <FileUp className="h-4 w-4" />
-                      Import
-                      <input className="hidden" type="file" accept=".sql,text/sql,text/plain" onChange={(event) => {
-                        const file = event.target.files?.[0]
-                        if (file) onImport(file)
-                        event.currentTarget.value = ''
-                      }} />
-                    </label>
-                  )}
-                  {onExport && (
-                    <button className="msm-btn-secondary px-3 inline-flex items-center gap-2" onClick={onExport}>
-                      <Download className="h-4 w-4" />
-                      Export
+              <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h3 className="font-headline text-lg font-semibold text-on-surface">
+                    Tabelle: <span className="font-mono">{selectedTable?.name || '-'}</span>
+                  </h3>
+                  <p className="text-xs text-on-surface-variant">{formatRows(tableInfo?.row_estimate)} Zeilen · {formatBytes(tableInfo?.size_bytes)}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative min-w-64">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
+                    <input
+                      className="msm-input pl-9"
+                      placeholder="In dieser Tabelle suchen..."
+                      onChange={(event) => setSearch(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') onSearchRows(search)
+                      }}
+                    />
+                  </div>
+                  <button className="msm-btn-secondary px-3 inline-flex items-center gap-2" onClick={() => onSearchRows(search)}>
+                    <Search className="h-4 w-4" />
+                    Suchen
+                  </button>
+                  <ToolbarToggleButton
+                    icon={Filter}
+                    label="Filter"
+                    active={openDropdown === 'filter'}
+                    hasState={Boolean(filterColumn && filterValue)}
+                    disabled={!resultColumns.length}
+                    onClick={() => setOpenDropdown(openDropdown === 'filter' ? null : 'filter')}
+                  />
+                  <ToolbarToggleButton
+                    icon={ArrowUpDown}
+                    label="Sortieren"
+                    active={openDropdown === 'sort'}
+                    hasState={Boolean(sortColumn)}
+                    disabled={!resultColumns.length}
+                    onClick={() => setOpenDropdown(openDropdown === 'sort' ? null : 'sort')}
+                  />
+                  <ToolbarToggleButton
+                    icon={Columns3}
+                    label="Spalten"
+                    active={openDropdown === 'columns'}
+                    hasState={hiddenColumns.size > 0}
+                    disabled={!resultColumns.length}
+                    onClick={() => setOpenDropdown(openDropdown === 'columns' ? null : 'columns')}
+                  />
+                  {canAdmin && onDropTable && (
+                    <button className="msm-btn-destructive px-3 inline-flex items-center gap-2" onClick={onDropTable}>
+                      <Trash2 className="h-4 w-4" />
+                      Tabelle löschen
                     </button>
                   )}
                 </div>
               </div>
-              <textarea
-                className="msm-input min-h-52 font-mono text-sm leading-relaxed"
-                value={sqlText}
-                onChange={(event) => onSqlTextChange(event.target.value)}
-                onKeyDown={(event) => {
-                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                    event.preventDefault()
-                    onRunSql()
-                  }
-                }}
-                spellCheck={false}
-              />
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2" onClick={onRunSql} disabled={!canAdmin || busy === 'sql'}>
-                  <Play className="h-4 w-4" />
-                  Ausführen
-                </button>
-                <button className="msm-btn-secondary px-3 py-2 inline-flex items-center gap-2" onClick={() => onSqlTextChange(formatSql(sqlText))}>
-                  <Wand2 className="h-4 w-4" />
-                  Formatieren
-                </button>
-                <span className="text-xs text-on-surface-variant">Ctrl+Enter · 500 Zeilen · lange Skripte erlaubt</span>
+              <div className="relative">
+                {openDropdown === 'filter' && (
+                  <FilterDropdown
+                    columns={resultColumns}
+                    filterColumn={filterColumn}
+                    filterValue={filterValue}
+                    onFilterColumn={setFilterColumn}
+                    onFilterValue={setFilterValue}
+                    onClose={() => setOpenDropdown(null)}
+                  />
+                )}
+                {openDropdown === 'sort' && (
+                  <SortDropdown
+                    columns={resultColumns}
+                    sortColumn={sortColumn}
+                    sortDirection={sortDirection}
+                    onSortColumn={setSortColumn}
+                    onSortDirection={setSortDirection}
+                    onClose={() => setOpenDropdown(null)}
+                  />
+                )}
+                {openDropdown === 'columns' && (
+                  <ColumnsDropdown
+                    columns={resultColumns}
+                    hiddenColumns={hiddenColumns}
+                    onToggle={toggleColumn}
+                    onReset={() => setHiddenColumns(new Set())}
+                    onClose={() => setOpenDropdown(null)}
+                  />
+                )}
               </div>
-              <SqlResult result={sqlResult} />
+              <RowsGrid result={processedRows} />
             </section>
-          </main>
+          )}
 
-          <aside className="msm-card p-4">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="rounded-lg border border-secondary/30 bg-secondary/10 p-2 text-secondary">
-                <Layers3 className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="font-headline text-lg font-semibold text-on-surface">{selectedTable?.name || 'Keine Tabelle'}</h3>
-                <p className="text-xs text-on-surface-variant">Schema</p>
+          <section className="msm-card p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-headline text-lg font-semibold text-on-surface">SQL-Konsole</h3>
+              <div className="flex flex-wrap gap-2">
+                {onImport && (
+                  <label className="msm-btn-secondary cursor-pointer px-3 py-2 inline-flex items-center gap-2">
+                    <FileUp className="h-4 w-4" />
+                    Import
+                    <input className="hidden" type="file" accept=".sql,text/sql,text/plain" onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (file) onImport(file)
+                      event.currentTarget.value = ''
+                    }} />
+                  </label>
+                )}
+                {onExport && (
+                  <button className="msm-btn-secondary px-3 inline-flex items-center gap-2" onClick={onExport}>
+                    <Download className="h-4 w-4" />
+                    Export
+                  </button>
+                )}
               </div>
             </div>
-            <SchemaPanel tableInfo={tableInfo} />
+            <textarea
+              className="msm-input min-h-52 font-mono text-sm leading-relaxed"
+              value={sqlText}
+              onChange={(event) => onSqlTextChange(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                  event.preventDefault()
+                  onRunSql()
+                }
+              }}
+              spellCheck={false}
+            />
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2" onClick={onRunSql} disabled={!canAdmin || busy === 'sql'}>
+                <Play className="h-4 w-4" />
+                Ausführen
+              </button>
+              <button className="msm-btn-secondary px-3 py-2 inline-flex items-center gap-2" onClick={() => onSqlTextChange(formatSql(sqlText))}>
+                <Wand2 className="h-4 w-4" />
+                Formatieren
+              </button>
+              <span className="text-xs text-on-surface-variant">Ctrl+Enter · 500 Zeilen · lange Skripte erlaubt</span>
+            </div>
+            <SqlResult result={sqlResult} />
+          </section>
+        </main>
+
+        <aside className="msm-card p-4">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="rounded-lg border border-secondary/30 bg-secondary/10 p-2 text-secondary">
+              <Layers3 className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="font-headline text-lg font-semibold text-on-surface">{selectedTable?.name || 'Keine Tabelle'}</h3>
+              <p className="text-xs text-on-surface-variant">Schema</p>
+            </div>
+          </div>
+          <SchemaPanel tableInfo={tableInfo} />
+          {canManagePowerUser && (
             <div className="mt-5 border-t border-outline-variant pt-4">
               <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-on-surface">
                 <KeyRound className="h-4 w-4 text-status-warning" />
                 Superuser
               </h4>
-              {canManagePowerUser ? (
-                <div className="space-y-2">
-                  <p className="text-xs text-on-surface-variant">
-                    {powerUserActive ? 'Owner-Rolle hat aktuell SUPERUSER-Rechte.' : 'Superuser nur für bewusste Admin-Arbeiten aktivieren.'}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {powerUserActive ? (
-                      <>
-                        <button className="msm-btn-secondary px-3 py-2 text-xs" onClick={onRotatePowerUser}>Rotieren</button>
-                        <button className="msm-btn-destructive px-3 py-2 text-xs" onClick={onDemotePowerUser}>Entziehen</button>
-                      </>
-                    ) : (
-                      <button className="msm-btn-secondary px-3 py-2 text-xs inline-flex items-center gap-2" onClick={onEnablePowerUser}>
-                        <Shield className="h-3.5 w-3.5" />
-                        Aktivieren
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-xs text-on-surface-variant">Nicht für diese Datenbankoberfläche verfügbar.</p>
-              )}
-            </div>
-            <div className="mt-5 border-t border-outline-variant pt-4">
-              <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-on-surface">
-                <History className="h-4 w-4" />
-                Abfrage-Verlauf
-              </h4>
               <div className="space-y-2">
-                {history.slice(0, 5).map((entry, index) => (
-                  <button
-                    key={`${entry}-${index}`}
-                    className="w-full rounded-md border border-outline-variant bg-surface-container-high p-2 text-left font-mono text-xs text-on-surface-variant hover:text-on-surface"
-                    onClick={() => onSqlTextChange(entry)}
-                  >
-                    {entry.length > 90 ? `${entry.slice(0, 87)}...` : entry}
-                  </button>
-                ))}
-                {!history.length && <p className="text-xs text-on-surface-variant">Noch keine Abfragen.</p>}
+                <p className="text-xs text-on-surface-variant">
+                  {powerUserActive ? 'Owner-Rolle hat aktuell SUPERUSER-Rechte.' : 'Superuser nur für bewusste Admin-Arbeiten aktivieren.'}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {powerUserActive ? (
+                    <>
+                      <button className="msm-btn-secondary px-3 py-2 text-xs" onClick={onRotatePowerUser}>Rotieren</button>
+                      <button className="msm-btn-destructive px-3 py-2 text-xs" onClick={onDemotePowerUser}>Entziehen</button>
+                    </>
+                  ) : (
+                    <button className="msm-btn-secondary px-3 py-2 text-xs inline-flex items-center gap-2" onClick={onEnablePowerUser}>
+                      <Shield className="h-3.5 w-3.5" />
+                      Aktivieren
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          </aside>
-        </div>
-      )}
+          )}
+          <div className="mt-5 border-t border-outline-variant pt-4">
+            <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-on-surface">
+              <History className="h-4 w-4" />
+              Abfrage-Verlauf
+            </h4>
+            <div className="space-y-2">
+              {history.slice(0, 5).map((entry, index) => (
+                <button
+                  key={`${entry}-${index}`}
+                  className="w-full rounded-md border border-outline-variant bg-surface-container-high p-2 text-left font-mono text-xs text-on-surface-variant hover:text-on-surface"
+                  onClick={() => onSqlTextChange(entry)}
+                >
+                  {entry.length > 90 ? `${entry.slice(0, 87)}...` : entry}
+                </button>
+              ))}
+              {!history.length && <p className="text-xs text-on-surface-variant">Noch keine Abfragen.</p>}
+            </div>
+          </div>
+        </aside>
+      </div>
     </div>
   )
 }
@@ -445,7 +515,6 @@ function RowsGrid({ result }: { result: PostgresRowsResult | null }) {
       <table className="min-w-full text-sm">
         <thead className="sticky top-0 z-10 bg-surface-container-highest text-on-surface">
           <tr>
-            <th className="w-10 px-3 py-2 text-left"><input type="checkbox" /></th>
             {result.columns.map((column) => (
               <th key={column} className="px-3 py-2 text-left font-mono font-medium whitespace-nowrap">{column}</th>
             ))}
@@ -454,7 +523,6 @@ function RowsGrid({ result }: { result: PostgresRowsResult | null }) {
         <tbody className="divide-y divide-outline-variant">
           {result.rows.map((row, index) => (
             <tr key={index} className="bg-surface-container text-on-surface-variant hover:bg-surface-container-high">
-              <td className="px-3 py-2"><input type="checkbox" /></td>
               {result.columns.map((column) => (
                 <td key={column} className="max-w-[420px] px-3 py-2 align-top font-mono text-xs whitespace-pre-wrap break-words">
                   {formatValue(row[column])}
@@ -523,25 +591,176 @@ function SqlResult({ result }: { result: PostgresSqlResult | null }) {
   )
 }
 
-function FeaturePanel({ activeTab, canAdmin }: { activeTab: TabKey; canAdmin: boolean }) {
-  const copy = {
-    users: ['Benutzer und Grants', 'Datenbankrollen, Besitzer und Zugriff werden serverseitig verwaltet.'],
-    backups: ['Backups', 'Server-Backups enthalten Datenbank-Dumps. Import und Export liegen in der SQL-Konsole.'],
-    logs: ['Logs', 'SQL-Ergebnisse und Fehler werden bewusst nicht dauerhaft im Browser gespeichert.'],
-    monitoring: ['Monitoring', 'Live-Kennzahlen kommen aus PostgreSQL und werden beim Aktualisieren neu geladen.'],
-    settings: ['Einstellungen', canAdmin ? 'Admin-Aktionen bleiben durch Backend-Permissions und CSRF geschützt.' : 'Nur Ansicht: keine Admin-Berechtigung.'],
-  }[activeTab as Exclude<TabKey, 'tables' | 'sql'>] || ['Datenbank', 'Diese Ansicht ist in der Tabellen- und SQL-Konsole integriert.']
+function ToolbarToggleButton({ icon: Icon, label, active, hasState, disabled, onClick }: {
+  icon: typeof Filter
+  label: string
+  active: boolean
+  hasState: boolean
+  disabled?: boolean
+  onClick: () => void
+}) {
   return (
-    <div className="msm-card p-8">
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="mt-1 h-5 w-5 text-status-warning" />
-        <div>
-          <h3 className="font-headline text-lg font-semibold text-on-surface">{copy[0]}</h3>
-          <p className="mt-1 text-sm text-on-surface-variant">{copy[1]}</p>
-        </div>
-      </div>
-    </div>
+    <button
+      className={`msm-btn-secondary px-3 inline-flex items-center gap-2 ${active ? 'ring-1 ring-primary' : ''} ${hasState ? 'text-secondary' : ''}`}
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+    >
+      <Icon className="h-4 w-4" />
+      {label}
+    </button>
   )
+}
+
+function DropdownPanel({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border border-outline-variant bg-surface-container-highest p-3 shadow-lg">
+        {children}
+      </div>
+    </>
+  )
+}
+
+function FilterDropdown({ columns, filterColumn, filterValue, onFilterColumn, onFilterValue, onClose }: {
+  columns: string[]
+  filterColumn: string
+  filterValue: string
+  onFilterColumn: (value: string) => void
+  onFilterValue: (value: string) => void
+  onClose: () => void
+}) {
+  const active = Boolean(filterColumn && filterValue)
+  return (
+    <DropdownPanel onClose={onClose}>
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <label className="text-xs text-on-surface-variant">Spalte</label>
+          <select className="msm-input h-9 text-sm" value={filterColumn} onChange={(event) => onFilterColumn(event.target.value)}>
+            <option value="">-- Spalte wählen --</option>
+            {columns.map((column) => (
+              <option key={column} value={column}>{column}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-on-surface-variant">Wert enthält</label>
+          <input
+            className="msm-input h-9 text-sm"
+            value={filterValue}
+            placeholder="Text..."
+            onChange={(event) => onFilterValue(event.target.value)}
+          />
+        </div>
+        {active && (
+          <button
+            className="msm-btn-secondary w-full py-1.5 text-xs"
+            onClick={() => { onFilterColumn(''); onFilterValue('') }}
+          >
+            Zurücksetzen
+          </button>
+        )}
+      </div>
+    </DropdownPanel>
+  )
+}
+
+function SortDropdown({ columns, sortColumn, sortDirection, onSortColumn, onSortDirection, onClose }: {
+  columns: string[]
+  sortColumn: string
+  sortDirection: 'asc' | 'desc'
+  onSortColumn: (value: string) => void
+  onSortDirection: (value: 'asc' | 'desc') => void
+  onClose: () => void
+}) {
+  return (
+    <DropdownPanel onClose={onClose}>
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <label className="text-xs text-on-surface-variant">Spalte</label>
+          <select className="msm-input h-9 text-sm" value={sortColumn} onChange={(event) => onSortColumn(event.target.value)}>
+            <option value="">-- Spalte wählen --</option>
+            {columns.map((column) => (
+              <option key={column} value={column}>{column}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-on-surface-variant">Richtung</label>
+          <div className="flex gap-2">
+            <button
+              className={`msm-btn-secondary flex-1 py-1.5 text-xs ${sortDirection === 'asc' ? 'ring-1 ring-primary' : ''}`}
+              onClick={() => onSortDirection('asc')}
+            >
+              Aufsteigend
+            </button>
+            <button
+              className={`msm-btn-secondary flex-1 py-1.5 text-xs ${sortDirection === 'desc' ? 'ring-1 ring-primary' : ''}`}
+              onClick={() => onSortDirection('desc')}
+            >
+              Absteigend
+            </button>
+          </div>
+        </div>
+        {sortColumn && (
+          <button
+            className="msm-btn-secondary w-full py-1.5 text-xs"
+            onClick={() => { onSortColumn(''); onSortDirection('asc') }}
+          >
+            Zurücksetzen
+          </button>
+        )}
+      </div>
+    </DropdownPanel>
+  )
+}
+
+function ColumnsDropdown({ columns, hiddenColumns, onToggle, onReset, onClose }: {
+  columns: string[]
+  hiddenColumns: Set<string>
+  onToggle: (column: string) => void
+  onReset: () => void
+  onClose: () => void
+}) {
+  return (
+    <DropdownPanel onClose={onClose}>
+      <div className="space-y-2">
+        <div className="max-h-60 space-y-1 overflow-y-auto pr-1">
+          {columns.map((column) => (
+            <label key={column} className="flex items-center gap-2 text-sm text-on-surface">
+              <input
+                type="checkbox"
+                checked={!hiddenColumns.has(column)}
+                onChange={() => onToggle(column)}
+              />
+              <span className="truncate font-mono text-xs">{column}</span>
+            </label>
+          ))}
+        </div>
+        {hiddenColumns.size > 0 && (
+          <button className="msm-btn-secondary w-full py-1.5 text-xs" onClick={onReset}>
+            Zurücksetzen
+          </button>
+        )}
+      </div>
+    </DropdownPanel>
+  )
+}
+
+function compareValues(a: unknown, b: unknown, direction: 'asc' | 'desc'): number {
+  const aNull = a == null
+  const bNull = b == null
+  if (aNull && bNull) return 0
+  if (aNull) return 1
+  if (bNull) return -1
+  let cmp: number
+  if (typeof a === 'number' && typeof b === 'number') {
+    cmp = a - b
+  } else {
+    cmp = String(a).localeCompare(String(b))
+  }
+  return direction === 'asc' ? cmp : -cmp
 }
 
 function groupTables(tables: PostgresTable[]) {
