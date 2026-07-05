@@ -28,6 +28,7 @@ import { ModManager } from "./ModManager";
 import { Backups } from "./Backups";
 import { ServerConsolePanel } from "@/components/server/ServerConsolePanel";
 import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
+import { AuthSetupBanner } from "@/components/server/AuthSetupBanner";
 import { DatabaseManager } from "@/components/server/DatabaseManager";
 import { OutgoingWebhooksPanel } from "@/components/server/OutgoingWebhooksPanel";
 import type { GameInfo, Server } from "@/types";
@@ -507,6 +508,9 @@ export function ServerDetail() {
           })}
         </span>
       </div>
+
+      {/* Auth-Setup-Banner: sichtbar waehrend der Container auf interaktiven Auth-Flow wartet */}
+      {server.auth_required && <AuthSetupBanner serverId={server.id} />}
 
       {/* Warnung: keine Bind-IP */}
       {!server.public_bind_ip && effectiveStatus !== "running" && (

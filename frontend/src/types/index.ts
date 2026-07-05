@@ -19,6 +19,9 @@ export interface Server {
   // Keine Verwendung im FE-Code (nur hier); interne Pfade bleiben server-only in DB/audit/owner flows.
   status: string
   status_message: string | null
+  // True waehrend der Server-Container auf einen interaktiven Auth-Flow wartet
+  // (z.B. Hytale OAuth-Refresh expired). UI rendert dann einen Warn-Banner.
+  auth_required: boolean
   auto_restart: boolean
   restart_interval_hours: number | null
   restart_time_utc: string | null

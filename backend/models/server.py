@@ -26,9 +26,15 @@ class Server(Base):
 
     # Auto-Restart
     # WICHTIG: Nur EIN Modus aktiv (Intervall oder feste Zeiten).
-    # Die _normalize_server_restart_mode im Router stellt Exklusivität sicher.
+    # Die _normalize_server_restart_mode im Router stellt Exklusivitaet sicher.
     # Intervall hat Vorrang. Siehe sync_server_restart_schedule und AGENTS.md (KISS + Rootless).
     auto_restart: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Auth-Setup-Recovery: True waehrend der Container im TTY-Modus laeuft und
+    # auf User-Interaktion wartet (z.B. Hytale OAuth-Refresh). Wird vom
+    # Auth-Setup-Recovery-Thread gesetzt und vom Cancel-Endpoint zurueckgesetzt.
+    # UI rendert einen Warn-Banner solange True. Default False (kein laufender Auth-Flow).
+    auth_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     restart_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     restart_time_utc: Mapped[str | None] = mapped_column(String(8), nullable=True)  # HH:MM
     restart_times_utc: Mapped[str | None] = mapped_column(String(256), nullable=True)  # HH:MM,HH:MM

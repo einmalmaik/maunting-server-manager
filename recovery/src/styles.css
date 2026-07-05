@@ -1,0 +1,289 @@
+@import 'tailwindcss';
+
+/*
+ * MSM Backup Recovery - MauntingStudios Design-DNA stylesheet.
+ *
+ * Tailwind v4 `@theme` block maps the HSL design tokens from
+ * `maunting-design-dna/design-tokens.md` to Tailwind utility classes so the
+ * whole app uses semantic tokens (`bg-background`, `text-foreground`, …) with
+ * NO raw hex colors in component code.
+ *
+ * Token reference (HSL triples, dark theme):
+ *   background        206 31% 4%     foreground        188 29% 95%
+ *   card              204 25% 10%    card-foreground   188 29% 95%
+ *   primary           193 45% 86%    primary-foreground 195 43% 5%
+ *   secondary         198 30% 12%    muted             201 27% 13%
+ *   muted-foreground  196 19% 67%    accent            194 31% 65%
+ *   border / input    198 22% 26%    ring              194 44% 68%
+ *   success           158 64% 52%    warning           38 92% 50%
+ *   destructive       0 70% 55%
+ */
+
+@theme {
+  --color-background: hsl(206 31% 4%);
+  --color-foreground: hsl(188 29% 95%);
+  --color-card: hsl(204 25% 10%);
+  --color-card-foreground: hsl(188 29% 95%);
+  --color-primary: hsl(193 45% 86%);
+  --color-primary-foreground: hsl(195 43% 5%);
+  --color-secondary: hsl(198 30% 12%);
+  --color-muted: hsl(201 27% 13%);
+  --color-muted-foreground: hsl(196 19% 67%);
+  --color-accent: hsl(194 31% 65%);
+  --color-border: hsl(198 22% 26%);
+  --color-input: hsl(198 22% 26%);
+  --color-ring: hsl(194 44% 68%);
+  --color-success: hsl(158 64% 52%);
+  --color-warning: hsl(38 92% 50%);
+  --color-destructive: hsl(0 70% 55%);
+
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --radius-control: 0.65rem;
+  --radius-card: 0.9rem;
+
+  --shadow-panel: 0 20px 48px hsl(0 0% 0% / 0.38);
+  --shadow-accent-cta: 0 14px 30px hsl(194 44% 68% / 0.22);
+  --shadow-glow: 0 0 20px hsl(194 44% 68% / 0.18);
+}
+
+:root {
+  color-scheme: dark;
+  font-family: var(--font-sans);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: hsl(194 44% 68% / 0.28);
+  color: var(--color-foreground);
+}
+
+/* Design-DNA glow utility */
+.shadow-glow {
+  box-shadow: var(--shadow-glow);
+}
+
+@layer components {
+  /* Card / panel surface */
+  .msm-card {
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-panel);
+  }
+
+  /* Primary button: calm cyan with dark text and soft glow */
+  .msm-btn-primary {
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+    font-weight: 600;
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-accent-cta);
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.2s ease,
+      filter 0.2s ease;
+  }
+  .msm-btn-primary:hover:not(:disabled) {
+    filter: brightness(1.06);
+  }
+  .msm-btn-primary:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+  .msm-btn-primary:disabled {
+    pointer-events: none;
+    opacity: 0.6;
+  }
+
+  /* Secondary button: quiet glass with border */
+  .msm-btn-secondary {
+    background: var(--color-secondary);
+    border: 1px solid var(--color-border);
+    color: var(--color-foreground);
+    border-radius: var(--radius-control);
+    transition:
+      background 0.2s ease,
+      border-color 0.2s ease;
+  }
+  .msm-btn-secondary:hover:not(:disabled) {
+    background: var(--color-muted);
+    border-color: var(--color-ring);
+  }
+
+  /* Input field */
+  .msm-input {
+    width: 100%;
+    background: hsl(201 27% 13% / 0.6);
+    border: 1px solid var(--color-border);
+    color: var(--color-foreground);
+    border-radius: var(--radius-control);
+    padding: 0.625rem 0.875rem;
+    font-size: 0.875rem;
+    transition:
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  .msm-input::placeholder {
+    color: hsl(196 19% 67% / 0.5);
+  }
+  .msm-input:focus {
+    outline: none;
+    border-color: var(--color-ring);
+    box-shadow: 0 0 0 2px hsl(194 44% 68% / 0.25);
+  }
+  .msm-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* DIS badge link (follows Design-DNA DisBadge.tsx pattern) */
+  .msm-dis-badge-link {
+    text-decoration: none;
+  }
+  .msm-dis-badge-link:hover {
+    text-decoration: none;
+  }
+
+  /* Drag & drop zone */
+  .msm-dropzone {
+    transition:
+      border-color 0.2s ease,
+      background 0.2s ease;
+  }
+
+  /* Progress bar (indeterminate, animated) */
+  .msm-progress-track {
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: hsl(201 27% 13%);
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+  }
+  .msm-progress-fill {
+    height: 100%;
+    width: 40%;
+    border-radius: 9999px;
+    background: var(--color-ring);
+    animation: msm-progress-indeterminate 1.4s ease-in-out infinite;
+  }
+  @keyframes msm-progress-indeterminate {
+    0% {
+      transform: translateX(-100%);
+    }
+    50% {
+      transform: translateX(150%);
+    }
+    100% {
+      transform: translateX(350%);
+    }
+  }
+
+  /* Spinner (for preview loading) */
+  .msm-spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid hsl(201 27% 13%);
+    border-top-color: var(--color-ring);
+    border-radius: 9999px;
+    animation: msm-spin 0.7s linear infinite;
+  }
+  @keyframes msm-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* File tree */
+  .msm-tree-children {
+    animation: msm-fade-slide 0.15s ease-out;
+  }
+  @keyframes msm-fade-slide {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* manifest.json highlight (VAL-EXTRACT-005) */
+  .msm-manifest-row {
+    background: hsl(38 92% 50% / 0.06);
+    border-radius: 0.375rem;
+  }
+  .msm-manifest-row:hover {
+    background: hsl(38 92% 50% / 0.1);
+  }
+  .msm-manifest-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-warning);
+    background: hsl(38 92% 50% / 0.12);
+    border: 1px solid hsl(38 92% 50% / 0.2);
+    border-radius: 0.25rem;
+    padding: 0.0625rem 0.375rem;
+    margin-left: 0.375rem;
+  }
+
+  /* File preview */
+  .msm-preview-body {
+    max-height: 24rem;
+  }
+  .msm-code-block {
+    background: hsl(206 31% 4% / 0.6);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    padding: 0.875rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--color-foreground);
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+  }
+  .msm-code-block code {
+    font-family: inherit;
+  }
+
+  /* JSON syntax highlighting (Design-DNA token colors) */
+  .json-line {
+    min-height: 1.4em;
+  }
+  .json-key {
+    color: hsl(194 44% 68%);
+  }
+  .json-string {
+    color: hsl(158 64% 62%);
+  }
+  .json-number {
+    color: hsl(38 92% 56%);
+  }
+  .json-boolean {
+    color: hsl(280 50% 65%);
+  }
+  .json-null {
+    color: hsl(0 70% 60%);
+  }
+}

@@ -109,6 +109,13 @@ async def lifespan(app: FastAPI):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE webhook_subscriptions ADD COLUMN secret_encrypted VARCHAR(4096)"))
 
+    # Migration: servers.auth_required Spalte hinzufuegen (interaktive Auth-Recovery)
+    if 'servers' in inspector.get_table_names():
+        srv_cols = [c['name'] for c in inspector.get_columns('servers')]
+        if 'auth_required' not in srv_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE servers ADD COLUMN auth_required BOOLEAN NOT NULL DEFAULT false"))
+
     # Migration: email_verifications table cleanup for hashing
     if 'email_verifications' in inspector.get_table_names():
         ev_cols = [c['name'] for c in inspector.get_columns('email_verifications')]
@@ -243,6 +250,22 @@ async def lifespan(app: FastAPI):
         if 'name' not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backups ADD COLUMN name VARCHAR(256)"))
+        # S3-Cloud-Backup-Erweiterung (M1). Drei Spalten, alle nullable ausser
+        # ``encrypted`` (Default false). Bei Migration jeweils idempotent
+        # pruefen, bevor ALTER TABLE ausgefuehrt wird.
+        # Hintergrund: die S3-Features wurden im Code commited (Model +
+        # Orchestrator), aber die Schema-Migration fuer die bestehende
+        # DB wurde vergessen — jede Query auf den Backup-Endpoint schlug
+        # deshalb mit ``column backups.s3_key does not exist`` fehl.
+        if 's3_key' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backups ADD COLUMN s3_key VARCHAR(512)"))
+        if 's3_bucket' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backups ADD COLUMN s3_bucket VARCHAR(255)"))
+        if 'encrypted' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backups ADD COLUMN encrypted BOOLEAN NOT NULL DEFAULT false"))
 
     # Phase 3 — RBAC: users.role_id-Spalte (Tabellen `roles`/`role_permissions`/
     # `server_permissions` werden von `Base.metadata.create_all` angelegt) und

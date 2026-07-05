@@ -204,6 +204,40 @@ class TestRunContainer:
         client.api.pull.assert_not_called()
         client.containers.run.assert_called_once()
 
+    def test_run_container_default_no_tty(self):
+        """Default: kein TTY (verhindert Bruit-to-Game-Output-Corruption bei normalen Servern)."""
+        client = MagicMock()
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/natroutter/egg-hytale:latest",
+            )
+
+        kwargs = client.containers.run.call_args.kwargs
+        assert kwargs["tty"] is False
+
+    def test_run_container_tty_true_when_requested(self):
+        """Opt-in: tty=True wird durchgereicht fuer interaktive Auth-Recovery-Container."""
+        client = MagicMock()
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/natroutter/egg-hytale:latest",
+                tty=True,
+            )
+
+        kwargs = client.containers.run.call_args.kwargs
+        assert kwargs["tty"] is True
+        assert kwargs["stdin_open"] is True  # both are needed for interactive flow
+
     def test_run_container_sets_requested_primary_network(self):
         client = MagicMock()
         client.images.get.return_value = SimpleNamespace(id="local-image")

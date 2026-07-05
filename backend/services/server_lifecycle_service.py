@@ -512,6 +512,119 @@ def _run_server_file_update_if_needed(
     )
 
 
+def _try_start_auth_setup_recovery(
+    db: Session, server: Server, plugin, start_error: str
+) -> bool:
+    """Erkennt Auth-Pattern im Container-Start-Error und startet Recovery.
+
+    Returnt True wenn Recovery gestartet wurde (Caller muss dann KEIN HTTPException
+    mehr werfen). Returnt False wenn kein Auth-Pattern erkannt wurde und der
+    Caller normal weiter machen soll.
+
+    Generisch: nutzt nur die ``logs`` aus docker_service und Blueprint-Plugin-API.
+    """
+    from services.auth_setup_service import (
+        detect_auth_required,
+        run_auth_setup_recovery,
+    )
+
+    # Container-Logs holen (bis zu 4KB aus docker_service.run_container).
+    # Wir holen nochmal frisch vom Docker-Daemon, falls der Container
+    # zwischenzeitlich weg ist (entfernt beim startup_check).
+    container_name = container_name_for(server.id)
+    try:
+        raw_logs = docker_service.logs(container_name, lines=200)
+    except Exception:
+        raw_logs = start_error  # fallback: error-string selbst hat die URL
+
+    log_lines = raw_logs.splitlines()
+    if not detect_auth_required(log_lines):
+        return False
+
+    # Auth-Pattern erkannt. Server-Status auf "awaiting_auth" setzen
+    # und Recovery-Thread starten.
+    server.auth_required = True
+    server.status_message = "Auth-Setup erforderlich (siehe Konsole)"
+    db.commit()
+    _append_console_log(
+        server.id,
+        "[MSM] Auth-Setup erkannt. Credentials werden zurueckgesetzt, "
+        "Container startet im TTY-Modus...\n",
+    )
+
+    install_dir = server.install_dir
+    port_publishes = plugin.build_port_publishes(server)
+    volume_binds = plugin.build_volume_binds(server)
+    uid, gid = plugin.container_uid_gid(server)
+    container_user = f"{uid}:{gid}"
+
+    def on_log(text: str) -> None:
+        _append_console_log(server.id, text)
+
+    def on_status(auth_required: bool, status_message: str | None) -> None:
+        # Eigene DB-Session weil der Background-Thread lange laeuft.
+        with SessionLocal() as bg_db:
+            bg_server = bg_db.query(Server).filter(Server.id == server.id).first()
+            if bg_server:
+                bg_server.auth_required = auth_required
+                bg_server.status_message = status_message
+                bg_db.commit()
+
+    def restart_callback() -> None:
+        # Clean-Restart ueber queue_lifecycle_operation, damit die normalen
+        # Lifecycle-Hooks (Status-Updates, Notifications) durchlaufen.
+        from services.server_lifecycle_service import queue_lifecycle_operation
+        from services.server_lifecycle_service import LifecycleNotification
+        with SessionLocal() as bg_db:
+            bg_server = bg_db.query(Server).filter(Server.id == server.id).first()
+            if bg_server:
+                queue_lifecycle_operation(
+                    bg_db,
+                    bg_server,
+                    "restart",
+                    LifecycleNotification(None, "auth-setup-recovery", False),
+                )
+
+    def recovery_worker() -> None:
+        try:
+            run_auth_setup_recovery(
+                server_id=server.id,
+                install_dir=install_dir,
+                docker_image=plugin.docker_image,
+                container_command=plugin.build_container_command(server),
+                container_env=plugin.build_container_env(server),
+                port_publishes=port_publishes,
+                volume_binds=volume_binds,
+                cpu_limit_percent=server.cpu_limit_percent,
+                ram_limit_mb=server.ram_limit_mb,
+                container_user=container_user,
+                container_workdir=plugin.container_workdir(server),
+                container_read_only_rootfs=plugin.container_read_only_rootfs,
+                container_tmpfs_paths=plugin.container_tmpfs_paths(server),
+                container_extra_networks=plugin.container_extra_networks(server),
+                container_name=container_name,
+                on_log=on_log,
+                on_status=on_status,
+                restart_callback=restart_callback,
+            )
+        except Exception as exc:
+            logger.warning("Auth-Setup-Recovery fuer Server %s fehlgeschlagen: %s", server.id, exc)
+            with SessionLocal() as bg_db:
+                bg_server = bg_db.query(Server).filter(Server.id == server.id).first()
+                if bg_server:
+                    bg_server.auth_required = False
+                    bg_server.status_message = f"Auth-Setup Fehler: {exc}"
+                    bg_db.commit()
+            _append_console_log(server.id, f"[MSM] Auth-Setup-Recovery Fehler: {exc}\n")
+
+    threading.Thread(
+        target=recovery_worker,
+        daemon=True,
+        name=f"auth-setup-{server.id}",
+    ).start()
+    return True
+
+
 def _run_start(db: Session, server: Server, plugin) -> None:
     from blueprints.schema import BlueprintUpdateStrategy
 
@@ -585,6 +698,12 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     if "error" in result:
         close_ports(ports_list)
         iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        # Auth-Setup-Recovery: wenn der Container-Output auf einen interaktiven
+        # Auth-Flow hinweist (z.B. Hytale OAuth-Refresh expired), starten wir
+        # den Container im TTY-Modus neu und warten auf den User.
+        # Blueprint-agnostisch: Erkennung laeuft ueber Log-Pattern, nicht game_type.
+        if _try_start_auth_setup_recovery(db, server, plugin, result.get("error", "")):
+            return  # Recovery-Thread laeuft im Hintergrund
         raise HTTPException(status_code=500, detail=result["error"])
     server.status = "running"
     server.status_message = None

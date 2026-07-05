@@ -904,6 +904,12 @@ else
     fi
 fi
 
+# Redis-URL Fallback VOR dem Heredoc auswerten,
+# damit keine Bash-Control-Flow-Syntax in die .env geschrieben wird.
+if $INSTALL_REDIS && [[ -z "$MSM_REDIS_URL" ]]; then
+    MSM_REDIS_URL="redis://localhost:6379"
+fi
+
 cat > "$ENV_FILE" <<EOF
 # Automatisch generiert durch install.sh am $(date -Iseconds)
 # ÄNDERUNGEN NUR MIT VORSICHT
@@ -932,10 +938,6 @@ MSM_PANEL_URL="$PANEL_URL"
 MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
 MSM_DOCKER_HOST="$MSM_DOCKER_HOST"
 MSM_STEAMCMD_PATH="/usr/games/steamcmd"
-# Redis-URL Fallback (sicherstellen, dass sie nie leer ist wenn Redis aktiv sein soll)
-if $INSTALL_REDIS && [[ -z "$MSM_REDIS_URL" ]]; then
-    MSM_REDIS_URL="redis://localhost:6379"
-fi
 MSM_REDIS_URL="$MSM_REDIS_URL"
 
 # Auto-Update (GitHub Releases)
