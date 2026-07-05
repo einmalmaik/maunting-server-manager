@@ -1,9 +1,9 @@
 // MSM Backup Recovery - Tauri v2 backend entry point.
 //
-// The tar.gz extraction commands (`extract_tar_gz`, `save_extracted`,
-// `read_text_file`) are implemented in the `rust-extraction` feature (M2).
-// This shell boots the Tauri app with the frontend webview only, which is all
-// the M1 foundation milestone requires.
+// Registers the M2 `rust-extraction` commands (extract_tar_gz,
+// save_extracted, read_text_file) alongside the M1 frontend bootstrap.
+
+mod commands;
 
 use tauri::Manager;
 
@@ -12,6 +12,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::extract_tar_gz,
+            commands::save_extracted,
+            commands::read_text_file,
+        ])
         .setup(|app| {
             #[cfg(debug_assertions)]
             {
