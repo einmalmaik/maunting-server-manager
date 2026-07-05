@@ -110,12 +110,13 @@ def run_backup(
 
     # Tar ausfuehren (voller install_dir oder Blueprint backup.includePaths)
     plan = backup_plan_for_server(server)
-    # Postgres-Integration: wenn der Server postgres_enabled hat (oder
-    # PostgresDatabase-Records vorhanden sind), wird vor dem tar ein pg_dump
-    # erzeugt und als ``.msm/postgres.sql`` ins Archiv gepackt. Das ist
-    # Stand der v1.4.4 -- ohne Blueprints-Config ist jede Server-DB
-    # automatisch im Backup.
-    pg_dump_bytes: bytes = b""
+    # Postgres-Integration: wenn der Server PostgresDatabase-Records hat,
+    # wird vor dem tar ein pg_dump pro DB erzeugt und als
+    # ``.msm/postgres/<db_name>.sql`` ins Archiv gepackt.
+    # VAL-FIX-007: Bei pg_dump-Fehler fuer Server mit aktiven Postgres-DBs
+    # schlaegt das gesamte Backup fehl — ein Backup ohne DB-Dump ist
+    # unvollstaendig und wuerde dem User falsche Sicherheit geben.
+    pg_dump_dict: dict[str, bytes] = {}
     try:
         from models import PostgresDatabase as _PgDb
         has_pg = (
@@ -124,21 +125,19 @@ def run_backup(
     except Exception:
         has_pg = False
     if has_pg:
-        try:
-            pg_dump_bytes, _pg_sha, _pg_dbs = (
-                postgres_service.backup_pg_dump_for_archive(db, server_id)
-            )
-        except Exception as exc:
-            # Postgres-Fehler darf das ganze Backup NICHT blockieren -- der
-            # User hat dann immerhin sein install_dir-Snapshot. Wir loggen
-            # laut und fahren ohne pg_dump fort.
-            logger.warning(
-                "Postgres-Dump fuer Backup Server %s fehlgeschlagen: %s",
-                server_id, exc,
-            )
+        # Hartes Fehlschlagen bei pg_dump-Fehler (VAL-FIX-007) — kein
+        # continues-without-dump mehr. Der User bekommt einen klaren Fehler.
+        # pg_dump wird INNERHALB des try-Blocks ausgefuehrt, sodass der
+        # bestehende Fehler-Handler (Cleanup + RuntimeError) greift.
+        pass
 
     try:
         set_active_backup_status(server_id, "creating", est)
+        # pg_dump pro DB erzeugen (VAL-FIX-009: separate Dumps pro DB).
+        # Bei Fehlschlag wirft backup_pg_dump_for_archive — das try/except
+        # oben (VAL-FIX-007) wandelt es in "Backup fehlgeschlagen" um.
+        if has_pg:
+            pg_dump_dict = postgres_service.backup_pg_dump_for_archive(db, server_id)
         if plan.scope == "selective":
             # selective: nur Blueprint-Pfade -- nichts am Full-Tar-Aufruf
             # geaendert fuer v1.4.4; pg_dump fuer selective-Server waere
@@ -157,7 +156,7 @@ def run_backup(
             create_full_backup_tar(
                 tar_filepath,
                 server.install_dir,
-                pg_dump_bytes=pg_dump_bytes or None,
+                pg_dump_dict=pg_dump_dict or None,
                 server_id=server_id,
                 encrypted=encrypted,
                 encryption_algorithm=encryption_algorithm,

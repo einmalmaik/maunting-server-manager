@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import secrets
@@ -17,6 +18,8 @@ from services import docker_service
 from services.auth_service import AuthService
 from services.docker_service import PortPublish, VolumeBind
 from services.panel_settings_service import PanelSettingsService
+
+logger = logging.getLogger(__name__)
 
 ADMIN_USER = "msm_admin"
 CONTROL_DB = "msm_control"
@@ -1196,26 +1199,174 @@ def restore_sql_to_server_dbs(db: Session, server_id: int, sql_text: str) -> dic
     }
 
 
-def backup_pg_dump_for_archive(db: Session, server_id: int) -> tuple[bytes, str, list[str]]:
-    """Erzeugt einen kompakten pg_dump-Blob fuer die Backup-Integration.
+def backup_pg_dump_for_archive(db: Session, server_id: int) -> dict[str, bytes]:
+    """Erzeugt separate pg_dump-Blobs pro Server-DB fuer die Backup-Integration.
 
-    Liefert (sql_bytes, sha256_hex, db_names) -- der Caller packt das in das
-    Backup-tar als ``.msm/postgres.sql``. Bei Servern ohne DBs wird ``b""`` geliefert.
+    Liefert ``dict[db_name -> sql_bytes]`` — der Caller packt jeden Dump als
+    ``.msm/postgres/<db_name>.sql`` ins Backup-tar. Bei Servern ohne DBs wird
+    ein leeres dict geliefert.
+
+    VAL-FIX-009: Jede DB bekommt ihren eigenen Dump, sodass beim Restore jede
+    DB nur ihren eigenen Dump erhaelt (keine Cross-Kontamination).
     """
     db_names = _server_database_names(db, server_id)
     if not db_names:
-        return b"", "", []
-    sql_text, _names, _size, sha, _dur = _pg_dump_server_dbs(db, server_id)
-    return sql_text.encode("utf-8"), sha, db_names
+        return {}
+    return _pg_dump_server_dbs_per_db(db, server_id, db_names)
 
 
-def restore_pg_dump_from_archive(db: Session, server_id: int, sql_bytes: bytes) -> dict[str, Any]:
-    """Stellt ein in einem Backup-tar gefundenes ``.msm/postgres.sql`` wieder her."""
-    if not sql_bytes:
+def _pg_dump_server_dbs_per_db(
+    db: Session, server_id: int, db_names: list[str]
+) -> dict[str, bytes]:
+    """Erzeugt separate pg_dump-Ausgaben pro DB ueber docker_service.exec_in.
+
+    Liefert ``dict[db_name -> sql_bytes]``. Wirft bei pg_dump-Fehler ( Caller
+    muss entscheiden: hartes Backup-Fehlschlagen oder partial).
+    """
+    import hashlib
+    import shlex
+
+    admin_pw = _admin_password()
+    container = settings.managed_postgres_container_name
+    pw_quoted = admin_pw.replace("'", "'\\''")
+
+    result: dict[str, bytes] = {}
+    for db_name in db_names:
+        cmd_in_container = (
+            "pg_dump "
+            "--format=plain --no-owner --no-acl --clean --if-exists "
+            f"--dbname={shlex.quote(db_name)} "
+            f"--username={shlex.quote(ADMIN_USER)}"
+        )
+        full_cmd = ["sh", "-c", f"PGPASSWORD='{pw_quoted}' {cmd_in_container}"]
+
+        exec_result = docker_service.exec_in(container, full_cmd, timeout=180)
+        if not exec_result.get("ok"):
+            raise RuntimeError(
+                f"pg_dump fuer {db_name} fehlgeschlagen: "
+                f"{(exec_result.get('error') or exec_result.get('stderr') or '')[:400]}"
+            )
+        body = exec_result.get("stdout") or ""
+        if not body.strip():
+            # DB hatte keine schema-qualifizierten Objekte — leerer Dump.
+            result[db_name] = b""
+            continue
+        result[db_name] = body.encode("utf-8")
+
+    return result
+
+
+def restore_pg_dump_from_archive(
+    db: Session, server_id: int, dumps: dict[str, bytes]
+) -> dict[str, Any]:
+    """Stellt separate per-DB Dumps in die zugehoerigen Server-DBs wieder her.
+
+    VAL-FIX-009: Jeder Dump wird NUR in seine zugehoerige DB restored — keine
+    Cross-Kontamination (DB A's Dump wird nicht in DB B eingespielt).
+
+    Parameter:
+      dumps: ``dict[db_name -> sql_bytes]`` aus dem Backup-Archiv.
+
+    Verhalten:
+    - Leeres dict → skipped (kein Postgres-Dump im Backup).
+    - Dumps fuer DBs die nicht mehr existieren → uebersprungen (kein Fehler).
+    - Restore-Fehler → RuntimeError (Caller muss als harten Fehler behandeln).
+
+    Returns: ``{"ok": True, "databases": [names], "duration_ms": int}`` oder
+    ``{"ok": True, "skipped": True, "reason": "..."}`` bei leerem dict.
+    """
+    import time as _time
+
+    if not dumps:
         return {"ok": True, "skipped": True, "reason": "Backup enthaelt keinen Postgres-Dump"}
-    sql_text = sql_bytes.decode("utf-8", errors="replace")
-    result = restore_sql_to_server_dbs(db, server_id, sql_text)
-    return {"ok": True, "skipped": False, **result}
+
+    server_db_names = set(_server_database_names(db, server_id))
+    if not server_db_names:
+        raise ValueError("Server hat keine Postgres-Datenbanken.")
+
+    started = _time.monotonic()
+    host = settings.managed_postgres_host or "127.0.0.1"
+    port = settings.managed_postgres_port
+    admin_pw = _admin_password()
+
+    restored: list[str] = []
+    failed: list[dict[str, str]] = []
+
+    for db_name, sql_bytes in dumps.items():
+        # _legacy-Schluessel: kombiniert alter Dump ohne Sektions-Marker.
+        # Wird in alle Server-DBs eingespielt (altes Verhalten, Backward-Compat).
+        if db_name == "_legacy":
+            for target_name in server_db_names:
+                _restore_sql_to_single_db(
+                    host, port, target_name, admin_pw,
+                    sql_bytes.decode("utf-8", errors="replace"),
+                    failed,
+                )
+                restored.append(target_name)
+            continue
+
+        # Dump fuer eine DB die nicht mehr existiert → ueberspringen.
+        if db_name not in server_db_names:
+            logger.warning(
+                "Restore: Dump fuer DB '%s' existiert nicht mehr im Server %s — uebersprungen",
+                db_name, server_id,
+            )
+            continue
+
+        if not sql_bytes.strip():
+            # Leerer Dump (DB hatte keine Objekte) — nichts zu tun.
+            restored.append(db_name)
+            continue
+
+        sql_text = sql_bytes.decode("utf-8", errors="replace")
+        _restore_sql_to_single_db(host, port, db_name, admin_pw, sql_text, failed)
+        restored.append(db_name)
+
+    duration_ms = int((_time.monotonic() - started) * 1000)
+    if failed:
+        raise RuntimeError(
+            "Restore teilweise fehlgeschlagen: "
+            + "; ".join(f"{f['database']}: {f['error'][:120]}" for f in failed)
+        )
+    return {
+        "ok": True,
+        "databases": restored,
+        "duration_ms": duration_ms,
+    }
+
+
+def _restore_sql_to_single_db(
+    host: str,
+    port: int,
+    db_name: str,
+    admin_pw: str,
+    sql_text: str,
+    failed: list[dict[str, str]],
+) -> None:
+    """Stellt ein SQL-Dump in eine einzelne DB wieder her.
+
+    Fehler werden in ``failed`` gesammelt (Caller entscheidet ueber Behandlung).
+    """
+    try:
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            dbname=db_name,
+            user=ADMIN_USER,
+            password=admin_pw,
+            connect_timeout=5,
+        )
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql_text)
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    except Exception as exc:
+        failed.append({"database": db_name, "error": str(exc)})
 
 
 def _clean_pg_dump_for_restore(sql_text: str) -> str:

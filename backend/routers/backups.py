@@ -336,36 +336,48 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
         finally:
             clear_active_backup_status(server_id)
 
-        # Postgres-Restore (v1.4.4): wenn das Backup ein ``.msm/postgres.sql``
-        # enthaelt, wird das hier in ALLE Server-DBs eingespielt.
-        # Container wurde oben bereits gestoppt -- die Verbindung zum
-        # Postgres ist via localhost:15432 erreichbar (Admin-Passwort vorher gesetzt).
+        # Postgres-Restore (v1.4.4 / M5-Fix): wenn das Backup Postgres-Dumps
+        # enthaelt (.msm/postgres/<db_name>.sql pro DB oder Legacy .msm/postgres.sql),
+        # wird jeder Dump in seine zugehoerige DB eingespielt.
+        # VAL-FIX-008: DB-Restore-Fehler werden an die API gemeldet (nicht nur
+        # geloggt) — der Server wird NICHT als erfolgreich restored markiert.
+        # VAL-FIX-009: Jeder Dump wird nur in seine zugehoerige DB restored.
         try:
-            from services.backup_paths import read_pg_dump_bytes_from_archive
+            from services.backup_paths import read_pg_dump_from_archive
 
-            pg_bytes = read_pg_dump_bytes_from_archive(tar_path)
-            if pg_bytes:
+            pg_dumps = read_pg_dump_from_archive(tar_path)
+            if pg_dumps:
                 from services import postgres_service as _pg
 
-                result = _pg.restore_pg_dump_from_archive(db, server.id, pg_bytes)
-                if result.get("ok"):
+                result = _pg.restore_pg_dump_from_archive(db, server.id, pg_dumps)
+                if result.get("ok") and not result.get("skipped"):
                     logger.info(
                         "Postgres-Restore fuer Server %s: %s DBs in %sms",
                         server.id,
                         len(result.get("databases", [])),
                         result.get("duration_ms"),
                     )
-                else:
-                    # Skip-kein-Postgres ist still; alles andere wird geloggt.
-                    msg = result.get("reason") or "unbekannt"
-                    logger.debug("Postgres-Restore skipped: %s", msg)
+                elif result.get("skipped"):
+                    logger.debug(
+                        "Postgres-Restore skipped: %s",
+                        result.get("reason", "unbekannt"),
+                    )
         except Exception as exc:
-            # Postgres-Restore-Fehler blockiert den Filesystem-Restore NICHT
-            # -- der User hat dann seinen install_dir-Snapshot wieder und wir
-            # loggen das Problem laut.
+            # VAL-FIX-008: DB-Restore-Fehler blockiert den erfolgreichen
+            # Restore-Status. Der Server wird als error markiert, und der
+            # API-Fehler wird an den User gemeldet (kein stillschweigendes
+            # "stopped" mehr).
             logger.warning(
                 "Postgres-Restore fuer Server %s fehlgeschlagen: %s",
                 server.id, exc,
+            )
+            server.status = "error"
+            server.status_message = "Datenbank-Wiederherstellung fehlgeschlagen"
+            db.commit()
+            clear_active_backup_status(server_id)
+            raise HTTPException(
+                status_code=500,
+                detail="Wiederherstellung fehlgeschlagen: Datenbank-Restore fehlerhaft",
             )
 
         # Status zuruecksetzen -- Server ist jetzt installiert/stopped, nicht running

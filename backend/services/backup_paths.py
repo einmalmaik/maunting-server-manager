@@ -168,8 +168,16 @@ def create_selective_backup_tar(
                 continue
             tar.add(str(full), arcname=rel, recursive=True)
 
-# Backup-Integration fuer Postgres-Dumps (v1.4.4)
+# Backup-Integration fuer Postgres-Dumps (v1.4.4 / M5-Fix: per-DB Dumps)
+# Legacy-Format (v1.4.4): einzelne .msm/postgres.sql mit kombiniertem Dump
+#   aller Server-DBs (Sektions-Markierungen "-- ===== Database: <name> =====").
+# Neues Format (M5-Fix VAL-FIX-009): .msm/postgres/<db_name>.sql pro DB,
+#   sodass jede DB beim Restore nur ihren eigenen Dump erhaelt (keine
+#   Cross-Kontamination).
 BACKUP_POSTGRES_ARCNAME = ".msm/postgres.sql"
+BACKUP_POSTGRES_DIR = ".msm/postgres"
+# Sektions-Marker im Legacy-Format (siehe _pg_dump_server_dbs).
+_PG_SECTION_PREFIX = "-- ===== Database: "
 
 
 def create_full_backup_tar(
@@ -177,6 +185,7 @@ def create_full_backup_tar(
     install_dir: str,
     *,
     pg_dump_bytes: bytes | None = None,
+    pg_dump_dict: dict[str, bytes] | None = None,
     server_id: int | None = None,
     encrypted: bool = False,
     encryption_algorithm: str | None = None,
@@ -186,7 +195,11 @@ def create_full_backup_tar(
     Schreibt:
     - alle Dateien aus ``install_dir`` als relative Pfade
     - ``.msm/backup-manifest.json`` (``scope=full``)
-    - ``.msm/postgres.sql`` (nur wenn ``pg_dump_bytes`` nicht leer)
+    - Postgres-Dumps:
+      * ``pg_dump_dict`` (neues Format, VAL-FIX-009): ``.msm/postgres/<db_name>.sql``
+        pro Server-DB — jede Datei enthaelt nur den Dump der zugehoerigen DB.
+      * ``pg_dump_bytes`` (Legacy-Format, v1.4.4): einzelne ``.msm/postgres.sql``
+        mit kombiniertem Dump. Wird nur fuer Backward-Compat verwendet.
 
     KISS-Notiz: das ist eine 1:1-Umsetzung des vorhandenen ``subprocess tar``-
     Aufrufs in ``run_backup``, plus Postgres-Behaelter. Wir machen das als Python
@@ -219,8 +232,17 @@ def create_full_backup_tar(
         info.size = len(manifest_bytes)
         tar.addfile(info, io.BytesIO(manifest_bytes))
 
-        # Postgres-Dump, sofern mitgegeben (Server mit postgres_enabled).
-        if pg_dump_bytes:
+        # Postgres-Dumps pro DB (neues Format, VAL-FIX-009).
+        if pg_dump_dict:
+            for db_name, sql_bytes in pg_dump_dict.items():
+                if not sql_bytes:
+                    continue
+                arcname = f"{BACKUP_POSTGRES_DIR}/{db_name}.sql"
+                pg_info = tarfile.TarInfo(name=arcname)
+                pg_info.size = len(sql_bytes)
+                tar.addfile(pg_info, io.BytesIO(sql_bytes))
+        elif pg_dump_bytes:
+            # Legacy: einzelne kombinierte .msm/postgres.sql (Backward-Compat).
             pg_info = tarfile.TarInfo(name=BACKUP_POSTGRES_ARCNAME)
             pg_info.size = len(pg_dump_bytes)
             tar.addfile(pg_info, io.BytesIO(pg_dump_bytes))
@@ -243,7 +265,11 @@ def create_full_backup_tar(
 
 
 def read_pg_dump_bytes_from_archive(archive_path: str) -> bytes | None:
-    """Holt ``.msm/postgres.sql`` aus einem Backup-tar. Liefert ``None`` wenn nicht vorhanden."""
+    """Holt ``.msm/postgres.sql`` aus einem Backup-tar (Legacy-Format).
+
+    Liefert ``None`` wenn nicht vorhanden. Verwendet fuer Backward-Compat mit
+    alten Archiven. Neuer Code sollte ``read_pg_dump_from_archive`` verwenden.
+    """
     import tarfile
 
     try:
@@ -258,3 +284,93 @@ def read_pg_dump_bytes_from_archive(archive_path: str) -> bytes | None:
             return extracted.read()
     except (tarfile.TarError, OSError):
         return None
+
+
+def _split_legacy_combined_dump(combined: bytes) -> dict[str, bytes]:
+    """Splittet einen Legacy-kombinierten Dump (``.msm/postgres.sql``) anhand
+    der Sektions-Marker ``-- ===== Database: <name> =====`` in ein
+    ``dict[db_name -> bytes]``.
+
+    Wenn keine Sektions-Marker gefunden werden, wird der gesamte Dump unter
+    dem Schluessel ``_legacy`` zurueckgegeben (Caller muss entscheiden, wie
+    damit umgegangen wird).
+    """
+    text = combined.decode("utf-8", errors="replace")
+    result: dict[str, bytes] = {}
+    current_name: str | None = None
+    current_lines: list[str] = []
+
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith(_PG_SECTION_PREFIX) and stripped.endswith(" ====="):
+            # Neuer Abschnitt -- vorherigen flushen
+            if current_name is not None:
+                result[current_name] = "\n".join(current_lines).encode("utf-8")
+            name_part = stripped[len(_PG_SECTION_PREFIX):-len(" =====")].strip()
+            current_name = name_part
+            current_lines = []
+        else:
+            if current_name is not None:
+                current_lines.append(line)
+
+    # Letzten Abschnitt flushen
+    if current_name is not None:
+        result[current_name] = "\n".join(current_lines).encode("utf-8")
+
+    if not result:
+        # Keine Sektions-Marker → gesamter Dump als _legacy
+        result["_legacy"] = combined
+
+    return result
+
+
+def read_pg_dump_from_archive(archive_path: str) -> dict[str, bytes]:
+    """Liest Postgres-Dumps aus einem Backup-tar als ``dict[db_name -> bytes]``.
+
+    Unterstuetzt zwei Formate:
+    - Neues Format (M5-Fix): ``.msm/postgres/<db_name>.sql`` pro DB.
+    - Legacy-Format (v1.4.4): ``.msm/postgres.sql`` kombiniert — wird anhand
+      der Sektions-Marker in ein dict gesplittet.
+
+    Liefert ein leeres dict wenn das Archiv keine Postgres-Dumps enthaelt.
+    """
+    import tarfile
+
+    try:
+        with tarfile.open(archive_path, "r:gz") as tar:
+            members = tar.getnames()
+
+            # Neues Format: .msm/postgres/<name>.sql
+            per_db: dict[str, bytes] = {}
+            prefix = BACKUP_POSTGRES_DIR + "/"
+            for member_name in members:
+                if member_name.startswith(prefix) and member_name.endswith(".sql"):
+                    db_name = member_name[len(prefix):-len(".sql")]
+                    if not db_name:
+                        continue
+                    try:
+                        member = tar.getmember(member_name)
+                    except KeyError:
+                        continue
+                    extracted = tar.extractfile(member)
+                    if extracted is not None:
+                        per_db[db_name] = extracted.read()
+
+            if per_db:
+                return per_db
+
+            # Legacy-Format: .msm/postgres.sql (kombiniert)
+            if BACKUP_POSTGRES_ARCNAME in members:
+                try:
+                    member = tar.getmember(BACKUP_POSTGRES_ARCNAME)
+                except KeyError:
+                    return {}
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    return {}
+                combined = extracted.read()
+                return _split_legacy_combined_dump(combined)
+
+            return {}
+    except (tarfile.TarError, OSError):
+        return {}
