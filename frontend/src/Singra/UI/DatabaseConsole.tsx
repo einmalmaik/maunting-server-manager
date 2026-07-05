@@ -202,7 +202,7 @@ export function DatabaseConsole({
       {activeTab !== 'tables' && activeTab !== 'sql' ? (
         <FeaturePanel activeTab={activeTab} canAdmin={canAdmin} />
       ) : (
-        <div className="grid gap-4 2xl:grid-cols-[360px_minmax(0,1fr)_360px]">
+        <div className="msm-database-console-grid">
           <aside className="msm-card p-4">
             <div className="flex items-center justify-between gap-2">
               <div className="relative flex-1">
@@ -361,7 +361,7 @@ export function DatabaseConsole({
               {canManagePowerUser ? (
                 <div className="space-y-2">
                   <p className="text-xs text-on-surface-variant">
-                    {powerUserActive ? 'Owner-Rolle hat aktuell SUPERUSER-Rechte.' : 'Superuser nur fuer bewusste Admin-Arbeiten aktivieren.'}
+                    {powerUserActive ? 'Owner-Rolle hat aktuell SUPERUSER-Rechte.' : 'Superuser nur für bewusste Admin-Arbeiten aktivieren.'}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {powerUserActive ? (
@@ -378,7 +378,7 @@ export function DatabaseConsole({
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-on-surface-variant">Nicht fuer diese Datenbankoberflaeche verfuegbar.</p>
+                <p className="text-xs text-on-surface-variant">Nicht für diese Datenbankoberfläche verfügbar.</p>
               )}
             </div>
             <div className="mt-5 border-t border-outline-variant pt-4">

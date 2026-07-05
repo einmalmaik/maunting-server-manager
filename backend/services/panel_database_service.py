@@ -17,7 +17,7 @@ STATEMENT_TIMEOUT_MS = 5000
 def _ensure_postgresql() -> None:
     backend = make_url(settings.database_url).get_backend_name()
     if not backend.startswith("postgresql"):
-        raise ValueError("Panel-Datenbankverwaltung ist nur fuer PostgreSQL-Konfigurationen verfuegbar.")
+        raise ValueError("Panel-Datenbankverwaltung ist nur für PostgreSQL-Konfigurationen verfügbar.")
 
 
 def _connect():
