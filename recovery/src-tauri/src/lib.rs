@@ -17,6 +17,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::extract_tar_gz,
             commands::save_extracted,
+            commands::save_as_zip,
             commands::read_text_file,
             commands::create_temp_dir,
             commands::write_temp_file,

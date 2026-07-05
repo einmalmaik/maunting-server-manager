@@ -180,6 +180,26 @@ export function DatabaseManager({ serverId }: Props) {
       await fetchDatabaseData(selectedDbId)
     })
 
+  const deleteDatabase = () =>
+    run('delete-db', async () => {
+      if (!selectedDbId || !selectedDatabase) return
+      const ok = await confirm({
+        title: 'Datenbank löschen',
+        message: `Datenbank "${selectedDatabase.name}" wirklich löschen? Alle Daten gehen unwiderruflich verloren.`,
+        confirmText: t('common.delete'),
+        danger: true,
+      })
+      if (!ok) return
+      const typed = window.prompt(`Zum Bestätigen "${selectedDatabase.name}" eingeben`) || ''
+      if (typed !== selectedDatabase.name) return
+      await api(`/servers/${serverId}/databases/${selectedDbId}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ confirm_name: typed }),
+      })
+      await fetchResources()
+      toast.success('Datenbank gelöscht')
+    })
+
   const runSql = () =>
     run('sql', async () => {
       if (!selectedDbId) return
@@ -246,6 +266,58 @@ export function DatabaseManager({ serverId }: Props) {
       await fetchResources()
     })
 
+  const createUser = () =>
+    run('create-user', async () => {
+      if (!selectedDbId) return
+      const username = window.prompt('Benutzername für den neuen Datenbank-User')?.trim()
+      if (!username) return
+      const result = await api<{ credential: PostgresCredential }>(`/servers/${serverId}/databases/users`, {
+        method: 'POST',
+        body: JSON.stringify({ database_id: selectedDbId, username }),
+      })
+      setCredentials((prev) => [...prev, result.credential])
+      await fetchResources()
+      toast.success('Datenbank-User erstellt')
+    })
+
+  const rotateUser = (userId: number) =>
+    run(`rotate-user-${userId}`, async () => {
+      const result = await api<{ username: string; password: string; host: string; port: number }>(
+        `/servers/${serverId}/databases/users/${userId}/rotate`,
+        { method: 'POST' },
+      )
+      setCredentials((prev) => [...prev, {
+        database_name: selectedDatabase?.name || '',
+        username: result.username,
+        password: result.password,
+        host: result.host,
+        port: result.port,
+      }])
+      await fetchResources()
+      toast.success('Passwort rotiert')
+    })
+
+  const deleteUser = (userId: number) =>
+    run(`delete-user-${userId}`, async () => {
+      const user = resources.users.find((u) => u.id === userId)
+      if (!user) return
+      const ok = await confirm({
+        title: 'Datenbank-User löschen',
+        message: `User "${user.username}" wirklich löschen?`,
+        confirmText: t('common.delete'),
+        danger: true,
+      })
+      if (!ok) return
+      const typed = window.prompt(`Zum Bestätigen "${user.username}" eingeben`) || ''
+      if (typed !== user.username) return
+      await api(`/servers/${serverId}/databases/users/${userId}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ confirm_name: typed }),
+      })
+      await fetchResources()
+      toast.success('Datenbank-User gelöscht')
+    })
+
   if (resources.databases.length === 0) {
     return (
       <div className="msm-card p-8 text-center">
@@ -289,6 +361,7 @@ export function DatabaseManager({ serverId }: Props) {
         onSqlTextChange={setSqlText}
         onRunSql={runSql}
         onCreateDatabase={canAdmin ? bootstrap : undefined}
+        onDeleteDatabase={canAdmin ? deleteDatabase : undefined}
         onCreateTable={canWrite ? createTable : undefined}
         onDropTable={canWrite ? dropTable : undefined}
         onImport={canAdmin ? importSql : undefined}
@@ -297,6 +370,10 @@ export function DatabaseManager({ serverId }: Props) {
         onRotatePowerUser={canAdmin ? () => powerAction('rotate') : undefined}
         onDemotePowerUser={canAdmin ? () => powerAction('demote') : undefined}
         onRefresh={() => selectedDbId && void run('refresh', () => fetchDatabaseData(selectedDbId))}
+        dbUsers={resources.users}
+        onCreateUser={canAdmin ? createUser : undefined}
+        onRotateUser={canAdmin ? rotateUser : undefined}
+        onDeleteUser={canAdmin ? deleteUser : undefined}
       />
       <PostgresCredentialsDialog credentials={credentials} onClose={() => setCredentials([])} />
       <PowerUserDialog state={powerDialog} onClose={() => setPowerDialog(null)} />

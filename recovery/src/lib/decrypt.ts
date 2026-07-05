@@ -84,6 +84,7 @@ export async function deriveKey(
 export async function* decryptFrames(
   data: Uint8Array,
   key: CryptoKey,
+  onProgress?: (progress: number) => void,
 ): AsyncGenerator<Uint8Array> {
   let offset = 0;
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -111,6 +112,8 @@ export async function* decryptFrames(
     }
 
     yield await aesGcmDecrypt(key, nonce, ciphertext);
+
+    onProgress?.(offset / data.length);
   }
 }
 
@@ -123,6 +126,13 @@ export class DecryptError extends Error {
 }
 
 /**
+ * Progress update emitted by {@link decryptBackup}.
+ * - `stage: 'deriving'`  – Argon2id key derivation (0 → 1)
+ * - `stage: 'decrypting' – frame-by-frame AES-GCM decryption (0 → 1)
+ */
+export type DecryptProgress = { stage: 'deriving' | 'decrypting'; progress: number };
+
+/**
  * Decrypts a complete MSM backup `.enc` file to the original tar.gz bytes.
  *
  * @param encryptedFile  raw bytes of the `.enc` file
@@ -130,6 +140,8 @@ export class DecryptError extends Error {
  * @param saltBase64     base64-encoded salt (stored in the MSM database
  *                       panel_settings table under key `backup.salt`;
  *                       the salt itself is not sensitive)
+ * @param onProgress     optional callback receiving {@link DecryptProgress}
+ *                       updates so the UI can show a determinate bar.
  * @returns              the decrypted tar.gz bytes
  *
  * @throws {@link DecryptError} for empty/structurally invalid input.
@@ -139,17 +151,22 @@ export async function decryptBackup(
   encryptedFile: Uint8Array,
   password: string,
   saltBase64: string,
+  onProgress?: (update: DecryptProgress) => void,
 ): Promise<Uint8Array> {
   if (encryptedFile.length === 0) {
     throw new DecryptError('Die Datei ist leer oder ungültig.');
   }
 
+  onProgress?.({ stage: 'deriving', progress: 0 });
   const salt = base64ToBytes(saltBase64);
   const key = await deriveKey(password, salt);
+  onProgress?.({ stage: 'deriving', progress: 1 });
 
   const chunks: Uint8Array[] = [];
   let totalLength = 0;
-  for await (const chunk of decryptFrames(encryptedFile, key)) {
+  for await (const chunk of decryptFrames(encryptedFile, key, (p) => {
+    onProgress?.({ stage: 'decrypting', progress: p });
+  })) {
     chunks.push(chunk);
     totalLength += chunk.length;
   }

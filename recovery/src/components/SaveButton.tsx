@@ -1,29 +1,34 @@
 /**
- * SaveButton – saves extracted files to a user-chosen directory.
+ * SaveButton – saves extracted files as a ZIP archive.
  *
- * Opens a Tauri directory picker dialog, then calls the Rust `save_extracted`
- * command to copy all files from the temp extraction directory to the chosen
- * target. Shows loading, success, and error states with German i18n text.
+ * Opens a Tauri file-save dialog, then calls the Rust `save_as_zip` command
+ * to write all files from the temp extraction directory into a single ZIP
+ * archive at the user-chosen path. Shows loading, success, and error states
+ * with German i18n text.
  *
- * VAL-EXTRACT-006: Save button saves extracted files to chosen directory
+ * VAL-EXTRACT-006: Save button saves extracted files as ZIP archive
  */
 
 import { useState } from 'react';
-import { open as defaultOpen } from '@tauri-apps/plugin-dialog';
-import { saveExtracted } from '@/lib/tauri-commands';
+import { save as defaultSave } from '@tauri-apps/plugin-dialog';
+import { saveAsZip } from '@/lib/tauri-commands';
 import { useLanguage } from '@/lib/useLanguage';
 
-/** Minimal dialog open signature (swapped for tests). */
-export type DialogOpenDir = () => Promise<string | null>;
-/** Minimal save_extracted signature (swapped for tests). */
-export type SaveFn = (sourceDir: string, targetDir: string) => Promise<void>;
+/** Minimal save-dialog signature (swapped for tests). */
+export type DialogSave = (options?: {
+  title?: string;
+  defaultPath?: string;
+  filters?: { name: string; extensions: string[] }[];
+}) => Promise<string | null>;
+/** Minimal save_as_zip signature (swapped for tests). */
+export type SaveFn = (sourceDir: string, zipPath: string) => Promise<void>;
 
 export interface SaveButtonProps {
-  /** Path to the temp extraction directory (source for the copy). */
+  /** Path to the temp extraction directory (source for the ZIP). */
   sourceDir: string;
-  /** Override the Tauri directory dialog (tests). */
-  tauriDialog?: DialogOpenDir;
-  /** Override the save_extracted call (tests). */
+  /** Override the Tauri save dialog (tests). */
+  tauriDialog?: DialogSave;
+  /** Override the save_as_zip call (tests). */
   saveFn?: SaveFn;
   /** Disable the button (e.g. during other operations). */
   disabled?: boolean;
@@ -43,23 +48,23 @@ export function SaveButton({
     setStatus('saving');
     setErrorMsg(null);
 
-    const openFn = tauriDialog ?? defaultOpen;
-    const doSave = saveFn ?? saveExtracted;
+    const saveDialog = tauriDialog ?? defaultSave;
+    const doSave = saveFn ?? saveAsZip;
 
     try {
-      const targetDir = await openFn({
+      const zipPath = await saveDialog({
         title: t('save.dialog.title'),
-        directory: true,
-        multiple: false,
+        defaultPath: 'msm-backup.zip',
+        filters: [{ name: 'ZIP', extensions: ['zip'] }],
       });
 
-      if (!targetDir) {
+      if (!zipPath) {
         // User cancelled – return to idle without error
         setStatus('idle');
         return;
       }
 
-      await doSave(sourceDir, targetDir);
+      await doSave(sourceDir, zipPath);
       setStatus('saved');
     } catch (err) {
       setErrorMsg(typeof err === 'string' ? err : t('save.error'));

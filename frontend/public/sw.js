@@ -7,7 +7,7 @@
 // Konsole weil das alte Bundle z. B. noch /console/stream (SSE) statt
 // /console/ws (WS) aufruft.
 // Bei Breaking-Endpoint-Aenderungen immer bumpten.
-const CACHE_NAME = 'msm-v3';
+const CACHE_NAME = 'msm-v4';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',

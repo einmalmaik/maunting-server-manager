@@ -14,9 +14,22 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
+// Mock @tauri-apps/api/path join (used by writeTempFile)
+const mockJoin = vi.fn();
+vi.mock('@tauri-apps/api/path', () => ({
+  join: (...args: unknown[]) => mockJoin(...args),
+}));
+
+// Mock @tauri-apps/plugin-fs writeFile (used by writeTempFile)
+const mockWriteFile = vi.fn();
+vi.mock('@tauri-apps/plugin-fs', () => ({
+  writeFile: (...args: unknown[]) => mockWriteFile(...args),
+}));
+
 import {
   extractTarGz,
   saveExtracted,
+  saveAsZip,
   readTextFile,
   createTempDir,
   writeTempFile,
@@ -26,6 +39,8 @@ import {
 
 beforeEach(() => {
   mockInvoke.mockReset();
+  mockJoin.mockReset();
+  mockWriteFile.mockReset();
 });
 
 describe('extractTarGz', () => {
@@ -65,6 +80,17 @@ describe('saveExtracted', () => {
   });
 });
 
+describe('saveAsZip', () => {
+  it('calls invoke with save_as_zip command and args', async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    await saveAsZip('/tmp/src', '/tmp/output.zip');
+    expect(mockInvoke).toHaveBeenCalledWith('save_as_zip', {
+      sourceDir: '/tmp/src',
+      zipPath: '/tmp/output.zip',
+    });
+  });
+});
+
 describe('readTextFile', () => {
   it('calls invoke with read_text_file command and path', async () => {
     mockInvoke.mockResolvedValue('file content');
@@ -84,16 +110,31 @@ describe('createTempDir', () => {
 });
 
 describe('writeTempFile', () => {
-  it('calls invoke with write_temp_file command and args', async () => {
-    mockInvoke.mockResolvedValue('/tmp/msm-recovery-abc/backup.tar.gz');
+  it('joins the path and writes the bytes via plugin-fs writeFile', async () => {
+    mockJoin.mockResolvedValue('/tmp/dir/backup.tar.gz');
+    mockWriteFile.mockResolvedValue(undefined);
     const data = new Uint8Array([1, 2, 3]);
     const result = await writeTempFile('/tmp/dir', 'backup.tar.gz', data);
-    expect(mockInvoke).toHaveBeenCalledWith('write_temp_file', {
-      dirPath: '/tmp/dir',
-      filename: 'backup.tar.gz',
-      data: [1, 2, 3],
-    });
-    expect(result).toBe('/tmp/msm-recovery-abc/backup.tar.gz');
+    expect(mockJoin).toHaveBeenCalledWith('/tmp/dir', 'backup.tar.gz');
+    expect(mockWriteFile).toHaveBeenCalledWith('/tmp/dir/backup.tar.gz', data);
+    expect(result).toBe('/tmp/dir/backup.tar.gz');
+  });
+
+  it('passes the Uint8Array through without boxing to a plain array', async () => {
+    mockJoin.mockResolvedValue('/tmp/dir/backup.tar.gz');
+    mockWriteFile.mockResolvedValue(undefined);
+    const data = new Uint8Array(4);
+    await writeTempFile('/tmp/dir', 'backup.tar.gz', data);
+    // The data argument passed to writeFile must remain a Uint8Array (not
+    // Array.from'd into a plain Array<number>).
+    expect(mockWriteFile.mock.calls[0][1]).toBeInstanceOf(Uint8Array);
+  });
+
+  it('does not call invoke (bypasses the slow IPC array encoding)', async () => {
+    mockJoin.mockResolvedValue('/tmp/dir/backup.tar.gz');
+    mockWriteFile.mockResolvedValue(undefined);
+    await writeTempFile('/tmp/dir', 'backup.tar.gz', new Uint8Array([1]));
+    expect(mockInvoke).not.toHaveBeenCalled();
   });
 });
 

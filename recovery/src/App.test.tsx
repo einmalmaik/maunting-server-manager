@@ -46,6 +46,7 @@ const mockWriteTempFile = vi.fn();
 const mockExtractTarGz = vi.fn();
 const mockCleanupTempDir = vi.fn();
 const mockSaveExtracted = vi.fn();
+const mockSaveAsZip = vi.fn();
 const mockReadTextFile = vi.fn();
 
 vi.mock('@/lib/tauri-commands', async (importOriginal) => {
@@ -57,6 +58,7 @@ vi.mock('@/lib/tauri-commands', async (importOriginal) => {
     extractTarGz: (...args: unknown[]) => mockExtractTarGz(...args),
     cleanupTempDir: (...args: unknown[]) => mockCleanupTempDir(...args),
     saveExtracted: (...args: unknown[]) => mockSaveExtracted(...args),
+    saveAsZip: (...args: unknown[]) => mockSaveAsZip(...args),
     readTextFile: (...args: unknown[]) => mockReadTextFile(...args),
   };
 });
@@ -105,6 +107,7 @@ beforeEach(async () => {
   mockExtractTarGz.mockReset();
   mockCleanupTempDir.mockReset();
   mockSaveExtracted.mockReset();
+  mockSaveAsZip.mockReset();
   mockReadTextFile.mockReset();
 
   // Default happy-path mocks for the full flow
@@ -113,6 +116,7 @@ beforeEach(async () => {
   mockExtractTarGz.mockResolvedValue(MOCK_FILE_TREE);
   mockCleanupTempDir.mockResolvedValue(undefined);
   mockSaveExtracted.mockResolvedValue(undefined);
+  mockSaveAsZip.mockResolvedValue(undefined);
   mockReadTextFile.mockResolvedValue('file content');
 });
 
@@ -154,6 +158,7 @@ describe('VAL-UI-002: File picker in app', () => {
 // Module-level Tauri API mocks for the full flow test.
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn().mockResolvedValue('C:\\backups\\test.enc'),
+  save: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('@tauri-apps/plugin-fs', () => ({
   readFile: vi.fn().mockImplementation(async () => {
@@ -164,7 +169,7 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
   }),
 }));
 
-import { open as mockedOpen } from '@tauri-apps/plugin-dialog';
+import { open as mockedOpen, save as mockedSave } from '@tauri-apps/plugin-dialog';
 import { readFile as mockedReadFile } from '@tauri-apps/plugin-fs';
 
 describe('VAL-CROSS-001: full flow — select → decrypt → extract → tree → save', () => {
@@ -210,7 +215,7 @@ describe('VAL-CROSS-001: full flow — select → decrypt → extract → tree �
     expect(mockExtractTarGz).toHaveBeenCalledOnce();
   });
 
-  it('save: clicking save opens dialog and calls save_extracted', async () => {
+  it('save: clicking save opens dialog and calls save_as_zip', async () => {
     const decryptedBytes = gzipBytes(utf8('hello-recovery'));
     mockedDecrypt.mockResolvedValue(decryptedBytes);
     vi.mocked(mockedOpen).mockResolvedValue('C:\\backups\\test.enc');
@@ -231,14 +236,14 @@ describe('VAL-CROSS-001: full flow — select → decrypt → extract → tree �
       expect(screen.getByTestId('save-button')).toBeDefined();
     });
 
-    // Mock the directory dialog for save
-    vi.mocked(mockedOpen).mockResolvedValue('C:\\output-dir');
+    // Mock the save dialog for ZIP save
+    vi.mocked(mockedSave).mockResolvedValue('C:\\output\\msm-backup.zip');
 
     // Click save
     fireEvent.click(screen.getByTestId('save-button'));
 
     await waitFor(() => {
-      expect(mockSaveExtracted).toHaveBeenCalledOnce();
+      expect(mockSaveAsZip).toHaveBeenCalledOnce();
     });
 
     await waitFor(() => {

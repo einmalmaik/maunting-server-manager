@@ -36,6 +36,7 @@ export const de = {
   'decrypt.button.loading': 'Entschlüssele …',
 
   'progress.decrypting': 'Backup wird entschlüsselt …',
+  'progress.deriving': 'Schlüssel wird abgeleitet …',
   'progress.extracting': 'Dateien werden extrahiert …',
 
   'state.success.title': 'Entschlüsselung erfolgreich',
@@ -68,8 +69,8 @@ export const de = {
 
   'save.button': 'Extrahierte Dateien speichern',
   'save.button.saving': 'Speichere …',
-  'save.dialog.title': 'Zielverzeichnis wählen',
-  'save.success': 'Dateien wurden erfolgreich gespeichert.',
+  'save.dialog.title': 'ZIP-Datei speichern',
+  'save.success': 'Dateien wurden erfolgreich als ZIP gespeichert.',
   'save.error': 'Speichern fehlgeschlagen. Bitte versuchen Sie es erneut.',
 
   'dis.badge': 'Powered by DIS',
