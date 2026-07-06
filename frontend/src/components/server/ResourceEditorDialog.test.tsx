@@ -787,4 +787,122 @@ describe('ResourceEditorDialog', () => {
       await pendingPromise
     })
   })
+
+  // VAL-UI-020: Tab wraps from last focusable to first within dialog
+  it('traps Tab: Tab from last focusable element wraps to first', async () => {
+    renderDialog()
+    await waitFor(() => {
+      expect(screen.getByTestId('resource-cpu-input')).toHaveFocus()
+    })
+
+    // Focus the last focusable element (Save button)
+    screen.getByTestId('resource-save-btn').focus()
+    expect(screen.getByTestId('resource-save-btn')).toHaveFocus()
+
+    // Tab should wrap to the first focusable element (CPU input)
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Tab' })
+    })
+    expect(screen.getByTestId('resource-cpu-input')).toHaveFocus()
+  })
+
+  // VAL-UI-020: Shift+Tab wraps from first focusable to last within dialog
+  it('traps Shift+Tab: Shift+Tab from first focusable wraps to last', async () => {
+    renderDialog()
+    await waitFor(() => {
+      expect(screen.getByTestId('resource-cpu-input')).toHaveFocus()
+    })
+
+    // Focus is on the first focusable element (CPU input)
+    expect(screen.getByTestId('resource-cpu-input')).toHaveFocus()
+
+    // Shift+Tab should wrap to the last focusable element (Save button)
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Tab', shiftKey: true })
+    })
+    expect(screen.getByTestId('resource-save-btn')).toHaveFocus()
+  })
+
+  // VAL-UI-020: Focus returns to the triggering element when dialog closes
+  it('returns focus to the trigger element when dialog closes', async () => {
+    // Create a trigger button and focus it before opening the dialog
+    const trigger = document.createElement('button')
+    trigger.textContent = 'Edit Resources'
+    document.body.appendChild(trigger)
+    trigger.focus()
+    expect(trigger).toHaveFocus()
+
+    const { unmount } = renderDialog()
+
+    // Dialog is open, CPU input should be focused (after setTimeout)
+    await waitFor(() => {
+      expect(screen.getByTestId('resource-cpu-input')).toHaveFocus()
+    })
+
+    // Close the dialog (unmount)
+    unmount()
+
+    // Focus should return to the trigger button
+    expect(trigger).toHaveFocus()
+
+    document.body.removeChild(trigger)
+  })
+
+  // VAL-UI-020: Tab brings focus back into dialog if it escaped
+  it('brings focus back into dialog when Tab is pressed outside dialog controls', async () => {
+    renderDialog()
+    await waitFor(() => {
+      expect(screen.getByTestId('resource-cpu-input')).toHaveFocus()
+    })
+
+    // Move focus outside the dialog (simulates focus escaping)
+    const outsideButton = document.createElement('button')
+    outsideButton.textContent = 'Outside'
+    document.body.appendChild(outsideButton)
+    outsideButton.focus()
+    expect(outsideButton).toHaveFocus()
+
+    // Tab should bring focus back to the first dialog control
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Tab' })
+    })
+    expect(screen.getByTestId('resource-cpu-input')).toHaveFocus()
+
+    document.body.removeChild(outsideButton)
+  })
+
+  // VAL-UI-007: Clearing a field via DOM (bypassing onChange) still sends null.
+  // This simulates real browser behavior where controlled input state can
+  // get out of sync with the DOM.
+  it('sends null when CPU field is cleared via DOM without triggering onChange', async () => {
+    renderDialog({ cpuLimit: 150, ramLimit: 4096, diskLimit: 50 })
+    setMockResponse(() => ({ id: 42 }))
+
+    // Simulate browser automation clearing the field without firing onChange
+    const cpuInput = screen.getByTestId('resource-cpu-input') as HTMLInputElement
+    cpuInput.value = ''
+
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    await waitFor(() => {
+      expect(mockApi).toHaveBeenCalledTimes(1)
+    })
+    const body = JSON.parse(mockApi.mock.calls[0][1]?.body as string)
+    expect(body).toEqual({ cpu_limit_percent: null })
+  })
+
+  // VAL-UI-008: Validation error shows for CPU below minimum even when DOM
+  // value bypasses onChange (real browser robustness).
+  it('shows CPU below-minimum validation error even when DOM value bypasses onChange', () => {
+    renderDialog({ cpuLimit: 100 })
+
+    // Simulate browser automation typing '5' without triggering onChange
+    const cpuInput = screen.getByTestId('resource-cpu-input') as HTMLInputElement
+    cpuInput.value = '5'
+
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    expect(screen.getByTestId('resource-cpu-error')).toBeInTheDocument()
+    expect(mockApi).not.toHaveBeenCalled()
+  })
 })

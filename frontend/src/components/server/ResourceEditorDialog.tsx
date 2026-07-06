@@ -65,24 +65,51 @@ export function ResourceEditorDialog({
 
   const dialogRef = useRef<HTMLDivElement>(null)
   const cpuInputRef = useRef<HTMLInputElement>(null)
+  const ramInputRef = useRef<HTMLInputElement>(null)
+  const diskInputRef = useRef<HTMLInputElement>(null)
 
   // Focus-Management: beim Oeffnen ersten Input fokussieren,
   // beim Schliessen Focus auf den Ausloeser zurueckgeben.
+  // setTimeout(0) ist zuverlaessiger als requestAnimationFrame in echten
+  // Browsern, da es nach der aktuellen Task feuert und die DOM-Updates
+  // bereits verarbeitet sind (VAL-UI-020).
   useEffect(() => {
     const previousActive = document.activeElement as HTMLElement | null
-    const raf = requestAnimationFrame(() => cpuInputRef.current?.focus())
+    const timeoutId = setTimeout(() => cpuInputRef.current?.focus(), 0)
     return () => {
-      cancelAnimationFrame(raf)
+      clearTimeout(timeoutId)
       previousActive?.focus()
     }
   }, [])
 
-  // Escape-Handler auf Window-Ebene (sicherer als nur dialog-scope)
+  // Keyboard-Handler auf Window-Ebene: Escape schliesst (wenn nicht saving),
+  // Tab/Shift+Tab bleiben innerhalb des Dialogs gefangen (VAL-UI-020).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !saving) {
         e.preventDefault()
         onClose()
+        return
+      }
+      if (e.key === 'Tab') {
+        const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        )
+        if (!focusable || focusable.length === 0) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        const inside = dialogRef.current?.contains(document.activeElement)
+        if (e.shiftKey) {
+          if (document.activeElement === first || !inside) {
+            e.preventDefault()
+            last.focus()
+          }
+        } else {
+          if (document.activeElement === last || !inside) {
+            e.preventDefault()
+            first.focus()
+          }
+        }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -118,41 +145,22 @@ export function ResourceEditorDialog({
   }
 
   const handleBlur = (field: keyof FormState) => {
-    const err = validateField(field, form[field])
+    // Read from DOM ref for reliability in real browsers where controlled
+    // input state might be out of sync (VAL-UI-008 / VAL-UI-017).
+    const ref = field === 'cpu' ? cpuInputRef : field === 'ram' ? ramInputRef : diskInputRef
+    const domValue = ref.current?.value ?? ''
+    const err = validateField(field, domValue)
     setErrors((prev) => ({ ...prev, [field]: err }))
   }
 
-  const validate = (): boolean => {
-    const errs: Record<string, string> = {}
-
-    const cpuErr = validateField('cpu', form.cpu)
-    if (cpuErr) errs.cpu = cpuErr
-
-    const ramErr = validateField('ram', form.ram)
-    if (ramErr) errs.ram = ramErr
-
-    const diskErr = validateField('disk', form.disk)
-    if (diskErr) errs.disk = diskErr
-
-    setErrors(errs)
-    return Object.keys(errs).length === 0
-  }
-
-  const buildPayload = (): Record<string, number | null> | null => {
-    const init = initialRef.current
-    const body: Record<string, number | null> = {}
-
-    const cpuNum = form.cpu === '' ? null : parseInt(form.cpu, 10)
-    if (cpuNum !== init.cpu) body.cpu_limit_percent = cpuNum
-
-    const ramNum = form.ram === '' ? null : parseInt(form.ram, 10)
-    if (ramNum !== init.ram) body.ram_limit_mb = ramNum
-
-    const diskNum = form.disk === '' ? null : parseInt(form.disk, 10)
-    if (diskNum !== init.disk) body.disk_limit_gb = diskNum
-
-    return Object.keys(body).length > 0 ? body : null
-  }
+  // Read current values from DOM refs. Controlled inputs can get out of
+  // sync with React state when browser automation or edge cases bypass
+  // onChange (VAL-UI-007). DOM refs always reflect the actual input values.
+  const getFieldValues = (): FormState => ({
+    cpu: cpuInputRef.current?.value ?? '',
+    ram: ramInputRef.current?.value ?? '',
+    disk: diskInputRef.current?.value ?? '',
+  })
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -163,11 +171,33 @@ export function ResourceEditorDialog({
       return
     }
 
-    if (!validate()) return
+    // Read from DOM refs for reliability in real browsers (VAL-UI-007 /
+    // VAL-UI-008 / VAL-UI-017).
+    const values = getFieldValues()
 
-    const body = buildPayload()
-    if (!body) {
-      // No-op: keine geaenderten Felder → Dialog schliessen ohne PATCH
+    // Validate using DOM values
+    const errs: Record<string, string> = {}
+    const cpuErr = validateField('cpu', values.cpu)
+    if (cpuErr) errs.cpu = cpuErr
+    const ramErr = validateField('ram', values.ram)
+    if (ramErr) errs.ram = ramErr
+    const diskErr = validateField('disk', values.disk)
+    if (diskErr) errs.disk = diskErr
+    setErrors(errs)
+    if (Object.keys(errs).length > 0) return
+
+    // Build payload using DOM values
+    const init = initialRef.current
+    const body: Record<string, number | null> = {}
+    const cpuNum = values.cpu === '' ? null : parseInt(values.cpu, 10)
+    if (cpuNum !== init.cpu) body.cpu_limit_percent = cpuNum
+    const ramNum = values.ram === '' ? null : parseInt(values.ram, 10)
+    if (ramNum !== init.ram) body.ram_limit_mb = ramNum
+    const diskNum = values.disk === '' ? null : parseInt(values.disk, 10)
+    if (diskNum !== init.disk) body.disk_limit_gb = diskNum
+
+    if (Object.keys(body).length === 0) {
+      // No-op: keine geaenderten Felder -> Dialog schliessen ohne PATCH
       onClose()
       return
     }
@@ -201,28 +231,6 @@ export function ResourceEditorDialog({
     }
   }
 
-  // Focus-Trap: Tab/Shift+Tab innerhalb des Dialogs halten
-  const handleTabTrap = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Tab') return
-    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    )
-    if (!focusable || focusable.length === 0) return
-    const first = focusable[0]
-    const last = focusable[focusable.length - 1]
-    if (e.shiftKey) {
-      if (document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
-      }
-    } else {
-      if (document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-  }
-
   const fieldLabel = (label: string, icon: ReactNode) => (
     <span className="inline-flex items-center gap-1.5">
       {icon}
@@ -242,7 +250,6 @@ export function ResourceEditorDialog({
         ref={dialogRef}
         className="msm-card w-full max-w-lg p-6 my-8"
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleTabTrap}
       >
         <h2
           id="resource-editor-title"
@@ -306,6 +313,7 @@ export function ResourceEditorDialog({
             </label>
             <input
               id="resource-ram"
+              ref={ramInputRef}
               type="text"
               inputMode="numeric"
               className="msm-input"
@@ -337,6 +345,7 @@ export function ResourceEditorDialog({
             </label>
             <input
               id="resource-disk"
+              ref={diskInputRef}
               type="text"
               inputMode="numeric"
               className="msm-input"
