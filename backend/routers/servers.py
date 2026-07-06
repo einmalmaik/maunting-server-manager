@@ -38,6 +38,8 @@ from services.port_role_service import blueprint_port_requirements, normalize_po
 from services.scheduler_service import sync_server_restart_schedule
 from services.server_lifecycle_service import (
     LifecycleNotification,
+    get_server_lifecycle_lock,
+    is_lifecycle_job_active,
     queue_lifecycle_operation,
     should_preserve_lifecycle_status,
 )
@@ -370,6 +372,16 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     has_resource = bool(resource_fields & set(payload.keys()))
     has_config = bool(config_fields & set(payload.keys()))
 
+    # ── Tatsaechliche CPU/RAM-Wertänderungen (kein No-Op). ──
+    # Wird vor den Attribut-Mutationen berechnet, damit der alte Wert
+    # noch als Referenz vorliegt. No-Op-PATCHes loesen kein Docker-Update
+    # aus (VAL-API-012). Nur CPU/RAM brauchen Live-Update; Disk ist ein
+    # Soft-Limit ohne Docker-Hard-Quota.
+    old_cpu = server.cpu_limit_percent
+    old_ram = server.ram_limit_mb
+    cpu_changed = "cpu_limit_percent" in payload and payload["cpu_limit_percent"] != old_cpu
+    ram_changed = "ram_limit_mb" in payload and payload["ram_limit_mb"] != old_ram
+
     # ── Least-privilege: jede Feldgruppe braucht nur ihre eigene Permission. ──
     # Ressourcen-PATCHes kommen mit ``server.resources.manage`` allein aus,
     # ohne ``server.config.write`` oder ``server.network.manage`` (VAL-API-011).
@@ -443,6 +455,69 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             if key not in ("game_port", "query_port", "rcon_port", "ports", "port_protocols"):
                 setattr(server, key, val)
         _normalize_server_restart_mode(server)
+
+        # ── Live CPU/RAM-Update fuer laufende Container (ohne Restart). ──
+        # Nur bei tatsaechlich geaenderten CPU/RAM-Werten und nur wenn kein
+        # Network-Change im selben PATCH ist (der Network-Recreate-Pfad
+        # sammelt die neuen Werte beim naechsten Start ein).
+        # Bei gestoppten Servern werden die Werte nur persistiert (VAL-API-008).
+        # Bei Docker-Fehlschlag wird die DB zurueckgerollt (VAL-API-009).
+        # Lifecycle-Serialisierung verhindert Race-Conditions mit Start/Stop
+        # (VAL-API-014). Stale-Runtime-Check verhindert DB/Docker-Drift
+        # (VAL-API-015). Keine Network- oder Firewall-Mutation (VAL-DOCKER-006).
+        resource_live_change = (cpu_changed or ram_changed) and not network_change
+        if resource_live_change:
+            container_name = container_name_for(server.id)
+            # Lifecycle-Job aktiv -> sicherer Konflikt (VAL-API-014).
+            if is_lifecycle_job_active(server_id):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Server Lifecycle-Aktion laeuft, Ressourcen-Update nicht moeglich",
+                )
+            lock = get_server_lifecycle_lock(server_id)
+            if not lock.acquire(timeout=5):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Server Lifecycle-Aktion laeuft, Ressourcen-Update nicht moeglich",
+                )
+            try:
+                # Re-Check nach Lock-Acquire (Race-Schutz: Job koennte zwischen
+                # der ersten Pruefung und dem Lock-Acquire gestartet worden sein).
+                if is_lifecycle_job_active(server_id):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Server Lifecycle-Aktion laeuft, Ressourcen-Update nicht moeglich",
+                    )
+                # Stale-Runtime-Check (VAL-API-015): DB-Status und Docker-
+                # Container-Status muessen uebereinstimmen. Wenn DB "running"
+                # sagt aber Docker nicht, driften wir nicht.
+                if server.status == "running":
+                    if not docker_service.is_running(container_name):
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Server-Status nicht konsistent, Ressourcen-Update abgebrochen",
+                        )
+                    # Docker Live-Update nur mit geaenderten Feldern (VAL-DOCKER-002).
+                    docker_updates: dict[str, int | None] = {}
+                    if cpu_changed:
+                        docker_updates["cpu_limit_percent"] = server.cpu_limit_percent
+                    if ram_changed:
+                        docker_updates["ram_limit_mb"] = server.ram_limit_mb
+                    result = docker_service.update_container_resources(
+                        container_name, docker_updates,
+                    )
+                    if not result.get("ok"):
+                        # Generische, sanitisierte Meldung (VAL-API-010):
+                        # der spezifische Fehler wird im Docker-Service geloggt.
+                        raise HTTPException(
+                            status_code=503,
+                            detail="Ressourcen-Update konnte nicht angewendet werden",
+                        )
+                # Bei status != "running": nur persistieren, kein Docker-Aufruf,
+                # kein Start (VAL-API-008).
+            finally:
+                lock.release()
+
         db.commit()
         db.refresh(server)
     except HTTPException:

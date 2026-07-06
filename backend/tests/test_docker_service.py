@@ -939,3 +939,212 @@ class TestSteamCMDHelpers:
 
         script = mock_eph.call_args_list[0].kwargs["command"][1]
         assert "chown -R " in script and "/data" in script
+
+
+class TestUpdateContainerResources:
+    """Unit-Tests fuer ``docker_service.update_container_resources``.
+
+    Verifiziert die Docker-SDK-Update-Payloads (VAL-DOCKER-001..009):
+    - CPU-Prozent -> cpu_period/cpu_quota Mapping
+    - RAM-MB -> mem_limit/memswap_limit Mapping
+    - None (unlimitiert) -> Limits loeschen
+    - Warnungen und Exceptions werden als Fehler behandelt
+    - Keine stop/remove/run/restart-Aufrufe
+    """
+
+    @pytest.mark.parametrize("cpu_percent,expected_quota", [
+        (10, 10_000),
+        (50, 50_000),
+        (100, 100_000),
+        (200, 200_000),
+        (3200, 3_200_000),
+    ])
+    def test_cpu_percent_maps_to_docker_quota(self, cpu_percent, expected_quota):
+        """VAL-DOCKER-001, VAL-DOCKER-007: CPU percent -> cpu_period=100000, cpu_quota=percent*1000."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": cpu_percent},
+            )
+
+        assert result == {"ok": True}
+        kwargs = container.update.call_args.kwargs
+        assert kwargs["cpu_period"] == 100000
+        assert kwargs["cpu_quota"] == expected_quota
+        # Kein Restart/Recreate: nur update() wurde aufgerufen
+        container.stop.assert_not_called()
+        container.remove.assert_not_called()
+        container.start.assert_not_called()
+
+    @pytest.mark.parametrize("ram_mb,expected", [
+        (512, "512m"),
+        (4096, "4096m"),
+        (8192, "8192m"),
+    ])
+    def test_ram_mb_maps_to_docker_memory_limits(self, ram_mb, expected):
+        """VAL-DOCKER-002, VAL-DOCKER-007: RAM MB -> mem_limit + memswap_limit, keine CPU-Aenderung."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"ram_limit_mb": ram_mb},
+            )
+
+        assert result == {"ok": True}
+        kwargs = container.update.call_args.kwargs
+        assert kwargs["mem_limit"] == expected
+        assert kwargs["memswap_limit"] == expected
+        # Keine CPU-Felder beim reinen RAM-Update
+        assert "cpu_period" not in kwargs
+        assert "cpu_quota" not in kwargs
+        container.stop.assert_not_called()
+
+    def test_clearing_cpu_applies_unlimited_quota(self):
+        """VAL-DOCKER-003: CPU None -> cpu_quota=0 (unlimitiert), ohne Restart."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": None},
+            )
+
+        assert result == {"ok": True}
+        kwargs = container.update.call_args.kwargs
+        assert kwargs["cpu_period"] == 100000
+        assert kwargs["cpu_quota"] == 0
+        container.stop.assert_not_called()
+
+    def test_clearing_ram_clears_memory_and_memswap(self):
+        """VAL-DOCKER-008: RAM None -> mem_limit=0, memswap_limit=-1 (beide Limiters geloescht)."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"ram_limit_mb": None},
+            )
+
+        assert result == {"ok": True}
+        kwargs = container.update.call_args.kwargs
+        assert kwargs["mem_limit"] == 0
+        assert kwargs["memswap_limit"] == -1
+        container.stop.assert_not_called()
+
+    def test_combined_cpu_ram_update_sends_both(self):
+        """VAL-DOCKER-004: CPU+RAM zusammen werden in einem Update-Aufruf gesendet."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1",
+                {"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+            )
+
+        assert result == {"ok": True}
+        kwargs = container.update.call_args.kwargs
+        assert kwargs["cpu_period"] == 100000
+        assert kwargs["cpu_quota"] == 200_000
+        assert kwargs["mem_limit"] == "4096m"
+        assert kwargs["memswap_limit"] == "4096m"
+        # Nur ein Update-Aufruf (atomar)
+        assert container.update.call_count == 1
+
+    def test_empty_updates_returns_ok_without_docker_call(self):
+        """Keine Aenderungen -> kein Docker-Aufruf."""
+        container = MagicMock()
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources("msm-srv-1", {})
+
+        assert result == {"ok": True}
+        container.update.assert_not_called()
+
+    def test_container_not_found_returns_error(self):
+        """Container existiert nicht -> sanitierter Fehler."""
+        with patch.object(docker_service, "_container", return_value=None):
+            result = docker_service.update_container_resources(
+                "msm-srv-missing", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert "Container" in result["error"]
+        assert "msm-srv-missing" not in result["error"]
+
+    def test_docker_exception_returns_sanitized_error(self):
+        """VAL-DOCKER-005: Docker-Ausnahme -> sanitierter Fehler, keine Secrets."""
+        container = MagicMock()
+        sentinel = "ZZLEAKSENTINEL_docker.sock_/var/run/docker.sock"
+        container.update.side_effect = docker_service.DockerException(sentinel)
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert sentinel not in result["error"]
+        assert "docker.sock" not in result["error"]
+
+    def test_docker_warnings_treated_as_failure(self):
+        """VAL-DOCKER-009: Docker-Warnings -> Fehler, keine Persistenz-Drift."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": ["unsupported cgroup controller"]}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert "Ressourcen" in result["error"]
+        # Warning-Inhalt darf nicht durchsickern
+        assert "cgroup" not in result["error"]
+
+    def test_docker_warnings_empty_list_is_success(self):
+        """Leere Warnings-Liste ist Erfolg (Docker liefert immer Warnings-Key)."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+            )
+
+        assert result == {"ok": True}
+
+    def test_no_stop_remove_or_restart_calls(self):
+        """VAL-DOCKER-001: Live-Update ruft nie stop/remove/restart auf."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            docker_service.update_container_resources(
+                "msm-srv-1",
+                {"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+            )
+
+        container.update.assert_called_once()
+        container.stop.assert_not_called()
+        container.remove.assert_not_called()
+        container.start.assert_not_called()
+        container.restart.assert_not_called()
+
+    def test_only_changed_fields_sent_to_docker(self):
+        """VAL-DOCKER-002: Unverwandte Limits werden nicht ungewollt geaendert."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result == {"ok": True}
+        kwargs = container.update.call_args.kwargs
+        assert "mem_limit" not in kwargs
+        assert "memswap_limit" not in kwargs

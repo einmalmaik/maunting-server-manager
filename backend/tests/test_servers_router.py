@@ -1,7 +1,7 @@
 """Tests for servers router: CRUD, permissions, CSRF."""
 import logging
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1193,6 +1193,399 @@ class TestResourcePatchPermissions:
         # Kein Drift: Resource-Wert unveraendert
         db.refresh(test_server)
         assert test_server.cpu_limit_percent == 100
+
+
+class TestLiveResourceUpdate:
+    """Tests fuer Live CPU/RAM-Update auf laufende Container (VAL-API-007..015, VAL-DOCKER-001..009)."""
+
+    def _set_resources(self, db: Session, server: Server, cpu=100, ram=2048, disk=20) -> None:
+        server.cpu_limit_percent = cpu
+        server.ram_limit_mb = ram
+        server.disk_limit_gb = disk
+        db.commit()
+        db.refresh(server)
+
+    # ── VAL-API-007: Running resource-only PATCH does not restart ──
+
+    def test_running_resource_patch_calls_live_update_no_restart(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Laufender Server: CPU-Update ruft Docker Live-Update, keinen Restart."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True) as mock_running, \
+             patch("routers.servers.docker_service.update_container_resources", return_value={"ok": True}) as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["cpu_limit_percent"] == 200
+        # Docker Live-Update wurde aufgerufen
+        mock_update.assert_called_once()
+        # Kein Stop/Start/Remove (keine Network-Aenderung)
+        mock_running.assert_called_once()  # fuer Stale-Check
+
+    def test_running_resource_patch_does_not_stop_or_recreate(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """VAL-API-007: Keine stop/start/remove/restart-Aufrufe bei Resource-PATCH."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources", return_value={"ok": True}) as mock_update, \
+             patch("routers.servers.docker_service.stop") as mock_stop, \
+             patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch("routers.servers.docker_service.start") as mock_start, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.get_plugin") as mock_plugin:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        mock_update.assert_called_once()
+        mock_stop.assert_not_called()
+        mock_remove.assert_not_called()
+        mock_start.assert_not_called()
+        mock_plugin.assert_not_called()
+
+    # ── VAL-API-008: Stopped server resource PATCH persists for next start ──
+
+    def test_stopped_server_resource_patch_persists_no_docker(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Gestoppter Server: Werte werden persistiert, kein Docker-Aufruf, kein Start."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running") as mock_running, \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["cpu_limit_percent"] == 200
+        assert data["ram_limit_mb"] == 4096
+        # Status bleibt "stopped"
+        assert data["status"] == "stopped"
+        # Kein Docker Live-Update oder is_running
+        mock_update.assert_not_called()
+        mock_running.assert_not_called()
+
+    # ── VAL-API-009: Runtime apply failure leaves API state unchanged ──
+
+    def test_docker_update_failure_rolls_back_db(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Docker-Update-Fehlschlag -> DB-Werte unveraendert, kein Drift."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        assert "Ressourcen" in response.json()["detail"]
+        # DB-Werte unveraendert (kein Drift)
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+
+    def test_docker_update_failure_sanitized_error(self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session, caplog):
+        """VAL-API-010: Fehler-Response und Logs sind sanitisiert."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+        sentinel = "ZZLEAKSENTINEL_docker.sock_/var/run/docker.sock"
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": sentinel}), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            with caplog.at_level(logging.WARNING):
+                response = client.patch(
+                    f"/api/servers/{test_server.id}",
+                    json={"cpu_limit_percent": 200},
+                    cookies=owner_cookies,
+                    headers={"X-CSRF-Token": csrf_token},
+                )
+        assert response.status_code == 503
+        assert sentinel not in response.text
+
+    # ── VAL-DOCKER-004: Combined CPU/RAM changes are atomic ──
+
+    def test_combined_cpu_ram_atomic_on_partial_failure(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Wenn Docker-Update fehlschlaegt, werden weder CPU noch RAM persistiert."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Update fehlgeschlagen"}), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        # Beide Werte unveraendert (atomar)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+
+    # ── VAL-DOCKER-005: Rootless Docker limitations fail safely ──
+
+    def test_rootless_failure_no_restart_no_persist(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Rootless-cgroup-Fehler -> 503, keine Werte persistiert, kein Restart."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+        original_status = test_server.status
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Systemfehler bei Container-Operation"}), \
+             patch("routers.servers.docker_service.stop") as mock_stop, \
+             patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.status == original_status
+        # Kein versteckter Restart als Fallback
+        mock_stop.assert_not_called()
+        mock_remove.assert_not_called()
+
+    # ── VAL-DOCKER-006: Resource-only updates do not mutate network ──
+
+    def test_resource_only_patch_no_network_mutation(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Resource-PATCH aendert keine Ports, Firewall oder iptables."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+        original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
+        original_bind_ip = test_server.public_bind_ip
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources", return_value={"ok": True}), \
+             patch("routers.servers.close_ports") as mock_close, \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.iptables_revoke_server") as mock_revoke, \
+             patch("routers.servers.iptables_accept_server") as mock_accept, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        # Keine Firewall/iptables/Port-Aenderung
+        mock_close.assert_not_called()
+        mock_open.assert_not_called()
+        mock_revoke.assert_not_called()
+        mock_accept.assert_not_called()
+        # Ports unveraendert
+        db.refresh(test_server)
+        assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
+        assert test_server.public_bind_ip == original_bind_ip
+
+    # ── VAL-API-014: Resource PATCH is serialized with lifecycle ──
+
+    def test_resource_patch_conflict_when_lifecycle_active(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Lifecycle-Job aktiv -> 409 Konflikt, keine Mutation."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        mock_update.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    # ── VAL-API-015: Stale runtime state fails safely ──
+
+    def test_stale_runtime_db_running_docker_stopped_fails_safely(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """DB sagt 'running', Docker sagt 'stopped' -> sicherer Abbruch, kein Drift."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=False), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        mock_update.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    # ── VAL-DOCKER-009: Docker warnings fail safely ──
+
+    def test_docker_warnings_fail_safely_no_persist(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Docker-Warnings -> 503, keine Persistenz, keine Raw-Warning im Response."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    # ── VAL-DOCKER-003: Clearing CPU/RAM applies unlimited live state ──
+
+    def test_running_null_cpu_calls_docker_clear(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Laufender Server: CPU null -> Docker Live-Clear, kein Restart."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources", return_value={"ok": True}) as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": None},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["cpu_limit_percent"] is None
+        mock_update.assert_called_once()
+        # Verify None was passed to Docker service
+        call_args = mock_update.call_args
+        updates = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("updates", {})
+        assert updates.get("cpu_limit_percent") is None
+
+    def test_running_null_ram_calls_docker_clear(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Laufender Server: RAM null -> Docker Live-Clear fuer mem+memswap."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources", return_value={"ok": True}) as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"ram_limit_mb": None},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        assert response.json()["ram_limit_mb"] is None
+        mock_update.assert_called_once()
+
+    # ── Resource-only PATCH on running server with disk change ──
+
+    def test_disk_only_change_no_docker_update_for_running(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk-Aenderung allein loest kein Docker-Update aus (Soft-Limit)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running") as mock_running, \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        assert response.json()["disk_limit_gb"] == 50
+        # Disk ist Soft-Limit: kein Docker-Update, kein is_running-Check
+        mock_update.assert_not_called()
+        mock_running.assert_not_called()
 
 
 # ── Exec-Tab Endpoint (v1.4.7) ───────────────────────────────────────────

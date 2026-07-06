@@ -420,6 +420,82 @@ def is_running(name: str) -> bool:
     return bool(container is not None and getattr(container, "status", None) == "running")
 
 
+def update_container_resources(name: str, updates: dict[str, int | None]) -> dict:
+    """Wendet CPU/RAM-Limits live auf einen laufenden Container an (ohne Restart).
+
+    Kapselt das Docker SDK ``container.update()``. Der Aufrufer uebergibt nur
+    die Felder, die sich tatsaechlich geaendert haben, als Dict:
+
+      ``{"cpu_limit_percent": 200, "ram_limit_mb": 4096}``
+
+    Werte ``None`` bedeuten "unlimitiert" und loeschen das entsprechende
+    Docker-Limit. Nicht im Dict enthaltene Felder werden nicht an Docker
+    gesendet (VAL-DOCKER-002: keine unerwarteten Aenderungen an unverwandten
+    Limits).
+
+    CPU-Mapping (VAL-DOCKER-007):
+      - ``cpu_period`` = 100000 (fester CFS-Zyklus)
+      - ``cpu_quota``  = cpu_limit_percent * 1000
+      - 50 % -> 50000, 100 % -> 100000, 200 % -> 200000
+      - None   -> cpu_quota = 0 (kein Quota = unlimitiert)
+
+    RAM-Mapping:
+      - ``mem_limit``      = f"{ram_limit_mb}m"
+      - ``memswap_limit``  = f"{ram_limit_mb}m"  (kein Swap-Ueberhang)
+      - None -> mem_limit = 0, memswap_limit = -1 (beide Limiters geloescht,
+        VAL-DOCKER-008)
+
+    Docker-Warnings oder Partial-Success werden als Fehler behandelt
+    (VAL-DOCKER-009), damit API- und Docker-Zustand nicht driften.
+
+    Returns:
+      ``{"ok": True}`` bei Erfolg.
+      ``{"ok": False, "error": "..."}`` bei Fehlschlag (sanitisiert).
+    """
+    container = _container(name)
+    if container is None:
+        return {"ok": False, "error": "Container nicht gefunden"}
+
+    update_kwargs: dict[str, Any] = {}
+
+    if "cpu_limit_percent" in updates:
+        cpu = updates["cpu_limit_percent"]
+        update_kwargs["cpu_period"] = 100000
+        if cpu is not None and cpu > 0:
+            update_kwargs["cpu_quota"] = int(cpu) * 1000
+        else:
+            # None = unlimitiert -> Quota 0
+            update_kwargs["cpu_quota"] = 0
+
+    if "ram_limit_mb" in updates:
+        ram = updates["ram_limit_mb"]
+        if ram is not None and ram > 0:
+            update_kwargs["mem_limit"] = f"{int(ram)}m"
+            update_kwargs["memswap_limit"] = f"{int(ram)}m"
+        else:
+            # None = unlimitiert -> Memory 0, Swap -1 (beide Limiters geloescht)
+            update_kwargs["mem_limit"] = 0
+            update_kwargs["memswap_limit"] = -1
+
+    if not update_kwargs:
+        return {"ok": True}
+
+    try:
+        result = container.update(**update_kwargs)
+        warnings: list = []
+        if isinstance(result, dict):
+            raw_warnings = result.get("Warnings") or []
+            if isinstance(raw_warnings, list):
+                warnings = [w for w in raw_warnings if w]
+        if warnings:
+            logger.warning("docker update returned warnings for %s", name)
+            return {"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}
+        return {"ok": True}
+    except (DockerException, OSError) as exc:
+        logger.warning("docker live update failed for %s", name)
+        return {"ok": False, "error": _safe_error(exc)}
+
+
 def remove(name: str, force: bool = True) -> dict:
     container = _container(name)
     if container is None:
