@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Cpu, MemoryStick, HardDrive, Info } from 'lucide-react'
-import { api } from '@/api/client'
+import { api, SanitizedApiError } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 
 /**
@@ -39,21 +39,6 @@ interface FormState {
 
 function limitToString(v: number | null): string {
   return v != null ? String(v) : ''
-}
-
-/**
- * Detects generic/unknown error messages that should NOT be displayed raw.
- * The API client already translates recognized backend error keys. Messages
- * that look like HTTP status fallbacks or browser/network errors are unknown
- * and get a safe localized fallback instead (no raw err.message leakage).
- */
-function isGenericError(msg: string): boolean {
-  if (!msg) return true
-  // API client fallback: "HTTP 500", "HTTP 404", etc.
-  if (/^HTTP \d+$/i.test(msg)) return true
-  // Browser/network error patterns (fetch failures, timeouts, etc.)
-  if (/^(failed to fetch|networkerror|network request failed|load failed|timeout|aborted)/i.test(msg)) return true
-  return false
 }
 
 export function ResourceEditorDialog({
@@ -198,13 +183,16 @@ export function ResourceEditorDialog({
       onSaved()
       onClose()
     } catch (err: unknown) {
-      // The API client extracts and i18n-translates recognized backend error
-      // messages. For unknown or generic client/HTTP errors, show a safe
-      // localized fallback instead of raw err.message (no internals/stack traces).
-      // Recognized sanitized backend messages may still be displayed.
-      const raw = err instanceof Error ? err.message : String(err)
+      // Allowlist approach: only messages from the API client's sanitized
+      // HTTP-response path (SanitizedApiError) may be displayed directly.
+      // The backend is the authority for sanitizing those (no host paths,
+      // socket paths, sensitive data, stack traces — VAL-API-010). Everything
+      // else — arbitrary Error objects, thrown strings, non-Error values,
+      // fetch TypeErrors, unknown client/runtime failures — gets a safe
+      // localized fallback so no raw err.message / internals can leak.
       const safeFallback = t('serverDetail.resourceEditor.errors.saveFailed')
-      const displayMsg = raw && !isGenericError(raw) ? raw : safeFallback
+      const displayMsg =
+        err instanceof SanitizedApiError && err.message ? err.message : safeFallback
       setFormError(displayMsg)
       toast.error(displayMsg)
       // Dialog bleibt offen, eingegebene Werte bleiben erhalten

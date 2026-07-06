@@ -5,10 +5,12 @@ import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { useToastStore } from '@/stores/toastStore'
 
-// Mock api client
-vi.mock('@/api/client', () => ({
-  api: vi.fn(),
-}))
+// Mock api client, preserving real exports (e.g. SanitizedApiError) so
+// tests can simulate the exact error type the real client throws.
+vi.mock('@/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/client')>()
+  return { ...actual, api: vi.fn() }
+})
 
 // Mock useHostInterfaces is not needed here; ResourceEditorDialog doesn't use it.
 
@@ -411,7 +413,9 @@ describe('ResourceEditorDialog', () => {
 
   it('backend 422 keeps dialog open with retained values and form-level error', async () => {
     const { onClose } = renderDialog({ cpuLimit: 100, ramLimit: 4096 })
-    mockApi.mockRejectedValueOnce(new Error('Invalid resource value'))
+    // A 422 comes through the API client's sanitized HTTP-response path,
+    // so it is a SanitizedApiError carrying the field validation message.
+    mockApi.mockRejectedValueOnce(new client.SanitizedApiError('Invalid resource value'))
 
     fireEvent.change(screen.getByTestId('resource-ram-input'), { target: { value: '2048' } })
     fireEvent.click(screen.getByTestId('resource-save-btn'))
@@ -421,6 +425,8 @@ describe('ResourceEditorDialog', () => {
     })
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByTestId('resource-ram-input')).toHaveValue('2048')
+    // The recognized sanitized validation message is displayed directly.
+    expect(screen.getByTestId('resource-form-error').textContent).toMatch(/Invalid resource value/)
   })
 
   // Unknown/generic errors map to safe localized fallback (no raw err.message)
@@ -460,8 +466,9 @@ describe('ResourceEditorDialog', () => {
 
   it('still displays recognized sanitized backend error messages', async () => {
     renderDialog({ cpuLimit: 100 })
-    // Simulate a recognized backend validation error message
-    mockApi.mockRejectedValueOnce(new Error('Validation failed'))
+    // Simulate a recognized sanitized backend error message as produced by
+    // the API client's HTTP-response path (SanitizedApiError).
+    mockApi.mockRejectedValueOnce(new client.SanitizedApiError('Validation failed'))
 
     fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '200' } })
     fireEvent.click(screen.getByTestId('resource-save-btn'))
@@ -472,6 +479,99 @@ describe('ResourceEditorDialog', () => {
     const errorEl = screen.getByTestId('resource-form-error')
     // Recognized sanitized backend messages may still be displayed
     expect(errorEl.textContent).toMatch(/Validation failed/)
+  })
+
+  // Safe error hardening: arbitrary unexpected client/runtime exceptions
+  // must map to the generic localized saveFailed fallback. Only known
+  // sanitized backend messages (SanitizedApiError) or field validation
+  // messages may be displayed directly. No raw err.message, host paths,
+  // socket paths, or internal details may surface in the UI.
+  describe('safe error hardening for unexpected failures', () => {
+    const fallback = () => i18n.t('serverDetail.resourceEditor.errors.saveFailed')
+
+    async function triggerSaveError(rejection: unknown) {
+      mockApi.mockRejectedValueOnce(rejection)
+      fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '200' } })
+      fireEvent.click(screen.getByTestId('resource-save-btn'))
+      await waitFor(() => {
+        expect(screen.getByTestId('resource-form-error')).toBeInTheDocument()
+      })
+      return screen.getByTestId('resource-form-error')
+    }
+
+    it('maps an arbitrary unexpected Error to the localized saveFailed fallback', async () => {
+      renderDialog({ cpuLimit: 100 })
+      const sentinel = 'ZZUNEXPECTED-client-bomb-9382'
+      const errorEl = await triggerSaveError(new Error(sentinel))
+      expect(errorEl.textContent).toBe(fallback())
+      // Raw unexpected message must not leak.
+      expect(errorEl.textContent).not.toMatch(/ZZUNEXPECTED-client-bomb-9382/)
+    })
+
+    it('maps an unexpected stack-trace-like Error to fallback without leaking internals', async () => {
+      renderDialog({ cpuLimit: 100 })
+      const sentinel = 'boom at internalStep (anonymous:42): cannot read config'
+      const errorEl = await triggerSaveError(new Error(sentinel))
+      expect(errorEl.textContent).toBe(fallback())
+      expect(errorEl.textContent).not.toMatch(/boom at internalStep/)
+      expect(errorEl.textContent).not.toMatch(/anonymous:42/)
+    })
+
+    it('maps a thrown string to the localized saveFailed fallback', async () => {
+      renderDialog({ cpuLimit: 100 })
+      const sentinel = 'ZZSTRING-bomb-555'
+      const errorEl = await triggerSaveError(sentinel as unknown as Error)
+      expect(errorEl.textContent).toBe(fallback())
+      expect(errorEl.textContent).not.toMatch(/ZZSTRING-bomb-555/)
+    })
+
+    it('maps a non-Error object value to the localized saveFailed fallback', async () => {
+      renderDialog({ cpuLimit: 100 })
+      const errorEl = await triggerSaveError({ weird: 'payload', tag: 'ZZOBJ-4321' } as unknown)
+      expect(errorEl.textContent).toBe(fallback())
+      expect(errorEl.textContent).not.toMatch(/ZZOBJ-4321/)
+    })
+
+    it('maps null rejection to the localized saveFailed fallback', async () => {
+      renderDialog({ cpuLimit: 100 })
+      const errorEl = await triggerSaveError(null)
+      expect(errorEl.textContent).toBe(fallback())
+    })
+
+    it('maps a TypeError (fetch failure) to the localized saveFailed fallback', async () => {
+      renderDialog({ cpuLimit: 100 })
+      const sentinel = 'ZZTYPE-bomb-111'
+      const errorEl = await triggerSaveError(new TypeError(sentinel))
+      expect(errorEl.textContent).toBe(fallback())
+      expect(errorEl.textContent).not.toMatch(/ZZTYPE-bomb-111/)
+    })
+
+    it('maps an empty-message Error to the localized saveFailed fallback', async () => {
+      renderDialog({ cpuLimit: 100 })
+      const errorEl = await triggerSaveError(new Error(''))
+      expect(errorEl.textContent).toBe(fallback())
+    })
+
+    it('still shows a recognized SanitizedApiError message directly (not the fallback)', async () => {
+      renderDialog({ cpuLimit: 100 })
+      const msg = 'Ressourcen-Update konnte nicht angewendet werden'
+      const errorEl = await triggerSaveError(new client.SanitizedApiError(msg))
+      // Recognized sanitized backend message is displayed, not the fallback.
+      expect(errorEl.textContent).toMatch(/Ressourcen-Update konnte nicht angewendet werden/)
+      expect(errorEl.textContent).not.toBe(fallback())
+    })
+
+    it('shows an error toast with the safe fallback for unexpected errors', async () => {
+      renderDialog({ cpuLimit: 100 })
+      const sentinel = 'ZZLEAK-bomb-999'
+      await triggerSaveError(new Error(sentinel))
+      const errorToasts = useToastStore.getState().toasts.filter((t) => t.type === 'error')
+      expect(errorToasts.length).toBeGreaterThan(0)
+      const toastMsg = errorToasts[errorToasts.length - 1].message
+      expect(toastMsg).toBe(fallback())
+      // The toast must not leak the raw unexpected content either.
+      expect(toastMsg).not.toMatch(/ZZLEAK-bomb-999/)
+    })
   })
 
   // VAL-UI-012: Disk UI does not overclaim hard quota behavior

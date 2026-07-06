@@ -3,6 +3,25 @@ import { toast } from '@/stores/toastStore'
 
 const API_BASE = '/api'
 
+/**
+ * Error thrown by the API client for failures that originated from a
+ * processed backend HTTP response (non-2xx status, 429, session-expired
+ * refresh failure). The backend is the authority for sanitizing these
+ * messages — it must not emit host paths, socket paths, sensitive values,
+ * stack traces, or raw command output (VAL-API-010). Callers may therefore
+ * display `.message` directly.
+ *
+ * Client-side / runtime failures (fetch TypeError, unexpected exceptions,
+ * thrown strings, non-Error values) are NOT wrapped in this class. Callers
+ * must map those to a safe localized fallback instead of raw err.message.
+ */
+export class SanitizedApiError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SanitizedApiError'
+  }
+}
+
 function getCsrfToken(): string | null {
   const match = document.cookie.match(new RegExp('(^| )__Secure-csrf_token=([^;]+)'))
   return match ? decodeURIComponent(match[2]) : null
@@ -115,8 +134,10 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     } catch {
       // Refresh fehlgeschlagen — Weiterleitung zum Login im Aufrufer.
       // Lokalisierte Meldung, damit der Caller die Fehlermeldung direkt
-      // anzeigen kann (kein doppelter `t()`-Aufruf noetig).
-      throw new Error(i18n.t('errors.SESSION_EXPIRED'))
+      // anzeigen kann (kein doppelter `t()`-Aufruf noetig). Diese Meldung
+      // stammt aus einem verarbeiteten Backend-Response-Pfad und ist
+      // sanitisiert (SanitizedApiError).
+      throw new SanitizedApiError(i18n.t('errors.SESSION_EXPIRED'))
     }
   }
 
@@ -124,7 +145,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     if (res.status === 429) {
       const message = i18n.t('errors.RATE_LIMITED')
       toast.error(message)
-      throw new Error(message)
+      throw new SanitizedApiError(message)
     }
     const text = await res.text()
     let message: string | null = null
@@ -139,7 +160,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
         message = i18n.t(message)
       }
     }
-    throw new Error(message || res.statusText || `HTTP ${res.status}`)
+    throw new SanitizedApiError(message || res.statusText || `HTTP ${res.status}`)
   }
 
   if (res.status === 204) {
