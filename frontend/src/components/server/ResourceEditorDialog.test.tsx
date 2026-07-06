@@ -192,13 +192,14 @@ describe('ResourceEditorDialog', () => {
   // VAL-UI-008: Invalid values are blocked client-side, no PATCH
   it('blocks non-numeric CPU input and shows validation error without PATCH', () => {
     renderDialog({ cpuLimit: 100 })
-    // Non-numeric input is prevented at the updateField level (only digits allowed).
-    // But we can test the validation by setting a value that bypasses the input filter
-    // via direct state manipulation isn't possible; instead test below-minimum.
-    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '5' } })
+    // Non-numeric text is now allowed to remain in the input so the user
+    // sees localized validation feedback (VAL-UI-008 / VAL-UI-017).
+    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: 'abc' } })
     fireEvent.click(screen.getByTestId('resource-save-btn'))
 
     expect(screen.getByTestId('resource-cpu-error')).toBeInTheDocument()
+    // The invalid text remains visible in the input
+    expect(screen.getByTestId('resource-cpu-input')).toHaveValue('abc')
     expect(mockApi).not.toHaveBeenCalled()
   })
 
@@ -236,6 +237,113 @@ describe('ResourceEditorDialog', () => {
 
     expect(screen.getByTestId('resource-disk-error')).toBeInTheDocument()
     expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  // VAL-UI-017: Non-numeric, decimal, and negative values for all fields
+  it('blocks decimal CPU input with validation error and no PATCH', () => {
+    renderDialog({ cpuLimit: 100 })
+    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '3.5' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    expect(screen.getByTestId('resource-cpu-error')).toBeInTheDocument()
+    expect(screen.getByTestId('resource-cpu-input')).toHaveValue('3.5')
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('blocks negative CPU input with validation error and no PATCH', () => {
+    renderDialog({ cpuLimit: 100 })
+    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '-100' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    expect(screen.getByTestId('resource-cpu-error')).toBeInTheDocument()
+    expect(screen.getByTestId('resource-cpu-input')).toHaveValue('-100')
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('blocks non-numeric RAM input with validation error and no PATCH', () => {
+    renderDialog({ ramLimit: 4096 })
+    fireEvent.change(screen.getByTestId('resource-ram-input'), { target: { value: 'abc' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    expect(screen.getByTestId('resource-ram-error')).toBeInTheDocument()
+    expect(screen.getByTestId('resource-ram-input')).toHaveValue('abc')
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('blocks decimal RAM input with validation error and no PATCH', () => {
+    renderDialog({ ramLimit: 4096 })
+    fireEvent.change(screen.getByTestId('resource-ram-input'), { target: { value: '512.5' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    expect(screen.getByTestId('resource-ram-error')).toBeInTheDocument()
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('blocks negative RAM input with validation error and no PATCH', () => {
+    renderDialog({ ramLimit: 4096 })
+    fireEvent.change(screen.getByTestId('resource-ram-input'), { target: { value: '-512' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    expect(screen.getByTestId('resource-ram-error')).toBeInTheDocument()
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('blocks non-numeric Disk input with validation error and no PATCH', () => {
+    renderDialog({ diskLimit: 50 })
+    fireEvent.change(screen.getByTestId('resource-disk-input'), { target: { value: 'abc' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    expect(screen.getByTestId('resource-disk-error')).toBeInTheDocument()
+    expect(screen.getByTestId('resource-disk-input')).toHaveValue('abc')
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('blocks decimal Disk input with validation error and no PATCH', () => {
+    renderDialog({ diskLimit: 50 })
+    fireEvent.change(screen.getByTestId('resource-disk-input'), { target: { value: '1.5' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    expect(screen.getByTestId('resource-disk-error')).toBeInTheDocument()
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('blocks negative Disk input with validation error and no PATCH', () => {
+    renderDialog({ diskLimit: 50 })
+    fireEvent.change(screen.getByTestId('resource-disk-input'), { target: { value: '-1' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    expect(screen.getByTestId('resource-disk-error')).toBeInTheDocument()
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  // VAL-UI-008: Invalid typed text remains visible with validation feedback
+  it('shows validation error on blur for non-numeric CPU input', () => {
+    renderDialog({ cpuLimit: 100 })
+    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: 'abc' } })
+    fireEvent.blur(screen.getByTestId('resource-cpu-input'))
+
+    expect(screen.getByTestId('resource-cpu-error')).toBeInTheDocument()
+    expect(screen.getByTestId('resource-cpu-input')).toHaveValue('abc')
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('shows validation error on blur for decimal RAM input', () => {
+    renderDialog({ ramLimit: 4096 })
+    fireEvent.change(screen.getByTestId('resource-ram-input'), { target: { value: '1.5' } })
+    fireEvent.blur(screen.getByTestId('resource-ram-input'))
+
+    expect(screen.getByTestId('resource-ram-error')).toBeInTheDocument()
+  })
+
+  it('clears validation error when user fixes invalid input', () => {
+    renderDialog({ cpuLimit: 100 })
+    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: 'abc' } })
+    fireEvent.blur(screen.getByTestId('resource-cpu-input'))
+    expect(screen.getByTestId('resource-cpu-error')).toBeInTheDocument()
+
+    // User fixes the input
+    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '200' } })
+    expect(screen.queryByTestId('resource-cpu-error')).not.toBeInTheDocument()
   })
 
   // VAL-UI-009: Save is pending-safe
@@ -313,6 +421,57 @@ describe('ResourceEditorDialog', () => {
     })
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByTestId('resource-ram-input')).toHaveValue('2048')
+  })
+
+  // Unknown/generic errors map to safe localized fallback (no raw err.message)
+  it('shows safe localized fallback for generic HTTP error instead of raw message', async () => {
+    renderDialog({ cpuLimit: 100 })
+    mockApi.mockRejectedValueOnce(new Error('HTTP 500'))
+
+    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '200' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('resource-form-error')).toBeInTheDocument()
+    })
+    const errorEl = screen.getByTestId('resource-form-error')
+    // Must NOT show raw "HTTP 500"
+    expect(errorEl.textContent).not.toMatch(/HTTP 500/)
+    // Must show the localized fallback
+    expect(errorEl.textContent).toBeTruthy()
+    expect(errorEl.textContent).not.toBe('')
+  })
+
+  it('shows safe localized fallback for network error instead of raw message', async () => {
+    renderDialog({ cpuLimit: 100 })
+    mockApi.mockRejectedValueOnce(new Error('Failed to fetch'))
+
+    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '200' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('resource-form-error')).toBeInTheDocument()
+    })
+    const errorEl = screen.getByTestId('resource-form-error')
+    // Must NOT show raw "Failed to fetch"
+    expect(errorEl.textContent).not.toMatch(/Failed to fetch/i)
+    expect(errorEl.textContent).toBeTruthy()
+  })
+
+  it('still displays recognized sanitized backend error messages', async () => {
+    renderDialog({ cpuLimit: 100 })
+    // Simulate a recognized backend validation error message
+    mockApi.mockRejectedValueOnce(new Error('Validation failed'))
+
+    fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '200' } })
+    fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('resource-form-error')).toBeInTheDocument()
+    })
+    const errorEl = screen.getByTestId('resource-form-error')
+    // Recognized sanitized backend messages may still be displayed
+    expect(errorEl.textContent).toMatch(/Validation failed/)
   })
 
   // VAL-UI-012: Disk UI does not overclaim hard quota behavior

@@ -1094,7 +1094,8 @@
         "cpuMin": "CPU muss mindestens 10% sein.",
         "cpuMax": "CPU darf 3200% nicht überschreiten.",
         "ramMin": "RAM muss mindestens 512 MB sein.",
-        "diskMin": "Disk muss mindestens 1 GB sein."
+        "diskMin": "Disk muss mindestens 1 GB sein.",
+        "saveFailed": "Ressourcen-Limits konnten nicht gespeichert werden. Bitte erneut versuchen."
       }
     }
   },

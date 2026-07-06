@@ -41,6 +41,21 @@ function limitToString(v: number | null): string {
   return v != null ? String(v) : ''
 }
 
+/**
+ * Detects generic/unknown error messages that should NOT be displayed raw.
+ * The API client already translates recognized backend error keys. Messages
+ * that look like HTTP status fallbacks or browser/network errors are unknown
+ * and get a safe localized fallback instead (no raw err.message leakage).
+ */
+function isGenericError(msg: string): boolean {
+  if (!msg) return true
+  // API client fallback: "HTTP 500", "HTTP 404", etc.
+  if (/^HTTP \d+$/i.test(msg)) return true
+  // Browser/network error patterns (fetch failures, timeouts, etc.)
+  if (/^(failed to fetch|networkerror|network request failed|load failed|timeout|aborted)/i.test(msg)) return true
+  return false
+}
+
 export function ResourceEditorDialog({
   onClose,
   serverId,
@@ -90,44 +105,49 @@ export function ResourceEditorDialog({
   }, [onClose, saving])
 
   const updateField = (field: keyof FormState, value: string) => {
-    // Nur Ziffern erlauben (keine Dezimalzahlen, keine Negativzeichen)
-    if (value === '' || /^\d*$/.test(value)) {
-      setForm((prev) => ({ ...prev, [field]: value }))
-      setErrors((prev) => ({ ...prev, [field]: '' }))
-      setFormError(null)
+    // Allow any typed text so invalid input remains visible long enough to
+    // show localized validation feedback (VAL-UI-008 / VAL-UI-017).
+    // Validation runs on blur and on save; invalid values block PATCH.
+    setForm((prev) => ({ ...prev, [field]: value }))
+    setErrors((prev) => ({ ...prev, [field]: '' }))
+    setFormError(null)
+  }
+
+  // Per-field validation: returns a localized error string or '' if valid.
+  // Empty string means "unlimited" and is always valid.
+  const validateField = (field: keyof FormState, value: string): string => {
+    if (value === '') return ''
+    if (!/^\d+$/.test(value)) {
+      return t('serverDetail.resourceEditor.errors.integer')
     }
+    const v = parseInt(value, 10)
+    if (field === 'cpu') {
+      if (v < 10) return t('serverDetail.resourceEditor.errors.cpuMin')
+      if (v > 3200) return t('serverDetail.resourceEditor.errors.cpuMax')
+    } else if (field === 'ram') {
+      if (v < 512) return t('serverDetail.resourceEditor.errors.ramMin')
+    } else if (field === 'disk') {
+      if (v < 1) return t('serverDetail.resourceEditor.errors.diskMin')
+    }
+    return ''
+  }
+
+  const handleBlur = (field: keyof FormState) => {
+    const err = validateField(field, form[field])
+    setErrors((prev) => ({ ...prev, [field]: err }))
   }
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {}
 
-    if (form.cpu !== '') {
-      if (!/^\d+$/.test(form.cpu)) {
-        errs.cpu = t('serverDetail.resourceEditor.errors.integer')
-      } else {
-        const v = parseInt(form.cpu, 10)
-        if (v < 10) errs.cpu = t('serverDetail.resourceEditor.errors.cpuMin')
-        else if (v > 3200) errs.cpu = t('serverDetail.resourceEditor.errors.cpuMax')
-      }
-    }
+    const cpuErr = validateField('cpu', form.cpu)
+    if (cpuErr) errs.cpu = cpuErr
 
-    if (form.ram !== '') {
-      if (!/^\d+$/.test(form.ram)) {
-        errs.ram = t('serverDetail.resourceEditor.errors.integer')
-      } else {
-        const v = parseInt(form.ram, 10)
-        if (v < 512) errs.ram = t('serverDetail.resourceEditor.errors.ramMin')
-      }
-    }
+    const ramErr = validateField('ram', form.ram)
+    if (ramErr) errs.ram = ramErr
 
-    if (form.disk !== '') {
-      if (!/^\d+$/.test(form.disk)) {
-        errs.disk = t('serverDetail.resourceEditor.errors.integer')
-      } else {
-        const v = parseInt(form.disk, 10)
-        if (v < 1) errs.disk = t('serverDetail.resourceEditor.errors.diskMin')
-      }
-    }
+    const diskErr = validateField('disk', form.disk)
+    if (diskErr) errs.disk = diskErr
 
     setErrors(errs)
     return Object.keys(errs).length === 0
@@ -178,11 +198,15 @@ export function ResourceEditorDialog({
       onSaved()
       onClose()
     } catch (err: unknown) {
-      // api-Client extrahiert und i18n-uebersetzt bereits die Fehlermeldung.
-      // Backend stellt Sanitization sicher (keine Internals/Stacktraces).
+      // The API client extracts and i18n-translates recognized backend error
+      // messages. For unknown or generic client/HTTP errors, show a safe
+      // localized fallback instead of raw err.message (no internals/stack traces).
+      // Recognized sanitized backend messages may still be displayed.
       const raw = err instanceof Error ? err.message : String(err)
-      setFormError(raw || t('common.error'))
-      toast.error(raw || t('common.error'))
+      const safeFallback = t('serverDetail.resourceEditor.errors.saveFailed')
+      const displayMsg = raw && !isGenericError(raw) ? raw : safeFallback
+      setFormError(displayMsg)
+      toast.error(displayMsg)
       // Dialog bleibt offen, eingegebene Werte bleiben erhalten
     } finally {
       setSaving(false)
@@ -268,6 +292,7 @@ export function ResourceEditorDialog({
               className="msm-input"
               value={form.cpu}
               onChange={(e) => updateField('cpu', e.target.value)}
+              onBlur={() => handleBlur('cpu')}
               aria-invalid={!!errors.cpu || undefined}
               aria-describedby={errors.cpu ? 'resource-cpu-error' : 'resource-cpu-hint'}
               data-testid="resource-cpu-input"
@@ -298,6 +323,7 @@ export function ResourceEditorDialog({
               className="msm-input"
               value={form.ram}
               onChange={(e) => updateField('ram', e.target.value)}
+              onBlur={() => handleBlur('ram')}
               aria-invalid={!!errors.ram || undefined}
               aria-describedby={errors.ram ? 'resource-ram-error' : 'resource-ram-hint'}
               data-testid="resource-ram-input"
@@ -328,6 +354,7 @@ export function ResourceEditorDialog({
               className="msm-input"
               value={form.disk}
               onChange={(e) => updateField('disk', e.target.value)}
+              onBlur={() => handleBlur('disk')}
               aria-invalid={!!errors.disk || undefined}
               aria-describedby={errors.disk ? 'resource-disk-error' : 'resource-disk-hint'}
               data-testid="resource-disk-input"

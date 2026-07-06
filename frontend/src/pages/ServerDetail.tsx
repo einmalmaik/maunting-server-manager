@@ -434,6 +434,14 @@ export function ServerDetail() {
     "awaiting_files",
   ].includes(effectiveStatus);
 
+  // Configured resource limits: derive from status (live) first, then server
+  // (DB-persisted) fallback. null means unlimited → always show the localized
+  // unlimited label, regardless of disk_free_mb or other usage fields
+  // (VAL-UI-001 / VAL-UI-007).
+  const configuredCpuLimit = status?.cpu_limit_percent ?? server.cpu_limit_percent ?? null;
+  const configuredRamLimit = status?.ram_limit_mb ?? server.ram_limit_mb ?? null;
+  const configuredDiskLimit = status?.disk_limit_gb ?? server.disk_limit_gb ?? null;
+
   const openResourceEditor = () => setShowEditResource(true);
   const closeResourceEditor = () => setShowEditResource(false);
   const onResourceSaved = () => void fetchAll();
@@ -699,8 +707,8 @@ export function ServerDetail() {
           </p>
           <p className="font-body-md text-xs text-on-surface-variant mt-1">
             {t("serverDetail.limit")}:{" "}
-            {status?.cpu_limit_percent
-              ? `${status.cpu_limit_percent}%`
+            {configuredCpuLimit != null
+              ? `${configuredCpuLimit}%`
               : t("common.unlimited")}
           </p>
         </div>
@@ -713,8 +721,8 @@ export function ServerDetail() {
           </p>
           <p className="font-body-md text-xs text-on-surface-variant mt-1">
             {t("serverDetail.limit")}:{" "}
-            {status?.ram_limit_mb
-              ? formatMb(status.ram_limit_mb)
+            {configuredRamLimit != null
+              ? formatMb(configuredRamLimit)
               : t("common.unlimited")}
           </p>
         </div>
@@ -726,11 +734,9 @@ export function ServerDetail() {
             {status?.disk_used_mb != null ? formatMb(status.disk_used_mb) : "-"}
           </p>
           <p className="font-body-md text-xs text-on-surface-variant mt-1">
-            {status?.disk_limit_gb
-              ? `${t("serverDetail.limit")}: ${status.disk_limit_gb} GB`
-              : status?.disk_free_mb != null
-                ? `${formatMb(status.disk_free_mb)} ${t("serverDetail.free")}`
-                : t("common.unlimited")}
+            {configuredDiskLimit != null
+              ? `${t("serverDetail.limit")}: ${configuredDiskLimit} GB`
+              : t("common.unlimited")}
           </p>
         </div>
         <div className="msm-card p-5">
@@ -1046,9 +1052,9 @@ export function ServerDetail() {
         <ResourceEditorDialog
           onClose={closeResourceEditor}
           serverId={serverId}
-          cpuLimit={status?.cpu_limit_percent ?? server.cpu_limit_percent ?? null}
-          ramLimit={status?.ram_limit_mb ?? server.ram_limit_mb ?? null}
-          diskLimit={status?.disk_limit_gb ?? server.disk_limit_gb ?? null}
+          cpuLimit={configuredCpuLimit}
+          ramLimit={configuredRamLimit}
+          diskLimit={configuredDiskLimit}
           lifecycleBusy={isLifecycleBusy}
           onSaved={onResourceSaved}
         />
