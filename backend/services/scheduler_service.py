@@ -410,6 +410,103 @@ def get_jobs(server_id: Optional[int] = None) -> list:
 # cleanup_old_backups wurde entfernt (war Duplikat). Zentrale Implementierung
 # jetzt in services/backup_service.py (wird von _backup_server_task und Router genutzt).
 
+# ── Disk-Soft-Limit: zentrale Evaluierungs-Funktion (DRY) ──────────────
+# Wird sowohl vom Scheduler (periodisch, _disk_soft_limit_task) als auch vom
+# PATCH-Handler (sofort nach disk_limit_gb-Aenderung) genutzt.
+# Keine Datei- oder DB-Zeilenloeschung. Kein Docker-Hard-Quota.
+# Startet niemals einen gestoppten Server (VAL-DISK-006).
+
+DISK_WARN_MSG_PREFIX = "Warnung: Disk-Verbrauch bei"
+DISK_STOP_MSG_PREFIX = "Disk-Soft-Limit erreicht"
+
+
+def _is_disk_status_message(msg: str | None) -> bool:
+    """True wenn status_message ein Disk-Soft-Limit-Status ist (Warnung oder Stop)."""
+    if not msg:
+        return False
+    return msg.startswith(DISK_WARN_MSG_PREFIX) or msg.startswith(DISK_STOP_MSG_PREFIX)
+
+
+def _clear_stale_disk_state(server) -> None:
+    """Loescht verstaendliche Disk-Warn-/Fehler-Zustaende (VAL-DISK-006).
+
+    Setzt status von 'error' auf 'stopped' zurueck, wenn der Fehler durch
+    Disk-Soft-Limit verursacht wurde. Startet niemals einen Server.
+    """
+    if not _is_disk_status_message(server.status_message):
+        return
+    server.status_message = None
+    if server.status == "error":
+        server.status = "stopped"
+
+
+def evaluate_disk_soft_limit(db, server) -> dict:
+    """Misst die aktuelle Disk-Nutzung und wendet die bestehende Soft-Limit-
+    Warn-/Stop-Policy fuer einen einzelnen Server an.
+
+    Wird sowohl vom Scheduler (periodisch) als auch vom PATCH-Handler
+    (sofort nach Aenderung) genutzt (DRY, VAL-DISK-001).
+
+    - Keine Datei- oder DB-Zeilenloeschung (VAL-DISK-002, VAL-DISK-003).
+    - Kein Docker-Hard-Quota (VAL-DISK-004, VAL-DOCKER-010).
+    - Stop erfolgt ueber plugin.stop (Lifecycle/Plugin-Boundary, VAL-DISK-007).
+    - Startet niemals einen gestoppten Server (VAL-DISK-006).
+    - Bei Mess- oder Enforcement-Fehler: ``{"ok": False}`` damit Aufrufer
+      rollbacken kann (VAL-DISK-005, kein Drift).
+
+    Returns:
+        ``{"ok": True, "action": "none"|"warning"|"stop"|"cleared"}``
+        ``{"ok": False, "error": "..."}`` bei Mess- oder Enforcement-Fehler
+    """
+    from models import AuditLog
+
+    usage_mb = docker_service.disk_usage_mb(server.install_dir)
+    if usage_mb is None:
+        return {"ok": False, "error": "Disk-Nutzung konnte nicht ermittelt werden"}
+
+    server.disk_usage_mb = usage_mb
+    limit_mb = (server.disk_limit_gb or 0) * 1024
+
+    if limit_mb <= 0:
+        # Kein Limit gesetzt -> ggf. verstaendliche Disk-Warnung loeschen
+        # (VAL-DISK-006). Status NICHT auf 'running' setzen (kein Auto-Start).
+        _clear_stale_disk_state(server)
+        return {"ok": True, "action": "cleared"}
+
+    percent = (usage_mb * 100) // limit_mb
+
+    if percent >= DISK_STOP_THRESHOLD_PERCENT:
+        plugin = get_plugin(server.game_type)
+        if plugin and server.status == "running":
+            try:
+                plugin.stop(server)
+            except Exception:
+                logger.warning("disk-limit stop failed for %s", server.id)
+                return {"ok": False, "error": "Disk-Limit-Stop fehlgeschlagen"}
+        server.status = "error"
+        server.status_message = (
+            f"Disk-Soft-Limit erreicht ({usage_mb} MB / {limit_mb} MB). Container gestoppt."
+        )
+        db.add(AuditLog(
+            user_id=None,
+            action="disk_limit_stop",
+            target_type="server",
+            target_id=server.id,
+            details=f"Disk usage {usage_mb} MB hit limit {limit_mb} MB",
+        ))
+        return {"ok": True, "action": "stop"}
+    elif percent >= DISK_WARN_THRESHOLD_PERCENT:
+        server.status_message = (
+            f"Warnung: Disk-Verbrauch bei {percent} % von {limit_mb} MB."
+        )
+        return {"ok": True, "action": "warning"}
+    else:
+        # Usage innerhalb des Limits -> verstaendliche Disk-Warnung loeschen
+        # (VAL-DISK-006). Kein Auto-Start.
+        _clear_stale_disk_state(server)
+        return {"ok": True, "action": "none"}
+
+
 async def _disk_soft_limit_task() -> None:
     """Globaler periodischer Job: aktualisiert `disk_usage_mb` für ALLE Server,
     und prüft zusätzlich das Soft-Limit (falls gesetzt).
@@ -419,43 +516,15 @@ async def _disk_soft_limit_task() -> None:
     - Warnung bei >= 80 % belegt: `status_message` enthält Warntext.
     - Auto-Stop bei >= 100 % belegt: Container gestoppt, `status='error'`.
     """
-    from models import AuditLog, Server
+    from models import Server
 
     db = SessionLocal()
     try:
         servers = db.query(Server).all()
         for server in servers:
-            usage_mb = docker_service.disk_usage_mb(server.install_dir)
-            if usage_mb is None:
+            result = evaluate_disk_soft_limit(db, server)
+            if not result.get("ok"):
                 continue
-            server.disk_usage_mb = usage_mb
-            limit_mb = (server.disk_limit_gb or 0) * 1024
-            if limit_mb <= 0:
-                continue
-            percent = (usage_mb * 100) // limit_mb
-
-            if percent >= DISK_STOP_THRESHOLD_PERCENT:
-                plugin = get_plugin(server.game_type)
-                if plugin and server.status == "running":
-                    try:
-                        plugin.stop(server)
-                    except Exception as e:
-                        logger.warning("disk-limit stop failed for %s: %s", server.id, e)
-                server.status = "error"
-                server.status_message = (
-                    f"Disk-Soft-Limit erreicht ({usage_mb} MB / {limit_mb} MB). Container gestoppt."
-                )
-                db.add(AuditLog(
-                    user_id=None,
-                    action="disk_limit_stop",
-                    target_type="server",
-                    target_id=server.id,
-                    details=f"Disk usage {usage_mb} MB hit limit {limit_mb} MB",
-                ))
-            elif percent >= DISK_WARN_THRESHOLD_PERCENT:
-                server.status_message = (
-                    f"Warnung: Disk-Verbrauch bei {percent} % von {limit_mb} MB."
-                )
         db.commit()
     except Exception as e:
         logger.warning("disk soft-limit task crashed: %s", e)

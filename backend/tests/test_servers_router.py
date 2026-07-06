@@ -957,12 +957,14 @@ class TestResourcePatchPermissions:
         self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session,
         field, value,
     ):
-        response = client.patch(
-            f"/api/servers/{test_server.id}",
-            json={field: value},
-            cookies=owner_cookies,
-            headers={"X-CSRF-Token": csrf_token},
-        )
+        with patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={field: value},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
         assert response.status_code == 200, response.text
         assert response.json()[field] == value
 
@@ -1567,14 +1569,17 @@ class TestLiveResourceUpdate:
         self, client: TestClient, owner_cookies: dict, csrf_token: str,
         test_server: Server, db: Session,
     ):
-        """Disk-Aenderung allein loest kein Docker-Update aus (Soft-Limit)."""
+        """Disk-Aenderung allein loest kein Docker-Update aus (Soft-Limit),
+        aber sofortige Disk-Soft-Limit-Re-evaluation (VAL-DISK-001, VAL-DISK-004)."""
         self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
         test_server.status = "running"
         db.commit()
 
         with patch("routers.servers.docker_service.is_running") as mock_running, \
              patch("routers.servers.docker_service.update_container_resources") as mock_update, \
-             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+             patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}) as mock_eval:
             response = client.patch(
                 f"/api/servers/{test_server.id}",
                 json={"disk_limit_gb": 50},
@@ -1583,9 +1588,505 @@ class TestLiveResourceUpdate:
             )
         assert response.status_code == 200
         assert response.json()["disk_limit_gb"] == 50
-        # Disk ist Soft-Limit: kein Docker-Update, kein is_running-Check
+        # Disk ist Soft-Limit: kein Docker-Update
         mock_update.assert_not_called()
-        mock_running.assert_not_called()
+        # Disk-Soft-Limit-Re-evaluation wurde sofort aufgerufen (VAL-DISK-001)
+        mock_eval.assert_called_once()
+
+
+# ── Disk Soft-Limit Re-evaluation (VAL-DISK-001..007, VAL-DOCKER-010) ──
+
+
+class TestDiskSoftLimitReEvaluation:
+    """Tests fuer sofortige Disk-Soft-Limit-Re-evaluation nach PATCH."""
+
+    def _set_resources(self, db: Session, server: Server, cpu=100, ram=2048, disk=20) -> None:
+        server.cpu_limit_percent = cpu
+        server.ram_limit_mb = ram
+        server.disk_limit_gb = disk
+        db.commit()
+        db.refresh(server)
+
+    # ── VAL-DISK-001: Disk changes trigger immediate usage re-evaluation ──
+
+    def test_disk_change_triggers_immediate_reevaluation(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk_limit_gb-Aenderung loest sofortige evaluate_disk_soft_limit aus."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}) as mock_eval:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        mock_eval.assert_called_once()
+        # Verify the server object was passed
+        call_args = mock_eval.call_args
+        assert call_args[0][1].id == test_server.id  # db, server positional
+
+    def test_disk_noop_does_not_trigger_reevaluation(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """No-Op-Disk-PATCH (gleicher Wert) loest keine Re-evaluation aus (VAL-API-012)."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.evaluate_disk_soft_limit") as mock_eval:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 20},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        mock_eval.assert_not_called()
+
+    # ── VAL-DISK-002: Lowering disk below usage invokes safe stop ──
+
+    def test_lowering_disk_below_usage_invokes_stop_no_deletion(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Limit unter aktuellen Verbrauch -> Stop via plugin.stop, keine Datenloeschung."""
+        self._set_resources(db, test_server, disk=50)
+        test_server.status = "running"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        stop_called = []
+
+        class FakePlugin:
+            def stop(self, server):
+                stop_called.append(server.id)
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=30000), \
+             patch("services.scheduler_service.get_plugin", return_value=FakePlugin()):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 10},  # 10 GB = 10240 MB, usage 30000 MB > 100%
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        # Stop wurde aufgerufen
+        assert stop_called == [test_server.id]
+        # Keine Docker-Resource-Updates (nur Disk)
+        mock_update.assert_not_called()
+        # Kein force-remove oder prune
+        mock_remove.assert_not_called()
+        # Server-Daten bleiben erhalten (kein Datei- oder DB-Loesch-Aufruf)
+        db.refresh(test_server)
+        assert test_server.status == "error"
+        assert "Disk-Soft-Limit" in (test_server.status_message or "")
+        assert test_server.disk_limit_gb == 10
+
+    def test_lowering_disk_below_usage_stopped_server_sets_error_no_stop(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Bei bereits gestopptem Server: Status auf error, kein plugin.stop-Aufruf."""
+        self._set_resources(db, test_server, disk=50)
+        test_server.status = "stopped"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        stop_called = []
+
+        class FakePlugin:
+            def stop(self, server):
+                stop_called.append(server.id)
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=30000), \
+             patch("services.scheduler_service.get_plugin", return_value=FakePlugin()):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 10},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        # Plugin.stop wurde nicht aufgerufen (Server war bereits gestoppt)
+        assert stop_called == []
+        db.refresh(test_server)
+        assert test_server.status == "error"
+        assert "Disk-Soft-Limit" in (test_server.status_message or "")
+
+    # ── VAL-DISK-003: Increasing or clearing disk limit is non-destructive ──
+
+    def test_increasing_disk_limit_non_destructive(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Limit erhoehen -> keine Stop/Delete-Aufrufe, Nutzung innerhalb Policy."""
+        self._set_resources(db, test_server, disk=10)
+        test_server.status = "running"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=5000), \
+             patch("services.scheduler_service.get_plugin") as mock_plugin:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 100},  # 100 GB, usage 5000 MB < 80%
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        assert response.json()["disk_limit_gb"] == 100
+        # Kein Stop, kein Docker-Update
+        mock_plugin.assert_not_called()
+        mock_update.assert_not_called()
+        # Status bleibt running
+        db.refresh(test_server)
+        assert test_server.status == "running"
+
+    def test_clearing_disk_limit_non_destructive(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk-Limit auf null setzen -> keine Stop/Delete, Limit geloescht."""
+        self._set_resources(db, test_server, disk=10)
+        test_server.status = "running"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=5000), \
+             patch("services.scheduler_service.get_plugin") as mock_plugin:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": None},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        assert response.json()["disk_limit_gb"] is None
+        mock_plugin.assert_not_called()
+        mock_update.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.status == "running"
+
+    # ── VAL-DISK-004: Disk remains soft limit, not Docker hard quota ──
+
+    def test_disk_only_change_no_docker_hard_quota(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk-Aenderung sendet keine Docker-Hard-Quota (storage_opt, overlay, etc.)."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        # Docker update_container_resources wurde NICHT aufgerufen
+        mock_update.assert_not_called()
+
+    # ── VAL-DISK-005: Disk re-evaluation failure has no drift ──
+
+    def test_disk_measurement_failure_rolls_back_no_drift(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk-Nutzungsmessung schlaegt fehl -> 503, alte Werte erhalten (kein Drift)."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "stopped"
+        test_server.status_message = "existing message"
+        db.commit()
+
+        with patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": False, "error": "Disk-Nutzung konnte nicht ermittelt werden"}):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        assert "Disk-Limit" in response.json()["detail"]
+        # Kein Drift: alte Werte erhalten
+        db.refresh(test_server)
+        assert test_server.disk_limit_gb == 20
+        assert test_server.status == "stopped"
+        assert test_server.status_message == "existing message"
+
+    def test_disk_enforcement_failure_rolls_back_no_drift(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk-Stop schlaegt fehl -> 503, alte Werte erhalten (kein Drift)."""
+        self._set_resources(db, test_server, disk=50)
+        test_server.status = "running"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        class FailingPlugin:
+            def stop(self, server):
+                raise RuntimeError("stop failed")
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=30000), \
+             patch("services.scheduler_service.get_plugin", return_value=FailingPlugin()):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 10},  # below usage -> stop needed
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        # Kein Drift: alte Werte erhalten
+        db.refresh(test_server)
+        assert test_server.disk_limit_gb == 50
+        assert test_server.status == "running"
+        mock_update.assert_not_called()
+
+    # ── VAL-DISK-006: Stale warning state handling ──
+
+    def test_increasing_disk_clears_stale_warning(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Limit erhoehen, Usage innerhalb Policy -> Disk-Warnung geloescht (VAL-DISK-006)."""
+        self._set_resources(db, test_server, disk=10)
+        test_server.status = "running"
+        test_server.status_message = "Warnung: Disk-Verbrauch bei 85 % von 10240 MB."
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=5000), \
+             patch("services.scheduler_service.get_plugin") as mock_plugin:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 100},  # 100 GB, usage 5000 MB < 80%
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        db.refresh(test_server)
+        # Warnung geloescht
+        assert test_server.status_message is None
+        # Status bleibt running (kein Auto-Start noetig)
+        assert test_server.status == "running"
+        mock_plugin.assert_not_called()
+
+    def test_clearing_disk_clears_stale_error_no_autostart(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Limit loeschen, Server war in error -> status auf stopped, kein Auto-Start."""
+        self._set_resources(db, test_server, disk=10)
+        test_server.status = "error"
+        test_server.status_message = "Disk-Soft-Limit erreicht (30000 MB / 10240 MB). Container gestoppt."
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=30000), \
+             patch("services.scheduler_service.get_plugin") as mock_plugin, \
+             patch("routers.servers.docker_service.start") as mock_start:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": None},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        db.refresh(test_server)
+        # Status von error -> stopped (nicht running! kein Auto-Start)
+        assert test_server.status == "stopped"
+        assert test_server.status_message is None
+        assert test_server.disk_limit_gb is None
+        # Kein Start-Aufruf
+        mock_start.assert_not_called()
+        mock_plugin.assert_not_called()
+
+    def test_non_disk_status_message_preserved(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Nicht-Disk-Statusmeldung bleibt bei Disk-Limit-Erhoehung erhalten."""
+        self._set_resources(db, test_server, disk=10)
+        test_server.status = "running"
+        test_server.status_message = "Hintergrund-Check: Server-Datei-Update verfuegbar."
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=5000), \
+             patch("services.scheduler_service.get_plugin"):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 100},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        db.refresh(test_server)
+        # Nicht-Disk-Meldung bleibt erhalten
+        assert "Server-Datei-Update" in (test_server.status_message or "")
+
+    # ── VAL-DISK-007: Disk stop uses lifecycle-safe stop path ──
+
+    def test_disk_stop_uses_lifecycle_lock(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk-Stop erfolgt unter Lifecycle-Lock (VAL-DISK-007)."""
+        self._set_resources(db, test_server, disk=50)
+        test_server.status = "running"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        class FakePlugin:
+            def stop(self, server):
+                pass
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False) as mock_active, \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources"), \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=30000), \
+             patch("services.scheduler_service.get_plugin", return_value=FakePlugin()):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 10},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        # Lifecycle-Job-Check wurde aufgerufen (Lock wurde geprueft/akquiriert)
+        assert mock_active.call_count >= 2  # pre-check + re-check after lock
+
+    def test_disk_stop_conflict_when_lifecycle_active(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Lifecycle-Job aktiv -> 409, keine Disk-Mutation, kein Drift."""
+        self._set_resources(db, test_server, disk=50)
+        test_server.status = "running"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=True), \
+             patch("services.scheduler_service.docker_service.disk_usage_mb") as mock_usage, \
+             patch("services.scheduler_service.get_plugin") as mock_plugin:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 10},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        # Keine Disk-Messung oder Plugin-Aufruf
+        mock_usage.assert_not_called()
+        mock_plugin.assert_not_called()
+        # Kein Drift
+        db.refresh(test_server)
+        assert test_server.disk_limit_gb == 50
+
+    def test_disk_stop_no_force_remove_or_prune(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk-Stop verwendet plugin.stop, nie force-remove/prune/duplicate-stop."""
+        self._set_resources(db, test_server, disk=50)
+        test_server.status = "running"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        stop_count = []
+
+        class FakePlugin:
+            def stop(self, server):
+                stop_count.append(1)
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch("routers.servers.docker_service.update_container_resources"), \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=30000), \
+             patch("services.scheduler_service.get_plugin", return_value=FakePlugin()):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 10},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        # Genau ein Stop, kein force-remove
+        assert len(stop_count) == 1
+        mock_remove.assert_not_called()
+
+    # ── VAL-DISK-002: No data deletion during stop ──
+
+    def test_disk_stop_no_filesystem_or_db_deletion(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk-Stop loescht keine Dateien, Backups, Logs oder DB-Zeilen."""
+        self._set_resources(db, test_server, disk=50)
+        test_server.status = "running"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        class FakePlugin:
+            def stop(self, server):
+                pass
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch("routers.servers.shutil.rmtree") as mock_rmtree, \
+             patch("routers.servers.docker_service.update_container_resources"), \
+             patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=30000), \
+             patch("services.scheduler_service.get_plugin", return_value=FakePlugin()):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 10},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        # Keine Datei- oder Verzeichnisloeschung
+        mock_rmtree.assert_not_called()
+        mock_remove.assert_not_called()
+        # Server-Row existiert noch
+        db.refresh(test_server)
+        assert test_server.id is not None
 
 
 # ── Exec-Tab Endpoint (v1.4.7) ───────────────────────────────────────────

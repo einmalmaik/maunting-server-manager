@@ -35,7 +35,7 @@ from services.firewall_service import close_ports, open_ports
 from services.network_interfaces_service import default_bind_ip, list_host_interfaces
 from services.port_allocation_service import PortConflictError, allocate_ports
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
-from services.scheduler_service import sync_server_restart_schedule
+from services.scheduler_service import sync_server_restart_schedule, evaluate_disk_soft_limit
 from services.server_lifecycle_service import (
     LifecycleNotification,
     get_server_lifecycle_lock,
@@ -381,6 +381,8 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     old_ram = server.ram_limit_mb
     cpu_changed = "cpu_limit_percent" in payload and payload["cpu_limit_percent"] != old_cpu
     ram_changed = "ram_limit_mb" in payload and payload["ram_limit_mb"] != old_ram
+    old_disk = server.disk_limit_gb
+    disk_changed = "disk_limit_gb" in payload and payload["disk_limit_gb"] != old_disk
 
     # ── Least-privilege: jede Feldgruppe braucht nur ihre eigene Permission. ──
     # Ressourcen-PATCHes kommen mit ``server.resources.manage`` allein aus,
@@ -456,8 +458,8 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                 setattr(server, key, val)
         _normalize_server_restart_mode(server)
 
-        # ── Live CPU/RAM-Update fuer laufende Container (ohne Restart). ──
-        # Nur bei tatsaechlich geaenderten CPU/RAM-Werten und nur wenn kein
+        # ── Live CPU/RAM-Update und/oder Disk-Soft-Limit-Re-evaluation ──
+        # Nur bei tatsaechlich geaenderten Werten und nur wenn kein
         # Network-Change im selben PATCH ist (der Network-Recreate-Pfad
         # sammelt die neuen Werte beim naechsten Start ein).
         # Bei gestoppten Servern werden die Werte nur persistiert (VAL-API-008).
@@ -465,8 +467,15 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         # Lifecycle-Serialisierung verhindert Race-Conditions mit Start/Stop
         # (VAL-API-014). Stale-Runtime-Check verhindert DB/Docker-Drift
         # (VAL-API-015). Keine Network- oder Firewall-Mutation (VAL-DOCKER-006).
+        # Disk ist ein Soft-Limit: sofortige Re-evaluation ohne Docker-Hard-Quota
+        # (VAL-DISK-001, VAL-DISK-004, VAL-DOCKER-010).
         resource_live_change = (cpu_changed or ram_changed) and not network_change
-        if resource_live_change:
+        disk_eval_needed = disk_changed and not network_change
+        # Lock wird benoetigt fuer CPU/RAM-Live-Update (Docker-Mutation) und
+        # fuer Disk-Re-evaluation bei laufendem Server (potenzieller Stop
+        # via plugin.stop, VAL-DISK-007).
+        needs_lock = resource_live_change or (disk_eval_needed and server.status == "running")
+        if needs_lock:
             container_name = container_name_for(server.id)
             # Lifecycle-Job aktiv -> sicherer Konflikt (VAL-API-014).
             if is_lifecycle_job_active(server_id):
@@ -488,10 +497,10 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                         status_code=409,
                         detail="Server Lifecycle-Aktion laeuft, Ressourcen-Update nicht moeglich",
                     )
+                # ── CPU/RAM Live-Update fuer laufende Container (ohne Restart). ──
                 # Stale-Runtime-Check (VAL-API-015): DB-Status und Docker-
-                # Container-Status muessen uebereinstimmen. Wenn DB "running"
-                # sagt aber Docker nicht, driften wir nicht.
-                if server.status == "running":
+                # Container-Status muessen uebereinstimmen.
+                if resource_live_change and server.status == "running":
                     if not docker_service.is_running(container_name):
                         raise HTTPException(
                             status_code=409,
@@ -515,8 +524,29 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                         )
                 # Bei status != "running": nur persistieren, kein Docker-Aufruf,
                 # kein Start (VAL-API-008).
+                # ── Disk Soft-Limit sofort neu bewerten (VAL-DISK-001). ──
+                # Misst Nutzung und wendet bestehende Warn-/Stop-Policy an.
+                # Stop erfolgt via plugin.stop unter Lifecycle-Lock (VAL-DISK-007).
+                # Bei Fehlschlag: 503 + Rollback, kein Drift (VAL-DISK-005).
+                if disk_eval_needed:
+                    disk_result = evaluate_disk_soft_limit(db, server)
+                    if not disk_result.get("ok"):
+                        raise HTTPException(
+                            status_code=503,
+                            detail="Disk-Limit konnte nicht neu bewertet werden",
+                        )
             finally:
                 lock.release()
+        elif disk_eval_needed:
+            # Server nicht running -> Disk-Re-evaluation ohne Lock (kein Stop
+            # moeglich, keine Docker-Mutation). Misst nur Nutzung und ggf.
+            # Loeschen verstaendlicher Disk-Warn-Status (VAL-DISK-006).
+            disk_result = evaluate_disk_soft_limit(db, server)
+            if not disk_result.get("ok"):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Disk-Limit konnte nicht neu bewertet werden",
+                )
 
         db.commit()
         db.refresh(server)

@@ -1148,3 +1148,88 @@ class TestUpdateContainerResources:
         kwargs = container.update.call_args.kwargs
         assert "mem_limit" not in kwargs
         assert "memswap_limit" not in kwargs
+
+
+# ── VAL-DOCKER-010: Disk limit is never sent as Docker hard quota ──────
+
+
+class TestDiskLimitNeverDockerHardQuota:
+    """Verifies that disk_limit_gb is never passed as a Docker storage quota,
+    overlay size, device-mapper size, or equivalent hard-quota argument during
+    create, live update, or recreate paths (VAL-DOCKER-010, VAL-DISK-004).
+    """
+
+    def test_run_container_no_storage_opt_in_kwargs(self):
+        """run_container never passes storage_opt, disk_quota, or size to Docker SDK."""
+        client = MagicMock()
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            docker_service.run_container(
+                name="msm-srv-1",
+                image="ghcr.io/parkervcp/steamcmd:debian",
+                command=["x"],
+                env={},
+                volumes=[],
+                cpu_limit_percent=100,
+                ram_limit_mb=2048,
+            )
+
+        kwargs = client.containers.run.call_args.kwargs
+        # No storage quota keys whatsoever
+        assert "storage_opt" not in kwargs
+        assert "storage_opts" not in kwargs
+        assert "disk_quota" not in kwargs
+        assert "disk_limit_gb" not in kwargs
+        assert "size" not in kwargs
+        assert "shm_size" not in kwargs or kwargs.get("shm_size") is None
+
+    def test_run_container_signature_has_no_disk_limit_param(self):
+        """run_container does not accept a disk_limit_gb parameter at all."""
+        import inspect
+        sig = inspect.signature(docker_service.run_container)
+        assert "disk_limit_gb" not in sig.parameters
+        assert "storage_opt" not in sig.parameters
+        assert "storage_quota" not in sig.parameters
+
+    def test_update_container_resources_ignores_disk_limit(self):
+        """update_container_resources does not handle disk_limit_gb at all.
+        If disk_limit_gb is passed, it is silently ignored (no storage_opt
+        in update kwargs)."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1",
+                {"cpu_limit_percent": 200, "ram_limit_mb": 4096, "disk_limit_gb": 50},
+            )
+
+        assert result == {"ok": True}
+        kwargs = container.update.call_args.kwargs
+        # No storage quota keys in update payload
+        assert "storage_opt" not in kwargs
+        assert "storage_opts" not in kwargs
+        assert "disk_quota" not in kwargs
+        assert "size" not in kwargs
+        # Only CPU and RAM fields are present
+        assert "cpu_period" in kwargs
+        assert "mem_limit" in kwargs
+
+    def test_update_container_resources_disk_only_is_noop(self):
+        """Passing only disk_limit_gb to update_container_resources is a no-op
+        (no Docker call at all, since disk is a soft limit)."""
+        container = MagicMock()
+        container.update.return_value = {"Warnings": []}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1",
+                {"disk_limit_gb": 50},
+            )
+
+        # No CPU/RAM fields -> no update_kwargs -> no Docker call
+        assert result == {"ok": True}
+        container.update.assert_not_called()
