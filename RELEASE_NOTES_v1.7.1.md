@@ -109,13 +109,21 @@ Verhalten bei Rootless-Fehlern:
 
 ## Bekannte Einschraenkungen
 
-- **Rootless-Linux-Smoke-Validation:** Die lokale Entwicklungsumgebung verwendet
-  Windows Docker Desktop, nicht das produktive Rootless-Linux-Docker. Rootless-
-  Linux-Smoke-Validierung (live CPU/RAM-Update, Unlimited-Clearing, Safe-Failure
-  auf einem echten Rootless-Linux-Host) konnte in dieser Umgebung nicht
-  durchgefuehrt werden. Dies ist ein Release-Gate fuer die Publikation
-  (Merge/Tag). Mocked-Docker-SDK-Tests und simulierte Rootless-Failure-Tests
-  decken das Verhalten ab, ersetzen aber nicht die produktive Paritaet.
+- **Rootless-Linux-Smoke-Validation (User-Waiver):** Die lokale
+  Entwicklungsumgebung verwendet Windows Docker Desktop, nicht das produktive
+  Rootless-Linux-Docker. Rootless-Linux-Smoke-Validierung (live CPU/RAM-Update,
+  Unlimited-Clearing, Safe-Failure auf einem echten Rootless-Linux-Host) konnte
+  in dieser Umgebung nicht durchgefuehrt werden. Der Nutzer hat am 2026-07-07
+  explizit waived, dass die echte Rootless-Linux-Smoke-Validation als hartes
+  Release-Gate entfaellt, da die aktuelle Umgebung Windows Docker Desktop ist
+  und nicht über einen produktiven Rootless-Linux-Host verfuegt. Der Waiver gilt
+  nur unter folgenden Bedingungen: alle lokalen Validatoren sind gruen, die
+  Docker-SDK/Rootless-Failure-Logik ist durch Tests, Mocks oder simulierte
+  Rootless-Failure-Tests belegt, es gibt keinen privilegierten Fallback, keinen
+  versteckten Restart und keinen DB/Docker-Drift. Mocked-Docker-SDK-Tests und
+  simulierte Rootless-Failure-Tests decken das Verhalten ab, ersetzen aber nicht
+  die produktive Paritaet. Eine spätere Validierung auf einem echten
+  Rootless-Linux-Host wird fuer die produktive Paritaet empfohlen.
 - **Disk als Soft-Limit:** Disk-Limits sind keine Docker-Hard-Quotas. Das System
   misst Nutzung und warnt/stopt bei Ueberschreitung, kann aber keine echte
   Festplatten-Quota auf Container-Ebene erzwingen.
