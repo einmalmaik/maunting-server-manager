@@ -1,7 +1,9 @@
 """Tests for servers router: CRUD, permissions, CSRF."""
+import logging
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -743,6 +745,454 @@ class TestServerPortsRouter:
         query_port = next(p for p in response.json()["ports"] if p["role"] == "query")
         assert query_port["port"] == 27016
         assert query_port["protocol"] == "tcp"
+
+
+# ── Resource-Limit PATCH Hardening (CPU/RAM/Disk) ──────────────────────
+#
+# Covers VAL-API-001..006, 010..013, 016: strict JSON typing, validation,
+# least-privilege resource authorization, CSRF/auth preservation, partial /
+# null / no-op behavior, mixed payload permission + atomicity, sanitized
+# errors, and rollback / no drift on failures.
+#
+# Strategie: Gegen den vorhandenen PATCH /api/servers/{id} Flow getestet.
+# Docker-/Disk-/Lifecycle-Grenzen werden gemockt und auf "nicht aufgerufen"
+# geprueft, damit Ressourcen-Patches keineexternen Seiteneffekte haben.
+
+
+class TestResourcePatchPermissions:
+    """Hardening for resource-field PATCH (CPU/RAM/Disk)."""
+
+    def _grant(self, db: Session, user: User, server: Server, *keys: str) -> None:
+        """Delegiert exakt die angegebenen server-scoped Permissions (KISS-Helper)."""
+        for key in keys:
+            db.add(ServerPermission(
+                user_id=user.id, server_id=server.id, permission_key=key,
+            ))
+        db.commit()
+
+    def _set_resources(self, db: Session, server: Server, cpu=100, ram=2048, disk=20) -> None:
+        server.cpu_limit_percent = cpu
+        server.ram_limit_mb = ram
+        server.disk_limit_gb = disk
+        db.commit()
+        db.refresh(server)
+
+    # ── VAL-API-001: Authenticated and CSRF-protected resource PATCH ──
+
+    def test_resource_patch_unauthenticated_rejected(self, client: TestClient, test_server: Server, db: Session):
+        test_server.cpu_limit_percent = 100
+        db.commit()
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200},
+        )
+        assert response.status_code == 401
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    def test_resource_patch_missing_csrf_rejected(self, client: TestClient, owner_cookies: dict, test_server: Server, db: Session):
+        test_server.cpu_limit_percent = 100
+        db.commit()
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200},
+            cookies=owner_cookies,
+        )
+        assert response.status_code == 403
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    # ── VAL-API-002: Backend resource permission is authoritative ──
+
+    def test_resource_patch_without_resources_permission_forbidden(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        # View-only user (kein server.resources.manage)
+        self._grant(db, regular_user, test_server, "server.view")
+        test_server.cpu_limit_percent = 100
+        db.commit()
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 403
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    # ── VAL-API-011: Resource-only PATCH uses least privilege ──
+
+    def test_resource_only_patch_with_resources_manage_succeeds(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        # view + resources.manage, aber NICHT config.write / network.manage
+        self._grant(db, regular_user, test_server, "server.view", "server.resources.manage")
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 150, "ram_limit_mb": 4096},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["cpu_limit_percent"] == 150
+        assert data["ram_limit_mb"] == 4096
+        # disk nicht gesendet -> bleibt erhalten
+        assert data["disk_limit_gb"] == 20
+
+    def test_resources_manage_user_cannot_patch_config_fields(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        self._grant(db, regular_user, test_server, "server.view", "server.resources.manage")
+        original_name = test_server.name
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"name": "Hacked Name"},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 403
+        db.refresh(test_server)
+        assert test_server.name == original_name
+
+    def test_resources_manage_user_cannot_patch_network_fields(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        self._grant(db, regular_user, test_server, "server.view", "server.resources.manage")
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"game_port": 27015},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 403
+        db.refresh(test_server)
+        assert all(p.port != 27015 for p in test_server.ports)
+
+    # ── VAL-API-003: Partial resource PATCH changes only supplied fields ──
+
+    def test_partial_resource_patch_changes_only_supplied(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session,
+    ):
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cpu_limit_percent"] == 200
+        assert data["ram_limit_mb"] == 2048
+        assert data["disk_limit_gb"] == 20
+        # Follow-up GET bestätigt Persistenz
+        get = client.get(f"/api/servers/{test_server.id}", cookies=owner_cookies)
+        assert get.status_code == 200
+        got = get.json()
+        assert got["cpu_limit_percent"] == 200
+        assert got["ram_limit_mb"] == 2048
+        assert got["disk_limit_gb"] == 20
+
+    # ── VAL-API-004: Null resource values mean unlimited ──
+
+    def test_null_resource_values_clear_limits(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session,
+    ):
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": None, "ram_limit_mb": None},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cpu_limit_percent"] is None
+        assert data["ram_limit_mb"] is None
+        # disk nicht gesendet -> bleibt erhalten
+        assert data["disk_limit_gb"] == 20
+        get = client.get(f"/api/servers/{test_server.id}", cookies=owner_cookies)
+        assert get.json()["cpu_limit_percent"] is None
+        assert get.json()["ram_limit_mb"] is None
+
+    # ── VAL-API-005: Resource validation boundaries are enforced ──
+
+    @pytest.mark.parametrize("field,value", [
+        ("cpu_limit_percent", 9),
+        ("cpu_limit_percent", 3201),
+        ("ram_limit_mb", 511),
+        ("disk_limit_gb", 0),
+    ])
+    def test_invalid_resource_values_rejected(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session,
+        field, value,
+    ):
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={field: value},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 422
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+        assert test_server.disk_limit_gb == 20
+
+    @pytest.mark.parametrize("field,value", [
+        ("cpu_limit_percent", 10),
+        ("cpu_limit_percent", 3200),
+        ("ram_limit_mb", 512),
+        ("disk_limit_gb", 1),
+    ])
+    def test_valid_boundary_resource_values_accepted(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session,
+        field, value,
+    ):
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={field: value},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()[field] == value
+
+    # ── VAL-API-006: Nonexistent or unauthorized server access does not mutate ──
+
+    def test_resource_patch_nonexistent_server_404(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+    ):
+        response = client.patch(
+            "/api/servers/999999",
+            json={"cpu_limit_percent": 200},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 404
+
+    def test_resource_patch_unauthorized_server_forbidden(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        # Gar keine Permissions auf diesen Server
+        test_server.cpu_limit_percent = 100
+        db.commit()
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 403
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    # ── VAL-API-016: Resource JSON types are strict ──
+
+    @pytest.mark.parametrize("field,bad_value", [
+        ("cpu_limit_percent", "100"),
+        ("cpu_limit_percent", 100.0),
+        ("cpu_limit_percent", True),
+        ("cpu_limit_percent", [100]),
+        ("cpu_limit_percent", {"v": 100}),
+        ("ram_limit_mb", "2048"),
+        ("ram_limit_mb", 2048.5),
+        ("disk_limit_gb", "20"),
+    ])
+    def test_strict_resource_types_rejected(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session,
+        field, bad_value,
+    ):
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={field: bad_value},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 422
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+        assert test_server.disk_limit_gb == 20
+
+    # ── VAL-API-012: No-op resource PATCH is idempotent ──
+
+    def test_noop_resource_patch_idempotent_no_side_effects(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session,
+    ):
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        original_status = test_server.status
+        with patch("routers.servers.docker_service.is_running") as mock_running, \
+             patch("routers.servers.close_ports") as mock_close, \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.iptables_revoke_server") as mock_revoke, \
+             patch("routers.servers.iptables_accept_server") as mock_accept:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 100, "ram_limit_mb": 2048, "disk_limit_gb": 20},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cpu_limit_percent"] == 100
+        assert data["ram_limit_mb"] == 2048
+        assert data["disk_limit_gb"] == 20
+        # Keine Docker-, Netzwerk- oder Firewall-Seiteneffekte
+        mock_running.assert_not_called()
+        mock_close.assert_not_called()
+        mock_open.assert_not_called()
+        mock_revoke.assert_not_called()
+        mock_accept.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.status == original_status
+        assert test_server.cpu_limit_percent == 100
+
+    # ── VAL-API-013: Mixed resource and network/config PATCH is atomic ──
+
+    def test_mixed_resource_and_config_requires_both_permissions(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        # resources + config braucht resources.manage UND config.write
+        self._grant(db, regular_user, test_server, "server.view", "server.resources.manage")
+        original_name = test_server.name
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        # config.write fehlt -> 403, weder Resource noch Name darf sich aendern
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200, "name": "Renamed"},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 403
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.name == original_name
+
+        # config.write gewaehren -> beide Aenderungen werden angewendet
+        self._grant(db, regular_user, test_server, "server.config.write")
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200, "name": "Renamed"},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 200, response.text
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 200
+        assert test_server.name == "Renamed"
+
+    def test_mixed_resource_and_network_requires_both_permissions(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        self._grant(db, regular_user, test_server, "server.view", "server.resources.manage")
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        # network.manage fehlt -> 403, kein Port-Update, keine Resource-Aenderung
+        with patch("routers.servers.allocate_ports") as mock_alloc, \
+             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.docker_service.is_running", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "game_port": 27015},
+                cookies=user_cookies,
+                headers={"X-CSRF-Token": user_csrf_token},
+            )
+        assert response.status_code == 403
+        mock_alloc.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert all(p.port != 27015 for p in test_server.ports)
+
+        # network.manage gewaehren -> beide Aenderungen werden angewendet
+        self._grant(db, regular_user, test_server, "server.network.manage")
+        with patch("routers.servers.allocate_ports", return_value=[
+            ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
+        ]), patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.docker_service.is_running", return_value=False), \
+             patch("routers.servers.open_ports"), patch("routers.servers.close_ports"), \
+             patch("routers.servers.iptables_accept_server"), patch("routers.servers.iptables_revoke_server"):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "game_port": 27015},
+                cookies=user_cookies,
+                headers={"X-CSRF-Token": user_csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 200
+        assert test_server.game_port == 27015
+
+    def test_mixed_resource_network_atomic_on_port_failure(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        from services.port_allocation_service import PortConflictError
+        self._grant(db, regular_user, test_server, "server.view", "server.resources.manage", "server.network.manage")
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
+        with patch("routers.servers.allocate_ports", side_effect=PortConflictError("Port 27015/udp belegt")), \
+             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.docker_service.is_running", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "game_port": 27015},
+                cookies=user_cookies,
+                headers={"X-CSRF-Token": user_csrf_token},
+            )
+        assert response.status_code == 400
+        db.refresh(test_server)
+        # Kein Drift: Resource-Feld und Ports unveraendert
+        assert test_server.cpu_limit_percent == 100
+        assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
+
+    # ── VAL-API-010: Error responses and logs are sanitized ──
+
+    def test_resource_patch_failure_response_and_logs_sanitized(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session,
+        caplog,
+    ):
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        # Ein synthetischer Sentinel als Exception-Nachricht. Die Implementierung
+        # darf die Nachricht weder im Response-Body noch im Log reflektieren
+        # (VAL-API-010): bei unerwarteten Fehlern wird nur ein generischer Text
+        # plus Exception-Typ ausgegeben, niemals Host-Pfade, Socket-Pfade,
+        # Secrets, Stacktraces oder Roh-Output.
+        sentinel = "ZZLEAKSENTINEL_4f8a2c1d ZZNEVERLEAK"
+        with patch("routers.servers._normalize_server_restart_mode", side_effect=RuntimeError(sentinel)):
+            with caplog.at_level(logging.WARNING):
+                response = client.patch(
+                    f"/api/servers/{test_server.id}",
+                    json={"cpu_limit_percent": 200},
+                    cookies=owner_cookies,
+                    headers={"X-CSRF-Token": csrf_token},
+                )
+        assert response.status_code == 500
+        # Response enthaelt nur die generische, sanitisierte Meldung
+        assert response.json()["detail"] == "Server-Aktualisierung fehlgeschlagen"
+        body = response.text
+        assert sentinel not in body
+        assert "ZZLEAKSENTINEL" not in body
+        assert "ZZNEVERLEAK" not in body
+        # Logs duerfen nur den Exception-Typ enthalten, nicht die Nachricht
+        log_text = caplog.text
+        assert sentinel not in log_text
+        assert "ZZLEAKSENTINEL" not in log_text
+        assert "ZZNEVERLEAK" not in log_text
+        # Kein Drift: Resource-Wert unveraendert
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
 
 
 # ── Exec-Tab Endpoint (v1.4.7) ───────────────────────────────────────────

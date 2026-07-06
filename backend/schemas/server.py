@@ -12,7 +12,7 @@ from __future__ import annotations
 import ipaddress
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 
 from schemas.postgres import PostgresOneTimeCredential
 
@@ -133,9 +133,12 @@ class ServerUpdate(BaseModel):
     restart_interval_hours: int | None = Field(None, ge=1, le=168)
     restart_time_utc: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
     restart_times_utc: str | None = Field(None, max_length=256)
-    cpu_limit_percent: int | None = Field(None, ge=10, le=3200)
-    ram_limit_mb: int | None = Field(None, ge=512)
-    disk_limit_gb: int | None = Field(None, ge=1)
+    # Ressourcen-Limits sind strikt typgeprueft (VAL-API-016): Strings, Floats,
+    # Booleans, Arrays oder Objects werden abgelehnt statt coerced. ``null``
+    # bleibt erlaubt und bedeutet "unlimitiert".
+    cpu_limit_percent: StrictInt | None = Field(None, ge=10, le=3200)
+    ram_limit_mb: StrictInt | None = Field(None, ge=512)
+    disk_limit_gb: StrictInt | None = Field(None, ge=1)
     game_port: int | None = Field(None, ge=1024, le=65535)
     query_port: int | None = Field(None, ge=1024, le=65535)
     rcon_port: int | None = Field(None, ge=1024, le=65535)

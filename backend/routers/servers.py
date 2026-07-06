@@ -348,7 +348,11 @@ def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depen
 
 @router.patch("/{server_id}", response_model=ServerResponse)
 def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> Server:
-    require_server_permission(user, server_id, db, "server.config.write")
+    # ── Zugriffsgate: Server muss sichtbar sein (least-privilege Basis). ──
+    # Frueher war hier pauschal ``server.config.write`` erforderlich, was
+    # reine Ressourcen-PATCHes unnoetig blockiert hat (VAL-API-011). Die
+    # konkreten Schreibrechte werden unten pro Feldgruppe geprueft.
+    require_server_permission(user, server_id, db, "server.view")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -359,71 +363,98 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     payload = req.model_dump(exclude_unset=True)
     port_fields = {"game_port", "query_port", "rcon_port", "ports", "port_protocols"}
     resource_fields = {"cpu_limit_percent", "ram_limit_mb", "disk_limit_gb"}
+    config_fields = {"name", "auto_restart", "restart_interval_hours", "restart_time_utc", "restart_times_utc"}
     changed_ports = port_fields & set(payload.keys())
     bind_ip_changed = "public_bind_ip" in payload and payload["public_bind_ip"] != old_bind_ip
     network_change = bool(changed_ports) or bind_ip_changed
+    has_resource = bool(resource_fields & set(payload.keys()))
+    has_config = bool(config_fields & set(payload.keys()))
+
+    # ── Least-privilege: jede Feldgruppe braucht nur ihre eigene Permission. ──
+    # Ressourcen-PATCHes kommen mit ``server.resources.manage`` allein aus,
+    # ohne ``server.config.write`` oder ``server.network.manage`` (VAL-API-011).
+    # Bei gemischten Payloads werden ALLE relevanten Permissions verlangt
+    # (VAL-API-013). Die Pruefungen finden vor jeder Mutation statt.
+    if has_resource:
+        require_server_permission(user, server_id, db, "server.resources.manage")
     if network_change:
         require_server_permission(user, server_id, db, "server.network.manage")
-    if resource_fields & set(payload.keys()):
-        require_server_permission(user, server_id, db, "server.resources.manage")
+    if has_config:
+        require_server_permission(user, server_id, db, "server.config.write")
 
-    # ── Port-/Bind-Aenderung: validieren ──
-    if changed_ports:
-        port_requirements = _port_requirements_for_server(
-            server,
-            protocol_overrides=req.port_protocols,
-        )
-
-        current_ports = {p.role: p.port for p in server.ports}
-        requested_ports = dict(req.ports or {})
-        
-        if req.game_port is not None:
-            requested_ports["game"] = req.game_port
-        if req.query_port is not None:
-            requested_ports["query"] = req.query_port
-        if req.rcon_port is not None:
-            requested_ports["rcon"] = req.rcon_port
-
-        for role, _ in port_requirements:
-            if role not in requested_ports:
-                requested_ports[role] = current_ports.get(role)
-
-        bind_ip_for_check = payload.get("public_bind_ip", old_bind_ip) or "0.0.0.0"
-        try:
-            allocated = allocate_ports(
-                db,
-                exclude_server_id=server.id,
-                bind_ip=bind_ip_for_check,
-                port_requirements=port_requirements,
-                requested_ports=requested_ports,
+    # ── DB-Atomaritaet: alle Mutationen in einer Transaktion, ein Commit. ──
+    # Schlägt ein Schritt (z. B. Port-Allokation) fehl, wird die Session
+    # zurückgerollt, sodass Ressourcen-, Netzwerk- und Konfig-Felder nicht
+    # partial driften (VAL-API-013). Unerwartete Fehler werden sanitisiert
+    # (VAL-API-010): kein Stacktrace, kein Host-Pfad, kein Socket-Pfad im
+    # Response oder Log.
+    try:
+        # ── Port-/Bind-Aenderung: validieren ──
+        if changed_ports:
+            port_requirements = _port_requirements_for_server(
+                server,
+                protocol_overrides=req.port_protocols,
             )
-        except PortConflictError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except RuntimeError as e:
-            raise HTTPException(status_code=503, detail=str(e))
 
-        if isinstance(allocated, tuple) and len(allocated) == 3 and all(isinstance(x, int) for x in allocated):
-            allocated = [
-                ("game", allocated[0], "udp"),
-                ("query", allocated[1], "udp"),
-                ("rcon", allocated[2], "tcp"),
-            ]
+            current_ports = {p.role: p.port for p in server.ports}
+            requested_ports = dict(req.ports or {})
 
-        from models.server_port import ServerPort
-        db.query(ServerPort).filter(ServerPort.server_id == server.id).delete()
-        for role, port_val, proto in allocated:
-            db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
+            if req.game_port is not None:
+                requested_ports["game"] = req.game_port
+            if req.query_port is not None:
+                requested_ports["query"] = req.query_port
+            if req.rcon_port is not None:
+                requested_ports["rcon"] = req.rcon_port
+
+            for role, _ in port_requirements:
+                if role not in requested_ports:
+                    requested_ports[role] = current_ports.get(role)
+
+            bind_ip_for_check = payload.get("public_bind_ip", old_bind_ip) or "0.0.0.0"
+            try:
+                allocated = allocate_ports(
+                    db,
+                    exclude_server_id=server.id,
+                    bind_ip=bind_ip_for_check,
+                    port_requirements=port_requirements,
+                    requested_ports=requested_ports,
+                )
+            except PortConflictError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            except RuntimeError as e:
+                raise HTTPException(status_code=503, detail=str(e))
+
+            if isinstance(allocated, tuple) and len(allocated) == 3 and all(isinstance(x, int) for x in allocated):
+                allocated = [
+                    ("game", allocated[0], "udp"),
+                    ("query", allocated[1], "udp"),
+                    ("rcon", allocated[2], "tcp"),
+                ]
+
+            from models.server_port import ServerPort
+            db.query(ServerPort).filter(ServerPort.server_id == server.id).delete()
+            for role, port_val, proto in allocated:
+                db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
+
+        # Standard-Update (alle nicht-Port-Felder)
+        for key, val in payload.items():
+            if key not in ("game_port", "query_port", "rcon_port", "ports", "port_protocols"):
+                setattr(server, key, val)
+        _normalize_server_restart_mode(server)
         db.commit()
-
-    # Standard-Update
-    for key, val in payload.items():
-        if key not in ("game_port", "query_port", "rcon_port", "ports", "port_protocols"):
-            setattr(server, key, val)
-    _normalize_server_restart_mode(server)
-    db.commit()
-    db.refresh(server)
+        db.refresh(server)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            "Server-Aktualisierung fehlgeschlagen (server_id=%s): %s",
+            server_id, type(exc).__name__,
+        )
+        raise HTTPException(status_code=500, detail="Server-Aktualisierung fehlgeschlagen")
 
     if {"auto_restart", "restart_interval_hours", "restart_time_utc", "restart_times_utc"} & set(payload.keys()):
         sync_server_restart_schedule(server)
