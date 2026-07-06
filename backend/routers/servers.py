@@ -396,6 +396,23 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     if has_config:
         require_server_permission(user, server_id, db, "server.config.write")
 
+    # ── Mixed resource/disk + network rejection (scrutiny round 2 fix). ──
+    # Resource-Felder (cpu_limit_percent, ram_limit_mb, disk_limit_gb) und
+    # Network-Felder (ports, bind_ip, port_protocols) loesen unterschiedliche
+    # Seiteneffekt-Gruppen aus (Docker-Live-Update / Disk-Soft-Limit vs.
+    # Firewall / iptables / Plugin-Stop-Start). Die Network-Seiteneffekte
+    # laufen NACH dem DB-Commit, sodass ein Post-Commit-Fehler die bereits
+    # committeten Resource-Aenderungen nicht zurueckrollen kann. KISS-safe:
+    # diese unsupported mixed side-effect group VOR jeder Mutation ablehnen
+    # (VAL-CROSS-010, VAL-CROSS-014). Permission-Pruefungen laufen zuerst
+    # (403 vor 409). Resource-only, disk-only, network-only und
+    # config/scheduler Paths bleiben unberuehrt.
+    if has_resource and network_change:
+        raise HTTPException(
+            status_code=409,
+            detail="Ressourcen- und Netzwerk-Aenderungen koennen nicht in einem gemeinsamen PATCH durchgefuehrt werden",
+        )
+
     # ── DB-Atomaritaet: alle Mutationen in einer Transaktion, ein Commit. ──
     # Schlägt ein Schritt (z. B. Port-Allokation) fehl, wird die Session
     # zurückgerollt, sodass Ressourcen-, Netzwerk- und Konfig-Felder nicht
@@ -459,16 +476,16 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         _normalize_server_restart_mode(server)
 
         # ── Live CPU/RAM-Update und/oder Disk-Soft-Limit-Re-evaluation ──
+        # Mixed resource/disk + network payloads wurden VOR diesem Punkt
+        # mit 409 abgelehnt (scrutiny round 2 fix). Hier sind nur noch
+        # resource-only, disk-only, resource+disk (ohne network), oder
+        # network/config-only Payloads moeglich.
         # CPU/RAM-Live-Update nur wenn kein Network-Change im selben PATCH
         # ist (der Network-Recreate-Pfad sammelt die neuen Werte beim
         # naechsten Start ein).
-        # Disk-Soft-Limit-Re-evaluation bei JEDER disk_limit_gb-Aenderung,
-        # auch in gemischten Payloads mit Network-Aenderungen (VAL-DISK-001,
-        # VAL-CROSS-010, VAL-CROSS-014). Frueher wurde die Re-evaluation bei
-        # Network-Aenderungen uebersprungen, was zu Drift fuehrte: der neue
-        # Limit wurde persistiert, aber nie gegen die aktuelle Nutzung
-        # geprueft. Die Re-evaluation findet vor dem Commit statt, sodass
-        # bei Fehlschlag alle Aenderungen zurueckgerollt werden.
+        # Disk-Soft-Limit-Re-evaluation bei JEDER disk_limit_gb-Aenderung
+        # (VAL-DISK-001). Die Re-evaluation findet vor dem Commit statt,
+        # sodass bei Fehlschlag alle Aenderungen zurueckgerollt werden.
         # Bei gestoppten Servern werden die Werte nur persistiert (VAL-API-008).
         # Bei Docker-Fehlschlag wird die DB zurueckgerollt (VAL-API-009).
         # Lifecycle-Serialisierung verhindert Race-Conditions mit Start/Stop

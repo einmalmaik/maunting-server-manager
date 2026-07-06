@@ -1117,24 +1117,21 @@ class TestResourcePatchPermissions:
         assert test_server.cpu_limit_percent == 100
         assert all(p.port != 27015 for p in test_server.ports)
 
-        # network.manage gewaehren -> beide Aenderungen werden angewendet
+        # network.manage gewaehren -> mixed resource+network wird VOR Mutation
+        # mit 409 abgelehnt (scrutiny round 2 fix: post-commit network side
+        # effects can fail after DB commit, so reject before mutation).
         self._grant(db, regular_user, test_server, "server.network.manage")
-        with patch("routers.servers.allocate_ports", return_value=[
-            ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
-        ]), patch("routers.servers.get_plugin", return_value=None), \
-             patch("routers.servers.docker_service.is_running", return_value=False), \
-             patch("routers.servers.open_ports"), patch("routers.servers.close_ports"), \
-             patch("routers.servers.iptables_accept_server"), patch("routers.servers.iptables_revoke_server"):
+        with patch("routers.servers.allocate_ports") as mock_alloc2:
             response = client.patch(
                 f"/api/servers/{test_server.id}",
                 json={"cpu_limit_percent": 200, "game_port": 27015},
                 cookies=user_cookies,
                 headers={"X-CSRF-Token": user_csrf_token},
             )
-        assert response.status_code == 200, response.text
+        assert response.status_code == 409
+        mock_alloc2.assert_not_called()
         db.refresh(test_server)
-        assert test_server.cpu_limit_percent == 200
-        assert test_server.game_port == 27015
+        assert test_server.cpu_limit_percent == 100
 
     def test_mixed_resource_network_atomic_on_port_failure(
         self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
@@ -1144,7 +1141,9 @@ class TestResourcePatchPermissions:
         self._grant(db, regular_user, test_server, "server.view", "server.resources.manage", "server.network.manage")
         self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
         original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
-        with patch("routers.servers.allocate_ports", side_effect=PortConflictError("Port 27015/udp belegt")), \
+        # Mixed resource+network wird VOR Port-Allokation abgelehnt (409).
+        # allocate_ports wird nie aufgerufen (scrutiny round 2 fix).
+        with patch("routers.servers.allocate_ports", side_effect=PortConflictError("Port 27015/udp belegt")) as mock_alloc, \
              patch("routers.servers.get_plugin", return_value=None), \
              patch("routers.servers.docker_service.is_running", return_value=False):
             response = client.patch(
@@ -1153,7 +1152,8 @@ class TestResourcePatchPermissions:
                 cookies=user_cookies,
                 headers={"X-CSRF-Token": user_csrf_token},
             )
-        assert response.status_code == 400
+        assert response.status_code == 409
+        mock_alloc.assert_not_called()
         db.refresh(test_server)
         # Kein Drift: Resource-Feld und Ports unveraendert
         assert test_server.cpu_limit_percent == 100
@@ -2275,54 +2275,50 @@ class TestMixedPatchAtomicityAndStaleRuntime:
         db.refresh(test_server)
         assert test_server.cpu_limit_percent == 200
 
-    # ── Fix 3: Mixed disk + network evaluates disk soft-limit ──
+    # ── Fix 3: Mixed disk + network rejected before mutation (scrutiny r2) ──
     # VAL-DISK-001, VAL-DISK-005, VAL-CROSS-010, VAL-CROSS-014
+    #
+    # Scrutiny round 2 found that mixed disk + network payloads can commit
+    # DB changes before post-commit network side effects (firewall, iptables,
+    # plugin stop/start) fail. KISS-safe: reject with 409 before mutation.
 
-    def test_mixed_disk_network_evaluates_disk_soft_limit(
+    def test_mixed_disk_network_rejected_409_no_disk_eval(
         self, client: TestClient, owner_cookies: dict, csrf_token: str,
         test_server: Server, db: Session,
     ):
-        """Disk + network in one PATCH: disk soft-limit must still be
-        evaluated before commit (VAL-DISK-001, VAL-CROSS-010)."""
+        """Disk + network in one PATCH -> 409 before mutation, disk evaluator
+        not called (scrutiny round 2 fix)."""
         self._set_resources(db, test_server, disk=20)
         test_server.status = "stopped"
         db.commit()
 
-        with patch("routers.servers.evaluate_disk_soft_limit",
-                   return_value={"ok": True, "action": "none"}) as mock_eval, \
-             patch("routers.servers.allocate_ports", return_value=[
-                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
-             ]), \
-             patch("routers.servers.get_plugin", return_value=None), \
-             patch("routers.servers.docker_service.is_running", return_value=False):
+        with patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.allocate_ports") as mock_alloc:
             response = client.patch(
                 f"/api/servers/{test_server.id}",
                 json={"disk_limit_gb": 50, "game_port": 27015},
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
-        assert response.status_code == 200, response.text
-        assert response.json()["disk_limit_gb"] == 50
-        mock_eval.assert_called_once()
+        assert response.status_code == 409
+        mock_eval.assert_not_called()
+        mock_alloc.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.disk_limit_gb == 20
 
-    def test_mixed_disk_network_disk_eval_failure_rolls_back(
+    def test_mixed_disk_network_rejected_409_no_drift(
         self, client: TestClient, owner_cookies: dict, csrf_token: str,
         test_server: Server, db: Session,
     ):
-        """Disk + network: disk eval failure -> 503, no drift, no network
+        """Disk + network: 409 rejection leaves DB unchanged, no network
         mutation (VAL-DISK-005, VAL-CROSS-010, VAL-CROSS-014)."""
         self._set_resources(db, test_server, disk=20)
         test_server.status = "stopped"
         original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
         db.commit()
 
-        with patch("routers.servers.evaluate_disk_soft_limit",
-                   return_value={"ok": False, "error": "Disk-Nutzung konnte nicht ermittelt werden"}), \
-             patch("routers.servers.allocate_ports", return_value=[
-                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
-             ]), \
-             patch("routers.servers.get_plugin", return_value=None), \
-             patch("routers.servers.docker_service.is_running", return_value=False), \
+        with patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.allocate_ports") as mock_alloc, \
              patch("routers.servers.open_ports") as mock_open, \
              patch("routers.servers.close_ports") as mock_close:
             response = client.patch(
@@ -2331,32 +2327,32 @@ class TestMixedPatchAtomicityAndStaleRuntime:
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
-        assert response.status_code == 503
-        assert "Disk-Limit" in response.json()["detail"]
+        assert response.status_code == 409
+        mock_eval.assert_not_called()
+        mock_alloc.assert_not_called()
+        mock_open.assert_not_called()
+        mock_close.assert_not_called()
         db.refresh(test_server)
         assert test_server.disk_limit_gb == 20
         assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
 
-    def test_mixed_cpu_ram_disk_network_rollback_on_disk_failure(
+    def test_mixed_cpu_ram_disk_network_rejected_409(
         self, client: TestClient, owner_cookies: dict, csrf_token: str,
         test_server: Server, db: Session,
     ):
-        """CPU + RAM + disk + network: disk eval failure -> all unchanged,
+        """CPU + RAM + disk + network -> 409 before mutation, all unchanged,
         no Docker update, no network mutation (VAL-CROSS-014)."""
         self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
         test_server.status = "running"
         original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
         db.commit()
 
-        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
-             patch("routers.servers.docker_service.is_running", return_value=True), \
+        with patch("routers.servers.is_lifecycle_job_active") as mock_active, \
+             patch("routers.servers.docker_service.is_running") as mock_running, \
              patch("routers.servers.docker_service.update_container_resources") as mock_update, \
-             patch("routers.servers.evaluate_disk_soft_limit",
-                   return_value={"ok": False, "error": "Disk-Nutzung konnte nicht ermittelt werden"}), \
-             patch("routers.servers.allocate_ports", return_value=[
-                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
-             ]), \
-             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.allocate_ports") as mock_alloc, \
+             patch("routers.servers.get_plugin") as mock_plugin, \
              patch("routers.servers.open_ports") as mock_open, \
              patch("routers.servers.close_ports") as mock_close:
             response = client.patch(
@@ -2370,82 +2366,440 @@ class TestMixedPatchAtomicityAndStaleRuntime:
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
-        assert response.status_code == 503
+        assert response.status_code == 409
         db.refresh(test_server)
         assert test_server.cpu_limit_percent == 100
         assert test_server.ram_limit_mb == 2048
         assert test_server.disk_limit_gb == 20
         assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
         mock_update.assert_not_called()
+        mock_active.assert_not_called()
+        mock_running.assert_not_called()
+        mock_eval.assert_not_called()
+        mock_alloc.assert_not_called()
+        mock_plugin.assert_not_called()
+        mock_open.assert_not_called()
+        mock_close.assert_not_called()
 
-    def test_mixed_disk_network_running_server_uses_lock_for_disk_eval(
+    def test_mixed_disk_network_running_server_no_lock_no_side_effects(
         self, client: TestClient, owner_cookies: dict, csrf_token: str,
         test_server: Server, db: Session,
     ):
-        """Disk + network on running server: disk eval happens under
-        lifecycle lock (VAL-DISK-007, VAL-CROSS-010)."""
+        """Disk + network on running server: 409 before mutation, no
+        lifecycle lock, no Docker, no firewall, no iptables (VAL-DISK-007,
+        VAL-CROSS-010)."""
         self._set_resources(db, test_server, disk=20)
         test_server.status = "running"
         test_server.install_dir = "/tmp/test_server"
         db.commit()
 
-        with patch("routers.servers.is_lifecycle_job_active", return_value=False) as mock_active, \
-             patch("routers.servers.docker_service.is_running", return_value=True), \
-             patch("routers.servers.evaluate_disk_soft_limit",
-                   return_value={"ok": True, "action": "none"}) as mock_eval, \
-             patch("routers.servers.allocate_ports", return_value=[
-                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
-             ]), \
-             patch("routers.servers.get_plugin", return_value=None), \
-             patch("routers.servers.open_ports"), \
-             patch("routers.servers.close_ports"), \
-             patch("routers.servers.iptables_accept_server"), \
-             patch("routers.servers.iptables_revoke_server"):
+        with patch("routers.servers.is_lifecycle_job_active") as mock_active, \
+             patch("routers.servers.get_server_lifecycle_lock") as mock_lock, \
+             patch("routers.servers.docker_service.is_running") as mock_running, \
+             patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.allocate_ports") as mock_alloc, \
+             patch("routers.servers.get_plugin") as mock_plugin, \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.close_ports") as mock_close, \
+             patch("routers.servers.iptables_accept_server") as mock_accept, \
+             patch("routers.servers.iptables_revoke_server") as mock_revoke:
             response = client.patch(
                 f"/api/servers/{test_server.id}",
                 json={"disk_limit_gb": 50, "game_port": 27015},
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
-        assert response.status_code == 200, response.text
-        mock_eval.assert_called_once()
-        assert mock_active.call_count >= 2
+        assert response.status_code == 409
+        mock_active.assert_not_called()
+        mock_lock.assert_not_called()
+        mock_running.assert_not_called()
+        mock_eval.assert_not_called()
+        mock_alloc.assert_not_called()
+        mock_plugin.assert_not_called()
+        mock_open.assert_not_called()
+        mock_close.assert_not_called()
+        mock_accept.assert_not_called()
+        mock_revoke.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.disk_limit_gb == 20
 
-    def test_mixed_disk_network_no_docker_live_update(
+    def test_mixed_disk_cpu_network_rejected_409_no_docker_live_update(
         self, client: TestClient, owner_cookies: dict, csrf_token: str,
         test_server: Server, db: Session,
     ):
-        """Disk + network: no Docker live CPU/RAM update (network recreate
-        applies values at next start, not live)."""
+        """Disk + CPU + network -> 409 before mutation, no Docker live update,
+        no side effects (scrutiny round 2 fix)."""
         self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
         test_server.status = "running"
         db.commit()
 
-        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
-             patch("routers.servers.docker_service.is_running", return_value=True), \
+        with patch("routers.servers.is_lifecycle_job_active") as mock_active, \
+             patch("routers.servers.docker_service.is_running") as mock_running, \
              patch("routers.servers.docker_service.update_container_resources") as mock_update, \
-             patch("routers.servers.evaluate_disk_soft_limit",
-                   return_value={"ok": True, "action": "none"}), \
-             patch("routers.servers.allocate_ports", return_value=[
-                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
-             ]), \
-             patch("routers.servers.get_plugin", return_value=None), \
-             patch("routers.servers.open_ports"), \
-             patch("routers.servers.close_ports"), \
-             patch("routers.servers.iptables_accept_server"), \
-             patch("routers.servers.iptables_revoke_server"):
+             patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.allocate_ports") as mock_alloc:
             response = client.patch(
                 f"/api/servers/{test_server.id}",
                 json={"disk_limit_gb": 50, "cpu_limit_percent": 200, "game_port": 27015},
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
-        assert response.status_code == 200, response.text
-        # No live Docker update (network change -> recreate path)
+        assert response.status_code == 409
         mock_update.assert_not_called()
+        mock_active.assert_not_called()
+        mock_running.assert_not_called()
+        mock_eval.assert_not_called()
+        mock_alloc.assert_not_called()
         db.refresh(test_server)
-        assert test_server.cpu_limit_percent == 200
-        assert test_server.disk_limit_gb == 50
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.disk_limit_gb == 20
+
+
+# ── Mixed Resource/Disk + Network PATCH Rejection (scrutiny round 2) ──
+#
+# Scrutiny round 2 found that mixed resource/disk plus network payloads
+# can commit DB changes before post-commit network side effects (firewall,
+# iptables, plugin stop/start) fail. KISS-safe behavior: reject these
+# unsupported mixed side-effect groups with a sanitized 409 BEFORE any
+# mutation, after permission checks.
+#
+# Covers VAL-CROSS-010, VAL-CROSS-014, and the scrutiny round 2 blocker.
+# Existing resource-only, disk-only, network-only, and config/scheduler
+# paths must continue working (regression guard).
+
+
+class TestMixedResourceNetworkRejection:
+    """Reject mixed resource/disk + network PATCH payloads before mutation."""
+
+    def _set_resources(self, db: Session, server: Server, cpu=100, ram=2048, disk=20) -> None:
+        server.cpu_limit_percent = cpu
+        server.ram_limit_mb = ram
+        server.disk_limit_gb = disk
+        db.commit()
+        db.refresh(server)
+
+    def _grant(self, db: Session, user: User, server: Server, *keys: str) -> None:
+        for key in keys:
+            db.add(ServerPermission(
+                user_id=user.id, server_id=server.id, permission_key=key,
+            ))
+        db.commit()
+
+    # ── 409 rejection with full permissions ──
+
+    def test_mixed_cpu_ram_network_full_perms_returns_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Mixed CPU/RAM + network with full permissions -> 409, DB unchanged."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.allocate_ports") as mock_alloc, \
+             patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.docker_service.is_running") as mock_running, \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096, "game_port": 27015},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+        # No mutation side effects
+        mock_alloc.assert_not_called()
+        mock_eval.assert_not_called()
+        mock_running.assert_not_called()
+        mock_update.assert_not_called()
+
+    def test_mixed_disk_network_returns_409_no_disk_eval(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Mixed disk_limit_gb + network -> 409, disk evaluator not called."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.allocate_ports") as mock_alloc:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50, "game_port": 27015},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        db.refresh(test_server)
+        assert test_server.disk_limit_gb == 20
+        mock_eval.assert_not_called()
+        mock_alloc.assert_not_called()
+
+    def test_mixed_resource_public_bind_ip_returns_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Mixed resource + public_bind_ip (network field) -> 409."""
+        self._set_resources(db, test_server, cpu=100)
+        test_server.status = "stopped"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200, "public_bind_ip": "192.168.1.1"},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 409
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    def test_mixed_disk_port_protocols_returns_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Mixed disk + port_protocols (network field) -> 409."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "stopped"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"disk_limit_gb": 50, "port_protocols": {"game": "tcp"}},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 409
+        db.refresh(test_server)
+        assert test_server.disk_limit_gb == 20
+
+    # ── No side effects on running servers ──
+
+    def test_mixed_resource_network_running_no_lifecycle_lock(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Mixed resource/disk + network on running server: no lifecycle
+        lock acquired, no Docker, no firewall, no iptables, no stop/start."""
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active") as mock_active, \
+             patch("routers.servers.get_server_lifecycle_lock") as mock_lock, \
+             patch("routers.servers.docker_service.is_running") as mock_running, \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.close_ports") as mock_close, \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.iptables_revoke_server") as mock_revoke, \
+             patch("routers.servers.iptables_accept_server") as mock_accept, \
+             patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.allocate_ports") as mock_alloc, \
+             patch("routers.servers.get_plugin") as mock_plugin:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={
+                    "cpu_limit_percent": 200,
+                    "disk_limit_gb": 50,
+                    "game_port": 27015,
+                },
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.disk_limit_gb == 20
+        # No lifecycle lock, no Docker, no firewall, no iptables, no plugin
+        mock_active.assert_not_called()
+        mock_lock.assert_not_called()
+        mock_running.assert_not_called()
+        mock_update.assert_not_called()
+        mock_close.assert_not_called()
+        mock_open.assert_not_called()
+        mock_revoke.assert_not_called()
+        mock_accept.assert_not_called()
+        mock_eval.assert_not_called()
+        mock_alloc.assert_not_called()
+        mock_plugin.assert_not_called()
+
+    # ── Permission checks before 409 ──
+
+    def test_missing_network_permission_returns_403_before_409(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Missing network permission -> 403 before the mixed-payload 409."""
+        self._grant(db, regular_user, test_server, "server.view", "server.resources.manage")
+        self._set_resources(db, test_server, cpu=100)
+        test_server.status = "stopped"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200, "game_port": 27015},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 403
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    def test_missing_resource_permission_returns_403_before_409(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Missing resource permission -> 403 before the mixed-payload 409."""
+        self._grant(db, regular_user, test_server, "server.view", "server.network.manage")
+        self._set_resources(db, test_server, cpu=100)
+        test_server.status = "stopped"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200, "game_port": 27015},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 403
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    # ── 409 response is sanitized ──
+
+    def test_mixed_rejection_409_sanitized_no_internals(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """409 response is sanitized: no host paths, socket paths, stack traces."""
+        self._set_resources(db, test_server, cpu=100)
+        test_server.status = "stopped"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200, "game_port": 27015},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 409
+        body = response.text
+        assert "docker.sock" not in body
+        assert "/var/run" not in body
+        assert "Traceback" not in body
+        assert "File \"" not in body
+
+    # ── Regression: single-group payloads remain valid ──
+
+    def test_resource_only_patch_still_works(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Resource-only PATCH (no network) still succeeds (regression)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=False), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["cpu_limit_percent"] == 200
+        assert response.json()["ram_limit_mb"] == 4096
+
+    def test_disk_only_patch_still_works(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk-only PATCH (no network) still succeeds (regression)."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["disk_limit_gb"] == 50
+
+    def test_network_only_patch_still_works(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Network-only PATCH (no resource) still succeeds (regression)."""
+        from blueprints.schema import Blueprint
+        from models.server_port import ServerPort
+
+        bp = Blueprint.model_validate({
+            "version": 1,
+            "meta": {"id": "test_game_ports", "name": "Test", "category": "non_steam_game"},
+            "runtime": {"image": "test:latest", "startup": "./server"},
+            "ports": [
+                {"name": "game", "protocol": "udp"},
+                {"name": "query", "protocol": "udp"},
+                {"name": "rcon", "protocol": "tcp"},
+            ],
+            "source": {"type": "manualUpload", "manual": {"requiredFiles": ["server.jar"], "instructions": "test"}},
+        })
+        test_server.game_type = "test_game_ports"
+        test_server.ports = [
+            ServerPort(role="game", port=27015, protocol="udp"),
+            ServerPort(role="query", port=27016, protocol="udp"),
+            ServerPort(role="rcon", port=27017, protocol="tcp"),
+        ]
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.allocate_ports", return_value=[
+            ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
+        ]), patch("routers.servers.get_plugin") as mock_plugin, \
+             patch("routers.servers.docker_service.is_running", return_value=False):
+            mock_plugin.return_value.get_blueprint.return_value = bp
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"game_port": 27015},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+
+    def test_config_scheduler_only_patch_still_works(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Config/scheduler-only PATCH (no resource, no network) still
+        succeeds (regression)."""
+        test_server.status = "stopped"
+        test_server.auto_restart = True
+        test_server.restart_interval_hours = 8
+        db.commit()
+
+        with patch("routers.servers.sync_server_restart_schedule") as mock_sync:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"restart_interval_hours": 4},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        mock_sync.assert_called_once()
+        db.refresh(test_server)
+        assert test_server.restart_interval_hours == 4
 
 
 # ── Docker Warning / Partial-Success No-Drift Regression ──────────────
