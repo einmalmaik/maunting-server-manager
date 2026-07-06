@@ -421,6 +421,11 @@ def _ensure_install_dir_writable(install_dir: Path) -> None:
     if not install_dir.is_dir():
         return
 
+    # Windows (and other platforms without getuid/getgid): chown and Unix
+    # execute-bit self-healing do not apply. Skip safely, mirroring the
+    # host_uid_gid() guard in services/docker_service.py.
+    if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
+        return
     uid = os.getuid()
     gid = os.getgid()
 
