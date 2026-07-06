@@ -1075,7 +1075,28 @@
     "limit": "Limit",
     "free": "free",
     "uptime": "Uptime",
-    "sinceLastStart": "Since last start"
+    "sinceLastStart": "Since last start",
+    "resources": "Resources",
+    "resourceEditor": {
+      "title": "Edit Resource Limits",
+      "description": "Adjust CPU, RAM, and disk limits. Leave a field blank to set it to unlimited.",
+      "cpu": "CPU Limit (%)",
+      "cpuHint": "100% = 1 core. Range: 10 to 3200.",
+      "ram": "RAM Limit (MB)",
+      "ramHint": "Minimum: 512 MB.",
+      "disk": "Disk Limit (GB)",
+      "diskHint": "Soft limit. Minimum: 1 GB. Does not delete existing data.",
+      "saving": "Saving...",
+      "saved": "Resource limits saved.",
+      "lifecycleBusy": "Resource editing is unavailable while the server is starting, stopping, or updating.",
+      "errors": {
+        "integer": "Please enter a whole number.",
+        "cpuMin": "CPU must be at least 10%.",
+        "cpuMax": "CPU must not exceed 3200%.",
+        "ramMin": "RAM must be at least 512 MB.",
+        "diskMin": "Disk must be at least 1 GB."
+      }
+    }
   },
   "docsIndex": {
     "title": "Help & Documentation",

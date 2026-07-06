@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Clock,
+  Cpu,
   Database,
   Download,
   FileText,
@@ -22,7 +23,10 @@ import {
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { confirm } from "@/stores/confirmStore";
+import { usePermissionsStore } from "@/stores/permissionsStore";
 import { useHostInterfaces } from "@/hooks/useHostInterfaces";
+import { useHasPermission } from "@/hooks/useHasPermission";
+import { ResourceEditorDialog } from "@/components/server/ResourceEditorDialog";
 import { FileManager } from "./FileManager";
 import { ModManager } from "./ModManager";
 import { Backups } from "./Backups";
@@ -142,6 +146,16 @@ export function ServerDetail() {
   const { interfaces } = useHostInterfaces();
 
   const serverId = parseInt(id || "0");
+
+  // Permission-Gating fuer Ressourcen-Editor (VAL-UI-002, VAL-UI-018):
+  // Backend bleibt alleinige Wahrheitsquelle — Frontend versteckt nur die UI.
+  // isLoading-Check verhindert Permission-Load-Flash: Button erscheint erst
+  // nach Abschluss des Permission-Loads (oder gar nicht bei fehlendem Recht).
+  const canManageResources = useHasPermission("server.resources.manage", serverId);
+  const permissionsLoading = usePermissionsStore((s) => s.isLoading);
+  const showResourceEdit = !permissionsLoading && canManageResources;
+
+  const [showEditResource, setShowEditResource] = useState(false);
 
   const fetchAll = async () => {
     if (!serverId) return;
@@ -409,6 +423,21 @@ export function ServerDetail() {
 
   const effectiveStatus = optimisticStatus || server.status;
 
+  // Lifecycle-State: transiente Zustaende blockieren Ressourcen-Editor (VAL-UI-023)
+  const isLifecycleBusy = [
+    "starting",
+    "stopping",
+    "restarting",
+    "installing",
+    "updating",
+    "queued",
+    "awaiting_files",
+  ].includes(effectiveStatus);
+
+  const openResourceEditor = () => setShowEditResource(true);
+  const closeResourceEditor = () => setShowEditResource(false);
+  const onResourceSaved = () => void fetchAll();
+
   // KISS: Install vs Reinstall Button-Logik + Update-Badge (genau nach Spec)
   // - Keine Server-Dateien (awaiting_files oder Disk <= 0) → servers.install
   // - Sobald Dateien da → servers.reinstall
@@ -634,7 +663,31 @@ export function ServerDetail() {
       </div>
 
       {/* Stats (CPU / RAM / Disk) — Player-Stat ist absichtlich entfernt (KISS, kein A2S) */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-headline text-body-md text-on-surface flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-on-surface-variant" />
+            {t("serverDetail.resources")}
+          </h3>
+          {showResourceEdit && (
+            <div className="flex items-center gap-2">
+              {isLifecycleBusy && (
+                <span className="font-body-md text-xs text-on-surface-variant">
+                  {t("serverDetail.resourceEditor.lifecycleBusy")}
+                </span>
+              )}
+              <button
+                onClick={openResourceEditor}
+                disabled={isLifecycleBusy || !!actionLoading}
+                className="msm-btn-secondary px-3 py-1.5 text-sm disabled:opacity-50"
+                data-testid="resource-edit-btn"
+              >
+                {t("common.edit")}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="msm-card p-5">
           <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
             CPU
@@ -694,6 +747,7 @@ export function ServerDetail() {
               : t(`servers.status.${effectiveStatus}`, { defaultValue: effectiveStatus })}
           </p>
         </div>
+      </div>
       </div>
 
       {/* Network */}
@@ -985,6 +1039,19 @@ export function ServerDetail() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Edit-Resource Modal — permission-gated, accessible, polling-stable */}
+      {showEditResource && (
+        <ResourceEditorDialog
+          onClose={closeResourceEditor}
+          serverId={serverId}
+          cpuLimit={status?.cpu_limit_percent ?? server.cpu_limit_percent ?? null}
+          ramLimit={status?.ram_limit_mb ?? server.ram_limit_mb ?? null}
+          diskLimit={status?.disk_limit_gb ?? server.disk_limit_gb ?? null}
+          lifecycleBusy={isLifecycleBusy}
+          onSaved={onResourceSaved}
+        />
       )}
     </div>
   );
