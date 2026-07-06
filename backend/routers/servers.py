@@ -367,7 +367,17 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     resource_fields = {"cpu_limit_percent", "ram_limit_mb", "disk_limit_gb"}
     config_fields = {"name", "auto_restart", "restart_interval_hours", "restart_time_utc", "restart_times_utc"}
     changed_ports = port_fields & set(payload.keys())
-    bind_ip_changed = "public_bind_ip" in payload and payload["public_bind_ip"] != old_bind_ip
+    bind_ip_present = "public_bind_ip" in payload
+    bind_ip_changed = bind_ip_present and payload["public_bind_ip"] != old_bind_ip
+    # Network-field PRESENCE (scrutiny round 3 fix): determines permission
+    # checks and mixed-payload 409 rejection. Must be presence-based so a
+    # resource plus public_bind_ip with the CURRENT value still requires
+    # server.network.manage and triggers the mixed 409 before mutation.
+    # Port fields (changed_ports) are already presence-based.
+    network_field_present = bool(changed_ports) or bind_ip_present
+    # Network VALUE CHANGE: determines post-commit network recreation
+    # (firewall, iptables, plugin stop/start). Value-based so same-value
+    # fields are no-ops and don't trigger unnecessary recreation.
     network_change = bool(changed_ports) or bind_ip_changed
     has_resource = bool(resource_fields & set(payload.keys()))
     has_config = bool(config_fields & set(payload.keys()))
@@ -391,7 +401,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     # (VAL-API-013). Die Pruefungen finden vor jeder Mutation statt.
     if has_resource:
         require_server_permission(user, server_id, db, "server.resources.manage")
-    if network_change:
+    if network_field_present:
         require_server_permission(user, server_id, db, "server.network.manage")
     if has_config:
         require_server_permission(user, server_id, db, "server.config.write")
@@ -407,7 +417,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     # (VAL-CROSS-010, VAL-CROSS-014). Permission-Pruefungen laufen zuerst
     # (403 vor 409). Resource-only, disk-only, network-only und
     # config/scheduler Paths bleiben unberuehrt.
-    if has_resource and network_change:
+    if has_resource and network_field_present:
         raise HTTPException(
             status_code=409,
             detail="Ressourcen- und Netzwerk-Aenderungen koennen nicht in einem gemeinsamen PATCH durchgefuehrt werden",

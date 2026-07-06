@@ -1838,3 +1838,231 @@ class TestDiskLimitNeverDockerHardQuota:
         # No CPU/RAM fields -> no update_kwargs -> no Docker call
         assert result == {"ok": True}
         container.update.assert_not_called()
+
+
+# ── Docker HostConfig Missing-Key Semantics (scrutiny round 3) ──────
+#
+# Scrutiny round 3 identified that _capture_old_docker_limits uses
+# .get(key, 0) for missing HostConfig keys without explicit tested
+# behavior. Docker's API always includes CpuPeriod, CpuQuota, Memory,
+# and MemorySwap in HostConfig with default 0, so .get(key, 0) matches
+# Docker's actual default. But the behavior was not explicitly tested,
+# leaving drift-prone ambiguity.
+#
+# These tests define and verify the missing-key semantics: missing keys
+# default to 0 (Docker's default), capture succeeds (returns a non-None
+# dict), and restore + verification with those defaults is consistent
+# (no DB/Docker drift ambiguity).
+
+
+class TestHostConfigMissingKeySemantics:
+    """Define and test Docker HostConfig missing-key behavior for old-limit
+    capture so no drift-prone ambiguity remains.
+
+    Docker's API always includes CpuPeriod, CpuQuota, Memory, and
+    MemorySwap in HostConfig, defaulting unset fields to 0. The
+    _capture_old_docker_limits function uses .get(key, 0) which matches
+    this default. These tests verify that missing individual keys are
+    handled consistently: capture succeeds, restore uses 0, and
+    verification confirms the 0 values (no drift).
+    """
+
+    def test_missing_cpu_keys_capture_as_zero(self):
+        """Missing CpuPeriod and CpuQuota in HostConfig → captured as 0
+        (Docker's default for unset CPU limits)."""
+        container = MagicMock()
+        container.attrs = {"HostConfig": {}}  # No CPU keys present
+
+        with patch.object(docker_service, "_container", return_value=container):
+            captured = docker_service._capture_old_docker_limits(
+                container, {"cpu_limit_percent": 200},
+            )
+
+        assert captured is not None
+        assert captured["cpu_period"] == 0
+        assert captured["cpu_quota"] == 0
+
+    def test_missing_memory_keys_capture_as_zero(self):
+        """Missing Memory and MemorySwap in HostConfig → captured as 0
+        (Docker's default for unset memory limits)."""
+        container = MagicMock()
+        container.attrs = {"HostConfig": {}}  # No memory keys present
+
+        with patch.object(docker_service, "_container", return_value=container):
+            captured = docker_service._capture_old_docker_limits(
+                container, {"ram_limit_mb": 4096},
+            )
+
+        assert captured is not None
+        assert captured["mem_limit"] == 0
+        assert captured["memswap_limit"] == 0
+
+    def test_partial_missing_keys_uses_present_values_and_zero_defaults(self):
+        """When some keys are present and others missing, present values are
+        used and missing keys default to 0."""
+        container = MagicMock()
+        container.attrs = {
+            "HostConfig": {
+                "CpuPeriod": 100000,
+                # CpuQuota missing → default 0
+                "Memory": 2147483648,
+                # MemorySwap missing → default 0
+            }
+        }
+
+        with patch.object(docker_service, "_container", return_value=container):
+            captured = docker_service._capture_old_docker_limits(
+                container, {"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+            )
+
+        assert captured is not None
+        assert captured["cpu_period"] == 100000  # present
+        assert captured["cpu_quota"] == 0  # missing → 0
+        assert captured["mem_limit"] == 2147483648  # present
+        assert captured["memswap_limit"] == 0  # missing → 0
+
+    def test_missing_keys_restore_uses_zero_no_drift(self):
+        """When Docker warnings occur and old keys were missing (default 0),
+        restore uses 0 and verification confirms 0 is effective (no drift)."""
+        container = MagicMock()
+        container.attrs = {"HostConfig": {}}  # All keys missing → all 0
+        container.update.return_value = {"Warnings": ["cgroup error"]}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert not result.get("drift")
+        # Two update calls: original + restore
+        assert container.update.call_count == 2
+        # Restore uses captured 0 values (Docker's default for missing keys)
+        restore_kwargs = container.update.call_args_list[1].kwargs
+        assert restore_kwargs["cpu_period"] == 0
+        assert restore_kwargs["cpu_quota"] == 0
+
+    def test_missing_keys_only_for_changed_fields(self):
+        """Missing keys are only captured for fields being updated
+        (VAL-DOCKER-002: unrelated limits are not touched)."""
+        container = MagicMock()
+        container.attrs = {
+            "HostConfig": {
+                "Memory": 2147483648,
+                "MemorySwap": 2147483648,
+                # CpuPeriod and CpuQuota missing
+            }
+        }
+
+        with patch.object(docker_service, "_container", return_value=container):
+            captured = docker_service._capture_old_docker_limits(
+                container, {"cpu_limit_percent": 200},  # only CPU, not RAM
+            )
+
+        assert captured is not None
+        # CPU keys captured (missing → 0)
+        assert "cpu_period" in captured
+        assert "cpu_quota" in captured
+        assert captured["cpu_period"] == 0
+        assert captured["cpu_quota"] == 0
+        # RAM keys NOT captured (only CPU was in updates)
+        assert "mem_limit" not in captured
+        assert "memswap_limit" not in captured
+
+    def test_missing_keys_warning_restore_only_touches_changed_fields(self):
+        """When warnings occur and only CPU was changed, restore only
+        includes CPU fields (not RAM), even with missing-key defaults."""
+        container = MagicMock()
+        container.attrs = {
+            "HostConfig": {
+                "Memory": 2147483648,
+                "MemorySwap": 2147483648,
+                # CpuPeriod and CpuQuota missing → default 0
+            }
+        }
+        container.update.return_value = {"Warnings": ["cgroup error"]}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},  # only CPU
+            )
+
+        assert result["ok"] is False
+        assert not result.get("drift")
+        assert container.update.call_count == 2
+        restore_kwargs = container.update.call_args_list[1].kwargs
+        # CPU fields restored with default 0
+        assert restore_kwargs["cpu_period"] == 0
+        assert restore_kwargs["cpu_quota"] == 0
+        # RAM fields NOT in restore (only CPU was changed)
+        assert "mem_limit" not in restore_kwargs
+        assert "memswap_limit" not in restore_kwargs
+
+    def test_missing_keys_verification_confirms_zero_effective(self):
+        """After restore with 0 defaults, verification reloads HostConfig
+        and confirms 0 is effective (no drift ambiguity)."""
+        container = MagicMock()
+        container.attrs = {"HostConfig": {}}  # All missing → 0
+        container.update.return_value = {"Warnings": ["cgroup error"]}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"ram_limit_mb": 4096},
+            )
+
+        assert result["ok"] is False
+        assert not result.get("drift")
+        # Restore uses 0 defaults
+        restore_kwargs = container.update.call_args_list[1].kwargs
+        assert restore_kwargs["mem_limit"] == 0
+        assert restore_kwargs["memswap_limit"] == 0
+        # Verification: reload was called and HostConfig still has {} →
+        # .get(key, 0) returns 0 which matches captured 0 → verified
+
+    def test_missing_keys_capture_does_not_abort(self):
+        """Missing individual keys does NOT cause _capture_old_docker_limits
+        to return None (unlike missing entire HostConfig which does abort).
+        Docker's API always includes these keys, but missing-key defaulting
+        to 0 is the tested, explicit behavior."""
+        container = MagicMock()
+        container.attrs = {"HostConfig": {}}  # Empty dict, no individual keys
+
+        with patch.object(docker_service, "_container", return_value=container):
+            captured = docker_service._capture_old_docker_limits(
+                container, {"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+            )
+
+        # Capture succeeds (returns non-None dict with 0 defaults)
+        assert captured is not None
+        assert captured == {
+            "cpu_period": 0,
+            "cpu_quota": 0,
+            "mem_limit": 0,
+            "memswap_limit": 0,
+        }
+
+    def test_missing_keys_vs_missing_hostconfig_distinct_behavior(self):
+        """Missing entire HostConfig → abort (return None).
+        Missing individual keys within HostConfig → default to 0 (capture succeeds).
+        These are distinct, explicit behaviors with no ambiguity."""
+        # Missing entire HostConfig → abort
+        container_no_hc = MagicMock()
+        container_no_hc.attrs = {}
+        with patch.object(docker_service, "_container", return_value=container_no_hc):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+        assert result["ok"] is False
+        assert "Ressourcen" in result["error"]
+        container_no_hc.update.assert_not_called()
+
+        # Missing individual keys → capture succeeds, update proceeds
+        container_empty_hc = MagicMock()
+        container_empty_hc.attrs = {"HostConfig": {}}
+        container_empty_hc.update.return_value = {"Warnings": []}
+        with patch.object(docker_service, "_container", return_value=container_empty_hc):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+        assert result == {"ok": True}
+        container_empty_hc.update.assert_called_once()

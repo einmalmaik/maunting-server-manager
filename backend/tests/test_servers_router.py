@@ -3409,3 +3409,216 @@ class TestExecEndpoint:
             server_id=test_server.id, command=["sleep", "999"],
         )
         assert r.status_code == 504
+
+
+# ── Network Field Presence Detection (scrutiny round 3 fix) ──────────
+#
+# Scrutiny round 3 found that network field PRESENCE was conflated with
+# network field VALUE CHANGE for public_bind_ip. A PATCH with a resource
+# field plus public_bind_ip carrying the CURRENT value bypassed both the
+# network permission check and the mixed resource/network 409 rejection,
+# because bind_ip_changed was False (same value).
+#
+# The fix detects network-field PRESENCE separately from value changes:
+#   - network_field_present (presence-based) → permission check + 409
+#   - network_change (value-based) → post-commit recreation
+#
+# Covers the scrutiny round 3 blocking finding. Existing network-only,
+# resource-only, and mixed-with-changed-value behavior must remain unchanged.
+
+
+class TestNetworkFieldPresenceDetection:
+    """Detect network field presence separately from value changes.
+
+    Presence of public_bind_ip or port fields in a PATCH must be treated
+    as network-field presence for permission and mixed-payload rejection,
+    even when the value equals the current value.
+    """
+
+    def _set_resources(self, db: Session, server: Server, cpu=100, ram=2048, disk=20) -> None:
+        server.cpu_limit_percent = cpu
+        server.ram_limit_mb = ram
+        server.disk_limit_gb = disk
+        db.commit()
+        db.refresh(server)
+
+    def _grant(self, db: Session, user: User, server: Server, *keys: str) -> None:
+        for key in keys:
+            db.add(ServerPermission(
+                user_id=user.id, server_id=server.id, permission_key=key,
+            ))
+        db.commit()
+
+    # ── Resource + same-value public_bind_ip → 409 with full permissions ──
+
+    def test_resource_plus_same_value_bind_ip_returns_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Resource + public_bind_ip with the CURRENT value → 409, no mutation
+        (scrutiny round 3: presence must trigger rejection even for same value)."""
+        self._set_resources(db, test_server, cpu=100)
+        test_server.status = "stopped"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+
+        with patch("routers.servers.allocate_ports") as mock_alloc, \
+             patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.docker_service.is_running") as mock_running, \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.close_ports") as mock_close, \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.get_plugin") as mock_plugin:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "public_bind_ip": "127.0.0.1"},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        # No mutation side effects at all
+        mock_alloc.assert_not_called()
+        mock_eval.assert_not_called()
+        mock_running.assert_not_called()
+        mock_update.assert_not_called()
+        mock_close.assert_not_called()
+        mock_open.assert_not_called()
+        mock_plugin.assert_not_called()
+
+    # ── Resource + same-value public_bind_ip without network perm → 403 ──
+
+    def test_resource_plus_same_value_bind_ip_no_network_perm_returns_403(
+        self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Resource + same-value public_bind_ip without server.network.manage
+        → 403, no mutation (permission check uses presence, not value change)."""
+        self._grant(db, regular_user, test_server, "server.view", "server.resources.manage")
+        self._set_resources(db, test_server, cpu=100)
+        test_server.status = "stopped"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200, "public_bind_ip": "127.0.0.1"},
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert response.status_code == 403
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.public_bind_ip == "127.0.0.1"
+
+    # ── Resource + same-value port field → 409 (ports already presence-based) ──
+
+    def test_resource_plus_same_value_port_returns_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Resource + port field with the CURRENT value → 409, no mutation
+        (port fields are already presence-based; regression guard)."""
+        from models.server_port import ServerPort
+        self._set_resources(db, test_server, cpu=100)
+        test_server.status = "stopped"
+        test_server.ports = [ServerPort(role="game", port=27015, protocol="udp")]
+        db.commit()
+
+        with patch("routers.servers.allocate_ports") as mock_alloc, \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "game_port": 27015},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        mock_alloc.assert_not_called()
+        mock_update.assert_not_called()
+
+    # ── Network-only same-value public_bind_ip → no-op / safe success ──
+
+    def test_network_only_same_value_bind_ip_no_recreation(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Network-only same-value public_bind_ip → 200, no network recreation
+        (post-commit recreation uses value-based network_change, not presence)."""
+        test_server.status = "stopped"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+
+        with patch("routers.servers.close_ports") as mock_close, \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.iptables_revoke_server") as mock_revoke, \
+             patch("routers.servers.iptables_accept_server") as mock_accept, \
+             patch("routers.servers.get_plugin") as mock_plugin, \
+             patch("routers.servers.docker_service.is_running", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"public_bind_ip": "127.0.0.1"},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        # No network recreation side effects (same value = no-op)
+        mock_close.assert_not_called()
+        mock_open.assert_not_called()
+        mock_revoke.assert_not_called()
+        mock_accept.assert_not_called()
+        mock_plugin.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.public_bind_ip == "127.0.0.1"
+
+    # ── Disk + same-value public_bind_ip → 409, no disk evaluation ──
+
+    def test_disk_plus_same_value_bind_ip_returns_409_no_disk_eval(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk + same-value public_bind_ip → 409, disk evaluator not called."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "stopped"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+
+        with patch("routers.servers.evaluate_disk_soft_limit") as mock_eval, \
+             patch("routers.servers.allocate_ports") as mock_alloc:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50, "public_bind_ip": "127.0.0.1"},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        db.refresh(test_server)
+        assert test_server.disk_limit_gb == 20
+        mock_eval.assert_not_called()
+        mock_alloc.assert_not_called()
+
+    # ── Regression: changed-value public_bind_ip + resource still 409 ──
+
+    def test_resource_plus_changed_value_bind_ip_still_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Regression: resource + changed-value public_bind_ip still → 409
+        (existing behavior must not regress)."""
+        self._set_resources(db, test_server, cpu=100)
+        test_server.status = "stopped"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"cpu_limit_percent": 200, "public_bind_ip": "192.168.1.1"},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 409
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100

@@ -446,6 +446,13 @@ def _capture_old_docker_limits(
 
     restore_kwargs: dict[str, Any] = {}
 
+    # Docker's HostConfig always includes CpuPeriod, CpuQuota, Memory, and
+    # MemorySwap, defaulting unset fields to 0. Using .get(key, 0) matches
+    # this default, so missing keys are captured as 0 (the Docker default
+    # for unset limits). This is the explicit, tested behavior: missing
+    # individual keys default to 0 and cannot create drift ambiguity
+    # (scrutiny round 3 fix). Missing entire HostConfig is handled above
+    # (returns None → caller aborts before mutation).
     if "cpu_limit_percent" in updates:
         restore_kwargs["cpu_period"] = host_config.get("CpuPeriod", 0)
         restore_kwargs["cpu_quota"] = host_config.get("CpuQuota", 0)
@@ -485,9 +492,15 @@ def _verify_effective_limits(
         ("mem_limit", "Memory"),
         ("memswap_limit", "MemorySwap"),
     ]
+    # Use .get(host_key, 0) to match the default used in
+    # _capture_old_docker_limits. Docker's HostConfig always includes these
+    # keys with default 0, so missing keys in both capture and verification
+    # default to 0 consistently. Without this, a missing key would return
+    # None from .get(host_key) while the captured value is 0, causing a
+    # false mismatch and drift report (scrutiny round 3 fix).
     for key, host_key in field_map:
         if key in restore_kwargs:
-            if host_config.get(host_key) != restore_kwargs[key]:
+            if host_config.get(host_key, 0) != restore_kwargs[key]:
                 logger.warning("docker restore verification mismatch for %s", name)
                 return False
 
