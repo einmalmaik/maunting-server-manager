@@ -1269,12 +1269,14 @@ class TestLiveResourceUpdate:
         self, client: TestClient, owner_cookies: dict, csrf_token: str,
         test_server: Server, db: Session,
     ):
-        """Gestoppter Server: Werte werden persistiert, kein Docker-Aufruf, kein Start."""
+        """Gestoppter Server: Werte werden persistiert, kein Docker-Update,
+        kein Start. Stale-Runtime-Check prueft Docker-Status (VAL-API-015):
+        DB=stopped + Docker=stopped -> sicher persistieren."""
         self._set_resources(db, test_server, cpu=100, ram=2048)
         test_server.status = "stopped"
         db.commit()
 
-        with patch("routers.servers.docker_service.is_running") as mock_running, \
+        with patch("routers.servers.docker_service.is_running", return_value=False) as mock_running, \
              patch("routers.servers.docker_service.update_container_resources") as mock_update, \
              patch("routers.servers.is_lifecycle_job_active", return_value=False):
             response = client.patch(
@@ -1289,9 +1291,10 @@ class TestLiveResourceUpdate:
         assert data["ram_limit_mb"] == 4096
         # Status bleibt "stopped"
         assert data["status"] == "stopped"
-        # Kein Docker Live-Update oder is_running
+        # Stale-Runtime-Check wurde durchgefuehrt (Docker nicht running)
+        mock_running.assert_called()
+        # Kein Docker Live-Update (Server ist gestoppt)
         mock_update.assert_not_called()
-        mock_running.assert_not_called()
 
     # ── VAL-API-009: Runtime apply failure leaves API state unchanged ──
 
@@ -2087,6 +2090,362 @@ class TestDiskSoftLimitReEvaluation:
         # Server-Row existiert noch
         db.refresh(test_server)
         assert test_server.id is not None
+
+
+# ── Mixed PATCH Atomicity and Stale Runtime Safety (scrutiny fix) ──────
+#
+# Regression tests for scrutiny blockers around mixed PATCH atomicity and
+# stale runtime safety. Covers VAL-API-013, VAL-API-015, VAL-DISK-001,
+# VAL-DISK-005, VAL-CROSS-010, VAL-CROSS-014.
+#
+# Three findings fixed:
+#   1. Mixed resource + restart-scheduler config payloads committed DB
+#      changes before scheduler sync could fail outside rollback handling.
+#   2. CPU/RAM PATCH did not check actual Docker runtime state when DB
+#      status said stopped; DB-stopped/Docker-running persisted values
+#      without live update (drift).
+#   3. Mixed disk_limit_gb + network PATCH paths skipped disk soft-limit
+#      re-evaluation entirely.
+
+
+class TestMixedPatchAtomicityAndStaleRuntime:
+    """Regression tests for mixed PATCH atomicity and stale runtime safety."""
+
+    def _set_resources(self, db: Session, server: Server, cpu=100, ram=2048, disk=20) -> None:
+        server.cpu_limit_percent = cpu
+        server.ram_limit_mb = ram
+        server.disk_limit_gb = disk
+        db.commit()
+        db.refresh(server)
+
+    def _grant(self, db: Session, user: User, server: Server, *keys: str) -> None:
+        for key in keys:
+            db.add(ServerPermission(
+                user_id=user.id, server_id=server.id, permission_key=key,
+            ))
+        db.commit()
+
+    # ── Fix 1: Mixed resource + restart-scheduler atomicity (VAL-API-013) ──
+
+    def test_mixed_resource_restart_scheduler_rollback_on_sync_failure(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Resource + restart-scheduler config in one PATCH: if scheduler
+        sync fails, DB must roll back (no drift between DB and scheduler)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "stopped"
+        test_server.auto_restart = True
+        test_server.restart_interval_hours = 8
+        db.commit()
+
+        with patch("routers.servers.sync_server_restart_schedule",
+                   side_effect=RuntimeError("scheduler unavailable")):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "restart_interval_hours": 4},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Server-Aktualisierung fehlgeschlagen"
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.restart_interval_hours == 8
+
+    def test_mixed_resource_restart_scheduler_success_commits_atomically(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Resource + restart-scheduler: both succeed -> both committed
+        atomically (scheduler sync inside transaction)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "stopped"
+        test_server.auto_restart = True
+        test_server.restart_interval_hours = 8
+        db.commit()
+
+        with patch("routers.servers.sync_server_restart_schedule") as mock_sync:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "restart_interval_hours": 4},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        mock_sync.assert_called_once()
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 200
+        assert test_server.restart_interval_hours == 4
+
+    def test_config_only_restart_scheduler_rollback_on_sync_failure(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Config-only restart-scheduler PATCH: scheduler sync failure rolls
+        back config changes too (not just resource changes)."""
+        test_server.status = "stopped"
+        test_server.auto_restart = True
+        test_server.restart_interval_hours = 8
+        db.commit()
+
+        with patch("routers.servers.sync_server_restart_schedule",
+                   side_effect=RuntimeError("scheduler unavailable")):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"restart_interval_hours": 4},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 500
+        db.refresh(test_server)
+        assert test_server.restart_interval_hours == 8
+
+    # ── Fix 2: DB-stopped/Docker-running stale runtime (VAL-API-015) ──
+
+    def test_db_stopped_docker_running_fails_safely(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """DB says stopped, Docker says running -> 409, no persist, no drift."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 409
+        mock_update.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+
+    def test_db_stopped_docker_stopped_persists_safely(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """DB says stopped, Docker says stopped -> persist, no Docker update."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=False), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["cpu_limit_percent"] == 200
+        mock_update.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 200
+
+    def test_db_running_docker_running_applies_live_update(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """DB says running, Docker says running -> live update applied
+        (unchanged behavior, regression guard)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": True}) as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        mock_update.assert_called_once()
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 200
+
+    # ── Fix 3: Mixed disk + network evaluates disk soft-limit ──
+    # VAL-DISK-001, VAL-DISK-005, VAL-CROSS-010, VAL-CROSS-014
+
+    def test_mixed_disk_network_evaluates_disk_soft_limit(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk + network in one PATCH: disk soft-limit must still be
+        evaluated before commit (VAL-DISK-001, VAL-CROSS-010)."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "stopped"
+        db.commit()
+
+        with patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}) as mock_eval, \
+             patch("routers.servers.allocate_ports", return_value=[
+                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
+             ]), \
+             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.docker_service.is_running", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50, "game_port": 27015},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["disk_limit_gb"] == 50
+        mock_eval.assert_called_once()
+
+    def test_mixed_disk_network_disk_eval_failure_rolls_back(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk + network: disk eval failure -> 503, no drift, no network
+        mutation (VAL-DISK-005, VAL-CROSS-010, VAL-CROSS-014)."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "stopped"
+        original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
+        db.commit()
+
+        with patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": False, "error": "Disk-Nutzung konnte nicht ermittelt werden"}), \
+             patch("routers.servers.allocate_ports", return_value=[
+                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
+             ]), \
+             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.docker_service.is_running", return_value=False), \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.close_ports") as mock_close:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50, "game_port": 27015},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        assert "Disk-Limit" in response.json()["detail"]
+        db.refresh(test_server)
+        assert test_server.disk_limit_gb == 20
+        assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
+
+    def test_mixed_cpu_ram_disk_network_rollback_on_disk_failure(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """CPU + RAM + disk + network: disk eval failure -> all unchanged,
+        no Docker update, no network mutation (VAL-CROSS-014)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        test_server.status = "running"
+        original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": False, "error": "Disk-Nutzung konnte nicht ermittelt werden"}), \
+             patch("routers.servers.allocate_ports", return_value=[
+                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
+             ]), \
+             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.close_ports") as mock_close:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={
+                    "cpu_limit_percent": 200,
+                    "ram_limit_mb": 4096,
+                    "disk_limit_gb": 50,
+                    "game_port": 27015,
+                },
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+        assert test_server.disk_limit_gb == 20
+        assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
+        mock_update.assert_not_called()
+
+    def test_mixed_disk_network_running_server_uses_lock_for_disk_eval(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk + network on running server: disk eval happens under
+        lifecycle lock (VAL-DISK-007, VAL-CROSS-010)."""
+        self._set_resources(db, test_server, disk=20)
+        test_server.status = "running"
+        test_server.install_dir = "/tmp/test_server"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False) as mock_active, \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}) as mock_eval, \
+             patch("routers.servers.allocate_ports", return_value=[
+                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
+             ]), \
+             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.open_ports"), \
+             patch("routers.servers.close_ports"), \
+             patch("routers.servers.iptables_accept_server"), \
+             patch("routers.servers.iptables_revoke_server"):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50, "game_port": 27015},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        mock_eval.assert_called_once()
+        assert mock_active.call_count >= 2
+
+    def test_mixed_disk_network_no_docker_live_update(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Disk + network: no Docker live CPU/RAM update (network recreate
+        applies values at next start, not live)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}), \
+             patch("routers.servers.allocate_ports", return_value=[
+                 ("game", 27015, "udp"), ("query", 27016, "udp"), ("rcon", 27017, "tcp"),
+             ]), \
+             patch("routers.servers.get_plugin", return_value=None), \
+             patch("routers.servers.open_ports"), \
+             patch("routers.servers.close_ports"), \
+             patch("routers.servers.iptables_accept_server"), \
+             patch("routers.servers.iptables_revoke_server"):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"disk_limit_gb": 50, "cpu_limit_percent": 200, "game_port": 27015},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200, response.text
+        # No live Docker update (network change -> recreate path)
+        mock_update.assert_not_called()
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 200
+        assert test_server.disk_limit_gb == 50
 
 
 # ── Exec-Tab Endpoint (v1.4.7) ───────────────────────────────────────────

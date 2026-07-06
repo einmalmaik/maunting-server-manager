@@ -459,9 +459,16 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         _normalize_server_restart_mode(server)
 
         # ── Live CPU/RAM-Update und/oder Disk-Soft-Limit-Re-evaluation ──
-        # Nur bei tatsaechlich geaenderten Werten und nur wenn kein
-        # Network-Change im selben PATCH ist (der Network-Recreate-Pfad
-        # sammelt die neuen Werte beim naechsten Start ein).
+        # CPU/RAM-Live-Update nur wenn kein Network-Change im selben PATCH
+        # ist (der Network-Recreate-Pfad sammelt die neuen Werte beim
+        # naechsten Start ein).
+        # Disk-Soft-Limit-Re-evaluation bei JEDER disk_limit_gb-Aenderung,
+        # auch in gemischten Payloads mit Network-Aenderungen (VAL-DISK-001,
+        # VAL-CROSS-010, VAL-CROSS-014). Frueher wurde die Re-evaluation bei
+        # Network-Aenderungen uebersprungen, was zu Drift fuehrte: der neue
+        # Limit wurde persistiert, aber nie gegen die aktuelle Nutzung
+        # geprueft. Die Re-evaluation findet vor dem Commit statt, sodass
+        # bei Fehlschlag alle Aenderungen zurueckgerollt werden.
         # Bei gestoppten Servern werden die Werte nur persistiert (VAL-API-008).
         # Bei Docker-Fehlschlag wird die DB zurueckgerollt (VAL-API-009).
         # Lifecycle-Serialisierung verhindert Race-Conditions mit Start/Stop
@@ -470,7 +477,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         # Disk ist ein Soft-Limit: sofortige Re-evaluation ohne Docker-Hard-Quota
         # (VAL-DISK-001, VAL-DISK-004, VAL-DOCKER-010).
         resource_live_change = (cpu_changed or ram_changed) and not network_change
-        disk_eval_needed = disk_changed and not network_change
+        disk_eval_needed = disk_changed
         # Lock wird benoetigt fuer CPU/RAM-Live-Update (Docker-Mutation) und
         # fuer Disk-Re-evaluation bei laufendem Server (potenzieller Stop
         # via plugin.stop, VAL-DISK-007).
@@ -499,31 +506,44 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                     )
                 # ── CPU/RAM Live-Update fuer laufende Container (ohne Restart). ──
                 # Stale-Runtime-Check (VAL-API-015): DB-Status und Docker-
-                # Container-Status muessen uebereinstimmen.
-                if resource_live_change and server.status == "running":
-                    if not docker_service.is_running(container_name):
+                # Container-Status muessen uebereinstimmen. Wenn DB "running"
+                # sagt, aber Docker gestoppt ist, wird sicher abgebrochen.
+                # Wenn DB "stopped" sagt, aber Docker tatsaechlich laeuft,
+                # wird ebenfalls sicher abgebrochen (kein Drift: niemals Werte
+                # persistieren, die ein Live-Update behaupten, ohne dass der
+                # Container aktualisiert wurde).
+                if resource_live_change:
+                    docker_running = docker_service.is_running(container_name)
+                    if server.status == "running" and not docker_running:
                         raise HTTPException(
                             status_code=409,
                             detail="Server-Status nicht konsistent, Ressourcen-Update abgebrochen",
                         )
-                    # Docker Live-Update nur mit geaenderten Feldern (VAL-DOCKER-002).
-                    docker_updates: dict[str, int | None] = {}
-                    if cpu_changed:
-                        docker_updates["cpu_limit_percent"] = server.cpu_limit_percent
-                    if ram_changed:
-                        docker_updates["ram_limit_mb"] = server.ram_limit_mb
-                    result = docker_service.update_container_resources(
-                        container_name, docker_updates,
-                    )
-                    if not result.get("ok"):
-                        # Generische, sanitisierte Meldung (VAL-API-010):
-                        # der spezifische Fehler wird im Docker-Service geloggt.
+                    if server.status != "running" and docker_running:
                         raise HTTPException(
-                            status_code=503,
-                            detail="Ressourcen-Update konnte nicht angewendet werden",
+                            status_code=409,
+                            detail="Server-Status nicht konsistent, Ressourcen-Update abgebrochen",
                         )
-                # Bei status != "running": nur persistieren, kein Docker-Aufruf,
-                # kein Start (VAL-API-008).
+                    if docker_running:
+                        # Docker Live-Update nur mit geaenderten Feldern
+                        # (VAL-DOCKER-002).
+                        docker_updates: dict[str, int | None] = {}
+                        if cpu_changed:
+                            docker_updates["cpu_limit_percent"] = server.cpu_limit_percent
+                        if ram_changed:
+                            docker_updates["ram_limit_mb"] = server.ram_limit_mb
+                        result = docker_service.update_container_resources(
+                            container_name, docker_updates,
+                        )
+                        if not result.get("ok"):
+                            # Generische, sanitisierte Meldung (VAL-API-010):
+                            # der spezifische Fehler wird im Docker-Service geloggt.
+                            raise HTTPException(
+                                status_code=503,
+                                detail="Ressourcen-Update konnte nicht angewendet werden",
+                            )
+                # Bei DB=stopped + Docker=stopped: nur persistieren, kein
+                # Docker-Aufruf, kein Start (VAL-API-008).
                 # ── Disk Soft-Limit sofort neu bewerten (VAL-DISK-001). ──
                 # Misst Nutzung und wendet bestehende Warn-/Stop-Policy an.
                 # Stop erfolgt via plugin.stop unter Lifecycle-Lock (VAL-DISK-007).
@@ -548,6 +568,14 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                     detail="Disk-Limit konnte nicht neu bewertet werden",
                 )
 
+        # ── Scheduler-Sync vor Commit (VAL-API-013 scrutiny fix): ──
+        # Bei Fehlschlag wird die DB zurueckgerollt, damit DB- und
+        # Scheduler-Status nicht driften. Scheduler-Sync ist eine
+        # Seiteneffekt-Gruppe, die mit Resource- oder Config-Aenderungen
+        # im selben PATCH atomic sein muss.
+        if {"auto_restart", "restart_interval_hours", "restart_time_utc", "restart_times_utc"} & set(payload.keys()):
+            sync_server_restart_schedule(server)
+
         db.commit()
         db.refresh(server)
     except HTTPException:
@@ -560,9 +588,6 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             server_id, type(exc).__name__,
         )
         raise HTTPException(status_code=500, detail="Server-Aktualisierung fehlgeschlagen")
-
-    if {"auto_restart", "restart_interval_hours", "restart_time_utc", "restart_times_utc"} & set(payload.keys()):
-        sync_server_restart_schedule(server)
 
     if network_change:
         # Alte Firewall- und iptables-Regeln entfernen, neue anlegen - ABER
