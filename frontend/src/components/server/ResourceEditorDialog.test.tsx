@@ -905,4 +905,96 @@ describe('ResourceEditorDialog', () => {
     expect(screen.getByTestId('resource-cpu-error')).toBeInTheDocument()
     expect(mockApi).not.toHaveBeenCalled()
   })
+
+  // VAL-CROSS-012: Rootless Docker failure in UI shows sanitized localized
+  // feedback, keeps old cards/API values, and exposes no cgroup/socket/
+  // path/stack details.
+  describe('rootless failure UI safety (VAL-CROSS-012)', () => {
+    const sensitivePatterns = [
+      /cgroup/i,
+      /docker\.sock/i,
+      /\/var\/run/i,
+      /\/sys\/fs/i,
+      /Traceback/i,
+      /File "/i,
+      /socket\s+path/i,
+      /stack\s+trace/i,
+    ]
+
+    it('shows sanitized backend message for rootless failure with no sensitive details', async () => {
+      renderDialog({ cpuLimit: 100, ramLimit: 4096, diskLimit: 50 })
+      // Backend returns a sanitized 503 message for rootless failures.
+      // The API client wraps it in SanitizedApiError.
+      const rootlessMsg = 'Ressourcen-Update konnte nicht angewendet werden'
+      mockApi.mockRejectedValueOnce(new client.SanitizedApiError(rootlessMsg))
+
+      fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '200' } })
+      fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('resource-form-error')).toBeInTheDocument()
+      })
+
+      const errorEl = screen.getByTestId('resource-form-error')
+      // Sanitized message is displayed (recognized SanitizedApiError)
+      expect(errorEl.textContent).toMatch(/Ressourcen-Update konnte nicht angewendet werden/)
+
+      // No sensitive markers leak into the UI
+      const errorText = errorEl.textContent || ''
+      for (const pattern of sensitivePatterns) {
+        expect(errorText).not.toMatch(pattern)
+      }
+
+      // Dialog stays open with entered values (old values preserved)
+      expect(screen.getByTestId('resource-cpu-input')).toHaveValue('200')
+      expect(screen.getByTestId('resource-ram-input')).toHaveValue('4096')
+      expect(screen.getByTestId('resource-disk-input')).toHaveValue('50')
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+      // Toast shows the sanitized error, no sensitive markers
+      const errorToasts = useToastStore.getState().toasts.filter((t) => t.type === 'error')
+      expect(errorToasts.length).toBeGreaterThan(0)
+      const toastMsg = errorToasts[errorToasts.length - 1].message
+      expect(toastMsg).toMatch(/Ressourcen-Update konnte nicht angewendet werden/)
+      for (const pattern of sensitivePatterns) {
+        expect(toastMsg).not.toMatch(pattern)
+      }
+    })
+
+    it('uses safe fallback and preserves old values when rootless error has sensitive payload', async () => {
+      renderDialog({ cpuLimit: 150, ramLimit: 2048, diskLimit: 30 })
+      // Simulate a rootless failure where an unexpected error contains
+      // sensitive internals (cgroup path, socket path). Since this is NOT
+      // a SanitizedApiError, the dialog must use the safe fallback and
+      // must not display the raw sensitive content.
+      const sensitivePayload = 'cgroup v2 controller not delegated at /sys/fs/cgroup/docker.sock'
+      mockApi.mockRejectedValueOnce(new Error(sensitivePayload))
+
+      fireEvent.change(screen.getByTestId('resource-cpu-input'), { target: { value: '200' } })
+      fireEvent.click(screen.getByTestId('resource-save-btn'))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('resource-form-error')).toBeInTheDocument()
+      })
+
+      const errorEl = screen.getByTestId('resource-form-error')
+      const fallback = i18n.t('serverDetail.resourceEditor.errors.saveFailed')
+      // Safe fallback is shown, not the sensitive payload
+      expect(errorEl.textContent).toBe(fallback)
+      expect(errorEl.textContent).not.toMatch(/cgroup|docker\.sock|\/sys\/fs/i)
+
+      // Old values preserved (dialog stays open with entered values)
+      expect(screen.getByTestId('resource-cpu-input')).toHaveValue('200')
+      expect(screen.getByTestId('resource-ram-input')).toHaveValue('2048')
+      expect(screen.getByTestId('resource-disk-input')).toHaveValue('30')
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+      // Toast also uses safe fallback, no sensitive markers
+      const errorToasts = useToastStore.getState().toasts.filter((t) => t.type === 'error')
+      expect(errorToasts.length).toBeGreaterThan(0)
+      const toastMsg = errorToasts[errorToasts.length - 1].message
+      expect(toastMsg).toBe(fallback)
+      expect(toastMsg).not.toMatch(/cgroup|docker\.sock|\/sys\/fs/i)
+    })
+  })
 })

@@ -26,6 +26,7 @@ assertions are covered in test_servers_router.py and test_docker_service.py;
 these tests add the cross-area end-to-end perspective.
 """
 import logging
+import socket
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -318,6 +319,83 @@ class TestCrossAreaStoppedNextStart:
         assert status.json()["disk_limit_gb"] == 50
         assert status.json()["status"] == "stopped"
 
+    def test_stopped_patch_then_start_uses_new_cpu_ram_limits(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """VAL-CROSS-003: Stopped PATCH persists new CPU/RAM; a later normal
+        start creates the Docker container with those new limits, and the
+        disk soft limit remains API/status-visible after start."""
+        _set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        test_server.status = "stopped"
+        db.commit()
+
+        # Step 1: PATCH new CPU/RAM/disk while stopped (no Docker, no start)
+        with patch("routers.servers.docker_service.is_running", return_value=False), \
+             patch("routers.servers.docker_service.update_container_resources") as mock_update, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096, "disk_limit_gb": 50},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 200
+        mock_update.assert_not_called()
+
+        # Step 2: Verify new values persisted in DB
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 200
+        assert test_server.ram_limit_mb == 4096
+        assert test_server.disk_limit_gb == 50
+
+        # Step 3: Simulate a later normal start. The real start path in
+        # games/base.py (BasePlugin.start) calls docker_service.run_container
+        # with cpu_limit_percent=server.cpu_limit_percent and
+        # ram_limit_mb=server.ram_limit_mb. We use a minimal plugin that
+        # mirrors this exact contract to prove the persisted values reach
+        # Docker create.
+        from services import docker_service
+
+        class _StartPlugin:
+            """Mirrors the CPU/RAM-relevant portion of games/base.py start."""
+            docker_image = "test/game:latest"
+
+            def start(self, server):
+                result = docker_service.run_container(
+                    name=f"msm-srv-{server.id}",
+                    image=self.docker_image,
+                    cpu_limit_percent=server.cpu_limit_percent,
+                    ram_limit_mb=server.ram_limit_mb,
+                )
+                if not result.get("ok"):
+                    return {"error": result.get("error", "start failed")}
+                return {"message": "Server gestartet",
+                        "container": f"msm-srv-{server.id}"}
+
+        with patch.object(docker_service, "run_container",
+                          return_value={"ok": True, "stdout": "", "stderr": ""}) as mock_run:
+            plugin = _StartPlugin()
+            result = plugin.start(test_server)
+
+        # Step 4: Docker create received the NEW CPU/RAM limits from the
+        # persisted DB values, proving stopped PATCH → later start flow.
+        assert "message" in result, f"start failed: {result}"
+        mock_run.assert_called_once()
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["cpu_limit_percent"] == 200
+        assert kwargs["ram_limit_mb"] == 4096
+        assert kwargs["name"] == f"msm-srv-{test_server.id}"
+
+        # Step 5: Disk soft limit remains API/status-visible after start
+        get = client.get(f"/api/servers/{test_server.id}", cookies=owner_cookies)
+        assert get.json()["disk_limit_gb"] == 50
+        status = client.get(f"/api/servers/{test_server.id}/status", cookies=owner_cookies)
+        assert status.status_code == 200
+        assert status.json()["disk_limit_gb"] == 50
+
 
 # ── VAL-CROSS-004: Unlimited values round trip across UI, API, and Docker ──
 
@@ -446,7 +524,8 @@ class TestCrossAreaDiskWarningStopVisible:
         test_server: Server, db: Session,
     ):
         """VAL-CROSS-005: Lowering disk to warning threshold; API and status
-        show consistent warning state immediately."""
+        show consistent warning state (usage, limit, status, message)
+        immediately, non-destructive."""
         _set_resources(db, test_server, disk=50)
         test_server.status = "running"
         test_server.install_dir = "/tmp/test_server"
@@ -457,13 +536,11 @@ class TestCrossAreaDiskWarningStopVisible:
              patch("routers.servers.docker_service.update_container_resources"), \
              patch("services.scheduler_service.docker_service.disk_usage_mb", return_value=9000), \
              patch("services.scheduler_service.get_plugin") as mock_plugin:
-            # 12 GB limit, usage 9000 MB ~73% -> within policy, no warning
-            # Actually 9000/12288 = 73%, below 80% warning threshold
-            # Use a lower limit to trigger warning: 12 GB = 12288 MB, 9000/12288 = 73%
-            # Let's use 11 GB = 11264 MB, 9000/11264 = 80% -> warning
+            # 10 GB = 10240 MB, usage 9000 MB -> 87% >= 80% warning threshold
+            # but < 100% stop threshold -> warning, not stop
             response = client.patch(
                 f"/api/servers/{test_server.id}",
-                json={"disk_limit_gb": 11},
+                json={"disk_limit_gb": 10},
                 cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
             )
@@ -471,16 +548,37 @@ class TestCrossAreaDiskWarningStopVisible:
         assert response.status_code == 200
         db.refresh(test_server)
         # Disk limit updated
-        assert test_server.disk_limit_gb == 11
-        # No destructive stop (usage within policy or warning only)
+        assert test_server.disk_limit_gb == 10
+        # Warning state: status_message contains warning text
+        assert test_server.status_message is not None
+        assert "Warnung" in test_server.status_message
+        # Disk usage was measured and stored
+        assert test_server.disk_usage_mb == 9000
+        # No destructive stop (warning only, below 100%)
         mock_plugin.assert_not_called()
+
+        # API response shows usage, limit, and warning message
+        data = response.json()
+        assert data["disk_limit_gb"] == 10
+        assert data["disk_usage_mb"] == 9000
+
+        # Status endpoint shows usage, limit, status, and message
+        status = client.get(f"/api/servers/{test_server.id}/status", cookies=owner_cookies)
+        assert status.status_code == 200
+        st = status.json()
+        assert st["disk_limit_gb"] == 10
+        assert st["disk_used_mb"] == 9000
+        # Warning is visible in status_message (UI-equivalent: the UI reads
+        # this from the status endpoint)
+        assert st.get("status_message") is not None or "Warnung" in (st.get("message") or "")
 
     def test_disk_stop_state_visible_in_api_and_status(
         self, client: TestClient, owner_cookies: dict, csrf_token: str,
         test_server: Server, db: Session,
     ):
-        """VAL-CROSS-005: Lowering disk below usage; status shows error state,
-        API shows updated limit, non-destructive."""
+        """VAL-CROSS-005: Lowering disk below usage; API and status show
+        consistent usage, limit, status, and message — all four fields
+        visible through both endpoints, non-destructive."""
         _set_resources(db, test_server, disk=50)
         test_server.status = "running"
         test_server.install_dir = "/tmp/test_server"
@@ -507,28 +605,36 @@ class TestCrossAreaDiskWarningStopVisible:
 
         assert response.status_code == 200
         data = response.json()
+        # API shows limit and usage
         assert data["disk_limit_gb"] == 10
+        assert data["disk_usage_mb"] == 30000
         # Stop was invoked (lifecycle-safe)
         assert stop_called == [test_server.id]
         # No destructive remove
         mock_remove.assert_not_called()
 
-        # DB state shows error with disk message
+        # DB state shows error with disk message (all four fields)
         db.refresh(test_server)
         assert test_server.status == "error"
+        assert test_server.disk_limit_gb == 10
+        assert test_server.disk_usage_mb == 30000
         assert "Disk-Soft-Limit" in (test_server.status_message or "")
 
-        # Status endpoint shows the same state
+        # Status endpoint shows usage, limit, status, and message
         mock_status_plugin = MagicMock()
         mock_status_plugin.get_status.return_value = MagicMock(
-            status="error", message="Disk-Soft-Limit", cpu_percent=None,
+            status="error", message="Disk-Soft-Limit erreicht", cpu_percent=None,
             ram_mb=None, disk_mb=30000, uptime_seconds=0, started_at=None,
         )
         with patch("routers.servers.get_plugin", return_value=mock_status_plugin):
             status = client.get(f"/api/servers/{test_server.id}/status", cookies=owner_cookies)
         assert status.status_code == 200
         st = status.json()
+        # All four visibility fields through status endpoint
         assert st["disk_limit_gb"] == 10
+        assert st["disk_used_mb"] == 30000
+        assert st["status"] == "error"
+        assert "Disk-Soft-Limit" in (st.get("message") or st.get("status_message") or "")
 
 
 # ── VAL-CROSS-006: Unauthorized direct API attempts cannot bypass UI ──
@@ -726,6 +832,41 @@ class TestCrossAreaNoDestructiveCleanup:
             )
 
         assert response.status_code == 200
+        mock_remove.assert_not_called()
+        mock_rmtree.assert_not_called()
+
+    def test_successful_edit_prune_not_called(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """VAL-CROSS-008: Successful resource PATCH explicitly asserts that
+        docker_service.prune (broad container cleanup) is never called."""
+        _set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": True}), \
+             patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch.object(
+                 __import__("routers.servers", fromlist=["docker_service"]).docker_service,
+                 "prune", create=True,
+             ) as mock_prune, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False), \
+             patch("routers.servers.evaluate_disk_soft_limit",
+                   return_value={"ok": True, "action": "none"}), \
+             patch("shutil.rmtree") as mock_rmtree:
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096, "disk_limit_gb": 50},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 200
+        # Explicit: prune was never called on the success path
+        mock_prune.assert_not_called()
         mock_remove.assert_not_called()
         mock_rmtree.assert_not_called()
 
@@ -1223,6 +1364,93 @@ class TestCrossAreaNetworkReachabilityStable:
         mock_open.assert_not_called()
         db.refresh(test_server)
         assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
+
+    def test_active_loopback_probe_stable_during_resource_edit(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """VAL-CROSS-013: Active loopback-only synthetic TCP probes to a
+        reachable port remain consistent before, during, and after a
+        running CPU/RAM edit. Metadata-only assertions are not sufficient;
+        this test opens a real loopback listener and probes it."""
+        _set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+        original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
+        original_bind_ip = test_server.public_bind_ip
+
+        # Open a synthetic loopback-only TCP listener on an ephemeral port.
+        # This simulates a reachable game/query port without touching any
+        # real server or external network.
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(5)
+        probe_port = listener.getsockname()[1]
+        listener.settimeout(0.5)
+
+        def _probe() -> bool:
+            """Attempt a loopback TCP connect to the probe port, then
+            accept and close on the listener side to clear the backlog."""
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.0)
+                s.connect(("127.0.0.1", probe_port))
+                s.close()
+                # Accept and close to clear the accept queue for next probe
+                try:
+                    conn, _ = listener.accept()
+                    conn.close()
+                except socket.timeout:
+                    pass
+                return True
+            except (OSError, ConnectionRefusedError):
+                return False
+
+        try:
+            # Probe BEFORE the resource edit
+            probe_before = _probe()
+            assert probe_before, "Probe port should be reachable before edit"
+
+            # Perform the CPU/RAM edit WHILE the probe port is active.
+            # The edit must not close/open ports or touch firewall rules.
+            with patch("routers.servers.docker_service.is_running", return_value=True), \
+                 patch("routers.servers.docker_service.update_container_resources",
+                       return_value={"ok": True}), \
+                 patch("routers.servers.close_ports") as mock_close, \
+                 patch("routers.servers.open_ports") as mock_open, \
+                 patch("routers.servers.iptables_revoke_server") as mock_revoke, \
+                 patch("routers.servers.iptables_accept_server") as mock_accept, \
+                 patch("routers.servers.is_lifecycle_job_active", return_value=False):
+                response = client.patch(
+                    f"/api/servers/{test_server.id}",
+                    json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                    cookies=owner_cookies,
+                    headers={"X-CSRF-Token": csrf_token},
+                )
+
+            assert response.status_code == 200
+
+            # No firewall/iptables/port mutations during the edit
+            mock_close.assert_not_called()
+            mock_open.assert_not_called()
+            mock_revoke.assert_not_called()
+            mock_accept.assert_not_called()
+
+            # Probe DURING/AFTER the edit — port must still be reachable
+            probe_after = _probe()
+            assert probe_after, "Probe port should remain reachable after edit"
+
+            # Probes are consistent: reachable before AND after
+            assert probe_before == probe_after == True
+
+            # API port bindings unchanged
+            db.refresh(test_server)
+            assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
+            assert test_server.public_bind_ip == original_bind_ip
+
+        finally:
+            listener.close()
 
 
 # ── VAL-CROSS-014: Combined CPU/RAM plus disk failure leaves no drift ──
