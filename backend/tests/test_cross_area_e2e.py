@@ -27,6 +27,7 @@ these tests add the cross-area end-to-end perspective.
 """
 import logging
 import socket
+import threading
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -1365,14 +1366,15 @@ class TestCrossAreaNetworkReachabilityStable:
         db.refresh(test_server)
         assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
 
-    def test_active_loopback_probe_stable_during_resource_edit(
+    def test_during_probe_inside_live_update_side_effect(
         self, client: TestClient, owner_cookies: dict, csrf_token: str,
         test_server: Server, db: Session,
     ):
-        """VAL-CROSS-013: Active loopback-only synthetic TCP probes to a
-        reachable port remain consistent before, during, and after a
-        running CPU/RAM edit. Metadata-only assertions are not sufficient;
-        this test opens a real loopback listener and probes it."""
+        """VAL-CROSS-013: A loopback-only synthetic TCP probe runs INSIDE
+        the mocked live-update side effect (while update_container_resources
+        is executing and PATCH is in progress), proving before/during/after
+        reachability with real socket probes — not metadata-only assertions.
+        """
         _set_resources(db, test_server, cpu=100, ram=2048)
         test_server.status = "running"
         db.commit()
@@ -1407,16 +1409,29 @@ class TestCrossAreaNetworkReachabilityStable:
             except (OSError, ConnectionRefusedError):
                 return False
 
+        # The during-probe result will be captured INSIDE the live-update
+        # side effect, i.e. while update_container_resources is executing
+        # and the PATCH request is still in progress.
+        during_probe_results: list[bool] = []
+
+        def update_with_during_probe(*args, **kwargs):
+            """Mocked live-update that probes reachability while the
+            PATCH is in progress — the during probe runs inside the
+            side effect, not merely before or after it."""
+            during_probe_results.append(_probe())
+            return {"ok": True}
+
         try:
             # Probe BEFORE the resource edit
             probe_before = _probe()
             assert probe_before, "Probe port should be reachable before edit"
 
-            # Perform the CPU/RAM edit WHILE the probe port is active.
-            # The edit must not close/open ports or touch firewall rules.
+            # Perform the CPU/RAM edit. The update_container_resources mock
+            # runs the during-probe INSIDE the live-update side effect while
+            # the PATCH is in progress.
             with patch("routers.servers.docker_service.is_running", return_value=True), \
                  patch("routers.servers.docker_service.update_container_resources",
-                       return_value={"ok": True}), \
+                       side_effect=update_with_during_probe) as mock_update, \
                  patch("routers.servers.close_ports") as mock_close, \
                  patch("routers.servers.open_ports") as mock_open, \
                  patch("routers.servers.iptables_revoke_server") as mock_revoke, \
@@ -1431,18 +1446,167 @@ class TestCrossAreaNetworkReachabilityStable:
 
             assert response.status_code == 200
 
+            # The during-probe ran exactly once inside the live-update side effect
+            assert len(during_probe_results) == 1, (
+                "During-probe should have run exactly once inside the "
+                "live-update side effect"
+            )
+            probe_during = during_probe_results[0]
+            assert probe_during, (
+                "Probe port must remain reachable DURING the live-update "
+                "side effect while PATCH is in progress"
+            )
+
             # No firewall/iptables/port mutations during the edit
             mock_close.assert_not_called()
             mock_open.assert_not_called()
             mock_revoke.assert_not_called()
             mock_accept.assert_not_called()
 
-            # Probe DURING/AFTER the edit — port must still be reachable
+            # Probe AFTER the edit — port must still be reachable
             probe_after = _probe()
             assert probe_after, "Probe port should remain reachable after edit"
 
-            # Probes are consistent: reachable before AND after
-            assert probe_before == probe_after == True
+            # Before/during/after all consistent: reachable throughout
+            assert probe_before == probe_during == probe_after == True
+
+            # Docker live update was called exactly once
+            mock_update.assert_called_once()
+
+            # API port bindings unchanged
+            db.refresh(test_server)
+            assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
+            assert test_server.public_bind_ip == original_bind_ip
+
+        finally:
+            listener.close()
+
+    def test_during_probe_concurrent_while_patch_blocked(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """VAL-CROSS-013: A loopback-only synthetic TCP probe runs
+        concurrently while the PATCH is intentionally blocked inside the
+        live-update side effect. Two threading.Event objects coordinate
+        the blocking mock and the main-thread probe so that the during
+        probe genuinely overlaps with the in-progress PATCH.
+        """
+        _set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+        original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
+        original_bind_ip = test_server.public_bind_ip
+
+        # Open a synthetic loopback-only TCP listener on an ephemeral port.
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(5)
+        probe_port = listener.getsockname()[1]
+        listener.settimeout(2.0)
+
+        def _probe() -> bool:
+            """Attempt a loopback TCP connect to the probe port, then
+            accept and close on the listener side to clear the backlog."""
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.0)
+                s.connect(("127.0.0.1", probe_port))
+                s.close()
+                try:
+                    conn, _ = listener.accept()
+                    conn.close()
+                except socket.timeout:
+                    pass
+                return True
+            except (OSError, ConnectionRefusedError):
+                return False
+
+        # Coordination events: the mock signals when it starts blocking,
+        # and waits for permission to complete.
+        update_started = threading.Event()
+        update_can_complete = threading.Event()
+
+        def blocking_update(*args, **kwargs):
+            """Mocked live-update that blocks until the main thread has
+            finished the concurrent during-probe."""
+            update_started.set()
+            update_can_complete.wait(timeout=10.0)
+            return {"ok": True}
+
+        patch_result: dict = {}
+
+        try:
+            # Probe BEFORE the resource edit
+            probe_before = _probe()
+            assert probe_before, "Probe port should be reachable before edit"
+
+            # Apply patches in the main thread (module-level attribute
+            # replacement is visible to all threads), then run the PATCH
+            # in a background thread so the main thread can probe
+            # concurrently while the PATCH is blocked.
+            with patch("routers.servers.docker_service.is_running", return_value=True), \
+                 patch("routers.servers.docker_service.update_container_resources",
+                       side_effect=blocking_update) as mock_update, \
+                 patch("routers.servers.close_ports") as mock_close, \
+                 patch("routers.servers.open_ports") as mock_open, \
+                 patch("routers.servers.iptables_revoke_server") as mock_revoke, \
+                 patch("routers.servers.iptables_accept_server") as mock_accept, \
+                 patch("routers.servers.is_lifecycle_job_active", return_value=False):
+
+                def _do_patch():
+                    response = client.patch(
+                        f"/api/servers/{test_server.id}",
+                        json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                        cookies=owner_cookies,
+                        headers={"X-CSRF-Token": csrf_token},
+                    )
+                    patch_result["status_code"] = response.status_code
+
+                patch_thread = threading.Thread(target=_do_patch, daemon=True)
+                patch_thread.start()
+
+                # Wait until the PATCH has reached the live-update side
+                # effect and is now blocked.
+                assert update_started.wait(timeout=10.0), (
+                    "PATCH did not reach the live-update side effect in time"
+                )
+
+                # Probe DURING — the PATCH is blocked inside
+                # update_container_resources right now.
+                probe_during = _probe()
+                assert probe_during, (
+                    "Probe port must remain reachable while PATCH is "
+                    "blocked inside the live-update side effect"
+                )
+
+                # Release the blocked PATCH so it can complete.
+                update_can_complete.set()
+                patch_thread.join(timeout=10.0)
+                assert not patch_thread.is_alive(), (
+                    "PATCH thread did not complete in time"
+                )
+
+            # No firewall/iptables/port mutations during the edit
+            mock_close.assert_not_called()
+            mock_open.assert_not_called()
+            mock_revoke.assert_not_called()
+            mock_accept.assert_not_called()
+
+            # Probe AFTER the edit — port must still be reachable
+            probe_after = _probe()
+            assert probe_after, "Probe port should remain reachable after edit"
+
+            # Before/during/after all consistent: reachable throughout
+            assert probe_before == probe_during == probe_after == True
+
+            # PATCH succeeded
+            assert patch_result.get("status_code") == 200, (
+                f"PATCH failed with status {patch_result.get('status_code')}"
+            )
+
+            # Docker live update was called exactly once
+            mock_update.assert_called_once()
 
             # API port bindings unchanged
             db.refresh(test_server)

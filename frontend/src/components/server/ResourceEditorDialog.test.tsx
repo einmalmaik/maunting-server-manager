@@ -922,7 +922,7 @@ describe('ResourceEditorDialog', () => {
     ]
 
     it('shows sanitized backend message for rootless failure with no sensitive details', async () => {
-      renderDialog({ cpuLimit: 100, ramLimit: 4096, diskLimit: 50 })
+      const { onSaved, onClose } = renderDialog({ cpuLimit: 100, ramLimit: 4096, diskLimit: 50 })
       // Backend returns a sanitized 503 message for rootless failures.
       // The API client wraps it in SanitizedApiError.
       const rootlessMsg = 'Ressourcen-Update konnte nicht angewendet werden'
@@ -951,6 +951,16 @@ describe('ResourceEditorDialog', () => {
       expect(screen.getByTestId('resource-disk-input')).toHaveValue('50')
       expect(screen.getByRole('dialog')).toBeInTheDocument()
 
+      // No success callback fired after a failed save
+      expect(onSaved).not.toHaveBeenCalled()
+      // Dialog does not close after a failed save
+      expect(onClose).not.toHaveBeenCalled()
+      // No success toast appears — only error feedback
+      expect(useToastStore.getState().toasts.some((t) => t.type === 'success')).toBe(false)
+
+      // API was called exactly once (the failed PATCH) and never retried
+      expect(mockApi).toHaveBeenCalledTimes(1)
+
       // Toast shows the sanitized error, no sensitive markers
       const errorToasts = useToastStore.getState().toasts.filter((t) => t.type === 'error')
       expect(errorToasts.length).toBeGreaterThan(0)
@@ -962,7 +972,7 @@ describe('ResourceEditorDialog', () => {
     })
 
     it('uses safe fallback and preserves old values when rootless error has sensitive payload', async () => {
-      renderDialog({ cpuLimit: 150, ramLimit: 2048, diskLimit: 30 })
+      const { onSaved, onClose } = renderDialog({ cpuLimit: 150, ramLimit: 2048, diskLimit: 30 })
       // Simulate a rootless failure where an unexpected error contains
       // sensitive internals (cgroup path, socket path). Since this is NOT
       // a SanitizedApiError, the dialog must use the safe fallback and
@@ -988,6 +998,16 @@ describe('ResourceEditorDialog', () => {
       expect(screen.getByTestId('resource-ram-input')).toHaveValue('2048')
       expect(screen.getByTestId('resource-disk-input')).toHaveValue('30')
       expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+      // No success callback fired after a failed save
+      expect(onSaved).not.toHaveBeenCalled()
+      // Dialog does not close after a failed save
+      expect(onClose).not.toHaveBeenCalled()
+      // No success toast appears — only error feedback
+      expect(useToastStore.getState().toasts.some((t) => t.type === 'success')).toBe(false)
+
+      // API was called exactly once (the failed PATCH) and never retried
+      expect(mockApi).toHaveBeenCalledTimes(1)
 
       // Toast also uses safe fallback, no sensitive markers
       const errorToasts = useToastStore.getState().toasts.filter((t) => t.type === 'error')
