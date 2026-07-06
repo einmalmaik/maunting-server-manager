@@ -2448,6 +2448,246 @@ class TestMixedPatchAtomicityAndStaleRuntime:
         assert test_server.disk_limit_gb == 50
 
 
+# ── Docker Warning / Partial-Success No-Drift Regression ──────────────
+#
+# Regression tests for the scrutiny blocker where Docker warning or
+# partial-success responses can leave Docker runtime limits changed while
+# the DB rolls back. Covers VAL-DOCKER-004, VAL-DOCKER-005, VAL-DOCKER-009,
+# VAL-CROSS-012, and VAL-CROSS-014 at the router level.
+#
+# The Docker service restore (compensation) is tested in
+# test_docker_service.py::TestUpdateContainerResourcesWarningRestore.
+# These router tests prove the no-persist behavior end-to-end: when the
+# Docker service returns a failure (from warnings), the DB rolls back and
+# the response is sanitized.
+
+
+class TestDockerWarningNoDriftRegression:
+    """Router-level regression tests for Docker warning/partial-success no-drift."""
+
+    def _set_resources(self, db: Session, server: Server, cpu=100, ram=2048, disk=20) -> None:
+        server.cpu_limit_percent = cpu
+        server.ram_limit_mb = ram
+        server.disk_limit_gb = disk
+        db.commit()
+        db.refresh(server)
+
+    # ── VAL-DOCKER-009: Docker warning fail safely, no persist ──
+
+    def test_docker_warning_no_persist_sanitized_response(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session, caplog,
+    ):
+        """Docker warning -> 503, old DB values, response and logs sanitized."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+        leak_sentinel = "ZZLEAKSENTINEL_cgroup_/sys/fs/cgroup/controller"
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            with caplog.at_level(logging.WARNING):
+                response = client.patch(
+                    f"/api/servers/{test_server.id}",
+                    json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                    cookies=owner_cookies,
+                    headers={"X-CSRF-Token": csrf_token},
+                )
+        assert response.status_code == 503
+        body = response.text
+        assert leak_sentinel not in body
+        assert "cgroup" not in body
+        assert "/sys/fs" not in body
+        assert "ZZLEAKSENTINEL" not in body
+        log_text = caplog.text
+        assert leak_sentinel not in log_text
+        assert "ZZLEAKSENTINEL" not in log_text
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+
+    # ── VAL-DOCKER-004: Combined CPU/RAM warning is atomic ──
+
+    def test_combined_cpu_ram_docker_warning_no_partial_drift(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Combined CPU+RAM Docker warning -> both old values preserved (atomic)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+
+    # ── VAL-DOCKER-005: Rootless warning -> no restart, no privileged fallback ──
+
+    def test_docker_warning_no_restart_no_privileged_fallback(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Docker warning -> no stop/remove/start, no status change, no drift."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+        original_status = test_server.status
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}), \
+             patch("routers.servers.docker_service.stop") as mock_stop, \
+             patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch("routers.servers.docker_service.start") as mock_start, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+        assert test_server.status == original_status
+        mock_stop.assert_not_called()
+        mock_remove.assert_not_called()
+        mock_start.assert_not_called()
+
+    # ── VAL-CROSS-012: Rootless failure safe through API ──
+
+    def test_rootless_warning_api_returns_old_values_no_drift(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Rootless cgroup warning -> 503, follow-up GET shows old values."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        # Follow-up GET confirms old values (no drift)
+        get = client.get(f"/api/servers/{test_server.id}", cookies=owner_cookies)
+        assert get.status_code == 200
+        got = get.json()
+        assert got["cpu_limit_percent"] == 100
+        assert got["ram_limit_mb"] == 2048
+
+    # ── VAL-CROSS-014: Combined CPU/RAM + disk warning -> no drift ──
+
+    def test_combined_cpu_ram_disk_docker_warning_no_drift(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """CPU+RAM+disk with Docker warning -> all values unchanged, no drift."""
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096, "disk_limit_gb": 50},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+        assert test_server.disk_limit_gb == 20
+
+    def test_combined_cpu_ram_disk_docker_warning_no_destructive_side_effects(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """VAL-CROSS-014: Docker warning -> no stop, no delete, no network mutation."""
+        self._set_resources(db, test_server, cpu=100, ram=2048, disk=20)
+        test_server.status = "running"
+        db.commit()
+        original_ports = [(p.port, p.protocol, p.role) for p in test_server.ports]
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}), \
+             patch("routers.servers.docker_service.stop") as mock_stop, \
+             patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch("routers.servers.close_ports") as mock_close, \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096, "disk_limit_gb": 50},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+        assert test_server.disk_limit_gb == 20
+        assert [(p.port, p.protocol, p.role) for p in test_server.ports] == original_ports
+        mock_stop.assert_not_called()
+        mock_remove.assert_not_called()
+        mock_close.assert_not_called()
+        mock_open.assert_not_called()
+
+    # ── VAL-DOCKER-009: Warning during CPU clear (null) ──
+
+    def test_docker_warning_during_cpu_clear_no_persist(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Warning when clearing CPU -> old CPU value preserved, no drift."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": None},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        # Old CPU value preserved (not cleared to null)
+        assert test_server.cpu_limit_percent == 100
+        # RAM unchanged (not in payload)
+        assert test_server.ram_limit_mb == 2048
+
+
 # ── Exec-Tab Endpoint (v1.4.7) ───────────────────────────────────────────
 #
 # POST /api/servers/{id}/exec -- Oneshot-Befehl im MSM-Container.

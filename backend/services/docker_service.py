@@ -420,6 +420,56 @@ def is_running(name: str) -> bool:
     return bool(container is not None and getattr(container, "status", None) == "running")
 
 
+def _capture_old_docker_limits(
+    container: Any, updates: dict[str, int | None]
+) -> dict[str, Any]:
+    """Erfasst die aktuellen Docker CPU/RAM-Limits aus dem Container-Attribut.
+
+    Wird vor ``container.update()`` aufgerufen, damit bei Warnungen oder
+    Partial-Success die alten Limits wiederhergestellt werden koennen
+    (VAL-DOCKER-009). Nur Felder, die auch geaendert werden, werden erfasst.
+    """
+    try:
+        container.reload()
+    except (DockerException, OSError):
+        return {}
+
+    host_config = container.attrs.get("HostConfig", {})
+    restore_kwargs: dict[str, Any] = {}
+
+    if "cpu_limit_percent" in updates:
+        restore_kwargs["cpu_period"] = host_config.get("CpuPeriod", 0)
+        restore_kwargs["cpu_quota"] = host_config.get("CpuQuota", 0)
+
+    if "ram_limit_mb" in updates:
+        restore_kwargs["mem_limit"] = host_config.get("Memory", 0)
+        restore_kwargs["memswap_limit"] = host_config.get("MemorySwap", 0)
+
+    return restore_kwargs
+
+
+def _restore_old_docker_limits(
+    container: Any, restore_kwargs: dict[str, Any], name: str
+) -> None:
+    """Versucht, alte Docker CPU/RAM-Limits nach einer Warnung wiederherzustellen.
+
+    Best-Effort: schlaegt die Wiederherstellung fehl, wird der Fehler nur
+    sanitisiert geloggt. Der Aufrufer gibt weiterhin einen Fehler zurueck,
+    und die DB wird vom Router zurueckgerollt. Ein eventuell verbleibender
+    Docker-Drift wird minimiert, aber nicht garantiert ausgeschlossen.
+    Weder die Warning-Inhalte noch Restore-Fehlerdetails werden geloggt
+    (VAL-DOCKER-009: keine Raw-Warning-Internas in Logs).
+    """
+    try:
+        result = container.update(**restore_kwargs)
+        if isinstance(result, dict):
+            raw = result.get("Warnings") or []
+            if isinstance(raw, list) and any(raw):
+                logger.warning("docker restore returned warnings for %s", name)
+    except (DockerException, OSError):
+        logger.warning("docker restore failed for %s", name)
+
+
 def update_container_resources(name: str, updates: dict[str, int | None]) -> dict:
     """Wendet CPU/RAM-Limits live auf einen laufenden Container an (ohne Restart).
 
@@ -447,6 +497,8 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
 
     Docker-Warnings oder Partial-Success werden als Fehler behandelt
     (VAL-DOCKER-009), damit API- und Docker-Zustand nicht driften.
+    Bei Warnungen werden die alten Docker-Limits wiederhergestellt
+    (Compensation), damit Docker und DB nach dem Rollback uebereinstimmen.
 
     Returns:
       ``{"ok": True}`` bei Erfolg.
@@ -480,6 +532,12 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
     if not update_kwargs:
         return {"ok": True}
 
+    # Alte Docker-Limits erfassen fuer Restore bei Warnungen (VAL-DOCKER-009).
+    # Docker's container.update() kann neue Limits teilweise anwenden, selbst
+    # wenn Warnungen zurueckgegeben werden. Ohne Restore wuerde die DB
+    # zurueckgerollt, waehrend Docker die neuen Limits behaelt (Drift).
+    restore_kwargs = _capture_old_docker_limits(container, updates)
+
     try:
         result = container.update(**update_kwargs)
         warnings: list = []
@@ -489,6 +547,10 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
                 warnings = [w for w in raw_warnings if w]
         if warnings:
             logger.warning("docker update returned warnings for %s", name)
+            # Alte Limits wiederherstellen, um DB/Docker-Drift zu verhindern
+            # (VAL-DOCKER-009). Best-Effort: bei Fehlschlag wird nur geloggt.
+            if restore_kwargs:
+                _restore_old_docker_limits(container, restore_kwargs, name)
             return {"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}
         return {"ok": True}
     except (DockerException, OSError) as exc:
