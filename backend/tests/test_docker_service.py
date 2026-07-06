@@ -963,6 +963,7 @@ class TestUpdateContainerResources:
     def test_cpu_percent_maps_to_docker_quota(self, cpu_percent, expected_quota):
         """VAL-DOCKER-001, VAL-DOCKER-007: CPU percent -> cpu_period=100000, cpu_quota=percent*1000."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -987,6 +988,7 @@ class TestUpdateContainerResources:
     def test_ram_mb_maps_to_docker_memory_limits(self, ram_mb, expected):
         """VAL-DOCKER-002, VAL-DOCKER-007: RAM MB -> mem_limit + memswap_limit, keine CPU-Aenderung."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1006,6 +1008,7 @@ class TestUpdateContainerResources:
     def test_clearing_cpu_applies_unlimited_quota(self):
         """VAL-DOCKER-003: CPU None -> cpu_quota=0 (unlimitiert), ohne Restart."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1022,6 +1025,7 @@ class TestUpdateContainerResources:
     def test_clearing_ram_clears_memory_and_memswap(self):
         """VAL-DOCKER-008: RAM None -> mem_limit=0, memswap_limit=-1 (beide Limiters geloescht)."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1038,6 +1042,7 @@ class TestUpdateContainerResources:
     def test_combined_cpu_ram_update_sends_both(self):
         """VAL-DOCKER-004: CPU+RAM zusammen werden in einem Update-Aufruf gesendet."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1079,6 +1084,7 @@ class TestUpdateContainerResources:
     def test_docker_exception_returns_sanitized_error(self):
         """VAL-DOCKER-005: Docker-Ausnahme -> sanitierter Fehler, keine Secrets."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         sentinel = "ZZLEAKSENTINEL_docker.sock_/var/run/docker.sock"
         container.update.side_effect = docker_service.DockerException(sentinel)
 
@@ -1094,6 +1100,7 @@ class TestUpdateContainerResources:
     def test_docker_warnings_treated_as_failure(self):
         """VAL-DOCKER-009: Docker-Warnings -> Fehler, keine Persistenz-Drift."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": ["unsupported cgroup controller"]}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1109,6 +1116,7 @@ class TestUpdateContainerResources:
     def test_docker_warnings_empty_list_is_success(self):
         """Leere Warnings-Liste ist Erfolg (Docker liefert immer Warnings-Key)."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1121,6 +1129,7 @@ class TestUpdateContainerResources:
     def test_no_stop_remove_or_restart_calls(self):
         """VAL-DOCKER-001: Live-Update ruft nie stop/remove/restart auf."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1138,6 +1147,7 @@ class TestUpdateContainerResources:
     def test_only_changed_fields_sent_to_docker(self):
         """VAL-DOCKER-002: Unverwandte Limits werden nicht ungewollt geaendert."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1152,12 +1162,16 @@ class TestUpdateContainerResources:
 
 
 class TestUpdateContainerResourcesWarningRestore:
-    """VAL-DOCKER-009: Docker warning/partial-success restore old limits to prevent drift.
+    """VAL-DOCKER-009: Docker warning/partial-success restore+verify old limits.
 
     Regression tests for the scrutiny blocker where Docker warnings or
     SDK-shaped partial-success responses can leave Docker runtime limits
     changed while the DB rolls back. The fix captures old Docker limits
-    before the update and restores them when warnings occur (compensation).
+    before the update, restores them when warnings occur, and verifies
+    the effective HostConfig is restored before returning a rollback-safe
+    failure. Capture failure aborts before Docker mutation. Restore
+    warnings/exceptions are only tolerated if verification proves old
+    values are effective (scrutiny round 2 fix).
     """
 
     def test_warnings_trigger_restore_of_old_cpu_limits(self):
@@ -1180,6 +1194,7 @@ class TestUpdateContainerResourcesWarningRestore:
             )
 
         assert result["ok"] is False
+        assert not result.get("drift")
         # Two update calls: first with new values, second with old values (restore)
         assert container.update.call_count == 2
         # First call: new values
@@ -1211,6 +1226,7 @@ class TestUpdateContainerResourcesWarningRestore:
             )
 
         assert result["ok"] is False
+        assert not result.get("drift")
         assert container.update.call_count == 2
         # Restore: old RAM values (raw bytes from HostConfig)
         restore_kwargs = container.update.call_args_list[1].kwargs
@@ -1237,6 +1253,7 @@ class TestUpdateContainerResourcesWarningRestore:
             )
 
         assert result["ok"] is False
+        assert not result.get("drift")
         assert container.update.call_count == 2
         restore_kwargs = container.update.call_args_list[1].kwargs
         assert restore_kwargs["cpu_period"] == 100000
@@ -1273,7 +1290,8 @@ class TestUpdateContainerResourcesWarningRestore:
         assert container.update.call_count == 1
 
     def test_restore_failure_still_returns_sanitized_failure(self):
-        """If restore also raises an exception, still return sanitized failure."""
+        """If restore raises an exception but verification proves old values
+        are effective, return rollback-safe sanitized failure (no drift)."""
         container = MagicMock()
         container.attrs = {"HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000}}
         container.update.side_effect = [
@@ -1288,12 +1306,15 @@ class TestUpdateContainerResourcesWarningRestore:
 
         assert result["ok"] is False
         assert "Ressourcen" in result["error"]
+        # Restore exception tolerated because verification proves old values
+        assert not result.get("drift")
         # No raw exception content leaks into the error
         assert "restore" not in result["error"].lower()
         assert "connection" not in result["error"].lower()
 
     def test_restore_with_warnings_still_returns_sanitized_failure(self):
-        """If restore also returns warnings, still return sanitized failure."""
+        """If restore returns warnings but verification proves old values
+        are effective, return rollback-safe sanitized failure (no drift)."""
         container = MagicMock()
         container.attrs = {"HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000}}
         # Both the update and the restore return warnings
@@ -1306,6 +1327,8 @@ class TestUpdateContainerResourcesWarningRestore:
 
         assert result["ok"] is False
         assert "Ressourcen" in result["error"]
+        # Restore warnings tolerated because verification proves old values
+        assert not result.get("drift")
         assert "broken" not in result["error"]
         assert "cgroup" not in result["error"]
 
@@ -1346,8 +1369,10 @@ class TestUpdateContainerResourcesWarningRestore:
         assert "ZZLEAKSENTINEL" not in log_text
         assert "/sys/fs" not in log_text
 
-    def test_reload_failure_skips_restore_gracefully(self):
-        """If container.reload() fails, skip restore (best-effort, no crash)."""
+    def test_reload_failure_aborts_before_update(self):
+        """If container.reload() fails during capture, abort before
+        container.update() (scrutiny round 2 fix: no mutation without
+        captured old limits to restore on warnings)."""
         container = MagicMock()
         container.reload.side_effect = docker_service.DockerException("reload failed")
         container.update.return_value = {"Warnings": ["cgroup error"]}
@@ -1358,8 +1383,9 @@ class TestUpdateContainerResourcesWarningRestore:
             )
 
         assert result["ok"] is False
-        # Only one update call (no restore because reload failed)
-        assert container.update.call_count == 1
+        assert "Ressourcen" in result["error"]
+        # No update call at all: capture failed, abort before mutation
+        container.update.assert_not_called()
 
     def test_clearing_cpu_warning_restores_old_limited_value(self):
         """Warning when clearing CPU restores old CPU limit (not the cleared value)."""
@@ -1378,6 +1404,7 @@ class TestUpdateContainerResourcesWarningRestore:
             )
 
         assert result["ok"] is False
+        assert not result.get("drift")
         assert container.update.call_count == 2
         # Restore: old values (200% = 200000 quota), not the cleared value (0)
         restore_kwargs = container.update.call_args_list[1].kwargs
@@ -1402,6 +1429,7 @@ class TestUpdateContainerResourcesWarningRestore:
             )
 
         assert result["ok"] is False
+        assert not result.get("drift")
         assert container.update.call_count == 2
         restore_kwargs = container.update.call_args_list[1].kwargs
         assert restore_kwargs["mem_limit"] == old_mem_bytes
@@ -1449,6 +1477,281 @@ class TestUpdateContainerResourcesWarningRestore:
         container.remove.assert_not_called()
         container.start.assert_not_called()
         container.restart.assert_not_called()
+
+    # ── Scrutiny round 2: capture failure aborts before mutation ──
+
+    def test_missing_hostconfig_aborts_before_update(self):
+        """Missing/unusable HostConfig aborts before container.update()
+        (scrutiny round 2: cannot restore old limits without HostConfig)."""
+        container = MagicMock()
+        container.attrs = {}  # No HostConfig key
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert "Ressourcen" in result["error"]
+        container.update.assert_not_called()
+
+    def test_hostconfig_not_dict_aborts_before_update(self):
+        """HostConfig present but not a dict aborts before container.update()."""
+        container = MagicMock()
+        container.attrs = {"HostConfig": "not-a-dict"}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"ram_limit_mb": 4096},
+            )
+
+        assert result["ok"] is False
+        container.update.assert_not_called()
+
+    def test_capture_failure_error_is_sanitized(self):
+        """Capture failure returns a sanitized error, no Docker internals."""
+        container = MagicMock()
+        container.reload.side_effect = docker_service.DockerException(
+            "connection to /var/run/docker.sock refused"
+        )
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert "docker.sock" not in result["error"]
+        assert "/var/run" not in result["error"]
+        assert "connection" not in result["error"].lower()
+
+    # ── Scrutiny round 2: verified restore is rollback-safe ──
+
+    def test_restore_verified_returns_rollback_safe_failure(self):
+        """Restore succeeds and verification confirms old values: rollback-safe
+        failure (no drift flag)."""
+        container = MagicMock()
+        container.attrs = {
+            "HostConfig": {
+                "CpuPeriod": 100000,
+                "CpuQuota": 100000,
+                "Memory": 2147483648,
+                "MemorySwap": 2147483648,
+            }
+        }
+        container.update.return_value = {"Warnings": ["cgroup error"]}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+            )
+
+        assert result["ok"] is False
+        assert not result.get("drift")
+        assert "Ressourcen" in result["error"]
+        # Two update calls: original + restore
+        assert container.update.call_count == 2
+
+    def test_restore_warning_then_verification_succeeds(self):
+        """Restore returns warnings but verification proves old values are
+        effective: rollback-safe (no drift)."""
+        container = MagicMock()
+        container.attrs = {
+            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+        }
+        container.update.return_value = {"Warnings": ["restore warning"]}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert not result.get("drift")
+        assert "restore warning" not in result["error"]
+        assert "warning" not in result["error"].lower()
+
+    # ── Scrutiny round 2: verification failure is NOT rollback-safe ──
+
+    def test_restore_verification_mismatch_returns_drift_failure(self):
+        """Restore succeeds but effective values don't match old values:
+        drift failure (not rollback-safe)."""
+        container = MagicMock()
+        # Start with old values for capture
+        container.attrs = {
+            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+        }
+        call_count = [0]
+
+        def update_with_drift(**kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # Original update: new value sticks (partial application)
+                container.attrs = {
+                    "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 200000},
+                }
+                return {"Warnings": ["cgroup error"]}
+            # Restore: returns no warnings but value stays at new (drift)
+            return {"Warnings": []}
+
+        container.update.side_effect = update_with_drift
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert result.get("drift") is True
+        assert "Pruefung" in result["error"] or "manuelle" in result["error"].lower()
+        # No raw Docker internals in error
+        assert "cgroup" not in result["error"]
+        assert "quota" not in result["error"].lower()
+
+    def test_restore_exception_and_verification_fails_returns_drift(self):
+        """Restore throws and verification shows new values: drift failure."""
+        container = MagicMock()
+        container.attrs = {
+            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+        }
+        call_count = [0]
+
+        def update_with_drift(**kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # Original update: new value sticks
+                container.attrs = {
+                    "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 200000},
+                }
+                return {"Warnings": ["cgroup error"]}
+            # Restore: throws (can't restore)
+            raise docker_service.DockerException("restore failed")
+
+        container.update.side_effect = update_with_drift
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert result.get("drift") is True
+        assert "restore" not in result["error"].lower()
+        assert "connection" not in result["error"].lower()
+
+    def test_restore_reload_failure_verification_fails_returns_drift(self):
+        """Restore update succeeds but reload for verification fails: drift."""
+        container = MagicMock()
+        reload_count = [0]
+        original_attrs = {
+            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+        }
+
+        def reload_with_failure():
+            reload_count[0] += 1
+            if reload_count[0] >= 2:
+                # Second reload (verification) fails
+                raise docker_service.DockerException("reload failed")
+
+        container.reload.side_effect = reload_with_failure
+        container.attrs = original_attrs
+        container.update.return_value = {"Warnings": ["cgroup error"]}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert result.get("drift") is True
+
+    def test_restore_verification_missing_hostconfig_returns_drift(self):
+        """After restore, HostConfig disappears: verification fails, drift."""
+        container = MagicMock()
+        container.attrs = {
+            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+        }
+        reload_count = [0]
+
+        def reload_removing_hostconfig():
+            reload_count[0] += 1
+            if reload_count[0] >= 2:
+                # Second reload (verification): HostConfig gone
+                container.attrs = {}
+
+        container.reload.side_effect = reload_removing_hostconfig
+        container.update.return_value = {"Warnings": ["cgroup error"]}
+
+        with patch.object(docker_service, "_container", return_value=container):
+            result = docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200},
+            )
+
+        assert result["ok"] is False
+        assert result.get("drift") is True
+
+    def test_drift_failure_no_stop_remove_or_restart(self):
+        """VAL-DOCKER-005: drift failure path never calls stop/remove/restart."""
+        container = MagicMock()
+        container.attrs = {
+            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+        }
+        call_count = [0]
+
+        def update_with_drift(**kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                container.attrs = {
+                    "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 200000},
+                }
+                return {"Warnings": ["cgroup error"]}
+            return {"Warnings": []}
+
+        container.update.side_effect = update_with_drift
+
+        with patch.object(docker_service, "_container", return_value=container):
+            docker_service.update_container_resources(
+                "msm-srv-1", {"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+            )
+
+        container.stop.assert_not_called()
+        container.remove.assert_not_called()
+        container.start.assert_not_called()
+        container.restart.assert_not_called()
+
+    def test_drift_failure_error_is_sanitized(self, caplog):
+        """Drift failure error and logs do not leak Docker internals."""
+        container = MagicMock()
+        container.attrs = {
+            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+        }
+        call_count = [0]
+
+        def update_with_drift(**kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                container.attrs = {
+                    "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 200000},
+                }
+                return {"Warnings": ["ZZLEAK_cgroup_/sys/fs/cgroup/missing"]}
+            return {"Warnings": []}
+
+        container.update.side_effect = update_with_drift
+
+        with patch.object(docker_service, "_container", return_value=container):
+            with caplog.at_level(logging.WARNING):
+                result = docker_service.update_container_resources(
+                    "msm-srv-1", {"cpu_limit_percent": 200},
+                )
+
+        assert result["ok"] is False
+        assert result.get("drift") is True
+        assert "ZZLEAK" not in result["error"]
+        assert "cgroup" not in result["error"]
+        assert "/sys/fs" not in result["error"]
+        log_text = caplog.text
+        assert "ZZLEAK" not in log_text
+        assert "/sys/fs" not in log_text
 
 
 # ── VAL-DOCKER-010: Disk limit is never sent as Docker hard quota ──────
@@ -1500,6 +1803,7 @@ class TestDiskLimitNeverDockerHardQuota:
         If disk_limit_gb is passed, it is silently ignored (no storage_opt
         in update kwargs)."""
         container = MagicMock()
+        container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):

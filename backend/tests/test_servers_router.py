@@ -3041,6 +3041,145 @@ class TestDockerWarningNoDriftRegression:
         # RAM unchanged (not in payload)
         assert test_server.ram_limit_mb == 2048
 
+    # ── Scrutiny round 2: drift failure (restore verification mismatch) ──
+
+    def test_docker_drift_failure_503_and_db_unchanged(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Docker drift (restore verification mismatch) -> 503 with drift
+        message, DB values unchanged (scrutiny round 2 fix)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={
+                       "ok": False,
+                       "error": "Ressourcen-Update fehlgeschlagen, manuelle Pruefung erforderlich",
+                       "drift": True,
+                   }), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        body = response.text
+        assert "manuelle" in body.lower() or "pruefung" in body.lower()
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+
+    def test_docker_drift_failure_followup_get_returns_old_values(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """After drift failure, follow-up GET returns old values (no drift)."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={
+                       "ok": False,
+                       "error": "Ressourcen-Update fehlgeschlagen, manuelle Pruefung erforderlich",
+                       "drift": True,
+                   }), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        get = client.get(f"/api/servers/{test_server.id}", cookies=owner_cookies)
+        assert get.status_code == 200
+        got = get.json()
+        assert got["cpu_limit_percent"] == 100
+        assert got["ram_limit_mb"] == 2048
+
+    def test_docker_drift_failure_no_restart_no_destructive(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """Drift failure -> no stop/remove/start, no network mutation."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+        original_status = test_server.status
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={
+                       "ok": False,
+                       "error": "Ressourcen-Update fehlgeschlagen, manuelle Pruefung erforderlich",
+                       "drift": True,
+                   }), \
+             patch("routers.servers.docker_service.stop") as mock_stop, \
+             patch("routers.servers.docker_service.remove") as mock_remove, \
+             patch("routers.servers.docker_service.start") as mock_start, \
+             patch("routers.servers.close_ports") as mock_close, \
+             patch("routers.servers.open_ports") as mock_open, \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            response = client.patch(
+                f"/api/servers/{test_server.id}",
+                json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+        assert response.status_code == 503
+        db.refresh(test_server)
+        assert test_server.cpu_limit_percent == 100
+        assert test_server.ram_limit_mb == 2048
+        assert test_server.status == original_status
+        mock_stop.assert_not_called()
+        mock_remove.assert_not_called()
+        mock_start.assert_not_called()
+        mock_close.assert_not_called()
+        mock_open.assert_not_called()
+
+    def test_docker_drift_failure_sanitized_response(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session, caplog,
+    ):
+        """Drift failure response and logs do not leak Docker internals."""
+        self._set_resources(db, test_server, cpu=100, ram=2048)
+        test_server.status = "running"
+        db.commit()
+        leak_sentinel = "ZZLEAKSENTINEL_cgroup_/sys/fs/cgroup/controller"
+
+        with patch("routers.servers.docker_service.is_running", return_value=True), \
+             patch("routers.servers.docker_service.update_container_resources",
+                   return_value={
+                       "ok": False,
+                       "error": "Ressourcen-Update fehlgeschlagen, manuelle Pruefung erforderlich",
+                       "drift": True,
+                   }), \
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
+            with caplog.at_level(logging.WARNING):
+                response = client.patch(
+                    f"/api/servers/{test_server.id}",
+                    json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
+                    cookies=owner_cookies,
+                    headers={"X-CSRF-Token": csrf_token},
+                )
+        assert response.status_code == 503
+        body = response.text
+        assert leak_sentinel not in body
+        assert "cgroup" not in body
+        assert "/sys/fs" not in body
+        assert "ZZLEAKSENTINEL" not in body
+        assert "docker.sock" not in body
+        log_text = caplog.text
+        assert leak_sentinel not in log_text
+        assert "ZZLEAKSENTINEL" not in log_text
+
 
 # ── Exec-Tab Endpoint (v1.4.7) ───────────────────────────────────────────
 #

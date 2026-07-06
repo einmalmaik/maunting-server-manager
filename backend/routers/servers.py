@@ -555,6 +555,18 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                         if not result.get("ok"):
                             # Generische, sanitisierte Meldung (VAL-API-010):
                             # der spezifische Fehler wird im Docker-Service geloggt.
+                            # Bei drift=True (Restore-Verifikation fehlgeschlagen)
+                            # wird eine blocker-safe Meldung zurueckgegeben, die
+                            # den Operator auf moeglichen Docker-Drift hinweist
+                            # (scrutiny round 2 fix).
+                            if result.get("drift"):
+                                raise HTTPException(
+                                    status_code=503,
+                                    detail=(
+                                        "Ressourcen-Update fehlgeschlagen, "
+                                        "manuelle Pruefung erforderlich"
+                                    ),
+                                )
                             raise HTTPException(
                                 status_code=503,
                                 detail="Ressourcen-Update konnte nicht angewendet werden",

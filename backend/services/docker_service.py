@@ -422,19 +422,28 @@ def is_running(name: str) -> bool:
 
 def _capture_old_docker_limits(
     container: Any, updates: dict[str, int | None]
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Erfasst die aktuellen Docker CPU/RAM-Limits aus dem Container-Attribut.
 
     Wird vor ``container.update()`` aufgerufen, damit bei Warnungen oder
     Partial-Success die alten Limits wiederhergestellt werden koennen
     (VAL-DOCKER-009). Nur Felder, die auch geaendert werden, werden erfasst.
+
+    Returns ``None`` wenn ``container.reload()`` fehlschlaegt oder kein
+    verwendbares ``HostConfig``-Dict vorhanden ist. Der Aufrufer muss in
+    diesem Fall abbrechen, bevor ``container.update()`` aufgerufen wird,
+    da ohne erfasste alte Limits kein Restore bei Warnungen moeglich ist
+    und DB/Docker-Drift entstehen kann.
     """
     try:
         container.reload()
     except (DockerException, OSError):
-        return {}
+        return None
 
-    host_config = container.attrs.get("HostConfig", {})
+    host_config = container.attrs.get("HostConfig")
+    if not isinstance(host_config, dict):
+        return None
+
     restore_kwargs: dict[str, Any] = {}
 
     if "cpu_limit_percent" in updates:
@@ -448,16 +457,60 @@ def _capture_old_docker_limits(
     return restore_kwargs
 
 
+def _verify_effective_limits(
+    container: Any, restore_kwargs: dict[str, Any], name: str
+) -> bool:
+    """Verifiziert nach Restore, dass die effektiven Docker-Limits den alten
+    Werten entsprechen.
+
+    Laedt den Container neu und vergleicht die HostConfig-Werte mit den
+    urspruenglich erfassten Werten. Returns ``True`` wenn alle verglichenen
+    Werte uebereinstimmen, ``False`` bei Reload-Fehler, fehlendem HostConfig
+    oder Wert-Mismatch.
+    """
+    try:
+        container.reload()
+    except (DockerException, OSError):
+        logger.warning("docker restore verification reload failed for %s", name)
+        return False
+
+    host_config = container.attrs.get("HostConfig")
+    if not isinstance(host_config, dict):
+        logger.warning("docker restore verification no HostConfig for %s", name)
+        return False
+
+    field_map = [
+        ("cpu_period", "CpuPeriod"),
+        ("cpu_quota", "CpuQuota"),
+        ("mem_limit", "Memory"),
+        ("memswap_limit", "MemorySwap"),
+    ]
+    for key, host_key in field_map:
+        if key in restore_kwargs:
+            if host_config.get(host_key) != restore_kwargs[key]:
+                logger.warning("docker restore verification mismatch for %s", name)
+                return False
+
+    return True
+
+
 def _restore_old_docker_limits(
     container: Any, restore_kwargs: dict[str, Any], name: str
-) -> None:
-    """Versucht, alte Docker CPU/RAM-Limits nach einer Warnung wiederherzustellen.
+) -> bool:
+    """Versucht, alte Docker CPU/RAM-Limits nach einer Warnung wiederherzustellen
+    und verifiziert das Ergebnis.
 
-    Best-Effort: schlaegt die Wiederherstellung fehl, wird der Fehler nur
-    sanitisiert geloggt. Der Aufrufer gibt weiterhin einen Fehler zurueck,
-    und die DB wird vom Router zurueckgerollt. Ein eventuell verbleibender
-    Docker-Drift wird minimiert, aber nicht garantiert ausgeschlossen.
-    Weder die Warning-Inhalte noch Restore-Fehlerdetails werden geloggt
+    Ruft ``container.update()`` mit den alten Werten auf und verifiziert
+    anschliessend durch Reload, dass die effektiven HostConfig-Werte den
+    alten Werten entsprechen. Restore-Warnings oder -Exceptions werden
+    toleriert, aber nur wenn die Verifikation beweist, dass die alten
+    Werte effektiv wiederhergestellt sind (rollback-safe).
+
+    Returns ``True`` wenn die Verifikation die alten Werte bestätigt
+    (rollback-safe). Returns ``False`` bei Verifikationsfehler
+    (moeglicher Docker-Drift, nicht rollback-safe).
+
+    Weder Warning-Inhalte noch Restore-Fehlerdetails werden geloggt
     (VAL-DOCKER-009: keine Raw-Warning-Internas in Logs).
     """
     try:
@@ -468,6 +521,8 @@ def _restore_old_docker_limits(
                 logger.warning("docker restore returned warnings for %s", name)
     except (DockerException, OSError):
         logger.warning("docker restore failed for %s", name)
+
+    return _verify_effective_limits(container, restore_kwargs, name)
 
 
 def update_container_resources(name: str, updates: dict[str, int | None]) -> dict:
@@ -536,7 +591,12 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
     # Docker's container.update() kann neue Limits teilweise anwenden, selbst
     # wenn Warnungen zurueckgegeben werden. Ohne Restore wuerde die DB
     # zurueckgerollt, waehrend Docker die neuen Limits behaelt (Drift).
+    # Wenn der Capture fehlschlaegt (reload oder HostConfig nicht lesbar),
+    # muss vor container.update() abgebrochen werden, da sonst keine
+    # Restore-Moeglichkeit bei Warnungen besteht (scrutiny round 2 fix).
     restore_kwargs = _capture_old_docker_limits(container, updates)
+    if restore_kwargs is None:
+        return {"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}
 
     try:
         result = container.update(**update_kwargs)
@@ -547,11 +607,20 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
                 warnings = [w for w in raw_warnings if w]
         if warnings:
             logger.warning("docker update returned warnings for %s", name)
-            # Alte Limits wiederherstellen, um DB/Docker-Drift zu verhindern
-            # (VAL-DOCKER-009). Best-Effort: bei Fehlschlag wird nur geloggt.
-            if restore_kwargs:
-                _restore_old_docker_limits(container, restore_kwargs, name)
-            return {"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}
+            # Alte Limits wiederherstellen und verifizieren, um DB/Docker-Drift
+            # zu verhindern (VAL-DOCKER-009, scrutiny round 2 fix).
+            # Restore + Verifikation: nur wenn die Verifikation beweist, dass
+            # die alten Werte effektiv wiederhergestellt sind, ist der Fehler
+            # rollback-safe. Bei Verifikationsfehler wird ein drift-Flag
+            # gesetzt, damit der Aufrufer den schwerwiegenden Fall kennt.
+            verified = _restore_old_docker_limits(container, restore_kwargs, name)
+            if verified:
+                return {"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}
+            return {
+                "ok": False,
+                "error": "Ressourcen-Update fehlgeschlagen, manuelle Pruefung erforderlich",
+                "drift": True,
+            }
         return {"ok": True}
     except (DockerException, OSError) as exc:
         logger.warning("docker live update failed for %s", name)
