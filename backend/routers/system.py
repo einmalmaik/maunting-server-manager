@@ -1,4 +1,5 @@
 import asyncio
+import re
 import subprocess
 import time
 
@@ -88,6 +89,33 @@ def _check_database() -> dict:
         return {"status": "error", "detail": str(exc)[:120]}
 
 
+def _strip_version(raw: str) -> str:
+    """Normalisiert einen Versions-String fuer den Vergleich.
+
+    Entfernt das optionale 'v'-Prefix und git-describe-Suffixe
+    (z.B. 'v1.7.7-2-gabcdef' → '1.7.7').
+    """
+    v = raw.strip().lstrip("v")
+    # git describe haengt '-<commits>-g<hash>' an, wenn HEAD nicht
+    # exakt auf dem Tag liegt. Wir brauchen nur den SemVer-Kern.
+    match = re.match(r"^(\d+\.\d+\.\d+)", v)
+    return match.group(1) if match else v
+
+
+def _version_newer(latest: str, current: str) -> bool:
+    """Prueft, ob 'latest' eine hoehere SemVer-Version als 'current' ist.
+
+    Vergleicht die drei numerischen Segmente (Major.Minor.Patch).
+    Gibt False zurueck, wenn eines der Argumente nicht parsbar ist.
+    """
+    try:
+        parts_l = [int(x) for x in latest.split(".")]
+        parts_c = [int(x) for x in current.split(".")]
+        return parts_l > parts_c
+    except (ValueError, AttributeError):
+        return False
+
+
 def _get_current_version() -> str:
     """Liest die aktuelle Version aus Git-Tags oder einer Datei."""
     try:
@@ -175,8 +203,11 @@ def system_version(user: User = Depends(get_current_user)) -> dict:
             data = resp.json()
             latest = data.get("tag_name", "unknown")
             release_url = data.get("html_url", "")
-            # Einfacher String-Vergleich (Tags sollten SemVer nutzen)
-            update_available = current != latest and latest != "unknown"
+            # SemVer-Vergleich: v-Prefix und git-describe-Suffixe
+            # normalisieren, dann numerisch pruefen ob latest > current.
+            norm_current = _strip_version(current)
+            norm_latest = _strip_version(latest)
+            update_available = _version_newer(norm_latest, norm_current)
     except Exception:
         pass
 
