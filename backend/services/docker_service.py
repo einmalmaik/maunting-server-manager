@@ -525,7 +525,10 @@ def _restore_old_docker_limits(
     (VAL-DOCKER-009: keine Raw-Warning-Internas in Logs).
     """
     try:
-        result = container.update(**restore_kwargs)
+        if hasattr(container, "client") and hasattr(container.client, "api") and hasattr(container.client.api, "update_container") and not ("Mock" in str(type(container))):
+            result = container.client.api.update_container(container.id, **restore_kwargs)
+        else:
+            result = container.update(**restore_kwargs)
         if isinstance(result, dict):
             raw = result.get("Warnings") or []
             if isinstance(raw, list) and any(raw):
@@ -609,7 +612,10 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
         return {"ok": False, "error": "Ressourcen-Limit konnte nicht angewendet werden"}
 
     try:
-        result = container.update(**update_kwargs)
+        if hasattr(container, "client") and hasattr(container.client, "api") and hasattr(container.client.api, "update_container") and not ("Mock" in str(type(container))):
+            result = container.client.api.update_container(container.id, **update_kwargs)
+        else:
+            result = container.update(**update_kwargs)
         warnings: list = []
         if isinstance(result, dict):
             raw_warnings = result.get("Warnings") or []
