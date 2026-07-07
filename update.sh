@@ -30,6 +30,18 @@ ok()   { echo -e "${GREEN}[OK]${NC}   $1" | tee -a "$LOG_FILE"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1" | tee -a "$LOG_FILE"; }
 err()  { echo -e "${RED}[ERR]${NC}  $1" | tee -a "$LOG_FILE"; exit 1; }
 
+# Normalisiert Versions-Strings fuer den Vergleich:
+# Entfernt v-Prefix und git-describe-Suffixe (-N-gHASH).
+# Beispiel: 'v1.7.8-2-gabcdef' -> '1.7.8', 'recovery-v1.7.8' -> '1.7.8'
+normalize_version() {
+    local v="$1"
+    # Entferne alles vor 'v' (z.B. 'recovery-v1.7.8' -> 'v1.7.8')
+    v="${v##*v}"
+    # Entferne git-describe-Suffix (-N-gHASH)
+    v=$(echo "$v" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+    echo "$v"
+}
+
 # Setzt Besitz der Panel-Dateien zurueck auf $MSM_USER.
 # WICHTIG: /opt/msm/servers (per-Game-Server-User) und /opt/msm/backups
 # (eigene Backup-Daten) NICHT anfassen, sonst kippen Datei-Rechte fuer
@@ -111,7 +123,7 @@ RELEASE_JSON=""
 
 if [[ -d "$MSM_DIR/.git" ]]; then
     cd "$MSM_DIR"
-    CURRENT_VERSION=$(git describe --tags --always 2>/dev/null || echo "unknown")
+    CURRENT_VERSION=$(git describe --tags --always --match "v*" 2>/dev/null || echo "unknown")
 fi
 
 log "Aktuelle Version: $CURRENT_VERSION"
@@ -169,7 +181,7 @@ else
 fi
 
 # ── Vergleich (nur bei Release-Mode) ──
-if [[ "$UPDATE_MODE" == "release" ]] && [[ "$CURRENT_VERSION" == "$LATEST_TAG" ]]; then
+if [[ "$UPDATE_MODE" == "release" ]] && [[ "$(normalize_version "$CURRENT_VERSION")" == "$(normalize_version "$LATEST_TAG")" ]]; then
     ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_VERSION)."
     # Recovery wie im Git-Pfad: Besitz zurueck auf msm, falls ein frueherer
     # Run Dateien als root liegen gelassen hat.
@@ -611,7 +623,7 @@ fi
 
 # ── Version aktualisieren ──
 cd "$MSM_DIR"
-NEW_VERSION=$(git describe --tags --always 2>/dev/null || echo "$LATEST_TAG")
+NEW_VERSION=$(git describe --tags --always --match "v*" 2>/dev/null || echo "$LATEST_TAG")
 
 # ── Fertig ──
 echo ""
