@@ -636,7 +636,7 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
             }
         return {"ok": True}
     except (DockerException, OSError) as exc:
-        logger.warning("docker live update failed for %s", name)
+        logger.warning("docker live update failed for %s: %s", name, exc)
         return {"ok": False, "error": _safe_error(exc)}
 
 

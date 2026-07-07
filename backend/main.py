@@ -445,7 +445,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     description="Maunting Server Manager — Universeller Game Server Manager",
-    version="1.7.3",
+    version="1.7.4",
     lifespan=lifespan,
 )
 
@@ -539,7 +539,7 @@ app.include_router(panel_database_router)
 
 @app.get("/api/version")
 def app_version():
-    return {"name": settings.app_name, "version": "1.7.3"}
+    return {"name": settings.app_name, "version": "1.7.4"}
 
 
 @app.get("/api/health")
