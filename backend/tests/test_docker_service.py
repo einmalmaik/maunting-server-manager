@@ -953,15 +953,15 @@ class TestUpdateContainerResources:
     - Keine stop/remove/run/restart-Aufrufe
     """
 
-    @pytest.mark.parametrize("cpu_percent,expected_quota", [
-        (10, 10_000),
-        (50, 50_000),
-        (100, 100_000),
-        (200, 200_000),
-        (3200, 3_200_000),
+    @pytest.mark.parametrize("cpu_percent,expected_nano_cpus", [
+        (10, 100_000_000),
+        (50, 500_000_000),
+        (100, 1_000_000_000),
+        (200, 2_000_000_000),
+        (3200, 32_000_000_000),
     ])
-    def test_cpu_percent_maps_to_docker_quota(self, cpu_percent, expected_quota):
-        """VAL-DOCKER-001, VAL-DOCKER-007: CPU percent -> cpu_period=100000, cpu_quota=percent*1000."""
+    def test_cpu_percent_maps_to_docker_quota(self, cpu_percent, expected_nano_cpus):
+        """VAL-DOCKER-001, VAL-DOCKER-007: CPU percent -> nano_cpus=percent/100 * 1e9."""
         container = MagicMock()
         container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
@@ -973,8 +973,7 @@ class TestUpdateContainerResources:
 
         assert result == {"ok": True}
         kwargs = container.update.call_args.kwargs
-        assert kwargs["cpu_period"] == 100000
-        assert kwargs["cpu_quota"] == expected_quota
+        assert kwargs["nano_cpus"] == expected_nano_cpus
         # Kein Restart/Recreate: nur update() wurde aufgerufen
         container.stop.assert_not_called()
         container.remove.assert_not_called()
@@ -1001,12 +1000,11 @@ class TestUpdateContainerResources:
         assert kwargs["mem_limit"] == expected
         assert kwargs["memswap_limit"] == expected
         # Keine CPU-Felder beim reinen RAM-Update
-        assert "cpu_period" not in kwargs
-        assert "cpu_quota" not in kwargs
+        assert "nano_cpus" not in kwargs
         container.stop.assert_not_called()
 
     def test_clearing_cpu_applies_unlimited_quota(self):
-        """VAL-DOCKER-003: CPU None -> cpu_quota=0 (unlimitiert), ohne Restart."""
+        """VAL-DOCKER-003: CPU None -> nano_cpus=0 (unlimitiert), ohne Restart."""
         container = MagicMock()
         container.attrs = {"HostConfig": {}}
         container.update.return_value = {"Warnings": []}
@@ -1018,8 +1016,7 @@ class TestUpdateContainerResources:
 
         assert result == {"ok": True}
         kwargs = container.update.call_args.kwargs
-        assert kwargs["cpu_period"] == 100000
-        assert kwargs["cpu_quota"] == 0
+        assert kwargs["nano_cpus"] == 0
         container.stop.assert_not_called()
 
     def test_clearing_ram_clears_memory_and_memswap(self):
@@ -1053,8 +1050,7 @@ class TestUpdateContainerResources:
 
         assert result == {"ok": True}
         kwargs = container.update.call_args.kwargs
-        assert kwargs["cpu_period"] == 100000
-        assert kwargs["cpu_quota"] == 200_000
+        assert kwargs["nano_cpus"] == 2_000_000_000
         assert kwargs["mem_limit"] == "4096m"
         assert kwargs["memswap_limit"] == "4096m"
         # Nur ein Update-Aufruf (atomar)
@@ -1180,8 +1176,7 @@ class TestUpdateContainerResourcesWarningRestore:
         container = MagicMock()
         container.attrs = {
             "HostConfig": {
-                "CpuPeriod": 100000,
-                "CpuQuota": 100000,  # old: 100%
+                "NanoCpus": 1_000_000_000,  # old: 100%
                 "Memory": 0,
                 "MemorySwap": 0,
             }
@@ -1199,12 +1194,10 @@ class TestUpdateContainerResourcesWarningRestore:
         assert container.update.call_count == 2
         # First call: new values
         first_kwargs = container.update.call_args_list[0].kwargs
-        assert first_kwargs["cpu_period"] == 100000
-        assert first_kwargs["cpu_quota"] == 200_000
+        assert first_kwargs["nano_cpus"] == 2_000_000_000
         # Second call (restore): old values from HostConfig
         restore_kwargs = container.update.call_args_list[1].kwargs
-        assert restore_kwargs["cpu_period"] == 100000
-        assert restore_kwargs["cpu_quota"] == 100000
+        assert restore_kwargs["nano_cpus"] == 1_000_000_000
 
     def test_warnings_trigger_restore_of_old_ram_limits(self):
         """When Docker returns warnings, old RAM limits are restored in bytes."""
@@ -1239,8 +1232,7 @@ class TestUpdateContainerResourcesWarningRestore:
         old_mem_bytes = 2048 * 1024 * 1024  # 2048 MB in bytes
         container.attrs = {
             "HostConfig": {
-                "CpuPeriod": 100000,
-                "CpuQuota": 100000,  # old: 100%
+                "NanoCpus": 1_000_000_000,  # old: 100%
                 "Memory": old_mem_bytes,
                 "MemorySwap": old_mem_bytes,
             }
@@ -1256,15 +1248,14 @@ class TestUpdateContainerResourcesWarningRestore:
         assert not result.get("drift")
         assert container.update.call_count == 2
         restore_kwargs = container.update.call_args_list[1].kwargs
-        assert restore_kwargs["cpu_period"] == 100000
-        assert restore_kwargs["cpu_quota"] == 100000
+        assert restore_kwargs["nano_cpus"] == 1_000_000_000
         assert restore_kwargs["mem_limit"] == old_mem_bytes
         assert restore_kwargs["memswap_limit"] == old_mem_bytes
 
     def test_successful_update_does_not_restore(self):
         """Successful update (no warnings) does not trigger a restore call."""
         container = MagicMock()
-        container.attrs = {"HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000}}
+        container.attrs = {"HostConfig": {"NanoCpus": 1000000000}}
         container.update.return_value = {"Warnings": []}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1278,7 +1269,7 @@ class TestUpdateContainerResourcesWarningRestore:
     def test_exception_does_not_trigger_restore(self):
         """Docker exception does not trigger restore (limits likely not applied)."""
         container = MagicMock()
-        container.attrs = {"HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000}}
+        container.attrs = {"HostConfig": {"NanoCpus": 1000000000}}
         container.update.side_effect = docker_service.DockerException("connection refused")
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1293,7 +1284,7 @@ class TestUpdateContainerResourcesWarningRestore:
         """If restore raises an exception but verification proves old values
         are effective, return rollback-safe sanitized failure (no drift)."""
         container = MagicMock()
-        container.attrs = {"HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000}}
+        container.attrs = {"HostConfig": {"NanoCpus": 1000000000}}
         container.update.side_effect = [
             {"Warnings": ["cgroup error"]},
             docker_service.DockerException("restore connection refused"),
@@ -1316,7 +1307,7 @@ class TestUpdateContainerResourcesWarningRestore:
         """If restore returns warnings but verification proves old values
         are effective, return rollback-safe sanitized failure (no drift)."""
         container = MagicMock()
-        container.attrs = {"HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000}}
+        container.attrs = {"HostConfig": {"NanoCpus": 1000000000}}
         # Both the update and the restore return warnings
         container.update.return_value = {"Warnings": ["still broken"]}
 
@@ -1335,7 +1326,7 @@ class TestUpdateContainerResourcesWarningRestore:
     def test_warning_error_does_not_leak_warning_content(self):
         """VAL-DOCKER-009: Error response does not leak raw warning internals."""
         container = MagicMock()
-        container.attrs = {"HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000}}
+        container.attrs = {"HostConfig": {"NanoCpus": 1000000000}}
         container.update.return_value = {
             "Warnings": ["cgroup v2 controller not delegated, /sys/fs/cgroup path missing"]
         }
@@ -1353,7 +1344,7 @@ class TestUpdateContainerResourcesWarningRestore:
     def test_warning_log_does_not_leak_warning_content(self, caplog):
         """VAL-DOCKER-009: Logs do not leak raw warning internals."""
         container = MagicMock()
-        container.attrs = {"HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000}}
+        container.attrs = {"HostConfig": {"NanoCpus": 1000000000}}
         leak_sentinel = "ZZLEAKSENTINEL_/sys/fs/cgroup/controller_missing"
         container.update.return_value = {"Warnings": [leak_sentinel]}
 
@@ -1392,8 +1383,7 @@ class TestUpdateContainerResourcesWarningRestore:
         container = MagicMock()
         container.attrs = {
             "HostConfig": {
-                "CpuPeriod": 100000,
-                "CpuQuota": 200000,  # old: 200%
+                "NanoCpus": 2000000000,  # old: 200%
             }
         }
         container.update.return_value = {"Warnings": ["cgroup error"]}
@@ -1406,10 +1396,9 @@ class TestUpdateContainerResourcesWarningRestore:
         assert result["ok"] is False
         assert not result.get("drift")
         assert container.update.call_count == 2
-        # Restore: old values (200% = 200000 quota), not the cleared value (0)
+        # Restore: old values (200% = 2000000000 nanocpus), not the cleared value (0)
         restore_kwargs = container.update.call_args_list[1].kwargs
-        assert restore_kwargs["cpu_period"] == 100000
-        assert restore_kwargs["cpu_quota"] == 200000
+        assert restore_kwargs["nano_cpus"] == 2000000000
 
     def test_clearing_ram_warning_restores_old_limited_value(self):
         """Warning when clearing RAM restores old RAM limit (not the cleared value)."""
@@ -1440,8 +1429,7 @@ class TestUpdateContainerResourcesWarningRestore:
         container = MagicMock()
         container.attrs = {
             "HostConfig": {
-                "CpuPeriod": 100000,
-                "CpuQuota": 100000,
+                "NanoCpus": 1000000000,
                 "Memory": 2147483648,
                 "MemorySwap": 2147483648,
             }
@@ -1456,8 +1444,7 @@ class TestUpdateContainerResourcesWarningRestore:
         assert container.update.call_count == 2
         restore_kwargs = container.update.call_args_list[1].kwargs
         # CPU fields restored
-        assert "cpu_period" in restore_kwargs
-        assert "cpu_quota" in restore_kwargs
+        assert "nano_cpus" in restore_kwargs
         # RAM fields NOT in restore (only CPU was changed)
         assert "mem_limit" not in restore_kwargs
         assert "memswap_limit" not in restore_kwargs
@@ -1465,7 +1452,7 @@ class TestUpdateContainerResourcesWarningRestore:
     def test_no_stop_remove_or_restart_during_restore(self):
         """VAL-DOCKER-005: Restore never calls stop/remove/restart."""
         container = MagicMock()
-        container.attrs = {"HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000}}
+        container.attrs = {"HostConfig": {"NanoCpus": 1000000000}}
         container.update.return_value = {"Warnings": ["cgroup error"]}
 
         with patch.object(docker_service, "_container", return_value=container):
@@ -1579,7 +1566,7 @@ class TestUpdateContainerResourcesWarningRestore:
         container = MagicMock()
         # Start with old values for capture
         container.attrs = {
-            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+            "HostConfig": {"NanoCpus": 1000000000},
         }
         call_count = [0]
 
@@ -1588,7 +1575,7 @@ class TestUpdateContainerResourcesWarningRestore:
             if call_count[0] == 1:
                 # Original update: new value sticks (partial application)
                 container.attrs = {
-                    "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 200000},
+                    "HostConfig": {"NanoCpus": 2000000000},
                 }
                 return {"Warnings": ["cgroup error"]}
             # Restore: returns no warnings but value stays at new (drift)
@@ -1612,7 +1599,7 @@ class TestUpdateContainerResourcesWarningRestore:
         """Restore throws and verification shows new values: drift failure."""
         container = MagicMock()
         container.attrs = {
-            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+            "HostConfig": {"NanoCpus": 1000000000},
         }
         call_count = [0]
 
@@ -1621,7 +1608,7 @@ class TestUpdateContainerResourcesWarningRestore:
             if call_count[0] == 1:
                 # Original update: new value sticks
                 container.attrs = {
-                    "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 200000},
+                    "HostConfig": {"NanoCpus": 2000000000},
                 }
                 return {"Warnings": ["cgroup error"]}
             # Restore: throws (can't restore)
@@ -1644,7 +1631,7 @@ class TestUpdateContainerResourcesWarningRestore:
         container = MagicMock()
         reload_count = [0]
         original_attrs = {
-            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+            "HostConfig": {"NanoCpus": 1000000000},
         }
 
         def reload_with_failure():
@@ -1669,7 +1656,7 @@ class TestUpdateContainerResourcesWarningRestore:
         """After restore, HostConfig disappears: verification fails, drift."""
         container = MagicMock()
         container.attrs = {
-            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+            "HostConfig": {"NanoCpus": 1000000000},
         }
         reload_count = [0]
 
@@ -1694,7 +1681,7 @@ class TestUpdateContainerResourcesWarningRestore:
         """VAL-DOCKER-005: drift failure path never calls stop/remove/restart."""
         container = MagicMock()
         container.attrs = {
-            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+            "HostConfig": {"NanoCpus": 1000000000},
         }
         call_count = [0]
 
@@ -1702,7 +1689,7 @@ class TestUpdateContainerResourcesWarningRestore:
             call_count[0] += 1
             if call_count[0] == 1:
                 container.attrs = {
-                    "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 200000},
+                    "HostConfig": {"NanoCpus": 2000000000},
                 }
                 return {"Warnings": ["cgroup error"]}
             return {"Warnings": []}
@@ -1723,7 +1710,7 @@ class TestUpdateContainerResourcesWarningRestore:
         """Drift failure error and logs do not leak Docker internals."""
         container = MagicMock()
         container.attrs = {
-            "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 100000},
+            "HostConfig": {"NanoCpus": 1000000000},
         }
         call_count = [0]
 
@@ -1731,7 +1718,7 @@ class TestUpdateContainerResourcesWarningRestore:
             call_count[0] += 1
             if call_count[0] == 1:
                 container.attrs = {
-                    "HostConfig": {"CpuPeriod": 100000, "CpuQuota": 200000},
+                    "HostConfig": {"NanoCpus": 2000000000},
                 }
                 return {"Warnings": ["ZZLEAK_cgroup_/sys/fs/cgroup/missing"]}
             return {"Warnings": []}
@@ -1820,7 +1807,7 @@ class TestDiskLimitNeverDockerHardQuota:
         assert "disk_quota" not in kwargs
         assert "size" not in kwargs
         # Only CPU and RAM fields are present
-        assert "cpu_period" in kwargs
+        assert "nano_cpus" in kwargs
         assert "mem_limit" in kwargs
 
     def test_update_container_resources_disk_only_is_noop(self):
@@ -1868,7 +1855,7 @@ class TestHostConfigMissingKeySemantics:
     """
 
     def test_missing_cpu_keys_capture_as_zero(self):
-        """Missing CpuPeriod and CpuQuota in HostConfig → captured as 0
+        """Missing NanoCpus in HostConfig → captured as 0
         (Docker's default for unset CPU limits)."""
         container = MagicMock()
         container.attrs = {"HostConfig": {}}  # No CPU keys present
@@ -1879,8 +1866,7 @@ class TestHostConfigMissingKeySemantics:
             )
 
         assert captured is not None
-        assert captured["cpu_period"] == 0
-        assert captured["cpu_quota"] == 0
+        assert captured["nano_cpus"] == 0
 
     def test_missing_memory_keys_capture_as_zero(self):
         """Missing Memory and MemorySwap in HostConfig → captured as 0
@@ -1903,8 +1889,7 @@ class TestHostConfigMissingKeySemantics:
         container = MagicMock()
         container.attrs = {
             "HostConfig": {
-                "CpuPeriod": 100000,
-                # CpuQuota missing → default 0
+                "NanoCpus": 1000000000,
                 "Memory": 2147483648,
                 # MemorySwap missing → default 0
             }
@@ -1916,8 +1901,7 @@ class TestHostConfigMissingKeySemantics:
             )
 
         assert captured is not None
-        assert captured["cpu_period"] == 100000  # present
-        assert captured["cpu_quota"] == 0  # missing → 0
+        assert captured["nano_cpus"] == 1000000000  # present
         assert captured["mem_limit"] == 2147483648  # present
         assert captured["memswap_limit"] == 0  # missing → 0
 
@@ -1939,8 +1923,7 @@ class TestHostConfigMissingKeySemantics:
         assert container.update.call_count == 2
         # Restore uses captured 0 values (Docker's default for missing keys)
         restore_kwargs = container.update.call_args_list[1].kwargs
-        assert restore_kwargs["cpu_period"] == 0
-        assert restore_kwargs["cpu_quota"] == 0
+        assert restore_kwargs["nano_cpus"] == 0
 
     def test_missing_keys_only_for_changed_fields(self):
         """Missing keys are only captured for fields being updated
@@ -1950,7 +1933,7 @@ class TestHostConfigMissingKeySemantics:
             "HostConfig": {
                 "Memory": 2147483648,
                 "MemorySwap": 2147483648,
-                # CpuPeriod and CpuQuota missing
+                # NanoCpus missing
             }
         }
 
@@ -1961,10 +1944,8 @@ class TestHostConfigMissingKeySemantics:
 
         assert captured is not None
         # CPU keys captured (missing → 0)
-        assert "cpu_period" in captured
-        assert "cpu_quota" in captured
-        assert captured["cpu_period"] == 0
-        assert captured["cpu_quota"] == 0
+        assert "nano_cpus" in captured
+        assert captured["nano_cpus"] == 0
         # RAM keys NOT captured (only CPU was in updates)
         assert "mem_limit" not in captured
         assert "memswap_limit" not in captured
@@ -1977,7 +1958,7 @@ class TestHostConfigMissingKeySemantics:
             "HostConfig": {
                 "Memory": 2147483648,
                 "MemorySwap": 2147483648,
-                # CpuPeriod and CpuQuota missing → default 0
+                # NanoCpus missing → default 0
             }
         }
         container.update.return_value = {"Warnings": ["cgroup error"]}
@@ -1992,8 +1973,7 @@ class TestHostConfigMissingKeySemantics:
         assert container.update.call_count == 2
         restore_kwargs = container.update.call_args_list[1].kwargs
         # CPU fields restored with default 0
-        assert restore_kwargs["cpu_period"] == 0
-        assert restore_kwargs["cpu_quota"] == 0
+        assert restore_kwargs["nano_cpus"] == 0
         # RAM fields NOT in restore (only CPU was changed)
         assert "mem_limit" not in restore_kwargs
         assert "memswap_limit" not in restore_kwargs
@@ -2035,8 +2015,7 @@ class TestHostConfigMissingKeySemantics:
         # Capture succeeds (returns non-None dict with 0 defaults)
         assert captured is not None
         assert captured == {
-            "cpu_period": 0,
-            "cpu_quota": 0,
+            "nano_cpus": 0,
             "mem_limit": 0,
             "memswap_limit": 0,
         }

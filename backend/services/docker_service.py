@@ -454,8 +454,7 @@ def _capture_old_docker_limits(
     # (scrutiny round 3 fix). Missing entire HostConfig is handled above
     # (returns None → caller aborts before mutation).
     if "cpu_limit_percent" in updates:
-        restore_kwargs["cpu_period"] = host_config.get("CpuPeriod", 0)
-        restore_kwargs["cpu_quota"] = host_config.get("CpuQuota", 0)
+        restore_kwargs["nano_cpus"] = host_config.get("NanoCpus", 0)
 
     if "ram_limit_mb" in updates:
         restore_kwargs["mem_limit"] = host_config.get("Memory", 0)
@@ -487,8 +486,7 @@ def _verify_effective_limits(
         return False
 
     field_map = [
-        ("cpu_period", "CpuPeriod"),
-        ("cpu_quota", "CpuQuota"),
+        ("nano_cpus", "NanoCpus"),
         ("mem_limit", "Memory"),
         ("memswap_limit", "MemorySwap"),
     ]
@@ -580,12 +578,11 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
 
     if "cpu_limit_percent" in updates:
         cpu = updates["cpu_limit_percent"]
-        update_kwargs["cpu_period"] = 100000
         if cpu is not None and cpu > 0:
-            update_kwargs["cpu_quota"] = int(cpu) * 1000
+            update_kwargs["nano_cpus"] = int(round(cpu / 100.0, 2) * 1_000_000_000)
         else:
-            # None = unlimitiert -> Quota 0
-            update_kwargs["cpu_quota"] = 0
+            # None = unlimitiert -> NanoCpus 0
+            update_kwargs["nano_cpus"] = 0
 
     if "ram_limit_mb" in updates:
         ram = updates["ram_limit_mb"]
