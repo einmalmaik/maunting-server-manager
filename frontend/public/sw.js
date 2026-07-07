@@ -7,7 +7,7 @@
 // Konsole weil das alte Bundle z. B. noch /console/stream (SSE) statt
 // /console/ws (WS) aufruft.
 // Bei Breaking-Endpoint-Aenderungen immer bumpten.
-const CACHE_NAME = 'msm-v5';
+const CACHE_NAME = 'msm-v6';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -81,11 +81,10 @@ self.addEventListener('fetch', (event) => {
       caches.match(event.request)
         .then((response) => {
           // Return cached version if found, otherwise fetch from network
-          return response || fetch(event.request);
-        })
-        .catch(() => {
-          // Respond with a network error/offline response instead of letting the promise rejection go unhandled
-          return new Response('Offline', { status: 503, statusText: 'Offline' });
+          return response || fetch(event.request).catch(() => {
+            // Respond with a network error/offline response instead of letting the promise rejection go unhandled
+            return new Response('Offline', { status: 503, statusText: 'Offline' });
+          });
         })
     );
   }
