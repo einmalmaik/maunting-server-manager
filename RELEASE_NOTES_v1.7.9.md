@@ -36,6 +36,15 @@ Die **401**-Meldungen in der Konsole bei kurzem Panel-Ausfall (503) sind
 Session/Token abgelaufen — nach Update einmal neu einloggen oder Hard-Reload.
 `tabs:outgoing.message.ready` stammt von einer Browser-Extension, nicht von MSM.
 
+### Footer: installierte Version statt GitHub-Cache
+Die Zeile **„Maunting Server Manager v…“** im Footer kam bisher aus dem
+GitHub-`releases/latest`-Abruf mit **1h localStorage-Cache** — nicht von der
+tatsächlich installierten Version. Nach einem Update konnte deshalb noch
+**v1.7.8** angezeigt werden, obwohl das Panel bereits **1.7.9** lief.
+
+**Fix:** Footer nutzt `/api/system/version` → `current_version` (git describe /
+`.version` auf dem Host).
+
 ### Recovery App v0.2.0 (unverändert, weiter im Release)
 Die **MSM Backup Recovery** Desktop-App (Entschlüsselung/Restore von Panel- und
 Server-Backups) ist in diesem Release **inhaltlich unverändert** (weiter v0.2.0).
@@ -50,6 +59,7 @@ wie bei v1.7.8 erneut am GitHub-Release angehängt.
 - `frontend/src/components/server/fileHelpers.test.ts`: Tests.
 - `frontend/src/locales/de.json`, `en.json`: `uploadAlreadyRunning`.
 - `frontend/public/sw.js`: Network-First für Assets, `msm-v7`.
+- `frontend/src/hooks/useVersion.ts`: Footer-Version aus installiertem Stand.
 - `frontend/package.json` + `package-lock.json`: Version `1.7.9`.
 
 ### Backend
