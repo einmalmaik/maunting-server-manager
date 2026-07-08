@@ -37,6 +37,7 @@ import {
   parentPath,
   pathSegments,
   sortEntries,
+  uploadDestinationKey,
 } from '@/components/server/fileHelpers'
 import { uploadFile } from '@/components/server/chunkedUpload'
 
@@ -117,6 +118,7 @@ export function FileManager({ serverId }: FileManagerProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const promptInputRef = useRef<HTMLInputElement>(null)
+  const inFlightUploadsRef = useRef(new Set<string>())
 
   // ── Loader ───────────────────────────────────────────────────────────
   const fetchEntries = useCallback(async () => {
@@ -232,15 +234,21 @@ export function FileManager({ serverId }: FileManagerProps) {
   }
 
   // ── Upload ───────────────────────────────────────────────────────────
-  const enqueueUpload = (files: FileList | File[] | null) => {
+  const enqueueUpload = (files: FileList | File[] | null, destinationPath: string = currentPath) => {
     if (!files || (Array.isArray(files) ? files.length === 0 : files.length === 0)) return
     const list = Array.isArray(files) ? files : Array.from(files)
     list.forEach((file) => {
+      const destKey = uploadDestinationKey(destinationPath, file.name)
+      if (inFlightUploadsRef.current.has(destKey)) {
+        toast.error(t('files.uploadAlreadyRunning', { name: file.name }))
+        return
+      }
+      inFlightUploadsRef.current.add(destKey)
       const id = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       setUploads((prev) => [...prev, { id, name: file.name, fraction: 0, status: 'running' }])
       uploadFile({
         serverId,
-        destinationPath: currentPath,
+        destinationPath,
         file,
         onProgress: (frac) =>
           setUploads((prev) => prev.map((u) => (u.id === id ? { ...u, fraction: frac } : u))),
@@ -259,12 +267,17 @@ export function FileManager({ serverId }: FileManagerProps) {
           )
           toast.error(`${file.name}: ${msg}`)
         })
+        .finally(() => {
+          inFlightUploadsRef.current.delete(destKey)
+        })
     })
   }
 
   const onTreeDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
+    // Interner Move (Zeile → Ordner): wird auf dem Ordner behandelt, nicht hier erneut.
+    if (e.dataTransfer.types.includes('application/x-msm-path')) return
     enqueueUpload(e.dataTransfer.files)
   }
 
@@ -461,22 +474,27 @@ export function FileManager({ serverId }: FileManagerProps) {
     e.preventDefault()
     e.stopPropagation()
     const fromPath = e.dataTransfer.getData('application/x-msm-path')
-    if (!fromPath) return
-    const fromBase = fromPath.split('/').pop() || fromPath
-    const toDir = joinPath(currentPath, folder.name)
-    if (isWithin(fromPath, joinPath(toDir, fromBase))) {
-      toast.error(t('files.moveSelfError'))
+    if (fromPath) {
+      const fromBase = fromPath.split('/').pop() || fromPath
+      const toDir = joinPath(currentPath, folder.name)
+      if (isWithin(fromPath, joinPath(toDir, fromBase))) {
+        toast.error(t('files.moveSelfError'))
+        return
+      }
+      try {
+        await api(`/files/${serverId}/move`, {
+          method: 'POST',
+          body: JSON.stringify({ from_path: fromPath, to_dir: toDir }),
+        })
+        toast.success(t('files.moved'))
+        void fetchEntries()
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
       return
     }
-    try {
-      await api(`/files/${serverId}/move`, {
-        method: 'POST',
-        body: JSON.stringify({ from_path: fromPath, to_dir: toDir }),
-      })
-      toast.success(t('files.moved'))
-      void fetchEntries()
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : String(err))
+    if (e.dataTransfer.files?.length) {
+      enqueueUpload(e.dataTransfer.files, joinPath(currentPath, folder.name))
     }
   }
 

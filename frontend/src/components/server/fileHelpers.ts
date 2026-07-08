@@ -68,3 +68,10 @@ export function isWithin(base: string, candidate: string): boolean {
   if (b === c) return true
   return c.startsWith(`${b}/`)
 }
+
+/** Stabiler Schluessel fuer laufende Uploads (verhindert Doppel-POST bei Drop-Bubbling). */
+export function uploadDestinationKey(destinationPath: string, fileName: string): string {
+  const dir = destinationPath.replace(/^\/+|\/+$/g, '')
+  const name = fileName.replace(/^\/+|\/+$/g, '')
+  return dir ? `${dir}/${name}` : name
+}

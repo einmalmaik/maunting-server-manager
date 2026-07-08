@@ -7,6 +7,7 @@ import {
   parentPath,
   pathSegments,
   sortEntries,
+  uploadDestinationKey,
 } from './fileHelpers'
 
 describe('joinPath', () => {
@@ -84,5 +85,13 @@ describe('isWithin', () => {
   })
   it('behandelt leeren base konservativ', () => {
     expect(isWithin('', 'foo')).toBe(false)
+  })
+})
+
+describe('uploadDestinationKey', () => {
+  it('normalisiert Zielpfad fuer In-Flight-Dedup', () => {
+    expect(uploadDestinationKey('mods', 'foo.jar')).toBe('mods/foo.jar')
+    expect(uploadDestinationKey('/mods/', 'foo.jar')).toBe('mods/foo.jar')
+    expect(uploadDestinationKey('', 'foo.jar')).toBe('foo.jar')
   })
 })

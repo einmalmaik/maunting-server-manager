@@ -623,6 +623,7 @@
     "subtitle": "Server-Dateien durchsuchen und bearbeiten",
     "upload": "Hochladen",
     "uploaded": "hochgeladen",
+    "uploadAlreadyRunning": "„{{name}}“ wird bereits hochgeladen.",
     "newFolder": "Neuer Ordner",
     "newFile": "Neue Datei",
     "folderName": "Ordnername",

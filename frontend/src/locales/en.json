@@ -633,6 +633,7 @@
     "subtitle": "Browse and edit server files",
     "upload": "Upload",
     "uploaded": "uploaded",
+    "uploadAlreadyRunning": "“{{name}}” is already uploading.",
     "newFolder": "New Folder",
     "newFile": "New File",
     "folderName": "Folder name",
