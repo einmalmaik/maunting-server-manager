@@ -445,7 +445,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     description="Maunting Server Manager — Universeller Game Server Manager",
-    version="1.7.8",
+    version="1.7.9",
     lifespan=lifespan,
 )
 
@@ -539,7 +539,7 @@ app.include_router(panel_database_router)
 
 @app.get("/api/version")
 def app_version():
-    return {"name": settings.app_name, "version": "1.7.8"}
+    return {"name": settings.app_name, "version": "1.7.9"}
 
 
 @app.get("/api/health")
@@ -549,7 +549,14 @@ def health():
 # Static Frontend (nur in Produktion)
 # Wichtig: Mount NACH allen API-Routern und expliziten Routes hinzufügen,
 # damit /api/* und Health nicht vom SPA-Static-Fallback geschluckt werden.
-# API-Routes haben Priorität, unbekannte Pfade (SPA) gehen an das StaticFiles.
+# /assets/* ohne html-Fallback: fehlende JS-Chunks liefern 404 (text/plain),
+# nicht index.html — verhindert „MIME type text/html“ bei veralteten Lazy-Chunks.
 import os
-if os.path.exists("/opt/msm/frontend/dist"):
-    app.mount("/", StaticFiles(directory="/opt/msm/frontend/dist", html=True), name="frontend")
+_FRONTEND_DIST = "/opt/msm/frontend/dist"
+if os.path.exists(_FRONTEND_DIST):
+    app.mount(
+        "/assets",
+        StaticFiles(directory=_FRONTEND_DIST, html=False),
+        name="frontend-assets",
+    )
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
