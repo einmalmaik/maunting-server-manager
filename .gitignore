@@ -50,3 +50,11 @@ backend/.env
 
 # Project rules live locally, not in the repo
 AGENTS.md
+node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json
+.factory-test-data/evidence/e2e-safety/VAL-CROSS-evidence-summary.md
+.factory-test-data/evidence/e2e-safety/VAL-CROSS-browser-validation-evidence.txt
+.factory-test-data/evidence/e2e-safety/VAL-CROSS-009-auth-csrf-bypass-evidence.txt
+.factory-test-data/evidence/e2e-safety/VAL-CROSS-007-console-clean.txt
+.factory-test-data/evidence/e2e-safety/VAL-CROSS-004-api-get-after-unlimited.json
+.factory-test-data/evidence/e2e-safety/VAL-CROSS-001-api-get-after-edit.json
+.factory-test-data/evidence/e2e-safety-cross-area-pytest-output.txt
