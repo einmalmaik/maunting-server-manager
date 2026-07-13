@@ -32,6 +32,27 @@ def test_managed_postgres_starts_with_loopback_only_binding(monkeypatch):
     assert kwargs["ports"][0].host_port == 15432
     # Postgres-Entrypoint braucht diese Caps fuer initdb (chown/setuid)
     assert set(kwargs["cap_adds"]) == {"CHOWN", "FOWNER", "SETUID", "SETGID", "DAC_OVERRIDE", "DAC_READ_SEARCH"}
+    assert kwargs["restart_policy_name"] == "unless-stopped"
+
+
+def test_managed_postgres_starts_existing_stopped_container(monkeypatch):
+    monkeypatch.setattr(postgres_service.settings, "managed_postgres_host", "127.0.0.1")
+    monkeypatch.setattr(postgres_service.settings, "managed_postgres_port", 15432)
+    monkeypatch.setattr(postgres_service.settings, "managed_postgres_data_dir", "/tmp/msm-pg-test")
+
+    with patch("services.postgres_service.docker_service.ensure_network", return_value={"ok": True}), \
+         patch("services.postgres_service.docker_service.inspect_state", return_value={"status": "exited"}), \
+         patch("services.postgres_service.docker_service.start", return_value={"ok": True}) as start, \
+         patch("services.postgres_service.docker_service.run_container") as run_container, \
+         patch("services.postgres_service.docker_service.ensure_restart_policy", return_value={"ok": True}) as ensure_rp, \
+         patch("services.postgres_service.os.makedirs"), \
+         patch("services.postgres_service._encrypted_admin_password", return_value="encrypted"), \
+         patch("services.postgres_service._admin_password", return_value="secret"):
+        postgres_service.ensure_internal_postgres()
+
+    start.assert_called_once_with("msm-postgres")
+    run_container.assert_not_called()
+    ensure_rp.assert_called_once_with("msm-postgres", "unless-stopped")
 
 
 def test_managed_postgres_rejects_public_host_binding(monkeypatch):

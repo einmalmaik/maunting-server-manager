@@ -393,6 +393,20 @@ async def lifespan(app: FastAPI):
             "Phase-2 Port-Manager-Init partiell fehlgeschlagen: %s", exc,
         )
 
+    # Managed PostgreSQL fuer Server-Datenbanken: beim Panel-Start sicherstellen
+    # (laeuft + Restart-Policy unless-stopped), damit Game-Container msm-postgres
+    # per DNS erreichen koennen.
+    try:
+        from services.postgres_service import ensure_internal_postgres
+
+        ensure_internal_postgres()
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
+        )
+
     # Initialize scheduler and load existing schedules
     start_scheduler()
     from database import SessionLocal

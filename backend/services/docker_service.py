@@ -718,6 +718,23 @@ def start(name: str) -> dict:
         return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
 
 
+def ensure_restart_policy(name: str, policy_name: str = "unless-stopped") -> dict:
+    """Setzt die Docker-Restart-Policy auf einem bestehenden Container (idempotent)."""
+    container = _container(name)
+    if container is None:
+        return {"ok": False, "error": "Container nicht gefunden", "stdout": "", "stderr": ""}
+    try:
+        container.reload()
+        current = (container.attrs.get("HostConfig", {}) or {}).get("RestartPolicy", {}) or {}
+        if (current.get("Name") or "").lower() == policy_name.lower():
+            return {"ok": True, "stdout": "", "stderr": ""}
+        container.update(restart_policy={"Name": policy_name})
+        return {"ok": True, "stdout": "", "stderr": ""}
+    except (DockerException, OSError) as exc:
+        logger.warning("docker restart policy update failed")
+        return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
+
+
 def run_container(
     *,
     name: str,
@@ -740,6 +757,7 @@ def run_container(
     server_id: int | None = None,  # for pull progress logging to console during long image pulls
     cap_adds: list[str] | None = None,
     tty: bool = False,  # opt-in for interactive auth/setup flows; default off (existing callers unchanged)
+    restart_policy_name: str = "no",
 ) -> dict:
     """Startet einen langlebigen Game-Server-Container.
 
@@ -786,7 +804,8 @@ def run_container(
         "detach": detach,
         "stdin_open": True,
         "tty": tty,
-        "restart_policy": {"Name": "no"},  # MSM lifecycle only - see comment above
+        # Game-Server: "no" (MSM-Lifecycle). Managed Infra (msm-postgres): unless-stopped.
+        "restart_policy": {"Name": restart_policy_name or "no"},
         "log_config": LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None,
         "cap_drop": _HARDENING_CAP_DROP,
         "cap_add": cap_adds or None,

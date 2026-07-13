@@ -124,8 +124,19 @@ def ensure_internal_postgres() -> None:
     os.makedirs(settings.managed_postgres_data_dir, exist_ok=True)
     _encrypted_admin_password()
 
-    state = docker_service.inspect_state(settings.managed_postgres_container_name)
+    container_name = settings.managed_postgres_container_name
+    state = docker_service.inspect_state(container_name)
     if state and state.get("status") == "running":
+        docker_service.ensure_restart_policy(container_name, "unless-stopped")
+        return
+
+    if state and state.get("status") in {"exited", "created", "paused"}:
+        start_result = docker_service.start(container_name)
+        if not start_result.get("ok"):
+            raise PostgresServiceError(
+                start_result.get("error") or "PostgreSQL-Container konnte nicht gestartet werden."
+            )
+        docker_service.ensure_restart_policy(container_name, "unless-stopped")
         return
 
     result = docker_service.run_container(
@@ -157,9 +168,11 @@ def ensure_internal_postgres() -> None:
         # und SETUID/SETGID fuer den Wechsel auf den postgres-User.
         # DAC_OVERRIDE/DAC_READ_SEARCH ermoeglichen Zugriff auf Files mit 0700/0600.
         cap_adds=["CHOWN", "FOWNER", "SETUID", "SETGID", "DAC_OVERRIDE", "DAC_READ_SEARCH"],
+        restart_policy_name="unless-stopped",
     )
     if not result.get("ok"):
         raise PostgresServiceError(result.get("error") or "PostgreSQL-Container konnte nicht gestartet werden.")
+    docker_service.ensure_restart_policy(container_name, "unless-stopped")
 
 
 def server_extra_networks(db: Session, server_id: int) -> list[str]:
