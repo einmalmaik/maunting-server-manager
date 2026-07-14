@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "palworld",
+    "name": "Palworld",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "Palworld Dedicated Server 1.0+ nativ unter Linux (Steam App-ID 2394010). Steam Workshop (App 1623730) über -workshopdir auf den SteamCMD-Cache; Server- und Mod-Updates via MSM checkBased. UE4SS/Lua-Workshop-Mods sind laut Hersteller nur auf der Windows-Server-Edition — dieser Blueprint nutzt bewusst den nativen Linux-Server (.pak/Workshop-Inhalte)."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
+    "workdir": "/data",
+    "user": "1000:1000",
+    "env": {
+      "HOME": "/data",
+      "LD_LIBRARY_PATH": ".:./linux64:./Pal/Binaries/Linux:/usr/lib32:/usr/lib/x86_64-linux-gnu"
+    },
+    "startup": "./PalServer.sh -useperfthreads -NoAsyncLoadingThread -UseMultithreadForDS -publiclobby -port={GAME_PORT} -workshopdir={INSTALL_DIR}/steamapps/workshop/content/1623730",
+    "ensureDirs": [
+      "Pal/Saved/Config/LinuxServer",
+      "Pal/Saved/SaveGames",
+      "Mods/Workshop"
+    ],
+    "requiredFiles": [
+      "PalServer.sh"
+    ],
+    "configPatches": [
+      {
+        "type": "ini",
+        "file": "Pal/Saved/Config/LinuxServer/PalWorldSettings.ini",
+        "section": "/Script/Pal.PalGameWorldSettings",
+        "key": "PublicPort",
+        "value": "{GAME_PORT}"
+      }
+    ],
+    "startupCheckSeconds": 120.0
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "2394010",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false,
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
+  },
+  "mods": {
+    "supportsMods": true,
+    "supportsSteamWorkshop": true,
+    "workshopAppId": "1623730",
+    "filterTags": [],
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  },
+  "backup": {
+    "includePaths": [
+      "Pal/Saved/SaveGames",
+      "Pal/Saved/Config/LinuxServer/PalWorldSettings.ini",
+      "Pal/Saved/Config/LinuxServer/PalModSettings.ini"
+    ]
+  }
+}
