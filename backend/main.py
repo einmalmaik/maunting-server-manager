@@ -553,7 +553,7 @@ app.include_router(panel_database_router)
 
 @app.get("/api/version")
 def app_version():
-    return {"name": settings.app_name, "version": "1.7.9"}
+    return {"name": settings.app_name, "version": "1.7.10"}
 
 
 @app.get("/api/health")
