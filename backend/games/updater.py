@@ -74,9 +74,9 @@ def _fetch_steam_mod_updated(app_id: str, workshop_id: str) -> datetime | None:
     - Bei jedem Fehler (Netz, Rate, Parse): None + kurze Warnung (kein Stack).
     - Keine Caches hier (einfach, Caller kann bei Bedarf throttlen).
     """
-    from config import settings as app_settings
+    from services.steam_api_key_service import resolve_key
 
-    api_key = app_settings.steam_api_key or os.getenv("MSM_STEAM_API_KEY", "") or os.getenv("STEAM_API_KEY", "")
+    api_key = resolve_key()
     if not api_key:
         return None
 
@@ -119,13 +119,9 @@ def _fetch_steam_mod_updated(app_id: str, workshop_id: str) -> datetime | None:
 
 
 def _has_steam_api_key() -> bool:
-    from config import settings as app_settings
+    from services.steam_api_key_service import resolve_key
 
-    return bool(
-        app_settings.steam_api_key
-        or os.getenv("MSM_STEAM_API_KEY", "")
-        or os.getenv("STEAM_API_KEY", "")
-    )
+    return bool(resolve_key())
 
 
 def _fetch_http_last_modified(url: str) -> datetime | None:

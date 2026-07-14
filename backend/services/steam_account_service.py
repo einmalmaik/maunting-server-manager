@@ -16,10 +16,26 @@ from services.panel_settings_service import PanelSettingsService
 
 _USERNAME_KEY = "steam_account_username"
 _PASSWORD_KEY = "steam_account_password_enc"
+_LEGACY_USER_KEY = "steam_user"
+_LEGACY_PASS_KEY = "steam_password"
 _AAD = "msm:steam:password"
 
 
 class SteamAccountService:
+    @staticmethod
+    def migrate_legacy_if_needed() -> bool:
+        """Übernimmt alte plain-text Keys ``steam_user``/``steam_password`` einmalig."""
+        if SteamAccountService.is_configured():
+            return False
+        u = PanelSettingsService.get(_LEGACY_USER_KEY, "").strip()
+        p = PanelSettingsService.get(_LEGACY_PASS_KEY, "").strip()
+        if not u or not p:
+            return False
+        SteamAccountService.set(u, p)
+        PanelSettingsService.set(_LEGACY_USER_KEY, "")
+        PanelSettingsService.set(_LEGACY_PASS_KEY, "")
+        return True
+
     @staticmethod
     def is_configured() -> bool:
         return bool(PanelSettingsService.get(_USERNAME_KEY)) and bool(

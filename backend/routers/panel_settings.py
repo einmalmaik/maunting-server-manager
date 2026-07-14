@@ -13,6 +13,12 @@ from schemas.panel_settings import PanelSettingsResponse, PanelSettingsUpdate, T
 from services.panel_settings_service import PanelSettingsService
 from services.email_service import EmailService
 from services.steam_account_service import SteamAccountService
+from services.steam_api_key_service import (
+    current_source as steam_api_source,
+    resolve_key as resolve_steam_api_key,
+    set_panel_key,
+    status as steam_api_status,
+)
 from services.github_token_service import status as github_token_status, set_panel_token as set_github_panel_token, clear_panel_token as clear_github_panel_token
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -34,7 +40,9 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
     Passwoerter und API-Keys werden maskiert zurueckgegeben.
     """
     all_db = PanelSettingsService.get_all()
-    steam_key = settings.steam_api_key or os.getenv("MSM_STEAM_API_KEY", "") or os.getenv("STEAM_API_KEY", "")
+    SteamAccountService.migrate_legacy_if_needed()
+    steam_key = resolve_steam_api_key()
+    api_st = steam_api_status()
     return {
         "panel_url": all_db.get("panel_url", ""),
         "imprint_enabled": all_db.get("imprint_enabled", "false") == "true",
@@ -51,6 +59,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "email_provider": EmailService._get_provider(),
         "steam_api_key": _mask_secret(steam_key),
         "steam_api_configured": bool(steam_key),
+        "steam_api_source": api_st.get("source", "none"),
         "steam_account_username": SteamAccountService.get_username(),
         "steam_account_configured": SteamAccountService.is_configured(),
         **github_token_status_dict(),
@@ -228,12 +237,14 @@ def update_steam_key(
     except OSError as e:
         raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
 
+    set_panel_key(key)
+
     # Update in-memory for immediate effect
     settings.__dict__["steam_api_key"] = key
     os.environ["MSM_STEAM_API_KEY"] = key
     os.environ["STEAM_API_KEY"] = key
 
-    return {"message": "Steam API-Key gespeichert"}
+    return {"message": "Steam API-Key gespeichert", "steam_api_source": steam_api_source()}
 
 
 @router.post("/steam-account", status_code=200)
@@ -266,7 +277,7 @@ async def test_steam_key(
     """Tests whether the configured Steam API key is valid."""
     import httpx
 
-    key = settings.steam_api_key or os.getenv("MSM_STEAM_API_KEY", "") or os.getenv("STEAM_API_KEY", "")
+    key = resolve_steam_api_key()
     if not key:
         raise HTTPException(status_code=400, detail="Kein Steam API-Key konfiguriert")
 

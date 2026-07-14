@@ -17,6 +17,7 @@ class PanelSettingsResponse(BaseModel):
     email_provider: str = "none"
     steam_api_key: str = ""
     steam_api_configured: bool = False
+    steam_api_source: str = "none"  # "env" | "panel" | "none"
     steam_account_username: str = ""
     steam_account_configured: bool = False
     github_token_configured: bool = False
