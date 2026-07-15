@@ -1,30 +1,34 @@
 @echo off
 title MSM Dev Environment Manager
 echo ===================================================
-echo   MSM Dev Environment Installer & Starter
+echo   MSM Dev Environment Installer and Starter
 echo ===================================================
 echo.
 
-:: 1. Docker & Postgres check
-echo [1/4] Checking Docker & Postgres...
+:: 1. Docker and Postgres check
+echo [1/4] Checking Docker and Postgres...
 where docker >nul 2>nul
-if %errorlevel% equ 0 (
-    docker ps >nul 2>nul
-    if %errorlevel% equ 0 (
-        docker ps -a --format "{{.Names}}" | findstr /R "^msm-postgres-dev$" > nul
-        if %errorlevel% equ 0 (
-            echo Postgres-Container msm-postgres-dev existiert. Starte...
-            docker start msm-postgres-dev
-        ) else (
-            echo Erstelle neuen Postgres-Container msm-postgres-dev...
-            docker run -d --name msm-postgres-dev -p 5432:5432 -e POSTGRES_DB=msm -e POSTGRES_USER=msm -e POSTGRES_PASSWORD=msm_dev_pass postgres:15
-        )
-    ) else (
-        echo [WARN] Docker ist installiert, aber der Docker-Daemon laeuft nicht. Postgres-Dev-Container uebersprungen.
-    )
-) else (
+if %errorlevel% neq 0 (
     echo [WARN] Docker nicht im PATH gefunden. Postgres-Dev-Container uebersprungen.
+    goto :skip_docker
 )
+
+docker ps >nul 2>nul
+if %errorlevel% neq 0 (
+    echo [WARN] Docker-Daemon laeuft nicht. Postgres-Dev-Container uebersprungen.
+    goto :skip_docker
+)
+
+docker inspect msm-postgres-dev >nul 2>nul
+if %errorlevel% equ 0 (
+    echo Postgres-Container msm-postgres-dev existiert. Starte...
+    docker start msm-postgres-dev
+) else (
+    echo Erstelle neuen Postgres-Container msm-postgres-dev...
+    docker run -d --name msm-postgres-dev -p 5432:5432 -e POSTGRES_DB=msm -e POSTGRES_USER=msm -e POSTGRES_PASSWORD=msm_dev_pass postgres:15
+)
+
+:skip_docker
 echo.
 
 :: 2. DIS Sidecar Installation check
@@ -54,7 +58,7 @@ echo.
 :: 4. Backend Installation check
 echo [4/4] Checking Backend...
 if not exist "backend\venv" (
-    echo Erstelle Python Virtual Environment (venv) im Backend...
+    echo Erstelle Python Virtual Environment venv im Backend...
     cd backend
     python -m venv venv
     echo Installiere Python-Requirements...
