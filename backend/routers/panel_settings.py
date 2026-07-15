@@ -20,6 +20,7 @@ from services.steam_api_key_service import (
     status as steam_api_status,
 )
 from services.github_token_service import status as github_token_status, set_panel_token as set_github_panel_token, clear_panel_token as clear_github_panel_token
+from services import singra_webhook_secret_service as singra_secret
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -64,6 +65,13 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "steam_account_configured": SteamAccountService.is_configured(),
         **github_token_status_dict(),
         "time_format": all_db.get("time_format", "24h"),
+        "support_widget_enabled": all_db.get("support_widget_enabled", "false") == "true",
+        "support_widget_mode": all_db.get("support_widget_mode", "singra"),
+        "support_widget_singra_id": all_db.get("support_widget_singra_id", ""),
+        "support_widget_custom_snippet": all_db.get("support_widget_custom_snippet", ""),
+        "support_widget_notify_email": all_db.get("support_widget_notify_email", ""),
+        "singra_webhook_secret_configured": bool(singra_secret.resolve_secret()),
+        "singra_webhook_secret_source": singra_secret.current_source(),
     }
 
 
@@ -115,6 +123,28 @@ def update_settings(
             value = _validate_imprint_url(str(value))
         if key == "imprint_enabled":
             value = "true" if bool(value) else "false"
+        if key == "support_widget_enabled":
+            value = "true" if bool(value) else "false"
+        if key == "support_widget_mode":
+            mode = str(value).strip().lower()
+            if mode not in ("singra", "custom"):
+                raise HTTPException(status_code=400, detail="Ungueltiger Support-Widget-Modus")
+            value = mode
+        if key == "support_widget_singra_id":
+            wid = str(value).strip()
+            if len(wid) > 128:
+                raise HTTPException(status_code=400, detail="Widget-ID zu lang")
+            value = wid
+        if key == "support_widget_custom_snippet":
+            snippet = str(value)
+            if len(snippet) > 8192:
+                raise HTTPException(status_code=400, detail="Snippet zu lang")
+            value = snippet
+        if key == "support_widget_notify_email":
+            mail = str(value).strip()
+            if mail and ("@" not in mail or len(mail) > 320):
+                raise HTTPException(status_code=400, detail="Ungueltige Benachrichtigungs-E-Mail")
+            value = mail
         if _is_masked(str(value)):
             continue
         if key == "smtp_password":
@@ -378,3 +408,72 @@ async def test_github_token(
             return {"message": f"GitHub-API unerwartet: HTTP {resp.status_code}", "valid": False}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Test fehlgeschlagen: {e}")
+
+
+# ------------------------------------------------------------------
+# Singra support widget (inbound webhook secret)
+# ------------------------------------------------------------------
+
+
+@router.post("/singra-webhook-secret/rotate", status_code=200)
+def rotate_singra_webhook_secret(
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Erzeugt ein neues Webhook-Secret (nur Panel-DB; ENV bleibt unberührt)."""
+    if singra_secret.current_source() == "env":
+        raise HTTPException(
+            status_code=400,
+            detail="Webhook-Secret wird per Umgebungsvariable verwaltet",
+        )
+    plain = singra_secret.rotate_panel_secret()
+    return {
+        "message": "Webhook-Secret rotiert",
+        "secret": plain,
+        **singra_secret.status(),
+    }
+
+
+@router.post("/singra-webhook/test", status_code=200)
+async def test_singra_webhook(
+    db: Session = Depends(get_db),
+    _=Depends(require_global("panel.settings.read")),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Verarbeitet ein synthetisches webhook_test-Event (Signaturprüfung inklusive)."""
+    import hashlib
+    import hmac
+    import json
+    from datetime import datetime, timezone
+
+    from services.singra_webhook_handler import handle_verified_payload, verify_request
+
+    secret = singra_secret.resolve_secret()
+    if not secret:
+        raise HTTPException(status_code=400, detail="Webhook-Secret nicht konfiguriert")
+
+    payload = {
+        "event": "webhook_test",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "data": {
+            "ticketId": "00000000-0000-0000-0000-000000000000",
+            "guestName": "MSM Test",
+            "guestEmail": None,
+            "subject": "Webhook test",
+            "message": "Synthetic webhook_test from MSM panel settings.",
+            "isStaff": False,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+    body = json.dumps(payload, separators=(",", ":"))
+    ts = str(int(datetime.now(timezone.utc).timestamp()))
+    signature = hmac.new(
+        secret.encode("utf-8"),
+        f"{ts}.{body}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    err = verify_request(body.encode("utf-8"), ts, f"sha256={signature}")
+    if err:
+        return {"valid": False, "message": err}
+    await handle_verified_payload(db, event_type="webhook_test", payload=payload)
+    return {"valid": True, "message": "Webhook-Signatur und Verarbeitung OK"}

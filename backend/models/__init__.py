@@ -21,6 +21,7 @@ from .postgres_user import PostgresUser
 from .postgres_grant import PostgresGrant
 from .webhook_subscription import WebhookSubscription
 from .webhook_delivery import WebhookDelivery
+from .singra_webhook_event import SingraWebhookEvent
 
 __all__ = [
     "User", "Server", "Role", "RolePermission", "ServerPermission",
@@ -28,5 +29,5 @@ __all__ = [
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",
     "PostgresDatabase", "PostgresUser", "PostgresGrant",
-    "WebhookSubscription", "WebhookDelivery",
+    "WebhookSubscription", "WebhookDelivery", "SingraWebhookEvent",
 ]  # noqa: E501

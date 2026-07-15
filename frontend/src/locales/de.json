@@ -741,6 +741,7 @@
     "smtpTls": "TLS verwenden",
     "resendApiKey": "Resend API-Key",
     "defaultLanguage": "Standardsprache",
+    "defaultLanguageHint": "Deutsch/English-Umschalter (kein Sprachen-Dropdown). Gilt als Standard für neue Sitzungen.",
     "timeFormat": "Zeitformat",
     "timeFormat24": "24-Stunden-Format",
     "timeFormat12": "12-Stunden-Format",
@@ -781,6 +782,7 @@
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
       "imprint": "Impressum",
+      "supportWidget": "Support-Widget",
       "backup": "Backup"
     },
     "imprint": {
@@ -790,6 +792,35 @@
       "url": "Impressum-URL",
       "urlHint": "Leer ist erlaubt. Wenn eine URL gesetzt ist, muss sie mit http:// oder https:// beginnen.",
       "preview": "Impressum öffnen"
+    },
+    "supportWidget": {
+      "title": "Support-Widget",
+      "description": "Singra-Widget oder beliebiges Drittanbieter-Snippet einbinden. Tickets laufen über den Webhook; E-Mails nutzen die SMTP-Einstellungen.",
+      "enabled": "Widget im Panel anzeigen",
+      "mode": "Anbieter",
+      "modeSingra": "Singra Discord-Bot",
+      "modeCustom": "Eigenes HTML-Snippet",
+      "widgetId": "Widget-ID",
+      "widgetIdPlaceholder": "Aus dem Singra-Panel kopieren",
+      "customSnippet": "HTML vor </body>",
+      "notifyEmail": "Team-Benachrichtigung (optional)",
+      "notifyEmailHint": "Leer = SMTP-Absender",
+      "embedTitle": "Einbindung (Singra-Schnellstart)",
+      "embedHint": "Das Panel injiziert das Snippet automatisch — externe Seiten können dasselbe Snippet nutzen.",
+      "webhookTitle": "Webhook & Signatur",
+      "webhookDescription": "Diese HTTPS-URL im Singra-Widget hinterlegen. Secret rotieren und als SINGRA_WEBHOOK_SECRET auf dem Server speichern.",
+      "copyWebhook": "URL kopieren",
+      "webhookCopied": "Webhook-URL kopiert",
+      "secretConfigured": "Webhook-Secret ist gesetzt",
+      "secretMissing": "Webhook-Secret fehlt",
+      "secretSource": {
+        "env": "Quelle: Umgebungsvariable",
+        "panel": "Quelle: Panel-Datenbank",
+        "none": "Quelle: keine"
+      },
+      "rotateSecret": "Secret rotieren",
+      "secretRotated": "Neues Secret erzeugt — jetzt im Singra-Panel und als Umgebungsvariable hinterlegen",
+      "testWebhook": "Test-Zustellung"
     },
     "githubTokenTitle": "GitHub Personal Access Token",
     "githubWhyNeeded": "Erforderlich für Blueprints vom Typ source.type=github, um private Repositories zu klonen oder zu pullen. Öffentliche Repos funktionieren ohne Token.",
@@ -1052,6 +1083,11 @@
     "powerUserDialogWarn": "Dieses Passwort wird vom Panel NICHT gespeichert und kann nicht wieder angezeigt werden. Bitte jetzt sicher notieren (z. B. in einem Passwort-Manager).",
     "powerUserDialogHint": "Verbindung nur über das Docker-Netz (msm-internal) oder via msm-postgres:5432. Bei externem Zugriff muss der Port durch das Netz getunnelt werden.",
     "powerUserDialogClose": "Schließen — Passwort habe ich notiert"
+  },
+  "language": {
+    "label": "Sprache",
+    "de": "DE",
+    "en": "EN"
   },
   "common": {
     "unlimited": "unbegrenzt",

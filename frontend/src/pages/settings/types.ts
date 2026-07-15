@@ -19,6 +19,13 @@ export interface PanelSettings {
   time_format: '24h' | '12h'
   imprint_enabled: boolean
   imprint_url: string
+  support_widget_enabled: boolean
+  support_widget_mode: 'singra' | 'custom'
+  support_widget_singra_id: string
+  support_widget_custom_snippet: string
+  support_widget_notify_email: string
+  singra_webhook_secret_configured: boolean
+  singra_webhook_secret_source: 'env' | 'panel' | 'none'
 }
 
 export const EMPTY_PANEL_SETTINGS: PanelSettings = {
@@ -42,4 +49,11 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   time_format: '24h',
   imprint_enabled: false,
   imprint_url: '',
+  support_widget_enabled: false,
+  support_widget_mode: 'singra',
+  support_widget_singra_id: '',
+  support_widget_custom_snippet: '',
+  support_widget_notify_email: '',
+  singra_webhook_secret_configured: false,
+  singra_webhook_secret_source: 'none',
 }

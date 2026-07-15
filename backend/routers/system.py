@@ -34,6 +34,26 @@ def legal_settings() -> dict:
     }
 
 
+@router.get("/support-widget")
+def public_support_widget() -> dict:
+    """Oeffentliche Widget-Konfiguration fuer Script-Injektion (keine Secrets)."""
+    enabled = PanelSettingsService.get("support_widget_enabled", "false") == "true"
+    mode = PanelSettingsService.get("support_widget_mode", "singra")
+    singra_id = PanelSettingsService.get("support_widget_singra_id", "").strip()
+    custom = PanelSettingsService.get("support_widget_custom_snippet", "")
+    if not enabled:
+        return {"enabled": False, "mode": mode, "singra_widget_id": "", "custom_snippet": ""}
+    if mode == "custom":
+        return {"enabled": True, "mode": "custom", "singra_widget_id": "", "custom_snippet": custom}
+    return {
+        "enabled": True,
+        "mode": "singra",
+        "singra_widget_id": singra_id,
+        "custom_snippet": "",
+        "script_src": "https://singrabot.mauntingstudios.de/widget.js",
+    }
+
+
 def _check_docker() -> dict:
     """Prüft ob der Docker-Daemon erreichbar ist."""
     try:

@@ -23,6 +23,13 @@ class PanelSettingsResponse(BaseModel):
     github_token_configured: bool = False
     github_token_source: str = "none"  # "env" | "panel" | "none"
     time_format: str = "24h"
+    support_widget_enabled: bool = False
+    support_widget_mode: str = "singra"
+    support_widget_singra_id: str = ""
+    support_widget_custom_snippet: str = ""
+    support_widget_notify_email: str = ""
+    singra_webhook_secret_configured: bool = False
+    singra_webhook_secret_source: str = "none"
 
 
 class PanelSettingsUpdate(BaseModel):
@@ -38,6 +45,11 @@ class PanelSettingsUpdate(BaseModel):
     resend_api_key: str | None = None
     default_language: str | None = None
     time_format: str | None = None
+    support_widget_enabled: bool | None = None
+    support_widget_mode: str | None = None
+    support_widget_singra_id: str | None = None
+    support_widget_custom_snippet: str | None = None
+    support_widget_notify_email: str | None = None
 
 
 class TestEmailRequest(BaseModel):
