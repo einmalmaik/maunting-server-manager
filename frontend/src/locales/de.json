@@ -20,11 +20,15 @@
     "add": "Node hinzufügen",
     "edit": "Node bearbeiten",
     "name": "Name",
-    "host": "Host-URL",
+    "host": "Host-URL (HTTPS)",
     "agentToken": "Agent-Token",
     "tokenHint": "Wird im Panel mit DIS verschlüsselt gespeichert und nie wieder im Klartext angezeigt.",
     "tokenLeaveBlank": "Leer lassen, um den Token nicht zu ändern",
     "tokenTooShort": "Token muss mindestens 16 Zeichen haben.",
+    "tlsFingerprint": "TLS-Fingerprint (SHA-256)",
+    "fingerprintPlaceholder": "64 Hex-Zeichen vom install-agent.sh",
+    "fingerprintHint": "SHA-256 des Agent-Zertifikats (Self-signed Pinning). Pflicht für Remote-Nodes.",
+    "fingerprintRequired": "TLS-Fingerprint ist für Remote-Nodes erforderlich.",
     "loadFailed": "Nodes konnten nicht geladen werden.",
     "created": "Node angelegt.",
     "updated": "Node aktualisiert.",
@@ -366,8 +370,10 @@
       "queued": "In Warteschlange",
       "awaiting_files": "wartet auf Dateien",
       "stopping": "Wird gestoppt...",
-      "restarting": "Wird neu gestartet..."
+      "restarting": "Wird neu gestartet...",
+      "node_unreachable": "Node offline"
     },
+    "nodeUnreachableHint": "Node ist offline — Start/Stopp und Dateioperationen sind deaktiviert, bis der Agent wieder erreichbar ist.",
     "kill": "Erzwingen",
     "killConfirm": "Server wirklich erzwungen beenden? Alle ungespeicherten Daten gehen verloren.",
     "killSuccess": "Server wurde erzwungen beendet"

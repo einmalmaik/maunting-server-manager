@@ -169,6 +169,34 @@ MSM_SERVE_FRONTEND=false
 
 Dann Cookies mit `SameSite=None; Secure` und CSRF über Response-Header `X-CSRF-Token`.
 
+### Agent (Phase 1/5) — optional lokal
+
+```bash
+cp msm-agent/.env.example msm-agent/.env
+# MSM_AGENT_TOKEN setzen; fuer TLS:
+# openssl req -x509 -newkey rsa:4096 -nodes -keyout msm-agent/certs/agent.key \
+#   -out msm-agent/certs/agent.crt -days 365 -subj "/CN=msm-agent"
+# Fingerprint: openssl x509 -in msm-agent/certs/agent.crt -outform DER | sha256sum
+```
+
+Remote-Produktion: `sudo bash scripts/install-agent.sh` (rootless Docker + TLS + systemd).
+
+Migration Fingerprint-Spalte (einmalig):
+```bash
+cd backend && python scripts/migrate_add_node_tls_fingerprint.py
+```
+
+### Phase 6 — Agent→S3 Backups
+
+Voraussetzungen: S3 (oder MinIO) + Backup-Passwort im Panel, Remote-Node online.
+
+1. Panel leitet AES-Key via DIS `derive-raw-key` ab (Argon2id wie `init-key`).
+2. Agent: `POST /backup/create` tar.gz → AES-256-GCM Frames (DIS-kompatibel) → Multipart-S3.
+3. Restore Remote: `POST /backup/restore` auf dem Agenten (Download → Decrypt → Extract).
+4. Local-Node bleibt beim bisherigen Panel-Pfad (lokales `.enc` + optionaler S3-Upload).
+
+Agent-Deps: `pip install -r msm-agent/requirements.txt` (enthält `cryptography`, `boto3`).
+
 ---
 
 ## 3. Testen und Verifizieren von Phase 0

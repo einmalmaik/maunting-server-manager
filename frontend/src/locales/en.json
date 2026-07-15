@@ -20,11 +20,15 @@
     "add": "Add node",
     "edit": "Edit node",
     "name": "Name",
-    "host": "Host URL",
+    "host": "Host URL (HTTPS)",
     "agentToken": "Agent token",
     "tokenHint": "Encrypted with DIS on the panel and never shown in plain text again.",
     "tokenLeaveBlank": "Leave blank to keep the current token",
     "tokenTooShort": "Token must be at least 16 characters.",
+    "tlsFingerprint": "TLS fingerprint (SHA-256)",
+    "fingerprintPlaceholder": "64 hex chars from install-agent.sh",
+    "fingerprintHint": "SHA-256 of the agent certificate (self-signed pin). Required for remote nodes.",
+    "fingerprintRequired": "TLS fingerprint is required for remote nodes.",
     "loadFailed": "Could not load nodes.",
     "created": "Node created.",
     "updated": "Node updated.",
@@ -366,8 +370,10 @@
       "queued": "queued",
       "awaiting_files": "awaiting files",
       "stopping": "Stopping...",
-      "restarting": "Restarting..."
+      "restarting": "Restarting...",
+      "node_unreachable": "node offline"
     },
+    "nodeUnreachableHint": "Node is offline — start/stop and file operations are disabled until the agent is reachable again.",
     "kill": "Force Kill",
     "killConfirm": "Really force kill the server? All unsaved data will be lost.",
     "killSuccess": "Server was force killed"

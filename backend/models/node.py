@@ -14,6 +14,8 @@ class Node(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     host: Mapped[str] = mapped_column(String(255), nullable=False)
     auth_token_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    # SHA-256 of agent TLS cert DER (hex, no colons). Required for remote HTTPS nodes.
+    tls_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(20), default="unknown")
     cpu_total: Mapped[float | None] = mapped_column(Float, nullable=True)

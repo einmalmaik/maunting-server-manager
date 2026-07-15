@@ -12,7 +12,13 @@ from services.port_allocation_service import _db_used_ports, allocate_ports
 
 
 def test_node_client_from_node_decrypts_with_aad():
-    node = SimpleNamespace(host="http://127.0.0.1:9000", auth_token_enc="cipher", id=1)
+    node = SimpleNamespace(
+        host="http://127.0.0.1:9000",
+        auth_token_enc="cipher",
+        id=1,
+        is_local=True,
+        tls_fingerprint=None,
+    )
     with patch("services.node_client.DisClient.decrypt", return_value="plain-token") as dec:
         client = NodeClient.from_node(node)
     dec.assert_called_once_with("cipher", aad=NODE_TOKEN_AAD)
@@ -57,7 +63,14 @@ def test_node_client_auth_failure():
 
 
 def test_docker_stop_routes_to_node():
-    node = SimpleNamespace(host="http://127.0.0.1:9000", auth_token_enc="c", id=1)
+    node = SimpleNamespace(
+        host="http://127.0.0.1:9000",
+        auth_token_enc="c",
+        id=1,
+        is_local=True,
+        tls_fingerprint=None,
+        status="online",
+    )
     with patch("services.node_client.DisClient.decrypt", return_value="t"), \
          patch.object(NodeClient, "stop_container", return_value={"ok": True}) as stop:
         from services import docker_service

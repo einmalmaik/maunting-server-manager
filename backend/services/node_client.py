@@ -2,17 +2,21 @@
 
 Decrypts node.auth_token_enc via DIS (AAD msm:node:auth_token) in memory only.
 Never logs, persists, or returns the plaintext token to callers beyond request headers.
+
+Phase 5: TLS fingerprint pinning for remote/self-signed agents.
 """
 
 from __future__ import annotations
 
 import logging
+import ssl
 from typing import Any, Iterator
 from urllib.parse import quote, urljoin, urlparse, urlunparse
 
 import httpx
 
 from services.dis_client import DisClient, DisSidecarError
+from services.tls_pinning import build_pinned_ssl_context, normalize_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +42,66 @@ class NodeClient:
     KISS: one class, no manager registry. Construct per request/operation.
     """
 
-    def __init__(self, host: str, token: str, *, timeout: float = _DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self,
+        host: str,
+        token: str,
+        *,
+        timeout: float = _DEFAULT_TIMEOUT,
+        tls_fingerprint: str | None = None,
+        require_tls_pin: bool = False,
+    ) -> None:
         base = (host or "").strip().rstrip("/")
         if not base:
             raise NodeClientError("Node host is empty")
         if "://" not in base:
-            base = f"http://{base}"
+            # Remote pins imply HTTPS; otherwise default http for local dev
+            scheme = "https" if (tls_fingerprint or require_tls_pin) else "http"
+            base = f"{scheme}://{base}"
         self._base = base
         self._token = token
         self._timeout = timeout
+        self._tls_fingerprint = normalize_fingerprint(tls_fingerprint) or None
+        self._require_tls_pin = require_tls_pin
+        self._ssl_context: ssl.SSLContext | bool | None = None
+        self._validate_tls_policy()
+
+    def _validate_tls_policy(self) -> None:
+        """Remote agents must use HTTPS + fingerprint pin (MITM protection)."""
+        parsed = urlparse(self._base)
+        scheme = (parsed.scheme or "").lower()
+        if self._require_tls_pin:
+            if scheme != "https":
+                raise NodeClientError(
+                    "Remote nodes require HTTPS (self-signed TLS + fingerprint pin)"
+                )
+            if not self._tls_fingerprint:
+                raise NodeClientError(
+                    "Remote nodes require a TLS certificate fingerprint (SHA-256)"
+                )
+        if scheme == "https" and self._tls_fingerprint:
+            # Pin will be applied when building client
+            return
+        if scheme == "https" and not self._tls_fingerprint and self._require_tls_pin:
+            raise NodeClientError("TLS fingerprint required for remote HTTPS agent")
+
+    def _verify(self) -> ssl.SSLContext | bool:
+        """httpx verify= argument: pinned SSLContext, True (CA), or False (dev only)."""
+        if self._ssl_context is not None:
+            return self._ssl_context
+        parsed = urlparse(self._base)
+        if (parsed.scheme or "").lower() != "https":
+            self._ssl_context = True
+            return self._ssl_context
+        if self._tls_fingerprint:
+            try:
+                self._ssl_context = build_pinned_ssl_context(self._base, self._tls_fingerprint)
+            except ValueError as exc:
+                raise NodeClientError(str(exc) or "TLS fingerprint check failed") from exc
+            return self._ssl_context
+        # HTTPS without pin: system CAs only (public certs). Self-signed will fail.
+        self._ssl_context = True
+        return self._ssl_context
 
     # ── Factory ──────────────────────────────────────────────────────────
 
@@ -63,7 +118,23 @@ class NodeClient:
         except (DisSidecarError, Exception) as exc:
             logger.warning("node token decrypt failed for node_id=%s", getattr(node, "id", "?"))
             raise NodeClientError("Could not decrypt node auth token") from exc
-        return cls(host=node.host, token=token, timeout=timeout)
+        is_local = bool(getattr(node, "is_local", False))
+        fp = getattr(node, "tls_fingerprint", None)
+        host = getattr(node, "host", "") or ""
+        # Remote production policy: non-local nodes must pin TLS.
+        # Loopback http fixtures/tests without is_local stay pin-optional.
+        host_l = host.lower()
+        loopback_http = host_l.startswith("http://127.") or host_l.startswith(
+            "http://localhost"
+        )
+        require_pin = (not is_local) and (not loopback_http)
+        return cls(
+            host=host,
+            token=token,
+            timeout=timeout,
+            tls_fingerprint=fp,
+            require_tls_pin=require_pin,
+        )
 
     # ── Internals ────────────────────────────────────────────────────────
 
@@ -79,6 +150,9 @@ class NodeClient:
         netloc = parsed.netloc or parsed.path
         return urlunparse((scheme, netloc, path, "", "", ""))
 
+    def _httpx_client(self, timeout: float) -> httpx.Client:
+        return httpx.Client(timeout=timeout, verify=self._verify())
+
     def _request(
         self,
         method: str,
@@ -93,7 +167,7 @@ class NodeClient:
     ) -> Any:
         t = timeout if timeout is not None else self._timeout
         try:
-            with httpx.Client(timeout=t) as client:
+            with self._httpx_client(t) as client:
                 resp = client.request(
                     method,
                     self._url(path),
@@ -103,6 +177,8 @@ class NodeClient:
                     content=content,
                     files=files,
                 )
+        except NodeClientError:
+            raise
         except httpx.HTTPError as exc:
             logger.warning("node agent request failed path=%s", path)
             raise NodeClientError("Agent not reachable") from exc
@@ -127,11 +203,13 @@ class NodeClient:
     def health(self) -> dict[str, Any]:
         """Unauthenticated health — does not send bearer token."""
         try:
-            with httpx.Client(timeout=5.0) as client:
+            with self._httpx_client(5.0) as client:
                 resp = client.get(self._url("/health"))
             if resp.status_code != 200:
                 raise NodeClientError(f"Agent health HTTP {resp.status_code}", status_code=resp.status_code)
             return resp.json()
+        except NodeClientError:
+            raise
         except httpx.HTTPError as exc:
             raise NodeClientError("Agent not reachable") from exc
 
@@ -241,7 +319,7 @@ class NodeClient:
     def files_archive(self, server_id: int | str) -> Iterator[bytes]:
         """Stream a tar.gz of the server directory from the agent."""
         try:
-            with httpx.Client(timeout=_LONG_TIMEOUT) as client:
+            with self._httpx_client(_LONG_TIMEOUT) as client:
                 with client.stream(
                     "GET",
                     self._url("/files/archive"),
@@ -257,12 +335,60 @@ class NodeClient:
                     for chunk in resp.iter_bytes(64 * 1024):
                         if chunk:
                             yield chunk
+        except NodeClientError:
+            raise
         except httpx.HTTPError as exc:
             logger.warning("node agent archive stream failed")
             raise NodeClientError("Agent not reachable") from exc
 
     def console_ws_url(self, container_name: str) -> str:
         return self._ws_url(f"/console/{quote(container_name, safe='')}/ws")
+
+    # ── Phase 6: agent-direct S3 backup/restore ───────────────────────────
+
+    def backup_create_s3(
+        self,
+        server_id: int | str,
+        *,
+        s3_config: dict[str, Any],
+        encryption_key_b64: str,
+        s3_key: str,
+        timeout: float = _LONG_TIMEOUT,
+    ) -> dict[str, Any]:
+        """Trigger encrypted backup on agent → direct S3 upload (no panel data path)."""
+        return self._request(
+            "POST",
+            "/backup/create",
+            json={
+                "server_id": str(server_id),
+                "s3_config": s3_config,
+                "encryption_key": encryption_key_b64,
+                "s3_key": s3_key,
+            },
+            timeout=timeout,
+        )
+
+    def backup_restore_s3(
+        self,
+        server_id: int | str,
+        *,
+        s3_config: dict[str, Any],
+        encryption_key_b64: str,
+        s3_key: str,
+        timeout: float = _LONG_TIMEOUT,
+    ) -> dict[str, Any]:
+        """Trigger S3 download + decrypt + extract on agent."""
+        return self._request(
+            "POST",
+            "/backup/restore",
+            json={
+                "server_id": str(server_id),
+                "s3_config": s3_config,
+                "encryption_key": encryption_key_b64,
+                "s3_key": s3_key,
+            },
+            timeout=timeout,
+        )
 
     @property
     def bearer_token(self) -> str:
@@ -275,7 +401,6 @@ def _safe_detail(resp: httpx.Response) -> str:
         body = resp.json()
         detail = body.get("detail") if isinstance(body, dict) else None
         if isinstance(detail, str) and detail:
-            # Never echo potential secrets — truncate only
             return detail[:300]
     except Exception:
         pass

@@ -47,12 +47,13 @@ def create_server_backup(
     """Erstellt lokales Backup + verschluesselten S3-Upload (wenn konfiguriert).
 
     Gibt den Backup-Record zurueck. Wirft bei lokalem Backup-Fehler (wie run_backup).
-    S3/DIS-Fehler werden NICHT propagiert (Best-Effort, Warning-Log).
+    S3/DIS-Fehler werden NICHT propagiert (Best-Effort, Warning-Log) — ausser
+    Phase-6 Remote-Agent-S3 (dann schlaegt der Remote-Pfad hart fehl).
 
-    Lokale Verschluesselung: wenn ein Backup-Passwort gesetzt ist, wird das
-    lokale tar.gz via DIS zu .enc verschluesselt (VAL-FIX-001/002/003).
-    Ohne Passwort: Plaintext tar.gz (backward compat, Warning-Log).
+    Phase 6: Remote-Nodes mit S3+Passwort → Agent streamt tar→AES-GCM→S3 direkt
+    (kein Datenpfad ueber das Panel). S3-Credentials und Key nur im RAM.
     """
+    from models import Server
     from services.backup_config_service import BackupConfigService
     from services.backup_service import run_backup
 
@@ -61,6 +62,16 @@ def create_server_backup(
     s3_configured = BackupConfigService.is_s3_configured()
     s3_eligible = s3_configured and password_set
     encrypt_local = password_set  # VAL-FIX-001: local .enc when password set
+
+    server = db.query(Server).filter(Server.id == server_id).first()
+    node = getattr(server, "node", None) if server else None
+    is_remote = bool(node is not None and not getattr(node, "is_local", False))
+
+    # Phase 6: remote + S3 + password → agent-direct (no panel data plane)
+    if is_remote and s3_eligible:
+        return _create_remote_agent_s3_backup(
+            server_id, db, node, name=name, timeout_seconds=timeout_seconds
+        )
 
     if s3_configured and not password_set:
         logger.warning(
@@ -75,6 +86,7 @@ def create_server_backup(
 
     # 1. Lokales Backup erstellen (tar.gz oder .enc wenn encrypt_local).
     # encrypted-Flag steuert das Manifest im tar.gz (true wenn verschluesselt).
+    # Remote without S3 eligibility still streams archive via agent (Phase 2 path).
     backup = run_backup(
         server_id,
         db,
@@ -85,12 +97,109 @@ def create_server_backup(
         encrypt_local=encrypt_local,
     )
 
-    # 2. S3-Upload (Best-Effort).
+    # 2. S3-Upload (Best-Effort) — local/panel path.
     if not s3_eligible:
         return backup
 
     _upload_to_s3(backup, db, server_id)
     return backup
+
+
+def _create_remote_agent_s3_backup(
+    server_id: int,
+    db: Session,
+    node,
+    *,
+    name: str | None = None,
+    timeout_seconds: int = 600,
+) -> "Backup":
+    """Remote node: agent encrypts and uploads to S3; panel only orchestrates.
+
+    Invariants:
+    - S3 credentials + encryption key only in memory for the agent HTTP call.
+    - Frame crypto compatible with DIS AES-256-GCM streaming format.
+    - No permanent secret storage on the agent.
+    """
+    from models import Backup
+    from services.backup_config_service import BackupConfigService
+    from services.backup_crypto_service import BackupCryptoService, BackupCryptoError
+    from services.backup_service import clear_active_backup_status, set_active_backup_status
+    from services.node_client import NodeClient, NodeClientError
+    from services.node_service import ensure_node_online
+    from services.s3_service import S3NotConfiguredError, S3Service
+
+    ensure_node_online(node)
+    set_active_backup_status(server_id, "creating", None)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    # Placeholder local path (no file required when s3_key is set)
+    placeholder = f"/opt/msm/backups/{server_id}/server_{server_id}_{timestamp}_remote.enc"
+    backup = Backup(
+        server_id=server_id,
+        filename=placeholder,
+        size_mb=0,
+        name=name or None,
+        encrypted=True,
+    )
+    db.add(backup)
+    db.commit()
+    db.refresh(backup)
+
+    s3_key = f"{_S3_KEY_PREFIX}/{server_id}/server_{server_id}_{timestamp}_{backup.id}.enc"
+    key_b64: str | None = None
+    try:
+        password = BackupConfigService.get_backup_password()
+        salt = BackupConfigService.get_backup_salt()
+        key_b64 = BackupCryptoService.derive_raw_key_b64(password, salt)
+        s3_cfg = S3Service.get_ephemeral_agent_s3_config()
+        client = NodeClient.from_node(node, timeout=float(timeout_seconds))
+        result = client.backup_create_s3(
+            server_id,
+            s3_config=s3_cfg,
+            encryption_key_b64=key_b64,
+            s3_key=s3_key,
+            timeout=float(timeout_seconds),
+        )
+        size_bytes = int(result.get("size_bytes") or 0)
+        backup.s3_key = result.get("s3_key") or s3_key
+        backup.s3_bucket = s3_cfg.get("bucket") or ""
+        backup.encrypted = True
+        backup.size_mb = max(0, size_bytes // (1024 * 1024))
+        db.commit()
+        db.refresh(backup)
+        logger.info(
+            "Agent-S3-Backup ok (Server %s, Backup %s)",
+            server_id,
+            backup.id,
+        )
+        return backup
+    except (NodeClientError, BackupCryptoError, S3NotConfiguredError, ValueError) as exc:
+        logger.warning(
+            "Agent-S3-Backup fehlgeschlagen (Server %s): %s",
+            server_id,
+            type(exc).__name__,
+        )
+        try:
+            db.delete(backup)
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise RuntimeError("Remote-Backup fehlgeschlagen") from exc
+    except Exception as exc:
+        logger.warning(
+            "Agent-S3-Backup unerwartet fehlgeschlagen (Server %s): %s",
+            server_id,
+            type(exc).__name__,
+        )
+        try:
+            db.delete(backup)
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise RuntimeError("Remote-Backup fehlgeschlagen") from exc
+    finally:
+        key_b64 = None  # drop reference ASAP
+        clear_active_backup_status(server_id)
 
 
 def _upload_to_s3(backup, db: Session, server_id: int) -> None:
@@ -190,6 +299,44 @@ def upload_backup_to_cloud(backup, db: Session, server_id: int) -> bool:
     return bool(backup.s3_key and backup.encrypted)
 
 
+def restore_via_agent_s3(server, backup, *, timeout_seconds: int = 600) -> None:
+    """Phase 6: agent downloads S3 object, decrypts, extracts into server dir.
+
+    Panel only sends ephemeral S3 config + raw AES key (never logged).
+    """
+    from services.backup_config_service import BackupConfigService
+    from services.backup_crypto_service import BackupCryptoService
+    from services.node_client import NodeClient, NodeClientError
+    from services.node_service import ensure_node_online, resolve_server_node
+    from services.s3_service import S3Service
+
+    node = resolve_server_node(server, None) or getattr(server, "node", None)
+    if node is None:
+        raise RuntimeError("Kein Node fuer Remote-Restore")
+    ensure_node_online(node)
+    if not backup.s3_key:
+        raise RuntimeError("Kein s3_key am Backup")
+
+    password = BackupConfigService.get_backup_password()
+    salt = BackupConfigService.get_backup_salt()
+    key_b64 = BackupCryptoService.derive_raw_key_b64(password, salt)
+    try:
+        s3_cfg = S3Service.get_ephemeral_agent_s3_config()
+        # Prefer bucket stored on the backup record if present
+        if backup.s3_bucket:
+            s3_cfg = {**s3_cfg, "bucket": backup.s3_bucket}
+        client = NodeClient.from_node(node, timeout=float(timeout_seconds))
+        client.backup_restore_s3(
+            server.id,
+            s3_config=s3_cfg,
+            encryption_key_b64=key_b64,
+            s3_key=backup.s3_key,
+            timeout=float(timeout_seconds),
+        )
+    finally:
+        key_b64 = None
+
+
 def fetch_backup_from_s3(backup, db: Session) -> None:
     """Laedt ein Backup von S3 herunter und speichert es lokal.
 
@@ -213,6 +360,11 @@ def fetch_backup_from_s3(backup, db: Session) -> None:
     - BackupCryptoError: DIS nicht erreichbar (legacy Pfad)
     """
     from services.s3_service import S3Service
+
+    # Ensure parent dir exists for download target
+    parent = os.path.dirname(backup.filename or "")
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
     # Neues Format: .enc Dateiname → S3-Objekt direkt herunterladen (kein Decrypt)
     if backup.filename.endswith(".enc"):

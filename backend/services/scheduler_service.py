@@ -52,6 +52,10 @@ def get_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
+# Phase 5: Node heartbeat interval (seconds)
+NODE_HEARTBEAT_INTERVAL_SECONDS = 60
+
+
 def start_scheduler():
     """Start the scheduler if not running."""
     scheduler = get_scheduler()
@@ -60,6 +64,7 @@ def start_scheduler():
     # Globalen passiven Background-Update-Check-Job sicherstellen (auch hier,
     # damit der Job nach Scheduler-Restart/Neustart aktiv ist; KISS, idempotent).
     _ensure_background_update_check_job()
+    _ensure_node_heartbeat_job()
 
 
 def _utcnow() -> datetime:
@@ -741,6 +746,55 @@ def _ensure_background_update_check_job() -> None:
     )
 
 
+def _node_heartbeat_task() -> None:
+    """Probe every registered node /health; set online/offline + last_heartbeat.
+
+    Never logs tokens. Fingerprint pinning enforced inside NodeClient.
+    """
+    from models import Node
+    from services.node_client import NodeClient, NodeClientError
+
+    db = SessionLocal()
+    try:
+        nodes = db.query(Node).order_by(Node.id.asc()).all()
+        for node in nodes:
+            try:
+                client = NodeClient.from_node(node)
+                client.health()
+                node.status = "online"
+                node.last_heartbeat = _utcnow()
+            except NodeClientError:
+                node.status = "offline"
+            except Exception:
+                logger.warning("node heartbeat unexpected error node_id=%s", getattr(node, "id", "?"))
+                node.status = "offline"
+        db.commit()
+    except Exception as exc:
+        logger.warning("node heartbeat task failed: %s", exc)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _ensure_node_heartbeat_job() -> None:
+    """Register periodic node health probes (Phase 5)."""
+    scheduler = get_scheduler()
+    job_id = "global_node_heartbeat"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_node_heartbeat_task,
+        trigger=IntervalTrigger(seconds=NODE_HEARTBEAT_INTERVAL_SECONDS),
+        id=job_id,
+        name="Node Agent Heartbeat",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def init_server_schedules(db):
     """Initialize schedules for all servers on startup."""
     from models import Server
@@ -750,6 +804,7 @@ def init_server_schedules(db):
     # Ruft check_for_mod_updates + check_for_server_file_update passiv auf.
     # Integriert hier + in start_scheduler (genau nach Plan).
     _ensure_background_update_check_job()
+    _ensure_node_heartbeat_job()
 
     servers = db.query(Server).all()
     for server in servers:

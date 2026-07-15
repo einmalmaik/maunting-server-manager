@@ -100,10 +100,15 @@ def _agent_client(server: Server, db: Session) -> NodeClient | None:
     Remote nodes always use the agent. Local node uses agent when reachable
     (token decrypt OK); otherwise falls back to panel-local filesystem so
     existing tests and single-host without agent keep working.
+    Offline remote nodes fail closed (503) — graceful degradation.
     """
+    from services.node_service import NODE_OFFLINE_MSG, is_node_offline
+
     node = resolve_server_node(server, db)
     if node is None:
         return None
+    if is_node_offline(node) and not getattr(node, "is_local", False):
+        raise HTTPException(status_code=503, detail=NODE_OFFLINE_MSG)
     if getattr(node, "is_local", False):
         # Local: prefer local FS when install_dir exists (dev/tests/single-host)
         if server.install_dir and os.path.isdir(server.install_dir):
@@ -113,7 +118,7 @@ def _agent_client(server: Server, db: Session) -> NodeClient | None:
     except NodeClientError as exc:
         if getattr(node, "is_local", False):
             return None
-        raise HTTPException(status_code=503, detail="Node-Agent nicht erreichbar") from exc
+        raise HTTPException(status_code=503, detail=exc.message or "Node-Agent nicht erreichbar") from exc
 
 
 def _map_agent_error(exc: NodeClientError) -> HTTPException:

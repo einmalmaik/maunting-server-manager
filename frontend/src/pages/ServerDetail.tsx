@@ -422,6 +422,8 @@ export function ServerDetail() {
   }
 
   const effectiveStatus = optimisticStatus || server.status;
+  // Phase 5: node heartbeat offline → keep server visible, block actions
+  const isNodeUnreachable = effectiveStatus === "node_unreachable";
 
   // Lifecycle-State: transiente Zustaende blockieren Ressourcen-Editor (VAL-UI-023)
   const isLifecycleBusy = [
@@ -575,15 +577,26 @@ export function ServerDetail() {
         </div>
       )}
 
+      {isNodeUnreachable && (
+        <div className="msm-card p-4 border-status-error/40 bg-status-error/5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-status-error flex-shrink-0 mt-0.5" />
+          <p className="font-body-md text-sm text-on-surface-variant">
+            {t("servers.nodeUnreachableHint")}
+          </p>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
         {effectiveStatus !== "running" && effectiveStatus !== "installing" && effectiveStatus !== "starting" && effectiveStatus !== "stopping" && effectiveStatus !== "restarting" && effectiveStatus !== "queued" && (
           <button
             onClick={() => doAction("start")}
-            disabled={!!actionLoading || !server.public_bind_ip}
+            disabled={!!actionLoading || !server.public_bind_ip || isNodeUnreachable}
             className="msm-btn-primary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
             title={
-              !server.public_bind_ip
+              isNodeUnreachable
+                ? t("servers.nodeUnreachableHint")
+                : !server.public_bind_ip
                 ? t("servers.bindIp.startBlockedTitle")
                 : undefined
             }
@@ -597,7 +610,7 @@ export function ServerDetail() {
         {effectiveStatus === "running" && (
           <button
             onClick={() => doAction("stop")}
-            disabled={!!actionLoading}
+            disabled={!!actionLoading || isNodeUnreachable}
             className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50"
           >
             <Square className="w-4 h-4" />
@@ -606,7 +619,7 @@ export function ServerDetail() {
         )}
         <button
           onClick={() => doAction("restart")}
-          disabled={!!actionLoading || ["installing", "starting", "stopping", "restarting", "queued"].includes(effectiveStatus)}
+          disabled={!!actionLoading || isNodeUnreachable || ["installing", "starting", "stopping", "restarting", "queued"].includes(effectiveStatus)}
           className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
         >
           <RefreshCw className="w-4 h-4" />
@@ -618,7 +631,7 @@ export function ServerDetail() {
         {["starting", "running", "stopping", "restarting"].includes(effectiveStatus) && (
           <button
             onClick={handleKill}
-            disabled={!!actionLoading}
+            disabled={!!actionLoading || isNodeUnreachable}
             className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50"
           >
             {actionLoading === "kill" ? t("common.loading") : t("servers.kill")}
@@ -627,7 +640,7 @@ export function ServerDetail() {
         {effectiveStatus !== "installing" && effectiveStatus !== "queued" && (
           <button
             onClick={handleInstall}
-            disabled={!!actionLoading}
+            disabled={!!actionLoading || isNodeUnreachable}
             className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
           >
             <Download className="w-4 h-4" />
@@ -639,7 +652,7 @@ export function ServerDetail() {
           <button
             type="button"
             onClick={() => void checkServerFileUpdates()}
-            disabled={!!actionLoading || serverUpdateCheckLoading}
+            disabled={!!actionLoading || serverUpdateCheckLoading || isNodeUnreachable}
             className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${serverUpdateCheckLoading ? "animate-spin" : ""}`} />

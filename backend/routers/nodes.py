@@ -17,7 +17,7 @@ from dependencies import get_current_owner, get_current_user, verify_csrf
 from models import Node, Server, User
 from schemas.node import NodeCreate, NodeOut, NodeUpdate
 from services.node_client import NodeClient, NodeClientError
-from services.node_service import encrypt_node_token, node_out_dict
+from services.node_service import encrypt_node_token, node_out_dict, validate_remote_node_host
 from services.permission_service import has_global_permission
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
@@ -57,9 +57,12 @@ def create_node(
     _: None = Depends(verify_csrf),
 ) -> dict:
     _ = owner
-    host = body.host.strip()
-    if not host:
-        raise HTTPException(status_code=400, detail="host ist erforderlich")
+    try:
+        host = validate_remote_node_host(
+            body.host, body.tls_fingerprint, is_local=False
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         token_enc = encrypt_node_token(body.auth_token)
     except Exception:
@@ -69,6 +72,7 @@ def create_node(
         name=body.name.strip(),
         host=host,
         auth_token_enc=token_enc,
+        tls_fingerprint=body.tls_fingerprint,
         is_local=False,
         status="unknown",
     )
@@ -91,14 +95,13 @@ def get_node(
     count = db.query(Server).filter(Server.node_id == node.id).count()
     data = node_out_dict(node, server_count=count)
 
-    # Live metrics from agent (best-effort)
+    # Live metrics from agent (best-effort; skip offline guard for manual probe)
     metrics = None
     status = node.status or "unknown"
     try:
         client = NodeClient.from_node(node)
         metrics = client.metrics()
         status = "online"
-        # Persist lightweight resource totals when agent reports them
         if metrics:
             if metrics.get("cpu_count") is not None:
                 node.cpu_total = float(metrics["cpu_count"])
@@ -137,11 +140,19 @@ def update_node(
 
     if body.name is not None:
         node.name = body.name.strip()
-    if body.host is not None:
-        host = body.host.strip()
-        if not host:
-            raise HTTPException(status_code=400, detail="host ist erforderlich")
-        node.host = host
+
+    new_fp = body.tls_fingerprint if body.tls_fingerprint is not None else node.tls_fingerprint
+    new_host = body.host.strip() if body.host is not None else node.host
+    if body.host is not None or body.tls_fingerprint is not None:
+        try:
+            node.host = validate_remote_node_host(
+                new_host, new_fp, is_local=bool(node.is_local)
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if body.tls_fingerprint is not None:
+            node.tls_fingerprint = body.tls_fingerprint
+
     if body.auth_token is not None:
         try:
             node.auth_token_enc = encrypt_node_token(body.auth_token)

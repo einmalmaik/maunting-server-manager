@@ -54,6 +54,8 @@ export interface Node {
   host: string
   is_local: boolean
   status: string
+  /** SHA-256 of agent TLS cert (hex). Required for remote HTTPS nodes. */
+  tls_fingerprint?: string | null
   cpu_total: number | null
   ram_total: number | null
   disk_total: number | null

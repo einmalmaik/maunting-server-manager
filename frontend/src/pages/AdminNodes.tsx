@@ -74,7 +74,12 @@ export function AdminNodes() {
   const [editing, setEditing] = useState<Node | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ name: '', host: '', auth_token: '' })
+  const [form, setForm] = useState({
+    name: '',
+    host: '',
+    auth_token: '',
+    tls_fingerprint: '',
+  })
 
   useEffect(() => {
     void fetchNodes().catch((err: unknown) => {
@@ -84,13 +89,18 @@ export function AdminNodes() {
 
   const openCreate = () => {
     setEditing(null)
-    setForm({ name: '', host: 'http://', auth_token: '' })
+    setForm({ name: '', host: 'https://', auth_token: '', tls_fingerprint: '' })
     setShowForm(true)
   }
 
   const openEdit = (node: Node) => {
     setEditing(node)
-    setForm({ name: node.name, host: node.host, auth_token: '' })
+    setForm({
+      name: node.name,
+      host: node.host,
+      auth_token: '',
+      tls_fingerprint: node.tls_fingerprint || '',
+    })
     setShowForm(true)
   }
 
@@ -99,12 +109,20 @@ export function AdminNodes() {
     setSaving(true)
     try {
       if (editing) {
-        const payload: { name?: string; host?: string; auth_token?: string } = {
+        const payload: {
+          name?: string
+          host?: string
+          auth_token?: string
+          tls_fingerprint?: string
+        } = {
           name: form.name.trim(),
           host: form.host.trim(),
         }
         if (form.auth_token.trim()) {
           payload.auth_token = form.auth_token.trim()
+        }
+        if (form.tls_fingerprint.trim()) {
+          payload.tls_fingerprint = form.tls_fingerprint.trim()
         }
         await updateNode(editing.id, payload)
         toast.success(t('nodes.updated'))
@@ -113,15 +131,20 @@ export function AdminNodes() {
           toast.error(t('nodes.tokenTooShort'))
           return
         }
+        if (!form.tls_fingerprint.trim()) {
+          toast.error(t('nodes.fingerprintRequired'))
+          return
+        }
         await createNode({
           name: form.name.trim(),
           host: form.host.trim(),
           auth_token: form.auth_token.trim(),
+          tls_fingerprint: form.tls_fingerprint.trim(),
         })
         toast.success(t('nodes.created'))
       }
       setShowForm(false)
-      setForm({ name: '', host: '', auth_token: '' })
+      setForm({ name: '', host: '', auth_token: '', tls_fingerprint: '' })
       setEditing(null)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : t('common.error'))
@@ -225,10 +248,26 @@ export function AdminNodes() {
                 value={form.host}
                 onChange={(e) => setForm({ ...form, host: e.target.value })}
                 required
-                placeholder="http://10.0.0.5:9000"
+                placeholder="https://10.0.0.5:9000"
                 maxLength={255}
                 autoComplete="off"
               />
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1.5 block font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">
+                {t('nodes.tlsFingerprint')}
+              </label>
+              <input
+                className="msm-input font-mono text-sm"
+                value={form.tls_fingerprint}
+                onChange={(e) => setForm({ ...form, tls_fingerprint: e.target.value })}
+                required={!editing}
+                placeholder={t('nodes.fingerprintPlaceholder')}
+                maxLength={128}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <p className="mt-1 text-xs text-on-surface-variant">{t('nodes.fingerprintHint')}</p>
             </div>
             <div className="md:col-span-2">
               <label className="mb-1.5 block font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">

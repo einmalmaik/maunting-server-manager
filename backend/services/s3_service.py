@@ -100,6 +100,22 @@ class S3Service:
         }
 
     @staticmethod
+    def get_ephemeral_agent_s3_config() -> dict[str, str]:
+        """Plaintext S3 config for one-shot handoff to MSM Agent (Phase 6).
+
+        Caller must only keep this in memory for the HTTP request to the agent.
+        Never log or persist the returned credentials.
+        """
+        cfg = S3Service._get_config()
+        return {
+            "endpoint": cfg.get("endpoint") or "",
+            "access_key": cfg["access_key"],
+            "secret_key": cfg["secret_key"],
+            "bucket": cfg["bucket"],
+            "region": cfg.get("region") or "",
+        }
+
+    @staticmethod
     def _get_client():
         """Erstellt einen boto3-S3-Client aus entschluesselten Credentials."""
         cfg = S3Service._get_config()

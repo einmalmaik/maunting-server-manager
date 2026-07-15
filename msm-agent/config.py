@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     agent_log_level: str = "INFO"
     agent_version: str = "1.0.0"
 
+    # TLS (self-signed). When both set, uvicorn serves HTTPS.
+    # Panel pins cert SHA-256 via node.tls_fingerprint.
+    tls_certfile: str = ""
+    tls_keyfile: str = ""
+
     # Container name prefix — only containers with this prefix are manageable
     container_name_prefix: str = "msm-srv-"
 

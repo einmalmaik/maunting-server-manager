@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from config import settings
-from routers import console, containers, files, health, metrics
+from routers import backup, console, containers, files, health, metrics
 from services import file_service
 
 # ── Logging (never log Authorization / tokens / env secrets) ──
@@ -140,10 +140,21 @@ app.include_router(containers.router)
 app.include_router(files.router)
 app.include_router(metrics.router)
 app.include_router(console.router)
+app.include_router(backup.router)
 
 
 def main() -> None:
     import uvicorn
+
+    cert = (settings.tls_certfile or "").strip()
+    key = (settings.tls_keyfile or "").strip()
+    ssl_kwargs: dict = {}
+    if cert and key:
+        ssl_kwargs["ssl_certfile"] = cert
+        ssl_kwargs["ssl_keyfile"] = key
+        logger.info("TLS enabled (cert file configured; fingerprint pin on panel)")
+    elif cert or key:
+        logger.warning("TLS incomplete: set both MSM_TLS_CERTFILE and MSM_TLS_KEYFILE")
 
     uvicorn.run(
         "main:app",
@@ -151,6 +162,7 @@ def main() -> None:
         port=settings.agent_port,
         log_level=settings.agent_log_level.lower(),
         workers=1,
+        **ssl_kwargs,
     )
 
 

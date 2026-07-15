@@ -36,13 +36,15 @@ def test_create_and_list_node(client: TestClient, owner_cookies: dict):
             headers={"X-CSRF-Token": csrf},
             json={
                 "name": "Worker-1",
-                "host": "http://10.0.0.5:9000",
+                "host": "https://10.0.0.5:9000",
                 "auth_token": "super-secret-agent-token-32chars!!",
+                "tls_fingerprint": "a" * 64,
             },
         )
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["name"] == "Worker-1"
+    assert body.get("tls_fingerprint") == "a" * 64
     assert "auth_token" not in body
     assert "auth_token_enc" not in body
     assert body["server_count"] == 0

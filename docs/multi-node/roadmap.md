@@ -38,12 +38,12 @@ Die Entwicklung ist in 7 logische Phasen aufgeteilt. Für jede Phase gibt es ein
    - Statische React-App lauffähig machen auf Vercel.
    - CORS-Policies, cross-domain WebSockets und Cookie/CSRF-Auth anpassen.
 
-6. **[Phase 5: Agent-Installer & Produktionsreife](file:///c:/Users/einma/AppData/Local/Singra/workspace/maunting-server-manager/docs/multi-node/phase-5.md)**
+6. **[Phase 5: Agent-Installer & Produktionsreife](phase-5.md)** (ABGESCHLOSSEN)
    - TLS-Absicherung der Agenten-API (Self-signed mit Fingerprint-Pinning im Panel).
    - Heartbeat-System und automatische Ausfallsicherung (Offline-Status der Nodes).
-   - Bash-Installer für Remote-Server (`install-agent.sh`).
+   - Bash-Installer für Remote-Server (`scripts/install-agent.sh`).
 
-7. **[Phase 6: Backup-System für Multi-Node optimieren](file:///c:/Users/einma/AppData/Local/Singra/workspace/maunting-server-manager/docs/multi-node/phase-6.md)**
+7. **[Phase 6: Backup-System für Multi-Node optimieren](phase-6.md)** (ABGESCHLOSSEN)
    - Direktes Backup-Streaming vom Agenten zu S3 mit temporären Credentials (vermeidet Traffic-Engpässe am zentralen Panel).
 
 ---

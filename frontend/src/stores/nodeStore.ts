@@ -11,10 +11,20 @@ interface NodeState {
   loading: boolean
   error: string | null
   fetchNodes: () => Promise<void>
-  createNode: (input: { name: string; host: string; auth_token: string }) => Promise<Node>
+  createNode: (input: {
+    name: string
+    host: string
+    auth_token: string
+    tls_fingerprint?: string
+  }) => Promise<Node>
   updateNode: (
     id: number,
-    input: { name?: string; host?: string; auth_token?: string },
+    input: {
+      name?: string
+      host?: string
+      auth_token?: string
+      tls_fingerprint?: string
+    },
   ) => Promise<Node>
   deleteNode: (id: number) => Promise<void>
   healthCheck: (id: number) => Promise<Node>

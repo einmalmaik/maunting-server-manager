@@ -11,7 +11,8 @@ Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten
 | 2 – Panel node-aware | umgesetzt |
 | 3 – Node-UI & Server-Create | umgesetzt |
 | 4 – Frontend entkoppeln (Vercel-Ready) | umgesetzt |
-| 5–6 | spezifiziert, noch offen |
+| 5 – Agent-Installer & Produktionsreife | umgesetzt |
+| 6 – Agent→S3 Backup-Streaming | umgesetzt |
 
 ---
 
@@ -135,6 +136,52 @@ Bestehende UI-Primitives (behalten, werden genutzt):
 
 ---
 
+## Phase 5 — Agent-Installer & Produktionsreife
+
+| Datei | Rolle |
+|-------|--------|
+| `backend/services/tls_pinning.py` | SHA-256 Fingerprint normalize + pinned SSLContext |
+| `backend/services/node_client.py` | HTTPS + Pin für Remote; verify=pinned context |
+| `backend/services/node_service.py` | Offline-Guard, `node_unreachable`, Host-Validierung |
+| `backend/models/node.py` | `tls_fingerprint` |
+| `backend/schemas/node.py` | Create/Update/Out mit Fingerprint |
+| `backend/routers/nodes.py` | Remote: HTTPS + Fingerprint Pflicht |
+| `backend/routers/servers.py` | Start/Stop/Restart 503 wenn Node offline |
+| `backend/routers/files.py` | Datei-Ops 503 wenn Remote offline |
+| `backend/services/scheduler_service.py` | Heartbeat-Job alle 60s (`global_node_heartbeat`) |
+| `backend/scripts/migrate_add_node_tls_fingerprint.py` | Idempotente Spalte |
+| `backend/tests/test_phase5_tls_heartbeat.py` | Pin/Offline/Heartbeat-Tests |
+| `msm-agent/config.py` + `main.py` | `MSM_TLS_CERTFILE` / `MSM_TLS_KEYFILE` |
+| `msm-agent/.env.example` | TLS-Variablen |
+| `scripts/install-agent.sh` | Rootless Docker, Cert, Token, systemd |
+| `frontend/src/pages/AdminNodes.tsx` | Fingerprint-Feld |
+| `frontend/src/pages/ServerDetail.tsx` | Aktionen disabled bei `node_unreachable` |
+
+**Installer:** `sudo bash scripts/install-agent.sh` → URL, Token, Fingerprint in Panel eintragen.
+
+---
+
+## Phase 6 — Agent→S3 Backup (dezentral)
+
+| Datei | Rolle |
+|-------|--------|
+| `dis-sidecar/server.mjs` | `POST /backup/derive-raw-key` (Argon2id → raw AES key, not stored) |
+| `backend/services/backup_crypto_service.py` | `derive_raw_key_b64` |
+| `backend/services/backup_orchestrator.py` | Remote: agent-direct create/restore |
+| `backend/services/s3_service.py` | `get_ephemeral_agent_s3_config` |
+| `backend/services/node_client.py` | `backup_create_s3` / `backup_restore_s3` |
+| `backend/routers/backups.py` | Remote restore via agent |
+| `msm-agent/services/stream_crypto.py` | DIS-kompatible AES-GCM Frames |
+| `msm-agent/services/s3_backup_service.py` | tar → encrypt → S3; reverse restore |
+| `msm-agent/routers/backup.py` | `POST /backup/create`, `/backup/restore` |
+| `msm-agent/requirements.txt` | `cryptography`, `boto3` |
+| `backend/tests/test_phase6_agent_s3_backup.py` | Orchestrator-Mocks |
+| `msm-agent/tests/test_stream_crypto.py` | Frame roundtrip / wrong key |
+
+**Invariante:** S3-Credentials + Backup-Key nur im RAM der Request-Dauer auf dem Agenten; nie auf Disk.
+
+---
+
 ## Security-Invarianten (über alle Phasen)
 
 1. Agent-Token: DIS-verschlüsselt in DB (`auth_token_enc`, AAD `msm:node:auth_token`).
@@ -173,6 +220,12 @@ test -f frontend/src/pages/AdminNodes.tsx && test -f frontend/src/stores/nodeSto
 
 # Phase 4
 test -f frontend/src/config/api.ts && test -f frontend/vercel.json
+
+# Phase 5
+test -f scripts/install-agent.sh && test -f backend/services/tls_pinning.py
+
+# Phase 6
+test -f msm-agent/services/stream_crypto.py && test -f msm-agent/routers/backup.py
 ```
 
 PowerShell:
@@ -188,6 +241,12 @@ PowerShell:
   'frontend/src/stores/nodeStore.ts',
   'frontend/src/config/api.ts',
   'frontend/vercel.json',
-  'backend/tests/test_phase4_frontend_decouple.py'
+  'backend/tests/test_phase4_frontend_decouple.py',
+  'backend/services/tls_pinning.py',
+  'scripts/install-agent.sh',
+  'backend/tests/test_phase5_tls_heartbeat.py',
+  'msm-agent/services/stream_crypto.py',
+  'msm-agent/routers/backup.py',
+  'backend/tests/test_phase6_agent_s3_backup.py'
 ) | ForEach-Object { if (Test-Path $_) { "OK $_" } else { "MISSING $_" } }
 ```

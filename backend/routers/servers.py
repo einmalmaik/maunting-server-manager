@@ -353,15 +353,30 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
 
 def _server_response(server: Server) -> ServerResponse:
     """Serialize server including safe node label (never auth tokens)."""
+    from services.node_service import effective_server_runtime_status, is_node_offline
+
     data = ServerResponse.model_validate(server)
     node = getattr(server, "node", None)
     if node is not None:
         data.node_id = node.id
         data.node_name = node.name
+        # Graceful degradation: keep server visible; surface node_unreachable
+        if is_node_offline(node):
+            data.status = effective_server_runtime_status(server, node)
+            data.status_message = "Node offline — Aktionen deaktiviert"
     else:
         data.node_id = getattr(server, "node_id", None)
         data.node_name = None
     return data
+
+
+def _reject_if_node_offline(server: Server) -> None:
+    """Block start/stop/file-ops when heartbeat marked the node offline."""
+    from services.node_service import NODE_OFFLINE_MSG, is_node_offline
+
+    node = getattr(server, "node", None)
+    if is_node_offline(node):
+        raise HTTPException(status_code=503, detail=NODE_OFFLINE_MSG)
 
 
 @router.get("", response_model=list[ServerResponse])
@@ -839,6 +854,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    _reject_if_node_offline(server)
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
@@ -885,6 +901,7 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    _reject_if_node_offline(server)
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
@@ -903,6 +920,7 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    _reject_if_node_offline(server)
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
