@@ -24,6 +24,7 @@ from .role import RoleCreate, RoleUpdate, RoleResponse, AssignRoleRequest, Serve
 from .backup import BackupResponse
 from .panel_backup import PanelBackupCreateRequest, PanelBackupResponse, PanelRestorePrepResponse
 from .mod import ModResponse
+from .node import NodeCreate, NodeOut
 
 __all__ = [
     "LoginRequest", "LoginVerifyRequest", "TokenResponse", "RegistrationResponse", "PasswordResetRequest", "PasswordResetConfirm", "ChangePasswordRequest", "ChangeEmailRequest", "ResendVerificationRequest", "DeleteAccountRequest",
@@ -33,4 +34,5 @@ __all__ = [
     "RoleCreate", "RoleUpdate", "RoleResponse", "AssignRoleRequest",
     "ServerPermissionsRequest", "ServerPermissionsResponse",
     "BackupResponse", "PanelBackupCreateRequest", "PanelBackupResponse", "PanelRestorePrepResponse", "ModResponse",
+    "NodeCreate", "NodeOut",
 ]
