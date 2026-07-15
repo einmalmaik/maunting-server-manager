@@ -390,6 +390,71 @@ class NodeClient:
             timeout=timeout,
         )
 
+    # ── Phase 7: managed Postgres on the node ─────────────────────────────
+    # Passwords only in request body (TLS to agent). Never log payloads.
+
+    def postgres_ensure(self, *, admin_password: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/postgres/ensure",
+            json={"admin_password": admin_password},
+            timeout=_LONG_TIMEOUT,
+        )
+
+    def postgres_provision(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/postgres/provision",
+            json=payload,
+            timeout=_LONG_TIMEOUT,
+        )
+
+    def postgres_create_user(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/postgres/users/create", json=payload)
+
+    def postgres_rotate_user(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/postgres/users/rotate", json=payload)
+
+    def postgres_drop(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/postgres/drop", json=payload)
+
+    def postgres_query(self, payload: dict[str, Any]) -> Any:
+        return self._request(
+            "POST",
+            "/postgres/query",
+            json=payload,
+            timeout=_LONG_TIMEOUT,
+        )
+
+    def postgres_promote(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/postgres/roles/promote", json=payload)
+
+    def postgres_demote(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/postgres/roles/demote", json=payload)
+
+    def postgres_rotate_owner(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/postgres/roles/rotate-owner", json=payload)
+
+    def postgres_dump(
+        self, *, admin_password: str, database_names: list[str]
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/postgres/dump",
+            json={"admin_password": admin_password, "database_names": database_names},
+            timeout=_LONG_TIMEOUT,
+        )
+
+    def postgres_restore(
+        self, *, admin_password: str, dumps: dict[str, str]
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/postgres/restore",
+            json={"admin_password": admin_password, "dumps": dumps},
+            timeout=_LONG_TIMEOUT,
+        )
+
     @property
     def bearer_token(self) -> str:
         """In-memory token for WS upgrade only — caller must not log/store."""

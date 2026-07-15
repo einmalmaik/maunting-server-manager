@@ -394,13 +394,16 @@ async def lifespan(app: FastAPI):
             "Phase-2 Port-Manager-Init partiell fehlgeschlagen: %s", exc,
         )
 
-    # Managed PostgreSQL fuer Server-Datenbanken: beim Panel-Start sicherstellen
-    # (laeuft + Restart-Policy unless-stopped), damit Game-Container msm-postgres
-    # per DNS erreichen koennen.
+    # Managed PostgreSQL: on local node agent only (Phase 7 — no panel psycopg2).
     try:
+        from database import SessionLocal
         from services.postgres_service import ensure_internal_postgres
 
-        ensure_internal_postgres()
+        _pg_db = SessionLocal()
+        try:
+            ensure_internal_postgres(_pg_db)
+        finally:
+            _pg_db.close()
     except Exception as exc:
         import logging
 

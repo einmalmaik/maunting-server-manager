@@ -46,6 +46,10 @@ Die Entwicklung ist in 7 logische Phasen aufgeteilt. Für jede Phase gibt es ein
 7. **[Phase 6: Backup-System für Multi-Node optimieren](phase-6.md)** (ABGESCHLOSSEN)
    - Direktes Backup-Streaming vom Agenten zu S3 mit temporären Credentials (vermeidet Traffic-Engpässe am zentralen Panel).
 
+8. **[Phase 7: Node-Aware Managed Postgres](phase-7.md)** (ABGESCHLOSSEN)
+   - Vollständige Auslagerung der `psycopg2`-Datenbanklogik und des `msm-postgres`-Containers in den `msm-agent`.
+   - Backend wird zum reinen REST-Proxy für DDL-Befehle, um Remote-Nodes sicher zu unterstützen.
+
 ---
 
 ## Lokale Entwicklung und Tests

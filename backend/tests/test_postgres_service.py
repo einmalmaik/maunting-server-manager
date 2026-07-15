@@ -1,64 +1,9 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from services import postgres_service
-from services.docker_service import PortPublish
 from services.postgres_service import PostgresServiceError
-
-
-def test_managed_postgres_starts_with_loopback_only_binding(monkeypatch):
-    monkeypatch.setattr(postgres_service.settings, "managed_postgres_host", "127.0.0.1")
-    monkeypatch.setattr(postgres_service.settings, "managed_postgres_port", 15432)
-    monkeypatch.setattr(postgres_service.settings, "managed_postgres_data_dir", "/tmp/msm-pg-test")
-
-    with patch("services.postgres_service.docker_service.ensure_network", return_value={"ok": True}), \
-         patch("services.postgres_service.docker_service.inspect_state", return_value=None), \
-         patch("services.postgres_service.docker_service.run_container", return_value={"ok": True}) as run_container, \
-         patch("services.postgres_service.os.makedirs"), \
-         patch("services.postgres_service._encrypted_admin_password", return_value="encrypted"), \
-         patch("services.postgres_service._admin_password", return_value="secret"):
-        postgres_service.ensure_internal_postgres()
-
-    kwargs = run_container.call_args.kwargs
-    assert kwargs["image"] == "postgres:17-alpine"
-    # Container haengt am msm-internal-Netz fuer Game-Container-Konnektivitaet,
-    # nutzt aber default-bridge fuer das host-loopback-Binding (127.0.0.1:<port>).
-    assert kwargs.get("network") in (None,)  # kein primaeres User-Network (wg. Port-Binding)
-    assert kwargs["extra_networks"] == ["msm-internal"]
-    assert kwargs["read_only_rootfs"] is False
-    assert isinstance(kwargs["ports"][0], PortPublish)
-    assert kwargs["ports"][0].host_ip == "127.0.0.1"
-    assert kwargs["ports"][0].host_port == 15432
-    # Postgres-Entrypoint braucht diese Caps fuer initdb (chown/setuid)
-    assert set(kwargs["cap_adds"]) == {"CHOWN", "FOWNER", "SETUID", "SETGID", "DAC_OVERRIDE", "DAC_READ_SEARCH"}
-    assert kwargs["restart_policy_name"] == "unless-stopped"
-
-
-def test_managed_postgres_starts_existing_stopped_container(monkeypatch):
-    monkeypatch.setattr(postgres_service.settings, "managed_postgres_host", "127.0.0.1")
-    monkeypatch.setattr(postgres_service.settings, "managed_postgres_port", 15432)
-    monkeypatch.setattr(postgres_service.settings, "managed_postgres_data_dir", "/tmp/msm-pg-test")
-
-    with patch("services.postgres_service.docker_service.ensure_network", return_value={"ok": True}), \
-         patch("services.postgres_service.docker_service.inspect_state", return_value={"status": "exited"}), \
-         patch("services.postgres_service.docker_service.start", return_value={"ok": True}) as start, \
-         patch("services.postgres_service.docker_service.run_container") as run_container, \
-         patch("services.postgres_service.docker_service.ensure_restart_policy", return_value={"ok": True}) as ensure_rp, \
-         patch("services.postgres_service.os.makedirs"), \
-         patch("services.postgres_service._encrypted_admin_password", return_value="encrypted"), \
-         patch("services.postgres_service._admin_password", return_value="secret"):
-        postgres_service.ensure_internal_postgres()
-
-    start.assert_called_once_with("msm-postgres")
-    run_container.assert_not_called()
-    ensure_rp.assert_called_once_with("msm-postgres", "unless-stopped")
-
-
-def test_managed_postgres_rejects_public_host_binding(monkeypatch):
-    monkeypatch.setattr(postgres_service.settings, "managed_postgres_host", "0.0.0.0")
-    with pytest.raises(PostgresServiceError):
-        postgres_service._db_host()
 
 
 def test_identifier_validation_rejects_unsafe_names():
@@ -85,3 +30,54 @@ def test_extension_whitelist_rejects_unsafe_names():
         postgres_service._validate_extension_name("pgcrypto; DROP DATABASE postgres")
     with pytest.raises(ValueError):
         postgres_service._validate_extension_name("")
+
+
+def test_ensure_internal_postgres_proxies_to_agent():
+    mock_client = MagicMock()
+    mock_client.postgres_ensure.return_value = {"ok": True, "status": "running"}
+    mock_db = MagicMock()
+    mock_server = MagicMock()
+    with patch.object(postgres_service, "_client_for_server", return_value=mock_client), \
+         patch.object(postgres_service, "_admin_password", return_value="secret"):
+        postgres_service.ensure_internal_postgres(mock_db, mock_server)
+    mock_client.postgres_ensure.assert_called_once_with(admin_password="secret")
+
+
+def test_ensure_internal_postgres_no_node_logs_only():
+    mock_db = MagicMock()
+    with patch.object(postgres_service, "get_local_node", return_value=None):
+        # Must not raise when no node (startup soft-fail path)
+        postgres_service.ensure_internal_postgres(mock_db)
+
+
+def test_provision_uses_node_client_not_psycopg2():
+    """Phase 7: no psycopg2 in panel postgres_service module."""
+    import services.postgres_service as mod
+    assert not hasattr(mod, "psycopg2")
+    source = open(mod.__file__, encoding="utf-8").read()
+    assert "import psycopg2" not in source
+    assert "from psycopg2" not in source
+
+
+def test_create_database_proxies_provision(db, test_server):
+    mock_client = MagicMock()
+    mock_client.postgres_provision.return_value = {"ok": True}
+    mock_client.postgres_ensure.return_value = {"ok": True}
+
+    with patch.object(postgres_service, "_client_for_server", return_value=mock_client), \
+         patch.object(postgres_service, "_client_for_server_id", return_value=mock_client), \
+         patch.object(postgres_service, "_admin_password", return_value="admin-pw"), \
+         patch.object(
+             postgres_service.AuthService,
+             "encrypt_secret",
+             side_effect=lambda p, aad="": f"enc:{p}",
+         ):
+        cred = postgres_service.create_database(db, test_server.id)
+
+    assert cred["database_name"].startswith(f"msm_s{test_server.id}_")
+    assert "password" in cred
+    mock_client.postgres_provision.assert_called_once()
+    call_payload = mock_client.postgres_provision.call_args[0][0]
+    assert call_payload["admin_password"] == "admin-pw"
+    assert "owner_password" in call_payload
+    assert "user_password" in call_payload

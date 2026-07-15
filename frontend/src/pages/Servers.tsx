@@ -91,7 +91,7 @@ export function Servers() {
 
   // Node-Picker sobald mindestens ein Node geladen ist (Local + Remote).
   // Bei genau einem Eintrag ist die Wahl trivial, aber sichtbar und explizit.
-  const showNodePicker = nodes.length >= 1
+  const showNodePicker = nodes.length > 1
 
   const nodeOptionLabel = (n: Node) => {
     const localTag = n.is_local ? ` · ${t('nodes.local')}` : ''

@@ -13,6 +13,7 @@ Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten
 | 4 – Frontend entkoppeln (Vercel-Ready) | umgesetzt |
 | 5 – Agent-Installer & Produktionsreife | umgesetzt |
 | 6 – Agent→S3 Backup-Streaming | umgesetzt |
+| 7 – Node-Aware Managed Postgres | umgesetzt |
 
 ---
 
@@ -182,6 +183,25 @@ Bestehende UI-Primitives (behalten, werden genutzt):
 
 ---
 
+## Phase 7 — Node-Aware Managed Postgres
+
+| Datei | Rolle |
+|-------|--------|
+| `msm-agent/services/postgres_service.py` | DDL/DML via psycopg2 lokal; Container `msm-postgres` |
+| `msm-agent/services/docker_service.py` | Managed-Postgres Helpers (`run_managed_postgres`, `exec_in_managed`, …) |
+| `msm-agent/routers/postgres.py` | `/postgres/ensure|provision|query|dump|restore|…` |
+| `msm-agent/config.py` | `MSM_MANAGED_POSTGRES_*` |
+| `msm-agent/requirements.txt` | `psycopg2-binary` |
+| `backend/services/postgres_service.py` | **Kein** psycopg2; reiner NodeClient-Proxy + Panel-Metadaten/DIS |
+| `backend/services/node_client.py` | `postgres_*` Wrapper |
+| `backend/main.py` | Startup-Ensure über lokalen Node-Agent |
+| `backend/tests/test_phase7_managed_postgres.py` | Proxy/Invarianten-Tests |
+| `msm-agent/tests/test_postgres_service.py` | Agent unit tests |
+
+**Invariante:** Admin/Owner-Passwörter nur im Request-Body (TLS) und RAM des Agenten; Panel speichert DIS-verschlüsselt; Agent speichert keine Klartext-Credentials auf Disk.
+
+---
+
 ## Security-Invarianten (über alle Phasen)
 
 1. Agent-Token: DIS-verschlüsselt in DB (`auth_token_enc`, AAD `msm:node:auth_token`).
@@ -190,6 +210,7 @@ Bestehende UI-Primitives (behalten, werden genutzt):
 4. Path-Traversal nur innerhalb `MSM_SERVERS_DIR/<server_id>`.
 5. Docker-Hardening: kein privileged, `cap_drop=ALL`, kein host-network.
 6. Ports pro Node; Remote ohne lokalen Host-Bind-Check.
+7. Managed-Postgres-Passwörter: nur Panel-DIS-Storage + ephemeral HTTPS-Body zum Agenten (RAM only).
 
 ---
 

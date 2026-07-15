@@ -11,3 +11,5 @@ httpx==0.27.0
 # Phase 6: agent-direct encrypted S3 backup (AES-GCM + multipart)
 cryptography>=42.0.0,<45
 boto3>=1.34.0,<2
+# Phase 7: managed Postgres on the node (local psycopg2 only)
+psycopg2-binary>=2.9.9,<3

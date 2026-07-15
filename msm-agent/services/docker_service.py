@@ -350,6 +350,180 @@ def _cpu_percent(raw: dict) -> float | None:
         return None
 
 
+# ── Managed Postgres container (fixed name, not msm-srv-*) ─────────────────
+# Separate from game containers: needs cap_add for initdb and dual-network setup.
+
+
+def assert_managed_postgres_name(name: str) -> str:
+    expected = settings.managed_postgres_container_name
+    if not name or name != expected:
+        raise ContainerNameError(f"Only managed container '{expected}' is allowed here")
+    return name
+
+
+def ensure_network(name: str, *, internal: bool = False) -> dict[str, Any]:
+    client = _get_client()
+    try:
+        client.networks.get(name)
+        return {"ok": True}
+    except NotFound:
+        pass
+    except (DockerException, OSError) as exc:
+        logger.warning("docker network lookup failed")
+        return {"ok": False, "error": _safe_error(exc)}
+    try:
+        client.networks.create(name, driver="bridge", internal=internal)
+        return {"ok": True}
+    except (DockerException, OSError) as exc:
+        logger.warning("docker network create failed")
+        return {"ok": False, "error": _safe_error(exc)}
+
+
+def inspect_managed_state(name: str) -> dict[str, Any] | None:
+    assert_managed_postgres_name(name)
+    client = _get_client()
+    try:
+        c = client.containers.get(name)
+        c.reload()
+        return {"status": c.status, "name": name}
+    except NotFound:
+        return None
+    except (DockerException, OSError) as exc:
+        raise DockerUnavailableError(_safe_error(exc)) from exc
+
+
+def start_managed(name: str) -> dict[str, Any]:
+    assert_managed_postgres_name(name)
+    client = _get_client()
+    try:
+        c = client.containers.get(name)
+        c.start()
+        return {"ok": True, "name": name}
+    except NotFound:
+        return {"ok": False, "error": "Container not found"}
+    except (DockerException, OSError) as exc:
+        return {"ok": False, "error": _safe_error(exc)}
+
+
+def ensure_managed_restart_policy(name: str, policy_name: str = "unless-stopped") -> dict[str, Any]:
+    assert_managed_postgres_name(name)
+    client = _get_client()
+    try:
+        c = client.containers.get(name)
+        c.reload()
+        current = (c.attrs.get("HostConfig", {}) or {}).get("RestartPolicy", {}) or {}
+        if (current.get("Name") or "").lower() == policy_name.lower():
+            return {"ok": True}
+        c.update(restart_policy={"Name": policy_name})
+        return {"ok": True}
+    except NotFound:
+        return {"ok": False, "error": "Container not found"}
+    except (DockerException, OSError) as exc:
+        return {"ok": False, "error": _safe_error(exc)}
+
+
+def run_managed_postgres(
+    *,
+    name: str,
+    image: str,
+    env: dict[str, str],
+    host_port: int,
+    host_ip: str,
+    data_dir: str,
+    network_name: str,
+    cap_adds: list[str],
+) -> dict[str, Any]:
+    """Create msm-postgres with loopback bind + internal network for game containers.
+
+    cap_add is required for postgres initdb (CHOWN/SETUID/…). Never logs env values.
+    """
+    assert_managed_postgres_name(name)
+    if host_ip != "127.0.0.1":
+        raise HardeningError("Managed PostgreSQL may only bind to 127.0.0.1")
+    client = _get_client()
+
+    try:
+        existing = client.containers.get(name)
+        existing.remove(force=True)
+    except NotFound:
+        pass
+    except (DockerException, OSError) as exc:
+        return {"ok": False, "error": _safe_error(exc)}
+
+    # Pull if missing
+    try:
+        client.images.get(image)
+    except ImageNotFound:
+        try:
+            client.images.pull(image)
+        except (DockerException, OSError) as exc:
+            return {"ok": False, "error": _safe_error(exc)}
+
+    ports = {"5432/tcp": (host_ip, host_port)}
+    volumes = {data_dir: {"bind": "/var/lib/postgresql/data", "mode": "rw"}}
+    try:
+        container = client.containers.run(
+            image=image,
+            name=name,
+            detach=True,
+            environment=env,
+            ports=ports,
+            volumes=volumes,
+            privileged=False,
+            cap_drop=list(_HARDENING_CAP_DROP),
+            cap_add=list(cap_adds),
+            security_opt=list(_HARDENING_SECURITY_OPT),
+            restart_policy={"Name": "unless-stopped"},
+            log_config=(
+                LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None
+            ),
+        )
+        # Attach internal network so game containers reach msm-postgres by DNS
+        try:
+            net = client.networks.get(network_name)
+            net.connect(container)
+        except NotFound:
+            client.networks.create(network_name, driver="bridge", internal=True)
+            client.networks.get(network_name).connect(container)
+        except (DockerException, OSError):
+            logger.warning("managed postgres network attach failed")
+        return {"ok": True, "name": name, "id": (getattr(container, "id", "") or "")[:12]}
+    except (DockerException, OSError) as exc:
+        logger.warning("managed postgres run failed")
+        return {"ok": False, "error": _safe_error(exc)}
+
+
+def exec_in_managed(name: str, command: list[str], timeout: int = 180) -> dict[str, Any]:
+    """exec in managed postgres container (no msm-srv- prefix check)."""
+    assert_managed_postgres_name(name)
+    if not command:
+        raise ValueError("command is required")
+    client = _get_client()
+    try:
+        container = client.containers.get(name)
+        container.reload()
+        if container.status != "running":
+            return {"ok": False, "error": "Container is not running", "stdout": "", "stderr": ""}
+        result = container.exec_run(command, stdout=True, stderr=True, demux=True)
+        exit_code = int(getattr(result, "exit_code", 1))
+        output = getattr(result, "output", (b"", b""))
+        stdout_b, stderr_b = output if isinstance(output, tuple) else (output, b"")
+        stdout = _decode(stdout_b)
+        stderr = _decode(stderr_b)
+        return {
+            "ok": exit_code == 0,
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "error": "" if exit_code == 0 else (stderr or stdout or f"exit {exit_code}")[:500],
+        }
+    except NotFound:
+        return {"ok": False, "error": "Container not found", "stdout": "", "stderr": ""}
+    except (DockerException, OSError) as exc:
+        logger.warning("managed docker exec failed")
+        return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
+
+
 def exec_in_container(name: str, command: list[str]) -> dict[str, Any]:
     if not command:
         raise ValueError("command is required")
