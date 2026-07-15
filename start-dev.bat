@@ -94,6 +94,16 @@ if not exist "msm-agent\.env" (
 echo.
 
 echo ===================================================
+echo   Freigeben belegter Ports...
+echo ===================================================
+echo.
+
+call :kill_port 9100
+call :kill_port 8000
+call :kill_port 9000
+call :kill_port 3000
+
+echo ===================================================
 echo   Starte dev server...
 echo ===================================================
 echo.
@@ -122,3 +132,12 @@ echo - DIS Sidecar: http://localhost:9100
 echo - MSM Agent: http://localhost:9000
 echo.
 pause
+exit /b
+
+:kill_port
+set port=%1
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr /r /c:":%port% "') do (
+    echo Port %port% ist belegt. Schliesse Prozess %%a...
+    taskkill /f /pid %%a >nul 2>&1
+)
+exit /b
