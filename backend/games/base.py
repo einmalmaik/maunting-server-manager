@@ -1149,11 +1149,17 @@ class GamePlugin(ABC):
 
     # ─ Default Lifecycle (Docker) ────────────────────────────────────────
 
+    def _runtime_node(self, server):
+        """Node ORM object for multi-node routing (None = local docker_service)."""
+        return getattr(server, "node", None)
+
     def start(self, server) -> dict:
         """Standard-Start: Container mit aktuellen Limits/Ports neu hochziehen."""
         if not self.docker_image:
             return {"error": "Plugin hat kein docker_image konfiguriert"}
-        if not docker_service.is_available():
+        node = self._runtime_node(server)
+        # Remote node: agent must be used; local without node: panel docker
+        if node is None and not docker_service.is_available():
             return {"error": "Docker ist auf diesem Host nicht verfügbar"}
 
         # Pflicht-Bind-IP früh validieren — sonst riskieren wir 0.0.0.0.
@@ -1171,26 +1177,29 @@ class GamePlugin(ABC):
         # Rechte VOR Runtime-Patches/Preflight normalisieren. Wenn externe Tools
         # root-/fremd-eigene Dateien erzeugen, darf prepare_runtime nicht schon
         # an Permission-Denied scheitern, bevor MSM reparieren konnte.
-        for volume in volume_binds:
-            if volume.read_only:
-                continue
-            repair = docker_service.repair_bind_mount_permissions(
-                volume.host_path,
-                container_path=volume.container_path,
-                owner_uid_gid=(uid, gid),
-            )
-            if not repair.get("ok"):
-                err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
-                _append_console_log(
-                    server.id,
-                    f"[MSM] Permission-Repair Hinweis (Start wird fortgesetzt): {err}\n",
+        # Permission-Repair laeuft am Panel-Host nur wenn kein Remote-Node
+        # (Agent uebernimmt Dateirechte auf dem Node selbst).
+        if node is None or getattr(node, "is_local", False):
+            for volume in volume_binds:
+                if volume.read_only:
+                    continue
+                repair = docker_service.repair_bind_mount_permissions(
+                    volume.host_path,
+                    container_path=volume.container_path,
+                    owner_uid_gid=(uid, gid),
                 )
-            elif repair.get("stderr", "").strip():
-                _append_console_log(
-                    server.id,
-                    "[MSM] Permission-Repair: einige Dateien konnten nicht angepasst werden "
-                    "(z. B. root-owned unter Rootless Docker). Start wird fortgesetzt.\n",
-                )
+                if not repair.get("ok"):
+                    err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] Permission-Repair Hinweis (Start wird fortgesetzt): {err}\n",
+                    )
+                elif repair.get("stderr", "").strip():
+                    _append_console_log(
+                        server.id,
+                        "[MSM] Permission-Repair: einige Dateien konnten nicht angepasst werden "
+                        "(z. B. root-owned unter Rootless Docker). Start wird fortgesetzt.\n",
+                    )
 
         # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
         try:
@@ -1217,6 +1226,7 @@ class GamePlugin(ABC):
             extra_networks=self.container_extra_networks(server),
             startup_check_seconds=getattr(getattr(self.get_blueprint(), "runtime", None), "startupCheckSeconds", None) or 2.0,
             server_id=server.id,  # enables pull progress in console
+            node=node,
         )
         if not result["ok"]:
             _append_console_log(server.id, f"[MSM] Container-Start fehlgeschlagen: {result['error']}\n")
@@ -1236,7 +1246,7 @@ class GamePlugin(ABC):
         """
         name = container_name_for(server.id)
         timeout = self.stop_grace_period_seconds(server)
-        result = docker_service.stop(name, timeout=timeout)
+        result = docker_service.stop(name, timeout=timeout, node=self._runtime_node(server))
         if not result["ok"]:
             return {"error": result["error"]}
         _append_console_log(server.id, f"[MSM] Container {name} gestoppt\n")
@@ -1257,12 +1267,13 @@ class GamePlugin(ABC):
     def get_status(self, server) -> ServerStatus:
         """Liefert Live-Status aus Docker (Container-State + CPU/RAM via stats)."""
         name = container_name_for(server.id)
-        state = docker_service.inspect_state(name)
+        node = self._runtime_node(server)
+        state = docker_service.inspect_state(name, node=node)
         if state is None:
             return ServerStatus(status="stopped")
 
         is_running = state["status"] == "running"
-        live_stats = docker_service.stats(name) if is_running else None
+        live_stats = docker_service.stats(name, node=node) if is_running else None
         started_at = _parse_docker_started_at(state.get("started_at")) if is_running else None
         uptime_seconds = None
         if started_at is not None:

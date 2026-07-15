@@ -148,3 +148,24 @@ def create_dir(
         return {"ok": True}
     except Exception as exc:
         raise _map_path_errors(exc) from exc
+
+
+@router.get("/archive")
+def archive_server(server_id: str = Query(...)):
+    """Stream a tar.gz of the server directory (panel backup path, Phase 2)."""
+    from fastapi.responses import StreamingResponse
+
+    try:
+        # Validate root exists before streaming
+        root = file_service.server_root(server_id)
+        if not root.is_dir():
+            raise FileNotFoundError("Server directory not found")
+        return StreamingResponse(
+            file_service.iter_archive_tar_gz(server_id),
+            media_type="application/gzip",
+            headers={
+                "Content-Disposition": f'attachment; filename="server_{server_id}.tar.gz"'
+            },
+        )
+    except Exception as exc:
+        raise _map_path_errors(exc) from exc

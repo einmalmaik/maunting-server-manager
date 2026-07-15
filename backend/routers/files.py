@@ -34,6 +34,8 @@ from database import get_db
 from models import Server, User
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from services import docker_service
+from services.node_client import NodeClient, NodeClientError
+from services.node_service import resolve_server_node
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -90,6 +92,35 @@ def _get_server(server_id: int, db: Session) -> Server:
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
     return server
+
+
+def _agent_client(server: Server, db: Session) -> NodeClient | None:
+    """Return NodeClient when file ops must hit the agent.
+
+    Remote nodes always use the agent. Local node uses agent when reachable
+    (token decrypt OK); otherwise falls back to panel-local filesystem so
+    existing tests and single-host without agent keep working.
+    """
+    node = resolve_server_node(server, db)
+    if node is None:
+        return None
+    if getattr(node, "is_local", False):
+        # Local: prefer local FS when install_dir exists (dev/tests/single-host)
+        if server.install_dir and os.path.isdir(server.install_dir):
+            return None
+    try:
+        return NodeClient.from_node(node)
+    except NodeClientError as exc:
+        if getattr(node, "is_local", False):
+            return None
+        raise HTTPException(status_code=503, detail="Node-Agent nicht erreichbar") from exc
+
+
+def _map_agent_error(exc: NodeClientError) -> HTTPException:
+    code = exc.status_code or 502
+    if code in (400, 403, 404, 409, 413):
+        return HTTPException(status_code=code, detail=exc.message)
+    return HTTPException(status_code=502, detail=exc.message or "Node-Agent Fehler")
 
 
 def _ensure_allowed_extension(filename: str) -> None:
@@ -223,6 +254,26 @@ def browse_directory(
     """List files and directories at the given path."""
     require_server_permission(user, server_id, db, "server.files.read")
     server = _get_server(server_id, db)
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            raw = agent.files_list(server_id, path or "")
+        except NodeClientError as exc:
+            if exc.status_code == 404:
+                return {"path": path, "entries": [], "exists": False}
+            raise _map_agent_error(exc) from exc
+        entries = [
+            {
+                "name": e.get("name", ""),
+                "is_dir": bool(e.get("is_dir")),
+                "size": int(e.get("size") or 0),
+                "modified": float(e.get("mtime") or 0),
+            }
+            for e in raw
+            if e.get("name") != CHUNK_TMP_DIRNAME
+        ]
+        return {"path": path, "entries": entries, "exists": True}
+
     target = _safe_path(server.install_dir, path)
 
     if not target.exists():
@@ -310,6 +361,15 @@ def read_file(
     """Read a text file's content."""
     require_server_permission(user, server_id, db, "server.files.read")
     server = _get_server(server_id, db)
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            content = agent.files_read(server_id, path)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        name = path.rsplit("/", 1)[-1] if path else ""
+        return {"path": path, "name": name, "content": content, "size": len(content.encode("utf-8"))}
+
     target = _safe_path(server.install_dir, path)
 
     if not target.exists():
@@ -339,6 +399,14 @@ def write_file(
     """Write/create a text file."""
     require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            agent.files_write(server_id, path, body.content)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"message": "Datei gespeichert", "path": path}
+
     target = _safe_path(server.install_dir, path)
 
     try:
@@ -627,10 +695,25 @@ def download_file(
     path: str = Query(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> FileResponse:
+):
     """Download a file."""
+    from fastapi.responses import Response
+
     require_server_permission(user, server_id, db, "server.files.read")
     server = _get_server(server_id, db)
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            data = agent.files_download(server_id, path)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        filename = path.rsplit("/", 1)[-1] if path else "download"
+        return Response(
+            content=data,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     target = _safe_path(server.install_dir, path)
 
     if not target.exists() or not target.is_file():
@@ -653,7 +736,16 @@ def make_directory(
     server = _get_server(server_id, db)
     if "/" in body.name or "\\" in body.name or body.name in ("", ".", ".."):
         raise HTTPException(status_code=400, detail="Ungueltiger Ordnername")
-    target = _safe_path(server.install_dir, os.path.join(path, body.name))
+    rel = os.path.join(path, body.name).replace("\\", "/")
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            agent.files_mkdir(server_id, rel)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"message": "Verzeichnis erstellt", "path": rel}
+
+    target = _safe_path(server.install_dir, rel)
 
     if target.exists():
         raise HTTPException(status_code=409, detail="Verzeichnis existiert bereits")
@@ -678,6 +770,14 @@ def delete_path(
     """Delete a file or directory."""
     require_server_permission(user, server_id, db, "server.files.delete")
     server = _get_server(server_id, db)
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            agent.files_delete(server_id, path)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"message": "Geloescht", "path": path}
+
     target = _safe_path(server.install_dir, path)
 
     if not target.exists():

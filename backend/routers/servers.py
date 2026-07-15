@@ -174,6 +174,12 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         requested_ports["rcon"] = req.rcon_port
 
     bind_ip = req.public_bind_ip or default_bind_ip()
+    # Phase 2: default to local node; ports scoped per node
+    from services.node_service import get_local_node
+
+    target_node = get_local_node(db)
+    target_node_id = target_node.id if target_node else None
+    check_host = True if (target_node is None or target_node.is_local) else False
     try:
         allocated = allocate_ports(
             db,
@@ -181,6 +187,8 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
             bind_ip=bind_ip or "0.0.0.0",
             port_requirements=port_requirements,
             requested_ports=requested_ports,
+            node_id=target_node_id,
+            check_host=check_host,
         )
     except PortConflictError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -213,6 +221,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         ram_limit_mb=req.ram_limit_mb,
         disk_limit_gb=req.disk_limit_gb,
         public_bind_ip=bind_ip,
+        node_id=target_node_id,
     )
     _normalize_server_restart_mode(server)
     db.add(server)
@@ -452,6 +461,9 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                     requested_ports[role] = current_ports.get(role)
 
             bind_ip_for_check = payload.get("public_bind_ip", old_bind_ip) or "0.0.0.0"
+            node = getattr(server, "node", None)
+            node_id = getattr(server, "node_id", None)
+            check_host = True if (node is None or getattr(node, "is_local", True)) else False
             try:
                 allocated = allocate_ports(
                     db,
@@ -459,6 +471,8 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                     bind_ip=bind_ip_for_check,
                     port_requirements=port_requirements,
                     requested_ports=requested_ports,
+                    node_id=node_id,
+                    check_host=check_host,
                 )
             except PortConflictError as e:
                 raise HTTPException(status_code=400, detail=str(e))
@@ -1161,6 +1175,7 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
         return
 
     db = SessionLocal()
+    node = None
     try:
         try:
             user = get_current_user_for_ws(websocket, db)
@@ -1169,6 +1184,11 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
                 await websocket.close(code=1008)
                 return
             require_server_permission(user, server_id, db, "server.console.read")
+            # Eager-load node before session closes (avoid DetachedInstanceError)
+            node = server.node
+            if node is not None:
+                # Touch attributes while session is open
+                _ = (node.id, node.host, node.is_local, node.auth_token_enc)
         except HTTPException:
             await websocket.close(code=1008)
             return
@@ -1191,6 +1211,7 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
             container=container,
             log_path=log_path,
             last_id=last_id,
+            node=node,
         )
     finally:
         if db.is_active:

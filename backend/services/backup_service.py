@@ -74,7 +74,13 @@ def run_backup(
     if not server:
         raise ValueError(f"Server {server_id} nicht gefunden")
 
-    if not os.path.isdir(server.install_dir):
+    # Phase 2: remote node → stream archive from agent (S3 credentials stay on panel)
+    node = getattr(server, "node", None)
+    use_agent_archive = (
+        node is not None
+        and not getattr(node, "is_local", False)
+    )
+    if not use_agent_archive and not os.path.isdir(server.install_dir):
         # Generische Nachricht (kein Leak von install_dir in Exception-String / HTTP-Details)
         raise FileNotFoundError("Server-Verzeichnis existiert nicht. Ist der Server installiert?")
 
@@ -136,9 +142,24 @@ def run_backup(
         # pg_dump pro DB erzeugen (VAL-FIX-009: separate Dumps pro DB).
         # Bei Fehlschlag wirft backup_pg_dump_for_archive — das try/except
         # oben (VAL-FIX-007) wandelt es in "Backup fehlgeschlagen" um.
+        # Postgres remains panel-side (managed DB host).
         if has_pg:
             pg_dump_dict = postgres_service.backup_pg_dump_for_archive(db, server_id)
-        if plan.scope == "selective":
+
+        if use_agent_archive:
+            # Stream full server tree from agent; panel encrypts + stores.
+            # Selective path still uses local install_dir when present; remote
+            # nodes always stream full archive in Phase 2 (KISS).
+            from services.node_client import NodeClient, NodeClientError
+
+            try:
+                client = NodeClient.from_node(node)
+                with open(tar_filepath, "wb") as out:
+                    for chunk in client.files_archive(server_id):
+                        out.write(chunk)
+            except NodeClientError as exc:
+                raise RuntimeError(f"Node-Backup fehlgeschlagen: {exc.message}") from exc
+        elif plan.scope == "selective":
             # selective: nur Blueprint-Pfade -- nichts am Full-Tar-Aufruf
             # geaendert fuer v1.4.4; pg_dump fuer selective-Server waere
             # verfuegbar, aber wir respektieren das Blueprint-Scope-Konzept.

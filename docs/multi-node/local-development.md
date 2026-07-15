@@ -197,3 +197,28 @@ source venv/bin/activate   # bzw. .\venv\Scripts\activate
 pip install pytest
 pytest -q
 ```
+
+---
+
+## 5. Testen von Phase 2 (Node-Aware Panel)
+
+Phase 2 leitet Docker/Dateien/Konsole/Backups über den `NodeClient` an den Agenten
+(Remote-Nodes). Port-Vergabe ist node-scoped (gleicher Port auf Node A und B erlaubt).
+
+### Owner-API Nodes
+```bash
+# Liste (Owner-Cookie + CSRF für Writes)
+curl -b cookies.txt http://localhost:8000/api/nodes
+
+# Node hinzufügen (Token wird DIS-verschlüsselt gespeichert, nie im Klartext zurückgegeben)
+curl -b cookies.txt -X POST http://localhost:8000/api/nodes \
+  -H "Content-Type: application/json" -H "X-CSRF-Token: ..." \
+  -d '{"name":"Worker-1","host":"http://10.0.0.5:9000","auth_token":"<agent-token>"}'
+```
+
+### Backend-Tests
+```bash
+cd backend
+pytest tests/test_node_client.py tests/test_nodes_router.py -q
+pytest -q   # volle Suite
+```

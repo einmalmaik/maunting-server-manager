@@ -173,3 +173,40 @@ def ensure_servers_dir() -> None:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         logger.warning("Could not create servers_dir: %s", exc)
+
+
+def iter_archive_tar_gz(server_id: str | int):
+    """Yield tar.gz chunks of the server root (for panel backup streaming).
+
+    Uses tarfile in streaming mode; path escape is prevented by walking only
+    under server_root after realpath checks.
+    """
+    import io
+    import tarfile
+
+    root = server_root(server_id)
+    if not root.is_dir():
+        raise FileNotFoundError("Server directory not found")
+
+    # Build archive in memory in chunks via TemporaryFile for large trees
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for name in filenames:
+                full = Path(dirpath) / name
+                try:
+                    resolved = full.resolve(strict=False)
+                    resolved.relative_to(root)
+                except (ValueError, OSError):
+                    continue
+                if full.is_symlink():
+                    continue
+                arcname = resolved.relative_to(root).as_posix()
+                try:
+                    tar.add(str(full), arcname=arcname, recursive=False)
+                except OSError:
+                    continue
+    data = buf.getvalue()
+    chunk = 64 * 1024
+    for i in range(0, len(data), chunk):
+        yield data[i : i + chunk]

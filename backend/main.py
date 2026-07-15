@@ -34,6 +34,7 @@ from routers import (
     backup_config_router,
     panel_backups_router,
     panel_database_router,
+    nodes_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -529,6 +530,7 @@ app.include_router(mods_router)
 app.include_router(system_router)
 app.include_router(steam_router)
 app.include_router(panel_settings_router)
+app.include_router(nodes_router)
 app.include_router(files_router)
 app.include_router(roles_router)
 app.include_router(permissions_router)

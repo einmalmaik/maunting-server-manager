@@ -3,8 +3,16 @@
 KISS: kleine Fassade um das Docker SDK. Die restliche Codebasis bleibt bei der
 bestehenden ``docker_service``-API und sieht keine SDK-Typen.
 
+Multi-Node (Phase 2):
+- Oeffentliche Game-Container-Methoden akzeptieren optional ``node=``.
+- Ist ein Node gesetzt, wird die Operation an den MSM Agent via
+  ``NodeClient`` delegiert (HTTP). Panel-lokale Infra (Postgres, SteamCMD,
+  Permission-Repair) bleibt am lokalen Docker-Socket.
+- Ohne ``node`` (Tests / Legacy): lokales Docker SDK wie bisher.
+
 Sicherheitsinvarianten:
-- MSM spricht nur mit dem Rootless-Docker-Socket des Panel-Users.
+- MSM spricht nur mit dem Rootless-Docker-Socket des Panel-Users (lokal).
+- Agent-Token wird nie geloggt.
 - Keine Secrets, Env-Werte oder stdin-Daten werden geloggt.
 - Kein ``--privileged`` und kein ``--network host``.
 - Container starten mit Cap-Drop, no-new-privileges, Log-Limits und Resource-
@@ -456,11 +464,37 @@ def pull(image: str) -> dict:
         return {"ok": False, "error": f"Docker Pull fehlgeschlagen: {pull_error}", "stdout": "", "stderr": ""}
 
 
-def exists(name: str) -> bool:
+def exists(name: str, *, node: Any | None = None) -> bool:
+    if node is not None:
+        try:
+            from services.node_client import NodeClient
+
+            client = NodeClient.from_node(node)
+            for c in client.list_containers():
+                if c.get("name") == name:
+                    return True
+            return False
+        except Exception:
+            logger.warning("node exists check failed")
+            return False
     return _container(name) is not None
 
 
-def is_running(name: str) -> bool:
+def is_running(name: str, *, node: Any | None = None) -> bool:
+    if node is not None:
+        try:
+            from services.node_client import NodeClient
+
+            client = NodeClient.from_node(node)
+            stats = client.container_stats(name)
+            return stats.get("status") == "running"
+        except Exception as exc:
+            # 404 from agent => not running / missing
+            status = getattr(exc, "status_code", None)
+            if status == 404:
+                return False
+            logger.warning("node is_running check failed")
+            return False
     container = _container(name)
     return bool(container is not None and getattr(container, "status", None) == "running")
 
@@ -682,7 +716,19 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
         return {"ok": False, "error": _safe_error(exc)}
 
 
-def remove(name: str, force: bool = True) -> dict:
+def remove(name: str, force: bool = True, *, node: Any | None = None) -> dict:
+    if node is not None:
+        try:
+            from services.node_client import NodeClient, NodeClientError
+
+            NodeClient.from_node(node).remove_container(name)
+            return {"ok": True, "stdout": "", "stderr": ""}
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status == 404:
+                return {"ok": True, "stdout": "", "stderr": "", "note": "container did not exist"}
+            logger.warning("node remove failed")
+            return {"ok": False, "error": str(getattr(exc, "message", exc))[:300], "stdout": "", "stderr": ""}
     container = _container(name)
     if container is None:
         return {"ok": True, "stdout": "", "stderr": "", "note": "container did not exist"}
@@ -694,7 +740,19 @@ def remove(name: str, force: bool = True) -> dict:
         return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
 
 
-def stop(name: str, timeout: int = 30) -> dict:
+def stop(name: str, timeout: int = 30, *, node: Any | None = None) -> dict:
+    if node is not None:
+        try:
+            from services.node_client import NodeClient
+
+            NodeClient.from_node(node).stop_container(name, timeout=timeout)
+            return {"ok": True, "stdout": "", "stderr": ""}
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status == 404:
+                return {"ok": True, "stdout": "", "stderr": "", "note": "container was not running"}
+            logger.warning("node stop failed")
+            return {"ok": False, "error": str(getattr(exc, "message", exc))[:300], "stdout": "", "stderr": ""}
     container = _container(name)
     if container is None or getattr(container, "status", None) != "running":
         return {"ok": True, "stdout": "", "stderr": "", "note": "container was not running"}
@@ -706,7 +764,16 @@ def stop(name: str, timeout: int = 30) -> dict:
         return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
 
 
-def start(name: str) -> dict:
+def start(name: str, *, node: Any | None = None) -> dict:
+    if node is not None:
+        try:
+            from services.node_client import NodeClient
+
+            NodeClient.from_node(node).start_container(name)
+            return {"ok": True, "stdout": "", "stderr": ""}
+        except Exception as exc:
+            logger.warning("node start failed")
+            return {"ok": False, "error": str(getattr(exc, "message", exc))[:300], "stdout": "", "stderr": ""}
     container = _container(name)
     if container is None:
         return {"ok": False, "error": "Container nicht gefunden", "stdout": "", "stderr": ""}
@@ -758,6 +825,7 @@ def run_container(
     cap_adds: list[str] | None = None,
     tty: bool = False,  # opt-in for interactive auth/setup flows; default off (existing callers unchanged)
     restart_policy_name: str = "no",
+    node: Any | None = None,
 ) -> dict:
     """Startet einen langlebigen Game-Server-Container.
 
@@ -769,10 +837,28 @@ def run_container(
     ``tty=True`` allokiert ein Pseudo-TTY im Container, noetig fuer interaktive
     Auth-Flows (Device-Authorization-Grant mit URL+Code-Eingabe). Wird vom
     Auth-Setup-Recovery-Pfad genutzt; nie vom normalen Server-Start.
+
+    ``node``: wenn gesetzt, Create/Start laeuft ueber den MSM Agent (Phase 2).
     """
 
     if extra_args:
         return {"ok": False, "error": "extra_args werden vom Docker SDK Adapter nicht unterstuetzt", "stdout": "", "stderr": ""}
+
+    if node is not None:
+        return _run_container_via_node(
+            node=node,
+            name=name,
+            image=image,
+            command=command,
+            env=env,
+            ports=ports,
+            volumes=volumes,
+            cpu_limit_percent=cpu_limit_percent,
+            ram_limit_mb=ram_limit_mb,
+            user=user,
+            workdir=workdir,
+            network=network,
+        )
 
     client, error = _client_or_error()
     if error:
@@ -959,7 +1045,83 @@ def _decode(value: bytes | str | None) -> str:
     return value
 
 
-def inspect_state(name: str) -> dict | None:
+def _run_container_via_node(
+    *,
+    node: Any,
+    name: str,
+    image: str,
+    command: list[str] | None,
+    env: dict[str, str] | None,
+    ports: list[PortPublish] | None,
+    volumes: list[VolumeBind] | None,
+    cpu_limit_percent: int | float | None,
+    ram_limit_mb: int | None,
+    user: str | None,
+    workdir: str | None,
+    network: str | None,
+) -> dict:
+    """Map local PortPublish/VolumeBind to agent create payload."""
+    from services.node_client import NodeClient, NodeClientError
+
+    ports_dict: dict[str, Any] | None = None
+    if ports:
+        ports_dict = {}
+        for p in ports:
+            key = p.key()
+            binding = p.binding()
+            if isinstance(binding, tuple):
+                ports_dict[key] = {"HostIp": binding[0], "HostPort": str(binding[1])}
+            else:
+                ports_dict[key] = binding
+
+    volumes_dict: dict[str, dict[str, str]] | None = None
+    if volumes:
+        volumes_dict = {v.host_path: v.binding() for v in volumes}
+
+    body: dict[str, Any] = {
+        "name": name,
+        "image": image,
+        "command": command,
+        "env": env,
+        "ports": ports_dict,
+        "volumes": volumes_dict,
+        "cpu_limit_percent": float(cpu_limit_percent) if cpu_limit_percent else None,
+        "ram_limit_mb": int(ram_limit_mb) if ram_limit_mb else None,
+        "user": user,
+        "workdir": workdir,
+        "network": network,
+    }
+    body = {k: v for k, v in body.items() if v is not None}
+    try:
+        result = NodeClient.from_node(node).create_container(body)
+        cid = result.get("id") or ""
+        return {"ok": True, "stdout": f"{cid}\n" if cid else "", "stderr": ""}
+    except NodeClientError as exc:
+        logger.warning("node create_container failed")
+        return {"ok": False, "error": exc.message[:500], "stdout": "", "stderr": ""}
+    except Exception as exc:
+        logger.warning("node create_container failed")
+        return {"ok": False, "error": "Agent-Container-Start fehlgeschlagen", "stdout": "", "stderr": ""}
+
+
+def inspect_state(name: str, *, node: Any | None = None) -> dict | None:
+    if node is not None:
+        try:
+            from services.node_client import NodeClient
+
+            stats = NodeClient.from_node(node).container_stats(name)
+            status = stats.get("status") or "unknown"
+            return {
+                "status": status,
+                "started_at": None,
+                "exit_code": None,
+                "oom_killed": False,
+            }
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404:
+                return None
+            logger.warning("node inspect failed")
+            return None
     container = _container(name)
     if container is None:
         return None
@@ -977,7 +1139,21 @@ def inspect_state(name: str) -> dict | None:
         return None
 
 
-def stats(name: str) -> dict | None:
+def stats(name: str, *, node: Any | None = None) -> dict | None:
+    if node is not None:
+        try:
+            from services.node_client import NodeClient
+
+            raw = NodeClient.from_node(node).container_stats(name)
+            if raw.get("status") != "running":
+                return None
+            return {
+                "cpu_percent": raw.get("cpu_percent"),
+                "ram_mb": raw.get("ram_mb"),
+            }
+        except Exception:
+            logger.warning("node stats failed")
+            return None
     container = _container(name)
     if container is None or getattr(container, "status", None) != "running":
         return None
@@ -1018,7 +1194,21 @@ def logs(name: str, lines: int = 200) -> str:
         return ""
 
 
-def exec_in(name: str, command: list[str], timeout: int = 30) -> dict:
+def exec_in(name: str, command: list[str], timeout: int = 30, *, node: Any | None = None) -> dict:
+    if node is not None:
+        try:
+            from services.node_client import NodeClient
+
+            result = NodeClient.from_node(node).exec_in_container(name, command)
+            return {
+                "ok": bool(result.get("ok")),
+                "error": result.get("error") or "",
+                "stdout": result.get("stdout") or "",
+                "stderr": result.get("stderr") or "",
+            }
+        except Exception as exc:
+            logger.warning("node exec failed")
+            return {"ok": False, "error": str(getattr(exc, "message", exc))[:300], "stdout": "", "stderr": ""}
     container = _container(name)
     if container is None or getattr(container, "status", None) != "running":
         return {"ok": False, "error": "Container laeuft nicht", "stdout": "", "stderr": ""}
@@ -1072,7 +1262,11 @@ def _demux_socket_stream(raw_socket: Any) -> tuple[bytes, bytes]:
     return b"".join(stdout_chunks), b"".join(stderr_chunks)
 
 
-def send_stdin(name: str, data: str) -> dict:
+def send_stdin(name: str, data: str, *, node: Any | None = None) -> dict:
+    if node is not None:
+        # Console input for remote nodes goes through the agent WebSocket path
+        # (console_stream_service). HTTP stdin via agent is not used here.
+        return {"ok": False, "error": "stdin via node requires console websocket"}
     container = _container(name)
     if container is None or getattr(container, "status", None) != "running":
         return {"ok": False, "error": "Container laeuft nicht", "stdout": "", "stderr": ""}
@@ -1115,8 +1309,15 @@ def send_stdin(name: str, data: str) -> dict:
         return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
 
 
-async def stream_logs(name: str, tail: int = 200) -> AsyncIterator[str]:
-    """Streame Live-Container-Stdout/Stderr via Subprocess (verhindert Thread-Leaks)."""
+async def stream_logs(name: str, tail: int = 200, *, node: Any | None = None) -> AsyncIterator[str]:
+    """Streame Live-Container-Stdout/Stderr via Subprocess (verhindert Thread-Leaks).
+
+    Mit ``node``: Logs laufen ueber Agent-WebSocket (console_stream_service).
+    Diese Funktion liefert dann absichtlich nichts — der WS-Proxy ist der Pfad.
+    """
+    if node is not None:
+        return
+
     if not is_available() or not exists(name):
         return
 
