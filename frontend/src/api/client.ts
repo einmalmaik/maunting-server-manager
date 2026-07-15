@@ -1,5 +1,5 @@
 import i18n from '@/i18n'
-import { API_BASE, apiUrl } from '@/config/api'
+import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 
 export { API_BASE, apiUrl } from '@/config/api'

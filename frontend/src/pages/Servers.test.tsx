@@ -91,7 +91,7 @@ describe('Servers create form — dynamic port fields', () => {
     })
 
     // Modal oeffnen — vorher gibt es keine <option>-Elemente.
-    const createButtons = screen.getAllByRole('button', { name: /server erstellen|create server/i })
+    const createButtons = await screen.findAllByRole('button', { name: /server erstellen|create server/i })
     fireEvent.click(createButtons[0])
 
     // Default game_type 'conan_exiles_ue5' kennt unser Mock nicht — Fallback rendert.
@@ -112,7 +112,7 @@ describe('Servers create form — dynamic port fields', () => {
       expect(vi.mocked(client.api)).toHaveBeenCalledWith('/system/games')
     })
 
-    const createButtons = screen.getAllByRole('button', { name: /server erstellen|create server/i })
+    const createButtons = await screen.findAllByRole('button', { name: /server erstellen|create server/i })
     fireEvent.click(createButtons[0])
 
     const selects = screen.getAllByRole('combobox')

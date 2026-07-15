@@ -44,14 +44,18 @@ def test_ensure_creates_with_loopback_only():
                return_value={"ok": True}) as run, \
          patch("services.postgres_service.docker_service.ensure_managed_restart_policy",
                return_value={"ok": True}), \
+         patch("services.postgres_service._connect_with_retry", return_value=MagicMock()), \
          patch("services.postgres_service.os.makedirs"):
         ensure_internal_postgres("admin-secret")
-    kwargs = run.call_args.kwargs
-    assert kwargs["host_ip"] == "127.0.0.1"
-    assert kwargs["env"]["POSTGRES_USER"] == "msm_admin"
+    assert run.call_count == 2
+    bootstrap = run.call_args_list[0].kwargs
+    sanitized = run.call_args_list[1].kwargs
+    assert bootstrap["host_ip"] == "127.0.0.1"
+    assert bootstrap["env"]["POSTGRES_USER"] == "msm_admin"
     # password present but we only check it was passed (not logged)
-    assert kwargs["env"]["POSTGRES_PASSWORD"] == "admin-secret"
-    assert set(kwargs["cap_adds"]) == {
+    assert bootstrap["env"]["POSTGRES_PASSWORD"] == "admin-secret"
+    assert sanitized["env"] is None
+    assert set(bootstrap["cap_adds"]) == {
         "CHOWN", "FOWNER", "SETUID", "SETGID", "DAC_OVERRIDE", "DAC_READ_SEARCH"
     }
 
@@ -101,3 +105,29 @@ def test_managed_postgres_name_guard():
     )
     with pytest.raises(ContainerNameError):
         assert_managed_postgres_name("evil-container")
+
+
+def test_restore_uses_database_owner_and_stdin_not_argv():
+    from services.postgres_service import restore_sql
+
+    with patch("services.postgres_service.ensure_internal_postgres"), \
+         patch("services.postgres_service.dump_databases", return_value={"msm_s1_db1": "-- old"}), \
+         patch("services.postgres_service.docker_service.exec_in_managed_stdin", return_value={"ok": True}) as execute:
+        result = restore_sql(
+            admin_password="admin-secret",
+            dumps={"msm_s1_db1": "-- dump body"},
+            owners={
+                "msm_s1_db1": {
+                    "owner_role": "msm_s1_o1",
+                    "owner_password": "owner-secret",
+                }
+            },
+        )
+
+    assert result["ok"] is True
+    args = execute.call_args.args
+    assert args[1] == [
+        "psql", "--set", "ON_ERROR_STOP=1", "--username", "msm_s1_o1", "--dbname", "msm_s1_db1"
+    ]
+    assert args[2] == "-- dump body"
+    assert execute.call_args.kwargs["environment"] == {"PGPASSWORD": "owner-secret"}

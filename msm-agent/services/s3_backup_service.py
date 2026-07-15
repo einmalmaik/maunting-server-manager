@@ -56,6 +56,7 @@ def create_encrypted_s3_backup(
     s3: dict[str, Any],
     encryption_key_b64: str,
     s3_object_key: str,
+    postgres: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Tar server dir → encrypt (DIS-compatible) → multipart upload to S3.
 
@@ -83,9 +84,26 @@ def create_encrypted_s3_backup(
         except OSError:
             pass
 
-        # Full tree tar.gz (KISS; panel/pg dumps remain panel-side)
+        postgres_dumps: dict[str, str] = {}
+        if postgres:
+            from services.postgres_service import dump_databases
+
+            postgres_dumps = dump_databases(
+                admin_password=str(postgres.get("admin_password") or ""),
+                database_names=list(postgres.get("database_names") or []),
+            )
+
+        # Full tree plus node-local managed PostgreSQL dumps.
         with tarfile.open(tar_path, "w:gz") as tar:
             tar.add(str(root), arcname=".")
+            for database_name, sql_text in postgres_dumps.items():
+                import io
+
+                payload = sql_text.encode("utf-8")
+                info = tarfile.TarInfo(name=f".msm/postgres/{database_name}.sql")
+                info.size = len(payload)
+                info.mode = 0o600
+                tar.addfile(info, io.BytesIO(payload))
         try:
             os.chmod(tar_path, 0o600)
         except OSError:
@@ -166,6 +184,7 @@ def restore_encrypted_s3_backup(
     s3: dict[str, Any],
     encryption_key_b64: str,
     s3_object_key: str,
+    postgres: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Download from S3 → decrypt → extract into server directory."""
     try:
@@ -183,6 +202,18 @@ def restore_encrypted_s3_backup(
     tmp_dir = tempfile.mkdtemp(prefix="msm-agent-rst-")
     enc_path = os.path.join(tmp_dir, "backup.enc")
     tar_path = os.path.join(tmp_dir, "backup.tar.gz")
+    backup_old = root.parent / f"{root.name}_pre_restore"
+
+    def rollback_files() -> None:
+        if not backup_old.exists():
+            return
+        try:
+            if root.exists():
+                shutil.rmtree(root)
+            shutil.move(str(backup_old), str(root))
+        except OSError:
+            logger.error("agent restore filesystem rollback failed")
+
     try:
         try:
             os.chmod(tmp_dir, 0o700)
@@ -202,7 +233,6 @@ def restore_encrypted_s3_backup(
         # Replace server root contents
         if root.exists():
             # Move aside then extract (caller should stop containers first)
-            backup_old = root.parent / f"{root.name}_pre_restore"
             if backup_old.exists():
                 shutil.rmtree(backup_old, ignore_errors=True)
             shutil.move(str(root), str(backup_old))
@@ -219,8 +249,28 @@ def restore_encrypted_s3_backup(
             else:
                 tar.extractall(path=str(root))
 
+        if postgres:
+            dump_dir = root / ".msm" / "postgres"
+            dumps = (
+                {
+                    path.stem: path.read_text(encoding="utf-8")
+                    for path in dump_dir.glob("*.sql")
+                    if path.is_file()
+                }
+                if dump_dir.is_dir()
+                else {}
+            )
+            if dumps:
+                from services.postgres_service import restore_sql
+
+                restore_sql(
+                    admin_password=str(postgres.get("admin_password") or ""),
+                    dumps=dumps,
+                    owners=dict(postgres.get("owners") or {}),
+                )
+            shutil.rmtree(dump_dir, ignore_errors=True)
+
         # cleanup pre_restore on success
-        backup_old = root.parent / f"{root.name}_pre_restore"
         if backup_old.exists():
             shutil.rmtree(backup_old, ignore_errors=True)
 
@@ -228,16 +278,11 @@ def restore_encrypted_s3_backup(
     except StreamCryptoError as exc:
         raise AgentBackupError("decryption failed", 400) from exc
     except AgentBackupError:
+        rollback_files()
         raise
     except Exception as exc:
         logger.warning("agent s3 restore failed: %s", type(exc).__name__)
-        # best-effort rollback
-        backup_old = root.parent / f"{root.name}_pre_restore"
-        if backup_old.exists() and not root.exists():
-            try:
-                shutil.move(str(backup_old), str(root))
-            except OSError:
-                pass
+        rollback_files()
         raise AgentBackupError("restore from S3 failed", 502) from exc
     finally:
         key = b"\x00" * 32

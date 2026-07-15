@@ -326,6 +326,7 @@ def run_steamcmd_install(
     steamcmd_image: str | None = None,
     validate: bool = True,
     beta_branch: str | None = None,
+    node: Any | None = None,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
@@ -334,12 +335,15 @@ def run_steamcmd_install(
     """
     from services.steam_account_service import SteamAccountService
 
-    os.makedirs(install_dir, exist_ok=True)
+    if node is None:
+        os.makedirs(install_dir, exist_ok=True)
 
     # 0x226/0x202 auto-recovery (generic for all Steam Blueprint servers)
     # If previous update left a bad manifest (StateFlags 550 etc.), delete it (with backup).
     # SteamCMD will recreate a clean one during the validate. No player data touched.
     try:
+        if node is not None:
+            raise FileNotFoundError
         man = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
         if os.path.exists(man):
             with open(man) as mf:
@@ -396,6 +400,8 @@ def run_steamcmd_install(
     #   297601:297593 or whatever os.stat reports). This avoids the subuid namespace chown
     #   conflict that often leaves manifests in 0x202/0x226 state.
     try:
+        if node is not None:
+            raise FileNotFoundError
         st = os.stat(install_dir)
         chown_uid, chown_gid = st.st_uid, st.st_gid
     except Exception:
@@ -420,6 +426,7 @@ def run_steamcmd_install(
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
         log_callback=_live_log,
+        node=node,
     )
 
     # Bei Live-Streaming ist out leer (— wurde bereits live geschrieben).
@@ -493,10 +500,11 @@ def run_steamcmd_install(
     # find + chmod a+rwX + chown to the real owner. This normalizes the bind mount
     # so both the panel (unprivileged) and the Wine game container can access files
     # without namespace/permission fights.
-    try:
-        docker_service.repair_bind_mount_permissions(install_dir)
-    except Exception:
-        pass
+    if node is None:
+        try:
+            docker_service.repair_bind_mount_permissions(install_dir)
+        except Exception:
+            pass
 
     return result
 
@@ -509,6 +517,7 @@ def run_steamcmd_workshop_download(
     workshop_item_id: str,
     use_authenticated_login: bool = False,
     steamcmd_image: str | None = None,
+    node: Any | None = None,
 ) -> dict:
     """Kompatibler Single-Mod-Einstieg; intern ein Batch mit einer Mod."""
     result = run_steamcmd_workshop_download_batch(
@@ -518,6 +527,7 @@ def run_steamcmd_workshop_download(
         workshop_item_ids=[workshop_item_id],
         use_authenticated_login=use_authenticated_login,
         steamcmd_image=steamcmd_image,
+        node=node,
     )
     if not result.get("ok", False):
         item = (result.get("items") or {}).get(str(workshop_item_id), {})
@@ -537,6 +547,7 @@ def run_steamcmd_workshop_download_batch(
     timeout: int = 3600,
     retry: bool = True,
     steamcmd_image: str | None = None,
+    node: Any | None = None,
 ) -> dict:
     """Lädt mehrere Workshop-Items in einer SteamCMD-Session.
 
@@ -615,6 +626,7 @@ def run_steamcmd_workshop_download_batch(
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=timeout,
         log_callback=_live_log,
+        node=node,
     )
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
     if out:
@@ -635,11 +647,12 @@ def run_steamcmd_workshop_download_batch(
     # Rootless Docker + overlayfs repair after workshop batch (with owner like main installs).
     # This makes newly written workshop folders visible and owned correctly for the
     # immediate host-side check.
-    try:
-        uid, gid = docker_service.container_runtime_uid_gid()
-        docker_service.repair_bind_mount_permissions(install_dir, owner_uid_gid=(uid, gid))
-    except Exception:
-        pass
+    if node is None:
+        try:
+            uid, gid = docker_service.container_runtime_uid_gid()
+            docker_service.repair_bind_mount_permissions(install_dir, owner_uid_gid=(uid, gid))
+        except Exception:
+            pass
 
     full_log = "\n".join(live_output) + "\n" + (out or "")
     verify_started_at = time.time()
@@ -657,7 +670,7 @@ def run_steamcmd_workshop_download_batch(
                 server_id,
                 f"[MSM] Mod {item_id}: trusted via SteamCMD success log (overlayfs visibility fix)\n",
             )
-        if not installed and target.exists():
+        if node is None and not installed and target.exists():
             # Secondary: folder visible on host with content or recent mtime
             for _ in range(10):
                 try:
@@ -702,6 +715,7 @@ def run_steamcmd_workshop_download_batch(
             timeout=timeout,
             retry=False,
             steamcmd_image=steamcmd_image,
+            node=node,
         )
         retry_items = retry_result.get("items", {}) if isinstance(retry_result, dict) else {}
         for item_id in failed_ids:

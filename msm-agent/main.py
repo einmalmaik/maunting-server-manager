@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from config import settings
-from routers import backup, console, containers, files, health, metrics, postgres
+from routers import backup, console, containers, files, health, metrics, postgres, runtime, sources
 from services import file_service
 
 # ── Logging (never log Authorization / tokens / env secrets) ──
@@ -142,6 +142,8 @@ app.include_router(metrics.router)
 app.include_router(console.router)
 app.include_router(backup.router)
 app.include_router(postgres.router)
+app.include_router(sources.router)
+app.include_router(runtime.router)
 
 
 def main() -> None:

@@ -29,6 +29,12 @@ class CreateContainerRequest(BaseModel):
     user: str | None = None
     workdir: str | None = None
     network: str | None = None
+    extra_networks: list[str] = Field(default_factory=list, max_length=16)
+    read_only_rootfs: bool = True
+    tmpfs_paths: list[str] = Field(default_factory=list, max_length=16)
+    tty: bool = False
+    restart_policy_name: str = Field(default="no", pattern="^(no|on-failure|unless-stopped)$")
+    startup_check_seconds: float = Field(default=0.0, ge=0, le=60)
     # Hardening traps — if clients send these, we reject explicitly
     privileged: bool | None = None
     cap_add: list[str] | None = None
@@ -41,6 +47,27 @@ class StopRequest(BaseModel):
 
 class ExecRequest(BaseModel):
     command: list[str] = Field(..., min_length=1)
+
+
+class EphemeralContainerRequest(BaseModel):
+    image: str = Field(..., min_length=1, max_length=512)
+    command: list[str] = Field(..., min_length=1)
+    env: dict[str, str] | None = None
+    volumes: dict[str, dict[str, str]] | None = None
+    user: str | None = None
+    workdir: str | None = None
+    entrypoint: str | None = None
+    cap_add: list[str] | None = None
+    timeout: int = Field(default=1800, ge=1, le=7200)
+
+
+class ResourceUpdateRequest(BaseModel):
+    cpu_limit_percent: int | None = Field(default=None, ge=0, le=100_000)
+    ram_limit_mb: int | None = Field(default=None, ge=0)
+
+
+class StdinRequest(BaseModel):
+    data: str = Field(..., max_length=4096)
 
 
 def _map_docker_errors(exc: Exception) -> HTTPException:
@@ -80,9 +107,33 @@ def create_container(body: CreateContainerRequest) -> dict[str, Any]:
             user=body.user,
             workdir=body.workdir,
             network=body.network,
+            extra_networks=body.extra_networks,
+            read_only_rootfs=body.read_only_rootfs,
+            tmpfs_paths=body.tmpfs_paths,
+            tty=body.tty,
+            restart_policy_name=body.restart_policy_name,
+            startup_check_seconds=body.startup_check_seconds,
             privileged=body.privileged,
             cap_add=body.cap_add,
             network_mode=body.network_mode,
+        )
+    except Exception as exc:
+        raise _map_docker_errors(exc) from exc
+
+
+@router.post("/ephemeral/run")
+def run_ephemeral(body: EphemeralContainerRequest) -> dict[str, Any]:
+    try:
+        return docker_service.run_ephemeral(
+            image=body.image,
+            command=body.command,
+            env=body.env,
+            volumes=body.volumes,
+            user=body.user,
+            workdir=body.workdir,
+            entrypoint=body.entrypoint,
+            cap_add=body.cap_add,
+            timeout=body.timeout,
         )
     except Exception as exc:
         raise _map_docker_errors(exc) from exc
@@ -130,9 +181,35 @@ def stats(name: str) -> dict[str, Any]:
         raise _map_docker_errors(exc) from exc
 
 
+@router.get("/{name}/logs")
+def logs(name: str, tail: int = 200) -> dict[str, str]:
+    try:
+        return {"logs": docker_service.container_logs(name, tail)}
+    except Exception as exc:
+        raise _map_docker_errors(exc) from exc
+
+
 @router.post("/{name}/exec")
 def exec_command(name: str, body: ExecRequest) -> dict[str, Any]:
     try:
         return docker_service.exec_in_container(name, body.command)
+    except Exception as exc:
+        raise _map_docker_errors(exc) from exc
+
+
+@router.patch("/{name}/resources")
+def update_resources(name: str, body: ResourceUpdateRequest) -> dict[str, Any]:
+    try:
+        return docker_service.update_container_resources(
+            name, body.model_dump(exclude_unset=True)
+        )
+    except Exception as exc:
+        raise _map_docker_errors(exc) from exc
+
+
+@router.post("/{name}/stdin")
+def send_stdin(name: str, body: StdinRequest) -> dict[str, Any]:
+    try:
+        return docker_service.send_stdin(name, body.data)
     except Exception as exc:
         raise _map_docker_errors(exc) from exc

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
+from pathlib import Path
 from typing import Any
 
 from config import settings
@@ -161,6 +163,22 @@ def _get_container(name: str) -> Any:
         raise DockerUnavailableError(_safe_error(exc)) from exc
 
 
+def _validated_volumes(volumes: dict[str, dict[str, str]] | None) -> dict[str, dict[str, str]] | None:
+    """Allow bind mounts only below the agent's managed server directory."""
+    if not volumes:
+        return None
+    root = settings.servers_path()
+    validated: dict[str, dict[str, str]] = {}
+    for raw_path, binding in volumes.items():
+        host_path = Path(raw_path).resolve(strict=False)
+        try:
+            host_path.relative_to(root)
+        except ValueError as exc:
+            raise HardeningError("bind mount is outside the managed servers directory") from exc
+        validated[str(host_path)] = binding
+    return validated
+
+
 def create_container(
     *,
     name: str,
@@ -174,6 +192,12 @@ def create_container(
     user: str | None = None,
     workdir: str | None = None,
     network: str | None = None,
+    extra_networks: list[str] | None = None,
+    read_only_rootfs: bool = True,
+    tmpfs_paths: list[str] | None = None,
+    tty: bool = False,
+    restart_policy_name: str = "no",
+    startup_check_seconds: float = 0.0,
     privileged: bool | None = None,
     cap_add: list[str] | None = None,
     network_mode: str | None = None,
@@ -192,8 +216,12 @@ def create_container(
         raise HardeningError("privileged containers are not allowed")
     if network_mode and str(network_mode).lower() == "host":
         raise HardeningError("host networking is not allowed")
-    if cap_add:
-        raise HardeningError("custom cap_add is not allowed (cap_drop=ALL enforced)")
+    allowed_caps = {"DAC_OVERRIDE", "DAC_READ_SEARCH", "CHOWN", "FOWNER", "SETUID", "SETGID"}
+    requested_caps = {str(cap).upper() for cap in (cap_add or [])}
+    if not requested_caps.issubset(allowed_caps):
+        raise HardeningError("requested capability is not allowed")
+    if restart_policy_name not in {"no", "on-failure", "unless-stopped"}:
+        raise HardeningError("restart policy is not allowed")
 
     client = _get_client()
 
@@ -212,20 +240,25 @@ def create_container(
         "name": name,
         "detach": True,
         "stdin_open": True,
-        "tty": False,
+        "tty": bool(tty),
         "privileged": False,
-        "restart_policy": {"Name": "no"},
+        "restart_policy": {"Name": restart_policy_name},
         "log_config": (
             LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None
         ),
         "cap_drop": list(_HARDENING_CAP_DROP),
+        "cap_add": sorted(requested_caps) or None,
         "security_opt": list(_HARDENING_SECURITY_OPT),
+        "read_only": bool(read_only_rootfs),
         "environment": env or None,
         "ports": ports or None,
-        "volumes": volumes or None,
+        "volumes": _validated_volumes(volumes),
         "user": user,
         "working_dir": workdir,
         "network": network,
+        "tmpfs": {
+            path: "rw,size=64m,mode=1777" for path in (tmpfs_paths or [])
+        } or None,
     }
     if cpu_limit_percent is not None and cpu_limit_percent > 0:
         kwargs["nano_cpus"] = int(round(cpu_limit_percent / 100.0, 2) * 1_000_000_000)
@@ -236,6 +269,29 @@ def create_container(
     kwargs = {k: v for k, v in kwargs.items() if v is not None}
     try:
         container = client.containers.run(**kwargs)
+        try:
+            for network_name in dict.fromkeys(extra_networks or []):
+                if network_name and network_name != network:
+                    client.networks.get(network_name).connect(container)
+        except (DockerException, OSError) as exc:
+            try:
+                container.remove(force=True)
+            except (DockerException, OSError):
+                logger.warning("docker cleanup after network attach failure failed")
+            raise DockerUnavailableError("Container network attachment failed") from exc
+
+        if startup_check_seconds > 0:
+            import time
+
+            time.sleep(startup_check_seconds)
+            container.reload()
+            state = container.attrs.get("State", {})
+            if state.get("Status") in {"exited", "dead"}:
+                try:
+                    container.remove(force=True)
+                except (DockerException, OSError):
+                    logger.warning("docker cleanup after startup failure failed")
+                raise DockerUnavailableError("Container exited during startup check")
         return {
             "ok": True,
             "name": name,
@@ -246,6 +302,64 @@ def create_container(
     except (DockerException, OSError) as exc:
         logger.warning("docker create/run failed")
         raise DockerUnavailableError(_safe_error(exc)) from exc
+
+
+def run_ephemeral(
+    *,
+    image: str,
+    command: list[str],
+    volumes: dict[str, dict[str, str]] | None = None,
+    env: dict[str, str] | None = None,
+    user: str | None = None,
+    workdir: str | None = None,
+    entrypoint: str | None = None,
+    cap_add: list[str] | None = None,
+    timeout: int = 1800,
+) -> dict[str, Any]:
+    """Run one hardened tool container and remove it on every exit path."""
+    allowed_caps = {"DAC_OVERRIDE", "DAC_READ_SEARCH", "CHOWN", "FOWNER", "SETUID", "SETGID"}
+    requested_caps = {str(cap).upper() for cap in (cap_add or [])}
+    if not requested_caps.issubset(allowed_caps):
+        raise HardeningError("requested capability is not allowed")
+    client = _get_client()
+    container = None
+    try:
+        container = client.containers.run(
+            image=image,
+            command=command,
+            detach=True,
+            environment=env or None,
+            volumes=_validated_volumes(volumes),
+            user=user,
+            working_dir=workdir,
+            entrypoint=entrypoint,
+            privileged=False,
+            cap_drop=list(_HARDENING_CAP_DROP),
+            cap_add=sorted(requested_caps) or None,
+            security_opt=list(_HARDENING_SECURITY_OPT),
+        )
+        wait_result = container.wait(timeout=timeout)
+        stdout = _decode(container.logs(stdout=True, stderr=False))
+        stderr = _decode(container.logs(stdout=False, stderr=True))
+        exit_code = int(wait_result.get("StatusCode", 1))
+        if exit_code != 0:
+            return {
+                "ok": False,
+                "error": (stderr.strip() or stdout.strip() or f"exit {exit_code}")[:500],
+                "stdout": stdout,
+                "stderr": stderr,
+            }
+        return {"ok": True, "stdout": stdout, "stderr": stderr}
+    except ImageNotFound as exc:
+        raise ValueError("Tool image not found") from exc
+    except (DockerException, OSError) as exc:
+        raise DockerUnavailableError(_safe_error(exc)) from exc
+    finally:
+        if container is not None:
+            try:
+                container.remove(force=True)
+            except (DockerException, OSError):
+                logger.warning("ephemeral container cleanup failed")
 
 
 def start_container(name: str) -> dict[str, Any]:
@@ -329,6 +443,41 @@ def container_stats(name: str) -> dict[str, Any]:
     }
 
 
+def update_container_resources(name: str, updates: dict[str, int | None]) -> dict[str, Any]:
+    container = _get_container(name)
+    container.reload()
+    host_config = container.attrs.get("HostConfig")
+    if not isinstance(host_config, dict):
+        return {"ok": False, "error": "Resource state unavailable"}
+    update_kwargs: dict[str, Any] = {}
+    restore_kwargs: dict[str, Any] = {}
+    if "cpu_limit_percent" in updates:
+        cpu = updates["cpu_limit_percent"]
+        update_kwargs["nano_cpus"] = int(round(cpu / 100.0, 2) * 1_000_000_000) if cpu else 0
+        restore_kwargs["nano_cpus"] = host_config.get("NanoCpus", 0)
+    if "ram_limit_mb" in updates:
+        ram = updates["ram_limit_mb"]
+        update_kwargs["mem_limit"] = f"{int(ram)}m" if ram else 0
+        update_kwargs["memswap_limit"] = f"{int(ram)}m" if ram else -1
+        restore_kwargs["mem_limit"] = host_config.get("Memory", 0)
+        restore_kwargs["memswap_limit"] = host_config.get("MemorySwap", 0)
+    if not update_kwargs:
+        return {"ok": True}
+    try:
+        result = container.update(**update_kwargs)
+        warnings = result.get("Warnings") if isinstance(result, dict) else None
+        if warnings:
+            try:
+                container.update(**restore_kwargs)
+            except (DockerException, OSError):
+                return {"ok": False, "error": "Resource update failed", "drift": True}
+            return {"ok": False, "error": "Resource update rejected"}
+        return {"ok": True}
+    except (DockerException, OSError) as exc:
+        logger.warning("container resource update failed")
+        raise DockerUnavailableError(_safe_error(exc)) from exc
+
+
 def _cpu_percent(raw: dict) -> float | None:
     try:
         cpu_delta = (
@@ -385,7 +534,15 @@ def inspect_managed_state(name: str) -> dict[str, Any] | None:
     try:
         c = client.containers.get(name)
         c.reload()
-        return {"status": c.status, "name": name}
+        env_names = {
+            str(item).split("=", 1)[0]
+            for item in ((c.attrs.get("Config", {}) or {}).get("Env", []) or [])
+        }
+        return {
+            "status": c.status,
+            "name": name,
+            "has_bootstrap_secret": "POSTGRES_PASSWORD" in env_names,
+        }
     except NotFound:
         return None
     except (DockerException, OSError) as exc:
@@ -426,7 +583,7 @@ def run_managed_postgres(
     *,
     name: str,
     image: str,
-    env: dict[str, str],
+    env: dict[str, str] | None,
     host_port: int,
     host_ip: str,
     data_dir: str,
@@ -466,7 +623,7 @@ def run_managed_postgres(
             image=image,
             name=name,
             detach=True,
-            environment=env,
+            environment=env or None,
             ports=ports,
             volumes=volumes,
             privileged=False,
@@ -485,15 +642,25 @@ def run_managed_postgres(
         except NotFound:
             client.networks.create(network_name, driver="bridge", internal=True)
             client.networks.get(network_name).connect(container)
-        except (DockerException, OSError):
-            logger.warning("managed postgres network attach failed")
+        except (DockerException, OSError) as exc:
+            try:
+                container.remove(force=True)
+            except (DockerException, OSError):
+                logger.warning("managed postgres cleanup after network failure failed")
+            return {"ok": False, "error": "Managed PostgreSQL network attachment failed"}
         return {"ok": True, "name": name, "id": (getattr(container, "id", "") or "")[:12]}
     except (DockerException, OSError) as exc:
         logger.warning("managed postgres run failed")
         return {"ok": False, "error": _safe_error(exc)}
 
 
-def exec_in_managed(name: str, command: list[str], timeout: int = 180) -> dict[str, Any]:
+def exec_in_managed(
+    name: str,
+    command: list[str],
+    timeout: int = 180,
+    *,
+    environment: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """exec in managed postgres container (no msm-srv- prefix check)."""
     assert_managed_postgres_name(name)
     if not command:
@@ -504,7 +671,13 @@ def exec_in_managed(name: str, command: list[str], timeout: int = 180) -> dict[s
         container.reload()
         if container.status != "running":
             return {"ok": False, "error": "Container is not running", "stdout": "", "stderr": ""}
-        result = container.exec_run(command, stdout=True, stderr=True, demux=True)
+        result = container.exec_run(
+            command,
+            stdout=True,
+            stderr=True,
+            demux=True,
+            environment=environment or None,
+        )
         exit_code = int(getattr(result, "exit_code", 1))
         output = getattr(result, "output", (b"", b""))
         stdout_b, stderr_b = output if isinstance(output, tuple) else (output, b"")
@@ -521,6 +694,49 @@ def exec_in_managed(name: str, command: list[str], timeout: int = 180) -> dict[s
         return {"ok": False, "error": "Container not found", "stdout": "", "stderr": ""}
     except (DockerException, OSError) as exc:
         logger.warning("managed docker exec failed")
+        return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
+
+
+def exec_in_managed_stdin(
+    name: str,
+    command: list[str],
+    stdin_data: str,
+    *,
+    environment: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Exec in managed Postgres with SQL over stdin instead of process argv."""
+    assert_managed_postgres_name(name)
+    if not command:
+        raise ValueError("command is required")
+    inherited = {
+        key: os.environ[key]
+        for key in ("PATH", "HOME", "XDG_RUNTIME_DIR", "DOCKER_CONFIG", "SystemRoot", "TEMP", "TMP")
+        if key in os.environ
+    }
+    env = {**inherited, "DOCKER_HOST": resolve_docker_host(), **(environment or {})}
+    docker_args = ["docker", "exec", "-i"]
+    for key in (environment or {}):
+        docker_args.extend(["-e", key])
+    docker_args.extend([name, *command])
+    try:
+        result = subprocess.run(
+            docker_args,
+            input=stdin_data,
+            capture_output=True,
+            text=True,
+            timeout=190,
+            check=False,
+            env=env,
+        )
+        return {
+            "ok": result.returncode == 0,
+            "exit_code": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "error": "" if result.returncode == 0 else (result.stderr or result.stdout or f"exit {result.returncode}")[:500],
+        }
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("managed postgres stdin exec failed")
         return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
 
 
@@ -595,6 +811,12 @@ def stream_logs_sync(name: str, tail: int = 200):
     except (DockerException, OSError):
         logger.warning("docker log stream ended")
         return
+
+
+def container_logs(name: str, tail: int = 200) -> str:
+    container = _get_container(name)
+    data = container.logs(tail=max(1, min(tail, 2000)), stdout=True, stderr=True)
+    return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
 
 
 def _decode(data: bytes | str | None) -> str:

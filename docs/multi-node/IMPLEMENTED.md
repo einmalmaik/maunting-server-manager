@@ -1,6 +1,6 @@
 # Multi-Node: Umgesetzte Phasen — Pflicht-Dateien behalten
 
-Stand: Branch `feature/multi-node`  
+Stand: 2026-07-15, Branch `feature/multi-node`
 Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten Phasen gehören.  
 **Nicht löschen, nicht aus dem Repo entfernen** (außer explizit genannte Secret-/Runtime-Dateien).
 
@@ -38,6 +38,7 @@ Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten
 | `backend/schemas/node.py` | `NodeCreate` / `NodeOut` / `NodeUpdate` |
 | `backend/schemas/__init__.py` | Schema-Exports |
 | `backend/scripts/migrate_add_nodes.py` | Idempotente Migration + Default-Node |
+| `backend/services/multi_node_migration_service.py` | Automatische, fail-closed Startmigration + Local-Node-Zuordnung |
 
 **Nicht committen:** verschlüsselte Tokens in DB, generierte Klartext-Tokens aus Migrations-Logs.
 
@@ -53,12 +54,16 @@ Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten
 | `msm-agent/.env.example` | Env-Vorlage (**kein** echtes `.env`) |
 | `msm-agent/msm-agent.service.template` | systemd-Vorlage |
 | `msm-agent/routers/health.py` | `GET /health` (unauth) |
-| `msm-agent/routers/containers.py` | Container-CRUD / exec / stats |
-| `msm-agent/routers/files.py` | Datei-API + `/files/archive` |
+| `msm-agent/routers/containers.py` | Container-CRUD / exec / stats / stdin / Live-Ressourcen |
+| `msm-agent/routers/files.py` | Vollständige Datei-API, Chunk-Uploads, Archive und atomischer Restore |
+| `msm-agent/routers/runtime.py` | Zielhost-Portprüfung + validierte Node-Firewall-Aufrufe |
+| `msm-agent/routers/sources.py` | HTTP-/GitHub-Installationen direkt auf dem Ziel-Node |
 | `msm-agent/routers/metrics.py` | Node-Metriken |
 | `msm-agent/routers/console.py` | WebSocket-Konsole |
 | `msm-agent/services/docker_service.py` | Docker-SDK + Hardening |
 | `msm-agent/services/file_service.py` | Path-Traversal-Schutz + Archive |
+| `msm-agent/services/runtime_service.py` | Portprüfung + schmaler Firewall-Wrapper-Vertrag |
+| `msm-agent/services/source_service.py` | HTTPS-/GitHub-Quellen mit SSRF-/Pfadschutz |
 | `msm-agent/tests/` | Auth / Path-Traversal / Hardening |
 | `install.sh` | Agent-Kopie, venv, `.env`, systemd |
 | `update.sh` | Agent-Update + Service |
@@ -181,6 +186,10 @@ Bestehende UI-Primitives (behalten, werden genutzt):
 
 **Invariante:** S3-Credentials + Backup-Key nur im RAM der Request-Dauer auf dem Agenten; nie auf Disk.
 
+Der S3- und der Panel-Stream-Fallback enthalten auch `.msm/postgres/<db>.sql`.
+Remote-Restore ersetzt das Serververzeichnis atomisch und behält den alten Stand,
+bis der zugehörige PostgreSQL-Restore erfolgreich abgeschlossen ist.
+
 ---
 
 ## Phase 7 — Node-Aware Managed Postgres
@@ -198,7 +207,7 @@ Bestehende UI-Primitives (behalten, werden genutzt):
 | `backend/tests/test_phase7_managed_postgres.py` | Proxy/Invarianten-Tests |
 | `msm-agent/tests/test_postgres_service.py` | Agent unit tests |
 
-**Invariante:** Admin/Owner-Passwörter nur im Request-Body (TLS) und RAM des Agenten; Panel speichert DIS-verschlüsselt; Agent speichert keine Klartext-Credentials auf Disk.
+**Invariante:** Admin/Owner-Passwörter nur im Request-Body (TLS) und RAM des Agenten; Panel speichert DIS-verschlüsselt; Agent speichert keine Klartext-Credentials auf Disk. Dumps werden per `psql` über stdin als jeweilige Owner-Rolle restauriert, damit Ownership und Rechte erhalten bleiben. Der finale Postgres-Container enthält kein Bootstrap-Passwort in `docker inspect`.
 
 ---
 
@@ -209,8 +218,9 @@ Bestehende UI-Primitives (behalten, werden genutzt):
 3. Agent: kein DIS/Crypto; Bearer auf allen Routen außer `GET /health`.
 4. Path-Traversal nur innerhalb `MSM_SERVERS_DIR/<server_id>`.
 5. Docker-Hardening: kein privileged, `cap_drop=ALL`, kein host-network.
-6. Ports pro Node; Remote ohne lokalen Host-Bind-Check.
+6. Ports pro Node; Belegung wird auf dem jeweiligen Ziel-Node geprüft. Firewall-Regeln werden ebenfalls dort über einen validierenden Root-Wrapper gesetzt.
 7. Managed-Postgres-Passwörter: nur Panel-DIS-Storage + ephemeral HTTPS-Body zum Agenten (RAM only).
+8. Bestehende Installationen migrieren beim Backend-Start automatisch; ohne passenden Local-Agent-Token startet das Backend fail-closed.
 
 ---
 

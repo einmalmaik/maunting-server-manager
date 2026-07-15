@@ -153,12 +153,15 @@ def _create_remote_agent_s3_backup(
         key_b64 = BackupCryptoService.derive_raw_key_b64(password, salt)
         s3_cfg = S3Service.get_ephemeral_agent_s3_config()
         client = NodeClient.from_node(node, timeout=float(timeout_seconds))
+        from services.postgres_service import backup_context
+
         result = client.backup_create_s3(
             server_id,
             s3_config=s3_cfg,
             encryption_key_b64=key_b64,
             s3_key=s3_key,
             timeout=float(timeout_seconds),
+            postgres=backup_context(db, server_id),
         )
         size_bytes = int(result.get("size_bytes") or 0)
         backup.s3_key = result.get("s3_key") or s3_key
@@ -299,7 +302,9 @@ def upload_backup_to_cloud(backup, db: Session, server_id: int) -> bool:
     return bool(backup.s3_key and backup.encrypted)
 
 
-def restore_via_agent_s3(server, backup, *, timeout_seconds: int = 600) -> None:
+def restore_via_agent_s3(
+    server, backup, db: Session | None = None, *, timeout_seconds: int = 600
+) -> None:
     """Phase 6: agent downloads S3 object, decrypts, extracts into server dir.
 
     Panel only sends ephemeral S3 config + raw AES key (never logged).
@@ -326,12 +331,15 @@ def restore_via_agent_s3(server, backup, *, timeout_seconds: int = 600) -> None:
         if backup.s3_bucket:
             s3_cfg = {**s3_cfg, "bucket": backup.s3_bucket}
         client = NodeClient.from_node(node, timeout=float(timeout_seconds))
+        from services.postgres_service import backup_context
+
         client.backup_restore_s3(
             server.id,
             s3_config=s3_cfg,
             encryption_key_b64=key_b64,
             s3_key=backup.s3_key,
             timeout=float(timeout_seconds),
+            postgres=backup_context(db, server.id) if db is not None else None,
         )
     finally:
         key_b64 = None

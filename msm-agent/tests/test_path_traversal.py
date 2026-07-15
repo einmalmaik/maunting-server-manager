@@ -94,3 +94,74 @@ def test_create_dir_and_delete(client: TestClient, auth_headers: dict, servers_d
     )
     assert d.status_code == 200
     assert not (servers_dir / "9" / "mods").exists()
+
+
+def test_server_root_lifecycle_is_scoped_and_explicit(
+    client: TestClient, auth_headers: dict, servers_dir: Path
+) -> None:
+    created = client.put(
+        "/files/server-root",
+        params={"server_id": "55"},
+        headers=auth_headers,
+    )
+    assert created.status_code == 200
+    (servers_dir / "55" / "data.txt").write_text("synthetic", encoding="utf-8")
+
+    duplicate = client.put(
+        "/files/server-root",
+        params={"server_id": "55"},
+        headers=auth_headers,
+    )
+    assert duplicate.status_code == 409
+
+    deleted = client.delete(
+        "/files/server-root",
+        params={"server_id": "55"},
+        headers=auth_headers,
+    )
+    assert deleted.status_code == 200
+    assert not (servers_dir / "55").exists()
+
+
+def test_prepare_runtime_applies_ini_and_checks_required_files(
+    client: TestClient, auth_headers: dict, servers_dir: Path
+) -> None:
+    root = servers_dir / "77"
+    root.mkdir()
+    (root / "bin").mkdir()
+    (root / "bin" / "server").write_text("synthetic", encoding="utf-8")
+    response = client.post(
+        "/files/prepare-runtime",
+        params={"server_id": "77"},
+        headers=auth_headers,
+        json={
+            "ensure_dirs": ["config"],
+            "required_files": ["bin/server"],
+            "patches": [
+                {
+                    "type": "ini",
+                    "file": "config/server.ini",
+                    "section": "Network",
+                    "key": "Port",
+                    "value": "27015",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert (root / "config" / "server.ini").read_text(encoding="utf-8") == (
+        "[Network]\nPort=27015\n"
+    )
+
+
+def test_prepare_runtime_rejects_path_escape(
+    client: TestClient, auth_headers: dict, servers_dir: Path
+) -> None:
+    (servers_dir / "78").mkdir()
+    response = client.post(
+        "/files/prepare-runtime",
+        params={"server_id": "78"},
+        headers=auth_headers,
+        json={"ensure_dirs": ["../../escape"], "required_files": [], "patches": []},
+    )
+    assert response.status_code in {400, 403}

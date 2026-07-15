@@ -101,6 +101,7 @@ class DumpIn(BaseModel):
 class RestoreIn(BaseModel):
     admin_password: str = Field(..., min_length=1)
     dumps: dict[str, str] = Field(default_factory=dict)
+    owners: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 @router.post("/ensure")
@@ -230,6 +231,10 @@ def postgres_dump(body: DumpIn) -> dict[str, Any]:
 @router.post("/restore")
 def postgres_restore(body: RestoreIn) -> dict[str, Any]:
     try:
-        return restore_sql(admin_password=body.admin_password, dumps=body.dumps)
+        return restore_sql(
+            admin_password=body.admin_password,
+            dumps=body.dumps,
+            owners=body.owners,
+        )
     except PostgresAgentError as exc:
         raise _http(exc) from exc

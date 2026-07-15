@@ -68,16 +68,27 @@ def _db_host() -> str:
 
 def _admin_connect(admin_password: str, database: str = CONTROL_DB):
     ensure_internal_postgres(admin_password)
-    conn = psycopg2.connect(
-        host=_db_host(),
-        port=settings.managed_postgres_port,
-        dbname=database,
-        user=ADMIN_USER,
-        password=admin_password,
-        connect_timeout=5,
-    )
+    conn = _connect_with_retry(admin_password, database)
     conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
     return conn
+
+
+def _connect_with_retry(admin_password: str, database: str = CONTROL_DB):
+    last_error: Exception | None = None
+    for _ in range(30):
+        try:
+            return psycopg2.connect(
+                host=_db_host(),
+                port=settings.managed_postgres_port,
+                dbname=database,
+                user=ADMIN_USER,
+                password=admin_password,
+                connect_timeout=2,
+            )
+        except psycopg2.Error as exc:
+            last_error = exc
+            time.sleep(1)
+    raise PostgresAgentError("Managed PostgreSQL did not become ready", status_code=503) from last_error
 
 
 def _owner_connect(database_name: str, owner_role: str, owner_password: str):
@@ -89,6 +100,25 @@ def _owner_connect(database_name: str, owner_role: str, owner_password: str):
         password=owner_password,
         connect_timeout=5,
     )
+
+
+def _sanitize_bootstrap_environment(admin_password: str) -> None:
+    ready = _connect_with_retry(admin_password)
+    ready.close()
+    sanitized = docker_service.run_managed_postgres(
+        name=settings.managed_postgres_container_name,
+        image=settings.managed_postgres_image,
+        env=None,
+        host_port=settings.managed_postgres_port,
+        host_ip=_db_host(),
+        data_dir=settings.managed_postgres_data_dir,
+        network_name=settings.managed_postgres_network,
+        cap_adds=_PG_CAPS,
+    )
+    if not sanitized.get("ok"):
+        raise PostgresAgentError("Could not remove bootstrap credentials from container", status_code=503)
+    ready = _connect_with_retry(admin_password)
+    ready.close()
 
 
 def ensure_internal_postgres(admin_password: str) -> dict[str, Any]:
@@ -110,6 +140,8 @@ def ensure_internal_postgres(admin_password: str) -> dict[str, Any]:
     state = docker_service.inspect_managed_state(container_name)
 
     if state and state.get("status") == "running":
+        if state.get("has_bootstrap_secret"):
+            _sanitize_bootstrap_environment(admin_password)
         docker_service.ensure_managed_restart_policy(container_name, "unless-stopped")
         return {"ok": True, "status": "running"}
 
@@ -120,6 +152,8 @@ def ensure_internal_postgres(admin_password: str) -> dict[str, Any]:
                 start_result.get("error") or "Could not start PostgreSQL container",
                 status_code=503,
             )
+        if state.get("has_bootstrap_secret"):
+            _sanitize_bootstrap_environment(admin_password)
         docker_service.ensure_managed_restart_policy(container_name, "unless-stopped")
         return {"ok": True, "status": "started"}
 
@@ -142,6 +176,10 @@ def ensure_internal_postgres(admin_password: str) -> dict[str, Any]:
             result.get("error") or "Could not create PostgreSQL container",
             status_code=503,
         )
+    # The official image only needs POSTGRES_PASSWORD during first init. Once
+    # the data directory is initialized, recreate without environment secrets
+    # so Docker inspect cannot expose the cleartext admin password.
+    _sanitize_bootstrap_environment(admin_password)
     docker_service.ensure_managed_restart_policy(container_name, "unless-stopped")
     return {"ok": True, "status": "created"}
 
@@ -1032,7 +1070,6 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
         return {}
     ensure_internal_postgres(admin_password)
     container = settings.managed_postgres_container_name
-    pw_quoted = admin_password.replace("'", "'\\''")
     result: dict[str, str] = {}
     for db_name in database_names:
         name = validate_identifier(db_name)
@@ -1042,8 +1079,12 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
             f"--dbname={shlex.quote(name)} "
             f"--username={shlex.quote(ADMIN_USER)}"
         )
-        full_cmd = ["sh", "-c", f"PGPASSWORD='{pw_quoted}' {cmd_in_container}"]
-        exec_result = docker_service.exec_in_managed(container, full_cmd, timeout=180)
+        exec_result = docker_service.exec_in_managed(
+            container,
+            ["sh", "-c", cmd_in_container],
+            timeout=180,
+            environment={"PGPASSWORD": admin_password},
+        )
         if not exec_result.get("ok"):
             raise PostgresAgentError(
                 f"pg_dump failed for database: {(exec_result.get('error') or '')[:200]}",
@@ -1057,12 +1098,34 @@ def restore_sql(
     *,
     admin_password: str,
     dumps: dict[str, str],
+    owners: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Restore SQL text into named databases (admin connection)."""
     if not dumps:
         return {"ok": True, "skipped": True, "reason": "empty dumps"}
     ensure_internal_postgres(admin_password)
     started = time.monotonic()
+    database_names = [validate_identifier(name) for name in dumps]
+    rollback_dumps = dump_databases(
+        admin_password=admin_password,
+        database_names=database_names,
+    )
+    def apply_dump(name: str, sql_text: str) -> None:
+        owner = (owners or {}).get(name) or {}
+        restore_user = validate_identifier(str(owner.get("owner_role") or ADMIN_USER))
+        restore_password = str(owner.get("owner_password") or admin_password)
+        result = docker_service.exec_in_managed_stdin(
+            settings.managed_postgres_container_name,
+            ["psql", "--set", "ON_ERROR_STOP=1", "--username", restore_user, "--dbname", name],
+            sql_text,
+            environment={"PGPASSWORD": restore_password},
+        )
+        if not result.get("ok"):
+            raise PostgresAgentError(
+                f"psql restore failed for database: {(result.get('error') or '')[:200]}",
+                status_code=500,
+            )
+
     restored: list[str] = []
     failed: list[dict[str, str]] = []
     for db_name, sql_text in dumps.items():
@@ -1071,29 +1134,28 @@ def restore_sql(
             if not (sql_text or "").strip():
                 restored.append(name)
                 continue
-            conn = psycopg2.connect(
-                host=_db_host(),
-                port=settings.managed_postgres_port,
-                dbname=name,
-                user=ADMIN_USER,
-                password=admin_password,
-                connect_timeout=5,
-            )
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(sql_text)
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
+            apply_dump(name, sql_text)
             restored.append(name)
         except Exception as exc:  # noqa: BLE001
             failed.append({"database": db_name, "error": str(exc)[:120]})
     if failed:
+        rollback_failed: list[str] = []
+        for name in restored:
+            previous_sql = rollback_dumps.get(name, "")
+            if not previous_sql.strip():
+                continue
+            try:
+                apply_dump(name, previous_sql)
+            except Exception:
+                rollback_failed.append(name)
+        if rollback_failed:
+            raise PostgresAgentError(
+                "Restore failed and rollback requires manual intervention for: "
+                + ", ".join(rollback_failed),
+                status_code=500,
+            )
         raise PostgresAgentError(
-            "Restore partially failed: "
+            "Restore failed; previously restored databases were rolled back: "
             + "; ".join(f"{f['database']}: {f['error']}" for f in failed),
             status_code=500,
         )

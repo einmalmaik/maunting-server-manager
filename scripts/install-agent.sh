@@ -75,7 +75,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >>"$LOG_FILE" 2>&1 || warn "apt-get update hatte Warnungen"
 apt-get install -y -qq \
   python3 python3-venv python3-pip \
-  curl ca-certificates gnupg openssl \
+  curl ca-certificates gnupg openssl sudo ufw \
   uidmap dbus-user-session slirp4netns \
   >>"$LOG_FILE" 2>&1 || err "apt-get install fehlgeschlagen (siehe $LOG_FILE)"
 ok "System-Pakete"
@@ -229,6 +229,37 @@ EOF
 chown "$MSM_USER:$MSM_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 ok ".env geschrieben"
+
+# Narrow root boundary for node-local UFW changes. The agent may only open or
+# close one validated TCP/UDP port per invocation; arbitrary UFW arguments are
+# impossible through this wrapper.
+FIREWALL_WRAPPER="/usr/local/sbin/msm-agent-firewall"
+cat > "$FIREWALL_WRAPPER" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+action="${1:-}"
+port="${2:-}"
+protocol="${3:-}"
+server_name="${4:-server}"
+role="${5:-game}"
+[[ "$action" =~ ^(open|close)$ ]] || exit 2
+[[ "$port" =~ ^[0-9]{1,5}$ ]] && (( port >= 1 && port <= 65535 )) || exit 2
+[[ "$protocol" =~ ^(tcp|udp)$ ]] || exit 2
+[[ "$server_name" =~ ^[A-Za-z0-9_.-]{1,64}$ ]] || exit 2
+[[ "$role" =~ ^[A-Za-z0-9_.-]{1,32}$ ]] || exit 2
+if [[ "$action" == "open" ]]; then
+  exec /usr/sbin/ufw allow "${port}/${protocol}" comment "MSM ${server_name:0:24} ${role}"
+fi
+exec /usr/sbin/ufw delete allow "${port}/${protocol}"
+EOF
+chown root:root "$FIREWALL_WRAPPER"
+chmod 0755 "$FIREWALL_WRAPPER"
+cat > /etc/sudoers.d/msm-agent-firewall <<EOF
+${MSM_USER} ALL=(root) NOPASSWD: ${FIREWALL_WRAPPER} *
+EOF
+chmod 0440 /etc/sudoers.d/msm-agent-firewall
+visudo -cf /etc/sudoers.d/msm-agent-firewall >/dev/null || err "Ungueltige Firewall-sudoers-Regel"
+ok "Node-Firewall-Wrapper installiert"
 
 # ── 10. systemd unit ──────────────────────────────────────────
 UNIT_PATH="/etc/systemd/system/msm-agent.service"

@@ -77,6 +77,16 @@ async def lifespan(app: FastAPI):
 
     Base.metadata.create_all(bind=engine)
 
+    # Must run before any ORM query touches Server.node_id on legacy databases.
+    from database import SessionLocal
+    from services.multi_node_migration_service import migrate_multi_node_schema
+
+    migrate_multi_node_schema(
+        engine,
+        SessionLocal,
+        allow_missing_local_token=is_testing,
+    )
+
     # Migration: fehlende Spalten nachträglich hinzufügen
     from sqlalchemy import inspect, text
     inspector = inspect(engine)

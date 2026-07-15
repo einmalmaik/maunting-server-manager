@@ -4,7 +4,7 @@ Exec-Tab (v1.4.7): User koennen Befehle IM Container ausfuehren. Wichtig:
 - Container-Name wird ausschliesslich aus ``container_name_for(server.id)``
   gebildet -- kein User-Input fliesst in den Container-Namen.
 - Output wird auf 256 KiB gedeckelt mit [truncated]-Marker.
-- Audit-Log enthaelt argv, NICHT stdout/stderr.
+- Audit-Log enthaelt nur Metadaten, NICHT argv/stdout/stderr (argv kann Secrets enthalten).
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def test_run_in_container_delegates_to_docker_exec_in(monkeypatch):
 
     seen: dict = {}
 
-    def fake_exec_in(name, command, timeout):
+    def fake_exec_in(name, command, timeout, node=None):
         seen["name"] = name
         seen["command"] = command
         seen["timeout"] = timeout
@@ -49,7 +49,7 @@ def test_run_in_container_passes_argv_verbatim_no_shell_escape(monkeypatch):
 
     seen: dict = {}
 
-    def fake_exec_in(name, command, timeout):
+    def fake_exec_in(name, command, timeout, node=None):
         seen["command"] = command
         return {"ok": True, "stdout": "", "stderr": ""}
 
@@ -130,14 +130,13 @@ def test_truncate_output_unicode_safe():
 # ── Task 5: Audit-Log ohne Output ───────────────────────────────────────
 
 
-def test_run_in_container_writes_audit_log_with_argv_not_output(
+def test_run_in_container_writes_audit_log_without_argv_or_output(
     monkeypatch, caplog
 ):
-    """Audit-Log enthaelt: server_id, user_id, argv. NICHT: stdout/stderr.
+    """Audit-Log enthaelt IDs und argc, aber weder argv noch Output.
 
     Hintergrund: Output kann sensible Daten enthalten (Secrets, Tokens,
-    User-PII). Wir loggen NUR, welcher Befehl von wem gegen welchen Server
-    gelaufen ist -- das reicht fuer Forensik.
+    User-PII). Auch argv kann Passwoerter oder Tokens enthalten.
     """
     from services import exec_service
 
@@ -161,8 +160,9 @@ def test_run_in_container_writes_audit_log_with_argv_not_output(
         )
 
     text = caplog.text
-    assert "cat" in text  # argv ist im Log
-    assert "/etc/secret" in text
+    assert "cat" not in text
+    assert "/etc/secret" not in text
+    assert "argc=2" in text
     assert "42" in text and "7" in text
     # Output darf NICHT im Log auftauchen
     assert "secret-payload-NEVER-LOG-12345" not in text
@@ -195,7 +195,8 @@ def test_run_in_container_logs_failure_path(monkeypatch, caplog):
 
     assert result["ok"] is False
     text = caplog.text
-    assert "false" in text and "99" in text and "3" in text
+    assert "false" not in text
+    assert "argc=1" in text and "99" in text and "3" in text
     assert "leaky-stdout" not in text
     assert "leaky-stderr" not in text
 

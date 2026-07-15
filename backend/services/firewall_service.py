@@ -119,6 +119,8 @@ def open_ports(
     game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None = None,
     rcon_port: int | None = None,
+    *,
+    node=None,
 ) -> bool:
     """Oeffnet die Spiel-Ports eines Servers in UFW.
 
@@ -133,6 +135,13 @@ def open_ports(
         ``True``, wenn UFW vorhanden ist und Calls abgesetzt wurden; sonst
         ``False``.
     """
+    if node is not None and not getattr(node, "is_local", True):
+        if not isinstance(game_port, list):
+            raise ValueError("Remote firewall requires normalized port list")
+        from services.node_client import NodeClient
+
+        NodeClient.from_node(node).firewall_update("open", name, game_port)
+        return True
     if not _ufw_available():
         return False
 
@@ -155,8 +164,18 @@ def close_ports(
     game_port: int | None | list[tuple[int, str, str]],
     query_port: int | None = None,
     rcon_port: int | None = None,
+    *,
+    node=None,
+    name: str = "server",
 ) -> bool:
     """Schliesst (idempotent) die UFW-Regeln eines Servers."""
+    if node is not None and not getattr(node, "is_local", True):
+        if not isinstance(game_port, list):
+            raise ValueError("Remote firewall requires normalized port list")
+        from services.node_client import NodeClient
+
+        NodeClient.from_node(node).firewall_update("close", name, game_port)
+        return True
     if not _ufw_available():
         return False
 

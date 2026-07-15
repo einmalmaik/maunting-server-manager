@@ -207,7 +207,10 @@ class NodeClient:
                 resp = client.get(self._url("/health"))
             if resp.status_code != 200:
                 raise NodeClientError(f"Agent health HTTP {resp.status_code}", status_code=resp.status_code)
-            return resp.json()
+            data = resp.json()
+            if data.get("status") != "ok" or data.get("docker_connected") is not True:
+                raise NodeClientError("Agent Docker runtime is unavailable", status_code=503)
+            return data
         except NodeClientError:
             raise
         except httpx.HTTPError as exc:
@@ -224,6 +227,15 @@ class NodeClient:
 
     def create_container(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/containers", json=body, timeout=_LONG_TIMEOUT)
+
+    def run_ephemeral_container(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/containers/ephemeral/run", json=body, timeout=_LONG_TIMEOUT)
+
+    def install_http_source(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/sources/http", json=body, timeout=_LONG_TIMEOUT)
+
+    def install_github_source(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/sources/github", json=body, timeout=_LONG_TIMEOUT)
 
     def start_container(self, name: str) -> dict[str, Any]:
         return self._request("POST", f"/containers/{quote(name, safe='')}/start")
@@ -242,6 +254,10 @@ class NodeClient:
     def container_stats(self, name: str) -> dict[str, Any]:
         return self._request("GET", f"/containers/{quote(name, safe='')}/stats")
 
+    def container_logs(self, name: str, tail: int = 200) -> str:
+        data = self._request("GET", f"/containers/{quote(name, safe='')}/logs", params={"tail": tail})
+        return str(data.get("logs", ""))
+
     def exec_in_container(self, name: str, command: list[str]) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -249,6 +265,12 @@ class NodeClient:
             json={"command": command},
             timeout=_LONG_TIMEOUT,
         )
+
+    def update_container_resources(self, name: str, updates: dict[str, int | None]) -> dict[str, Any]:
+        return self._request("PATCH", f"/containers/{quote(name, safe='')}/resources", json=updates)
+
+    def send_container_stdin(self, name: str, data: str) -> dict[str, Any]:
+        return self._request("POST", f"/containers/{quote(name, safe='')}/stdin", json={"data": data})
 
     # ── Files ────────────────────────────────────────────────────────────
 
@@ -298,6 +320,93 @@ class NodeClient:
             params={"server_id": str(server_id), "path": path},
         )
 
+    def files_ensure_server_root(self, server_id: int | str) -> dict[str, Any]:
+        return self._request(
+            "PUT",
+            "/files/server-root",
+            params={"server_id": str(server_id)},
+        )
+
+    def files_delete_server_root(self, server_id: int | str) -> dict[str, Any]:
+        return self._request(
+            "DELETE",
+            "/files/server-root",
+            params={"server_id": str(server_id)},
+        )
+
+    def files_prepare_runtime(self, server_id: int | str, body: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/files/prepare-runtime",
+            params={"server_id": str(server_id)},
+            json=body,
+        )
+
+    def files_disk_info(self, server_id: int | str) -> dict[str, int]:
+        return self._request("GET", "/files/disk", params={"server_id": str(server_id)})
+
+    def ports_available(self, ports: list[tuple[int, str, str]], bind_ip: str) -> dict[str, Any]:
+        return self._request("POST", "/runtime/ports/check", json={
+            "ports": [{"port": port, "protocol": protocol, "role": role} for port, protocol, role in ports],
+            "bind_ip": bind_ip or "0.0.0.0",
+        })
+
+    def firewall_update(self, action: str, server_name: str, ports: list[tuple[int, str, str]]) -> dict[str, Any]:
+        if action not in {"open", "close"}:
+            raise ValueError("Invalid firewall action")
+        return self._request("POST", f"/runtime/firewall/{action}", json={
+            "server_name": server_name,
+            "ports": [{"port": port, "protocol": protocol, "role": role} for port, protocol, role in ports],
+        })
+
+    def files_search(self, server_id: int | str, query: str) -> dict[str, Any]:
+        return self._request("GET", "/files/search", params={"server_id": str(server_id), "q": query})
+
+    def files_move(self, server_id: int | str, source_path: str, target_path: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/files/move",
+            params={"server_id": str(server_id)},
+            json={"source_path": source_path, "target_path": target_path},
+        )
+
+    def files_extract(self, server_id: int | str, path: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/files/extract",
+            params={"server_id": str(server_id), "path": path},
+        )
+
+    def files_upload_init(self, server_id: int | str, body: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/files/upload/init", params={"server_id": str(server_id)}, json=body)
+
+    def files_upload_chunk(self, server_id: int | str, upload_id: str, data: bytes) -> dict[str, Any]:
+        return self._request(
+            "PUT",
+            f"/files/upload/{quote(upload_id, safe='')}/chunk",
+            params={"server_id": str(server_id)},
+            files={"chunk": ("chunk", data)},
+            timeout=_LONG_TIMEOUT,
+        )
+
+    def files_upload_status(self, server_id: int | str, upload_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/files/upload/{quote(upload_id, safe='')}/status", params={"server_id": str(server_id)})
+
+    def files_upload_finalize(self, server_id: int | str, upload_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/files/upload/{quote(upload_id, safe='')}/finalize", params={"server_id": str(server_id)})
+
+    def files_upload_abort(self, server_id: int | str, upload_id: str) -> dict[str, Any]:
+        return self._request("DELETE", f"/files/upload/{quote(upload_id, safe='')}", params={"server_id": str(server_id)})
+
+    def files_cache_configs(self, server_id: int | str, patterns: list[str]) -> dict[str, Any]:
+        return self._request("POST", "/files/config-cache/create", params={"server_id": str(server_id)}, json={"patterns": patterns})
+
+    def files_restore_configs(self, server_id: int | str) -> dict[str, Any]:
+        return self._request("POST", "/files/config-cache/restore", params={"server_id": str(server_id)})
+
+    def files_clear_config_cache(self, server_id: int | str) -> dict[str, Any]:
+        return self._request("DELETE", "/files/config-cache", params={"server_id": str(server_id)})
+
     def files_upload(self, server_id: int | str, path: str, data: bytes, filename: str = "upload") -> dict[str, Any]:
         return self._request(
             "POST",
@@ -316,15 +425,21 @@ class NodeClient:
             expect_json=False,
         )
 
-    def files_archive(self, server_id: int | str) -> Iterator[bytes]:
+    def files_archive(
+        self,
+        server_id: int | str,
+        *,
+        postgres: dict[str, Any] | None = None,
+    ) -> Iterator[bytes]:
         """Stream a tar.gz of the server directory from the agent."""
         try:
             with self._httpx_client(_LONG_TIMEOUT) as client:
                 with client.stream(
-                    "GET",
+                    "POST" if postgres else "GET",
                     self._url("/files/archive"),
                     headers=self._headers(),
                     params={"server_id": str(server_id)},
+                    json={"postgres": postgres} if postgres else None,
                 ) as resp:
                     if resp.status_code >= 400:
                         detail = resp.read().decode("utf-8", errors="replace")[:200]
@@ -341,6 +456,25 @@ class NodeClient:
             logger.warning("node agent archive stream failed")
             raise NodeClientError("Agent not reachable") from exc
 
+    def files_restore_archive(self, server_id: int | str, archive_path: str) -> dict[str, Any]:
+        try:
+            with open(archive_path, "rb") as archive:
+                return self._request(
+                    "POST",
+                    "/files/restore-archive",
+                    params={"server_id": str(server_id)},
+                    files={"archive": ("backup.tar.gz", archive, "application/gzip")},
+                    timeout=_LONG_TIMEOUT,
+                )
+        except OSError as exc:
+            raise NodeClientError("Backup archive cannot be read") from exc
+
+    def files_finalize_restore(self, server_id: int | str) -> dict[str, Any]:
+        return self._request("POST", "/files/restore-archive/finalize", params={"server_id": str(server_id)})
+
+    def files_rollback_restore(self, server_id: int | str) -> dict[str, Any]:
+        return self._request("POST", "/files/restore-archive/rollback", params={"server_id": str(server_id)})
+
     def console_ws_url(self, container_name: str) -> str:
         return self._ws_url(f"/console/{quote(container_name, safe='')}/ws")
 
@@ -354,6 +488,7 @@ class NodeClient:
         encryption_key_b64: str,
         s3_key: str,
         timeout: float = _LONG_TIMEOUT,
+        postgres: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Trigger encrypted backup on agent → direct S3 upload (no panel data path)."""
         return self._request(
@@ -364,6 +499,7 @@ class NodeClient:
                 "s3_config": s3_config,
                 "encryption_key": encryption_key_b64,
                 "s3_key": s3_key,
+                "postgres": postgres,
             },
             timeout=timeout,
         )
@@ -376,6 +512,7 @@ class NodeClient:
         encryption_key_b64: str,
         s3_key: str,
         timeout: float = _LONG_TIMEOUT,
+        postgres: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Trigger S3 download + decrypt + extract on agent."""
         return self._request(
@@ -386,6 +523,7 @@ class NodeClient:
                 "s3_config": s3_config,
                 "encryption_key": encryption_key_b64,
                 "s3_key": s3_key,
+                "postgres": postgres,
             },
             timeout=timeout,
         )
@@ -446,12 +584,16 @@ class NodeClient:
         )
 
     def postgres_restore(
-        self, *, admin_password: str, dumps: dict[str, str]
+        self,
+        *,
+        admin_password: str,
+        dumps: dict[str, str],
+        owners: dict[str, dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         return self._request(
             "POST",
             "/postgres/restore",
-            json={"admin_password": admin_password, "dumps": dumps},
+            json={"admin_password": admin_password, "dumps": dumps, "owners": owners or {}},
             timeout=_LONG_TIMEOUT,
         )
 

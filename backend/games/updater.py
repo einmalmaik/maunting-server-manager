@@ -898,6 +898,23 @@ def _protect_manual_configs_and_run(
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    node = getattr(server, "node", None)
+    if node is not None and not getattr(node, "is_local", False):
+        from services.node_client import NodeClient
+
+        client = NodeClient.from_node(node)
+        try:
+            client.files_cache_configs(server_id, get_protected_config_patterns())
+            op_result = operation()
+        except Exception as exc:
+            op_result = {"ok": False, "error": str(exc)}
+        finally:
+            try:
+                client.files_restore_configs(server_id)
+            finally:
+                client.files_clear_config_cache(server_id)
+        return op_result
+
     # 1. Cache VOR Operation (Pflicht)
     cache_result: dict[str, Any] = {}
     try:
@@ -1065,12 +1082,31 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 # dedicated STEAMCMD_IMAGE for the tool (pre-baked binary), not the game's runtime image
                 validate=validate_flag,
                 beta_branch=depot_branch,
+                node=getattr(server, "node", None),
             )
         elif source_type == BlueprintSourceType.HTTP:
             _append_console_log(
                 server_id,
                 "[MSM] Server-Datei-Update: HTTP-Source-Download/Entpacken (synchron vor Start)\n"
             )
+            node = getattr(server, "node", None)
+            if node is not None and not getattr(node, "is_local", False):
+                from blueprints.http_source import _detect_archive_type
+                from services.node_client import NodeClient
+                from urllib.parse import urlparse
+
+                cfg = blueprint.source.http
+                assert cfg is not None
+                archive_type = cfg.archiveType or _detect_archive_type(urlparse(cfg.url).path)
+                if archive_type is None:
+                    return {"ok": False, "error": "Archive-Typ konnte nicht erkannt werden"}
+                return NodeClient.from_node(node, timeout=600).install_http_source({
+                    "server_id": str(server_id),
+                    "url": cfg.url,
+                    "sha256": cfg.sha256,
+                    "archive_type": archive_type.value,
+                    "extract_to": cfg.extractTo,
+                })
             return install_http_source(blueprint, install_dir)
         elif source_type == BlueprintSourceType.GITHUB:
             from blueprints.github_source import install_github_source
@@ -1081,6 +1117,22 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 server_id,
                 f"[MSM] Server-Datei-Update: git pull origin {branch} (synchron vor Start)\n",
             )
+            node = getattr(server, "node", None)
+            if node is not None and not getattr(node, "is_local", False):
+                from services.github_token_service import resolve_token
+                from services.node_client import NodeClient
+
+                cfg = blueprint.source.github
+                assert cfg is not None
+                return NodeClient.from_node(node, timeout=600).install_github_source({
+                    "server_id": str(server_id),
+                    "repo": cfg.repo,
+                    "branch": cfg.branch,
+                    "token": resolve_token(),
+                    "setup_commands": cfg.setupCommands,
+                    "sub_path": cfg.subPath,
+                    "runtime_image": blueprint.runtime.image,
+                })
             return install_github_source(blueprint, install_dir)
         else:
             # manualUpload / dockerOnly / custom → Check sollte nie "update" liefern.

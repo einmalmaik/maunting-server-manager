@@ -49,6 +49,15 @@ Die Entwicklung ist in 7 logische Phasen aufgeteilt. Für jede Phase gibt es ein
 8. **[Phase 7: Node-Aware Managed Postgres](phase-7.md)** (ABGESCHLOSSEN)
    - Vollständige Auslagerung der `psycopg2`-Datenbanklogik und des `msm-postgres`-Containers in den `msm-agent`.
    - Backend wird zum reinen REST-Proxy für DDL-Befehle, um Remote-Nodes sicher zu unterstützen.
+   - Server-Backups enthalten die node-lokalen Datenbanken; Restore erhält Daten und Owner-Rechte.
+
+### Abschluss-Härtung
+
+Die phasenübergreifende Laufzeitprüfung wurde nachgezogen: vollständiger Remote-Dateimanager,
+Source-Installationen, Konsole/Exec/stdin, Live-Ressourcen, Speicherstatus, Zielhost-Portprüfung,
+Node-Firewall, automatische Bestandsmigration sowie atomische Datei- und Datenbank-Restores.
+Damit sind lokale und entfernte Nodes über denselben Agent-Vertrag ausführbar; direkte
+Panel-Host-Operationen werden für Remote-Server nicht mehr als Fallback verwendet.
 
 ---
 

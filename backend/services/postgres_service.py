@@ -178,6 +178,26 @@ def list_resources(db: Session, server_id: int) -> dict[str, list[Any]]:
     }
 
 
+def backup_context(db: Session, server_id: int) -> dict[str, Any] | None:
+    """Build an ephemeral node-local dump/restore payload without persisting secrets."""
+    databases = [row.name for row in list_resources(db, server_id)["databases"]]
+    if not databases:
+        return None
+    rows = db.query(PostgresDatabase).filter(PostgresDatabase.server_id == server_id).all()
+    owners = {
+        row.name: {
+            "owner_role": row.owner_role,
+            "owner_password": _owner_password(row),
+        }
+        for row in rows
+    }
+    return {
+        "admin_password": _admin_password(),
+        "database_names": databases,
+        "owners": owners,
+    }
+
+
 def _owner_password(database: PostgresDatabase) -> str:
     return AuthService.decrypt_secret(
         database.owner_password_encrypted, aad="msm:pg:db:owner"
@@ -216,12 +236,14 @@ def provision_server_databases(
         raise ValueError("Mindestens eine PostgreSQL-Datenbank ist erforderlich.")
     ensure_internal_postgres(db, server)
     credentials: list[dict[str, Any]] = []
+    attempted_resources: list[tuple[str, str, str]] = []
     try:
         existing = (
             db.query(PostgresDatabase).filter(PostgresDatabase.server_id == server.id).count()
         )
         for offset in range(1, count + 1):
             db_name, owner_role, user_name = _next_names(server.id, existing + offset)
+            attempted_resources.append((db_name, owner_role, user_name))
             credentials.append(
                 _create_database_and_user(
                     db, server, db_name, owner_role, user_name, power_user=power_user
@@ -230,11 +252,19 @@ def provision_server_databases(
         db.commit()
         return credentials
     except Exception:
-        db.rollback()
         try:
-            drop_server_resources(db, server.id)
+            client = _client_for_server(db, server)
+            client.postgres_drop(
+                {
+                    "admin_password": _admin_password(),
+                    "databases": [item[0] for item in attempted_resources],
+                    "owners": [item[1] for item in attempted_resources],
+                    "users": [item[2] for item in attempted_resources],
+                }
+            )
         except Exception:
-            db.rollback()
+            logger.warning("PostgreSQL compensation failed for server_id=%s", server.id)
+        db.rollback()
         raise
 
 
@@ -453,11 +483,7 @@ def drop_server_resources(db: Session, server_id: int) -> None:
     owners = [item.owner_role for item in resources["databases"]]
     users = [item.username for item in resources["users"]]
     if databases or owners or users:
-        try:
-            _drop_database_and_roles(db, server_id, databases, owners, users)
-        except PostgresServiceError:
-            # Server delete should still clear panel metadata if agent is down
-            logger.warning("agent drop_server_resources failed for server_id=%s", server_id)
+        _drop_database_and_roles(db, server_id, databases, owners, users)
     db.query(PostgresGrant).filter(PostgresGrant.server_id == server_id).delete(
         synchronize_session=False
     )
@@ -850,6 +876,17 @@ def _server_database_names(db: Session, server_id: int) -> list[str]:
     return [r[0] for r in rows]
 
 
+def _restore_owners(db: Session, server_id: int) -> dict[str, dict[str, str]]:
+    rows = db.query(PostgresDatabase).filter(PostgresDatabase.server_id == server_id).all()
+    return {
+        row.name: {
+            "owner_role": row.owner_role,
+            "owner_password": _owner_password(row),
+        }
+        for row in rows
+    }
+
+
 def dump_server_databases(db: Session, server_id: int) -> tuple[str, list[str], int, str, int]:
     sql_text, names, size, sha, dur = _pg_dump_server_dbs(db, server_id)
     return sql_text, names, size, sha, dur
@@ -899,7 +936,9 @@ def restore_sql_to_server_dbs(db: Session, server_id: int, sql_text: str) -> dic
     client = _client_for_server_id(db, server_id)
     try:
         result = client.postgres_restore(
-            admin_password=_admin_password(), dumps=dumps
+            admin_password=_admin_password(),
+            dumps=dumps,
+            owners=_restore_owners(db, server_id),
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Restore failed") from exc
@@ -971,7 +1010,9 @@ def restore_pg_dump_from_archive(
         client = _client_for_server_id(db, server_id)
         try:
             client.postgres_restore(
-                admin_password=_admin_password(), dumps=text_dumps
+                admin_password=_admin_password(),
+                dumps=text_dumps,
+                owners=_restore_owners(db, server_id),
             )
         except NodeClientError as exc:
             raise PostgresServiceError(exc.message or "Restore failed") from exc

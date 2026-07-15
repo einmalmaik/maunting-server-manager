@@ -46,6 +46,21 @@ def test_node_client_never_logs_token():
         assert "headers" not in kwargs or "Authorization" not in (kwargs.get("headers") or {})
 
 
+def test_node_client_rejects_healthy_http_when_docker_is_down():
+    client = NodeClient(host="http://127.0.0.1:9000", token="synthetic")
+    with patch("services.node_client.httpx.Client") as mock_cls:
+        mock = MagicMock()
+        mock_cls.return_value.__enter__.return_value = mock
+        mock.get.return_value.status_code = 200
+        mock.get.return_value.json.return_value = {
+            "status": "degraded",
+            "version": "test",
+            "docker_connected": False,
+        }
+        with pytest.raises(NodeClientError, match="Docker runtime"):
+            client.health()
+
+
 def test_node_client_auth_failure():
     client = NodeClient(host="http://127.0.0.1:9000", token="x")
     with patch("services.node_client.httpx.Client") as mock_cls:
@@ -87,6 +102,64 @@ def test_docker_stop_local_without_node_uses_local_path():
         result = docker_service.stop("msm-srv-1", timeout=10)
     assert result["ok"] is True
     assert result.get("note") == "container was not running"
+
+
+def test_remote_container_payload_preserves_runtime_contract():
+    from services import docker_service
+
+    node = SimpleNamespace(id=2)
+    client = MagicMock()
+    client.create_container.return_value = {"ok": True, "id": "abc123"}
+    with patch.object(NodeClient, "from_node", return_value=client):
+        result = docker_service.run_container(
+            name="msm-srv-42",
+            image="example.invalid/runtime:test",
+            read_only_rootfs=True,
+            tmpfs_paths=["/tmp"],
+            extra_networks=["msm-managed-postgres"],
+            tty=True,
+            restart_policy_name="on-failure",
+            startup_check_seconds=2,
+            node=node,
+        )
+
+    assert result["ok"] is True
+    body = client.create_container.call_args.args[0]
+    assert body["read_only_rootfs"] is True
+    assert body["tmpfs_paths"] == ["/tmp"]
+    assert body["extra_networks"] == ["msm-managed-postgres"]
+    assert body["tty"] is True
+    assert body["restart_policy_name"] == "on-failure"
+    assert body["startup_check_seconds"] == 2
+
+
+def test_remote_ephemeral_container_runs_on_selected_node():
+    from services import docker_service
+    from services.docker_service import VolumeBind
+
+    node = SimpleNamespace(id=2)
+    client = MagicMock()
+    client.run_ephemeral_container.return_value = {
+        "ok": True,
+        "stdout": "installed\n",
+        "stderr": "",
+    }
+    logs: list[str] = []
+    with patch.object(NodeClient, "from_node", return_value=client):
+        result = docker_service.run_ephemeral(
+            image="example.invalid/tool:test",
+            command=["install"],
+            volumes=[VolumeBind("/opt/msm/servers/42", "/data", read_only=False)],
+            cap_adds=["CHOWN"],
+            log_callback=logs.append,
+            node=node,
+        )
+
+    assert result["ok"] is True
+    body = client.run_ephemeral_container.call_args.args[0]
+    assert body["volumes"]["/opt/msm/servers/42"] == {"bind": "/data", "mode": "rw"}
+    assert body["cap_add"] == ["CHOWN"]
+    assert logs == ["installed\n"]
 
 
 def test_db_used_ports_scoped_by_node(db):

@@ -28,7 +28,9 @@ def _make_pg_db(db: Session, server_id: int, name: str, *, index: int = 1) -> Po
         server_id=server_id,
         name=name,
         owner_role=f"msm_s{server_id}_o{index}",
-        owner_password_encrypted="test-enc-v1:msm:pg:db:owner:dummy",
+        owner_password_encrypted=(
+            f"test-enc-v1:{'msm:pg:db:owner'.encode().hex()}:{'dummy'.encode().hex()}"
+        ),
         is_superuser=False,
     )
     db.add(pg)
@@ -380,8 +382,9 @@ class TestValFix009PerDbDumps:
 
         mock_client = MagicMock()
 
-        def capture_restore(*, admin_password, dumps):
+        def capture_restore(*, admin_password, dumps, owners):
             captured["dumps"] = dict(dumps)
+            captured["owners"] = owners
             return {"ok": True, "databases": list(dumps.keys()), "duration_ms": 1}
 
         mock_client.postgres_restore.side_effect = capture_restore
@@ -399,6 +402,7 @@ class TestValFix009PerDbDumps:
         assert "t_beta" in captured["dumps"]["db_beta"]
         assert "t_alpha" not in captured["dumps"]["db_beta"]
         assert "t_beta" not in captured["dumps"]["db_alpha"]
+        assert captured["owners"]["db_alpha"]["owner_role"] == "msm_s1_o1"
 
     def test_restore_pg_dump_from_archive_skips_unknown_dbs(self, db, test_server):
         """Dumps fuer DBs die nicht mehr existieren werden uebersprungen."""
@@ -410,8 +414,9 @@ class TestValFix009PerDbDumps:
         captured: dict = {}
         mock_client = MagicMock()
 
-        def capture_restore(*, admin_password, dumps):
+        def capture_restore(*, admin_password, dumps, owners):
             captured["dumps"] = dict(dumps)
+            captured["owners"] = owners
             return {"ok": True, "databases": list(dumps.keys()), "duration_ms": 1}
 
         mock_client.postgres_restore.side_effect = capture_restore

@@ -615,7 +615,9 @@ def _restore_old_docker_limits(
     return _verify_effective_limits(container, restore_kwargs, name)
 
 
-def update_container_resources(name: str, updates: dict[str, int | None]) -> dict:
+def update_container_resources(
+    name: str, updates: dict[str, int | None], *, node: Any | None = None
+) -> dict:
     """Wendet CPU/RAM-Limits live auf einen laufenden Container an (ohne Restart).
 
     Kapselt das Docker SDK ``container.update()``. Der Aufrufer uebergibt nur
@@ -649,6 +651,15 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
       ``{"ok": True}`` bei Erfolg.
       ``{"ok": False, "error": "..."}`` bei Fehlschlag (sanitisiert).
     """
+    if node is not None:
+        try:
+            from services.node_client import NodeClient
+
+            return NodeClient.from_node(node).update_container_resources(name, updates)
+        except Exception as exc:
+            logger.warning("node resource update failed")
+            return {"ok": False, "error": str(getattr(exc, "message", exc))[:300]}
+
     container = _container(name)
     if container is None:
         return {"ok": False, "error": "Container nicht gefunden"}
@@ -858,6 +869,13 @@ def run_container(
             user=user,
             workdir=workdir,
             network=network,
+            extra_networks=extra_networks,
+            read_only_rootfs=read_only_rootfs,
+            tmpfs_paths=tmpfs_paths,
+            cap_adds=cap_adds,
+            tty=tty,
+            restart_policy_name=restart_policy_name,
+            startup_check_seconds=startup_check_seconds,
         )
 
     client, error = _client_or_error()
@@ -960,6 +978,7 @@ def run_ephemeral(
     cap_adds: list[str] | None = None,
     timeout: int = 1800,
     log_callback: Any | None = None,
+    node: Any | None = None,
 ) -> dict:
     """Fuehrt einen einmaligen Containerlauf aus und entfernt den Container danach.
 
@@ -968,6 +987,32 @@ def run_ephemeral(
     weitergeleitet. So sieht der User den Fortschritt live statt erst am Ende.
     Sicherheit: callback bekommt nur fertig dekodierte Zeilen, keine rohen bytes.
     """
+
+    if node is not None:
+        from services.node_client import NodeClient, NodeClientError
+
+        body = {
+            "image": image,
+            "command": command,
+            "volumes": _volumes_dict(volumes),
+            "env": env,
+            "user": user,
+            "workdir": workdir,
+            "entrypoint": entrypoint,
+            "cap_add": cap_adds,
+            "timeout": timeout,
+        }
+        try:
+            result = NodeClient.from_node(node, timeout=float(timeout)).run_ephemeral_container(
+                {key: value for key, value in body.items() if value is not None}
+            )
+            combined = (result.get("stdout") or "") + (result.get("stderr") or "")
+            if log_callback is not None and combined:
+                for line in combined.splitlines(keepends=True):
+                    log_callback(line)
+            return result
+        except NodeClientError as exc:
+            return {"ok": False, "error": exc.message[:500], "stdout": "", "stderr": ""}
 
     client, error = _client_or_error()
     if error:
@@ -1059,6 +1104,13 @@ def _run_container_via_node(
     user: str | None,
     workdir: str | None,
     network: str | None,
+    extra_networks: list[str] | None,
+    read_only_rootfs: bool,
+    tmpfs_paths: list[str] | None,
+    cap_adds: list[str] | None,
+    tty: bool,
+    restart_policy_name: str,
+    startup_check_seconds: float,
 ) -> dict:
     """Map local PortPublish/VolumeBind to agent create payload."""
     from services.node_client import NodeClient, NodeClientError
@@ -1090,6 +1142,13 @@ def _run_container_via_node(
         "user": user,
         "workdir": workdir,
         "network": network,
+        "extra_networks": extra_networks or [],
+        "read_only_rootfs": read_only_rootfs,
+        "tmpfs_paths": tmpfs_paths or [],
+        "cap_add": cap_adds,
+        "tty": tty,
+        "restart_policy_name": restart_policy_name,
+        "startup_check_seconds": startup_check_seconds,
     }
     body = {k: v for k, v in body.items() if v is not None}
     try:
@@ -1183,7 +1242,15 @@ def _cpu_percent(raw: dict) -> float | None:
         return None
 
 
-def logs(name: str, lines: int = 200) -> str:
+def logs(name: str, lines: int = 200, *, node: Any | None = None) -> str:
+    if node is not None and not getattr(node, "is_local", True):
+        try:
+            from services.node_client import NodeClient
+
+            return NodeClient.from_node(node).container_logs(name, lines)
+        except Exception:
+            logger.warning("node docker logs failed")
+            return ""
     container = _container(name)
     if container is None:
         return ""
@@ -1264,9 +1331,13 @@ def _demux_socket_stream(raw_socket: Any) -> tuple[bytes, bytes]:
 
 def send_stdin(name: str, data: str, *, node: Any | None = None) -> dict:
     if node is not None:
-        # Console input for remote nodes goes through the agent WebSocket path
-        # (console_stream_service). HTTP stdin via agent is not used here.
-        return {"ok": False, "error": "stdin via node requires console websocket"}
+        try:
+            from services.node_client import NodeClient
+
+            return NodeClient.from_node(node).send_container_stdin(name, data)
+        except Exception as exc:
+            logger.warning("node stdin send failed")
+            return {"ok": False, "error": str(getattr(exc, "message", exc))[:300]}
     container = _container(name)
     if container is None or getattr(container, "status", None) != "running":
         return {"ok": False, "error": "Container laeuft nicht", "stdout": "", "stderr": ""}
@@ -1363,8 +1434,17 @@ async def stream_logs(name: str, tail: int = 200, *, node: Any | None = None) ->
                     pass
 
 
-def disk_usage_mb(path: str) -> int | None:
-    """Liefert die Bytes-Groesse eines Pfads in MB (gerundet)."""
+def disk_usage_mb(path: str, *, node=None, server_id: int | str | None = None) -> int | None:
+    if node is not None and not getattr(node, "is_local", True):
+        if server_id is None:
+            return None
+        try:
+            from services.node_client import NodeClient
+
+            data = NodeClient.from_node(node).files_disk_info(server_id)
+            return int(data["used_bytes"]) // (1024 * 1024)
+        except Exception:
+            return None
     if not os.path.isdir(path):
         return None
     try:

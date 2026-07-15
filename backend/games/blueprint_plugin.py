@@ -168,6 +168,7 @@ class BlueprintPlugin(GamePlugin):
                         # which has the pre-installed binary at the expected path
                         validate=validate_flag,
                         beta_branch=_steam_effective_branch(bp.source.steam),
+                        node=getattr(server, "node", None),
                     ),
                     blueprint=bp,
                 )
@@ -182,7 +183,12 @@ class BlueprintPlugin(GamePlugin):
 
             def _http_install():
                 _append_console_log(server_id, "[MSM] HTTP-Source-Download startet\n")
-                reinstall = Path(install_dir).is_dir() and any(Path(install_dir).iterdir()) if Path(install_dir).exists() else False
+                node = getattr(server, "node", None)
+                reinstall = (
+                    Path(install_dir).is_dir() and any(Path(install_dir).iterdir())
+                    if node is None or getattr(node, "is_local", False)
+                    else False
+                ) if Path(install_dir).exists() else False
                 if reinstall:
                     _append_console_log(
                         server_id,
@@ -191,11 +197,27 @@ class BlueprintPlugin(GamePlugin):
                     )
                 # Reinstall-Schutz (manuelle Configs): Cache vor, Restore nach dem Entpacken.
                 from games.updater import perform_install_with_protection
-                result = perform_install_with_protection(
-                    server,
-                    lambda: install_http_source(bp, install_dir),
-                    blueprint=bp,
-                )
+                def _install_source():
+                    if node is not None and not getattr(node, "is_local", False):
+                        from blueprints.http_source import _detect_archive_type
+                        from services.node_client import NodeClient
+                        from urllib.parse import urlparse
+
+                        cfg = bp.source.http
+                        assert cfg is not None
+                        archive_type = cfg.archiveType or _detect_archive_type(urlparse(cfg.url).path)
+                        if archive_type is None:
+                            return {"ok": False, "error": "Archive-Typ konnte nicht erkannt werden"}
+                        return NodeClient.from_node(node, timeout=600).install_http_source({
+                            "server_id": str(server_id),
+                            "url": cfg.url,
+                            "sha256": cfg.sha256,
+                            "archive_type": archive_type.value,
+                            "extract_to": cfg.extractTo,
+                        })
+                    return install_http_source(bp, install_dir)
+
+                result = perform_install_with_protection(server, _install_source, blueprint=bp)
                 if result.get("ok"):
                     _append_console_log(server_id, "[MSM] HTTP-Source erfolgreich entpackt\n")
                 else:
@@ -225,11 +247,26 @@ class BlueprintPlugin(GamePlugin):
                     )
                 from games.updater import perform_install_with_protection
 
-                result = perform_install_with_protection(
-                    server,
-                    lambda: install_github_source(bp, install_dir),
-                    blueprint=bp,
-                )
+                def _install_source():
+                    node = getattr(server, "node", None)
+                    if node is not None and not getattr(node, "is_local", False):
+                        from services.github_token_service import resolve_token
+                        from services.node_client import NodeClient
+
+                        cfg = bp.source.github
+                        assert cfg is not None
+                        return NodeClient.from_node(node, timeout=600).install_github_source({
+                            "server_id": str(server_id),
+                            "repo": cfg.repo,
+                            "branch": cfg.branch,
+                            "token": resolve_token(),
+                            "setup_commands": cfg.setupCommands,
+                            "sub_path": cfg.subPath,
+                            "runtime_image": bp.runtime.image,
+                        })
+                    return install_github_source(bp, install_dir)
+
+                result = perform_install_with_protection(server, _install_source, blueprint=bp)
                 if result.get("ok"):
                     _append_console_log(
                         server_id,
@@ -249,18 +286,25 @@ class BlueprintPlugin(GamePlugin):
         if bp.source.type == BlueprintSourceType.MANUAL_UPLOAD:
             assert bp.source.manual is not None
             install_dir = Path(server.install_dir)
-            install_dir.mkdir(parents=True, exist_ok=True)
+            node = getattr(server, "node", None)
+            is_remote = node is not None and not getattr(node, "is_local", False)
+            if not is_remote:
+                install_dir.mkdir(parents=True, exist_ok=True)
 
             readme = install_dir / "MANUAL_INSTALL.md"
-            if not readme.exists():
-                readme.write_text(
+            readme_content = (
                     f"# Manuelle Installation: {bp.meta.name}\n\n"
                     f"{bp.source.manual.instructions}\n\n"
                     f"Erforderliche Dateien:\n"
                     + "\n".join(f"- `{p}`" for p in bp.source.manual.requiredFiles)
-                    + (f"\n\nWeitere Infos: {bp.source.manual.instructionsUrl}\n" if bp.source.manual.instructionsUrl else "\n"),
-                    encoding="utf-8",
-                )
+                    + (f"\n\nWeitere Infos: {bp.source.manual.instructionsUrl}\n" if bp.source.manual.instructionsUrl else "\n")
+            )
+            if is_remote:
+                from services.node_client import NodeClient
+
+                NodeClient.from_node(node).files_write(server.id, "MANUAL_INSTALL.md", readme_content)
+            elif not readme.exists():
+                readme.write_text(readme_content, encoding="utf-8")
 
             _append_console_log(
                 server.id,
@@ -358,12 +402,6 @@ class BlueprintPlugin(GamePlugin):
         )
 
     def prepare_runtime(self, server) -> None:
-        base = Path(server.install_dir).resolve()
-        for rel_path in self._blueprint.runtime.ensureDirs:
-            target = (base / rel_path).resolve()
-            target.relative_to(base)
-            target.mkdir(parents=True, exist_ok=True)
-
         ports = self._server_ports(server)
         values = {
             "GAME_PORT": ports.get("game"),
@@ -380,9 +418,9 @@ class BlueprintPlugin(GamePlugin):
                 else:
                     values[f"{k.upper()}_PORT"] = v
 
+        resolved_patches: list[dict[str, str | None]] = []
+        local_patches: list[tuple[object, str]] = []
         for patch in self._blueprint.runtime.configPatches:
-            target = (base / patch.file).resolve()
-            target.relative_to(base)
             value = patch.value
             skip = False
             for token, port in values.items():
@@ -394,6 +432,40 @@ class BlueprintPlugin(GamePlugin):
                     value = value.replace(placeholder, str(port))
             if skip:
                 continue
+
+            resolved_patches.append({
+                "type": patch.type.value,
+                "file": patch.file,
+                "section": patch.section,
+                "key": patch.key,
+                "regex": patch.regex,
+                "value": value,
+            })
+            local_patches.append((patch, value))
+
+        node = getattr(server, "node", None)
+        if node is not None and not getattr(node, "is_local", False):
+            from services.node_client import NodeClient
+
+            NodeClient.from_node(node).files_prepare_runtime(
+                server.id,
+                {
+                    "ensure_dirs": self._blueprint.runtime.ensureDirs,
+                    "required_files": self._blueprint.runtime.requiredFiles,
+                    "patches": resolved_patches,
+                },
+            )
+            return
+
+        base = Path(server.install_dir).resolve()
+        for rel_path in self._blueprint.runtime.ensureDirs:
+            target = (base / rel_path).resolve()
+            target.relative_to(base)
+            target.mkdir(parents=True, exist_ok=True)
+
+        for patch, value in local_patches:
+            target = (base / patch.file).resolve()
+            target.relative_to(base)
 
             if patch.type == BlueprintConfigPatchType.INI:
                 assert patch.section is not None
@@ -522,6 +594,7 @@ class BlueprintPlugin(GamePlugin):
                         workshop_item_ids=chunk,
                         use_authenticated_login=requires_login,
                         # use dedicated tool image, not the runtime one
+                        node=getattr(server, "node", None),
                     )
                     items = download_res.get("items") if isinstance(download_res, dict) else {}
                     aggregated_items.update(items if isinstance(items, dict) else {})

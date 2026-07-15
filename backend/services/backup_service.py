@@ -143,7 +143,7 @@ def run_backup(
         # Bei Fehlschlag wirft backup_pg_dump_for_archive — das try/except
         # oben (VAL-FIX-007) wandelt es in "Backup fehlgeschlagen" um.
         # Postgres remains panel-side (managed DB host).
-        if has_pg:
+        if has_pg and not use_agent_archive:
             pg_dump_dict = postgres_service.backup_pg_dump_for_archive(db, server_id)
 
         if use_agent_archive:
@@ -155,7 +155,12 @@ def run_backup(
             try:
                 client = NodeClient.from_node(node)
                 with open(tar_filepath, "wb") as out:
-                    for chunk in client.files_archive(server_id):
+                    from services.postgres_service import backup_context
+
+                    for chunk in client.files_archive(
+                        server_id,
+                        postgres=backup_context(db, server_id),
+                    ):
                         out.write(chunk)
             except NodeClientError as exc:
                 raise RuntimeError(f"Node-Backup fehlgeschlagen: {exc.message}") from exc

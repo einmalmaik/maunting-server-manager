@@ -5,13 +5,25 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
-def test_health_no_auth(client: TestClient) -> None:
+def test_health_no_auth(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr("services.docker_service.ping", lambda: True)
     r = client.get("/health")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
     assert "version" in body
     assert "docker_connected" in body
+
+
+def test_health_fails_closed_when_docker_is_unavailable(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr("services.docker_service.ping", lambda: False)
+    r = client.get("/health")
+    assert r.status_code == 503
+    assert r.json() == {
+        "status": "degraded",
+        "version": r.json()["version"],
+        "docker_connected": False,
+    }
 
 
 def test_containers_without_token_401(client: TestClient) -> None:

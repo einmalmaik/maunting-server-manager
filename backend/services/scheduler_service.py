@@ -465,7 +465,11 @@ def evaluate_disk_soft_limit(db, server) -> dict:
     """
     from models import AuditLog
 
-    usage_mb = docker_service.disk_usage_mb(server.install_dir)
+    usage_mb = docker_service.disk_usage_mb(
+        server.install_dir,
+        node=getattr(server, "node", None),
+        server_id=server.id,
+    )
     if usage_mb is None:
         return {"ok": False, "error": "Disk-Nutzung konnte nicht ermittelt werden"}
 

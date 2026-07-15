@@ -324,6 +324,12 @@ def search_paths(
     """
     require_server_permission(user, server_id, db, "server.files.read")
     server = _get_server(server_id, db)
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            return agent.files_search(server_id, q)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
     base = Path(server.install_dir).resolve(strict=False)
     if not base.exists():
         return {"q": q, "results": [], "truncated": False}
@@ -436,11 +442,24 @@ async def upload_file(
     Chunked-Upload-Routen nutzen."""
     require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
-    target_dir = _safe_path(server.install_dir, path)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Kein Dateiname")
     _ensure_allowed_extension(file.filename)
+
+    agent = _agent_client(server, db)
+    if agent is not None:
+        data = await file.read(MAX_UPLOAD_SIZE + 1)
+        if len(data) > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail="Datei zu gross für Direkt-Upload")
+        rel_path = os.path.join(path, file.filename).replace("\\", "/")
+        try:
+            agent.files_upload(server_id, rel_path, data, filename=file.filename)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"message": "Datei hochgeladen", "name": file.filename, "size": len(data)}
+
+    target_dir = _safe_path(server.install_dir, path)
 
     target_dir.mkdir(parents=True, exist_ok=True)
     dest = _safe_path(server.install_dir, os.path.join(path, file.filename))
@@ -502,6 +521,23 @@ def chunked_upload_init(
     if "/" in body.filename or "\\" in body.filename:
         raise HTTPException(status_code=400, detail="Dateiname darf keine Pfad-Trennzeichen enthalten")
 
+    agent = _agent_client(server, db)
+    if agent is not None:
+        upload_id = secrets.token_hex(16)
+        try:
+            agent.files_upload_init(
+                server_id,
+                {
+                    "upload_id": upload_id,
+                    "path": body.path,
+                    "filename": body.filename,
+                    "total_size": body.total_size,
+                },
+            )
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"upload_id": upload_id, "chunk_size_recommendation": 8 * 1024 * 1024}
+
     # Ziel-Verzeichnis validieren und sicherstellen, dass es existiert.
     target_dir = _safe_path(server.install_dir, body.path or "")
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -554,6 +590,16 @@ async def chunked_upload_chunk(
     if not upload_id.isalnum() or len(upload_id) != 32:
         raise HTTPException(status_code=400, detail="Ungueltige Upload-ID")
 
+    agent = _agent_client(server, db)
+    if agent is not None:
+        data = await chunk.read(64 * 1024 * 1024 + 1)
+        if len(data) > 64 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Chunk zu gross (max 64 MB)")
+        try:
+            return agent.files_upload_chunk(server_id, upload_id, data)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+
     tmp_dir = _chunk_tmp_dir(server.install_dir)
     tmp_path = tmp_dir / f"{upload_id}.part"
     if not tmp_path.exists():
@@ -596,6 +642,13 @@ def chunked_upload_status(
     if not upload_id.isalnum() or len(upload_id) != 32:
         raise HTTPException(status_code=400, detail="Ungueltige Upload-ID")
 
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            return agent.files_upload_status(server_id, upload_id)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+
     tmp_dir = _chunk_tmp_dir(server.install_dir)
     tmp_path = tmp_dir / f"{upload_id}.part"
     if not tmp_path.exists():
@@ -618,6 +671,14 @@ def chunked_upload_finalize(
 
     if not upload_id.isalnum() or len(upload_id) != 32:
         raise HTTPException(status_code=400, detail="Ungueltige Upload-ID")
+
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            result = agent.files_upload_finalize(server_id, upload_id)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"message": "Upload abgeschlossen", **result}
 
     tmp_dir = _chunk_tmp_dir(server.install_dir)
     tmp_path = tmp_dir / f"{upload_id}.part"
@@ -682,6 +743,14 @@ def chunked_upload_abort(
 
     if not upload_id.isalnum() or len(upload_id) != 32:
         raise HTTPException(status_code=400, detail="Ungueltige Upload-ID")
+
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            agent.files_upload_abort(server_id, upload_id)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"message": "Upload abgebrochen"}
 
     tmp_dir = _chunk_tmp_dir(server.install_dir)
     for suffix in (".part", ".meta"):
@@ -820,8 +889,17 @@ def rename_path(
     server = _get_server(server_id, db)
     if "/" in body.new_name or "\\" in body.new_name or body.new_name in ("", ".", ".."):
         raise HTTPException(status_code=400, detail="Ungueltiger neuer Name")
+    new_rel = os.path.join(os.path.dirname(path), body.new_name).replace("\\", "/")
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            agent.files_rename(server_id, path, new_rel)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"message": "Umbenannt", "old_path": path, "new_path": new_rel}
+
     target = _safe_path(server.install_dir, path)
-    new_target = _safe_path(server.install_dir, os.path.join(os.path.dirname(path), body.new_name))
+    new_target = _safe_path(server.install_dir, new_rel)
 
     if not target.exists():
         raise HTTPException(status_code=404, detail="Pfad nicht gefunden")
@@ -855,6 +933,18 @@ def move_path(
     """
     require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
+
+    final_name = body.new_name if body.new_name else os.path.basename(body.from_path.rstrip("/\\"))
+    if "/" in final_name or "\\" in final_name or final_name in ("", ".", ".."):
+        raise HTTPException(status_code=400, detail="Ungueltiger Zielname")
+    rel_target = os.path.join(body.to_dir or "", final_name).replace("\\", "/")
+    agent = _agent_client(server, db)
+    if agent is not None:
+        try:
+            agent.files_move(server_id, body.from_path, rel_target)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"message": "Verschoben", "from_path": body.from_path, "to_path": rel_target}
 
     source = _safe_path(server.install_dir, body.from_path)
     if not source.exists():
@@ -925,6 +1015,15 @@ def extract_archive(
     """Extract a zip or tar archive in place."""
     require_server_permission(user, server_id, db, "server.files.write")
     server = _get_server(server_id, db)
+    agent = _agent_client(server, db)
+    if agent is not None:
+        if not _is_archive(path):
+            raise HTTPException(status_code=400, detail="Nur ZIP- und Tar-Archive werden unterstützt.")
+        try:
+            agent.files_extract(server_id, path)
+        except NodeClientError as exc:
+            raise _map_agent_error(exc) from exc
+        return {"message": "Archiv entpackt", "path": os.path.dirname(path)}
     target = _safe_path(server.install_dir, path)
 
     if not target.exists() or not target.is_file():
