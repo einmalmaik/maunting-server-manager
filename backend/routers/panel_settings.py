@@ -9,7 +9,17 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import get_db
 from dependencies import require_global, verify_csrf
-from schemas.panel_settings import PanelSettingsResponse, PanelSettingsUpdate, TestEmailRequest, ResendKeyRequest, SteamApiKeyRequest, SteamAccountRequest, GitHubTokenRequest, GitHubTokenStatus
+from schemas.panel_settings import (
+    PanelSettingsResponse,
+    PanelSettingsUpdate,
+    TestEmailRequest,
+    ResendKeyRequest,
+    SteamApiKeyRequest,
+    SteamAccountRequest,
+    GitHubTokenRequest,
+    GitHubTokenStatus,
+    SingraWidgetInstallIdRequest,
+)
 from services.panel_settings_service import PanelSettingsService
 from services.email_service import EmailService
 from services.steam_account_service import SteamAccountService
@@ -21,6 +31,7 @@ from services.steam_api_key_service import (
 )
 from services.github_token_service import status as github_token_status, set_panel_token as set_github_panel_token, clear_panel_token as clear_github_panel_token
 from services import singra_webhook_secret_service as singra_secret
+from services import singra_widget_install_service as singra_install
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -67,9 +78,13 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "time_format": all_db.get("time_format", "24h"),
         "support_widget_enabled": all_db.get("support_widget_enabled", "false") == "true",
         "support_widget_mode": all_db.get("support_widget_mode", "singra"),
-        "support_widget_singra_id": all_db.get("support_widget_singra_id", ""),
+        "support_widget_crisp_website_id": all_db.get("support_widget_crisp_website_id", ""),
+        "support_widget_tawk_property_id": all_db.get("support_widget_tawk_property_id", ""),
+        "support_widget_tawk_widget_id": all_db.get("support_widget_tawk_widget_id", ""),
         "support_widget_custom_snippet": all_db.get("support_widget_custom_snippet", ""),
-        "support_widget_notify_email": all_db.get("support_widget_notify_email", ""),
+        "singra_widget_install_configured": bool(singra_install.resolve_install_id()),
+        "singra_widget_install_masked": _mask_secret(singra_install.resolve_install_id()),
+        "singra_widget_install_source": singra_install.current_source(),
         "singra_webhook_secret_configured": bool(singra_secret.resolve_secret()),
         "singra_webhook_secret_source": singra_secret.current_source(),
     }
@@ -127,24 +142,23 @@ def update_settings(
             value = "true" if bool(value) else "false"
         if key == "support_widget_mode":
             mode = str(value).strip().lower()
-            if mode not in ("singra", "custom"):
-                raise HTTPException(status_code=400, detail="Ungueltiger Support-Widget-Modus")
+            if mode not in ("singra", "crisp", "tawk", "custom"):
+                raise HTTPException(status_code=400, detail="Ungueltiger Support-Widget-Anbieter")
             value = mode
-        if key == "support_widget_singra_id":
+        if key in (
+            "support_widget_crisp_website_id",
+            "support_widget_tawk_property_id",
+            "support_widget_tawk_widget_id",
+        ):
             wid = str(value).strip()
             if len(wid) > 128:
-                raise HTTPException(status_code=400, detail="Widget-ID zu lang")
+                raise HTTPException(status_code=400, detail="Wert zu lang")
             value = wid
         if key == "support_widget_custom_snippet":
             snippet = str(value)
             if len(snippet) > 8192:
                 raise HTTPException(status_code=400, detail="Snippet zu lang")
             value = snippet
-        if key == "support_widget_notify_email":
-            mail = str(value).strip()
-            if mail and ("@" not in mail or len(mail) > 320):
-                raise HTTPException(status_code=400, detail="Ungueltige Benachrichtigungs-E-Mail")
-            value = mail
         if _is_masked(str(value)):
             continue
         if key == "smtp_password":
@@ -411,8 +425,44 @@ async def test_github_token(
 
 
 # ------------------------------------------------------------------
-# Singra support widget (inbound webhook secret)
+# Singra support widget (installation ID + inbound webhook secret)
 # ------------------------------------------------------------------
+
+
+@router.post("/singra-widget-install-id", status_code=200)
+def set_singra_widget_install_id(
+    req: SingraWidgetInstallIdRequest,
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Speichert die Widget-Installations-ID (DIS-verschlüsselt, wie Steam API-Key)."""
+    raw = (req.install_id or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Installations-ID darf nicht leer sein")
+    if any(c in raw for c in ("\n", "\r", "\0")):
+        raise HTTPException(status_code=400, detail="Ungültige Zeichen")
+    if len(raw) > 256:
+        raise HTTPException(status_code=400, detail="Installations-ID zu lang")
+    try:
+        singra_install.set_panel_install_id(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Installations-ID ungültig")
+    return {
+        "message": "Widget-Installations-ID gespeichert",
+        "configured": True,
+        "source": singra_install.current_source(),
+    }
+
+
+@router.delete("/singra-widget-install-id", status_code=200)
+def delete_singra_widget_install_id(
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    if singra_install.current_source() == "env":
+        raise HTTPException(status_code=400, detail="Installations-ID wird per Umgebungsvariable verwaltet")
+    singra_install.clear_panel_install_id()
+    return {"message": "Widget-Installations-ID entfernt", **singra_install.status()}
 
 
 @router.post("/singra-webhook-secret/rotate", status_code=200)

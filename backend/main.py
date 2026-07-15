@@ -494,10 +494,10 @@ async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
     csp = (
         "default-src 'self'; "
-        "script-src 'self' https://singrabot.mauntingstudios.de; "
+        "script-src 'self' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
-        "connect-src 'self' https://singrabot.mauntingstudios.de; "
+        "connect-src 'self' https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to; "
         "font-src 'self'; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "

@@ -1,20 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Copy, LifeBuoy, Play, RefreshCw, Save } from 'lucide-react'
+import { Copy, LifeBuoy, Play, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Switch } from '@/components/ui/Switch'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
-import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
-
-const SINGRA_SNIPPET_TEMPLATE = `<!-- Singra Support Widget -->
-<script
-  src="https://singrabot.mauntingstudios.de/widget.js"
-  data-widget-id="HIER_WIDGET_ID_EINSETZEN"
-  defer
-></script>`
+import { Dropdown } from '@/components/ui/Dropdown'
+import { PasswordInput } from '@/components/ui/PasswordInput'
+import { PanelSettings, EMPTY_PANEL_SETTINGS, type SupportWidgetProvider } from './types'
 
 export function SupportWidgetTab() {
   const { t } = useTranslation()
@@ -25,18 +20,34 @@ export function SupportWidgetTab() {
   const [rotating, setRotating] = useState(false)
   const [testing, setTesting] = useState(false)
   const [revealedSecret, setRevealedSecret] = useState('')
+  const [newInstallId, setNewInstallId] = useState('')
+  const [savingInstallId, setSavingInstallId] = useState(false)
+
+  const provider = settings.support_widget_mode as SupportWidgetProvider
+
+  const providerOptions = useMemo(
+    () => [
+      { value: 'singra', label: t('settings.supportWidget.providers.singra'), hint: t('settings.supportWidget.providers.singraHint') },
+      { value: 'crisp', label: t('settings.supportWidget.providers.crisp'), hint: t('settings.supportWidget.providers.crispHint') },
+      { value: 'tawk', label: t('settings.supportWidget.providers.tawk'), hint: t('settings.supportWidget.providers.tawkHint') },
+      { value: 'custom', label: t('settings.supportWidget.providers.custom'), hint: t('settings.supportWidget.providers.customHint') },
+    ],
+    [t],
+  )
 
   const webhookUrl = useMemo(() => {
     const base = settings.panel_url || (typeof window !== 'undefined' ? window.location.origin : '')
     return base ? `${base.replace(/\/$/, '')}/api/singra-webhook` : ''
   }, [settings.panel_url])
 
+  const reload = () =>
+    api<PanelSettings>('/settings')
+      .then((data) => setSettings(data))
+      .catch((err) => toast.error(err.message))
+
   useEffect(() => {
     let active = true
-    api<PanelSettings>('/settings')
-      .then((data) => { if (active) setSettings(data) })
-      .catch((err) => toast.error(err.message))
-      .finally(() => { if (active) setLoading(false) })
+    reload().finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [])
 
@@ -49,9 +60,10 @@ export function SupportWidgetTab() {
         body: JSON.stringify({
           support_widget_enabled: settings.support_widget_enabled,
           support_widget_mode: settings.support_widget_mode,
-          support_widget_singra_id: settings.support_widget_singra_id,
+          support_widget_crisp_website_id: settings.support_widget_crisp_website_id,
+          support_widget_tawk_property_id: settings.support_widget_tawk_property_id,
+          support_widget_tawk_widget_id: settings.support_widget_tawk_widget_id,
           support_widget_custom_snippet: settings.support_widget_custom_snippet,
-          support_widget_notify_email: settings.support_widget_notify_email,
         }),
       })
       toast.success(t('settings.saved'))
@@ -59,6 +71,34 @@ export function SupportWidgetTab() {
       toast.error(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const saveInstallId = async () => {
+    if (!newInstallId.trim()) return
+    setSavingInstallId(true)
+    try {
+      await api('/settings/singra-widget-install-id', {
+        method: 'POST',
+        body: JSON.stringify({ install_id: newInstallId.trim() }),
+      })
+      toast.success(t('settings.supportWidget.installIdSaved'))
+      setNewInstallId('')
+      await reload()
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setSavingInstallId(false)
+    }
+  }
+
+  const removeInstallId = async () => {
+    try {
+      await api('/settings/singra-widget-install-id', { method: 'DELETE' })
+      toast.success(t('settings.supportWidget.installIdRemoved'))
+      await reload()
+    } catch (err: any) {
+      toast.error(err.message)
     }
   }
 
@@ -107,14 +147,6 @@ export function SupportWidgetTab() {
     )
   }
 
-  const snippetPreview =
-    settings.support_widget_mode === 'singra'
-      ? SINGRA_SNIPPET_TEMPLATE.replace(
-          'HIER_WIDGET_ID_EINSETZEN',
-          settings.support_widget_singra_id || 'HIER_WIDGET_ID_EINSETZEN',
-        )
-      : settings.support_widget_custom_snippet
-
   return (
     <form onSubmit={save} className="space-y-6">
       <fieldset disabled={!canWrite} className="m-0 space-y-6 border-0 p-0">
@@ -135,101 +167,143 @@ export function SupportWidgetTab() {
             />
           </label>
 
-          <div className="mb-4 grid gap-4 md:grid-cols-2">
-            <label className="block text-sm">
-              <span className="mb-1.5 block text-on-surface-variant">{t('settings.supportWidget.mode')}</span>
-              <select
-                className="msm-input w-full"
-                value={settings.support_widget_mode}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    support_widget_mode: e.target.value as 'singra' | 'custom',
-                  })
-                }
-              >
-                <option value="singra">{t('settings.supportWidget.modeSingra')}</option>
-                <option value="custom">{t('settings.supportWidget.modeCustom')}</option>
-              </select>
-            </label>
-            {settings.support_widget_mode === 'singra' ? (
-              <label className="block text-sm">
-                <span className="mb-1.5 block text-on-surface-variant">{t('settings.supportWidget.widgetId')}</span>
-                <Input
-                  value={settings.support_widget_singra_id}
-                  onChange={(e) => setSettings({ ...settings, support_widget_singra_id: e.target.value })}
-                  placeholder={t('settings.supportWidget.widgetIdPlaceholder')}
-                />
-              </label>
-            ) : (
-              <label className="block text-sm md:col-span-2">
-                <span className="mb-1.5 block text-on-surface-variant">{t('settings.supportWidget.customSnippet')}</span>
-                <textarea
-                  className="msm-input min-h-[120px] w-full font-mono text-xs"
-                  value={settings.support_widget_custom_snippet}
-                  onChange={(e) => setSettings({ ...settings, support_widget_custom_snippet: e.target.value })}
-                  placeholder={SINGRA_SNIPPET_TEMPLATE}
-                />
-              </label>
-            )}
-          </div>
-
-          <label className="mb-6 block text-sm">
-            <span className="mb-1.5 block text-on-surface-variant">{t('settings.supportWidget.notifyEmail')}</span>
-            <Input
-              type="email"
-              value={settings.support_widget_notify_email}
-              onChange={(e) => setSettings({ ...settings, support_widget_notify_email: e.target.value })}
-              placeholder={t('settings.supportWidget.notifyEmailHint')}
+          <div className="mb-6">
+            <span className="mb-1.5 block text-sm text-on-surface-variant">{t('settings.supportWidget.provider')}</span>
+            <Dropdown
+              value={provider}
+              onChange={(value) => setSettings({ ...settings, support_widget_mode: value as SupportWidgetProvider })}
+              options={providerOptions}
+              disabled={!canWrite}
+              aria-label={t('settings.supportWidget.provider')}
             />
-          </label>
-
-          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-on-surface-variant">
-            {t('settings.supportWidget.embedTitle')}
-          </p>
-          <pre className="overflow-x-auto rounded-lg border border-outline-variant/40 bg-surface-container-high p-3 text-xs text-on-surface">
-            {snippetPreview}
-          </pre>
-          <p className="mt-2 text-xs text-on-surface-variant">{t('settings.supportWidget.embedHint')}</p>
-        </div>
-
-        <div className="msm-card space-y-4 p-6">
-          <h3 className="font-headline text-base text-primary">{t('settings.supportWidget.webhookTitle')}</h3>
-          <p className="text-sm text-on-surface-variant">{t('settings.supportWidget.webhookDescription')}</p>
-
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Input readOnly value={webhookUrl} className="font-mono text-xs" />
-            <Button type="button" variant="secondary" onClick={() => void copyWebhook()} className="shrink-0 gap-2">
-              <Copy className="h-4 w-4" />
-              {t('settings.supportWidget.copyWebhook')}
-            </Button>
           </div>
 
-          <p className="text-sm text-on-surface-variant">
-            {settings.singra_webhook_secret_configured
-              ? t('settings.supportWidget.secretConfigured')
-              : t('settings.supportWidget.secretMissing')}
-            {' · '}
-            {t(`settings.supportWidget.secretSource.${settings.singra_webhook_secret_source}`)}
-          </p>
-
-          {revealedSecret && (
-            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 font-mono text-xs break-all">
-              {revealedSecret}
+          {provider === 'singra' && (
+            <div className="space-y-4 rounded-lg border border-outline-variant/30 bg-surface-container-high/50 p-4">
+              <p className="text-sm text-on-surface-variant">{t('settings.supportWidget.singraAutoInject')}</p>
+              <div className="flex items-center gap-2 text-sm">
+                <span
+                  className={`h-2 w-2 rounded-full ${settings.singra_widget_install_configured ? 'bg-status-success' : 'bg-on-surface-variant'}`}
+                />
+                {settings.singra_widget_install_configured
+                  ? t('settings.supportWidget.installIdConfigured')
+                  : t('settings.supportWidget.installIdMissing')}
+                <span className="text-on-surface-variant/80">
+                  · {t(`settings.supportWidget.installIdSource.${settings.singra_widget_install_source}`)}
+                </span>
+              </div>
+              {settings.singra_widget_install_masked && (
+                <Input readOnly value={settings.singra_widget_install_masked} className="font-mono text-sm opacity-70" />
+              )}
+              <div>
+                <label className="mb-1.5 block text-sm text-on-surface-variant">
+                  {t('settings.supportWidget.installIdNew')}
+                </label>
+                <PasswordInput
+                  value={newInstallId}
+                  onChange={(e) => setNewInstallId(e.target.value)}
+                  placeholder={t('settings.supportWidget.installIdPlaceholder')}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="secondary" disabled={savingInstallId} onClick={() => void saveInstallId()}>
+                  {t('settings.supportWidget.installIdSave')}
+                </Button>
+                {settings.singra_widget_install_source === 'panel' && (
+                  <Button type="button" variant="ghost" onClick={() => void removeInstallId()} className="gap-2 text-status-error">
+                    <Trash2 className="h-4 w-4" />
+                    {t('settings.supportWidget.installIdRemove')}
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" disabled={rotating} onClick={() => void rotateSecret()} className="gap-2">
-              <RefreshCw className={`h-4 w-4 ${rotating ? 'animate-spin' : ''}`} />
-              {t('settings.supportWidget.rotateSecret')}
-            </Button>
-            <Button type="button" variant="secondary" disabled={testing} onClick={() => void testWebhook()} className="gap-2">
-              <Play className="h-4 w-4" />
-              {testing ? t('common.loading') : t('settings.supportWidget.testWebhook')}
-            </Button>
-          </div>
+          {provider === 'crisp' && (
+            <label className="block text-sm">
+              <span className="mb-1.5 block text-on-surface-variant">{t('settings.supportWidget.crispWebsiteId')}</span>
+              <Input
+                value={settings.support_widget_crisp_website_id}
+                onChange={(e) => setSettings({ ...settings, support_widget_crisp_website_id: e.target.value })}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              />
+              <p className="mt-1.5 text-xs text-on-surface-variant">{t('settings.supportWidget.crispHint')}</p>
+            </label>
+          )}
+
+          {provider === 'tawk' && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-on-surface-variant">{t('settings.supportWidget.tawkPropertyId')}</span>
+                <Input
+                  value={settings.support_widget_tawk_property_id}
+                  onChange={(e) => setSettings({ ...settings, support_widget_tawk_property_id: e.target.value })}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-on-surface-variant">{t('settings.supportWidget.tawkWidgetId')}</span>
+                <Input
+                  value={settings.support_widget_tawk_widget_id}
+                  onChange={(e) => setSettings({ ...settings, support_widget_tawk_widget_id: e.target.value })}
+                />
+              </label>
+              <p className="text-xs text-on-surface-variant md:col-span-2">{t('settings.supportWidget.tawkHint')}</p>
+            </div>
+          )}
+
+          {provider === 'custom' && (
+            <label className="block text-sm">
+              <span className="mb-1.5 block text-on-surface-variant">{t('settings.supportWidget.customSnippet')}</span>
+              <textarea
+                className="msm-input min-h-[140px] w-full font-mono text-xs"
+                value={settings.support_widget_custom_snippet}
+                onChange={(e) => setSettings({ ...settings, support_widget_custom_snippet: e.target.value })}
+                placeholder={t('settings.supportWidget.customSnippetPlaceholder')}
+              />
+              <p className="mt-1.5 text-xs text-on-surface-variant">{t('settings.supportWidget.customHint')}</p>
+            </label>
+          )}
         </div>
+
+        {provider === 'singra' && (
+          <div className="msm-card space-y-4 p-6">
+            <h3 className="font-headline text-base text-primary">{t('settings.supportWidget.webhookTitle')}</h3>
+            <p className="text-sm text-on-surface-variant">{t('settings.supportWidget.webhookDescription')}</p>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input readOnly value={webhookUrl} className="font-mono text-xs" />
+              <Button type="button" variant="secondary" onClick={() => void copyWebhook()} className="shrink-0 gap-2">
+                <Copy className="h-4 w-4" />
+                {t('settings.supportWidget.copyWebhook')}
+              </Button>
+            </div>
+
+            <p className="text-sm text-on-surface-variant">
+              {settings.singra_webhook_secret_configured
+                ? t('settings.supportWidget.secretConfigured')
+                : t('settings.supportWidget.secretMissing')}
+              {' · '}
+              {t(`settings.supportWidget.secretSource.${settings.singra_webhook_secret_source}`)}
+            </p>
+
+            {revealedSecret && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 font-mono text-xs break-all">
+                {revealedSecret}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" disabled={rotating} onClick={() => void rotateSecret()} className="gap-2">
+                <RefreshCw className={`h-4 w-4 ${rotating ? 'animate-spin' : ''}`} />
+                {t('settings.supportWidget.rotateSecret')}
+              </Button>
+              <Button type="button" variant="secondary" disabled={testing} onClick={() => void testWebhook()} className="gap-2">
+                <Play className="h-4 w-4" />
+                {testing ? t('common.loading') : t('settings.supportWidget.testWebhook')}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {canWrite && (
           <div className="flex justify-end">

@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from models.singra_webhook_event import SingraWebhookEvent
 from services.email_service import EmailService
-from services.panel_settings_service import PanelSettingsService
 from services.singra_webhook_secret_service import resolve_secret
 
 _log = logging.getLogger("msm.singra_webhook")
@@ -132,10 +131,7 @@ async def handle_verified_payload(
 async def _notify_team(data: dict[str, Any]) -> None:
     if not EmailService.is_configured():
         return
-    notify_to = (
-        PanelSettingsService.get("support_widget_notify_email", "").strip()
-        or EmailService._get_setting("smtp_from").strip()
-    )
+    notify_to = EmailService._get_setting("smtp_from").strip()
     if not notify_to:
         return
     subject = f"[MSM Support] {data.get('subject') or 'Neues Widget-Ticket'}"

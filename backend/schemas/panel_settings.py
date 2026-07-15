@@ -25,9 +25,13 @@ class PanelSettingsResponse(BaseModel):
     time_format: str = "24h"
     support_widget_enabled: bool = False
     support_widget_mode: str = "singra"
-    support_widget_singra_id: str = ""
+    support_widget_crisp_website_id: str = ""
+    support_widget_tawk_property_id: str = ""
+    support_widget_tawk_widget_id: str = ""
     support_widget_custom_snippet: str = ""
-    support_widget_notify_email: str = ""
+    singra_widget_install_configured: bool = False
+    singra_widget_install_masked: str = ""
+    singra_widget_install_source: str = "none"
     singra_webhook_secret_configured: bool = False
     singra_webhook_secret_source: str = "none"
 
@@ -47,9 +51,10 @@ class PanelSettingsUpdate(BaseModel):
     time_format: str | None = None
     support_widget_enabled: bool | None = None
     support_widget_mode: str | None = None
-    support_widget_singra_id: str | None = None
+    support_widget_crisp_website_id: str | None = None
+    support_widget_tawk_property_id: str | None = None
+    support_widget_tawk_widget_id: str | None = None
     support_widget_custom_snippet: str | None = None
-    support_widget_notify_email: str | None = None
 
 
 class TestEmailRequest(BaseModel):
@@ -81,3 +86,7 @@ class GitHubTokenRequest(BaseModel):
 class GitHubTokenStatus(BaseModel):
     configured: bool
     source: str  # "env" | "panel" | "none"
+
+
+class SingraWidgetInstallIdRequest(BaseModel):
+    install_id: str
