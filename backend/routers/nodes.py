@@ -1,8 +1,8 @@
-"""Admin Node-Management API.
+"""Node-Management API.
 
-Owner-only for create/update/delete. List/detail for authenticated users
-with panel admin context (owner or is_admin via existing admin patterns).
-Never returns auth_token_enc or plaintext tokens.
+- GET list: Owner ODER ``servers.create`` (noetig fuer Create-Server Node-Picker).
+- GET detail / mutations: Owner-only.
+- Responses never include auth_token / auth_token_enc.
 """
 
 from __future__ import annotations
@@ -13,21 +13,34 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_owner, verify_csrf
+from dependencies import get_current_owner, get_current_user, verify_csrf
 from models import Node, Server, User
 from schemas.node import NodeCreate, NodeOut, NodeUpdate
 from services.node_client import NodeClient, NodeClientError
 from services.node_service import encrypt_node_token, node_out_dict
+from services.permission_service import has_global_permission
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
+
+
+def _can_list_nodes(db: Session, user: User) -> bool:
+    if user.is_owner:
+        return True
+    return has_global_permission(db, user, "servers.create")
 
 
 @router.get("", response_model=list[NodeOut])
 def list_nodes(
     db: Session = Depends(get_db),
-    owner: User = Depends(get_current_owner),
+    user: User = Depends(get_current_user),
 ) -> list[dict]:
-    _ = owner
+    """List nodes for the create-server picker and admin UI.
+
+    Auth: logged-in user with Owner OR global ``servers.create``.
+    Never returns agent tokens.
+    """
+    if not _can_list_nodes(db, user):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
     nodes = db.query(Node).order_by(Node.id.asc()).all()
     out = []
     for n in nodes:

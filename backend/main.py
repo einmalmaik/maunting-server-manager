@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
-from config import settings
+from config import get_cors_origins, settings
 from database import engine, Base
 from routers import (
     auth_router,
@@ -464,10 +464,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS: Nicht mehr wildcard, sondern explizite Origins ──
-_cors_origins = [settings.panel_url]
-if settings.debug:
-    _cors_origins.extend(["http://localhost:5173", "http://localhost", "http://127.0.0.1:5173"])
+# ── CORS: Explizite Origins (panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev) ──
+_cors_origins = get_cors_origins()
 
 app.add_middleware(
     CORSMiddleware,
@@ -475,6 +473,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
+    expose_headers=["X-CSRF-Token"],
 )
 
 
@@ -485,6 +484,20 @@ app.add_middleware(SlowAPIMiddleware)
 
 
 # ── CSP + Security Headers Middleware ──
+def _csp_connect_src() -> str:
+    """connect-src: 'self' plus panel/CORS origins (split FE + API / Vercel)."""
+    parts = ["'self'"]
+    for origin in _cors_origins:
+        if origin and origin not in parts:
+            parts.append(origin)
+        # ws/wss counterpart for console streams when SPA is same CSP host
+        if origin.startswith("https://"):
+            parts.append("wss://" + origin[len("https://") :])
+        elif origin.startswith("http://"):
+            parts.append("ws://" + origin[len("http://") :])
+    return " ".join(parts)
+
+
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
@@ -493,7 +506,7 @@ async def security_headers_middleware(request: Request, call_next):
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
-        "connect-src 'self'; "
+        f"connect-src {_csp_connect_src()}; "
         "font-src 'self'; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
@@ -562,14 +575,14 @@ def app_version():
 def health():
     return {"status": "ok"}
 
-# Static Frontend (nur in Produktion)
+# Static Frontend (Single-Host Produktion). Phase 4: abschaltbar fuer API-only.
 # Wichtig: Mount NACH allen API-Routern und expliziten Routes hinzufügen,
 # damit /api/* und Health nicht vom SPA-Static-Fallback geschluckt werden.
 # /assets/* ohne html-Fallback: fehlende JS-Chunks liefern 404 (text/plain),
 # nicht index.html — verhindert „MIME type text/html“ bei veralteten Lazy-Chunks.
 import os
 _FRONTEND_DIST = "/opt/msm/frontend/dist"
-if os.path.exists(_FRONTEND_DIST):
+if settings.serve_frontend and os.path.exists(_FRONTEND_DIST):
     app.mount(
         "/assets",
         StaticFiles(directory=_FRONTEND_DIST, html=False),

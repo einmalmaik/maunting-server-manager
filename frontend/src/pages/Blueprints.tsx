@@ -11,6 +11,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { api } from '@/api/client'
+import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -376,7 +377,7 @@ export function Blueprints() {
                   {/* Aktionen */}
                   <div className="flex items-center gap-2 mt-auto pt-1 border-t border-outline-variant/20">
                     <a
-                      href={`/api/blueprints/${encodeURIComponent(entry.id)}`}
+                      href={apiUrl(`/blueprints/${encodeURIComponent(entry.id)}`)}
                       download
                       className="msm-btn-secondary inline-flex items-center gap-1 px-3 py-1.5 text-xs"
                       data-testid={`blueprint-download-${entry.id}`}

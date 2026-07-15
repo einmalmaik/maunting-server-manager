@@ -11,6 +11,8 @@ export const routeAccessRules = {
   blueprints: ['panel.settings.read'],
   panelBackups: ['panel.settings.write'],
   panelDatabase: ['panel.database.read'],
+  // Phase 3: owner-only (empty keys → only me.is_owner bypass grants access)
+  nodes: [] as const,
 } as const
 
 export function resolveRouteAccessState({

@@ -28,6 +28,7 @@
  *   })
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { wsUrl } from '@/config/api'
 
 export type ConnectionStatus = 'connecting' | 'live' | 'reconnecting' | 'failed'
 
@@ -142,8 +143,8 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketResult {
     const connect = () => {
       if (cancelledRef.current) return
       setStatusAndNotify('connecting')
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const ws = new WebSocket(`${proto}//${window.location.host}${buildUrlRef.current()}`)
+      // buildUrl may return a path (`/api/...`) or an absolute ws(s) URL.
+      const ws = new WebSocket(wsUrl(buildUrlRef.current()))
       wsRef.current = ws
 
       ws.onopen = () => {

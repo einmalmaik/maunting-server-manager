@@ -23,9 +23,9 @@ class TestLogin:
         # access_token and refresh_token must be httponly (FastAPI TestClient exposes them)
 
     def test_access_cookie_uses_lax_for_oauth_callback_compat(
-        self, client: TestClient, owner_user: User
+        self, client: TestClient, owner_user: User, monkeypatch
     ):
-        """Security-Invariante: __Secure-access_token MUSS SameSite=Lax sein.
+        """Security-Invariante (Single-Host): access SameSite=Lax, rest Strict.
 
         OAuth-Callbacks kommen als Cross-Site-Top-Level-Navigation vom IdP
         zurueck (Google, Discord, Keycloak, ...). SameSite=Strict wuerde das
@@ -34,11 +34,35 @@ class TestLogin:
         weiterhin Cross-Site-Subresources (AJAX/fetch) und nicht-sichere
         Methoden (POST) — d.h. keine CSRF-Schwaechung fuer MSM.
         """
-        from cookies import _COOKIE_CONFIG
+        import config
+        from cookies import _COOKIE_CONFIG, _samesite_for
+
+        monkeypatch.setattr(config.settings, "cookie_cross_site", False, raising=False)
         assert _COOKIE_CONFIG["__Secure-access_token"]["samesite"] == "lax"
-        # Refresh + CSRF duerfen/sollen strict bleiben
-        assert _COOKIE_CONFIG["__Secure-refresh_token"]["samesite"] == "strict"
-        assert _COOKIE_CONFIG["__Secure-csrf_token"]["samesite"] == "strict"
+        assert _samesite_for("__Secure-access_token") == "lax"
+        assert _samesite_for("__Secure-refresh_token") == "strict"
+        assert _samesite_for("__Secure-csrf_token") == "strict"
+
+    def test_cross_site_cookies_use_samesite_none(self, monkeypatch):
+        """Phase 4: split FE/API braucht SameSite=None auf allen Session-Cookies."""
+        import config
+        from cookies import _samesite_for
+
+        monkeypatch.setattr(config.settings, "cookie_cross_site", True, raising=False)
+        assert _samesite_for("__Secure-access_token") == "none"
+        assert _samesite_for("__Secure-refresh_token") == "none"
+        assert _samesite_for("__Secure-csrf_token") == "none"
+
+    def test_login_exposes_csrf_response_header(self, client: TestClient, owner_user: User):
+        """Cross-Origin SPA liest CSRF aus X-CSRF-Token (nicht aus document.cookie)."""
+        response = client.post("/api/auth/login", json={
+            "username": "owner",
+            "password": "OwnerPass123!",
+            "otp_code": None,
+        })
+        assert response.status_code == 200
+        assert response.headers.get("X-CSRF-Token")
+        assert response.headers["X-CSRF-Token"] == response.cookies.get("__Secure-csrf_token")
 
     def test_login_wrong_password(self, client: TestClient, owner_user: User):
         response = client.post("/api/auth/login", json={

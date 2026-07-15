@@ -534,6 +534,11 @@ export function ServerDetail() {
             </h1>
             <p className="font-body-md text-sm text-on-surface-variant">
               {gameName(server.game_type)}
+              {server.node_name ? (
+                <span className="ml-2 text-on-surface-variant/80">
+                  · {t("servers.node")}: {server.node_name}
+                </span>
+              ) : null}
             </p>
           </div>
         </div>
@@ -773,6 +778,14 @@ export function ServerDetail() {
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div>
+            <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
+              {t("servers.node")}
+            </p>
+            <p className="font-headline text-body-md text-primary break-all">
+              {server.node_name || t("servers.nodeUnknown", { defaultValue: "—" })}
+            </p>
+          </div>
           <div>
             <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
               {t("servers.publicBindIp")}

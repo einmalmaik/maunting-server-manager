@@ -27,7 +27,9 @@ const OAuthDocs = lazy(() => import('./pages/docs/OAuthDocs').then(module => ({ 
 const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ default: module.Blueprints })))
 const PanelBackups = lazy(() => import('./pages/PanelBackups').then(module => ({ default: module.PanelBackups })))
 const PanelDatabase = lazy(() => import('./pages/PanelDatabase').then(module => ({ default: module.PanelDatabase })))
+const AdminNodes = lazy(() => import('./pages/AdminNodes').then(module => ({ default: module.AdminNodes })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
+import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
 import { DisBadge } from './components/DisBadge'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
@@ -37,7 +39,7 @@ function App() {
   const { isAuthenticated } = useAuthStore()
 
   useEffect(() => {
-    fetch('/api/auth/setup-status')
+    fetch(apiUrl('/auth/setup-status'), { credentials: 'include' })
       .then((res) => res.json())
       .then((data) => setSetupRequired(data.setup_required))
       .catch(() => setSetupRequired(false))
@@ -130,6 +132,14 @@ function App() {
             element={
               <RequirePermission routeKey="panelDatabase">
                 <PanelDatabase />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="admin/nodes"
+            element={
+              <RequirePermission routeKey="nodes">
+                <AdminNodes />
               </RequirePermission>
             }
           />

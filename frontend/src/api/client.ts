@@ -1,7 +1,8 @@
 import i18n from '@/i18n'
+import { API_BASE, apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 
-const API_BASE = '/api'
+export { API_BASE, apiUrl } from '@/config/api'
 
 /**
  * Error thrown by the API client for failures that originated from a
@@ -22,9 +23,33 @@ export class SanitizedApiError extends Error {
   }
 }
 
-function getCsrfToken(): string | null {
+/**
+ * CSRF value held in memory for cross-origin setups where document.cookie
+ * cannot read the API host's `__Secure-csrf_token` (different site).
+ * Populated from `X-CSRF-Token` response headers (login, refresh, /me).
+ */
+let csrfTokenMemory: string | null = null
+
+export function getCsrfToken(): string | null {
+  if (csrfTokenMemory) return csrfTokenMemory
   const match = document.cookie.match(new RegExp('(^| )__Secure-csrf_token=([^;]+)'))
   return match ? decodeURIComponent(match[2]) : null
+}
+
+/** Clears in-memory CSRF (e.g. after logout). Does not touch HttpOnly cookies. */
+export function clearCsrfTokenMemory(): void {
+  csrfTokenMemory = null
+}
+
+function captureCsrfFromResponse(res: Response): void {
+  try {
+    const header = res.headers?.get?.('X-CSRF-Token')
+    if (header) {
+      csrfTokenMemory = header
+    }
+  } catch {
+    /* ignore incomplete Response mocks in tests */
+  }
 }
 
 function extractErrorMessage(detail: unknown): string | null {
@@ -60,10 +85,11 @@ function extractErrorMessage(detail: unknown): string | null {
 let refreshPromise: Promise<void> | null = null
 
 async function doRefresh(): Promise<void> {
-  const res = await fetch(`${API_BASE}/auth/refresh`, {
+  const res = await fetch(apiUrl('/auth/refresh'), {
     method: 'POST',
     credentials: 'include',
   })
+  captureCsrfFromResponse(res)
   if (!res.ok) {
     throw new Error('Session abgelaufen')
   }
@@ -109,11 +135,14 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     ...(method === 'GET' ? { cache: 'no-store' } : {}),
   }
 
+  const url = apiUrl(path)
+
   const makeRequest = async (): Promise<Response> => {
-    return fetch(`${API_BASE}${path}`, fetchOptions)
+    return fetch(url, fetchOptions)
   }
 
   let res = await makeRequest()
+  captureCsrfFromResponse(res)
 
   // Token-Refresh bei 401 (ausser bei Login/Refresh selbst)
   if (res.status === 401 && path !== '/auth/refresh' && path !== '/auth/login') {
@@ -127,10 +156,11 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       } else {
         delete newHeaders['X-CSRF-Token']
       }
-      res = await fetch(`${API_BASE}${path}`, {
+      res = await fetch(url, {
         ...fetchOptions,
         headers: newHeaders,
       })
+      captureCsrfFromResponse(res)
     } catch {
       // Refresh fehlgeschlagen — Weiterleitung zum Login im Aufrufer.
       // Lokalisierte Meldung, damit der Caller die Fehlermeldung direkt

@@ -49,6 +49,21 @@ class Settings(BaseSettings):
     # Mit führendem Punkt für Subdomains (Cloudflare, Reverse-Proxy etc.).
     cookie_domain: str = ""
 
+    # Cross-Site Cookies (Phase 4: Frontend auf anderer Domain, z. B. Vercel).
+    # true → Session-Cookies mit SameSite=None (erfordert Secure=True / HTTPS).
+    # false (Default) → SameSite=Lax/Strict wie bisher (Single-Host / reverse-proxy).
+    # Lokale Split-Dev (localhost:3000 → :8000): true setzen, CORS-Origins pflegen.
+    cookie_cross_site: bool = False
+
+    # Zusaetzliche CORS-Origins (Komma-separiert), z. B. https://maunting-panel.vercel.app
+    # panel_url ist immer erlaubt. In debug=True kommen zusaetzlich lokale Dev-Origins.
+    cors_allowed_origins: str = ""
+
+    # Backend dient das gebaute React-SPA (StaticFiles unter /opt/msm/frontend/dist).
+    # false = reines API-Backend (Vercel / separates Frontend-Hosting). Default true
+    # fuer Abwaertskompatibilitaet von Single-Host-Installationen.
+    serve_frontend: bool = True
+
     # Logo — absolute URL used in email templates.
     # Falls back to panel_url + /logo.png when empty.
     logo_url: str = ""
@@ -157,6 +172,44 @@ if settings.panel_url == "http://localhost" and not settings.debug:
         "The install.sh script writes it automatically on first install. "
         "Default would break OAuth redirect_uri, email links and CORS."
     )
+
+
+def get_cors_origins() -> list[str]:
+    """Explizite CORS allowlist: panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev-Defaults.
+
+    Kein Wildcard. Credentials (Cookies) erfordern exakte Origins.
+    """
+    origins: list[str] = []
+    panel = (settings.panel_url or "").rstrip("/")
+    if panel:
+        origins.append(panel)
+
+    extra = (settings.cors_allowed_origins or "").strip()
+    if extra:
+        for part in extra.split(","):
+            o = part.strip().rstrip("/")
+            if o:
+                origins.append(o)
+
+    if settings.debug:
+        for dev in (
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost",
+            "http://127.0.0.1",
+        ):
+            origins.append(dev)
+
+    # Deduplizieren, Reihenfolge behalten
+    seen: set[str] = set()
+    result: list[str] = []
+    for o in origins:
+        if o not in seen:
+            seen.add(o)
+            result.append(o)
+    return result
 
 
 def get_effective_cookie_domain() -> str:

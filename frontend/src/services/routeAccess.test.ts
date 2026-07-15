@@ -55,6 +55,11 @@ describe('resolveRouteAccessState', () => {
     expect(resolve('settings', userWith([]))).toBe('forbidden')
   })
 
+  it('allows nodes only for owners (empty required keys)', () => {
+    expect(resolve('nodes', owner)).toBe('allowed')
+    expect(resolve('nodes', userWith(['panel.settings.write']))).toBe('forbidden')
+  })
+
   it('separates unknown routes and permission load errors', () => {
     expect(resolve('does-not-exist', owner)).toBe('notFound')
     expect(resolve('settings', null, { error: 'PERMISSIONS_LOAD_FAILED' })).toBe('error')

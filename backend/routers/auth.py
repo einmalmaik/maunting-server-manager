@@ -339,7 +339,16 @@ def refresh(
 
 
 @router.get("/me", response_model=UserResponse)
-def me(user: User = Depends(get_current_user)) -> User:
+def me(
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+) -> User:
+    # Cross-Origin SPA: CSRF-Cookie ist nicht per document.cookie lesbar.
+    # Echo des Cookie-Werts als Header (bereits vom Browser mitgeschickt).
+    csrf = request.cookies.get("__Secure-csrf_token")
+    if csrf:
+        response.headers["X-CSRF-Token"] = csrf
     return user
 
 

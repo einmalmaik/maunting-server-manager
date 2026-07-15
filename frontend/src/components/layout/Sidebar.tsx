@@ -14,6 +14,7 @@ import {
   BookOpen,
   Boxes,
   Database,
+  Network,
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -30,6 +31,8 @@ export function Sidebar() {
   const canViewSettings = useHasPermission('panel.settings.read')
   const canManagePanelBackups = useHasPermission('panel.settings.write')
   const canReadPanelDatabase = useHasPermission('panel.database.read')
+  // Nodes API is owner-only; owners pass all permission hooks via bypass.
+  const canManageNodes = Boolean(user?.is_owner)
 
   const handleLogout = async () => {
     await logout()
@@ -54,6 +57,9 @@ export function Sidebar() {
     ] : []),
     ...((user?.is_owner || canReadPanelDatabase) ? [
       { to: '/panel-database', icon: Database, label: t('nav.panelDatabase', 'Panel-Datenbank') },
+    ] : []),
+    ...(canManageNodes ? [
+      { to: '/admin/nodes', icon: Network, label: t('nav.nodes') },
     ] : []),
     { to: '/docs', icon: BookOpen, label: t('nav.docs') },
   ]

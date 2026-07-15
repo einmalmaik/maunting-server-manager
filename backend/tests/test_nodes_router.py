@@ -20,6 +20,12 @@ def test_list_nodes_requires_auth(client: TestClient):
     assert r.status_code in (401, 403)
 
 
+def test_list_nodes_as_owner(client: TestClient, owner_cookies: dict):
+    r = client.get("/api/nodes", cookies=owner_cookies)
+    assert r.status_code == 200, r.text
+    assert isinstance(r.json(), list)
+
+
 def test_create_and_list_node(client: TestClient, owner_cookies: dict):
     csrf = owner_cookies.get("__Secure-csrf_token") or owner_cookies.get("csrf") or ""
     with patch("services.node_service.encrypt_node_token", return_value="enc-token"), \

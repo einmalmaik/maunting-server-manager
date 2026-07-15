@@ -16,25 +16,27 @@ MSM läuft derzeit vollständig auf einem einzelnen Linux-Server. Alle Docker-Co
 
 Die Entwicklung ist in 7 logische Phasen aufgeteilt. Für jede Phase gibt es eine detaillierte Spezifikation im Verzeichnis `docs/multi-node/`:
 
-1. **[Phase 0: Datenbank & Modell vorbereiten](file:///c:/Users/einma/AppData/Local/Singra/workspace/maunting-server-manager/docs/multi-node/phase-0.md)** (ABGESCHLOSSEN)
+1. **[Phase 0: Datenbank & Modell vorbereiten](phase-0.md)** (ABGESCHLOSSEN)
    - Einführung des `Node`-Modells und Verknüpfung von `Server` mit `Node`.
    - Migration der bestehenden Datenbank, Seed des Default-Nodes (`localhost`) und Migration aller bestehenden Server auf diesen Node.
 
-2. **[Phase 1: MSM Agent (Eigenständiges Mini-Projekt)](file:///c:/Users/einma/AppData/Local/Singra/workspace/maunting-server-manager/docs/multi-node/phase-1.md)**
+2. **[Phase 1: MSM Agent (Eigenständiges Mini-Projekt)](phase-1.md)** (ABGESCHLOSSEN)
    - Entwicklung der FastAPI App für den Agenten (Docker-, Datei-, Konsolen- und Metriken-API).
    - Generierung und Absicherung des Tokens (Kryptographie verbleibt beim Panel).
 
-3. **[Phase 2: Panel-Backend auf "Node-Aware" umbauen](file:///c:/Users/einma/AppData/Local/Singra/workspace/maunting-server-manager/docs/multi-node/phase-2.md)**
+3. **[Phase 2: Panel-Backend auf "Node-Aware" umbauen](phase-2.md)** (ABGESCHLOSSEN)
    - Umleitung aller Docker- und Dateioperationen im Panel-Backend auf `NodeClient` (Delegation an den Agenten über HTTP/WebSockets).
    - Port-Zuweisung und Backups Node-aware gestalten.
 
-4. **[Phase 3: Server-Erstellung & Node-UI im Frontend](file:///c:/Users/einma/AppData/Local/Singra/workspace/maunting-server-manager/docs/multi-node/phase-3.md)**
+4. **[Phase 3: Server-Erstellung & Node-UI im Frontend](phase-3.md)** (ABGESCHLOSSEN)
    - UI für das Hinzufügen/Verwalten von Nodes im Admin-Panel (unter Einhaltung der MauntingStudios Design-DNA).
    - Node-Auswahl beim Erstellen von Game-Servern.
 
-5. **[Phase 4: Frontend entkoppeln (Vercel-Ready)](file:///c:/Users/einma/AppData/Local/Singra/workspace/maunting-server-manager/docs/multi-node/phase-4.md)**
+**Inventar der behaltenen Kern-Dateien:** [IMPLEMENTED.md](IMPLEMENTED.md)
+
+5. **[Phase 4: Frontend entkoppeln (Vercel-Ready)](phase-4.md)** (ABGESCHLOSSEN)
    - Statische React-App lauffähig machen auf Vercel.
-   - CORS-Policies, cross-domain WebSockets und Token-basierte Auth anpassen.
+   - CORS-Policies, cross-domain WebSockets und Cookie/CSRF-Auth anpassen.
 
 6. **[Phase 5: Agent-Installer & Produktionsreife](file:///c:/Users/einma/AppData/Local/Singra/workspace/maunting-server-manager/docs/multi-node/phase-5.md)**
    - TLS-Absicherung der Agenten-API (Self-signed mit Fingerprint-Pinning im Panel).

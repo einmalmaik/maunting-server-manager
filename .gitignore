@@ -40,8 +40,11 @@ RELEASE_NOTES_*.md
 /frontend/node_modules
 /Design idee für mssm
 
-# Secrets / .env
+# Secrets / .env (nur *.example committen)
 backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
 msm-agent/.env
 msm-agent/venv/
 msm-agent/**/__pycache__/

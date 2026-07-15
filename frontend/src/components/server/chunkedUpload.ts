@@ -1,4 +1,5 @@
-import { api } from '@/api/client'
+import { api, getCsrfToken } from '@/api/client'
+import { apiUrl } from '@/config/api'
 
 // Schwelle, ab der wir vom einfachen Multipart-Upload auf den
 // chunked-resumable-Modus wechseln. ~5 MB ist genau der Bereich, in dem
@@ -9,11 +10,6 @@ export const SINGLE_SHOT_LIMIT_BYTES = 5 * 1024 * 1024
 // body, viele Setups ~10MB) nicht stoeren, aber gross genug fuer brauchbaren
 // Durchsatz. Backend akzeptiert bis 64 MB pro Chunk.
 export const CHUNK_SIZE_BYTES = 4 * 1024 * 1024
-
-function getCsrfToken(): string | null {
-  const match = document.cookie.match(new RegExp('(^| )__Secure-csrf_token=([^;]+)'))
-  return match ? decodeURIComponent(match[2]) : null
-}
 
 interface UploadOptions {
   serverId: number
@@ -81,7 +77,7 @@ async function uploadChunked({
       formData.append('chunk', blob, file.name)
 
       const res = await fetch(
-        `/api/files/${serverId}/upload/${uploadId}/chunk`,
+        apiUrl(`/files/${serverId}/upload/${uploadId}/chunk`),
         {
           method: 'PUT',
           credentials: 'include',

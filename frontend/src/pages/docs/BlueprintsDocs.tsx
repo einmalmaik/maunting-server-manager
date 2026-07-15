@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { BookOpen, Check, Copy, Download, ExternalLink, Info, AlertTriangle } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { apiUrl } from '@/config/api'
 
 interface CodeBlockProps {
   example: string | object
@@ -297,7 +298,7 @@ export function BlueprintsDocs() {
 
       <div className="mb-8 flex flex-wrap items-center gap-3">
         <a
-          href={`/api/blueprints/template?lang=${i18n.language}`}
+          href={apiUrl(`/blueprints/template?lang=${i18n.language}`)}
           download
           data-testid="docs-template-download"
           className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"

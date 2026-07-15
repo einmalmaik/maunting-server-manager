@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api } from '@/api/client'
+import { api, clearCsrfTokenMemory } from '@/api/client'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import type { User } from '@/types'
 
@@ -39,6 +39,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch {
       // Ignorieren: Backend hat Cookies geloescht, Client-State wird hier bereinigt
     }
+    clearCsrfTokenMemory()
     usePermissionsStore.getState().reset()
     set({ user: null, isAuthenticated: false, isLoading: false })
   },
@@ -51,6 +52,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       // Permissions parallel laden — Frontend-Permission-Checks wissen damit Bescheid.
       void usePermissionsStore.getState().refresh()
     } catch {
+      clearCsrfTokenMemory()
       usePermissionsStore.getState().reset()
       set({ user: null, isAuthenticated: false, isLoading: false })
     }

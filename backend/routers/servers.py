@@ -144,11 +144,6 @@ def _install_update_busy_error() -> HTTPException:
 
 
 
-@router.get("", response_model=list[ServerResponse])
-def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Server]:
-    return permission_service.list_visible_servers(db, user)
-
-
 @router.post("", response_model=ServerCreateResponse, status_code=201)
 async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(require_global("servers.create")), _: None = Depends(verify_csrf)) -> ServerCreateResponse:
 
@@ -174,10 +169,17 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         requested_ports["rcon"] = req.rcon_port
 
     bind_ip = req.public_bind_ip or default_bind_ip()
-    # Phase 2: default to local node; ports scoped per node
+    # Phase 2/3: node from request or default local; ports scoped per node
+    from models import Node
     from services.node_service import get_local_node
 
-    target_node = get_local_node(db)
+    target_node = None
+    if req.node_id is not None:
+        target_node = db.query(Node).filter(Node.id == req.node_id).first()
+        if not target_node:
+            raise HTTPException(status_code=400, detail="Node nicht gefunden")
+    else:
+        target_node = get_local_node(db)
     target_node_id = target_node.id if target_node else None
     check_host = True if (target_node is None or target_node.is_local) else False
     try:
@@ -340,21 +342,41 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         await EmailService.send_server_installed_notification(user.email, user.username, server.name)
 
     sync_server_restart_schedule(server)
-    response = ServerCreateResponse.model_validate(server)
-    response.postgres_credentials = [
+    response = _server_response(server)
+    create_resp = ServerCreateResponse.model_validate(response.model_dump())
+    create_resp.postgres_credentials = [
         PostgresOneTimeCredential.model_validate(item)
         for item in postgres_credentials
     ]
-    return response
+    return create_resp
+
+
+def _server_response(server: Server) -> ServerResponse:
+    """Serialize server including safe node label (never auth tokens)."""
+    data = ServerResponse.model_validate(server)
+    node = getattr(server, "node", None)
+    if node is not None:
+        data.node_id = node.id
+        data.node_name = node.name
+    else:
+        data.node_id = getattr(server, "node_id", None)
+        data.node_name = None
+    return data
+
+
+@router.get("", response_model=list[ServerResponse])
+def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[ServerResponse]:
+    servers = permission_service.list_visible_servers(db, user)
+    return [_server_response(s) for s in servers]
 
 
 @router.get("/{server_id}", response_model=ServerResponse)
-def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Server:
+def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> ServerResponse:
     require_server_permission(user, server_id, db, "server.view")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    return server
+    return _server_response(server)
 
 
 @router.patch("/{server_id}", response_model=ServerResponse)
@@ -668,7 +690,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             )
             plugin.start(server)
 
-    return server
+    return _server_response(server)
 
 
 @router.delete("/{server_id}")
@@ -1134,14 +1156,8 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
 
 
 # ── Erlaubte Origins fuer WebSocket-Upgrades ───────────────────────────────
-# Dieselbe Logik wie die CORS-Middleware: in Dev mehr, in Prod strikt.
-_WS_ALLOWED_ORIGINS: tuple[str, ...] = (
-    settings.panel_url,
-    "http://localhost",
-    "http://localhost:5173",
-    "http://127.0.0.1",
-    "http://127.0.0.1:5173",
-)
+# Dieselbe Allowlist wie CORS (panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev).
+from config import get_cors_origins
 
 
 def _ws_origin_allowed(origin: str | None) -> bool:
@@ -1150,7 +1166,8 @@ def _ws_origin_allowed(origin: str | None) -> bool:
     """
     if not origin:
         return False
-    return origin.rstrip("/") in {o.rstrip("/") for o in _WS_ALLOWED_ORIGINS}
+    allowed = {o.rstrip("/") for o in get_cors_origins()}
+    return origin.rstrip("/") in allowed
 
 
 @router.websocket("/{server_id}/console/ws")

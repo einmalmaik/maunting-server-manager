@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { useEffect } from 'react'
+import { apiUrl } from '@/config/api'
 import { oauthApi, type OAuthUserLink } from '@/api/oauth'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -128,7 +129,7 @@ export function LinkedAccountsTab() {
                 {unlinkedProviders.map((p) => (
                   <a
                     key={p.slug}
-                    href={`/api/oauth/${p.slug}/link/start`}
+                    href={apiUrl(`/oauth/${p.slug}/link/start`)}
                     className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2"
                   >
                     <Link2 className="w-3.5 h-3.5" />

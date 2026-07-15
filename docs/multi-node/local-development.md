@@ -41,17 +41,45 @@ Die manuelle Steuerung der Komponenten läuft wie folgt:
 
 ## 1. Voraussetzungen & Umgebungsvariablen
 
-Die Umgebungsvariablen werden über die `.env`-Datei im `backend/`-Ordner verwaltet.
+**Regel:** Jede Komponente hat eine vollständige Env-Vorlage (`*.env.example`). Lokale Secrets liegen in gitignored `.env` / `.env.local`.
 
-Stelle sicher, dass folgende Werte eingetragen sind:
+| Komponente | Vorlage (committen) | Lokal (nicht committen) |
+|---|---|---|
+| Panel-Backend | `backend/.env.example` | `backend/.env` |
+| Frontend (Vite) | `frontend/.env.example` | `frontend/.env.local` |
+| MSM Agent | `msm-agent/.env.example` | `msm-agent/.env` |
+
+Kopieren falls fehlend:
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env.local
+cp msm-agent/.env.example msm-agent/.env
+```
+
+### Backend Dev-Minimum (Auszug — vollständige Liste in `backend/.env.example`)
+
 ```env
 MSM_APP_NAME="Maunting Server Manager"
 MSM_DEBUG=true
 MSM_DATABASE_URL="sqlite:///./msm.db"
+MSM_DATABASE_URL_ASYNC="sqlite+aiosqlite:///./msm.db"
 MSM_SECRET_KEY="test-secret-key-for-dev-only-32-bytes-long!!"
 MSM_PANEL_URL="http://localhost:3000"
 MSM_SETUP_COMPLETED_FILE="./.setup_completed"
+MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"
 MSM_DIS_SALT="qhCLKLPChabuAqcCOqqxRw=="
+MSM_COOKIE_CROSS_SITE=false
+MSM_CORS_ALLOWED_ORIGINS="http://localhost:3000,http://127.0.0.1:3000"
+MSM_SERVE_FRONTEND=false
+MSM_SERVERS_DIR="./servers"
+```
+
+### Frontend Dev (Phase 4)
+
+```env
+# frontend/.env.local — leer = Vite-Proxy /api → :8000
+VITE_API_URL=
+VITE_WS_URL=
 ```
 
 ---
@@ -121,6 +149,25 @@ npm run dev
 *Erfolgsmeldung im Terminal:*
 `  VITE v5.x.x  ready in X ms`
 `  ➜  Local:   http://localhost:3000/`
+
+**Default (empfohlen):** Vite proxied `/api` → `http://localhost:8000` (same-origin Cookies, `SameSite=Lax`).
+
+**Optional — echte Cross-Origin-Dev (Phase 4):**
+
+`frontend/.env.local`:
+```env
+VITE_API_URL=http://127.0.0.1:8000
+```
+
+`backend/.env` ergänzen:
+```env
+MSM_PANEL_URL="http://localhost:3000"
+MSM_CORS_ALLOWED_ORIGINS="http://localhost:3000,http://127.0.0.1:3000"
+MSM_COOKIE_CROSS_SITE=true
+MSM_SERVE_FRONTEND=false
+```
+
+Dann Cookies mit `SameSite=None; Secure` und CSRF über Response-Header `X-CSRF-Token`.
 
 ---
 
@@ -222,3 +269,14 @@ cd backend
 pytest tests/test_node_client.py tests/test_nodes_router.py -q
 pytest -q   # volle Suite
 ```
+
+---
+
+## 6. Testen von Phase 3 (Node-UI & Server-Erstellung)
+
+1. Panel + Agent starten (`start-dev.bat` oder manuell).
+2. Als Owner: Sidebar → **Nodes** (`/admin/nodes`).
+3. Node hinzufügen (Token wird nie wieder angezeigt).
+4. Health-Check auslösen (Status-Badge Online/Offline).
+5. Server erstellen: bei **>1 Node** erscheint Node-Dropdown; bei genau 1 Node bleibt es unsichtbar.
+6. Server-Liste und Server-Detail zeigen den Node-Namen (Badge / System-Info).

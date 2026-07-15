@@ -5,10 +5,12 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import type { Server, GameInfo, PostgresCredential, ServerCreateResult } from '@/types'
+import type { Server, GameInfo, PostgresCredential, ServerCreateResult, Node } from '@/types'
 import { labelRole, mapBlueprintPorts } from '@/utils/portRoles'
-import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive, Database } from 'lucide-react'
+import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive, Database, Network } from 'lucide-react'
 import { PostgresCredentialsDialog } from '@/components/server/PostgresCredentialsDialog'
+import { Badge } from '@/components/ui/Badge'
+import { Dropdown } from '@/components/ui/Dropdown'
 
 export function Servers() {
   const { t } = useTranslation()
@@ -16,6 +18,7 @@ export function Servers() {
   const canCreateServer = useHasPermission('servers.create')
   const [servers, setServers] = useState<Server[]>([])
   const [games, setGames] = useState<GameInfo[]>([])
+  const [nodes, setNodes] = useState<Node[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -34,6 +37,7 @@ export function Servers() {
     public_bind_ip: '',
     postgres_enabled: false,
     postgres_database_count: '1',
+    node_id: '' as string,
   })
 
   // Default-Bind-IP setzen, sobald sie vom Backend kommt.
@@ -59,14 +63,59 @@ export function Servers() {
     }
   }
 
+  const loadNodes = async () => {
+    if (!canCreateServer) return
+    try {
+      const list = await api<Node[]>('/nodes')
+      setNodes(list)
+      const local = list.find((n) => n.is_local) || list[0]
+      if (local) {
+        setForm((prev) => (prev.node_id ? prev : { ...prev, node_id: String(local.id) }))
+      }
+    } catch {
+      setNodes([])
+    }
+  }
+
+  // Node-Liste fuer Create-Dialog: sobald ``servers.create`` (Owner-Bypass inkl.)
+  useEffect(() => {
+    void loadNodes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canCreateServer])
+
   useEffect(() => {
     fetchServers()
     const interval = setInterval(fetchServers, 5000)
     return () => clearInterval(interval)
   }, [])
 
+  // Node-Picker sobald mindestens ein Node geladen ist (Local + Remote).
+  // Bei genau einem Eintrag ist die Wahl trivial, aber sichtbar und explizit.
+  const showNodePicker = nodes.length >= 1
+
+  const nodeOptionLabel = (n: Node) => {
+    const localTag = n.is_local ? ` · ${t('nodes.local')}` : ''
+    const cpu =
+      n.metrics?.cpu_percent != null ? `${Math.round(n.metrics.cpu_percent)}%` : '—'
+    let freeRam = '—'
+    if (n.metrics?.ram_total_bytes != null && n.metrics?.ram_used_bytes != null) {
+      const freeMb = Math.max(
+        0,
+        Math.round((n.metrics.ram_total_bytes - n.metrics.ram_used_bytes) / (1024 * 1024)),
+      )
+      freeRam = freeMb >= 1024 ? `${(freeMb / 1024).toFixed(1)} GB` : `${freeMb} MB`
+    } else if (n.ram_total != null) {
+      freeRam = n.ram_total >= 1024 ? `${(n.ram_total / 1024).toFixed(1)} GB` : `${n.ram_total} MB`
+    }
+    return `${n.name}${localTag} (CPU ${cpu}, ${t('nodes.freeRamShort', { value: freeRam })})`
+  }
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (showNodePicker && !form.node_id) {
+      toast.error(t('servers.nodeRequired'))
+      return
+    }
     setCreating(true)
     try {
       const portsPayload: Record<string, number | null> = {}
@@ -87,27 +136,34 @@ export function Servers() {
         portsPayload[role] = valStr ? parseInt(valStr) : null
       })
 
+      const body: Record<string, unknown> = {
+        name: form.name,
+        game_type: form.game_type,
+        cpu_limit_percent: form.cpu_limit_percent ? parseInt(form.cpu_limit_percent) : null,
+        ram_limit_mb: form.ram_limit_mb ? parseInt(form.ram_limit_mb) : null,
+        disk_limit_gb: form.disk_limit_gb ? parseInt(form.disk_limit_gb) : null,
+        game_port: form.game_port ? parseInt(form.game_port) : null,
+        query_port: form.query_port ? parseInt(form.query_port) : null,
+        rcon_port: form.rcon_port ? parseInt(form.rcon_port) : null,
+        ports: portsPayload,
+        public_bind_ip: form.public_bind_ip || null,
+        postgres_enabled: form.postgres_enabled,
+        postgres_database_count: form.postgres_enabled ? parseInt(form.postgres_database_count || '1') : null,
+      }
+      // Ziel-Node mitschicken (Default = Local, sobald Nodes geladen)
+      if (form.node_id) {
+        body.node_id = parseInt(form.node_id, 10)
+      }
+
       const created = await api<ServerCreateResult>('/servers', {
         method: 'POST',
-        body: JSON.stringify({
-          name: form.name,
-          game_type: form.game_type,
-          cpu_limit_percent: form.cpu_limit_percent ? parseInt(form.cpu_limit_percent) : null,
-          ram_limit_mb: form.ram_limit_mb ? parseInt(form.ram_limit_mb) : null,
-          disk_limit_gb: form.disk_limit_gb ? parseInt(form.disk_limit_gb) : null,
-          game_port: form.game_port ? parseInt(form.game_port) : null,
-          query_port: form.query_port ? parseInt(form.query_port) : null,
-          rcon_port: form.rcon_port ? parseInt(form.rcon_port) : null,
-          ports: portsPayload,
-          public_bind_ip: form.public_bind_ip || null,
-          postgres_enabled: form.postgres_enabled,
-          postgres_database_count: form.postgres_enabled ? parseInt(form.postgres_database_count || '1') : null,
-        }),
+        body: JSON.stringify(body),
       })
       if (created.postgres_credentials?.length) {
         setOneTimeCredentials(created.postgres_credentials)
       }
       setShowCreate(false)
+      const defaultNode = nodes.find((n) => n.is_local) || nodes[0]
       setForm({
         name: '',
         game_type: 'conan_exiles_ue5',
@@ -121,6 +177,7 @@ export function Servers() {
         public_bind_ip: defaultBindIp || '',
         postgres_enabled: false,
         postgres_database_count: '1',
+        node_id: defaultNode ? String(defaultNode.id) : '',
       })
       fetchServers()
     } catch (err: any) {
@@ -174,7 +231,10 @@ export function Servers() {
         </div>
         {canCreateServer && (
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={() => {
+              setShowCreate(true)
+              void loadNodes()
+            }}
             className="msm-btn-primary flex items-center gap-2 px-4 py-2"
           >
             <Plus className="w-4 h-4" />
@@ -203,11 +263,17 @@ export function Servers() {
             onClick={() => navigate(`/servers/${server.id}`)}
           >
             <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <ServerIcon className="w-4 h-4 text-on-surface-variant" />
-                <h3 className="font-headline text-body-md text-on-surface">{server.name}</h3>
+              <div className="flex items-center gap-2 min-w-0">
+                <ServerIcon className="w-4 h-4 text-on-surface-variant shrink-0" />
+                <h3 className="font-headline text-body-md text-on-surface truncate">{server.name}</h3>
+                {server.node_name && (
+                  <Badge variant="info" className="shrink-0" title={t('servers.node')}>
+                    <Network className="w-3 h-3 mr-1 inline" />
+                    {server.node_name}
+                  </Badge>
+                )}
               </div>
-              <span className={`font-mono-sm text-mono-sm px-2 py-0.5 rounded-full border ${statusClasses(server.status)}`}>
+              <span className={`font-mono-sm text-mono-sm px-2 py-0.5 rounded-full border shrink-0 ${statusClasses(server.status)}`}>
                 {t(`servers.status.${server.status}`, { defaultValue: server.status })}
               </span>
             </div>
@@ -275,6 +341,29 @@ export function Servers() {
                   ))}
                 </select>
               </div>
+              {/* Ziel-Node: sichtbar sobald Nodes geladen; Pflichtfeld bei Anzeige */}
+              {showNodePicker && (
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    {t('servers.node')} *
+                  </label>
+                  <Dropdown
+                    value={form.node_id || null}
+                    onChange={(value) => setForm({ ...form, node_id: value })}
+                    options={nodes.map((n) => ({
+                      value: String(n.id),
+                      label: nodeOptionLabel(n),
+                      hint: n.host,
+                    }))}
+                    placeholder={t('servers.selectNode')}
+                    aria-label={t('servers.node')}
+                    data-testid="create-server-node"
+                  />
+                  <p className="font-body-md text-xs text-on-surface-variant mt-1">
+                    {t('servers.nodeHint')}
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">

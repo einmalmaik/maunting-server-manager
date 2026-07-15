@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
 import { oauthApi, type OAuthProviderPublic } from '@/api/oauth'
 import { toast } from '@/stores/toastStore'
@@ -363,7 +364,7 @@ export function Login() {
                   {oauthProviders.map((p) => (
                     <a
                       key={p.slug}
-                      href={`/api/oauth/${p.slug}/start?next=/&cb=${Date.now().toString(36)}`}
+                      href={apiUrl(`/oauth/${p.slug}/start?next=/&cb=${Date.now().toString(36)}`)}
                       className="msm-btn-secondary w-full py-2.5 inline-flex items-center justify-center gap-2"
                     >
                       <KeyRound className="w-4 h-4" />
@@ -438,7 +439,7 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
     try {
       // redirect: 'manual' — wir werten den 302 als Erfolg; die Set-Cookie-Header
       // nimmt der Browser mit, danach machen wir eine Hartnavigation.
-      const res = await fetch(`/api/oauth/${slug}/2fa`, {
+      const res = await fetch(apiUrl(`/oauth/${slug}/2fa`), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
