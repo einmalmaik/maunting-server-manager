@@ -520,6 +520,7 @@ if $SHOULD_COPY_FILES; then
         rm -rf "$MSM_DIR/frontend/dist" 2>/dev/null || true
         rm -rf "$MSM_DIR/frontend/node_modules" 2>/dev/null || true
         rm -rf "$MSM_DIR/backend/venv" 2>/dev/null || true
+        rm -rf "$MSM_DIR/msm-agent/venv" 2>/dev/null || true
     else
         # Install.sh läuft außerhalb des Zielverzeichnisses → sauberes Verzeichnis anlegen
         rm -rf "$MSM_DIR" 2>/dev/null || true
@@ -528,6 +529,7 @@ if $SHOULD_COPY_FILES; then
         cp -r "$SCRIPT_DIR/backend" "$MSM_DIR/"
         cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
         cp -r "$SCRIPT_DIR/dis-sidecar" "$MSM_DIR/" 2>/dev/null || true
+        cp -r "$SCRIPT_DIR/msm-agent" "$MSM_DIR/" 2>/dev/null || true
         cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
@@ -973,6 +975,37 @@ if $RUN_BACKEND_SETUP; then
         pip install -r requirements.txt -q
     " 2>&1 | tee -a "$LOG_FILE"
     ok "Python-Backend bereit"
+
+    # MSM Agent (lokaler Node, rootless Docker) — eigenes venv, gleiche User-ID
+    if [[ -d "$MSM_DIR/msm-agent" ]]; then
+        log "Installiere MSM Agent..."
+        su - "$MSM_USER" -c "
+            cd $MSM_DIR/msm-agent
+            python3 -m venv venv
+            source venv/bin/activate
+            pip install --upgrade pip -q
+            pip install -r requirements.txt -q
+        " 2>&1 | tee -a "$LOG_FILE"
+
+        AGENT_ENV="$MSM_DIR/msm-agent/.env"
+        if [[ ! -f "$AGENT_ENV" ]]; then
+            AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+            cat > "$AGENT_ENV" <<EOF
+MSM_AGENT_TOKEN="$AGENT_TOKEN"
+MSM_AGENT_HOST="127.0.0.1"
+MSM_AGENT_PORT="9000"
+MSM_SERVERS_DIR="$MSM_DIR/servers"
+MSM_DOCKER_HOST="$MSM_DOCKER_HOST"
+MSM_AGENT_LOG_LEVEL="INFO"
+EOF
+            chmod 600 "$AGENT_ENV"
+            chown "$MSM_USER:$MSM_USER" "$AGENT_ENV"
+            ok "MSM Agent .env erzeugt (Token wird nicht geloggt)"
+        else
+            ok "MSM Agent .env vorhanden — Token unverändert"
+        fi
+        ok "MSM Agent bereit"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -1293,10 +1326,43 @@ ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/u
 WantedBy=multi-user.target
 EOF
 
+    # MSM Agent (local node) — rootless Docker, loopback only
+    if [[ -d "$MSM_DIR/msm-agent" ]]; then
+        cat > /etc/systemd/system/msm-agent.service <<EOF
+[Unit]
+Description=MSM Agent (Node Runtime)
+After=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/msm-agent
+Environment="PATH=$MSM_DIR/msm-agent/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+EnvironmentFile=-$MSM_DIR/msm-agent/.env
+ExecStart=$MSM_DIR/msm-agent/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=$MSM_DIR -/run/user
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     if $SYSTEMD_AVAILABLE; then
         systemctl daemon-reload
         systemctl enable msm-dis-sidecar.service
         systemctl enable msm-panel.service
+        if [[ -f /etc/systemd/system/msm-agent.service ]]; then
+            systemctl enable msm-agent.service
+        fi
 
         # Update-Timer (optional — deaktiviert per Default)
         cp "$SCRIPT_DIR/msm-update.service" /etc/systemd/system/msm-update.service 2>/dev/null || true
@@ -1499,9 +1565,20 @@ if $SYSTEMD_AVAILABLE; then
     else
         warn "Panel-Service startet nicht automatisch. Prüfe: journalctl -u msm-panel -n 50"
     fi
+
+    if [[ -f /etc/systemd/system/msm-agent.service ]]; then
+        systemctl restart msm-agent.service 2>/dev/null || systemctl start msm-agent.service 2>/dev/null || true
+        sleep 1
+        if systemctl is-active --quiet msm-agent.service; then
+            ok "MSM Agent läuft (Port 9000)"
+        else
+            warn "MSM Agent startet nicht. Prüfe: journalctl -u msm-agent -n 50"
+        fi
+    fi
 else
     warn "systemd nicht verfügbar — Service muss manuell gestartet werden."
     warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"
+    warn "Agent: cd /opt/msm/msm-agent && source venv/bin/activate && python main.py"
 fi
 
 # ═══════════════════════════════════════════════════════════════

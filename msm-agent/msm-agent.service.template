@@ -1,0 +1,27 @@
+[Unit]
+Description=MSM Agent (Node Runtime)
+After=network.target
+
+[Service]
+Type=simple
+User=msm
+Group=msm
+WorkingDirectory={{MSM_DIR}}/msm-agent
+# Systemd units do not inherit login PATH. venv first, then system paths.
+Environment="PATH={{MSM_DIR}}/msm-agent/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DOCKER_HOST={{DOCKER_HOST}}"
+EnvironmentFile=-{{MSM_DIR}}/msm-agent/.env
+ExecStart={{MSM_DIR}}/msm-agent/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Agent only needs servers data + rootless docker runtime socket
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths={{MSM_DIR}} -/run/user
+
+[Install]
+WantedBy=multi-user.target

@@ -152,8 +152,48 @@ sqlite> SELECT id, name, node_id FROM servers;
 
 ---
 
-## 4. Testen von Phase 1 (Zukünftiger MSM Agent)
-Sobald der MSM Agent (Phase 1) entwickelt ist, kann dieser lokal gestartet werden:
-1. Er lauscht auf Port `9000`.
-2. Er verwendet dieselben Docker-Sockets und dasselbe Dateisystem wie das lokale Panel.
-3. Du kannst Test-Requests mit `curl` senden, indem du den bei der Migration generierten Token nutzt (siehe Konsolen-Output der Migration).
+## 4. Testen von Phase 1 (MSM Agent)
+
+### Agent starten
+```bash
+cd msm-agent
+# Windows
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env   # Token setzen: MSM_AGENT_TOKEN=...
+python main.py
+
+# Linux / WSL
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env     # Token setzen
+python main.py
+```
+
+`start-dev.bat` startet den Agenten automatisch mit.
+
+### Smoke-Tests
+```bash
+curl http://localhost:9000/health
+# Erwartet: {"status":"ok","version":"1.0.0","docker_connected":...}
+
+curl http://localhost:9000/containers
+# Erwartet: HTTP 401
+
+curl -H "Authorization: Bearer <MSM_AGENT_TOKEN>" http://localhost:9000/containers
+# Erwartet: HTTP 200 []
+
+# Path-Traversal muss abgewiesen werden:
+curl -H "Authorization: Bearer <TOKEN>" \
+  "http://localhost:9000/files/read?server_id=1&path=../../etc/passwd"
+# Erwartet: HTTP 400 oder 403
+```
+
+### Agent-Unit-Tests
+```bash
+cd msm-agent
+source venv/bin/activate   # bzw. .\venv\Scripts\activate
+pip install pytest
+pytest -q
+```

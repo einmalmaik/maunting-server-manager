@@ -1,6 +1,6 @@
 # Phase 1: MSM Agent (Eigenständiges Mini-Projekt)
 
-Dieses Dokument enthält die detaillierte Spezifikation für den **MSM Agent**. Der Agent wird als eigenständige, leichtgewichtige FastAPI-Anwendung implementiert, die auf jedem Server (Node) läuft und Befehle vom zentralen Panel entgegennimmt.
+Dieses Dokument enthält die detaillierte Spezifikation für den **MSM Agent**. Der Agent wird als eigenständige, leichtgewichtige FastAPI-Anwendung implementiert, die auf jedem Server (Node) läuft und Befehle vom zentralen Panel entgegennimmt. WICHTIG Das ganze projekt wird zum monorebo du musst auch install.sh vermutlich anpassen und update.sh damit es eingerichtet werden kann ohne das die leute groß was einstellen müssen wir bleiben beim rootless 
 
 ---
 

@@ -62,7 +62,7 @@ restore_panel_ownership() {
     # git clean loescht untracked Dirs. Die .gitignore schuetzt jetzt die Daten-Pfade,
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
     # Es gibt scripts/reset-msm-docker.sh als Recovery (für den Docker-Store-Corruption-Fall).
-    for sub in backend frontend docs dis-sidecar; do
+    for sub in backend frontend docs dis-sidecar msm-agent; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" 2>/dev/null || true
         fi
@@ -376,6 +376,35 @@ su - msm -c "
     pip install -r requirements.txt -q
 " 2>&1 | tee -a "$LOG_FILE"
 
+# ── MSM Agent aktualisieren (Monorepo, rootless Node) ──
+if [[ -d "$MSM_DIR/msm-agent" ]]; then
+    log "Aktualisiere MSM Agent..."
+    su - msm -c "
+        cd $MSM_DIR/msm-agent
+        if [[ ! -d venv ]]; then python3 -m venv venv; fi
+        source venv/bin/activate
+        pip install --upgrade pip -q
+        pip install -r requirements.txt -q
+    " 2>&1 | tee -a "$LOG_FILE"
+    # .env nur anlegen wenn fehlend — Token niemals ueberschreiben/loggen
+    if [[ ! -f "$MSM_DIR/msm-agent/.env" ]]; then
+        AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+        MSM_UID=$(id -u msm 2>/dev/null || echo 0)
+        cat > "$MSM_DIR/msm-agent/.env" <<EOF
+MSM_AGENT_TOKEN="$AGENT_TOKEN"
+MSM_AGENT_HOST="127.0.0.1"
+MSM_AGENT_PORT="9000"
+MSM_SERVERS_DIR="$MSM_DIR/servers"
+MSM_DOCKER_HOST="unix:///run/user/${MSM_UID}/docker.sock"
+MSM_AGENT_LOG_LEVEL="INFO"
+EOF
+        chmod 600 "$MSM_DIR/msm-agent/.env"
+        chown msm:msm "$MSM_DIR/msm-agent/.env"
+        ok "MSM Agent .env erzeugt"
+    fi
+    ok "MSM Agent Dependencies aktualisiert"
+fi
+
 # ── Datenbank-Migrationen ──
 log "Führe Datenbank-Migrationen durch..."
 su - msm -c "
@@ -485,9 +514,42 @@ ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/u
 WantedBy=multi-user.target
 EOF
 
+    # MSM Agent (local node)
+    if [[ -d "$MSM_DIR/msm-agent" ]]; then
+        cat > /etc/systemd/system/msm-agent.service <<EOF
+[Unit]
+Description=MSM Agent (Node Runtime)
+After=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/msm-agent
+Environment="PATH=$MSM_DIR/msm-agent/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+EnvironmentFile=-$MSM_DIR/msm-agent/.env
+ExecStart=$MSM_DIR/msm-agent/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=$MSM_DIR -/run/user
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     systemctl daemon-reload
     systemctl enable msm-dis-sidecar.service
     systemctl enable msm-panel.service
+    if [[ -f /etc/systemd/system/msm-agent.service ]]; then
+        systemctl enable msm-agent.service
+    fi
     ok "systemd Services registriert."
 fi
 
@@ -616,6 +678,9 @@ if $SYSTEMD_AVAILABLE; then
     fi
 
     systemctl restart msm-panel.service
+    if [[ -f /etc/systemd/system/msm-agent.service ]]; then
+        systemctl restart msm-agent.service 2>/dev/null || systemctl start msm-agent.service 2>/dev/null || true
+    fi
     systemctl restart caddy 2>/dev/null || true
 else
     warn "systemd nicht verfügbar — Services können nicht neu gestartet werden."

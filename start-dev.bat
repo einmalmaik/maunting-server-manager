@@ -56,7 +56,7 @@ if not exist "frontend\node_modules" (
 echo.
 
 :: 4. Backend Installation check
-echo [4/4] Checking Backend...
+echo [4/5] Checking Backend...
 if not exist "backend\venv" (
     echo Erstelle Python Virtual Environment venv im Backend...
     cd backend
@@ -66,6 +66,30 @@ if not exist "backend\venv" (
     cd ..
 ) else (
     echo Python-Virtualenv ist bereits vorhanden.
+)
+echo.
+
+:: 5. MSM Agent Installation check
+echo [5/5] Checking MSM Agent...
+if not exist "msm-agent\venv" (
+    echo Erstelle Python Virtual Environment fuer MSM Agent...
+    cd msm-agent
+    python -m venv venv
+    echo Installiere Agent-Requirements...
+    call .\venv\Scripts\pip.exe install -r requirements.txt
+    cd ..
+) else (
+    echo MSM Agent Virtualenv ist bereits vorhanden.
+)
+if not exist "msm-agent\.env" (
+    echo Erstelle msm-agent\.env fuer Dev...
+    (
+        echo MSM_AGENT_TOKEN=dev-agent-token-change-me
+        echo MSM_AGENT_HOST=127.0.0.1
+        echo MSM_AGENT_PORT=9000
+        echo MSM_SERVERS_DIR=./servers
+        echo MSM_AGENT_LOG_LEVEL=INFO
+    ) > msm-agent\.env
 )
 echo.
 
@@ -82,6 +106,10 @@ start "MSM - DIS Sidecar" cmd /k "cd dis-sidecar && set NODE_ENV=development && 
 echo Starte Python Backend (Port 8000)...
 start "MSM - FastAPI Backend" cmd /k "cd backend && .\venv\Scripts\activate && set NODE_ENV=development && set MSM_SECRET_KEY=test-secret-key-for-dev-only-32-bytes-long!! && set MSM_DIS_SALT=qhCLKLPChabuAqcCOqqxRw== && uvicorn main:app --reload --port 8000"
 
+:: Start MSM Agent in a new window
+echo Starte MSM Agent (Port 9000)...
+start "MSM - Agent" cmd /k "cd msm-agent && .\venv\Scripts\activate && python main.py"
+
 :: Start Frontend in a new window
 echo Starte React Frontend (Port 3000)...
 start "MSM - Vite Frontend" cmd /k "cd frontend && npm run dev"
@@ -91,5 +119,6 @@ echo Alle Komponenten wurden gestartet!
 echo - Frontend: http://localhost:3000
 echo - Backend API: http://localhost:8000
 echo - DIS Sidecar: http://localhost:9100
+echo - MSM Agent: http://localhost:9000
 echo.
 pause

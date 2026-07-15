@@ -42,6 +42,10 @@ RELEASE_NOTES_*.md
 
 # Secrets / .env
 backend/.env
+msm-agent/.env
+msm-agent/venv/
+msm-agent/**/__pycache__/
+msm-agent/servers/
 
 # Databases (production runs on Postgres per .env; this protects SQLite dev/test DBs)
 *.db
