@@ -1749,7 +1749,12 @@ if $SYSTEMD_AVAILABLE; then
         || err "DIS Sidecar konnte nicht gestartet werden."
     DIS_READY=false
     for _attempt in $(seq 1 30); do
-        if curl -fsS --max-time 2 http://127.0.0.1:9100/health >/dev/null 2>&1; then
+        # /health ist wie alle Sidecar-Routen authentifiziert. Den Token ueber
+        # stdin statt als Prozessargument uebergeben, damit er nicht in ps
+        # oder dem Installationslog sichtbar werden kann.
+        if printf 'Authorization: Bearer %s\n' "$DIS_TOKEN" \
+            | curl -fsS --max-time 2 --header @- http://127.0.0.1:9100/health \
+                >/dev/null 2>&1; then
             DIS_READY=true
             break
         fi

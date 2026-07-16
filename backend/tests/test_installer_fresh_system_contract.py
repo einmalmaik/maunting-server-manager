@@ -125,3 +125,14 @@ def test_fresh_install_initializes_dis_secrets_before_set_u_checks() -> None:
 
     assert salt_init < salt_check
     assert token_init < token_check
+
+
+def test_dis_readiness_probe_authenticates_without_exposing_token_in_argv() -> None:
+    installer = _installer()
+    readiness = installer.split("DIS_READY=false", 1)[1].split(
+        '$DIS_READY || err', 1
+    )[0]
+
+    assert "printf 'Authorization: Bearer %s\\n' \"$DIS_TOKEN\"" in readiness
+    assert "--header @- http://127.0.0.1:9100/health" in readiness
+    assert '--header "Authorization: Bearer $DIS_TOKEN"' not in readiness
