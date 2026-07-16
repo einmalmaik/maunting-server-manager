@@ -38,11 +38,11 @@ Bevor du loslegst, brauchst du:
 1. Einen **Linux-Server** (Ubuntu 22.04 oder Debian 12 empfohlen)
 2. **Root-Zugang** (SSH-Key oder Passwort)
 3. Eine **Domain** (optional, aber empfohlen für HTTPS)
-4. Einen **SMTP-Server oder Resend-Account** (optional, für Email-Verifikation und 2FA)
+4. Einen **Resend-Account** für die einfache Browser-Einrichtung (SMTP bleibt über den klassischen Installer möglich)
 
 ---
 
-## Installation (3 Schritte)
+## Installation
 
 ### Schritt 1: Auf den Server verbinden
 
@@ -52,34 +52,21 @@ Bevor du loslegst, brauchst du:
 ssh root@DEINE-SERVER-IP
 ```
 
-### Schritt 2: Repository klonen
+### Schritt 2: Ein Befehl
 
 ```bash
-cd /opt
-git clone https://github.com/einmalmaik/maunting-server-manager.git msm
-cd msm
-```
-**Wichtig (Prod):** Die Installations- und Server-Daten liegen unter `/opt/msm/servers`, `/opt/msm/backups` etc.
-Führe auf dem Server **niemals** `git clean -fd` (oder ähnliche "aufräumen"-Befehle) im Clone-Verzeichnis aus – auch wenn Daten in Sub-Dirs liegen. Die `.gitignore` schützt die Laufzeit-Daten, aber manuelle Git-Clean-Befehle können trotzdem gefährlich sein. Immer erst mit `--dry-run` testen.
-
-Es gibt ein Hilfsskript `scripts/reset-msm-docker.sh` für den (hoffentlich nie wieder auftretenden) Notfall.
-
-**PS vom Entwickler (der das selbst mal um 2 Uhr nachts verbockt hat):** Ja, genau das ist mir passiert. Git clean hat den rootless Docker-Content-Store des msm-Users zerschossen (Blobs weg, "lease content" Horror). Nie wieder. Lernt aus meinen Schmerzen, Leute! 😂 Wenn's bei euch passiert: Es gibt jetzt `scripts/reset-msm-docker.sh` (als root ausführen). Danach git pull + Panel restart. Die .gitignore + Warnungen hier schützen euch (hoffentlich) davor.
-
-### Schritt 3: Installer starten
-
-```bash
-sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com
 ```
 
-Der Installer fragt dich nach:
+Ersetze `panel.example.com` durch die Domain, deren DNS bereits auf den Server
+zeigt. Der Befehl fragt keine weiteren technischen Einstellungen ab.
 
-1. **Domain** — gib deine Domain ein oder lasse sie leer für IP-Zugriff
-2. **Email** — wähle Resend (API-Key) oder SMTP
-3. **Datenbank** — PostgreSQL (empfohlen) oder SQLite
-4. **Redis** — Ja/Nein für Rate-Limiting
-
-**Das war's.** Der Rest läuft automatisch.
+**Das war's.** PostgreSQL, Rootless Docker, DIS, der lokale Agent, Caddy und die
+Systemdienste werden automatisch eingerichtet. Eine vorhandene Legacy-SQLite-
+Datenbank wird vor dem Update gesichert, einmalig geprüft nach PostgreSQL
+importiert und anschließend als Migrationsarchiv behalten. Erkennt der
+Bootstrap eine vorhandene Installation, verwendet er automatisch den sicheren
+Updater; Serverdaten, Backups, Agent-Tokens und Konfigurationen bleiben erhalten.
 
 MSM richtet Docker im Rootless-Modus für den `msm`-User ein. Der Panel-User
 ist nicht Mitglied der globalen `docker`-Gruppe und nutzt
@@ -90,8 +77,8 @@ ist nicht Mitglied der globalen `docker`-Gruppe und nutzt
 ## Nach der Installation
 
 1. Öffne die Panel-URL im Browser (steht im Installer am Ende)
-2. Folge dem **Setup-Wizard** (erfordert eine gültige Email-Adresse)
-3. Erstelle deinen ersten **Owner-Account**
+2. Hinterlege im **Setup-Wizard** Absender und Resend-API-Key
+3. Erstelle den ersten **Owner-Account** und bestätige die E-Mail
 4. Lege deinen ersten **Game-Server** an
 
 ---
@@ -103,6 +90,11 @@ ist nicht Mitglied der globalen `docker`-Gruppe und nutzt
 ```bash
 sudo bash /opt/msm/update.sh
 ```
+
+Der Updater erstellt vor Schemaänderungen einen verifizierten PostgreSQL-Dump
+(bei Altinstallationen eine bytegenau geprüfte SQLite-Sicherung), nimmt nur das
+Panel kurz in Wartung und meldet erst nach Agent- und Backend-Healthchecks
+Erfolg. Laufende Game-Server auf den Nodes werden nicht gestoppt.
 
 ### Automatisch (optional)
 
@@ -170,12 +162,12 @@ Die Game-Server-Ports werden **automatisch** aus der Range 27015-27999 vergeben.
 ┌────────────▼────────────────────────────┐
 │  FastAPI Backend (Python)                 │
 │  → Port 8000 (nur localhost)              │
-│  → SQLite oder PostgreSQL                 │
+│  → PostgreSQL (nur Loopback)              │
 │  → Redis (optional)                       │
 └────────────┬────────────────────────────┘
              │
 ┌────────────▼────────────────────────────┐
-│  Game-Server (systemd)                    │
+│  Local Node Agent + Rootless Docker       │
 │  → Conan Exiles UE5 (Linux native)      │
 │  → DayZ (Linux native)                    │
 │  → Jeder Server eigener Linux-User        │

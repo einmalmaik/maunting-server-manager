@@ -14,7 +14,7 @@ MSM läuft derzeit vollständig auf einem einzelnen Linux-Server. Alle Docker-Co
 
 ## Die Phasen der Roadmap
 
-Die Entwicklung ist in 7 logische Phasen aufgeteilt. Für jede Phase gibt es eine detaillierte Spezifikation im Verzeichnis `docs/multi-node/`:
+Die Entwicklung ist in 9 logische Phasen (Phase 0 bis 8) aufgeteilt. Für jede Phase gibt es eine detaillierte Spezifikation im Verzeichnis `docs/multi-node/`:
 
 1. **[Phase 0: Datenbank & Modell vorbereiten](phase-0.md)** (ABGESCHLOSSEN)
    - Einführung des `Node`-Modells und Verknüpfung von `Server` mit `Node`.
@@ -51,6 +51,11 @@ Die Entwicklung ist in 7 logische Phasen aufgeteilt. Für jede Phase gibt es ein
    - Backend wird zum reinen REST-Proxy für DDL-Befehle, um Remote-Nodes sicher zu unterstützen.
    - Server-Backups enthalten die node-lokalen Datenbanken; Restore erhält Daten und Owner-Rechte.
 
+9. **[Phase 8: PostgreSQL-only, sichere Updates und einfache Node-Einrichtung](phase-8.md)** (ABGESCHLOSSEN)
+   - PostgreSQL als einzige Panel-Betriebsdatenbank und geprüfter einmaliger SQLite-Import.
+   - Update-Handoff, PostgreSQL-Backup, Agent-/Panel-Health-Gates und klarer Rollbackpfad.
+   - Geführtes Node-Enrollment mit einem kopierbaren Befehl und Bestätigung im Panel.
+
 ### Abschluss-Härtung
 
 Die phasenübergreifende Laufzeitprüfung wurde nachgezogen: vollständiger Remote-Dateimanager,
@@ -62,4 +67,4 @@ Panel-Host-Operationen werden für Remote-Server nicht mehr als Fallback verwend
 ---
 
 ## Lokale Entwicklung und Tests
-Wie die Komponenten lokal (z.B. unter Windows mit WSL) gestartet und getestet werden, ist im Dokument **[Local Development Guide](file:///c:/Users/einma/AppData/Local/Singra/workspace/maunting-server-manager/docs/multi-node/local-development.md)** beschrieben.
+Wie die Komponenten lokal (z.B. unter Windows mit WSL) gestartet und getestet werden, ist im Dokument **[Local Development Guide](local-development.md)** beschrieben.

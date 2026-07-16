@@ -7,6 +7,7 @@
 #  Sets up: msm user, rootless Docker, TLS cert, systemd unit
 # ═══════════════════════════════════════════════════════════════
 set -euo pipefail
+umask 077
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -75,7 +76,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >>"$LOG_FILE" 2>&1 || warn "apt-get update hatte Warnungen"
 apt-get install -y -qq \
   python3 python3-venv python3-pip \
-  curl ca-certificates gnupg openssl sudo ufw \
+  curl ca-certificates gnupg openssl sudo ufw rsync \
   uidmap dbus-user-session slirp4netns \
   >>"$LOG_FILE" 2>&1 || err "apt-get install fehlgeschlagen (siehe $LOG_FILE)"
 ok "System-Pakete"
@@ -164,7 +165,7 @@ rsync -a --delete \
   --exclude '*.pyc' \
   --exclude '.pytest_cache/' \
   "$SRC_AGENT/" "$AGENT_DIR/" 2>>"$LOG_FILE" \
-  || (cp -a "$SRC_AGENT/." "$AGENT_DIR/" && ok "cp fallback")
+  || err "Gefiltertes Agent-Deployment fehlgeschlagen"
 chown -R "$MSM_USER:$MSM_USER" "$AGENT_DIR" "$SERVERS_DIR"
 ok "Agent-Dateien deployed"
 
@@ -301,7 +302,18 @@ sleep 1
 if systemctl is-active --quiet msm-agent.service; then
   ok "msm-agent.service aktiv"
 else
+  if [[ "${MSM_AGENT_ENROLLMENT:-false}" == "true" ]]; then
+    err "msm-agent.service ist nicht aktiv — siehe: journalctl -u msm-agent -n 50"
+  fi
   warn "msm-agent.service nicht aktiv — siehe: journalctl -u msm-agent -n 50"
+fi
+
+# Open only the configured agent port when UFW is already active. Cloud-provider
+# firewalls remain outside the server and must still be configured there.
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+  ufw allow "${AGENT_PORT}/tcp" comment 'MSM Agent' >>"$LOG_FILE" 2>&1 \
+    || err "UFW-Regel fuer Agent-Port ${AGENT_PORT} konnte nicht gesetzt werden"
+  ok "UFW-Port ${AGENT_PORT}/tcp freigegeben"
 fi
 
 # ── 11. Detect public IP (best-effort) ────────────────────────
@@ -309,7 +321,8 @@ PUBLIC_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 PUBLIC_IP="${PUBLIC_IP:-127.0.0.1}"
 AGENT_URL="https://${PUBLIC_IP}:${AGENT_PORT}"
 
-# ── 12. Summary (show secrets once — operator copies into panel) ──
+# Enrollment installs never print the token. Manual installs retain the legacy
+# copy flow until all supported panels provide enrollment.
 echo ""
 echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN} MSM Agent Installation abgeschlossen${NC}"
@@ -318,9 +331,11 @@ echo ""
 echo -e "  Agent-URL (Panel → Node host):"
 echo -e "    ${CYAN}${AGENT_URL}${NC}"
 echo ""
-echo -e "  MSM_AGENT_TOKEN (nur jetzt anzeigen — in Panel speichern):"
-echo -e "    ${YELLOW}${AGENT_TOKEN}${NC}"
-echo ""
+if [[ "${MSM_AGENT_ENROLLMENT:-false}" != "true" ]]; then
+  echo -e "  MSM_AGENT_TOKEN (nur jetzt anzeigen — in Panel speichern):"
+  echo -e "    ${YELLOW}${AGENT_TOKEN}${NC}"
+  echo ""
+fi
 echo -e "  TLS Fingerprint SHA-256 (Panel → tls_fingerprint):"
 echo -e "    ${GREEN}${FINGERPRINT}${NC}"
 echo ""
@@ -329,9 +344,13 @@ echo -e "  Servers-Dir:  ${SERVERS_DIR}"
 echo -e "  Service:      systemctl status msm-agent"
 echo -e "  Log:          ${LOG_FILE}"
 echo ""
-echo -e "  Firewall (Beispiel UFW):"
-echo -e "    sudo ufw allow ${AGENT_PORT}/tcp comment 'MSM Agent'"
+echo -e "  Firewall:     UFW automatisch konfiguriert, falls aktiv"
+echo -e "                Cloud-Firewall muss Port ${AGENT_PORT}/tcp erlauben"
 echo ""
-echo -e "${BOLD}Im Panel:${NC} Admin → Nodes → Node hinzufuegen mit URL, Token und Fingerprint."
+if [[ "${MSM_AGENT_ENROLLMENT:-false}" != "true" ]]; then
+  echo -e "${BOLD}Im Panel:${NC} Admin → Nodes → Node hinzufuegen mit URL, Token und Fingerprint."
+else
+  echo -e "${BOLD}Enrollment:${NC} Agent lokal bereit; warte auf Bestätigung im Panel."
+fi
 echo -e "${BOLD}Sicherheit:${NC} Token und Keyfile niemals committen oder loggen."
 echo ""

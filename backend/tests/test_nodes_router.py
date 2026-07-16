@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from unittest.mock import patch
+from io import BytesIO
+import tarfile
 
 import pytest
 from fastapi.testclient import TestClient
 
-from models import Node, Server
+from models import Node, NodeEnrollment, Server
+from services.node_client import NodeClientError
 
 
 @pytest.fixture()
@@ -90,3 +93,175 @@ def test_node_out_never_includes_token_fields():
     assert "auth_token" not in out
     assert "auth_token_enc" not in out
     assert out["server_count"] == 3
+
+
+def test_install_command_uses_configured_panel_url_and_contains_no_secret(
+    client: TestClient,
+    owner_cookies: dict,
+):
+    response = client.get("/api/nodes/install-command", cookies=owner_cookies)
+
+    assert response.status_code == 200, response.text
+    command = response.json()["command"]
+    assert "http://localhost:3000/api/nodes/install.sh" in command
+    assert "--panel http://localhost:3000" in command
+    assert "token" not in command.lower()
+    assert "claim" not in command.lower()
+
+
+def test_node_enrollment_requires_owner_approval_and_never_returns_agent_token(
+    db,
+    client: TestClient,
+    owner_cookies: dict,
+):
+    agent_token = "agent-secret-that-must-never-be-returned-123456"
+    with patch(
+        "services.node_enrollment_service.encrypt_node_token",
+        return_value="encrypted-agent-token",
+    ):
+        begin = client.post(
+            "/api/nodes/enrollments/begin",
+            headers={"X-Forwarded-For": "198.51.100.24"},
+            json={
+                "name": "Worker Enrollment",
+                "agent_token": agent_token,
+                "tls_fingerprint": "b" * 64,
+                "port": 9000,
+            },
+        )
+
+    assert begin.status_code == 201, begin.text
+    begin_body = begin.json()
+    assert agent_token not in begin.text
+    assert begin_body["display_code"]
+    assert len(begin_body["claim_secret"]) >= 32
+
+    pending_without_auth = client.get("/api/nodes/enrollments/pending")
+    assert pending_without_auth.status_code in (401, 403)
+
+    pending = client.get("/api/nodes/enrollments/pending", cookies=owner_cookies)
+    assert pending.status_code == 200, pending.text
+    assert pending.json()[0]["host"] == "https://198.51.100.24:9000"
+    assert "auth_token" not in pending.text
+    from services import node_enrollment_service
+
+    assert node_enrollment_service.find_by_claim(db, begin_body["claim_secret"]) is not None
+
+    before_approval = client.post(
+        "/api/nodes/enrollments/poll",
+        headers={"Authorization": f"Bearer {begin_body['claim_secret']}"},
+    )
+    assert before_approval.status_code == 200, before_approval.text
+    assert before_approval.json() == {"status": "pending", "node_id": None}
+
+    csrf = owner_cookies.get("__Secure-csrf_token") or ""
+    enrollment_id = pending.json()[0]["id"]
+    with patch("routers.nodes.NodeClient.from_node") as node_client:
+        node_client.return_value.metrics.return_value = {
+            "cpu_count": 4,
+            "ram_total_bytes": 8 * 1024 * 1024,
+            "disk_total_bytes": 32 * 1024 * 1024,
+        }
+        approved = client.post(
+            f"/api/nodes/enrollments/{enrollment_id}/approve",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+    assert approved.status_code == 200, approved.text
+    assert "auth_token" not in approved.text
+    node_id = approved.json()["id"]
+
+    after_approval = client.post(
+        "/api/nodes/enrollments/poll",
+        headers={"Authorization": f"Bearer {begin_body['claim_secret']}"},
+    )
+    assert after_approval.status_code == 200, after_approval.text
+    assert after_approval.json() == {"status": "approved", "node_id": node_id}
+
+    enrollment = db.query(NodeEnrollment).filter(NodeEnrollment.id == enrollment_id).one()
+    assert enrollment.status == "claimed"
+    assert enrollment.auth_token_enc == "claimed"
+    node = db.query(Node).filter(Node.id == node_id).one()
+    assert node.auth_token_enc == "encrypted-agent-token"
+    assert node.status == "online"
+
+
+def test_node_enrollment_approval_rolls_back_when_panel_cannot_reach_agent(
+    db,
+    client: TestClient,
+    owner_cookies: dict,
+):
+    with patch(
+        "services.node_enrollment_service.encrypt_node_token",
+        return_value="encrypted-agent-token",
+    ):
+        begin = client.post(
+            "/api/nodes/enrollments/begin",
+            headers={"X-Forwarded-For": "198.51.100.25"},
+            json={
+                "name": "Offline Worker",
+                "agent_token": "agent-secret-that-is-long-enough-123456",
+                "tls_fingerprint": "d" * 64,
+                "port": 9000,
+            },
+        )
+    assert begin.status_code == 201
+    enrollment = db.query(NodeEnrollment).filter_by(name="Offline Worker").one()
+    csrf = owner_cookies.get("__Secure-csrf_token") or ""
+
+    with patch(
+        "routers.nodes.NodeClient.from_node",
+        side_effect=NodeClientError("Agent not reachable"),
+    ):
+        response = client.post(
+            f"/api/nodes/enrollments/{enrollment.id}/approve",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 502
+    db.expire_all()
+    enrollment = db.query(NodeEnrollment).filter_by(name="Offline Worker").one()
+    assert enrollment.status == "pending"
+    assert enrollment.node_id is None
+    assert db.query(Node).filter_by(name="Offline Worker").count() == 0
+
+
+def test_node_enrollment_rejects_untrusted_source_ip(
+    client: TestClient,
+):
+    response = client.post(
+        "/api/nodes/enrollments/begin",
+        headers={"X-Forwarded-For": "not-an-ip"},
+        json={
+            "name": "Broken",
+            "agent_token": "x" * 40,
+            "tls_fingerprint": "c" * 64,
+            "port": 9000,
+        },
+    )
+    assert response.status_code == 400
+
+
+def test_agent_package_excludes_local_secrets_data_and_test_artifacts(client: TestClient):
+    response = client.get("/api/nodes/agent-package")
+
+    assert response.status_code == 200, response.text
+    with tarfile.open(fileobj=BytesIO(response.content), mode="r:gz") as archive:
+        names = archive.getnames()
+
+    assert "msm-agent/main.py" in names
+    assert "scripts/install-agent.sh" in names
+    forbidden_parts = {
+        ".env",
+        ".dev",
+        "venv",
+        "servers",
+        "postgres",
+        "certs",
+        "tests",
+        "__pycache__",
+        ".pytest_cache",
+    }
+    assert not any(forbidden_parts.intersection(name.split("/")) for name in names)
+    assert not any(name.endswith((".pyc", ".db", ".sqlite", ".sqlite3")) for name in names)

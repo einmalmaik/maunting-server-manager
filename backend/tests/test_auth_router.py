@@ -1,11 +1,11 @@
 """Tests for auth router: login, logout, refresh, CSRF, cookies."""
 import logging
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from models import User, RefreshToken, EmailVerification
+from models import User, RefreshToken, EmailVerification, PanelSetting
 
 
 class TestLogin:
@@ -72,6 +72,32 @@ class TestLogin:
         })
         assert response.status_code == 401
         assert response.json()["detail"] == "Ungültige Anmeldedaten"
+
+    def test_login_session_survives_optional_email_decryption_failure(
+        self, client: TestClient, owner_user: User
+    ):
+        with (
+            patch("routers.auth.EmailService.is_configured", return_value=True),
+            patch.object(
+                User,
+                "email",
+                new_callable=PropertyMock,
+                side_effect=RuntimeError("synthetic decrypt failure"),
+            ),
+            patch("routers.auth.EmailService.send_new_device_login_notification") as notify,
+        ):
+            response = client.post(
+                "/api/auth/login",
+                json={
+                    "username": "owner",
+                    "password": "OwnerPass123!",
+                    "otp_code": None,
+                },
+            )
+
+        assert response.status_code == 200
+        assert "__Secure-access_token" in response.cookies
+        notify.assert_not_called()
 
     def test_login_nonexistent_user(self, client: TestClient):
         response = client.post("/api/auth/login", json={
@@ -335,6 +361,7 @@ class TestSetupStatus:
         response = client.get("/api/auth/setup-status")
         assert response.status_code == 200
         assert response.json()["setup_required"] is True
+        assert "email_configured" in response.json()
 
     def test_setup_not_required_when_owner_exists(self, client: TestClient, owner_user: User):
         response = client.get("/api/auth/setup-status")
@@ -343,6 +370,146 @@ class TestSetupStatus:
 
 
 class TestSetupVerification:
+    def test_setup_can_store_resend_config_without_exposing_secret(
+        self, client: TestClient, db: Session
+    ):
+        from services.auth_service import AuthService
+        from services.panel_settings_service import PanelSettingsService
+
+        db.query(User).delete()
+        db.commit()
+        api_key = "re_test_secret_value"
+
+        with patch("routers.auth.EmailService.is_configured", return_value=False), \
+             patch(
+                 "routers.auth.EmailService.send_verification_code_email",
+                 return_value=True,
+             ):
+            response = client.post("/api/auth/setup", json={
+                "username": "setupowner",
+                "email": "setup@test.de",
+                "password": "SetupPass123!",
+                "email_config": {
+                    "provider": "resend",
+                    "from_address": "noreply@test.de",
+                    "resend_api_key": api_key,
+                },
+            })
+
+        assert response.status_code == 201
+        assert api_key not in response.text
+        legacy = db.query(PanelSetting).filter_by(key="resend_api_key").first()
+        stored = db.query(PanelSetting).filter_by(
+            key="resend_api_key_encrypted"
+        ).first()
+        assert legacy is not None and legacy.value == ""
+        encrypted = stored.value if stored else ""
+        assert encrypted and api_key not in encrypted
+        assert AuthService.decrypt_secret(
+            encrypted, aad="msm:settings:resend_api_key"
+        ) == api_key
+
+    def test_setup_rejects_anonymous_smtp_configuration(
+        self, client: TestClient, db: Session
+    ):
+        from services.auth_service import AuthService
+
+        db.query(User).delete()
+        db.commit()
+
+        with patch("routers.auth.EmailService.is_configured", return_value=False):
+            response = client.post("/api/auth/setup", json={
+                "username": "setupowner",
+                "email": "setup@test.de",
+                "password": "SetupPass123!",
+                "email_config": {
+                    "provider": "smtp",
+                    "from_address": "noreply@test.de",
+                    "smtp_host": "127.0.0.1",
+                    "smtp_user": "internal",
+                    "smtp_password": "secret",
+                },
+            })
+
+        assert response.status_code == 422
+        assert AuthService.get_user_by_email(db, "setup@test.de") is None
+
+    def test_setup_without_existing_email_config_requires_resend(
+        self, client: TestClient, db: Session
+    ):
+        from services.auth_service import AuthService
+
+        db.query(User).delete()
+        db.commit()
+
+        with patch("routers.auth.EmailService.is_configured", return_value=False):
+            response = client.post("/api/auth/setup", json={
+                "username": "setupowner",
+                "email": "setup@test.de",
+                "password": "SetupPass123!",
+            })
+
+        assert response.status_code == 503
+        assert AuthService.get_user_by_email(db, "setup@test.de") is None
+
+    def test_failed_first_run_email_does_not_lock_setup_configuration(
+        self, client: TestClient, db: Session
+    ):
+        from services.auth_service import AuthService
+        from services.panel_settings_service import PanelSettingsService
+
+        db.query(User).delete()
+        db.commit()
+
+        with patch("routers.auth.EmailService.is_configured", return_value=False), \
+             patch(
+                 "routers.auth.EmailService.send_verification_code_email",
+                 side_effect=RuntimeError("provider unavailable"),
+             ):
+            response = client.post("/api/auth/setup", json={
+                "username": "setupowner",
+                "email": "setup@test.de",
+                "password": "SetupPass123!",
+                "email_config": {
+                    "provider": "resend",
+                    "from_address": "noreply@test.de",
+                    "resend_api_key": "re_invalid_test_key",
+                },
+            })
+
+        assert response.status_code == 503
+        assert AuthService.get_user_by_email(db, "setup@test.de") is None
+        assert PanelSettingsService.get("resend_api_key_encrypted") == ""
+        assert PanelSettingsService.get("smtp_from") == ""
+        assert "provider unavailable" not in response.text
+
+    def test_setup_resend_accepts_email_only_and_uses_setup_purpose(
+        self, client: TestClient, db: Session
+    ):
+        from services.auth_service import AuthService
+        from services.email_verification_service import EmailVerificationService
+
+        user = AuthService.create_owner(
+            db, "pendingowner", "pending-owner@test.de", "SetupPass123!"
+        )
+        user.email_verified = False
+        db.commit()
+
+        with patch("routers.auth.EmailService.is_configured", return_value=True), \
+             patch(
+                 "routers.auth.EmailService.send_verification_code_email",
+                 return_value=True,
+             ):
+            response = client.post(
+                "/api/auth/setup-resend",
+                json={"email": "pending-owner@test.de"},
+            )
+
+        assert response.status_code == 200
+        assert EmailVerificationService.has_active_verification(
+            db, "pending-owner@test.de", ["setup"]
+        )
+
     def test_setup_requires_verification_code(self, client: TestClient, db: Session):
         db.query(User).delete()
         db.commit()

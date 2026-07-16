@@ -1,6 +1,7 @@
 from .user import User
 from .server import Server
 from .node import Node
+from .node_enrollment import NodeEnrollment
 from .role import Role
 from .role_permission import RolePermission
 from .server_permission import ServerPermission
@@ -24,7 +25,7 @@ from .webhook_subscription import WebhookSubscription
 from .webhook_delivery import WebhookDelivery
 
 __all__ = [
-    "User", "Server", "Node", "Role", "RolePermission", "ServerPermission",
+    "User", "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",

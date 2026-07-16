@@ -50,8 +50,13 @@ _FAKE_SQLITE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY
 
 
 @pytest.fixture(autouse=True)
-def _clean_scheduler():
+def _clean_scheduler(monkeypatch):
     """Scheduler-Jobs vor/nach jedem Test bereinigen."""
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        "postgresql+psycopg2://msm:test@localhost/msm",
+    )
     scheduler = get_scheduler()
     for job in list(scheduler.get_jobs()):
         try:

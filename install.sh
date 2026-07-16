@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 # ── Global PATH: verhindert "mkdir: not found" in steamcmd-Wrapper ──
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -40,6 +41,10 @@ ok()   { echo -e "${GREEN}[OK]${NC}   $1" | tee -a "$LOG_FILE"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1" | tee -a "$LOG_FILE"; }
 err()  { echo -e "${RED}[ERR]${NC}  $1" | tee -a "$LOG_FILE"; exit 1; }
 ask()  { read -rp "$(echo -e "${BOLD}[?]${NC} $1 ")" "$2"; }
+ask_secret() {
+    read -rsp "$(echo -e "${BOLD}[?]${NC} $1 ")" "$2"
+    echo ""
+}
 ask_yesno() {
     local ans
     while true; do
@@ -70,6 +75,28 @@ ask_yesno_default() {
         fi
     done
 }
+
+SIMPLE_INSTALL=false
+INSTALL_DOMAIN=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --simple)
+            SIMPLE_INSTALL=true
+            shift
+            ;;
+        --domain)
+            [[ $# -ge 2 ]] || err "--domain benötigt einen Domainnamen."
+            INSTALL_DOMAIN="$2"
+            shift 2
+            ;;
+        *)
+            err "Unbekannte Option: $1"
+            ;;
+    esac
+done
+if [[ -n "$INSTALL_DOMAIN" ]] && [[ ! "$INSTALL_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+    err "Ungültige Domain. Beispiel: panel.example.com"
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # Re-Install Hilfsfunktionen
@@ -156,7 +183,7 @@ show_current_config() {
     echo -e "  ${BOLD}Email-Provider:${NC}  ${CURRENT_EMAIL_PROVIDER}"
     if [[ "$CURRENT_EMAIL_PROVIDER" == "resend" ]]; then
         if [[ -n "$CURRENT_RESEND_API_KEY" ]]; then
-            echo -e "  ${BOLD}Resend API-Key:${NC}  ${CURRENT_RESEND_API_KEY:0:8}..."
+            echo -e "  ${BOLD}Resend API-Key:${NC}  *** konfiguriert ***"
         else
             echo -e "  ${BOLD}Resend API-Key:${NC}  <nicht gesetzt>"
         fi
@@ -210,6 +237,9 @@ if [[ -d /run/systemd/system ]] && command -v systemctl &>/dev/null; then
     SYSTEMD_AVAILABLE=true
 else
     SYSTEMD_AVAILABLE=false
+fi
+if $SIMPLE_INSTALL && ! $SYSTEMD_AVAILABLE; then
+    err "Die einfache Produktionsinstallation benötigt systemd (Ubuntu/Debian Server)."
 fi
 
 ensure_subid_entry() {
@@ -322,18 +352,24 @@ if [[ -f "$MSM_DIR/backend/.env" ]]; then
     load_current_env
     show_current_config
 
-    echo -e "${BOLD}[?]${NC} Einstellungen beibehalten oder ändern?"
-    echo "    1) Beibehalten — nur Code aktualisieren, Frontend neu bauen, Services neustarten"
-    echo "    2) Ändern — Konfiguration anpassen (Domain, Email, DB, Redis, Auto-Update)"
-    ask "[1/2]: " choice
-
-    if [[ "$choice" == "1" ]]; then
+    if $SIMPLE_INSTALL; then
         KEEP_SETTINGS=true
         NEED_FULL_REBUILD=true
-        log "Re-Install Modus: Einstellungen beibehalten, Code aktualisieren..."
+        log "Bestehende Einstellungen werden unverändert übernommen."
     else
-        KEEP_SETTINGS=false
-        log "Re-Install Modus: Konfiguration wird angepasst..."
+        echo -e "${BOLD}[?]${NC} Einstellungen beibehalten oder ändern?"
+        echo "    1) Beibehalten — nur Code aktualisieren, Frontend neu bauen, Services neustarten"
+        echo "    2) Ändern — Konfiguration anpassen (Domain, Email, DB, Redis, Auto-Update)"
+        ask "[1/2]: " choice
+
+        if [[ "$choice" == "1" ]]; then
+            KEEP_SETTINGS=true
+            NEED_FULL_REBUILD=true
+            log "Re-Install Modus: Einstellungen beibehalten, Code aktualisieren..."
+        else
+            KEEP_SETTINGS=false
+            log "Re-Install Modus: Konfiguration wird angepasst..."
+        fi
     fi
 else
     log "Frische Installation erkannt..."
@@ -347,9 +383,8 @@ apt-get update -qq | tee -a "$LOG_FILE"
 
 log "Installiere Basis-Pakete..."
 apt-get install -y -qq \
-    curl wget git jq \
+    curl wget git jq rsync \
     python3 python3-pip python3-venv \
-    sqlite3 \
     systemd systemd-sysv \
     libc6-i386 lib32stdc++6 lib32gcc-s1 \
     software-properties-common \
@@ -453,7 +488,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
     fi
 else
     # Fresh install
-    if ask_yesno "Redis für verteiltes Rate-Limiting installieren? (empfohlen für Produktion)"; then
+    if $SIMPLE_INSTALL || ask_yesno "Redis für verteiltes Rate-Limiting installieren? (empfohlen für Produktion)"; then
         INSTALL_REDIS=true
         MSM_REDIS_URL="redis://localhost:6379"
     else
@@ -477,6 +512,8 @@ if $INSTALL_REDIS; then
     if ! $REINSTALL_MODE || ($REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_REDIS); then
         ok "Redis installiert und gestartet"
     fi
+    redis-cli ping 2>/dev/null | grep -qx 'PONG' \
+        || err "Redis wurde ausgewählt, ist aber nicht erreichbar."
 else
     if ! $REINSTALL_MODE; then
         log "Redis wird übersprungen (Rate-Limiting nutzt in-memory Fallback)."
@@ -522,15 +559,31 @@ if $SHOULD_COPY_FILES; then
         rm -rf "$MSM_DIR/backend/venv" 2>/dev/null || true
         rm -rf "$MSM_DIR/msm-agent/venv" 2>/dev/null || true
     else
-        # Install.sh läuft außerhalb des Zielverzeichnisses → sauberes Verzeichnis anlegen
-        rm -rf "$MSM_DIR" 2>/dev/null || true
+        # Code gezielt synchronisieren. Laufzeitdaten und Secrets im Ziel werden
+        # niemals durch eine Re-Installation geloescht oder ueberschrieben.
         mkdir -p "$MSM_DIR"
 
-        cp -r "$SCRIPT_DIR/backend" "$MSM_DIR/"
-        cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
-        cp -r "$SCRIPT_DIR/dis-sidecar" "$MSM_DIR/" 2>/dev/null || true
-        cp -r "$SCRIPT_DIR/msm-agent" "$MSM_DIR/" 2>/dev/null || true
-        cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
+        rsync -a --delete \
+            --exclude '.env' --exclude 'venv/' --exclude 'msm.db*' \
+            --exclude '__pycache__/' --exclude '*.pyc' \
+            "$SCRIPT_DIR/backend/" "$MSM_DIR/backend/"
+        rsync -a --delete \
+            --exclude 'node_modules/' --exclude 'dist/' \
+            "$SCRIPT_DIR/frontend/" "$MSM_DIR/frontend/"
+        if [[ -d "$SCRIPT_DIR/dis-sidecar" ]]; then
+            rsync -a --delete --exclude '.env' --exclude 'node_modules/' \
+                "$SCRIPT_DIR/dis-sidecar/" "$MSM_DIR/dis-sidecar/"
+        fi
+        if [[ -d "$SCRIPT_DIR/msm-agent" ]]; then
+            rsync -a --delete \
+                --exclude '.env' --exclude 'venv/' --exclude 'servers/' \
+                --exclude 'postgres/' --exclude 'certs/' \
+                --exclude '__pycache__/' --exclude '*.pyc' \
+                "$SCRIPT_DIR/msm-agent/" "$MSM_DIR/msm-agent/"
+        fi
+        if [[ -d "$SCRIPT_DIR/docs" ]]; then
+            rsync -a --delete "$SCRIPT_DIR/docs/" "$MSM_DIR/docs/"
+        fi
         cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/update.sh" "$MSM_DIR/" 2>/dev/null || true
@@ -555,7 +608,8 @@ SMTP_USER=""
 SMTP_PASS=""
 SMTP_FROM=""
 RESEND_API_KEY=""
-USE_POSTGRES=false
+USE_POSTGRES=true
+MIGRATE_LEGACY_SQLITE=false
 PG_PASSWORD=""
 MSM_AUTO_UPDATE="false"
 
@@ -569,10 +623,10 @@ if $REINSTALL_MODE && $KEEP_SETTINGS; then
     SMTP_PASS="$CURRENT_SMTP_PASS"
     SMTP_FROM="$CURRENT_SMTP_FROM"
     RESEND_API_KEY="$CURRENT_RESEND_API_KEY"
-    if $CURRENT_USE_POSTGRES; then
-        USE_POSTGRES=true
-    else
-        USE_POSTGRES=false
+    if ! $CURRENT_USE_POSTGRES; then
+        MIGRATE_LEGACY_SQLITE=true
+        CHANGED_DB=true
+        warn "Legacy-SQLite erkannt — der geprüfte PostgreSQL-Import wird automatisch ausgeführt."
     fi
     MSM_AUTO_UPDATE="$CURRENT_AUTO_UPDATE"
 
@@ -618,7 +672,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
 
         if [[ "$EMAIL_CHOICE" == "1" ]]; then
             EMAIL_PROVIDER="resend"
-            ask "Resend API-Key [${CURRENT_RESEND_API_KEY:-re_...}]: " RESEND_API_KEY
+            ask_secret "Resend API-Key [leer = bestehenden behalten]: " RESEND_API_KEY
             RESEND_API_KEY="${RESEND_API_KEY:-$CURRENT_RESEND_API_KEY}"
             ask "Absender-Adresse [${CURRENT_SMTP_FROM:-noreply@mauntingstudios.de}]: " SMTP_FROM_INPUT
             SMTP_FROM="${SMTP_FROM_INPUT:-${CURRENT_SMTP_FROM:-noreply@mauntingstudios.de}}"
@@ -631,7 +685,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
             SMTP_PORT="${SMTP_PORT_INPUT:-${CURRENT_SMTP_PORT:-587}}"
             ask "SMTP-Benutzername [${CURRENT_SMTP_USER:-}]: " SMTP_USER
             SMTP_USER="${SMTP_USER:-$CURRENT_SMTP_USER}"
-            ask "SMTP-Passwort [leer = bestehendes behalten]: " SMTP_PASS
+            ask_secret "SMTP-Passwort [leer = bestehendes behalten]: " SMTP_PASS
             if [[ -z "$SMTP_PASS" ]]; then
                 SMTP_PASS="$CURRENT_SMTP_PASS"
             fi
@@ -656,31 +710,11 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
     echo ""
     echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
     if $CURRENT_USE_POSTGRES; then
-        echo "  Aktuell: PostgreSQL"
+        ok "PostgreSQL bleibt als Panel-Datenbank aktiv."
     else
-        echo "  Aktuell: SQLite"
-    fi
-    echo "  'Ja' wählen um zu wechseln (mit Warnung)."
-    echo ""
-
-    USE_POSTGRES=$CURRENT_USE_POSTGRES
-
-    if ask_yesno "Datenbank-Typ wechseln?"; then
-        if $CURRENT_USE_POSTGRES; then
-            warn "WARNUNG: Wechsel von PostgreSQL zu SQLite!"
-            warn "Existierende PostgreSQL-Daten werden NICHT automatisch migriert."
-            if ask_yesno "Wirklich zu SQLite wechseln?"; then
-                USE_POSTGRES=false
-                CHANGED_DB=true
-            fi
-        else
-            warn "WARNUNG: Wechsel von SQLite zu PostgreSQL!"
-            warn "Existierende SQLite-Daten werden NICHT automatisch migriert."
-            if ask_yesno "Wirklich zu PostgreSQL wechseln?"; then
-                USE_POSTGRES=true
-                CHANGED_DB=true
-            fi
-        fi
+        MIGRATE_LEGACY_SQLITE=true
+        CHANGED_DB=true
+        warn "Legacy-SQLite erkannt — MSM migriert die Daten automatisch nach PostgreSQL."
     fi
 
     # ── 4/4 Auto-Update ──
@@ -714,6 +748,16 @@ else
     # Fresh install flow (Original)
     # ═══════════════════════════════════════════════════════════════
 
+    if $SIMPLE_INSTALL; then
+        [[ -n "$INSTALL_DOMAIN" ]] \
+            || err "Die einfache Installation benötigt --domain panel.example.com"
+        DOMAIN="$INSTALL_DOMAIN"
+        MSM_AUTO_UPDATE="false"
+        ok "Domain: $DOMAIN"
+        ok "PostgreSQL und Redis werden automatisch lokal eingerichtet."
+        log "E-Mail wird sicher im Browser-Setup eingerichtet; automatische Updates bleiben aus."
+    else
+
     # ── 5a. Domain ──
     echo ""
     echo -e "${BOLD}Schritt 1/4: Domain${NC}"
@@ -742,7 +786,7 @@ else
 
         if [[ "$EMAIL_CHOICE" == "1" ]]; then
             EMAIL_PROVIDER="resend"
-            ask "Resend API-Key (re_...): " RESEND_API_KEY
+            ask_secret "Resend API-Key (re_...): " RESEND_API_KEY
             ask "Absender-Adresse [noreply@mauntingstudios.de]: " SMTP_FROM_INPUT
             SMTP_FROM="${SMTP_FROM_INPUT:-noreply@mauntingstudios.de}"
             ok "Resend konfiguriert"
@@ -752,7 +796,7 @@ else
             ask "SMTP-Port [587]: " SMTP_PORT_INPUT
             SMTP_PORT="${SMTP_PORT_INPUT:-587}"
             ask "SMTP-Benutzername: " SMTP_USER
-            ask "SMTP-Passwort: " SMTP_PASS
+            ask_secret "SMTP-Passwort: " SMTP_PASS
             ask "Absender-Adresse [noreply@mauntingstudios.de]: " SMTP_FROM_INPUT
             SMTP_FROM="${SMTP_FROM_INPUT:-noreply@mauntingstudios.de}"
             ok "SMTP konfiguriert"
@@ -764,11 +808,7 @@ else
     # ── 5c. PostgreSQL ──
     echo ""
     echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
-    if ask_yesno "PostgreSQL für die Datenbank nutzen? (empfohlen für Produktion, sonst SQLite)"; then
-        USE_POSTGRES=true
-    else
-        USE_POSTGRES=false
-    fi
+    ok "PostgreSQL wird automatisch und sicher auf Loopback eingerichtet."
 
     # ── 5d. Auto-Update ──
     echo ""
@@ -781,48 +821,52 @@ else
     else
         MSM_AUTO_UPDATE="false"
     fi
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# 5b. PostgreSQL Setup (falls nötig)
+# 5b. PostgreSQL Setup
 # ═══════════════════════════════════════════════════════════════
-if $USE_POSTGRES; then
-    if ! command -v psql &>/dev/null; then
-        log "Installiere PostgreSQL..."
-        apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev 2>&1 | tee -a "$LOG_FILE"
+if ! command -v psql &>/dev/null; then
+    log "Installiere PostgreSQL..."
+    apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev 2>&1 | tee -a "$LOG_FILE"
+fi
+
+# Nur bei frischer Installation oder Legacy-SQLite-Migration: Passwort + User/DB erstellen
+if ! $REINSTALL_MODE || $CHANGED_DB; then
+    PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
+
+    log "Richte PostgreSQL-User und Datenbank ein..."
+    if su - postgres -c "psql --no-psqlrc -tAc \"SELECT 1 FROM pg_roles WHERE rolname='msm'\"" | grep -q 1; then
+        err "PostgreSQL-Rolle 'msm' existiert bereits. Der Installer überschreibt keine bestehende Rolle."
     fi
-
-    # Nur bei frischer Installation oder Wechsel zu PostgreSQL: Passwort + User/DB erstellen
-    if ! $REINSTALL_MODE || $CHANGED_DB; then
-        PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
-
-        log "Richte PostgreSQL-User und Datenbank ein..."
-        cat > /tmp/msm_pg_setup.sql <<EOF
-DO \$\$
-BEGIN
-  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'msm') THEN
-    ALTER USER msm WITH PASSWORD '${PG_PASSWORD}';
-  ELSE
-    CREATE USER msm WITH PASSWORD '${PG_PASSWORD}';
-  END IF;
-END \$\$;
+    if su - postgres -c "psql --no-psqlrc -tAc \"SELECT 1 FROM pg_database WHERE datname='msm'\"" | grep -q 1; then
+        err "PostgreSQL-Datenbank 'msm' existiert bereits. Der Installer überschreibt keine bestehende Datenbank."
+    fi
+    PG_SETUP_SQL=$(mktemp /tmp/msm-pg-setup.XXXXXX.sql)
+    chmod 600 "$PG_SETUP_SQL"
+    cat > "$PG_SETUP_SQL" <<EOF
+CREATE USER msm WITH PASSWORD '${PG_PASSWORD}';
 EOF
-        su - postgres -c "psql -f /tmp/msm_pg_setup.sql" 2>&1 | tee -a "$LOG_FILE"
-        rm -f /tmp/msm_pg_setup.sql
-
-        # CREATE DATABASE darf NICHT in einem DO/Transaktions-Block laufen
-        su - postgres -c "psql -c \"CREATE DATABASE msm OWNER msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
-
-        su - postgres -c "psql -d msm -c \"GRANT ALL ON SCHEMA public TO msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
-
-        ok "PostgreSQL eingerichtet (DB: msm, User: msm)"
-    else
-        log "PostgreSQL bleibt bestehend — User/DB nicht neu angelegt."
+    if ! su - postgres -c "psql -f '$PG_SETUP_SQL'" 2>&1 | tee -a "$LOG_FILE"; then
+        rm -f "$PG_SETUP_SQL"
+        err "PostgreSQL-Rolle konnte nicht eingerichtet werden."
     fi
+    rm -f "$PG_SETUP_SQL"
 
-    # pg_hba.conf sicherstellen (auch bei Re-Install)
-    PG_HBA=$(find /etc/postgresql -name pg_hba.conf | head -1)
-    if [[ -n "$PG_HBA" ]]; then
+    su - postgres -c "createdb --owner=msm msm" 2>&1 | tee -a "$LOG_FILE" \
+        || { su - postgres -c "dropuser --if-exists msm" >/dev/null 2>&1 || true; err "PostgreSQL-Datenbank konnte nicht erstellt werden."; }
+
+    su - postgres -c "psql -d msm -c \"GRANT ALL ON SCHEMA public TO msm;\"" 2>&1 | tee -a "$LOG_FILE"
+
+    ok "PostgreSQL eingerichtet (DB: msm, User: msm)"
+else
+    log "PostgreSQL bleibt bestehend — User/DB nicht neu angelegt."
+fi
+
+# pg_hba.conf sicherstellen (auch bei Re-Install)
+PG_HBA=$(find /etc/postgresql -name pg_hba.conf | head -1)
+if [[ -n "$PG_HBA" ]]; then
         sed -i -E 's/^(host\s+all\s+all\s+127\.0\.0\.1\/32)\s+.*/\1            scram-sha-256/' "$PG_HBA"
         sed -i -E 's/^(host\s+all\s+all\s+::1\/128)\s+.*/\1                 scram-sha-256/' "$PG_HBA"
         if ! grep -qE '^host\s+all\s+all\s+127\.0\.0\.1/32' "$PG_HBA"; then
@@ -836,15 +880,10 @@ EOF
         else
             service postgresql restart 2>/dev/null || pg_ctlcluster $(pg_lsclusters | tail -1 | awk '{print $1}') main restart 2>/dev/null || true
         fi
-    fi
+fi
 
-    if ! $REINSTALL_MODE || $CHANGED_DB; then
-        ok "PostgreSQL installiert (DB: msm, User: msm)"
-    fi
-else
-    if ! $REINSTALL_MODE; then
-        log "SQLite wird als Datenbank genutzt (einfach, aber nicht für hohe Last)."
-    fi
+if ! $REINSTALL_MODE || $CHANGED_DB; then
+    ok "PostgreSQL installiert (DB: msm, User: msm)"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -879,15 +918,10 @@ ENV_FILE="$MSM_DIR/backend/.env"
 
 # Datenbank-URL bestimmen
 if ! $REINSTALL_MODE || $CHANGED_DB; then
-    # Frische URL generieren
-    if $USE_POSTGRES; then
-        PG_PASSWORD_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$PG_PASSWORD''', safe=''))")
-        DB_URL="postgresql+psycopg2://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
-        DB_URL_ASYNC="postgresql+asyncpg://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
-    else
-        DB_URL="sqlite:///./msm.db"
-        DB_URL_ASYNC="sqlite+aiosqlite:///./msm.db"
-    fi
+    # Frische PostgreSQL-URL generieren
+    PG_PASSWORD_ENCODED=$(printf '%s' "$PG_PASSWORD" | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=''))")
+    DB_URL="postgresql+psycopg2://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
+    DB_URL_ASYNC="postgresql+asyncpg://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
 else
     # Bestehende URLs beibehalten
     if [[ -n "${CURRENT_DB_URL:-}" && -n "${CURRENT_DB_URL_ASYNC:-}" ]]; then
@@ -895,13 +929,8 @@ else
         DB_URL_ASYNC="$CURRENT_DB_URL_ASYNC"
     else
         # Fallback (sollte bei gültigem .env nie passieren)
-        if $USE_POSTGRES; then
-            DB_URL="postgresql+psycopg2://msm:@localhost:5432/msm"
-            DB_URL_ASYNC="postgresql+asyncpg://msm:@localhost:5432/msm"
-        else
-            DB_URL="sqlite:///./msm.db"
-            DB_URL_ASYNC="sqlite+aiosqlite:///./msm.db"
-        fi
+        DB_URL="postgresql+psycopg2://msm:@localhost:5432/msm"
+        DB_URL_ASYNC="postgresql+asyncpg://msm:@localhost:5432/msm"
         warn "Bestehende DB-URL nicht gefunden — Fallback generiert."
     fi
 fi
@@ -952,6 +981,18 @@ EOF
 chmod 600 "$ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$ENV_FILE"
 ok ".env geschrieben (chmod 600)"
+
+# Der DIS-Sidecar benoetigt dieselben Crypto-Secrets. Sie gehoeren nicht in
+# eine weltweit lesbare systemd-Unit, sondern in eine geschuetzte Environment-Datei.
+DIS_ENV_FILE="$MSM_DIR/dis-sidecar/.env"
+cat > "$DIS_ENV_FILE" <<EOF
+MSM_SECRET_KEY="$SECRET_KEY"
+MSM_DIS_SALT="$DIS_SALT"
+MSM_DIS_SIDECAR_TOKEN="$DIS_TOKEN"
+MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"
+EOF
+chmod 600 "$DIS_ENV_FILE"
+chown "$MSM_USER:$MSM_USER" "$DIS_ENV_FILE"
 
 # ═══════════════════════════════════════════════════════════════
 # 7. Python-Backend einrichten
@@ -1014,6 +1055,8 @@ fi
 RUN_DB_INIT=false
 if ! $REINSTALL_MODE; then
     RUN_DB_INIT=true
+elif $MIGRATE_LEGACY_SQLITE; then
+    RUN_DB_INIT=true
 elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_DB; then
     RUN_DB_INIT=true
 fi
@@ -1021,23 +1064,33 @@ fi
 if $RUN_DB_INIT; then
     log "Initialisiere Datenbank..."
 
-    # Bei SQLite: alte DB entfernen, damit create_all ein sauberes Schema erzeugt
-    # (außer Re-Install mit unveränderter SQLite-DB)
-    if [[ "$DB_URL" == sqlite* ]]; then
-        SHOULD_DELETE_DB=true
-        if $REINSTALL_MODE && ! $CHANGED_DB; then
-            SHOULD_DELETE_DB=false
-        fi
-        if $SHOULD_DELETE_DB; then
-            rm -f "$MSM_DIR/backend/msm.db"
-        fi
+    if $MIGRATE_LEGACY_SQLITE; then
+        LEGACY_SQLITE="$MSM_DIR/backend/msm.db"
+        [[ -f "$LEGACY_SQLITE" ]] || err "Legacy-SQLite-Datei fehlt: $LEGACY_SQLITE"
+        log "Migriere Legacy-SQLite einmalig nach PostgreSQL..."
+        su - "$MSM_USER" -c "
+            cd $MSM_DIR/backend
+            source venv/bin/activate
+            python3 scripts/migrate_sqlite_to_postgres.py \\
+                --sqlite '$LEGACY_SQLITE'
+        " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-nach-PostgreSQL-Import fehlgeschlagen"
+        ok "Legacy-SQLite vollständig importiert und verifiziert"
     fi
-
     su - "$MSM_USER" -c "
         cd $MSM_DIR/backend
         source venv/bin/activate
-        python3 -c \"from database import engine, Base; from models import *; Base.metadata.create_all(engine)\"
-    " 2>&1 | tee -a "$LOG_FILE"
+        python3 scripts/manage_schema.py
+    " 2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Schema konnte nicht vorbereitet werden"
+    if $MIGRATE_LEGACY_SQLITE; then
+        su - "$MSM_USER" -c "
+            cd $MSM_DIR/backend
+            source venv/bin/activate
+            python3 scripts/migrate_sqlite_to_postgres.py \\
+                --sqlite '$LEGACY_SQLITE' \\
+                --archive-source
+        " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-Archivierung nach erfolgreicher Migration fehlgeschlagen"
+        ok "Legacy-SQLite als Migrationsarchiv gesichert"
+    fi
     ok "Datenbank initialisiert"
 fi
 
@@ -1273,10 +1326,7 @@ User=$MSM_USER
 Group=$MSM_USER
 WorkingDirectory=$MSM_DIR/dis-sidecar
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="MSM_SECRET_KEY=$SECRET_KEY"
-Environment="MSM_DIS_SALT=$DIS_SALT"
-Environment="MSM_DIS_SIDECAR_TOKEN=$DIS_TOKEN"
-Environment="MSM_DIS_SIDECAR_URL=http://127.0.0.1:9100"
+EnvironmentFile=$MSM_DIR/dis-sidecar/.env
 ExecStart=/usr/bin/node $MSM_DIR/dis-sidecar/server.mjs
 Restart=on-failure
 RestartSec=3
@@ -1542,11 +1592,18 @@ fi
 log "Starte Panel-Service..."
 if $SYSTEMD_AVAILABLE; then
     # DIS Sidecar zuerst starten (Panel haengt davon ab)
-    systemctl restart msm-dis-sidecar.service 2>/dev/null || systemctl start msm-dis-sidecar.service 2>/dev/null || true
-    sleep 1
-    if ! systemctl is-active --quiet msm-dis-sidecar.service; then
-        warn "DIS Sidecar startet nicht. Pruefe: journalctl -u msm-dis-sidecar -n 50"
-    fi
+    systemctl restart msm-dis-sidecar.service 2>/dev/null \
+        || systemctl start msm-dis-sidecar.service 2>/dev/null \
+        || err "DIS Sidecar konnte nicht gestartet werden."
+    DIS_READY=false
+    for _attempt in $(seq 1 30); do
+        if curl -fsS --max-time 2 http://127.0.0.1:9100/health >/dev/null 2>&1; then
+            DIS_READY=true
+            break
+        fi
+        sleep 1
+    done
+    $DIS_READY || err "DIS Sidecar ist nicht bereit. Prüfe: journalctl -u msm-dis-sidecar -n 50"
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
     if [[ -f "$MSM_DIR/backend/msm.db" ]] || [[ "$DB_URL" == postgresql* ]]; then
@@ -1558,23 +1615,38 @@ if $SYSTEMD_AVAILABLE; then
         " 2>&1 | tee -a "$LOG_FILE" || err "DIS-Migration fehlgeschlagen! Migration abgebrochen. Prüfe das Log: $LOG_FILE"
     fi
 
-    systemctl restart msm-panel.service 2>/dev/null || systemctl start msm-panel.service 2>/dev/null || true
-    sleep 2
-    if systemctl is-active --quiet msm-panel.service; then
-        ok "Panel-Service läuft"
-    else
-        warn "Panel-Service startet nicht automatisch. Prüfe: journalctl -u msm-panel -n 50"
+    if [[ -f /etc/systemd/system/msm-agent.service ]]; then
+        systemctl restart msm-agent.service 2>/dev/null \
+            || systemctl start msm-agent.service 2>/dev/null \
+            || err "MSM Agent konnte nicht gestartet werden."
+        AGENT_READY=false
+        for _attempt in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:9000/health >/dev/null 2>&1; then
+                AGENT_READY=true
+                break
+            fi
+            sleep 1
+        done
+        $AGENT_READY || err "MSM Agent ist nicht bereit. Prüfe: journalctl -u msm-agent -n 50"
+        ok "MSM Agent läuft (Port 9000)"
     fi
 
-    if [[ -f /etc/systemd/system/msm-agent.service ]]; then
-        systemctl restart msm-agent.service 2>/dev/null || systemctl start msm-agent.service 2>/dev/null || true
-        sleep 1
-        if systemctl is-active --quiet msm-agent.service; then
-            ok "MSM Agent läuft (Port 9000)"
-        else
-            warn "MSM Agent startet nicht. Prüfe: journalctl -u msm-agent -n 50"
+    systemctl restart msm-panel.service 2>/dev/null \
+        || systemctl start msm-panel.service 2>/dev/null \
+        || err "Panel-Service konnte nicht gestartet werden."
+    PANEL_READY=false
+    for _attempt in $(seq 1 30); do
+        if curl -fsS --max-time 2 http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+            PANEL_READY=true
+            break
         fi
-    fi
+        sleep 1
+    done
+    $PANEL_READY || err "Panel-Service ist nicht bereit. Prüfe: journalctl -u msm-panel -n 50"
+    ok "Panel-Service läuft"
+    systemctl is-active --quiet caddy \
+        || err "Caddy ist nicht aktiv. Prüfe: journalctl -u caddy -n 50"
+    ok "Caddy läuft"
 else
     warn "systemd nicht verfügbar — Service muss manuell gestartet werden."
     warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"
@@ -1629,11 +1701,7 @@ echo -e "  ${BOLD}Log-Datei:${NC}          $LOG_FILE"
 echo -e "  ${BOLD}Konfiguration:${NC}      $ENV_FILE"
 echo ""
 
-if $USE_POSTGRES; then
-    echo -e "  ${GREEN}Datenbank:${NC}         PostgreSQL (DB: msm, User: msm)"
-else
-    echo -e "  ${YELLOW}Datenbank:${NC}         SQLite (empfohlen: PostgreSQL für Produktion)"
-fi
+echo -e "  ${GREEN}Datenbank:${NC}         PostgreSQL (DB: msm, User: msm)"
 
 if [[ "$EMAIL_PROVIDER" == "resend" && -n "$RESEND_API_KEY" ]]; then
     echo -e "  ${GREEN}Email:${NC}             Resend (API-Key konfiguriert)"
@@ -1641,7 +1709,7 @@ elif [[ -n "$SMTP_HOST" ]]; then
     echo -e "  ${GREEN}Email:${NC}             SMTP $SMTP_HOST:$SMTP_PORT"
 else
     echo -e "  ${YELLOW}Email nicht konfiguriert.${NC}"
-    echo -e "         Setze MSM_RESEND_API_KEY oder MSM_SMTP_* in $ENV_FILE."
+    echo -e "         Wird beim ersten Oeffnen sicher im Setup-Wizard eingerichtet."
 fi
 
 if $INSTALL_REDIS; then
@@ -1659,8 +1727,8 @@ fi
 echo ""
 echo -e "  ${BOLD}Nächste Schritte:${NC}"
 echo -e "    1. Panel im Browser öffnen"
-echo -e "    2. Setup-Wizard durchlaufen (erfordert gültige Email-Adresse)"
-echo -e "    3. Ersten Owner-Account erstellen"
+echo -e "    2. E-Mail-Versand und Owner im Setup-Wizard einrichten"
+echo -e "    3. E-Mail-Adresse mit dem zugesandten Code bestaetigen"
 echo -e "    4. Game-Server erstellen — jeder Server läuft isoliert mit eigenem Linux-User"
 echo ""
 echo -e "  ${BOLD}Wichtige Befehle:${NC}"

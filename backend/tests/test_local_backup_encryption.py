@@ -665,7 +665,7 @@ class TestPanelBackupEncrypted:
         _setup_backup_password()
 
         with patch.object(pbs, "_dump_database", return_value=b"-- sqlite dump\nCREATE TABLE x();"):
-            with patch.object(pbs.settings, "database_url", "sqlite:///./msm.db"):
+            with patch.object(pbs.settings, "database_url", "postgresql://msm:test@localhost/msm"):
                 backup = pbs.create_panel_backup(db)
 
         assert backup.local_path.endswith(".enc")
@@ -690,7 +690,7 @@ class TestPanelBackupEncrypted:
         monkeypatch.setattr(pbs.settings, "panel_backup_dir", str(backup_dir))
 
         with patch.object(pbs, "_dump_database", return_value=b"-- sqlite dump\nCREATE TABLE x();"):
-            with patch.object(pbs.settings, "database_url", "sqlite:///./msm.db"):
+            with patch.object(pbs.settings, "database_url", "postgresql://msm:test@localhost/msm"):
                 backup = pbs.create_panel_backup(db)
 
         assert backup.local_path.endswith(".tar.gz")
@@ -714,7 +714,7 @@ class TestPanelBackupEncrypted:
         from services.backup_crypto_service import BackupCryptoError
 
         with patch.object(pbs, "_dump_database", return_value=b"-- sqlite dump\nCREATE TABLE x();"), \
-             patch.object(pbs.settings, "database_url", "sqlite:///./msm.db"), \
+             patch.object(pbs.settings, "database_url", "postgresql://msm:test@localhost/msm"), \
              patch("services.backup_crypto_service.BackupCryptoService.init_key",
                    side_effect=BackupCryptoError("DIS down")):
             backup = pbs.create_panel_backup(db)
@@ -746,7 +746,7 @@ class TestPanelRestoreEncrypted:
         _setup_backup_password()
 
         with patch.object(pbs, "_dump_database", return_value=b"-- sqlite dump\nCREATE TABLE x();"):
-            with patch.object(pbs.settings, "database_url", "sqlite:///./msm.db"):
+            with patch.object(pbs.settings, "database_url", "postgresql://msm:test@localhost/msm"):
                 backup = pbs.create_panel_backup(db)
 
         assert backup.local_path.endswith(".enc")
@@ -779,7 +779,7 @@ class TestPanelRestoreEncrypted:
 
         # Kein Passwort → .tar.gz
         with patch.object(pbs, "_dump_database", return_value=b"-- sqlite dump\nCREATE TABLE x();"):
-            with patch.object(pbs.settings, "database_url", "sqlite:///./msm.db"):
+            with patch.object(pbs.settings, "database_url", "postgresql://msm:test@localhost/msm"):
                 backup = pbs.create_panel_backup(db)
 
         assert backup.local_path.endswith(".tar.gz")

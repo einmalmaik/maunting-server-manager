@@ -5,7 +5,7 @@ Abgedeckte Assertions:
 - VAL-PANEL-BACKUP-001: Admin kann Panel-Backup erstellen (POST /api/panel-backups)
 - VAL-PANEL-BACKUP-002: Non-admin 403, unauth 401
 - VAL-PANEL-BACKUP-003: pg_dump fuer PostgreSQL
-- VAL-PANEL-BACKUP-004: sqlite3 dump fuer SQLite dev
+- VAL-PANEL-BACKUP-004: SQLite runtime is rejected
 - VAL-PANEL-BACKUP-005: Config-Dateien im Archiv
 - VAL-PANEL-BACKUP-006: manifest.json mit Metadaten
 - VAL-PANEL-BACKUP-007: S3-Upload wenn konfiguriert + Passwort
@@ -43,6 +43,15 @@ TEST_PASSWORD = "SuperSecretBackup123!"
 
 _FAKE_PG_DUMP = b"-- PostgreSQL database dump\n-- pg_dump version 17\n\nCREATE TABLE users ();\n"
 _FAKE_SQLITE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY KEY);\nCOMMIT;\n"
+
+
+@pytest.fixture(autouse=True)
+def _postgres_panel_runtime(monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        "postgresql+psycopg2://msm:synthetic@127.0.0.1:5432/msm",
+    )
 
 
 # ── Helper ───────────────────────────────────────────────────────────────
@@ -116,29 +125,14 @@ def _post_panel_backup(client, cookies, *, name: str | None = None):
 class TestPanelBackupService:
     """Unit-Tests fuer create_panel_backup (Service-Layer)."""
 
-    def test_creates_local_backup_sqlite(self, db, tmp_path, monkeypatch):
-        """VAL-PANEL-BACKUP-004: sqlite3 dump fuer SQLite dev + lokales tar.gz."""
+    def test_rejects_sqlite_runtime_backup(self, db, tmp_path, monkeypatch):
+        """VAL-PANEL-BACKUP-004: SQLite is import-only, never a backup runtime."""
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env", "install.sh"])
         monkeypatch.setattr(settings, "database_url", "sqlite:///./msm.db")
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
-            backup = pbs.create_panel_backup(db)
-
-        assert backup.id is not None
-        assert backup.db_type == "sqlite3"
-        assert backup.size_mb is not None and backup.size_mb >= 0
-        assert backup.encrypted is False
-        assert backup.s3_key is None
-        assert os.path.exists(backup.local_path)
-
-        # Archiv-Inhalt pruefen
-        files = _extract_archive(backup.local_path)
-        assert "manifest.json" in files
-        assert "msm_db.sql" in files
-        assert b"sqlite" in files["msm_db.sql"].lower() or b"BEGIN TRANSACTION" in files["msm_db.sql"]
-        assert "configs/.env" in files
-        assert "configs/install.sh" in files
+        with pytest.raises(RuntimeError, match="PostgreSQL"):
+            pbs.create_panel_backup(db)
 
     def test_creates_local_backup_postgres(self, db, tmp_path, monkeypatch):
         """VAL-PANEL-BACKUP-003: pg_dump fuer PostgreSQL."""
@@ -160,9 +154,11 @@ class TestPanelBackupService:
         monkeypatch.setattr(settings, "database_url", "postgres://msm:pw@host/msm")
         assert pbs._detect_db_type() == "postgresql"
         monkeypatch.setattr(settings, "database_url", "sqlite:///./msm.db")
-        assert pbs._detect_db_type() == "sqlite3"
+        with pytest.raises(RuntimeError, match="PostgreSQL"):
+            pbs._detect_db_type()
         monkeypatch.setattr(settings, "database_url", "sqlite:///:memory:")
-        assert pbs._detect_db_type() == "sqlite3"
+        with pytest.raises(RuntimeError, match="PostgreSQL"):
+            pbs._detect_db_type()
 
 
 # ── Service: Config Files + Manifest ─────────────────────────────────────
@@ -392,9 +388,7 @@ class TestPanelBackupRetention:
     def test_retention_keeps_newest(self, db, tmp_path, monkeypatch):
         """Retention behaelt neueste N, loescht aeltere lokal + DB."""
         _prepare_dirs(tmp_path, monkeypatch)
-        monkeypatch.setattr(settings, "database_url", "sqlite:///./msm.db")
-
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_PG_DUMP):
             ids = []
             for i in range(5):
                 b = pbs.create_panel_backup(db, name=f"backup-{i}")

@@ -36,12 +36,16 @@ import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledge
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
+  const [setupEmailConfigured, setSetupEmailConfigured] = useState(false)
   const { isAuthenticated } = useAuthStore()
 
   useEffect(() => {
     fetch(apiUrl('/auth/setup-status'), { credentials: 'include' })
       .then((res) => res.json())
-      .then((data) => setSetupRequired(data.setup_required))
+      .then((data) => {
+        setSetupRequired(data.setup_required)
+        setSetupEmailConfigured(Boolean(data.email_configured))
+      })
       .catch(() => setSetupRequired(false))
   }, [])
 
@@ -54,7 +58,10 @@ function App() {
       <Suspense fallback={
         <Loader fullScreen label="Maunting Server Manager" />
       }>
-        <SetupWizard onComplete={() => setSetupRequired(false)} />
+        <SetupWizard
+          onComplete={() => setSetupRequired(false)}
+          emailConfigured={setupEmailConfigured}
+        />
       </Suspense>
     )
   }

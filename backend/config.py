@@ -8,8 +8,10 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Datenbank
-    database_url: str = "sqlite:///./msm.db"
-    database_url_async: str = "sqlite+aiosqlite:///./msm.db"
+    # PostgreSQL is the only supported panel runtime database. SQLite is read
+    # only by the explicit legacy import tool (and isolated unit tests).
+    database_url: str = ""
+    database_url_async: str = ""
 
     # Sicherheit
     secret_key: str = "change-me-in-production-please-use-a-256-bit-key"

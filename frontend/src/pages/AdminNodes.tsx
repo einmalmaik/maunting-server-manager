@@ -21,6 +21,7 @@ import { confirm } from '@/stores/confirmStore'
 import { Badge } from '@/components/ui/Badge'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { ProgressBar } from '@/Singra/UI/ProgressBar'
+import { NodeEnrollmentDialog } from '@/components/nodes/NodeEnrollmentDialog'
 import type { Node } from '@/types'
 
 function statusVariant(status: string): 'success' | 'destructive' | 'default' | 'warning' {
@@ -71,6 +72,7 @@ export function AdminNodes() {
   const { nodes, loading, fetchNodes, createNode, updateNode, deleteNode, healthCheck } =
     useNodeStore()
   const [showForm, setShowForm] = useState(false)
+  const [showEnrollment, setShowEnrollment] = useState(false)
   const [editing, setEditing] = useState<Node | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
@@ -87,9 +89,16 @@ export function AdminNodes() {
     })
   }, [fetchNodes, t])
 
-  const openCreate = () => {
+  const openEnrollment = () => {
+    setShowForm(false)
+    setEditing(null)
+    setShowEnrollment(true)
+  }
+
+  const openManualCreate = () => {
     setEditing(null)
     setForm({ name: '', host: 'https://', auth_token: '', tls_fingerprint: '' })
+    setShowEnrollment(false)
     setShowForm(true)
   }
 
@@ -212,13 +221,21 @@ export function AdminNodes() {
         </div>
         <button
           type="button"
-          onClick={openCreate}
+          onClick={openEnrollment}
           className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
         >
           <Plus className="h-4 w-4" />
           {t('nodes.add')}
         </button>
       </div>
+
+      {showEnrollment && (
+        <NodeEnrollmentDialog
+          onClose={() => setShowEnrollment(false)}
+          onManualSetup={openManualCreate}
+          onApproved={fetchNodes}
+        />
+      )}
 
       {showForm && (
         <div className="msm-card p-6">

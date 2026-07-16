@@ -35,13 +35,8 @@ def _local_agent_token() -> str | None:
     return None
 
 
-def migrate_multi_node_schema(
-    engine: Any,
-    session_factory: Any,
-    *,
-    allow_missing_local_token: bool = False,
-) -> None:
-    """Add legacy columns, sync the local agent token, assign orphan servers."""
+def ensure_multi_node_schema(engine: Any) -> None:
+    """Add only the legacy multi-node schema pieces, without touching secrets."""
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
     if "servers" in tables:
@@ -56,6 +51,31 @@ def migrate_multi_node_schema(
         if "tls_fingerprint" not in columns:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE nodes ADD COLUMN tls_fingerprint VARCHAR(128)"))
+
+
+def migrate_multi_node_schema(
+    engine: Any,
+    session_factory: Any,
+    *,
+    allow_missing_local_token: bool = False,
+) -> None:
+    """Add legacy columns, sync the local agent token, assign orphan servers."""
+    ensure_multi_node_schema(engine)
+    sync_multi_node_registration(
+        engine,
+        session_factory,
+        allow_missing_local_token=allow_missing_local_token,
+    )
+
+
+def sync_multi_node_registration(
+    engine: Any,
+    session_factory: Any,
+    *,
+    allow_missing_local_token: bool = False,
+) -> None:
+    """Sync local-node data after Alembic has prepared the schema."""
+    tables = set(inspect(engine).get_table_names())
 
     from models import Node
 

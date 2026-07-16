@@ -75,13 +75,12 @@ async def lifespan(app: FastAPI):
             "ohne DIS nicht operieren."
         )
 
-    Base.metadata.create_all(bind=engine)
-
-    # Must run before any ORM query touches Server.node_id on legacy databases.
+    # Schema changes run before service start via Alembic. Startup only syncs
+    # the local agent token and assigns legacy orphan records.
     from database import SessionLocal
-    from services.multi_node_migration_service import migrate_multi_node_schema
+    from services.multi_node_migration_service import sync_multi_node_registration
 
-    migrate_multi_node_schema(
+    sync_multi_node_registration(
         engine,
         SessionLocal,
         allow_missing_local_token=is_testing,
@@ -90,46 +89,52 @@ async def lifespan(app: FastAPI):
     # Migration: fehlende Spalten nachträglich hinzufügen
     from sqlalchemy import inspect, text
     inspector = inspect(engine)
+    # Phase 8: Sobald Alembic die Datenbank verwaltet, darf der Webprozess
+    # keinerlei Schema mehr veraendern. Die folgenden historischen Bruecken
+    # bleiben nur fuer einen ungeversionierten Altstart erhalten.
+    legacy_schema_bridge = "alembic_version" not in inspector.get_table_names()
     if 'users' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('users')]
-        if 'email_notifications' not in cols:
+        if legacy_schema_bridge and 'email_notifications' not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_notifications BOOLEAN DEFAULT true"))
         # E-Mail-Verschluesselung: email_encrypted + email_hash Spalten
-        if 'email_encrypted' not in cols:
+        if legacy_schema_bridge and 'email_encrypted' not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_encrypted VARCHAR(4096)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_hash VARCHAR(64)"))
                 conn.execute(text("CREATE INDEX ix_users_email_hash ON users (email_hash)"))
-            # Bestehende Klartext-E-Mails verschluesseln
-            from database import SessionLocal as _SL
-            from models import User as _U
-            from services.dis_client import DisClient as _DC
-            _db = _SL()
-            try:
-                for _u in _db.query(_U).filter(_U.email_encrypted.is_(None)).all():
-                    if _u.email_plain:
-                        _u.email = _u.email_plain  # setter verschluesselt + hasht
-                _db.commit()
-            finally:
-                _db.close()
+
+        # Bestehende Klartext-E-Mails immer nachziehen. Das ist auch fuer den
+        # SQLite->PostgreSQL-Import noetig: das Zielschema besitzt die neuen
+        # Spalten bereits, die importierten Legacy-Zeilen aber noch nicht.
+        from database import SessionLocal as _SL
+        from models import User as _U
+        _db = _SL()
+        try:
+            for _u in _db.query(_U).filter(_U.email_encrypted.is_(None)).all():
+                if _u.email_plain:
+                    _u.email = _u.email_plain  # setter verschluesselt + hasht
+            _db.commit()
+        finally:
+            _db.close()
 
     # Migration: webhook_subscriptions.secret_encrypted Spalte hinzufuegen
-    if 'webhook_subscriptions' in inspector.get_table_names():
+    if legacy_schema_bridge and 'webhook_subscriptions' in inspector.get_table_names():
         wh_cols = [c['name'] for c in inspector.get_columns('webhook_subscriptions')]
         if 'secret_encrypted' not in wh_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE webhook_subscriptions ADD COLUMN secret_encrypted VARCHAR(4096)"))
 
     # Migration: servers.auth_required Spalte hinzufuegen (interaktive Auth-Recovery)
-    if 'servers' in inspector.get_table_names():
+    if legacy_schema_bridge and 'servers' in inspector.get_table_names():
         srv_cols = [c['name'] for c in inspector.get_columns('servers')]
         if 'auth_required' not in srv_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE servers ADD COLUMN auth_required BOOLEAN NOT NULL DEFAULT false"))
 
     # Migration: email_verifications table cleanup for hashing
-    if 'email_verifications' in inspector.get_table_names():
+    if legacy_schema_bridge and 'email_verifications' in inspector.get_table_names():
         ev_cols = [c['name'] for c in inspector.get_columns('email_verifications')]
         if 'email' in ev_cols and 'email_hash' not in ev_cols:
             # Ephemerale Tabelle neu aufbauen
@@ -138,7 +143,7 @@ async def lifespan(app: FastAPI):
             Base.metadata.create_all(bind=engine)
 
     # Migration: oauth_user_links encryption columns
-    if 'oauth_user_links' in inspector.get_table_names():
+    if legacy_schema_bridge and 'oauth_user_links' in inspector.get_table_names():
         ol_cols = [c['name'] for c in inspector.get_columns('oauth_user_links')]
         if 'email_at_link_encrypted' not in ol_cols:
             with engine.begin() as conn:
@@ -148,7 +153,7 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE oauth_user_links ADD COLUMN username_at_link_encrypted VARCHAR(4096)"))
 
     # Migration: server_ports Tabelle anlegen & Daten migrieren
-    if 'server_ports' not in inspector.get_table_names():
+    if legacy_schema_bridge and 'server_ports' not in inspector.get_table_names():
         with engine.begin() as conn:
             conn.execute(text("""
                 CREATE TABLE server_ports (
@@ -163,7 +168,7 @@ async def lifespan(app: FastAPI):
             conn.execute(text("CREATE INDEX ix_server_ports_id ON server_ports (id)"))
 
     # Migration: Backup-Scheduling-Spalten + Phase-1 Docker-Spalten
-    if 'servers' in inspector.get_table_names():
+    if legacy_schema_bridge and 'servers' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('servers')]
         # Falls game_port noch in servers existiert, migrieren wir die Daten zuerst in server_ports
         if 'game_port' in cols:
@@ -230,7 +235,7 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE servers DROP COLUMN linux_user"))
 
     # Migration: Mod enabled-Spalte
-    if 'mods' in inspector.get_table_names():
+    if legacy_schema_bridge and 'mods' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('mods')]
         with engine.begin() as conn:
             if 'enabled' not in cols:
@@ -257,7 +262,7 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE mods ADD COLUMN update_checked_at TIMESTAMP"))
 
     # Migration: Backup name-Spalte
-    if 'backups' in inspector.get_table_names():
+    if legacy_schema_bridge and 'backups' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('backups')]
         if 'name' not in cols:
             with engine.begin() as conn:
@@ -282,7 +287,7 @@ async def lifespan(app: FastAPI):
     # Phase 3 — RBAC: users.role_id-Spalte (Tabellen `roles`/`role_permissions`/
     # `server_permissions` werden von `Base.metadata.create_all` angelegt) und
     # einmalige Migration der alten `permissions`-Tabelle in `server_permissions`.
-    if 'users' in inspector.get_table_names():
+    if legacy_schema_bridge and 'users' in inspector.get_table_names():
         user_cols = [c['name'] for c in inspector.get_columns('users')]
         if 'role_id' not in user_cols:
             with engine.begin() as conn:
@@ -316,7 +321,7 @@ async def lifespan(app: FastAPI):
     # Idempotent: prueft jeweils, ob Ziel-Rows bereits existieren. Danach wird
     # die Legacy-Tabelle gedroppt (nur, wenn sie existiert).
     inspector = inspect(engine)
-    if 'permissions' in inspector.get_table_names():
+    if legacy_schema_bridge and 'permissions' in inspector.get_table_names():
         import logging as _logging
         _log_mig = _logging.getLogger(__name__)
         legacy_cols = {c['name'] for c in inspector.get_columns('permissions')}
@@ -441,7 +446,7 @@ async def lifespan(app: FastAPI):
     # DIS-Decrypt im Listing-Pfad. Die Spalte wird beim naechsten
     # Create/Update des Providers automatisch befuellt; alte Provider
     # bekommen NULL (Fallback im Response-Builder).
-    if 'oauth_providers' in inspector.get_table_names():
+    if legacy_schema_bridge and 'oauth_providers' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('oauth_providers')]
         if 'client_secret_mask' not in cols:
             with engine.begin() as conn:

@@ -8,9 +8,10 @@ import { api } from '@/api/client'
 
 interface SetupWizardProps {
   onComplete: () => void
+  emailConfigured: boolean
 }
 
-export function SetupWizard({ onComplete }: SetupWizardProps) {
+export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
   const { t } = useTranslation()
   const [step, setStep] = useState(1)
   const [error, setError] = useState('')
@@ -21,6 +22,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     password: '',
     confirm: '',
     code: '',
+    fromAddress: '',
+    resendApiKey: '',
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -38,12 +41,21 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
     setSubmitting(true)
     try {
+      const emailConfig = emailConfigured
+        ? undefined
+        : {
+            provider: 'resend',
+            from_address: form.fromAddress,
+            resend_api_key: form.resendApiKey,
+          }
+
       const res = await api<{ requires_verification: boolean; message: string }>('/auth/setup', {
         method: 'POST',
         body: JSON.stringify({
           username: form.username,
           email: form.email,
           password: form.password,
+          ...(emailConfig ? { email_config: emailConfig } : {}),
         }),
       })
 
@@ -200,11 +212,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  <label htmlFor="setup-username" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                     {t('auth.username', 'Benutzername')}
                   </label>
                   <input
                     type="text"
+                    id="setup-username"
                     value={form.username}
                     onChange={(e) => setForm({ ...form, username: e.target.value })}
                     className="msm-input"
@@ -215,11 +228,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 </div>
 
                 <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  <label htmlFor="setup-owner-email" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                     {t('auth.email', 'E-Mail')}
                   </label>
                   <input
                     type="email"
+                    id="setup-owner-email"
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
                     className="msm-input"
@@ -229,6 +243,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 </div>
 
                 <PasswordInput
+                  id="setup-owner-password"
                   label={t('auth.password', 'Passwort') || 'Passwort'}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -238,12 +253,57 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 />
 
                 <PasswordInput
+                  id="setup-owner-password-confirm"
                   label={t('auth.confirmPassword', 'Passwort bestätigen') || 'Passwort bestätigen'}
                   value={form.confirm}
                   onChange={(e) => setForm({ ...form, confirm: e.target.value })}
                   placeholder="••••••••"
                   required
                 />
+
+                {!emailConfigured && (
+                  <fieldset className="rounded-lg border border-outline-variant bg-surface-container-low p-4 space-y-4">
+                    <legend className="px-1 font-label-md text-label-md text-on-surface uppercase tracking-wider">
+                      {t('setup.emailDelivery')}
+                    </legend>
+                    <p className="font-body-md text-sm text-on-surface-variant">
+                      {t('setup.emailDeliveryDesc')}
+                    </p>
+
+                    <div className="rounded-md border border-secondary/30 bg-secondary/10 px-3 py-2 text-sm text-on-surface">
+                      {t('setup.resendRecommended')}
+                    </div>
+
+                    <div>
+                      <label htmlFor="setup-from-address" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                        {t('setup.fromAddress')}
+                      </label>
+                      <input
+                        id="setup-from-address"
+                        type="email"
+                        value={form.fromAddress}
+                        onChange={(e) => setForm({ ...form, fromAddress: e.target.value })}
+                        className="msm-input"
+                        placeholder="panel@example.com"
+                        autoComplete="email"
+                        required
+                      />
+                    </div>
+
+                    <PasswordInput
+                      id="setup-resend-api-key"
+                      label={t('setup.resendApiKey')}
+                      value={form.resendApiKey}
+                      onChange={(e) => setForm({ ...form, resendApiKey: e.target.value })}
+                      placeholder="re_..."
+                      autoComplete="off"
+                      required
+                    />
+                    <p className="font-body-md text-xs text-on-surface-variant">
+                      {t('setup.smtpAfterLogin')}
+                    </p>
+                  </fieldset>
+                )}
 
                 {error && (
                   <div className="msm-alert-error">

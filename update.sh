@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 # ═══════════════════════════════════════════════════════════════
 #  Maunting Server Manager — Updater
@@ -81,6 +82,22 @@ restore_panel_ownership() {
 
 CHECK_ONLY=false
 FORCE=false
+UPDATE_SUCCEEDED=false
+PANEL_WAS_ACTIVE=false
+DB_BACKUP_FILE=""
+LEGACY_SQLITE_UPDATE=false
+
+cleanup_on_failure() {
+    local exit_code=$?
+    if [[ "$UPDATE_SUCCEEDED" != "true" && $exit_code -ne 0 ]]; then
+        warn "Update nicht abgeschlossen. Es wird bewusst kein Erfolg gemeldet."
+        [[ -n "$DB_BACKUP_FILE" ]] && warn "PostgreSQL-Sicherung: $DB_BACKUP_FILE"
+        if ${SYSTEMD_AVAILABLE:-false} && $PANEL_WAS_ACTIVE; then
+            systemctl restart msm-panel.service 2>/dev/null || true
+        fi
+    fi
+}
+trap cleanup_on_failure EXIT
 
 for arg in "$@"; do
     case "$arg" in
@@ -154,6 +171,21 @@ if [[ -z "$LATEST_TAG" ]]; then
         }
         LOCAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
         REMOTE_SHA=$(git rev-parse origin/main 2>/dev/null || echo "")
+
+        # Never continue inside a script that is about to overwrite itself.
+        # Execute the updater from the target revision in /tmp first.
+        if [[ -n "$LOCAL_SHA" && -n "$REMOTE_SHA" && "$LOCAL_SHA" != "$REMOTE_SHA" ]] \
+            && [[ "${MSM_UPDATE_STAGE2:-}" != "1" ]]; then
+            NEXT_UPDATER="/tmp/msm-update-${REMOTE_SHA:0:12}.sh"
+            git show "${REMOTE_SHA}:update.sh" > "$NEXT_UPDATER" \
+                || err "Updater der Zielversion konnte nicht geladen werden."
+            chmod 700 "$NEXT_UPDATER"
+            bash -n "$NEXT_UPDATER" \
+                || err "Updater der Zielversion ist syntaktisch ungültig."
+            log "Übergabe an geprüften Updater der Zielversion..."
+            export MSM_UPDATE_STAGE2=1
+            exec bash "$NEXT_UPDATER" "$@"
+        fi
 
         if [[ -z "$LOCAL_SHA" ]] || [[ -z "$REMOTE_SHA" ]]; then
             warn "Konnte Git-Commits nicht ermitteln."
@@ -236,28 +268,56 @@ tar -czf "$BACKUP_FILE" \
     --exclude=venv \
     --exclude=node_modules \
     --exclude=__pycache__ \
-    backend frontend .env 2>/dev/null || true
+    --exclude='*.db' \
+    --exclude='*.db.*' \
+    backend frontend 2>>"$LOG_FILE" \
+    || err "Code-/Konfigurationsbackup fehlgeschlagen."
+[[ -s "$BACKUP_FILE" ]] || err "Code-/Konfigurationsbackup ist leer."
 
-# DB extra backup (wenn SQLite)
-DB_PATH="$MSM_DIR/backend/msm.db"
-if [[ -f "$DB_PATH" ]]; then
-    cp "$DB_PATH" "$BACKUP_DIR/msm-db-$(date +%Y%m%d-%H%M%S).db"
+# PostgreSQL is the only runtime database after Phase 8. Existing SQLite is
+# copied byte-for-byte here and migrated only after the target code is ready.
+CURRENT_DATABASE_URL=$(grep -E '^MSM_DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+if [[ "$CURRENT_DATABASE_URL" == sqlite* ]]; then
+    LEGACY_SQLITE_UPDATE=true
+    LEGACY_SQLITE_FILE="$MSM_DIR/backend/msm.db"
+    [[ -s "$LEGACY_SQLITE_FILE" ]] || err "Legacy-SQLite-Datenbank fehlt oder ist leer."
+    DB_BACKUP_FILE="$BACKUP_DIR/msm-sqlite-pre-phase8-$(date +%Y%m%d-%H%M%S).db"
+    cp -p "$LEGACY_SQLITE_FILE" "$DB_BACKUP_FILE" \
+        || err "Legacy-SQLite-Sicherung fehlgeschlagen."
+    cmp -s "$LEGACY_SQLITE_FILE" "$DB_BACKUP_FILE" \
+        || err "Legacy-SQLite-Sicherung konnte nicht verifiziert werden."
+else
+    DB_BACKUP_FILE="$BACKUP_DIR/msm-postgres-$(date +%Y%m%d-%H%M%S).dump"
+    DB_BACKUP_HELPER="/tmp/msm-update-db-backup.py"
+    if [[ "$UPDATE_MODE" == "git" ]]; then
+        git show "${REMOTE_SHA}:backend/scripts/update_database_backup.py" > "$DB_BACKUP_HELPER" \
+            || err "PostgreSQL-Backuphelfer der Zielversion fehlt."
+    elif [[ -f "$MSM_DIR/backend/scripts/update_database_backup.py" ]]; then
+        cp "$MSM_DIR/backend/scripts/update_database_backup.py" "$DB_BACKUP_HELPER"
+    else
+        curl -fsSL \
+            "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/$LATEST_TAG/backend/scripts/update_database_backup.py" \
+            -o "$DB_BACKUP_HELPER" || err "PostgreSQL-Backuphelfer konnte nicht geladen werden."
+    fi
+    python3 -m py_compile "$DB_BACKUP_HELPER" \
+        || err "PostgreSQL-Backuphelfer ist ungültig."
+    python3 "$DB_BACKUP_HELPER" --env-file "$ENV_FILE" --output "$DB_BACKUP_FILE" \
+        2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Sicherung fehlgeschlagen. Update abgebrochen."
 fi
 
-ok "Backup erstellt: $BACKUP_FILE"
+ok "Code-/Konfigurationsbackup erstellt: $BACKUP_FILE"
+ok "Datenbank-Backup erstellt und verifiziert: $DB_BACKUP_FILE"
 
 # ── Git Pull oder Tarball ──
 cd "$MSM_DIR"
 
 if [[ "$UPDATE_MODE" == "git" ]]; then
     log "Aktualisiere via Git pull..."
-    # Backup des aktuellen HEAD für Rollback
-    ROLLBACK_SHA="$LOCAL_SHA"
-    git pull origin main || {
-        err "Git pull fehlgeschlagen. Versuche Rollback..."
-        git reset --hard "$ROLLBACK_SHA" 2>/dev/null || true
-        exit 1
-    }
+    if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+        err "Lokale Änderungen erkannt. Update sicher abgebrochen; bitte Änderungen zuerst sichern."
+    fi
+    git pull --ff-only origin main \
+        || err "Git-Update ist kein sicherer Fast-Forward und wurde abgebrochen."
     # Alte Build-Artefakte entfernen (nur dist/, keine Server-Daten!)
     rm -rf frontend/dist 2>/dev/null || true
     # git pull lief als root -> neue/geaenderte Dateien sind jetzt root-owned.
@@ -406,12 +466,23 @@ EOF
 fi
 
 # ── Datenbank-Migrationen ──
-log "Führe Datenbank-Migrationen durch..."
+if $SYSTEMD_AVAILABLE && systemctl is-active --quiet msm-panel.service; then
+    PANEL_WAS_ACTIVE=true
+    log "Nehme Panel für das Schema-Upgrade kurz in Wartung..."
+    systemctl stop msm-panel.service || err "Panel konnte nicht in Wartung genommen werden."
+fi
+if $LEGACY_SQLITE_UPDATE; then
+    log "Migriere bestehende Panel-Datenbank einmalig nach PostgreSQL..."
+    MSM_DIR="$MSM_DIR" MSM_USER="$MSM_USER" \
+        bash "$MSM_DIR/scripts/migrate-panel-to-postgres.sh" 2>&1 | tee -a "$LOG_FILE" \
+        || err "SQLite-nach-PostgreSQL-Migration fehlgeschlagen."
+fi
+log "Führe geprüfte PostgreSQL-Schemamigration durch..."
 su - msm -c "
     cd $MSM_DIR/backend
     source venv/bin/activate
-    alembic upgrade head 2>/dev/null || python3 -c \"from database import engine, Base; from models import *; Base.metadata.create_all(engine)\"
-" 2>&1 | tee -a "$LOG_FILE"
+    python3 scripts/prepare_phase8_schema.py
+" 2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Schemamigration fehlgeschlagen."
 
 # ── DIS Config laden/generieren ──
 log "Lade/Generiere kryptografischen DIS-Config..."
@@ -439,6 +510,18 @@ fi
 if ! grep -q '^MSM_DIS_SIDECAR_URL=' "$ENV_FILE"; then
     echo 'MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"' >> "$ENV_FILE"
 fi
+chmod 600 "$ENV_FILE"
+chown "$MSM_USER:$MSM_USER" "$ENV_FILE"
+
+DIS_ENV_FILE="$MSM_DIR/dis-sidecar/.env"
+cat > "$DIS_ENV_FILE" <<EOF
+MSM_SECRET_KEY="$SECRET_KEY"
+MSM_DIS_SALT="$DIS_SALT"
+MSM_DIS_SIDECAR_TOKEN="$DIS_TOKEN"
+MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"
+EOF
+chmod 600 "$DIS_ENV_FILE"
+chown "$MSM_USER:$MSM_USER" "$DIS_ENV_FILE"
 
 # ── DIS Sidecar Abhängigkeiten installieren ──
 log "Installiere DIS Sidecar-Abhängigkeiten..."
@@ -470,10 +553,7 @@ Group=$MSM_USER
 WorkingDirectory=$MSM_DIR/dis-sidecar
 Environment="NODE_ENV=production"
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="MSM_SECRET_KEY=$SECRET_KEY"
-Environment="MSM_DIS_SALT=$DIS_SALT"
-Environment="MSM_DIS_SIDECAR_TOKEN=$DIS_TOKEN"
-Environment="MSM_DIS_SIDECAR_URL=http://127.0.0.1:9100"
+EnvironmentFile=$MSM_DIR/dis-sidecar/.env
 ExecStart=/usr/bin/node $MSM_DIR/dis-sidecar/server.mjs
 Restart=on-failure
 RestartSec=3
@@ -661,10 +741,11 @@ fi
 log "Starte Services neu..."
 if $SYSTEMD_AVAILABLE; then
     log "Starte DIS Sidecar..."
-    systemctl restart msm-dis-sidecar.service 2>/dev/null || systemctl start msm-dis-sidecar.service 2>/dev/null || true
-    sleep 1
+    systemctl restart msm-dis-sidecar.service 2>/dev/null \
+        || systemctl start msm-dis-sidecar.service 2>/dev/null \
+        || err "DIS Sidecar konnte nicht gestartet werden."
     if ! systemctl is-active --quiet msm-dis-sidecar.service; then
-        warn "DIS Sidecar startet nicht. Pruefe: journalctl -u msm-dis-sidecar -n 50"
+        err "DIS Sidecar ist nicht aktiv. Prüfe: journalctl -u msm-dis-sidecar -n 50"
     fi
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
@@ -677,13 +758,37 @@ if $SYSTEMD_AVAILABLE; then
         " 2>&1 | tee -a "$LOG_FILE" || err "DIS-Migration fehlgeschlagen! Migration abgebrochen."
     fi
 
-    systemctl restart msm-panel.service
     if [[ -f /etc/systemd/system/msm-agent.service ]]; then
-        systemctl restart msm-agent.service 2>/dev/null || systemctl start msm-agent.service 2>/dev/null || true
+        systemctl restart msm-agent.service 2>/dev/null \
+            || systemctl start msm-agent.service 2>/dev/null \
+            || err "Lokaler MSM Agent konnte nicht gestartet werden."
+        AGENT_READY=false
+        for _attempt in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:9000/health >/dev/null 2>&1; then
+                AGENT_READY=true
+                break
+            fi
+            sleep 1
+        done
+        $AGENT_READY || err "Lokaler MSM Agent ist nicht erreichbar. Prüfe: journalctl -u msm-agent -n 50"
     fi
-    systemctl restart caddy 2>/dev/null || true
+
+    systemctl restart msm-panel.service || err "Panel konnte nicht gestartet werden."
+    PANEL_READY=false
+    for _attempt in $(seq 1 30); do
+        if curl -fsS --max-time 2 http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+            PANEL_READY=true
+            break
+        fi
+        sleep 1
+    done
+    $PANEL_READY || err "Panel-Healthcheck fehlgeschlagen. Prüfe: journalctl -u msm-panel -n 50"
+    systemctl restart caddy 2>/dev/null \
+        || err "Caddy konnte nicht neu gestartet werden."
+    systemctl is-active --quiet caddy \
+        || err "Caddy ist nach dem Update nicht aktiv."
 else
-    warn "systemd nicht verfügbar — Services können nicht neu gestartet werden."
+    err "systemd ist für sichere Produktionsupdates erforderlich."
 fi
 
 # ── Version aktualisieren ──
@@ -704,3 +809,4 @@ echo -e "  ${BOLD}Wichtig:${NC}"
 echo -e "    - Prüfe das Panel im Browser"
 echo -e "    - Bei Problemen: Rollback via Backup"
 echo ""
+UPDATE_SUCCEEDED=true

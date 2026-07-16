@@ -21,6 +21,7 @@ RELEASE_NOTES_*.md
 .hermes/
 
 # Build-Caches, Logs, venvs (vom remote-Branch uebernommen)
+**/__pycache__/
 /.refact
 /backend/.mypy_cache
 /backend/__pycache__
@@ -36,6 +37,7 @@ RELEASE_NOTES_*.md
 /backend/games/__pycache__
 /backend/scripts/__pycache__
 /backend/venv
+/scripts/__pycache__/
 /frontend/dist
 /frontend/node_modules
 /Design idee für mssm
@@ -46,12 +48,17 @@ frontend/.env
 frontend/.env.local
 frontend/.env.*.local
 msm-agent/.env
+msm-agent/.dev/
 msm-agent/venv/
 msm-agent/**/__pycache__/
 msm-agent/servers/
+msm-agent/servers-node-2/
+msm-agent/postgres-node-2/
 
 # Databases (production runs on Postgres per .env; this protects SQLite dev/test DBs)
 *.db
+*.db.migrated
+*.db.migration-complete
 *.sqlite
 *.sqlite3
 

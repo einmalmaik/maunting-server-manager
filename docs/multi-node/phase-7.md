@@ -48,7 +48,7 @@ Das Panel verliert die direkte Anbindung an den Docker-Dämon und die SQL-Ausfü
 
 2. **`backend/services/postgres_service.py` radikal kürzen (Refactoring):**
    - Entferne den Import von `psycopg2` und `docker_service.py`.
-   - Das Panel generiert weiterhin die sicheren, zufälligen Passwörter (z. B. `_generate_password()`), verschlüsselt diese für die eigene SQLite-Datenbank über das `AuthService` (DIS), schickt sie aber für die *Erstellung* im Klartext (temporär im Request-Payload) an den `NodeClient`.
+   - Das Panel generiert weiterhin die sicheren, zufälligen Passwörter (z. B. `_generate_password()`), verschlüsselt diese für die eigene PostgreSQL-Panel-Datenbank über das `AuthService` (DIS), schickt sie aber für die *Erstellung* im Klartext (temporär im Request-Payload) an den `NodeClient`.
    - Die Methoden wie `provision_server_databases`, `delete_database`, `list_tables`, `database_stats` rufen ab sofort nur noch den `NodeClient(server.node)` auf.
    - WICHTIG: Das Panel bleibt die "Source of Truth". Es speichert die erzeugten DB-Namen, User und verschlüsselten Passwörter weiterhin in seinen SQLAlchemy-Modellen (`PostgresDatabase`, `PostgresUser`).
 
@@ -60,10 +60,9 @@ Das Panel verliert die direkte Anbindung an den Docker-Dämon und die SQL-Ausfü
 ## 4. Sicherheitsinvarianten (Checkliste für die Abnahme)
 - [x] Kein `psycopg2` Import mehr im `backend/services/postgres_service.py`.
 - [x] Keine Klartext-Passwörter in Logs, Fehler-Rückgaben oder URLs (auch nicht beim Agenten).
-- [x] Das Panel speichert weiterhin die DIS-verschlüsselten Passwörter in der SQLite. Der Agent speichert **keine** Passwörter dauerhaft auf Festplatte (außer natürlich in der Postgres-Instanz selbst als gehashte Rollen-Passwörter).
+- [x] Das Panel speichert weiterhin die DIS-verschlüsselten Passwörter in seiner PostgreSQL-Datenbank. Der Agent speichert **keine** Passwörter dauerhaft auf Festplatte (außer natürlich in der verwalteten Postgres-Instanz selbst als gehashte Rollen-Passwörter).
 - [x] Bei der Erstellung von Datenbanken auf einem Remote-Node läuft der Traffic sicher durch den TLS-Tunnel (`HTTPS`), da die Passwörter im Request-Body stecken.
 
 ## 5. Status
 
 **ABGESCHLOSSEN** (Branch `feature/multi-node`).
-
