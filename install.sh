@@ -201,7 +201,7 @@ show_current_config() {
     if $CURRENT_USE_POSTGRES; then
         echo -e "  ${BOLD}Datenbank:${NC}       PostgreSQL"
     else
-        echo -e "  ${BOLD}Datenbank:${NC}       SQLite"
+        echo -e "  ${BOLD}Datenbank:${NC}       Legacy-SQLite (wird nach PostgreSQL migriert)"
     fi
     if [[ -n "$CURRENT_REDIS_URL" ]]; then
         echo -e "  ${BOLD}Redis:${NC}           Aktiviert"

@@ -24,6 +24,7 @@ const Profile = lazy(() => import('./pages/Profile').then(module => ({ default: 
 const Docs = lazy(() => import('./pages/Docs').then(module => ({ default: module.Docs })))
 const BlueprintsDocs = lazy(() => import('./pages/docs/BlueprintsDocs').then(module => ({ default: module.BlueprintsDocs })))
 const OAuthDocs = lazy(() => import('./pages/docs/OAuthDocs').then(module => ({ default: module.OAuthDocs })))
+const SelfHostingDocs = lazy(() => import('./pages/docs/SelfHostingDocs').then(module => ({ default: module.SelfHostingDocs })))
 const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ default: module.Blueprints })))
 const PanelBackups = lazy(() => import('./pages/PanelBackups').then(module => ({ default: module.PanelBackups })))
 const PanelDatabase = lazy(() => import('./pages/PanelDatabase').then(module => ({ default: module.PanelDatabase })))
@@ -117,6 +118,7 @@ function App() {
           <Route path="docs" element={<Docs />} />
           <Route path="docs/blueprints" element={<BlueprintsDocs />} />
           <Route path="docs/oauth" element={<OAuthDocs />} />
+          <Route path="docs/self-hosting" element={<SelfHostingDocs />} />
           <Route path="privacy" element={<Privacy />} />
           <Route
             path="blueprints"

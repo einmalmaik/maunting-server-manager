@@ -1188,10 +1188,102 @@
     "oauthTitle": "OAuth & Social Login",
     "oauthDesc": "Login mit Google, Discord, GitHub, Microsoft, Twitter oder einem eigenen OIDC-Provider (Authentik, Keycloak, Zitadel).",
     "oauthLink": "OAuth-Doku öffnen",
+    "selfHostingTitle": "Self-Hosting & Deployment",
+    "selfHostingDesc": "Panel, Frontend und Remote-Nodes ausliefern, ohne auf jedem Host das vollständige Monorepo zu klonen.",
+    "selfHostingLink": "Self-Hosting-Anleitung öffnen",
     "legalTitle": "Rechtliches",
     "legalDesc": "Datenschutzerklärung und optionales Betreiber-Impressum dieser Instanz.",
     "privacyLink": "Datenschutz öffnen",
     "imprintLink": "Impressum öffnen"
+  },
+  "docsSelfHosting": {
+    "eyebrow": "Betriebshandbuch",
+    "title": "Self-Hosting & Deployment",
+    "subtitle": "Verstehe, welche MSM-Komponente auf welchen Host gehört, nutze versionierte Release-Artefakte und verbinde neue Nodes ohne Agent-Zugangsdaten offenzulegen.",
+    "units": {
+      "title": "Ein Repository, drei Deployment-Einheiten",
+      "intro": "Das Monorepo ist die gemeinsame Quelle für Entwicklung und Releases. Produktivsysteme erhalten nur das Artefakt für ihre Rolle; ein vollständiger Git-Checkout ist nicht erforderlich.",
+      "panel": {
+        "title": "Panel / Control Plane",
+        "description": "Backend, DIS-Sidecar, Panel-PostgreSQL, Frontend, lokaler Agent und Installationsskripte. Dies ist die zentrale Steuerungsebene."
+      },
+      "frontend": {
+        "title": "Separates Frontend",
+        "description": "Das bereits gebaute statische Vite-Bundle samt öffentlicher Environment-Vorlage. Backend- oder Agent-Quellen sind nicht enthalten."
+      },
+      "node": {
+        "title": "Remote-Node",
+        "description": "Agent, Rootless Docker, TLS-Identität und node-eigene Serverdaten. Beim Standard-Enrollment wird das Agent-Paket direkt vom Panel geladen."
+      }
+    },
+    "install": {
+      "title": "Empfohlene Panel-Installation mit einem Befehl",
+      "description": "Richte eine HTTPS-Domain auf den frischen Ubuntu- oder Debian-Host und führe anschließend den öffentlichen Bootstrap als Root aus. Ersetze panel.example.com durch deine echte Panel-Domain.",
+      "commandLabel": "Öffentlicher Bootstrap",
+      "copy": "Befehl kopieren",
+      "copied": "Kopiert",
+      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt der zentrale Installer und führt die eigentliche Einrichtung aus; ein flacher Git-Checkout wird nur verwendet, wenn noch kein kompatibles Release-Artefakt existiert."
+    },
+    "topology": {
+      "title": "Beispiel-Topologie: 20 Hosts",
+      "controlLabel": "Control Plane",
+      "nodesLabel": "Remote-Nodes",
+      "control": "Host 1 betreibt das Panel beziehungsweise die Control Plane und kann zusätzlich das Frontend ausliefern. Er koordiniert Nutzer, Konfiguration und Remote-Nodes.",
+      "nodes": "Host 2 bis 20 betreiben jeweils nur den Remote-Agent. Keiner dieser neunzehn Nodes benötigt einen Repository-Checkout.",
+      "split": "Optionale Trennung: Host 1 liefert das statische Frontend aus, Host 2 betreibt die Control Plane und Host 3 bis 20 sind Remote-Nodes.",
+      "nodeGridLabel": "Neunzehn Remote-Node-Hosts"
+    },
+    "enrollment": {
+      "title": "Einen neuen Node verbinden",
+      "intro": "Der Standardweg ist für den Betreiber secret-frei: Agent-Token und TLS-Fingerprint müssen nicht manuell kopiert werden.",
+      "steps": {
+        "1": {
+          "title": "Nodes öffnen",
+          "description": "Als Owner anmelden, Nodes öffnen und Node hinzufügen wählen."
+        },
+        "2": {
+          "title": "Befehl kopieren",
+          "description": "Das Panel zeigt einen öffentlichen Installationsbefehl ohne Secrets an."
+        },
+        "3": {
+          "title": "Einmal ausführen",
+          "description": "Den Befehl als Root auf dem neuen Ubuntu- oder Debian-Node ausführen."
+        },
+        "4": {
+          "title": "Identität lokal erzeugen",
+          "description": "Der Installer erzeugt Agent-Token und TLS-Zertifikat auf dem Node und sendet Token und Fingerprint über HTTPS an das Panel. Der Token wird DIS-verschlüsselt gespeichert und nie in UI, URL oder Logs angezeigt."
+        },
+        "5": {
+          "title": "Code vergleichen",
+          "description": "Das ausstehende Enrollment erscheint im Panel. Vor der Freigabe wird der kurze angezeigte Code verglichen."
+        },
+        "6": {
+          "title": "Bestätigen und prüfen",
+          "description": "Die Owner-Bestätigung schaltet die Prüfung von Erreichbarkeit, Agent-Token und TLS-Pin frei. Erst eine erfolgreiche Verifikation aktiviert den Node."
+        }
+      },
+      "fallback": "Ausstehende Enrollments laufen nach 15 Minuten ab und sind rate-limited. Die manuelle Eingabe von Host, Token und Fingerprint bleibt nur als Fallback für separat installierte oder speziell angebundene Agents verfügbar."
+    },
+    "artifacts": {
+      "title": "GitHub-Release-Artefakte",
+      "file": "Artefakt",
+      "contains": "Inhalt und Zweck",
+      "descriptions": {
+        "panel": "Installierbare Control Plane mit Backend, DIS, Frontend, Agent-Paket und Installationsskripten.",
+        "frontend": "Nur das gebaute Verzeichnis frontend/dist und die öffentliche Environment-Vorlage.",
+        "agent": "Agent-Quellen und Installer für kontrollierte Offline- oder Automationsfälle.",
+        "sums": "SHA-256-Prüfsummen zur Prüfung aller drei Archive vor der Installation."
+      }
+    },
+    "compatibility": {
+      "title": "Neue Installationen ausschließlich mit PostgreSQL",
+      "description": "PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code existiert ausschließlich für die einmalige, geprüfte Migration bestehender Altinstallationen und ist bei Neuinstallationen nicht auswählbar."
+    },
+    "navigation": {
+      "label": "Links der Self-Hosting-Dokumentation",
+      "nodes": "Node-Verwaltung öffnen",
+      "docs": "Zurück zur Dokumentation"
+    }
   },
   "docsOAuth": {
     "title": "OAuth & Social Login",

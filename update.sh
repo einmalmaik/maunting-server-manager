@@ -335,29 +335,49 @@ elif [[ -d ".git" ]]; then
     restore_panel_ownership
 else
     log "Lade Release-Tarball..."
-    TARBALL_URL=$(echo "$RELEASE_JSON" | python3 -c "
+    readarray -t RELEASE_URLS < <(echo "$RELEASE_JSON" | python3 -c '
 import sys, json
 data = json.load(sys.stdin)
-for asset in data.get('assets', []):
-    if asset['name'].endswith('.tar.gz'):
-        print(asset['browser_download_url'])
-        break
-" 2>/dev/null || echo "")
+expected = "msm-panel-{}.tar.gz".format(data.get("tag_name", ""))
+tarball_url = ""
+checksum_url = ""
+for asset in data.get("assets", []):
+    if asset.get("name") == expected:
+        tarball_url = asset.get("browser_download_url", "")
+    elif asset.get("name") == "SHA256SUMS":
+        checksum_url = asset.get("browser_download_url", "")
+print(tarball_url)
+print(checksum_url)
+' 2>/dev/null || true)
+    TARBALL_URL="${RELEASE_URLS[0]:-}"
+    CHECKSUM_URL="${RELEASE_URLS[1]:-}"
 
-    if [[ -z "$TARBALL_URL" ]]; then
-        warn "Kein Tarball im Release gefunden. Versuche git clone..."
+    if [[ -z "$TARBALL_URL" || -z "$CHECKSUM_URL" ]]; then
+        warn "Kein vollständig prüfbares Panel-Artefakt gefunden. Versuche git clone..."
         git clone --depth 1 --branch "$LATEST_TAG" \
             "https://github.com/$GITHUB_OWNER/$GITHUB_REPO.git" /tmp/msm-update
         cp -r /tmp/msm-update/* "$MSM_DIR/"
         rm -rf /tmp/msm-update
     else
-        curl -sL "$TARBALL_URL" | tar -xz -C /tmp
-        # Annahme: Tarball enthält Ordner mit Release-Name
-        EXTRACTED=$(ls -d /tmp/mauntingservermanager* 2>/dev/null | head -1)
-        if [[ -n "$EXTRACTED" ]]; then
-            cp -r "$EXTRACTED"/* "$MSM_DIR/"
-            rm -rf "$EXTRACTED"
-        fi
+        RELEASE_TMP=$(mktemp -d /tmp/msm-release-update.XXXXXX)
+        PANEL_ASSET="msm-panel-$LATEST_TAG.tar.gz"
+        curl -fsSL "$TARBALL_URL" -o "$RELEASE_TMP/$PANEL_ASSET" \
+            || err "Panel-Release konnte nicht geladen werden."
+        curl -fsSL "$CHECKSUM_URL" -o "$RELEASE_TMP/SHA256SUMS" \
+            || err "Release-Prüfsummen konnten nicht geladen werden."
+        awk -v expected="$PANEL_ASSET" \
+            '$2 == expected && $1 ~ /^[[:xdigit:]]{64}$/ { print; found=1 } END { exit found ? 0 : 1 }' \
+            "$RELEASE_TMP/SHA256SUMS" > "$RELEASE_TMP/panel.sha256" \
+            || err "Prüfsumme für Panel-Artefakt fehlt oder ist ungültig."
+        (cd "$RELEASE_TMP" && sha256sum --check panel.sha256) \
+            || err "Panel-Release hat eine ungültige Prüfsumme."
+        tar -xzf "$RELEASE_TMP/$PANEL_ASSET" -C "$RELEASE_TMP" \
+            || err "Panel-Release konnte nicht sicher entpackt werden."
+        EXTRACTED="$RELEASE_TMP/mauntingservermanager-$LATEST_TAG"
+        [[ -d "$EXTRACTED/backend" && -f "$EXTRACTED/update.sh" ]] \
+            || err "Panel-Release hat nicht die erwartete Struktur."
+        cp -r "$EXTRACTED"/. "$MSM_DIR/"
+        rm -rf "$RELEASE_TMP"
     fi
     restore_panel_ownership
 fi

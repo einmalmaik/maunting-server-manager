@@ -82,10 +82,11 @@ Zielablauf:
 3. Der Installer richtet Benutzer, Rootless Docker, Agent, TLS, Firewall und
    systemd ein und meldet eine kurzlebige Enrollment-Anfrage beim Panel an.
 4. Im Panel erscheint die gefundene Node mit **Bestätigen**.
-5. Nach der Bestätigung erhält ausschließlich der wartende Installer den
-   Agent-Token über HTTPS. Der Token erscheint weder in URL noch UI noch Log.
-6. Der Installer prüft Agent und Panel-Verbindung. Die Node wird erst dann als
-   online und auswählbar markiert.
+5. Der Agent hat seinen Token bereits lokal erzeugt und beim Enrollment-Beginn
+   über HTTPS an das Panel übertragen. Das Panel hält ihn ausschließlich
+   DIS-verschlüsselt; er erscheint weder in URL noch UI noch Log.
+6. Nach der Bestätigung prüft das Panel Agent-Token, TLS-Pin und Erreichbarkeit.
+   Die Node wird erst dann als online und auswählbar markiert.
 
 Enrollment-Anfragen sind kurzlebig, rate-limited und bis zur Owner-Bestätigung
 wirkungslos. Claim-Secrets werden nur gehasht gespeichert. Nicht bestätigte

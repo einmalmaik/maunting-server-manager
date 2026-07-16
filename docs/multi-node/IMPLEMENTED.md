@@ -163,7 +163,10 @@ Bestehende UI-Primitives (behalten, werden genutzt):
 | `frontend/src/pages/AdminNodes.tsx` | Fingerprint-Feld |
 | `frontend/src/pages/ServerDetail.tsx` | Aktionen disabled bei `node_unreachable` |
 
-**Installer:** `sudo bash scripts/install-agent.sh` → URL, Token, Fingerprint in Panel eintragen.
+**Installer:** Standardmäßig im Panel **Node hinzufügen** öffnen, den dortigen
+secret-freien Einmal-Befehl auf dem Node ausführen und den kurzen Code im Panel
+bestätigen. `sudo bash scripts/install-agent.sh` mit manueller Eingabe von URL,
+Token und Fingerprint bleibt nur der Fallback für Spezialfälle.
 
 ---
 

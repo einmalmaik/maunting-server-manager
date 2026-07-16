@@ -177,11 +177,11 @@ echo.
 
 :: Start DIS Sidecar in a new window
 echo Starte DIS Sidecar...
-start "MSM - DIS Sidecar" /D "%~dp0dis-sidecar" cmd /k "set NODE_ENV=development&& set MSM_SECRET_KEY=test-secret-key-for-dev-only-32-bytes-long!!&& set MSM_DIS_SALT=qhCLKLPChabuAqcCOqqxRw==&& node server.mjs"
+start "MSM - DIS Sidecar" /D "%~dp0dis-sidecar" cmd /k "set NODE_ENV=development&& set MSM_SECRET_KEY=test-secret-key-for-dev-only-32-bytes-long&& set MSM_DIS_SALT=qhCLKLPChabuAqcCOqqxRw==&& node server.mjs"
 
 :: Start Backend in a new window
 echo Starte Python Backend (Port 8000)...
-start "MSM - FastAPI Backend" /D "%~dp0backend" cmd /k "set NODE_ENV=development&& set MSM_SECRET_KEY=test-secret-key-for-dev-only-32-bytes-long!!&& set MSM_DIS_SALT=qhCLKLPChabuAqcCOqqxRw==&& set MSM_LOCAL_AGENT_ENV_FILE=../msm-agent/.env&& .\venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000"
+start "MSM - FastAPI Backend" /D "%~dp0backend" cmd /k "set NODE_ENV=development&& set MSM_SECRET_KEY=test-secret-key-for-dev-only-32-bytes-long&& set MSM_DIS_SALT=qhCLKLPChabuAqcCOqqxRw==&& set MSM_LOCAL_AGENT_ENV_FILE=../msm-agent/.env&& .\venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000"
 
 :: Start MSM Agent in a new window
 echo Starte MSM Agent (Port 9000)...

@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { BookOpen, KeyRound, ArrowRight, BookOpenCheck, FileText, ExternalLink } from 'lucide-react'
+import { BookOpen, KeyRound, ArrowRight, BookOpenCheck, FileText, ExternalLink, Network } from 'lucide-react'
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 
 export function Docs() {
@@ -34,6 +34,13 @@ export function Docs() {
           title={t('docsIndex.oauthTitle')}
           description={t('docsIndex.oauthDesc')}
           cta={t('docsIndex.oauthLink')}
+        />
+        <DocCard
+          to="/docs/self-hosting"
+          icon={<Network className="w-6 h-6" />}
+          title={t('docsIndex.selfHostingTitle')}
+          description={t('docsIndex.selfHostingDesc')}
+          cta={t('docsIndex.selfHostingLink')}
         />
         <LegalCard imprintUrl={imprintUrl} />
       </div>
@@ -76,7 +83,7 @@ function LegalCard({ imprintUrl }: { imprintUrl: string }) {
   const { t } = useTranslation()
 
   return (
-    <div className="msm-card p-6 md:col-span-2">
+    <div className="msm-card p-6">
       <div className="flex items-center gap-3 mb-3">
         <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center text-secondary">
           <FileText className="w-6 h-6" />

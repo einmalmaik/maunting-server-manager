@@ -99,6 +99,10 @@ Der normale Installer generiert alle sicherheitskritischen Werte und verweist
 in den erzeugten `.env`-Dateien auf die jeweilige Vorlage. Manuell angelegte
 Dateien müssen Modus `600` erhalten und dürfen niemals committed werden.
 
+Die vollständige Komponenten-, Release- und Node-Anleitung steht in
+[`docs/self-hosting.md`](docs/self-hosting.md) und nach der Anmeldung im Panel
+unter **Dokumentation → Self-Hosting & Nodes**.
+
 ---
 
 ## Update (neue Version installieren)

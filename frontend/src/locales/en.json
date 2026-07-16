@@ -1188,10 +1188,102 @@
     "oauthTitle": "OAuth & Social Login",
     "oauthDesc": "Sign in with Google, Discord, GitHub, Microsoft, Twitter, or your own OIDC provider (Authentik, Keycloak, Zitadel).",
     "oauthLink": "Open OAuth docs",
+    "selfHostingTitle": "Self-hosting & deployment",
+    "selfHostingDesc": "Deploy the panel, frontend and remote nodes without cloning the complete monorepo on every host.",
+    "selfHostingLink": "Open self-hosting guide",
     "legalTitle": "Legal",
     "legalDesc": "Privacy policy and optional operator imprint for this instance.",
     "privacyLink": "Open privacy policy",
     "imprintLink": "Open imprint"
+  },
+  "docsSelfHosting": {
+    "eyebrow": "Operator runbook",
+    "title": "Self-hosting & deployment",
+    "subtitle": "Understand which MSM component belongs on each host, use versioned release artifacts and connect new nodes without exposing agent credentials.",
+    "units": {
+      "title": "One repository, three deployment units",
+      "intro": "The monorepo is the shared source for development and releases. Production hosts receive only the artifact required for their role; a complete Git checkout is not required.",
+      "panel": {
+        "title": "Panel / control plane",
+        "description": "Backend, DIS sidecar, panel PostgreSQL, frontend, local agent and installation scripts. This is the central control plane."
+      },
+      "frontend": {
+        "title": "Standalone frontend",
+        "description": "The already-built static Vite bundle plus the public environment example. No backend or agent sources are included."
+      },
+      "node": {
+        "title": "Remote node",
+        "description": "Agent, Rootless Docker, TLS identity and node-local server data. During standard enrollment the agent package is downloaded directly from the panel."
+      }
+    },
+    "install": {
+      "title": "Recommended one-command panel installation",
+      "description": "Point an HTTPS domain at the fresh Ubuntu or Debian host, then run the public bootstrap as root. Replace panel.example.com with your real panel domain.",
+      "commandLabel": "Public bootstrap",
+      "copy": "Copy command",
+      "copied": "Copied",
+      "releaseNote": "The bootstrap prefers the tested msm-panel release matching the latest GitHub release. install.sh remains the central installer and performs the actual setup; a shallow Git checkout is used only when no compatible release artifact exists."
+    },
+    "topology": {
+      "title": "Example topology: 20 hosts",
+      "controlLabel": "Control Plane",
+      "nodesLabel": "Remote Nodes",
+      "control": "Host 1 runs the panel/control plane and can also serve the frontend. It coordinates users, configuration and the remote nodes.",
+      "nodes": "Hosts 2 through 20 each run only the remote agent. None of these nineteen nodes needs a repository checkout.",
+      "split": "Optional split layout: host 1 serves the static frontend, host 2 runs the control plane, and hosts 3 through 20 are remote nodes.",
+      "nodeGridLabel": "Nineteen remote node hosts"
+    },
+    "enrollment": {
+      "title": "Connect a new node",
+      "intro": "The standard path is secret-free for the operator: no manual token or TLS fingerprint copy is required.",
+      "steps": {
+        "1": {
+          "title": "Open Nodes",
+          "description": "Sign in as owner, open Nodes and choose Add node."
+        },
+        "2": {
+          "title": "Copy the command",
+          "description": "The panel displays a public, secret-free installation command."
+        },
+        "3": {
+          "title": "Run it once",
+          "description": "Execute the command as root on the new Ubuntu or Debian node."
+        },
+        "4": {
+          "title": "Create identity locally",
+          "description": "The installer creates the agent token and TLS certificate on the node, then sends token and fingerprint to the panel over HTTPS. The token is stored DIS-encrypted and never shown in the UI, URL or logs."
+        },
+        "5": {
+          "title": "Compare the code",
+          "description": "The pending enrollment appears in the panel. Compare the short displayed code before approving it."
+        },
+        "6": {
+          "title": "Approve and verify",
+          "description": "Owner approval gates the panel's reachability, agent-token and TLS-pin checks. Only a successful verification activates the node."
+        }
+      },
+      "fallback": "Pending enrollments expire after 15 minutes and are rate-limited. Manual host, token and fingerprint entry remains available only as a fallback for agents installed separately or connected through a special network setup."
+    },
+    "artifacts": {
+      "title": "GitHub release artifacts",
+      "file": "Artifact",
+      "contains": "Contents and purpose",
+      "descriptions": {
+        "panel": "Installable control plane with backend, DIS, frontend, agent package and installation scripts.",
+        "frontend": "Only the built frontend/dist directory and the public environment example.",
+        "agent": "Agent sources and installer for controlled offline or automation scenarios.",
+        "sums": "SHA-256 checksums for verifying all three archives before installation."
+      }
+    },
+    "compatibility": {
+      "title": "PostgreSQL only for new installations",
+      "description": "PostgreSQL is the only supported panel runtime database. SQLite code exists solely for a one-time, verified migration of legacy installations and is not a selectable option for new installations."
+    },
+    "navigation": {
+      "label": "Self-hosting documentation links",
+      "nodes": "Open node administration",
+      "docs": "Back to documentation"
+    }
   },
   "docsOAuth": {
     "title": "OAuth & Social Login",
