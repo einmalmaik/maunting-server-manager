@@ -82,3 +82,12 @@ def test_caddy_setup_is_atomic_and_preserves_existing_configuration() -> None:
     assert 'mv -f "$source_tmp" "$CADDY_SOURCE_FILE"' in installer
     assert "--force-confold" in installer
     assert 'if [[ -f /etc/caddy/Caddyfile ]]' in installer
+
+
+def test_postgres_role_setup_crosses_the_service_user_boundary_without_a_temp_secret() -> None:
+    installer = _installer()
+
+    assert "PG_SETUP_SQL" not in installer
+    assert "CREATE USER msm WITH PASSWORD" in installer
+    assert 'su - postgres -c "psql --no-psqlrc --set ON_ERROR_STOP=1"' in installer
+    assert "PostgreSQL-Rolle konnte nicht eingerichtet werden" in installer

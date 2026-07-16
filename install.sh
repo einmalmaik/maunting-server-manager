@@ -907,16 +907,13 @@ if ! $REINSTALL_MODE || $CHANGED_DB; then
     if su - postgres -c "psql --no-psqlrc -tAc \"SELECT 1 FROM pg_database WHERE datname='msm'\"" | grep -q 1; then
         err "PostgreSQL-Datenbank 'msm' existiert bereits. Der Installer überschreibt keine bestehende Datenbank."
     fi
-    PG_SETUP_SQL=$(mktemp /tmp/msm-pg-setup.XXXXXX.sql)
-    chmod 600 "$PG_SETUP_SQL"
-    cat > "$PG_SETUP_SQL" <<EOF
-CREATE USER msm WITH PASSWORD '${PG_PASSWORD}';
-EOF
-    if ! su - postgres -c "psql -f '$PG_SETUP_SQL'" 2>&1 | tee -a "$LOG_FILE"; then
-        rm -f "$PG_SETUP_SQL"
+    # Übergabe ausschließlich über stdin: kein Passwort in Prozessargumenten
+    # und keine temporäre Root-Datei, die der postgres-User nicht lesen kann.
+    if ! printf '%s\n' "CREATE USER msm WITH PASSWORD '${PG_PASSWORD}';" \
+        | su - postgres -c "psql --no-psqlrc --set ON_ERROR_STOP=1" \
+        2>&1 | tee -a "$LOG_FILE"; then
         err "PostgreSQL-Rolle konnte nicht eingerichtet werden."
     fi
-    rm -f "$PG_SETUP_SQL"
 
     su - postgres -c "createdb --owner=msm msm" 2>&1 | tee -a "$LOG_FILE" \
         || { su - postgres -c "dropuser --if-exists msm" >/dev/null 2>&1 || true; err "PostgreSQL-Datenbank konnte nicht erstellt werden."; }
