@@ -1440,10 +1440,18 @@ EOF
     fi
 
     if ! $DOMAIN_CONFLICT; then
+        caddy validate --config "$CADDY_CONFIG" --adapter caddyfile \
+            2>&1 | tee -a "$LOG_FILE" \
+            || err "Caddy-Konfiguration ist ungültig. Prüfe: $CADDY_CONFIG"
         if $SYSTEMD_AVAILABLE; then
-            systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
+            systemctl reload caddy 2>&1 | tee -a "$LOG_FILE" \
+                || systemctl restart caddy 2>&1 | tee -a "$LOG_FILE" \
+                || err "Caddy konnte die MSM-Konfiguration nicht laden."
         else
-            service caddy restart 2>/dev/null || caddy reload --config "$CADDY_CONFIG" 2>/dev/null || true
+            service caddy restart 2>&1 | tee -a "$LOG_FILE" \
+                || caddy reload --config "$CADDY_CONFIG" --adapter caddyfile \
+                    2>&1 | tee -a "$LOG_FILE" \
+                || err "Caddy konnte die MSM-Konfiguration nicht laden."
         fi
     else
         warn "Caddy wurde NICHT neugestartet (Domain-Konflikt). Bitte Konflikt lösen und install.sh erneut ausführen."
@@ -1792,7 +1800,10 @@ if $SYSTEMD_AVAILABLE; then
         || systemctl start msm-panel.service 2>/dev/null \
         || err "Panel-Service konnte nicht gestartet werden."
     PANEL_READY=false
-    for _attempt in $(seq 1 30); do
+    # Der erste Start kann auf kleiner Hardware durch Schema-, Firewall- und
+    # Runtime-Abgleich deutlich laenger als ein normaler Neustart dauern.
+    PANEL_READY_DEADLINE=$((SECONDS + 180))
+    while (( SECONDS < PANEL_READY_DEADLINE )); do
         if curl -fsS --max-time 2 http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
             PANEL_READY=true
             break

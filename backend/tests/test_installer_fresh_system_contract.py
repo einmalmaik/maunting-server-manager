@@ -136,3 +136,23 @@ def test_dis_readiness_probe_authenticates_without_exposing_token_in_argv() -> N
     assert "printf 'Authorization: Bearer %s\\n' \"$DIS_TOKEN\"" in readiness
     assert "--header @- http://127.0.0.1:9100/health" in readiness
     assert '--header "Authorization: Bearer $DIS_TOKEN"' not in readiness
+
+
+def test_caddy_config_is_validated_and_reload_failures_are_fatal() -> None:
+    installer = _installer()
+
+    assert 'caddy validate --config "$CADDY_CONFIG" --adapter caddyfile' in installer
+    assert 'err "Caddy-Konfiguration ist ungültig.' in installer
+    assert 'err "Caddy konnte die MSM-Konfiguration nicht laden."' in installer
+    assert 'systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true' not in installer
+
+
+def test_panel_readiness_allows_slow_first_start() -> None:
+    installer = _installer()
+    readiness = installer.split("PANEL_READY=false", 1)[1].split(
+        '$PANEL_READY || err', 1
+    )[0]
+
+    assert "PANEL_READY_DEADLINE=$((SECONDS + 180))" in readiness
+    assert "while (( SECONDS < PANEL_READY_DEADLINE ))" in readiness
+    assert "http://127.0.0.1:8000/api/health" in readiness
