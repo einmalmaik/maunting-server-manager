@@ -44,6 +44,7 @@ RELEASE_NOTES_*.md
 
 # Secrets / .env (nur *.example committen)
 backend/.env
+dis-sidecar/.env
 frontend/.env
 frontend/.env.local
 frontend/.env.*.local

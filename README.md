@@ -83,6 +83,24 @@ ist nicht Mitglied der globalen `docker`-Gruppe und nutzt
 
 ---
 
+## Umgebungsvariablen
+
+Für Self-Hosting und manuelle Installationen enthält jede Komponente eine
+vollständige, kommentierte Vorlage. Bei jeder Variable steht, was sie macht,
+ob sie automatisch erzeugt wird, wann sie geändert werden muss und wo ein
+externer Wert bezogen wird:
+
+- [`backend/.env.example`](backend/.env.example) — Panel, Panel-Datenbank, E-Mail, DIS, Steam/GitHub und Updates
+- [`msm-agent/.env.example`](msm-agent/.env.example) — lokaler oder entfernter Node, TLS, Docker und node-eigenes PostgreSQL
+- [`frontend/.env.example`](frontend/.env.example) — ausschließlich öffentliche Build-Werte, niemals Secrets
+- [`dis-sidecar/.env.example`](dis-sidecar/.env.example) — lokale Kryptografie-Secrets, identisch zum Backend
+
+Der normale Installer generiert alle sicherheitskritischen Werte und verweist
+in den erzeugten `.env`-Dateien auf die jeweilige Vorlage. Manuell angelegte
+Dateien müssen Modus `600` erhalten und dürfen niemals committed werden.
+
+---
+
 ## Update (neue Version installieren)
 
 ### Manuell

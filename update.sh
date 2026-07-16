@@ -451,6 +451,7 @@ if [[ -d "$MSM_DIR/msm-agent" ]]; then
         AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
         MSM_UID=$(id -u msm 2>/dev/null || echo 0)
         cat > "$MSM_DIR/msm-agent/.env" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/msm-agent/.env.example
 MSM_AGENT_TOKEN="$AGENT_TOKEN"
 MSM_AGENT_HOST="127.0.0.1"
 MSM_AGENT_PORT="9000"
@@ -515,10 +516,12 @@ chown "$MSM_USER:$MSM_USER" "$ENV_FILE"
 
 DIS_ENV_FILE="$MSM_DIR/dis-sidecar/.env"
 cat > "$DIS_ENV_FILE" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/dis-sidecar/.env.example
 MSM_SECRET_KEY="$SECRET_KEY"
 MSM_DIS_SALT="$DIS_SALT"
 MSM_DIS_SIDECAR_TOKEN="$DIS_TOKEN"
-MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"
+MSM_DIS_SIDECAR_PORT=9100
+NODE_ENV=production
 EOF
 chmod 600 "$DIS_ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$DIS_ENV_FILE"

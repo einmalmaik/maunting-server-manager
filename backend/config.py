@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -104,7 +105,7 @@ class Settings(BaseSettings):
     # eine dynamische Allowlist an eine nicht-trusted Extension kommt.
     # Alle hier gelisteten Extensions sind in Postgres 17 als ``trusted`` markiert,
     # d. h. der Owner einer DB darf sie ohne Superuser mit CREATE-Privileg installieren.
-    trusted_postgres_extensions: set[str] = {
+    trusted_postgres_extensions: ClassVar[set[str]] = {
         "pgcrypto",        # UUID-Gen, Digest, Symmetric Encryption (haeufig gebraucht)
         "uuid-ossp",       # alternative UUID-Implementierung
         "citext",          # case-insensitive Text
