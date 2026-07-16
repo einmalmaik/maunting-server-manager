@@ -144,6 +144,8 @@ EOF
 SIMPLE_INSTALL=false
 INSTALL_DOMAIN=""
 RESUME_PARTIAL=false
+CONTROL_PLANE_ONLY=false
+EXTERNAL_FRONTEND_ORIGIN=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --simple)
@@ -159,6 +161,15 @@ while [[ $# -gt 0 ]]; do
             RESUME_PARTIAL=true
             shift
             ;;
+        --control-plane-only)
+            CONTROL_PLANE_ONLY=true
+            shift
+            ;;
+        --external-frontend)
+            [[ $# -ge 2 ]] || err "--external-frontend benötigt eine HTTPS-Origin."
+            EXTERNAL_FRONTEND_ORIGIN="${2%/}"
+            shift 2
+            ;;
         *)
             err "Unbekannte Option: $1"
             ;;
@@ -166,6 +177,10 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ -n "$INSTALL_DOMAIN" ]] && [[ ! "$INSTALL_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
     err "Ungültige Domain. Beispiel: panel.example.com"
+fi
+if [[ -n "$EXTERNAL_FRONTEND_ORIGIN" ]] \
+    && [[ ! "$EXTERNAL_FRONTEND_ORIGIN" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]]; then
+    err "Ungültige Frontend-Origin. Erwartet: https://panel.example.com ohne Pfad."
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -189,6 +204,7 @@ load_current_env() {
     CURRENT_SECRET_KEY=""
     CURRENT_DB_URL=""
     CURRENT_DB_URL_ASYNC=""
+    CURRENT_LOCAL_AGENT_ENABLED="true"
 
     [[ -f "$env_file" ]] || return
 
@@ -241,6 +257,9 @@ load_current_env() {
 
     val=$(grep -E '^MSM_SECRET_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
     [[ -n "$val" ]] && CURRENT_SECRET_KEY="$val"
+
+    val=$(grep -E '^MSM_LOCAL_AGENT_ENABLED=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_LOCAL_AGENT_ENABLED="$val"
 }
 
 show_current_config() {
@@ -452,6 +471,15 @@ fi
 if $RESUME_PARTIAL && $REINSTALL_MODE; then
     err "--resume-partial ist nur für eine abgebrochene Erstinstallation ohne backend/.env erlaubt."
 fi
+INSTALL_LOCAL_AGENT=true
+if $CONTROL_PLANE_ONLY; then
+    INSTALL_LOCAL_AGENT=false
+elif $REINSTALL_MODE && [[ "$CURRENT_LOCAL_AGENT_ENABLED" == "false" ]]; then
+    INSTALL_LOCAL_AGENT=false
+fi
+if $CONTROL_PLANE_ONLY && $REINSTALL_MODE && [[ "$CURRENT_LOCAL_AGENT_ENABLED" != "false" ]]; then
+    err "Eine bestehende All-in-one-Installation darf nur über den Migrationsassistenten auf Backend-only umgestellt werden."
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 1. System-Abhängigkeiten
@@ -504,14 +532,18 @@ fi
 # ── Docker (Game-Server-Runtime — Rootless) ──
 # Docker Engine/CLI bleiben Systempakete. MSM nutzt danach ausschließlich den
 # Rootless-Daemon des msm-Users, nie /var/run/docker.sock.
-if ! command -v docker &>/dev/null; then
-    log "Installiere Docker (offizieller Installer von docker.com)..."
-    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-    sh /tmp/get-docker.sh 2>&1 | tee -a "$LOG_FILE"
-    rm -f /tmp/get-docker.sh
-    ok "Docker installiert"
+if $INSTALL_LOCAL_AGENT; then
+    if ! command -v docker &>/dev/null; then
+        log "Installiere Docker (offizieller Installer von docker.com)..."
+        curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+        sh /tmp/get-docker.sh 2>&1 | tee -a "$LOG_FILE"
+        rm -f /tmp/get-docker.sh
+        ok "Docker installiert"
+    else
+        log "Docker bereits installiert ($(docker --version 2>/dev/null || echo unbekannt))"
+    fi
 else
-    log "Docker bereits installiert ($(docker --version 2>/dev/null || echo unbekannt))"
+    log "Backend-only: lokale Docker-/Agent-Runtime wird nicht installiert."
 fi
 
 ok "System-Abhängigkeiten installiert"
@@ -612,7 +644,10 @@ chown "$MSM_USER:$MSM_USER" /opt/msm/servers
 mkdir -p /opt/msm/backups
 chown "$MSM_USER:$MSM_USER" /opt/msm/backups
 
-setup_rootless_docker
+MSM_DOCKER_HOST=""
+if $INSTALL_LOCAL_AGENT; then
+    setup_rootless_docker
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 4. Dateien kopieren
@@ -1069,6 +1104,16 @@ LOGO_URL=$(existing_env_value MSM_LOGO_URL "")
 STEAM_API_KEY=$(existing_env_value MSM_STEAM_API_KEY "")
 GITHUB_CLONE_TOKEN=$(existing_env_value MSM_GITHUB_CLONE_TOKEN "")
 
+if [[ -n "$EXTERNAL_FRONTEND_ORIGIN" ]]; then
+    SERVE_FRONTEND=false
+    COOKIE_CROSS_SITE=true
+    if [[ -z "$CORS_ALLOWED_ORIGINS" ]]; then
+        CORS_ALLOWED_ORIGINS="$EXTERNAL_FRONTEND_ORIGIN"
+    elif [[ ",${CORS_ALLOWED_ORIGINS}," != *",${EXTERNAL_FRONTEND_ORIGIN},"* ]]; then
+        CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS},${EXTERNAL_FRONTEND_ORIGIN}"
+    fi
+fi
+
 cat > "$ENV_FILE" <<EOF
 # Automatisch generiert durch install.sh am $(date -Iseconds)
 # ÄNDERUNGEN NUR MIT VORSICHT
@@ -1103,6 +1148,7 @@ MSM_CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS"
 MSM_SERVE_FRONTEND=$SERVE_FRONTEND
 MSM_SERVERS_DIR="$MSM_DIR/servers"
 MSM_LOCAL_AGENT_ENV_FILE="$MSM_DIR/msm-agent/.env"
+MSM_LOCAL_AGENT_ENABLED=$INSTALL_LOCAL_AGENT
 MSM_PANEL_CONFIG_DIR="$MSM_DIR"
 MSM_PANEL_BACKUP_DIR="$MSM_DIR/backups/panel"
 MSM_BLUEPRINTS_DIR="$MSM_DIR/blueprints/community"
@@ -1169,7 +1215,7 @@ if $RUN_BACKEND_SETUP; then
     ok "Python-Backend bereit"
 
     # MSM Agent (lokaler Node, rootless Docker) — eigenes venv, gleiche User-ID
-    if [[ -d "$MSM_DIR/msm-agent" ]]; then
+    if $INSTALL_LOCAL_AGENT && [[ -d "$MSM_DIR/msm-agent" ]]; then
         log "Installiere MSM Agent..."
         su - "$MSM_USER" -c "
             cd $MSM_DIR/msm-agent
@@ -1258,7 +1304,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CODE_CHANGED; then
     RUN_FRONTEND_BUILD=true
 fi
 
-if $RUN_FRONTEND_BUILD; then
+if $RUN_FRONTEND_BUILD && [[ "$SERVE_FRONTEND" == "true" ]]; then
     log "Baue Frontend..."
     if ! su - "$MSM_USER" -c "
         set -e
@@ -1269,6 +1315,8 @@ if $RUN_FRONTEND_BUILD; then
         err "Frontend-Build fehlgeschlagen. Prüfe npm-Log und package.json."
     fi
     ok "Frontend gebaut"
+elif [[ "$SERVE_FRONTEND" != "true" ]]; then
+    log "Externes Frontend: lokaler Frontend-Build wird übersprungen."
 fi
 
 # ── DIS Sidecar: npm ci (@msdis/shield) ──
@@ -1372,6 +1420,33 @@ EOF
     # MSM-Config nur schreiben, wenn kein Domain-Conflict besteht
     if $DOMAIN_CONFLICT; then
         warn "MSM-Caddy-Config wurde NICHT geschrieben (Domain-Konflikt)."
+    elif [[ -n "$DOMAIN" && "$SERVE_FRONTEND" != "true" ]]; then
+        cat > "$MSM_CADDY_FILE" <<EOF
+# MSM API — managed by install.sh
+# Das Frontend wird extern ausgeliefert; diese Site veröffentlicht nur API/WS.
+$DOMAIN {
+    encode gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    }
+
+    handle /api/* {
+        reverse_proxy localhost:8000
+    }
+
+    handle /ws/* {
+        reverse_proxy localhost:8000
+    }
+
+    handle {
+        respond "Not Found" 404
+    }
+}
+EOF
     elif [[ -n "$DOMAIN" ]]; then
         cat > "$MSM_CADDY_FILE" <<EOF
 # MSM Panel — managed by install.sh
@@ -1537,7 +1612,7 @@ WantedBy=multi-user.target
 EOF
 
     # MSM Agent (local node) — rootless Docker, loopback only
-    if [[ -d "$MSM_DIR/msm-agent" ]]; then
+    if $INSTALL_LOCAL_AGENT && [[ -d "$MSM_DIR/msm-agent" ]]; then
         cat > /etc/systemd/system/msm-agent.service <<EOF
 [Unit]
 Description=MSM Agent (Node Runtime)
@@ -1570,7 +1645,7 @@ EOF
         systemctl daemon-reload
         systemctl enable msm-dis-sidecar.service
         systemctl enable msm-panel.service
-        if [[ -f /etc/systemd/system/msm-agent.service ]]; then
+        if $INSTALL_LOCAL_AGENT && [[ -f /etc/systemd/system/msm-agent.service ]]; then
             systemctl enable msm-agent.service
         fi
 
@@ -1780,7 +1855,7 @@ if $SYSTEMD_AVAILABLE; then
         " 2>&1 | tee -a "$LOG_FILE" || err "DIS-Migration fehlgeschlagen! Migration abgebrochen. Prüfe das Log: $LOG_FILE"
     fi
 
-    if [[ -f /etc/systemd/system/msm-agent.service ]]; then
+    if $INSTALL_LOCAL_AGENT && [[ -f /etc/systemd/system/msm-agent.service ]]; then
         systemctl restart msm-agent.service 2>/dev/null \
             || systemctl start msm-agent.service 2>/dev/null \
             || err "MSM Agent konnte nicht gestartet werden."
@@ -1818,7 +1893,9 @@ if $SYSTEMD_AVAILABLE; then
 else
     warn "systemd nicht verfügbar — Service muss manuell gestartet werden."
     warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"
-    warn "Agent: cd /opt/msm/msm-agent && source venv/bin/activate && python main.py"
+    if $INSTALL_LOCAL_AGENT; then
+        warn "Agent: cd /opt/msm/msm-agent && source venv/bin/activate && python main.py"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════

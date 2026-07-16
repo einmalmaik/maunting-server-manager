@@ -156,3 +156,26 @@ def test_panel_readiness_allows_slow_first_start() -> None:
     assert "PANEL_READY_DEADLINE=$((SECONDS + 180))" in readiness
     assert "while (( SECONDS < PANEL_READY_DEADLINE ))" in readiness
     assert "http://127.0.0.1:8000/api/health" in readiness
+
+
+def test_control_plane_only_install_skips_local_runtime_and_marks_env() -> None:
+    installer = _installer()
+
+    assert "--control-plane-only" in installer
+    assert "CONTROL_PLANE_ONLY=true" in installer
+    assert "INSTALL_LOCAL_AGENT=false" in installer
+    assert "if $INSTALL_LOCAL_AGENT; then\n    setup_rootless_docker\nfi" in installer
+    assert "MSM_LOCAL_AGENT_ENABLED=$INSTALL_LOCAL_AGENT" in installer
+    assert "Eine bestehende All-in-one-Installation darf nur über den Migrationsassistenten" in installer
+
+
+def test_external_frontend_uses_exact_origin_and_api_only_caddy() -> None:
+    installer = _installer()
+
+    assert "--external-frontend" in installer
+    assert 'EXTERNAL_FRONTEND_ORIGIN="${2%/}"' in installer
+    assert "SERVE_FRONTEND=false" in installer
+    assert "COOKIE_CROSS_SITE=true" in installer
+    assert 'CORS_ALLOWED_ORIGINS="$EXTERNAL_FRONTEND_ORIGIN"' in installer
+    assert "Das Frontend wird extern ausgeliefert; diese Site veröffentlicht nur API/WS." in installer
+    assert 'respond "Not Found" 404' in installer
