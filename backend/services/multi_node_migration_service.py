@@ -58,6 +58,7 @@ def migrate_multi_node_schema(
     session_factory: Any,
     *,
     allow_missing_local_token: bool = False,
+    local_agent_enabled: bool = True,
 ) -> None:
     """Add legacy columns, sync the local agent token, assign orphan servers."""
     ensure_multi_node_schema(engine)
@@ -65,6 +66,7 @@ def migrate_multi_node_schema(
         engine,
         session_factory,
         allow_missing_local_token=allow_missing_local_token,
+        local_agent_enabled=local_agent_enabled,
     )
 
 
@@ -73,16 +75,25 @@ def sync_multi_node_registration(
     session_factory: Any,
     *,
     allow_missing_local_token: bool = False,
+    local_agent_enabled: bool = True,
 ) -> None:
     """Sync local-node data after Alembic has prepared the schema."""
     tables = set(inspect(engine).get_table_names())
 
     from models import Node
 
-    token = _local_agent_token()
     db = session_factory()
     try:
         local_node = db.query(Node).filter(Node.is_local.is_(True)).first()
+        if not local_agent_enabled:
+            if local_node is not None:
+                raise RuntimeError(
+                    "Backend-only mode cannot start while a local node is still "
+                    "registered; convert it to a verified remote node first"
+                )
+            return
+
+        token = _local_agent_token()
         if token:
             encrypted = DisClient.encrypt(token, aad=NODE_TOKEN_AAD)
             if local_node is None:

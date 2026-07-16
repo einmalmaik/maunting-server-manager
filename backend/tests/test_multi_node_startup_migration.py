@@ -76,3 +76,50 @@ def test_missing_local_token_fails_closed(tmp_path: Path, monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="token is missing"):
         migrate_multi_node_schema(engine, sessions)
+
+
+def test_backend_only_mode_does_not_create_a_local_node(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'backend-only.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+
+    migrate_multi_node_schema(
+        engine,
+        sessions,
+        local_agent_enabled=False,
+    )
+
+    db = sessions()
+    try:
+        assert db.query(Node).count() == 0
+    finally:
+        db.close()
+
+
+def test_backend_only_mode_rejects_a_stale_local_node(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'stale-local.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    db = sessions()
+    try:
+        db.add(
+            Node(
+                name="Synthetic stale local node",
+                host="http://127.0.0.1:9000",
+                auth_token_enc="synthetic-encrypted-token",
+                is_local=True,
+                status="unknown",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="convert it to a verified remote node"):
+        migrate_multi_node_schema(
+            engine,
+            sessions,
+            local_agent_enabled=False,
+        )

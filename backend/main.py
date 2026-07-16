@@ -84,6 +84,7 @@ async def lifespan(app: FastAPI):
         engine,
         SessionLocal,
         allow_missing_local_token=is_testing,
+        local_agent_enabled=settings.local_agent_enabled,
     )
 
     # Migration: fehlende Spalten nachträglich hinzufügen
@@ -393,38 +394,40 @@ async def lifespan(app: FastAPI):
     #    Regeln bleiben unangetastet (siehe firewall_service.cleanup_legacy_msm_ranges).
     # 2. DOCKER-USER iptables Baseline-DROP fuer die MSM-Port-Range setzen
     #    (Defense-in-Depth gegen Docker-UFW-Bypass). Idempotent.
-    try:
-        from services.firewall_service import cleanup_legacy_msm_ranges
-        from services.docker_iptables_service import ensure_baseline_drop
-        removed = cleanup_legacy_msm_ranges()
-        if removed:
+    if settings.local_agent_enabled:
+        try:
+            from services.firewall_service import cleanup_legacy_msm_ranges
+            from services.docker_iptables_service import ensure_baseline_drop
+            removed = cleanup_legacy_msm_ranges()
+            if removed:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Port-Manager: %d Legacy-MSM-Range(s) aus UFW entfernt.", removed,
+                )
+            ensure_baseline_drop()
+        except Exception as exc:
             import logging
-            logging.getLogger(__name__).info(
-                "Port-Manager: %d Legacy-MSM-Range(s) aus UFW entfernt.", removed,
+            logging.getLogger(__name__).warning(
+                "Phase-2 Port-Manager-Init partiell fehlgeschlagen: %s", exc,
             )
-        ensure_baseline_drop()
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning(
-            "Phase-2 Port-Manager-Init partiell fehlgeschlagen: %s", exc,
-        )
 
     # Managed PostgreSQL: on local node agent only (Phase 7 — no panel psycopg2).
-    try:
-        from database import SessionLocal
-        from services.postgres_service import ensure_internal_postgres
-
-        _pg_db = SessionLocal()
+    if settings.local_agent_enabled:
         try:
-            ensure_internal_postgres(_pg_db)
-        finally:
-            _pg_db.close()
-    except Exception as exc:
-        import logging
+            from database import SessionLocal
+            from services.postgres_service import ensure_internal_postgres
 
-        logging.getLogger(__name__).warning(
-            "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
-        )
+            _pg_db = SessionLocal()
+            try:
+                ensure_internal_postgres(_pg_db)
+            finally:
+                _pg_db.close()
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
+            )
 
     # Initialize scheduler and load existing schedules
     start_scheduler()

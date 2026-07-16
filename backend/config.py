@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     panel_config_dir: str = "/opt/msm"
     panel_backup_dir: str = "/opt/msm/backups/panel"
     local_agent_env_file: str = "/opt/msm/msm-agent/.env"
+    # false = reine Control Plane ohne Docker/Agent auf demselben Host.
+    # Ein bestehender lokaler Node muss vor dem Start kontrolliert in einen
+    # verifizierten Remote-Node umgewandelt werden; kein stiller Fallback.
+    local_agent_enabled: bool = True
 
     # Verwaltetes PostgreSQL fuer Game-Server-Datenbanken.
     # Der Host-Port ist absichtlich nur an Loopback gebunden. Game-Container
