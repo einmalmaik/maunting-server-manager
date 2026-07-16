@@ -113,3 +113,15 @@ def test_partial_postgres_resume_is_explicit_nondestructive_and_fail_closed() ->
     assert '"$PG_OTHER_DATABASES" == "0"' in installer
     assert "ALTER ROLE msm WITH PASSWORD" in installer
     assert "dropdb" not in installer
+
+
+def test_fresh_install_initializes_dis_secrets_before_set_u_checks() -> None:
+    installer = _installer()
+
+    salt_init = installer.index('DIS_SALT=""')
+    token_init = installer.index('DIS_TOKEN=""')
+    salt_check = installer.index('if [[ -z "$DIS_SALT" ]]')
+    token_check = installer.index('if [[ -z "$DIS_TOKEN" ]]')
+
+    assert salt_init < salt_check
+    assert token_init < token_check

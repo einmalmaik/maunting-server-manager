@@ -1003,7 +1003,11 @@ else
     SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
 fi
 
-# DIS Sidecar: Salt + Token generieren (oder beibehalten bei Re-Install)
+# DIS Sidecar: Salt + Token generieren (oder beibehalten bei Re-Install).
+# Unter ``set -u`` muessen beide Werte auch im frischen Installationspfad
+# definiert sein, bevor sie auf Leerwerte geprueft werden.
+DIS_SALT=""
+DIS_TOKEN=""
 if $REINSTALL_MODE && [[ -f "$MSM_DIR/backend/.env" ]]; then
     DIS_SALT=$(grep -E '^MSM_DIS_SALT=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
     DIS_TOKEN=$(grep -E '^MSM_DIS_SIDECAR_TOKEN=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
