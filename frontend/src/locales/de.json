@@ -1277,7 +1277,7 @@
     },
     "compatibility": {
       "title": "Neue Installationen ausschließlich mit PostgreSQL",
-      "description": "PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code existiert ausschließlich für die einmalige, geprüfte Migration bestehender Altinstallationen und ist bei Neuinstallationen nicht auswählbar."
+      "description": "PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code existiert ausschließlich für die einmalige, geprüfte Migration bestehender Altinstallationen. Eine nach dem Anlegen von Rolle und Datenbank abgebrochene Erstinstallation kann geprüft und ohne Löschen mit --resume-partial fortgesetzt werden; fremde PostgreSQL-Zustände bleiben blockiert."
     },
     "navigation": {
       "label": "Links der Self-Hosting-Dokumentation",

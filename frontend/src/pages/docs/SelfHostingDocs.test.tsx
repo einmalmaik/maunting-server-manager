@@ -46,6 +46,13 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/without replacing an existing Caddyfile/i)).toBeInTheDocument()
   })
 
+  it('documents safe continuation of a partial PostgreSQL setup', () => {
+    renderPage()
+
+    expect(screen.getByText(/continued without deletion using --resume-partial/i)).toBeInTheDocument()
+    expect(screen.getByText(/foreign PostgreSQL state remains blocked/i)).toBeInTheDocument()
+  })
+
   it('links to node administration and the documentation index', () => {
     renderPage()
 

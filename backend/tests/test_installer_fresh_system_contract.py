@@ -100,3 +100,16 @@ def test_simple_reinstall_honors_an_explicit_domain_without_resetting_other_sett
     assert 'DOMAIN="${INSTALL_DOMAIN:-$CURRENT_DOMAIN}"' in installer
     assert "KEEP_SETTINGS=true" in installer
     assert "CHANGED_DOMAIN=true" in installer
+
+
+def test_partial_postgres_resume_is_explicit_nondestructive_and_fail_closed() -> None:
+    installer = _installer()
+
+    assert "--resume-partial" in installer
+    assert "RESUME_PARTIAL=true" in installer
+    assert '[[ "$PG_DATABASE_OWNER" == "msm" ]]' in installer
+    assert '[[ "$PG_ROLE_FLAGS" == "f"' in installer
+    assert '"$PG_ROLE_MEMBERSHIPS" == "0"' in installer
+    assert '"$PG_OTHER_DATABASES" == "0"' in installer
+    assert "ALTER ROLE msm WITH PASSWORD" in installer
+    assert "dropdb" not in installer

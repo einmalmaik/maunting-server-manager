@@ -48,6 +48,23 @@ Caddy-Konfigurationen. Der Installer aktualisiert die von MSM benötigten Pakete
 führt aber bewusst kein pauschales Betriebssystem-`dist-upgrade` und keinen
 automatischen Reboot fremder Systeme durch.
 
+### Abgebrochene Erstinstallation fortsetzen
+
+Hat ein abgebrochener Lauf bereits die lokale PostgreSQL-Rolle und Datenbank
+`msm`, aber noch keine `backend/.env` angelegt, bleibt der normale Installer aus
+Sicherheitsgründen stehen. Nach Prüfung des Zustands kann der Lauf ohne Löschen
+der Datenbank ausdrücklich fortgesetzt werden:
+
+```bash
+sudo bash install.sh --simple --domain panel.example.com --resume-partial
+```
+
+Der Resume-Pfad akzeptiert ausschließlich die Datenbank `msm` mit Eigentümer
+`msm`, eine unprivilegierte Rolle ohne Mitgliedschaften und ohne weitere eigene
+Datenbanken. Er erzeugt ein neues Passwort, überträgt es ausschließlich über
+`stdin` an PostgreSQL und schreibt es anschließend in die geschützte `.env`.
+Abweichende oder fremde PostgreSQL-Zustände werden nicht verändert.
+
 PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code im
 Installer dient ausschließlich dazu, bestehende Altinstallationen einmalig und
 geprüft nach PostgreSQL zu migrieren; neue SQLite-Installationen gibt es nicht.

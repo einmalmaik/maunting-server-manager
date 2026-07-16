@@ -143,6 +143,7 @@ EOF
 
 SIMPLE_INSTALL=false
 INSTALL_DOMAIN=""
+RESUME_PARTIAL=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --simple)
@@ -153,6 +154,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || err "--domain benötigt einen Domainnamen."
             INSTALL_DOMAIN="$2"
             shift 2
+            ;;
+        --resume-partial)
+            RESUME_PARTIAL=true
+            shift
             ;;
         *)
             err "Unbekannte Option: $1"
@@ -443,6 +448,9 @@ if [[ -f "$MSM_DIR/backend/.env" ]]; then
     fi
 else
     log "Frische Installation erkannt..."
+fi
+if $RESUME_PARTIAL && $REINSTALL_MODE; then
+    err "--resume-partial ist nur für eine abgebrochene Erstinstallation ohne backend/.env erlaubt."
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -906,22 +914,54 @@ if ! $REINSTALL_MODE || $CHANGED_DB; then
     PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
 
     log "Richte PostgreSQL-User und Datenbank ein..."
+    PG_ROLE_EXISTS=false
     if su - postgres -c "psql --no-psqlrc -tAc \"SELECT 1 FROM pg_roles WHERE rolname='msm'\"" | grep -q 1; then
-        err "PostgreSQL-Rolle 'msm' existiert bereits. Der Installer überschreibt keine bestehende Rolle."
+        PG_ROLE_EXISTS=true
     fi
-    if su - postgres -c "psql --no-psqlrc -tAc \"SELECT 1 FROM pg_database WHERE datname='msm'\"" | grep -q 1; then
-        err "PostgreSQL-Datenbank 'msm' existiert bereits. Der Installer überschreibt keine bestehende Datenbank."
-    fi
-    # Übergabe ausschließlich über stdin: kein Passwort in Prozessargumenten
-    # und keine temporäre Root-Datei, die der postgres-User nicht lesen kann.
-    if ! printf '%s\n' "CREATE USER msm WITH PASSWORD '${PG_PASSWORD}';" \
-        | su - postgres -c "psql --no-psqlrc --set ON_ERROR_STOP=1" \
-        2>&1 | tee -a "$LOG_FILE"; then
-        err "PostgreSQL-Rolle konnte nicht eingerichtet werden."
-    fi
+    PG_DATABASE_OWNER=$(su - postgres -c \
+        "psql --no-psqlrc -tAc \"SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='msm'\"" \
+        | tr -d '[:space:]')
 
-    su - postgres -c "createdb --owner=msm msm" 2>&1 | tee -a "$LOG_FILE" \
-        || { su - postgres -c "dropuser --if-exists msm" >/dev/null 2>&1 || true; err "PostgreSQL-Datenbank konnte nicht erstellt werden."; }
+    if $RESUME_PARTIAL; then
+        $PG_ROLE_EXISTS \
+            || err "Partielle Installation kann nicht fortgesetzt werden: PostgreSQL-Rolle 'msm' fehlt."
+        [[ "$PG_DATABASE_OWNER" == "msm" ]] \
+            || err "Partielle Installation kann nicht fortgesetzt werden: Datenbank 'msm' fehlt oder hat einen fremden Eigentümer."
+
+        PG_ROLE_FLAGS=$(su - postgres -c \
+            "psql --no-psqlrc -tAc \"SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname='msm'\"" \
+            | tr -d '[:space:]')
+        PG_ROLE_MEMBERSHIPS=$(su - postgres -c \
+            "psql --no-psqlrc -tAc \"SELECT count(*) FROM pg_auth_members WHERE roleid=(SELECT oid FROM pg_roles WHERE rolname='msm') OR member=(SELECT oid FROM pg_roles WHERE rolname='msm')\"" \
+            | tr -d '[:space:]')
+        PG_OTHER_DATABASES=$(su - postgres -c \
+            "psql --no-psqlrc -tAc \"SELECT count(*) FROM pg_database WHERE NOT datistemplate AND datname <> 'msm' AND datdba=(SELECT oid FROM pg_roles WHERE rolname='msm')\"" \
+            | tr -d '[:space:]')
+        [[ "$PG_ROLE_FLAGS" == "f" && "$PG_ROLE_MEMBERSHIPS" == "0" && "$PG_OTHER_DATABASES" == "0" ]] \
+            || err "Partielle Installation wird nicht fortgesetzt: PostgreSQL-Rolle 'msm' besitzt unerwartete Rechte oder weitere Objekte."
+
+        log "Setze die eindeutig erkannte partielle PostgreSQL-Installation sicher fort..."
+        if ! printf '%s\n' "ALTER ROLE msm WITH PASSWORD '${PG_PASSWORD}';" \
+            | su - postgres -c "psql --no-psqlrc --set ON_ERROR_STOP=1" \
+            2>&1 | tee -a "$LOG_FILE"; then
+            err "PostgreSQL-Zugang der partiellen Installation konnte nicht erneuert werden."
+        fi
+    else
+        if $PG_ROLE_EXISTS || [[ -n "$PG_DATABASE_OWNER" ]]; then
+            err "PostgreSQL-Rolle oder Datenbank 'msm' existiert bereits. Für eine nachweislich abgebrochene Erstinstallation erneut mit --resume-partial starten; fremde Daten werden niemals überschrieben."
+        fi
+
+        # Übergabe ausschließlich über stdin: kein Passwort in Prozessargumenten
+        # und keine temporäre Root-Datei, die der postgres-User nicht lesen kann.
+        if ! printf '%s\n' "CREATE USER msm WITH PASSWORD '${PG_PASSWORD}';" \
+            | su - postgres -c "psql --no-psqlrc --set ON_ERROR_STOP=1" \
+            2>&1 | tee -a "$LOG_FILE"; then
+            err "PostgreSQL-Rolle konnte nicht eingerichtet werden."
+        fi
+
+        su - postgres -c "createdb --owner=msm msm" 2>&1 | tee -a "$LOG_FILE" \
+            || { su - postgres -c "dropuser --if-exists msm" >/dev/null 2>&1 || true; err "PostgreSQL-Datenbank konnte nicht erstellt werden."; }
+    fi
 
     su - postgres -c "psql -d msm -c \"GRANT ALL ON SCHEMA public TO msm;\"" 2>&1 | tee -a "$LOG_FILE"
 

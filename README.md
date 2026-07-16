@@ -70,6 +70,10 @@ Updater; Serverdaten, Backups, Agent-Tokens und Konfigurationen bleiben erhalten
 Auf minimalen Ubuntu-/Debian-Systemen installiert derselbe `install.sh`-Pfad
 alle benötigten Basispakete und repariert auch eine zuvor unvollständig
 eingerichtete Caddy-Paketquelle, ohne eine vorhandene Caddyfile zu ersetzen.
+Falls eine Erstinstallation nach dem Anlegen der lokalen `msm`-Datenbank
+abbricht, kann sie ausdrücklich mit `--resume-partial` fortgesetzt werden. Der
+Installer übernimmt dabei nur eine exakt passende, unprivilegierte Datenbank
+`msm` mit Eigentümer `msm`; fremde PostgreSQL-Zustände bleiben blockiert.
 
 MSM richtet Docker im Rootless-Modus für den `msm`-User ein. Der Panel-User
 ist nicht Mitglied der globalen `docker`-Gruppe und nutzt
