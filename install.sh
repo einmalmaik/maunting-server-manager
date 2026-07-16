@@ -4,6 +4,7 @@ umask 077
 
 # ── Global PATH: verhindert "mkdir: not found" in steamcmd-Wrapper ──
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 
 # ═══════════════════════════════════════════════════════════════
 #  Maunting Server Manager — Zero-Config One-Line Installer
@@ -27,6 +28,12 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 MSM_USER="msm"
 MSM_DIR="/opt/msm"
 LOG_FILE="/tmp/msm-install.log"
+CADDY_SOURCE_FILE="/etc/apt/sources.list.d/caddy-stable.list"
+CADDY_KEYRING_FILE="/usr/share/keyrings/caddy-stable-archive-keyring.gpg"
+# Primary repository key. Signing subkeys may rotate without changing this
+# pinned trust anchor.
+CADDY_SIGNING_FINGERPRINT="65760C51EDEA2017CEA2CA15155B6D79CA56EA34"
+CADDY_SOURCE_BACKUP=""
 
 # Farben
 RED='\033[0;31m'
@@ -74,6 +81,64 @@ ask_yesno_default() {
             esac
         fi
     done
+}
+
+disable_caddy_source_for_apt_preflight() {
+    # A previous interrupted installation may have written the repository
+    # before its keyring was ready. Temporarily disable only MSM's known Caddy
+    # source so the base apt update can repair that state safely.
+    if [[ ! -f "$CADDY_SOURCE_FILE" ]]; then
+        return 0
+    fi
+
+    CADDY_SOURCE_BACKUP=$(mktemp "${CADDY_SOURCE_FILE}.msm-disabled.XXXXXX")
+    rm -f "$CADDY_SOURCE_BACKUP"
+    mv "$CADDY_SOURCE_FILE" "$CADDY_SOURCE_BACKUP"
+    log "Bestehende Caddy-Paketquelle wird vor der Schlüsselprüfung vorübergehend deaktiviert."
+}
+
+configure_caddy_repository() {
+    local armored_key keyring_tmp source_tmp
+
+    install -d -m 0755 /usr/share/keyrings /etc/apt/sources.list.d
+    armored_key=$(mktemp /tmp/msm-caddy-key.XXXXXX.asc)
+    keyring_tmp=$(mktemp /usr/share/keyrings/.caddy-stable-keyring.XXXXXX)
+    source_tmp=$(mktemp /etc/apt/sources.list.d/.caddy-stable.XXXXXX)
+
+    if ! curl -fsSL --retry 3 --retry-delay 2 \
+        https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+        -o "$armored_key"; then
+        rm -f "$armored_key" "$keyring_tmp" "$source_tmp"
+        err "Caddy-Signaturschlüssel konnte nicht geladen werden. Paketquelle bleibt sicher deaktiviert."
+    fi
+
+    if ! gpg --batch --show-keys --with-colons "$armored_key" 2>/dev/null \
+        | awk -F: -v expected="$CADDY_SIGNING_FINGERPRINT" \
+            '$1 == "fpr" && $10 == expected { found=1 } END { exit found ? 0 : 1 }'; then
+        rm -f "$armored_key" "$keyring_tmp" "$source_tmp"
+        err "Caddy-Signaturschlüssel hat nicht den erwarteten Fingerprint. Paketquelle bleibt deaktiviert."
+    fi
+
+    if ! gpg --batch --yes --dearmor --output "$keyring_tmp" "$armored_key"; then
+        rm -f "$armored_key" "$keyring_tmp" "$source_tmp"
+        err "Caddy-Signaturschlüssel konnte nicht verarbeitet werden. Paketquelle bleibt deaktiviert."
+    fi
+    chmod 0644 "$keyring_tmp"
+
+    cat > "$source_tmp" <<EOF
+# Source: Caddy stable (managed by MSM install.sh)
+deb [signed-by=$CADDY_KEYRING_FILE] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
+EOF
+    chmod 0644 "$source_tmp"
+
+    mv -f "$keyring_tmp" "$CADDY_KEYRING_FILE"
+    mv -f "$source_tmp" "$CADDY_SOURCE_FILE"
+    rm -f "$armored_key"
+    if [[ -n "$CADDY_SOURCE_BACKUP" ]]; then
+        rm -f "$CADDY_SOURCE_BACKUP"
+        CADDY_SOURCE_BACKUP=""
+    fi
+    ok "Caddy-Paketquelle und Signaturschlüssel geprüft"
 }
 
 SIMPLE_INSTALL=false
@@ -379,17 +444,18 @@ fi
 # 1. System-Abhängigkeiten
 # ═══════════════════════════════════════════════════════════════
 log "Aktualisiere Paketlisten..."
+disable_caddy_source_for_apt_preflight
 apt-get update -qq | tee -a "$LOG_FILE"
 
 log "Installiere Basis-Pakete..."
 apt-get install -y -qq \
-    curl wget git jq rsync \
+    ca-certificates curl wget git gnupg jq openssl rsync sudo \
     python3 python3-pip python3-venv \
     systemd systemd-sysv \
     libc6-i386 lib32stdc++6 lib32gcc-s1 \
-    software-properties-common \
-    debian-archive-keyring apt-transport-https \
-    slirp4netns \
+    software-properties-common lsb-release \
+    debian-keyring debian-archive-keyring apt-transport-https \
+    uidmap dbus-user-session slirp4netns ufw iptables \
     2>&1 | tee -a "$LOG_FILE"
 
 # ── Node.js 20 (nicht das veraltete aus apt) ──
@@ -400,16 +466,13 @@ if ! command -v node &>/dev/null || [[ "$(node -v | cut -d'v' -f2 | cut -d'.' -f
 fi
 
 # ── Caddy (offizielles Repo für aktuelle Version) ──
-# Nur installieren, wenn Caddy noch nicht vorhanden ist.
-# Bestehende Caddyfile wird niemals überschrieben.
-if ! command -v caddy &>/dev/null; then
-    log "Installiere Caddy (erstmalige Installation)..."
-    apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https 2>&1 | tee -a "$LOG_FILE"
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' 2>/dev/null | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>&1 | tee -a "$LOG_FILE"
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' 2>/dev/null | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-    apt-get update -qq | tee -a "$LOG_FILE"
-    apt-get install -y -qq caddy 2>&1 | tee -a "$LOG_FILE"
-else
+# Die Quelle wird bei jedem Lauf sicher repariert. Paketupdates behalten eine
+# bestehende Caddyfile ausdrücklich bei.
+configure_caddy_repository
+apt-get update -qq | tee -a "$LOG_FILE"
+log "Installiere beziehungsweise aktualisiere Caddy..."
+apt-get install -y -qq -o Dpkg::Options::="--force-confold" caddy 2>&1 | tee -a "$LOG_FILE"
+if command -v caddy &>/dev/null; then
     if [[ -f /etc/caddy/Caddyfile ]]; then
         ok "Caddy bereits vorhanden — bestehende Caddyfile wird erhalten."
     else
@@ -421,12 +484,13 @@ import /etc/caddy/conf.d/*.conf
 CADDYEOF
         ok "Minimal-Caddyfile angelegt."
     fi
+else
+    err "Caddy wurde nicht vollständig installiert."
 fi
 
 # ── Docker (Game-Server-Runtime — Rootless) ──
 # Docker Engine/CLI bleiben Systempakete. MSM nutzt danach ausschließlich den
 # Rootless-Daemon des msm-Users, nie /var/run/docker.sock.
-apt-get install -y -qq uidmap dbus-user-session 2>&1 | tee -a "$LOG_FILE"
 if ! command -v docker &>/dev/null; then
     log "Installiere Docker (offizieller Installer von docker.com)..."
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh

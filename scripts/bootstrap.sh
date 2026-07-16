@@ -25,8 +25,27 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+
+# A previously interrupted install can leave the Caddy source enabled before
+# its keyring exists. Keep bootstrap capable of reaching the canonical
+# install.sh, which will then rebuild and verify the repository atomically.
+caddy_source="/etc/apt/sources.list.d/caddy-stable.list"
+caddy_source_backup=""
+restore_caddy_source() {
+    if [[ -n "$caddy_source_backup" && -f "$caddy_source_backup" && ! -f "$caddy_source" ]]; then
+        mv "$caddy_source_backup" "$caddy_source"
+    fi
+}
+if [[ -f "$caddy_source" ]]; then
+    caddy_source_backup=$(mktemp "${caddy_source}.msm-bootstrap-disabled.XXXXXX")
+    rm -f "$caddy_source_backup"
+    mv "$caddy_source" "$caddy_source_backup"
+    trap restore_caddy_source EXIT
+fi
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl git python3 >/dev/null
+restore_caddy_source
+trap - EXIT
 
 if [[ -f /opt/msm/backend/.env ]]; then
     echo "[MSM] Bestehende Installation erkannt. Sicherer Updater wird gestartet..."

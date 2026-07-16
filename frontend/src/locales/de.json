@@ -1222,7 +1222,7 @@
       "commandLabel": "Öffentlicher Bootstrap",
       "copy": "Befehl kopieren",
       "copied": "Kopiert",
-      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt der zentrale Installer und führt die eigentliche Einrichtung aus; ein flacher Git-Checkout wird nur verwendet, wenn noch kein kompatibles Release-Artefakt existiert."
+      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt für Bootstrap, Simple- und interaktiven Modus der zentrale Installer: Er installiert auf Minimal-Systemen alle benötigten Basispakete und repariert eine unvollständige Caddy-Paketquelle sicher, ohne eine vorhandene Caddyfile zu ersetzen."
     },
     "topology": {
       "title": "Beispiel-Topologie: 20 Hosts",

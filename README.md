@@ -67,6 +67,9 @@ Datenbank wird vor dem Update gesichert, einmalig geprüft nach PostgreSQL
 importiert und anschließend als Migrationsarchiv behalten. Erkennt der
 Bootstrap eine vorhandene Installation, verwendet er automatisch den sicheren
 Updater; Serverdaten, Backups, Agent-Tokens und Konfigurationen bleiben erhalten.
+Auf minimalen Ubuntu-/Debian-Systemen installiert derselbe `install.sh`-Pfad
+alle benötigten Basispakete und repariert auch eine zuvor unvollständig
+eingerichtete Caddy-Paketquelle, ohne eine vorhandene Caddyfile zu ersetzen.
 
 MSM richtet Docker im Rootless-Modus für den `msm`-User ein. Der Panel-User
 ist nicht Mitglied der globalen `docker`-Gruppe und nutzt

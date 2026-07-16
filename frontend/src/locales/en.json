@@ -1222,7 +1222,7 @@
       "commandLabel": "Public bootstrap",
       "copy": "Copy command",
       "copied": "Copied",
-      "releaseNote": "The bootstrap prefers the tested msm-panel release matching the latest GitHub release. install.sh remains the central installer and performs the actual setup; a shallow Git checkout is used only when no compatible release artifact exists."
+      "releaseNote": "The bootstrap prefers the tested msm-panel artifact from the latest GitHub release. install.sh remains the central installer for bootstrap, simple and interactive modes: on minimal systems it installs every required base package and safely repairs an incomplete Caddy repository without replacing an existing Caddyfile."
     },
     "topology": {
       "title": "Example topology: 20 hosts",

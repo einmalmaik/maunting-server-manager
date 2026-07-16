@@ -39,6 +39,13 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/no manual token or TLS fingerprint copy is required/i)).toBeInTheDocument()
   })
 
+  it('documents the shared minimal-system installation path', () => {
+    renderPage()
+
+    expect(screen.getByText(/on minimal systems it installs every required base package/i)).toBeInTheDocument()
+    expect(screen.getByText(/without replacing an existing Caddyfile/i)).toBeInTheDocument()
+  })
+
   it('links to node administration and the documentation index', () => {
     renderPage()
 

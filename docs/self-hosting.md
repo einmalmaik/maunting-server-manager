@@ -40,6 +40,14 @@ systemd automatisch ein. E-Mail wird anschließend im Browser-Setup konfiguriert
 Wer bewusst den interaktiven Expertenweg benötigt, kann das Repository oder
 Panel-Artefakt entpacken und `sudo bash install.sh` ausführen.
 
+Alle drei Einstiege – direkter interaktiver Aufruf, `--simple` und öffentlicher
+Bootstrap – durchlaufen dieselbe idempotente Systemvorbereitung. Sie installiert
+die benötigten Basispakete auch auf einem minimalen Ubuntu-/Debian-System,
+repariert eine unvollständige Caddy-Paketquelle sicher und erhält vorhandene
+Caddy-Konfigurationen. Der Installer aktualisiert die von MSM benötigten Pakete,
+führt aber bewusst kein pauschales Betriebssystem-`dist-upgrade` und keinen
+automatischen Reboot fremder Systeme durch.
+
 PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code im
 Installer dient ausschließlich dazu, bestehende Altinstallationen einmalig und
 geprüft nach PostgreSQL zu migrieren; neue SQLite-Installationen gibt es nicht.
