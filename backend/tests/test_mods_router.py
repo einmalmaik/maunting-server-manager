@@ -87,6 +87,28 @@ class TestUpdateMod:
         )
         assert response.status_code == 403
 
+    def test_enable_disable_rewrites_modlist(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session
+    ):
+        mod = Mod(server_id=test_server.id, workshop_id="12345", enabled=True, load_order=0)
+        db.add(mod)
+        db.commit()
+        db.refresh(mod)
+
+        with patch("routers.mods.get_plugin") as mock_get_plugin:
+            plugin = mock_get_plugin.return_value
+            plugin.supports_mods = True
+            response = client.patch(
+                f"/api/mods/{test_server.id}/{mod.id}?enabled=false",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["enabled"] is False
+        plugin.update_modlist.assert_called_once()
+        assert plugin.update_modlist.call_args.args[0].id == test_server.id
+
 
 class TestModInstallActions:
     def test_check_updates_marks_mod_update_pending(
@@ -258,6 +280,29 @@ class TestUnsubscribeMod:
             cookies=owner_cookies,
         )
         assert response.status_code == 403
+
+    def test_cleanup_failure_keeps_mod_managed(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, test_server: Server, db: Session
+    ):
+        mod = Mod(server_id=test_server.id, workshop_id="12345", load_order=0)
+        db.add(mod)
+        db.commit()
+        mod_id = mod.id
+
+        with patch("routers.mods.get_plugin") as mock_get_plugin:
+            plugin = mock_get_plugin.return_value
+            plugin.supports_mods = True
+            plugin.cleanup_mod.side_effect = RuntimeError("synthetic node failure")
+            response = client.delete(
+                f"/api/mods/{test_server.id}/{mod_id}",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == "Mod-Dateien konnten nicht entfernt werden"
+        db.expire_all()
+        assert db.query(Mod).filter(Mod.id == mod_id).first() is not None
 
 
 class TestReorderMods:

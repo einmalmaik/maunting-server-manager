@@ -803,6 +803,17 @@ def write_workshop_modlist(server, relative_path: str, lines: list[str]) -> None
         _append_console_log(server.id, "[MSM] Modliste: Pfad enthaelt '..'\n")
         return
 
+    node = getattr(server, "node", None)
+    if node is not None and not getattr(node, "is_local", False):
+        try:
+            from services.node_client import NodeClient
+
+            content = "".join(f"{line}\n" for line in _finalize_modlist_lines(server, lines))
+            NodeClient.from_node(node).files_write(server.id, relative_path, content)
+        except Exception:
+            _append_console_log(server.id, "[MSM] Modliste: Schreiben auf Node fehlgeschlagen\n")
+        return
+
     try:
         install_real = os.path.realpath(install_dir)
         target = os.path.realpath(os.path.join(install_real, relative_path))

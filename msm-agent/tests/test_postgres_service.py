@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -55,6 +56,8 @@ def test_ensure_creates_with_loopback_only():
     # password present but we only check it was passed (not logged)
     assert bootstrap["env"]["POSTGRES_PASSWORD"] == "admin-secret"
     assert sanitized["env"] is None
+    assert Path(bootstrap["data_dir"]).is_absolute()
+    assert sanitized["data_dir"] == bootstrap["data_dir"]
     assert set(bootstrap["cap_adds"]) == {
         "CHOWN", "FOWNER", "SETUID", "SETGID", "DAC_OVERRIDE", "DAC_READ_SEARCH"
     }

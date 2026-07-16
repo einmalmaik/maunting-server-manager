@@ -483,9 +483,18 @@ def unsubscribe_mod(server_id: int, mod_id: int, db: Session = Depends(get_db), 
             try:
                 result = plugin.cleanup_mod(server, mod.workshop_id)
                 if isinstance(result, dict) and result.get("ok") is False:
-                    logger.warning("Mod-Cleanup gab False zurück fuer Server %s, Mod %s", server_id, mod.workshop_id)
-            except Exception as e:
-                logger.warning("Mod-Cleanup fehlgeschlagen fuer Server %s, Mod %s: %s", server_id, mod.workshop_id, e)
+                    raise RuntimeError("cleanup_failed")
+            except Exception as exc:
+                logger.warning(
+                    "Mod-Cleanup fehlgeschlagen fuer Server %s, Mod %s error_type=%s",
+                    server_id,
+                    mod.workshop_id,
+                    type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail="Mod-Dateien konnten nicht entfernt werden",
+                ) from exc
     db.delete(mod)
     db.commit()
     if server:

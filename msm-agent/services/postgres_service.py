@@ -12,6 +12,7 @@ import os
 import re
 import shlex
 import time
+from pathlib import Path
 from typing import Any
 
 import psycopg2
@@ -66,6 +67,10 @@ def _db_host() -> str:
     return host
 
 
+def _postgres_data_dir() -> str:
+    return str(Path(settings.managed_postgres_data_dir).expanduser().resolve())
+
+
 def _admin_connect(admin_password: str, database: str = CONTROL_DB):
     ensure_internal_postgres(admin_password)
     conn = _connect_with_retry(admin_password, database)
@@ -75,7 +80,9 @@ def _admin_connect(admin_password: str, database: str = CONTROL_DB):
 
 def _connect_with_retry(admin_password: str, database: str = CONTROL_DB):
     last_error: Exception | None = None
-    for _ in range(30):
+    # First initialization of the official image can exceed 30 seconds on a
+    # cold disk. Keep the request bounded while allowing that one-time setup.
+    for _ in range(60):
         try:
             return psycopg2.connect(
                 host=_db_host(),
@@ -111,7 +118,7 @@ def _sanitize_bootstrap_environment(admin_password: str) -> None:
         env=None,
         host_port=settings.managed_postgres_port,
         host_ip=_db_host(),
-        data_dir=settings.managed_postgres_data_dir,
+        data_dir=_postgres_data_dir(),
         network_name=settings.managed_postgres_network,
         cap_adds=_PG_CAPS,
     )
@@ -135,7 +142,8 @@ def ensure_internal_postgres(admin_password: str) -> dict[str, Any]:
             status_code=503,
         )
 
-    os.makedirs(settings.managed_postgres_data_dir, exist_ok=True)
+    data_dir = _postgres_data_dir()
+    os.makedirs(data_dir, exist_ok=True)
     container_name = settings.managed_postgres_container_name
     state = docker_service.inspect_managed_state(container_name)
 
@@ -167,7 +175,7 @@ def ensure_internal_postgres(admin_password: str) -> dict[str, Any]:
         },
         host_port=settings.managed_postgres_port,
         host_ip=_db_host(),
-        data_dir=settings.managed_postgres_data_dir,
+        data_dir=data_dir,
         network_name=settings.managed_postgres_network,
         cap_adds=_PG_CAPS,
     )

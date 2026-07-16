@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import json
+import glob
 import os
 import re
 import shutil
@@ -155,6 +156,150 @@ def write_text(server_id: str | int, rel_path: str, content: str) -> None:
         raise PathEscapeError() from exc
     parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
+
+
+def _safe_workshop_pattern(value: str, *, allow_glob: bool) -> str:
+    rel = str(value or "").strip().replace("\\", "/")
+    if not rel or rel.startswith("/") or "\x00" in rel:
+        raise PathValidationError("Unsafe workshop path")
+    if any(part == ".." for part in Path(rel).parts):
+        raise PathValidationError("Workshop path traversal is not allowed")
+    if not allow_glob and any(char in rel for char in ("*", "?", "[")):
+        raise PathValidationError("Workshop target glob is not allowed")
+    return rel
+
+
+def _workshop_sources(root: Path, source_pattern: str) -> list[Path]:
+    pattern = _safe_workshop_pattern(source_pattern, allow_glob=True)
+    matches = glob.glob(str(root / pattern), recursive=True)
+    sources: list[Path] = []
+    for raw in matches:
+        source = Path(raw).resolve(strict=False)
+        try:
+            source.relative_to(root)
+        except ValueError as exc:
+            raise PathEscapeError("Workshop source escapes server directory") from exc
+        if source.exists():
+            sources.append(source)
+    return sources
+
+
+def _workshop_target(root: Path, target_pattern: str, basename: str) -> Path:
+    rendered = _safe_workshop_pattern(
+        target_pattern.replace("{BASENAME}", basename),
+        allow_glob=False,
+    )
+    target = root / rendered
+    try:
+        target.parent.resolve(strict=False).relative_to(root)
+    except ValueError as exc:
+        raise PathEscapeError("Workshop target escapes server directory") from exc
+    return target
+
+
+def _workshop_target_ready(root: Path, target: Path) -> bool:
+    if not target.exists():
+        return False
+    if not target.is_symlink():
+        return True
+    try:
+        target.resolve(strict=True).relative_to(root)
+    except (FileNotFoundError, ValueError):
+        return False
+    return True
+
+
+def workshop_files(
+    server_id: str | int,
+    *,
+    workshop_app_id: str,
+    workshop_id: str,
+    actions: list[dict[str, Any]],
+    mode: str,
+) -> dict[str, Any]:
+    """Apply, inspect, or remove blueprint Workshop runtime artifacts on-node."""
+    if mode not in {"apply", "inspect", "cleanup"}:
+        raise PathValidationError("Invalid workshop operation")
+    if not str(workshop_app_id).isdigit() or not str(workshop_id).isdigit():
+        raise PathValidationError("Invalid workshop identifier")
+
+    root = server_root(server_id)
+    root.mkdir(parents=True, exist_ok=True)
+    targets: list[Path] = []
+
+    for action in actions:
+        operation = str(action.get("operation") or "")
+        if operation not in {"copy", "symlink"}:
+            raise PathValidationError("Invalid workshop file operation")
+        source_pattern = str(action.get("source") or "")
+        target_pattern = str(action.get("target") or "")
+        _safe_workshop_pattern(source_pattern, allow_glob=True)
+        _safe_workshop_pattern(
+            target_pattern.replace("{BASENAME}", "synthetic-target"),
+            allow_glob=False,
+        )
+        sources = _workshop_sources(root, source_pattern)
+        if bool(action.get("required")) and not sources and mode != "cleanup":
+            raise FileNotFoundError("Required workshop source not found")
+
+        if mode == "cleanup" and "{BASENAME}" in target_pattern and not sources:
+            cleanup_pattern = _safe_workshop_pattern(
+                target_pattern.replace("{BASENAME}", "*"), allow_glob=True
+            )
+            for raw in glob.glob(str(root / cleanup_pattern)):
+                candidate = Path(raw)
+                try:
+                    candidate.parent.resolve(strict=False).relative_to(root)
+                except ValueError as exc:
+                    raise PathEscapeError("Workshop cleanup target escapes server directory") from exc
+                targets.append(candidate)
+        else:
+            basenames = [source.name for source in sources] if "{BASENAME}" in target_pattern else [""]
+            targets.extend(_workshop_target(root, target_pattern, name) for name in basenames)
+
+        if mode == "apply":
+            for source in sources:
+                target = _workshop_target(root, target_pattern, source.name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if operation == "copy":
+                    if not source.is_file():
+                        raise PathValidationError("Workshop copy source is not a file")
+                    if target.is_symlink() or target.is_file():
+                        target.unlink()
+                    elif target.exists():
+                        raise PathValidationError("Workshop copy target is not a file")
+                    shutil.copy2(source, target)
+                else:
+                    if target.is_symlink():
+                        target.unlink()
+                    elif target.exists():
+                        raise FileExistsError("Workshop target already exists")
+                    target.symlink_to(os.path.relpath(source, target.parent), target_is_directory=source.is_dir())
+
+    unique_targets = list(dict.fromkeys(targets))
+    if mode == "cleanup":
+        for target in unique_targets:
+            if target.is_symlink() or target.is_file():
+                target.unlink(missing_ok=True)
+            elif target.is_dir():
+                shutil.rmtree(target)
+        for rel in (
+            f"steamapps/workshop/content/{workshop_app_id}/{workshop_id}",
+            f"steamapps/workshop/downloads/{workshop_app_id}/{workshop_id}",
+        ):
+            cache = safe_path(server_id, rel)
+            if cache.is_symlink() or cache.is_file():
+                cache.unlink(missing_ok=True)
+            elif cache.is_dir():
+                shutil.rmtree(cache)
+
+    ready = all(_workshop_target_ready(root, target) for target in unique_targets)
+    return {
+        "ok": True,
+        "ready": ready,
+        "targets": [target.relative_to(root).as_posix() for target in unique_targets],
+        "target_basenames": [target.name for target in unique_targets],
+    }
 
 
 def delete_path(server_id: str | int, rel_path: str) -> None:

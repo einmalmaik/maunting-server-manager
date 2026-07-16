@@ -12,11 +12,11 @@ from services.dis_client import DisClient
 
 def create_dev_user():
     print("Erstelle dev Admin/Owner Benutzer...")
-    
+
     if not DisClient.health_check():
         print("FEHLER: DIS Sidecar ist nicht erreichbar. Bitte starte zuerst die dev Umgebung (z.B. start-dev.bat).")
         sys.exit(1)
-        
+
     db = SessionLocal()
     try:
         if AuthService.is_owner_exists(db):
@@ -29,18 +29,18 @@ def create_dev_user():
         username = "admin"
         email = "admin@localhost.de"
         password = "admin"
-        
+
         print(f"Erstelle Owner: Username={username}, Password={password}")
         owner = AuthService.create_owner(db, username, email, password)
         # Stelle sicher, dass E-Mail verifiziert ist
         owner.email_verified = True
         db.commit()
-        
+
         print("Owner-Benutzer erfolgreich erstellt!")
         print("Login-Daten:")
         print(f"  Username: {username}")
         print(f"  Passwort: {password}")
-        
+
     except Exception as e:
         print(f"FEHLER beim Erstellen des Users: {e}")
         db.rollback()

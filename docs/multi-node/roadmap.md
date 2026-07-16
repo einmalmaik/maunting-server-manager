@@ -3,7 +3,7 @@
 Dieses Dokument beschreibt die langfristige Roadmap zur Umstellung des Maunting Server Managers (MSM) von einem Single-Host Game-Server-Panel auf eine skalierbare Multi-Node Infrastruktur.
 
 ## Ausgangslage (IST-Zustand)
-MSM läuft derzeit vollständig auf einem einzelnen Linux-Server. Alle Docker-Container (Game-Server), das Dateisystem (`/opt/msm/servers/`), das Python-Backend und das DIS-Sidecar teilen sich denselben Host. 
+MSM läuft derzeit vollständig auf einem einzelnen Linux-Server. Alle Docker-Container (Game-Server), das Dateisystem (`/opt/msm/servers/`), das Python-Backend und das DIS-Sidecar teilen sich denselben Host.
 
 ## Ziel-Architektur
 - **Zentrales Panel-Backend**: FastAPI App, PostgreSQL, DIS-Sidecar für Verschlüsselung/Secrets, verwaltet Server-Definitionen, Berechtigungen und löst Scheduler-Jobs aus.

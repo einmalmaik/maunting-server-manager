@@ -1,7 +1,7 @@
 # Multi-Node: Umgesetzte Phasen — Pflicht-Dateien behalten
 
 Stand: 2026-07-15, Branch `feature/multi-node`
-Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten Phasen gehören.  
+Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten Phasen gehören.
 **Nicht löschen, nicht aus dem Repo entfernen** (außer explizit genannte Secret-/Runtime-Dateien).
 
 | Phase | Status |
@@ -70,7 +70,7 @@ Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten
 | `start-dev.bat` | Dev-Start inkl. Agent |
 | `.gitignore` | `msm-agent/.env`, `venv/`, `servers/` |
 
-**Nicht committen / nicht behalten im Git:**  
+**Nicht committen / nicht behalten im Git:**
 `msm-agent/.env`, `msm-agent/venv/`, `msm-agent/servers/`, `__pycache__/`.
 
 ---
@@ -113,7 +113,7 @@ Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten
 | `frontend/src/locales/de.json` | i18n Nodes/Servers |
 | `frontend/src/locales/en.json` | i18n Nodes/Servers |
 
-Bestehende UI-Primitives (behalten, werden genutzt):  
+Bestehende UI-Primitives (behalten, werden genutzt):
 `frontend/src/components/ui/Badge.tsx`, `Dropdown.tsx`, `PasswordInput.tsx`, …
 
 ---
@@ -137,7 +137,7 @@ Bestehende UI-Primitives (behalten, werden genutzt):
 | `backend/tests/test_phase4_frontend_decouple.py` | CORS/CSP/CSRF-Header-Tests |
 | `backend/.env.example` | Phase-4 Env-Doku |
 
-**Split-Hosting (Prod):**  
+**Split-Hosting (Prod):**
 `MSM_CORS_ALLOWED_ORIGINS`, `MSM_COOKIE_CROSS_SITE=true`, `MSM_SERVE_FRONTEND=false`, Frontend-Build mit `VITE_API_URL=https://api…`.
 
 ---

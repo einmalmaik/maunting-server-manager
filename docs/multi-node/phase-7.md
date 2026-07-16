@@ -4,14 +4,14 @@
 Im Rahmen der Phasen 1 bis 6 wurde der Maunting Server Manager (MSM) erfolgreich auf eine Multi-Node-Architektur umgestellt. Alle Datei- und Docker-Operationen wurden in den `msm-agent` ausgelagert.
 
 **Ein kritischer Bereich wurde jedoch übersehen:** Die Server-eigenen Postgres-Datenbanken (Managed Postgres).
-Aktuell geht `backend/services/postgres_service.py` fest davon aus, dass der Container `msm-postgres` auf dem `localhost` (`127.0.0.1:5432`) des Panel-Servers läuft. Das Backend verbindet sich direkt per `psycopg2` (SQL), um Datenbanken, Rollen und Berechtigungen für die Gameserver zu erstellen. 
+Aktuell geht `backend/services/postgres_service.py` fest davon aus, dass der Container `msm-postgres` auf dem `localhost` (`127.0.0.1:5432`) des Panel-Servers läuft. Das Backend verbindet sich direkt per `psycopg2` (SQL), um Datenbanken, Rollen und Berechtigungen für die Gameserver zu erstellen.
 
 In einer Multi-Node-Architektur funktioniert das nicht mehr:
 1. Wenn ein Gameserver auf Node B gestartet wird, braucht er seine Datenbank auf Node B (damit er über das lokale Docker-Netzwerk `msm-managed-postgres` darauf zugreifen kann).
 2. Das Panel-Backend (Node A) kann und darf nicht unverschlüsselt über das Internet auf Port 5432 von Node B zugreifen, um DDL-Befehle auszuführen.
 
 ## 2. Zielsetzung (KISS & Sicherheit)
-Die gesamte Logik zur Verwaltung des `msm-postgres`-Containers und die Ausführung der SQL-Befehle (`psycopg2`) wird vollständig in den `msm-agent` ausgelagert. Das Panel-Backend wird zu einem reinen Proxy (Durchlauferhitzer), der nur noch Steuerbefehle an den Agenten sendet. 
+Die gesamte Logik zur Verwaltung des `msm-postgres`-Containers und die Ausführung der SQL-Befehle (`psycopg2`) wird vollständig in den `msm-agent` ausgelagert. Das Panel-Backend wird zu einem reinen Proxy (Durchlauferhitzer), der nur noch Steuerbefehle an den Agenten sendet.
 
 ---
 

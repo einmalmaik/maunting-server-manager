@@ -916,6 +916,16 @@ fi
 
 ENV_FILE="$MSM_DIR/backend/.env"
 
+existing_env_value() {
+    local key="$1"
+    local fallback="$2"
+    local value=""
+    if [[ -f "$ENV_FILE" ]]; then
+        value=$(grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    fi
+    printf '%s' "${value:-$fallback}"
+}
+
 # Datenbank-URL bestimmen
 if ! $REINSTALL_MODE || $CHANGED_DB; then
     # Frische PostgreSQL-URL generieren
@@ -940,6 +950,14 @@ fi
 if $INSTALL_REDIS && [[ -z "$MSM_REDIS_URL" ]]; then
     MSM_REDIS_URL="redis://localhost:6379"
 fi
+
+COOKIE_DOMAIN=$(existing_env_value MSM_COOKIE_DOMAIN "")
+COOKIE_CROSS_SITE=$(existing_env_value MSM_COOKIE_CROSS_SITE "false")
+CORS_ALLOWED_ORIGINS=$(existing_env_value MSM_CORS_ALLOWED_ORIGINS "")
+SERVE_FRONTEND=$(existing_env_value MSM_SERVE_FRONTEND "true")
+LOGO_URL=$(existing_env_value MSM_LOGO_URL "")
+STEAM_API_KEY=$(existing_env_value MSM_STEAM_API_KEY "")
+GITHUB_CLONE_TOKEN=$(existing_env_value MSM_GITHUB_CLONE_TOKEN "")
 
 cat > "$ENV_FILE" <<EOF
 # Automatisch generiert durch install.sh am $(date -Iseconds)
@@ -967,8 +985,28 @@ MSM_SMTP_FROM="${SMTP_FROM:-noreply@mauntingstudios.de}"
 MSM_RESEND_API_KEY="$RESEND_API_KEY"
 MSM_PANEL_URL="$PANEL_URL"
 MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
+MSM_LOGO_URL="$LOGO_URL"
+MSM_COOKIE_DOMAIN="$COOKIE_DOMAIN"
+MSM_COOKIE_CROSS_SITE=$COOKIE_CROSS_SITE
+MSM_CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS"
+MSM_SERVE_FRONTEND=$SERVE_FRONTEND
+MSM_SERVERS_DIR="$MSM_DIR/servers"
+MSM_LOCAL_AGENT_ENV_FILE="$MSM_DIR/msm-agent/.env"
+MSM_PANEL_CONFIG_DIR="$MSM_DIR"
+MSM_PANEL_BACKUP_DIR="$MSM_DIR/backups/panel"
+MSM_BLUEPRINTS_DIR="$MSM_DIR/blueprints/community"
 MSM_DOCKER_HOST="$MSM_DOCKER_HOST"
+MSM_MANAGED_POSTGRES_IMAGE="postgres:17-alpine"
+MSM_MANAGED_POSTGRES_CONTAINER_NAME="msm-postgres"
+MSM_MANAGED_POSTGRES_NETWORK="msm-internal"
+MSM_MANAGED_POSTGRES_HOST="127.0.0.1"
+MSM_MANAGED_POSTGRES_PORT=15432
+MSM_MANAGED_POSTGRES_DATA_DIR="$MSM_DIR/postgres"
+MSM_MANAGED_POSTGRES_STATEMENT_TIMEOUT_MS=5000
+MSM_MANAGED_POSTGRES_ROW_LIMIT=500
 MSM_STEAMCMD_PATH="/usr/games/steamcmd"
+MSM_STEAM_API_KEY="$STEAM_API_KEY"
+MSM_GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN"
 MSM_REDIS_URL="$MSM_REDIS_URL"
 
 # Auto-Update (GitHub Releases)

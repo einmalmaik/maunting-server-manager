@@ -362,6 +362,15 @@ class NodeClient:
     def files_search(self, server_id: int | str, query: str) -> dict[str, Any]:
         return self._request("GET", "/files/search", params={"server_id": str(server_id), "q": query})
 
+    def files_workshop(self, server_id: int | str, body: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/files/workshop",
+            params={"server_id": str(server_id)},
+            json=body,
+            timeout=_LONG_TIMEOUT,
+        )
+
     def files_move(self, server_id: int | str, source_path: str, target_path: str) -> dict[str, Any]:
         return self._request(
             "POST",

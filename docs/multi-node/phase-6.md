@@ -13,7 +13,7 @@ sequenceDiagram
     participant Panel
     participant Agent (Node)
     participant S3 (Cloud)
-    
+
     Panel->>Agent (Node): Trigger Backup (S3-Credentials & Temp Key)
     Note over Agent (Node): Komprimiert Server-Dateien
     Note over Agent (Node): Verschlüsselt Stream mit Temp Key

@@ -6,7 +6,7 @@ Dieser Guide beschreibt, wie das MSM-Gesamtsystem lokal auf einem Entwicklungsre
 
 ## Der einfachste Weg: Automatische Start-Skripte (Windows)
 
-Im Repository-Root befindet sich das Skript `start-dev.bat`. 
+Im Repository-Root befindet sich das Skript `start-dev.bat`.
 
 ### Normaler Dev-Start
 

@@ -10,7 +10,12 @@ import pytest
 from docker.errors import NotFound
 from fastapi.testclient import TestClient
 
-from services.docker_service import HardeningError, assert_msm_container_name, create_container
+from services.docker_service import (
+    HardeningError,
+    assert_msm_container_name,
+    create_container,
+    run_managed_postgres,
+)
 
 
 def test_container_name_prefix_required() -> None:
@@ -162,3 +167,35 @@ def test_bind_mount_outside_managed_root_is_rejected(monkeypatch, servers_dir: P
             command=["true"],
             volumes={str(servers_dir.parent): {"bind": "/host", "mode": "rw"}},
         )
+
+
+def test_managed_postgres_avoids_default_bridge_and_attaches_internal_network(
+    monkeypatch, tmp_path: Path
+) -> None:
+    container = MagicMock(id="abcdef1234567890")
+    run = MagicMock(return_value=container)
+    network = MagicMock()
+    docker_client = SimpleNamespace(
+        containers=SimpleNamespace(
+            get=MagicMock(side_effect=NotFound("missing")),
+            run=run,
+        ),
+        images=SimpleNamespace(get=MagicMock(return_value=MagicMock())),
+        networks=SimpleNamespace(get=MagicMock(return_value=network)),
+    )
+    monkeypatch.setattr("services.docker_service._get_client", lambda: docker_client)
+
+    result = run_managed_postgres(
+        name="msm-postgres",
+        image="postgres:17-alpine",
+        env=None,
+        host_port=15432,
+        host_ip="127.0.0.1",
+        data_dir=str(tmp_path),
+        network_name="msm-internal",
+        cap_adds=["CHOWN"],
+    )
+
+    assert result["ok"] is True
+    assert run.call_args.kwargs["network"] == "msm-internal-host"
+    network.connect.assert_called_once_with(container)

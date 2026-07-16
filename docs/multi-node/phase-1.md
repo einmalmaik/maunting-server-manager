@@ -1,6 +1,6 @@
 # Phase 1: MSM Agent (Eigenständiges Mini-Projekt)
 
-Dieses Dokument enthält die detaillierte Spezifikation für den **MSM Agent**. Der Agent wird als eigenständige, leichtgewichtige FastAPI-Anwendung implementiert, die auf jedem Server (Node) läuft und Befehle vom zentralen Panel entgegennimmt. WICHTIG Das ganze projekt wird zum monorebo du musst auch install.sh vermutlich anpassen und update.sh damit es eingerichtet werden kann ohne das die leute groß was einstellen müssen wir bleiben beim rootless 
+Dieses Dokument enthält die detaillierte Spezifikation für den **MSM Agent**. Der Agent wird als eigenständige, leichtgewichtige FastAPI-Anwendung implementiert, die auf jedem Server (Node) läuft und Befehle vom zentralen Panel entgegennimmt. WICHTIG Das ganze projekt wird zum monorebo du musst auch install.sh vermutlich anpassen und update.sh damit es eingerichtet werden kann ohne das die leute groß was einstellen müssen wir bleiben beim rootless
 
 ---
 
@@ -131,7 +131,7 @@ Wenn der Header fehlt oder ungültig ist, wird sofort HTTP 401 (Unauthorized) zu
    ```bash
    curl http://localhost:9000/containers
    # Erwartet: HTTP 401 Unauthorized
-   
+
    curl -H "Authorization: Bearer <DEIN_TOKEN>" http://localhost:9000/containers
    # Erwartet: HTTP 200 [] (oder Liste von Containern)
    ```

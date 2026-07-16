@@ -616,6 +616,21 @@ def run_managed_postgres(
         except (DockerException, OSError) as exc:
             return {"ok": False, "error": _safe_error(exc)}
 
+    host_network_name = f"{network_name}-host"
+    for required_name, internal in (
+        (host_network_name, False),
+        (network_name, True),
+    ):
+        try:
+            client.networks.get(required_name)
+        except NotFound:
+            try:
+                client.networks.create(required_name, driver="bridge", internal=internal)
+            except (DockerException, OSError) as exc:
+                return {"ok": False, "error": _safe_error(exc)}
+        except (DockerException, OSError) as exc:
+            return {"ok": False, "error": _safe_error(exc)}
+
     ports = {"5432/tcp": (host_ip, host_port)}
     volumes = {data_dir: {"bind": "/var/lib/postgresql/data", "mode": "rw"}}
     try:
@@ -630,17 +645,13 @@ def run_managed_postgres(
             cap_drop=list(_HARDENING_CAP_DROP),
             cap_add=list(cap_adds),
             security_opt=list(_HARDENING_SECURITY_OPT),
+            network=host_network_name,
             restart_policy={"Name": "unless-stopped"},
             log_config=(
                 LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None
             ),
         )
-        # Attach internal network so game containers reach msm-postgres by DNS
         try:
-            net = client.networks.get(network_name)
-            net.connect(container)
-        except NotFound:
-            client.networks.create(network_name, driver="bridge", internal=True)
             client.networks.get(network_name).connect(container)
         except (DockerException, OSError) as exc:
             try:

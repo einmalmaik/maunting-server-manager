@@ -12,7 +12,7 @@ Das Frontend darf keine relativen Pfade mehr annehmen, da die API-Domain sich vo
 - Konfiguration über Vite-Umgebungsvariablen:
   ```javascript
   const API_BASE = import.meta.env.VITE_API_URL || window.location.origin;
-  const WS_BASE = import.meta.env.VITE_WS_URL || 
+  const WS_BASE = import.meta.env.VITE_WS_URL ||
       API_BASE.replace('https://', 'wss://').replace('http://', 'ws://');
   ```
 

@@ -634,6 +634,21 @@ class BlueprintPlugin(GamePlugin):
             return [m.workshop_id for m in mods]
 
         lines: list[str] = []
+        node = getattr(server, "node", None)
+        if node is not None and not getattr(node, "is_local", False):
+            from services.node_client import NodeClient
+
+            client = NodeClient.from_node(node)
+            for mod in mods:
+                result = client.files_workshop(
+                    server.id,
+                    self._workshop_agent_payload(str(mod.workshop_id), mode="inspect"),
+                )
+                lines.extend(str(name) for name in result.get("target_basenames", []) if name)
+            if self._blueprint.meta.id == "conan_exiles_ue5":
+                return [f"*{line}" if line and not line.startswith("*") else line for line in lines]
+            return lines
+
         base = Path(server.install_dir).resolve()
         for mod in mods:
             workshop_id = str(mod.workshop_id)
@@ -661,6 +676,15 @@ class BlueprintPlugin(GamePlugin):
         bp_mods = self._blueprint.effective_mods()
         if not bp_mods.postInstall:
             return {}
+
+        node = getattr(server, "node", None)
+        if node is not None and not getattr(node, "is_local", False):
+            from services.node_client import NodeClient
+
+            return NodeClient.from_node(node).files_workshop(
+                server.id,
+                self._workshop_agent_payload(workshop_id, mode="apply"),
+            )
 
         base = Path(server.install_dir).resolve()
         for action in bp_mods.postInstall:
@@ -734,6 +758,15 @@ class BlueprintPlugin(GamePlugin):
         bp_mods = self._blueprint.effective_mods()
         if not bp_mods.postInstall:
             return True
+        node = getattr(server, "node", None)
+        if node is not None and not getattr(node, "is_local", False):
+            from services.node_client import NodeClient
+
+            result = NodeClient.from_node(node).files_workshop(
+                server.id,
+                self._workshop_agent_payload(workshop_id, mode="inspect"),
+            )
+            return bool(result.get("ready"))
         base = Path(server.install_dir).resolve()
         for action in bp_mods.postInstall:
             sources = self._resolve_workshop_sources(base, action.source, workshop_id)
@@ -789,6 +822,15 @@ class BlueprintPlugin(GamePlugin):
         bp_mods = self._blueprint.effective_mods()
         if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:
             return {"ok": True, "removed": []}
+
+        node = getattr(server, "node", None)
+        if node is not None and not getattr(node, "is_local", False):
+            from services.node_client import NodeClient
+
+            return NodeClient.from_node(node).files_workshop(
+                server.id,
+                self._workshop_agent_payload(workshop_id, mode="cleanup"),
+            )
 
         base = Path(server.install_dir).resolve()
         removed: list[str] = []
@@ -870,6 +912,23 @@ class BlueprintPlugin(GamePlugin):
             return [Path(match).resolve() for match in matches]
         source = (base / source_rel).resolve()
         return [source] if source.exists() else []
+
+    def _workshop_agent_payload(self, workshop_id: str, *, mode: str) -> dict:
+        bp_mods = self._blueprint.effective_mods()
+        return {
+            "workshop_app_id": bp_mods.workshopAppId or "",
+            "workshop_id": str(workshop_id),
+            "mode": mode,
+            "actions": [
+                {
+                    "operation": action.operation.value,
+                    "source": self._render_workshop_path(action.source, str(workshop_id)),
+                    "target": self._render_workshop_path(action.target, str(workshop_id)),
+                    "required": action.required,
+                }
+                for action in bp_mods.postInstall
+            ],
+        }
 
     def _render_workshop_path(
         self,

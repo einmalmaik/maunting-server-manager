@@ -55,6 +55,20 @@ class ConfigCacheBody(BaseModel):
     patterns: list[str] = Field(default_factory=list, max_length=64)
 
 
+class WorkshopFileAction(BaseModel):
+    operation: str = Field(..., pattern="^(copy|symlink)$")
+    source: str = Field(..., min_length=1, max_length=512)
+    target: str = Field(..., min_length=1, max_length=512)
+    required: bool = False
+
+
+class WorkshopFilesBody(BaseModel):
+    workshop_app_id: str = Field(..., pattern="^[0-9]+$")
+    workshop_id: str = Field(..., pattern="^[0-9]+$")
+    mode: str = Field(..., pattern="^(apply|inspect|cleanup)$")
+    actions: list[WorkshopFileAction] = Field(default_factory=list, max_length=32)
+
+
 class ArchiveBody(BaseModel):
     postgres: dict[str, Any] | None = None
 
@@ -231,6 +245,20 @@ def prepare_runtime(body: PrepareRuntimeBody, server_id: str = Query(...)) -> di
 def search_paths(server_id: str = Query(...), q: str = Query(..., min_length=1, max_length=128)) -> dict[str, Any]:
     try:
         return file_service.search_paths(server_id, q)
+    except Exception as exc:
+        raise _map_path_errors(exc) from exc
+
+
+@router.post("/workshop")
+def workshop_files(body: WorkshopFilesBody, server_id: str = Query(...)) -> dict[str, Any]:
+    try:
+        return file_service.workshop_files(
+            server_id,
+            workshop_app_id=body.workshop_app_id,
+            workshop_id=body.workshop_id,
+            actions=[action.model_dump() for action in body.actions],
+            mode=body.mode,
+        )
     except Exception as exc:
         raise _map_path_errors(exc) from exc
 
