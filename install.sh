@@ -420,7 +420,12 @@ if [[ -f "$MSM_DIR/backend/.env" ]]; then
     if $SIMPLE_INSTALL; then
         KEEP_SETTINGS=true
         NEED_FULL_REBUILD=true
-        log "Bestehende Einstellungen werden unverändert übernommen."
+        if [[ -n "$INSTALL_DOMAIN" && "$INSTALL_DOMAIN" != "$CURRENT_DOMAIN" ]]; then
+            CHANGED_DOMAIN=true
+            log "Bestehende Einstellungen bleiben erhalten; Domain wird auf '$INSTALL_DOMAIN' aktualisiert."
+        else
+            log "Bestehende Einstellungen werden unverändert übernommen."
+        fi
     else
         echo -e "${BOLD}[?]${NC} Einstellungen beibehalten oder ändern?"
         echo "    1) Beibehalten — nur Code aktualisieren, Frontend neu bauen, Services neustarten"
@@ -679,7 +684,7 @@ MSM_AUTO_UPDATE="false"
 
 if $REINSTALL_MODE && $KEEP_SETTINGS; then
     # Keep mode: alle aktuellen Werte übernehmen
-    DOMAIN="$CURRENT_DOMAIN"
+    DOMAIN="${INSTALL_DOMAIN:-$CURRENT_DOMAIN}"
     EMAIL_PROVIDER="$CURRENT_EMAIL_PROVIDER"
     SMTP_HOST="$CURRENT_SMTP_HOST"
     SMTP_PORT="${CURRENT_SMTP_PORT:-587}"

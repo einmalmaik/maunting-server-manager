@@ -91,3 +91,12 @@ def test_postgres_role_setup_crosses_the_service_user_boundary_without_a_temp_se
     assert "CREATE USER msm WITH PASSWORD" in installer
     assert 'su - postgres -c "psql --no-psqlrc --set ON_ERROR_STOP=1"' in installer
     assert "PostgreSQL-Rolle konnte nicht eingerichtet werden" in installer
+
+
+def test_simple_reinstall_honors_an_explicit_domain_without_resetting_other_settings() -> None:
+    installer = _installer()
+
+    assert 'if [[ -n "$INSTALL_DOMAIN" && "$INSTALL_DOMAIN" != "$CURRENT_DOMAIN" ]]' in installer
+    assert 'DOMAIN="${INSTALL_DOMAIN:-$CURRENT_DOMAIN}"' in installer
+    assert "KEEP_SETTINGS=true" in installer
+    assert "CHANGED_DOMAIN=true" in installer
