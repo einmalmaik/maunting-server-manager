@@ -161,6 +161,8 @@ rsync -a --delete \
   --exclude 'venv/' \
   --exclude '.env' \
   --exclude 'servers/' \
+  --exclude 'certs/' \
+  --exclude 'postgres/' \
   --exclude '__pycache__/' \
   --exclude '*.pyc' \
   --exclude '.pytest_cache/' \
