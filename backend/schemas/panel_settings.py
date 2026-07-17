@@ -34,6 +34,7 @@ class PanelSettingsResponse(BaseModel):
     singra_widget_install_source: str = "none"
     singra_webhook_secret_configured: bool = False
     singra_webhook_secret_source: str = "none"
+    updates_automatic: bool = False
 
 
 class PanelSettingsUpdate(BaseModel):
@@ -55,6 +56,7 @@ class PanelSettingsUpdate(BaseModel):
     support_widget_tawk_property_id: str | None = None
     support_widget_tawk_widget_id: str | None = None
     support_widget_custom_snippet: str | None = None
+    updates_automatic: bool | None = None
 
 
 class TestEmailRequest(BaseModel):

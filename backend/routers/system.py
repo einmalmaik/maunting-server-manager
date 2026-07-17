@@ -271,3 +271,45 @@ async def system_health(user: User = Depends(get_current_user)) -> dict:
         "services": services,
         "checked_in_ms": elapsed_ms,
     }
+
+
+@router.get("/update/status")
+def update_status(
+    _=Depends(require_global("panel.settings.read")),
+) -> dict:
+    from services.update_service import get_update_status
+    status = get_update_status()
+    status["updates_automatic"] = PanelSettingsService.get("updates_automatic", "false") == "true"
+    return status
+
+
+@router.post("/update/panel")
+def update_panel_endpoint(
+    _=Depends(require_global("panel.settings.write")),
+) -> dict:
+    from database import SessionLocal
+    from services.update_service import trigger_panel_update
+    db = SessionLocal()
+    try:
+        res = trigger_panel_update(db)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@router.post("/update/nodes")
+def update_nodes_endpoint(
+    _=Depends(require_global("panel.settings.write")),
+) -> dict:
+    from database import SessionLocal
+    from services.update_service import trigger_node_updates
+    db = SessionLocal()
+    try:
+        res = trigger_node_updates(db)
+        if not res["ok"]:
+            raise HTTPException(status_code=500, detail=res.get("error") or res.get("message"))
+        return res
+    finally:
+        db.close()

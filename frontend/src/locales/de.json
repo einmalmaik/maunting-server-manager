@@ -19,6 +19,8 @@
     "subtitle": "Remote- und Local-Nodes verwalten, Status prüfen und Agenten-Tokens hinterlegen.",
     "add": "Node hinzufügen",
     "edit": "Node bearbeiten",
+    "updateAll": "Nodes updaten",
+    "updating": "Nodes updaten...",
     "name": "Name",
     "host": "Host-URL (HTTPS)",
     "agentToken": "Agent-Token",
@@ -850,6 +852,8 @@
     "steamAccountRemoved": "Steam-Account entfernt",
     "save": "Speichern",
     "saved": "Einstellungen gespeichert",
+    "updatesAutomatic": "Automatische Updates",
+    "updatesAutomaticHint": "Das Panel und die remote Nodes aktualisieren sich automatisch, sobald ein neues Commit auf GitHub verfügbar ist.",
     "testEmail": "Test-E-Mail senden",
     "testEmailTo": "Test-E-Mail an",
     "testEmailSent": "Test-E-Mail gesendet",
@@ -1135,7 +1139,13 @@
     "panelUpdateAvailable": "Panel-Aktualisierung verfügbar",
     "current": "Aktuell",
     "viewRelease": "Release ansehen",
-    "manualUpdateCommand": "Update auf dem Server:"
+    "manualUpdateCommand": "Update auf dem Server:",
+    "startUpdate": "Update starten",
+    "updating": "Update läuft...",
+    "updateStarted": "Update wird ausgeführt. Das Panel startet gleich neu.",
+    "updateSuccess": "Update erfolgreich abgeschlossen!",
+    "updateTimeout": "Update-Timeout. Bitte lade die Seite manuell neu.",
+    "branch": "Branch"
   },
   "connection": {
     "connecting": "Verbinde…",

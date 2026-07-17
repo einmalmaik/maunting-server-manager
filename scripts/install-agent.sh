@@ -260,6 +260,7 @@ chown root:root "$FIREWALL_WRAPPER"
 chmod 0755 "$FIREWALL_WRAPPER"
 cat > /etc/sudoers.d/msm-agent-firewall <<EOF
 ${MSM_USER} ALL=(root) NOPASSWD: ${FIREWALL_WRAPPER} *
+${MSM_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart msm-agent.service, /bin/systemctl restart msm-agent.service
 EOF
 chmod 0440 /etc/sudoers.d/msm-agent-firewall
 visudo -cf /etc/sudoers.d/msm-agent-firewall >/dev/null || err "Ungueltige Firewall-sudoers-Regel"

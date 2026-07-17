@@ -16,3 +16,4 @@ msm ALL=(root) NOPASSWD: /usr/sbin/ufw status numbered
 # The wrapper (installed to /usr/local/sbin/msm-iptables) validates chain==DOCKER-USER (or version/L) before exec.
 # This is the only secure way to support variable-length rules without either (a) broken matching or (b) over-privilege to other chains.
 msm ALL=(root) NOPASSWD: /usr/local/sbin/msm-iptables
+msm ALL=(root) NOPASSWD: /opt/msm/update.sh

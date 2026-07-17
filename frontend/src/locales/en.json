@@ -16,9 +16,11 @@
     "nodes": "Nodes"
   },
   "nodes": {
-    "subtitle": "Manage local and remote nodes, check status, and store agent tokens.",
-    "add": "Add node",
-    "edit": "Edit node",
+    "subtitle": "Manage remote and local nodes, monitor health, and register agent tokens.",
+    "add": "Add Node",
+    "edit": "Edit Node",
+    "updateAll": "Update Nodes",
+    "updating": "Updating Nodes...",
     "name": "Name",
     "host": "Host URL (HTTPS)",
     "agentToken": "Agent token",
@@ -850,6 +852,8 @@
     "steamAccountRemoved": "Steam account removed",
     "save": "Save",
     "saved": "Settings saved",
+    "updatesAutomatic": "Automatic Updates",
+    "updatesAutomaticHint": "The panel and remote nodes will automatically update as soon as a new commit is available on GitHub.",
     "testEmail": "Send test email",
     "testEmailTo": "Test email to",
     "testEmailSent": "Test email sent",
@@ -1135,7 +1139,13 @@
     "panelUpdateAvailable": "Panel update available",
     "current": "Current",
     "viewRelease": "View release",
-    "manualUpdateCommand": "Update on server:"
+    "manualUpdateCommand": "Update on server:",
+    "startUpdate": "Start update",
+    "updating": "Updating...",
+    "updateStarted": "Update is in progress. The Panel will restart shortly.",
+    "updateSuccess": "Update completed successfully!",
+    "updateTimeout": "Update timeout. Please reload the page manually.",
+    "branch": "Branch"
   },
   "connection": {
     "connecting": "Connecting…",

@@ -32,6 +32,7 @@ export interface PanelSettings {
   singra_widget_install_source: 'env' | 'panel' | 'none'
   singra_webhook_secret_configured: boolean
   singra_webhook_secret_source: 'env' | 'panel' | 'none'
+  updates_automatic: boolean
 }
 
 export const EMPTY_PANEL_SETTINGS: PanelSettings = {
@@ -66,4 +67,5 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   singra_widget_install_source: 'none',
   singra_webhook_secret_configured: false,
   singra_webhook_secret_source: 'none',
+  updates_automatic: false,
 }

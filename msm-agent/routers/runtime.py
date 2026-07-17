@@ -1,7 +1,13 @@
-from __future__ import annotations
-
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, File, UploadFile
 from pydantic import BaseModel, Field, field_validator
+
+import os
+import shutil
+import tempfile
+import tarfile
+import subprocess
+import threading
+import time
 
 from services import runtime_service
 
@@ -61,3 +67,47 @@ def get_interfaces() -> dict:
         "interfaces": interfaces,
         "default_bind_ip": network_interfaces_service.default_bind_ip(),
     }
+
+
+@router.post("/update")
+def update_agent(file: UploadFile = File(...)) -> dict:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz") as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    try:
+        agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        with tempfile.TemporaryDirectory() as extract_dir:
+            with tarfile.open(tmp_path, "r:gz") as tar:
+                tar.extractall(path=extract_dir)
+
+            src_agent_dir = os.path.join(extract_dir, "msm-agent")
+            if os.path.isdir(src_agent_dir):
+                for item in os.listdir(src_agent_dir):
+                    s = os.path.join(src_agent_dir, item)
+                    d = os.path.join(agent_dir, item)
+                    if os.path.isdir(s):
+                        if item in (".git", "venv", ".env", "certs", "servers"):
+                            continue
+                        shutil.copytree(s, d, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(s, d)
+
+        # Pip-Dependencies aktualisieren
+        venv_pip = os.path.join(agent_dir, "venv", "bin", "pip")
+        requirements_txt = os.path.join(agent_dir, "requirements.txt")
+        if os.path.isfile(venv_pip) and os.path.isfile(requirements_txt):
+            subprocess.run([venv_pip, "install", "-r", requirements_txt], check=False)
+
+        def restart_service():
+            time.sleep(1)
+            subprocess.run(["sudo", "systemctl", "restart", "msm-agent.service"], check=False)
+
+        threading.Thread(target=restart_service, daemon=True).start()
+
+        return {"ok": True, "message": "Agent-Update erfolgreich gestartet"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Update des Agents fehlgeschlagen: {str(e)}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)

@@ -256,3 +256,13 @@ export interface HostInterfacesResponse {
   interfaces: HostInterface[]
   default_bind_ip: string | null
 }
+
+export interface GitUpdateStatus {
+  update_available: boolean
+  local_sha: string
+  remote_sha: string
+  branch: string
+  updates_automatic: boolean
+  ok: boolean
+  error?: string
+}

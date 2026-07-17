@@ -64,6 +64,7 @@ def start_scheduler():
     # Globalen passiven Background-Update-Check-Job sicherstellen (auch hier,
     # damit der Job nach Scheduler-Restart/Neustart aktiv ist; KISS, idempotent).
     _ensure_background_update_check_job()
+    _ensure_git_update_check_job()
     _ensure_node_heartbeat_job()
 
 
@@ -795,15 +796,58 @@ def _ensure_node_heartbeat_job() -> None:
     )
 
 
+async def _background_git_update_check_task() -> None:
+    """Periodischer Job fuer automatische Git-Updates (Panel + remote Nodes)."""
+    from services.panel_settings_service import PanelSettingsService
+    from services.update_service import get_update_status, trigger_panel_update, trigger_node_updates
+    from database import SessionLocal
+
+    auto_enabled = PanelSettingsService.get("updates_automatic", "false") == "true"
+    if not auto_enabled:
+        return
+
+    status = get_update_status()
+    if status.get("update_available"):
+        logger.info(
+            "Automatisches Update: Neues Commit gefunden (%s -> %s). Updates werden gestartet...",
+            status.get("local_sha"), status.get("remote_sha")
+        )
+        db = SessionLocal()
+        try:
+            trigger_node_updates(db)
+            trigger_panel_update(db)
+        except Exception as e:
+            logger.error("Automatisches Update fehlgeschlagen: %s", e)
+        finally:
+            db.close()
+
+
+def _ensure_git_update_check_job() -> None:
+    """Stellt sicher, dass der Git-Update-Check-Job registriert ist."""
+    scheduler = get_scheduler()
+    job_id = "global_git_update_checks"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_background_git_update_check_task,
+        trigger=IntervalTrigger(hours=1),
+        id=job_id,
+        name="Git Commit Update Checks & Auto-Update",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def init_server_schedules(db):
     """Initialize schedules for all servers on startup."""
     from models import Server
 
     _ensure_disk_check_job()
-    # Passiver Hintergrund-Update-Check-Job (global, für alle Server):
-    # Ruft check_for_mod_updates + check_for_server_file_update passiv auf.
-    # Integriert hier + in start_scheduler (genau nach Plan).
     _ensure_background_update_check_job()
+    _ensure_git_update_check_job()
     _ensure_node_heartbeat_job()
 
     servers = db.query(Server).all()

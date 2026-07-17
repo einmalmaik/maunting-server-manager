@@ -362,6 +362,13 @@ class NodeClient:
     def interfaces(self) -> dict[str, Any]:
         return self._request("GET", "/runtime/interfaces")
 
+    def update_agent(self, archive_bytes: bytes) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/runtime/update",
+            files={"file": ("agent.tar.gz", archive_bytes, "application/gzip")}
+        )
+
     def files_search(self, server_id: int | str, query: str) -> dict[str, Any]:
         return self._request("GET", "/files/search", params={"server_id": str(server_id), "q": query})
 

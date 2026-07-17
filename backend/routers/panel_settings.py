@@ -88,6 +88,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "singra_widget_install_source": singra_install.current_source(),
         "singra_webhook_secret_configured": bool(singra_secret.resolve_secret()),
         "singra_webhook_secret_source": singra_secret.current_source(),
+        "updates_automatic": all_db.get("updates_automatic", "false") == "true",
     }
 
 
@@ -140,6 +141,8 @@ def update_settings(
         if key == "imprint_enabled":
             value = "true" if bool(value) else "false"
         if key == "support_widget_enabled":
+            value = "true" if bool(value) else "false"
+        if key == "updates_automatic":
             value = "true" if bool(value) else "false"
         if key == "support_widget_mode":
             mode = str(value).strip().lower()

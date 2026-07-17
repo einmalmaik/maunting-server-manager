@@ -567,9 +567,9 @@ fi
 # 1. System-Abhängigkeiten
 # ═══════════════════════════════════════════════════════════════
 log "Aktualisiere Paketlisten..."
-disable_caddy_source_for_apt_preflight
 # --allow-releaseinfo-change=true: PPAs (z.B. ondrej/php) ändern gelegentlich Label/Suite;
 # ohne Flag bricht apt-get update non-interaktiv ab (E: Repository ... changed its 'Label').
+disable_caddy_source_for_apt_preflight
 apt-get update -qq --allow-releaseinfo-change=true | tee -a "$LOG_FILE"
 
 log "Installiere Basis-Pakete..."

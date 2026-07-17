@@ -76,12 +76,35 @@ export function AdminNodes() {
   const [editing, setEditing] = useState<Node | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+  const [updatingNodes, setUpdatingNodes] = useState(false)
   const [form, setForm] = useState({
     name: '',
     host: '',
     auth_token: '',
     tls_fingerprint: '',
   })
+
+  useEffect(() => {
+    api<{ update_available: boolean }>('/system/update/status')
+      .then((data) => {
+        setUpdateAvailable(data.update_available)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleUpdateNodes = async () => {
+    setUpdatingNodes(true)
+    try {
+      const res = await api<{ message: string }>('/system/update/nodes', { method: 'POST' })
+      toast.success(res.message || 'Node-Updates gestartet')
+      await fetchNodes()
+    } catch (err: any) {
+      toast.error(err.message || 'Node-Update fehlgeschlagen')
+    } finally {
+      setUpdatingNodes(false)
+    }
+  }
 
   useEffect(() => {
     const load = () =>
@@ -224,14 +247,27 @@ export function AdminNodes() {
             {t('nodes.subtitle')}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openEnrollment}
-          className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
-        >
-          <Plus className="h-4 w-4" />
-          {t('nodes.add')}
-        </button>
+        <div className="flex items-center gap-2">
+          {updateAvailable && (
+            <button
+              type="button"
+              disabled={updatingNodes}
+              onClick={handleUpdateNodes}
+              className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${updatingNodes ? 'animate-spin' : ''}`} />
+              {updatingNodes ? t('nodes.updating', 'Updating Nodes...') : t('nodes.updateAll', 'Nodes updaten')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={openEnrollment}
+            className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
+          >
+            <Plus className="h-4 w-4" />
+            {t('nodes.add')}
+          </button>
+        </div>
       </div>
 
       {showEnrollment && (
