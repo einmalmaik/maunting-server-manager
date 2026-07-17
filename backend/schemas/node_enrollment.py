@@ -21,9 +21,11 @@ class EnrollmentBegin(BaseModel):
 
 
 class EnrollmentBeginOut(BaseModel):
-    claim_secret: str
-    display_code: str
-    expires_at: datetime
+    claim_secret: str | None = None
+    display_code: str | None = None
+    expires_at: datetime | None = None
+    already_enrolled: bool = False
+    node_id: int | None = None
 
 
 class EnrollmentPendingOut(BaseModel):

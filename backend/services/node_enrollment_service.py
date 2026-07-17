@@ -50,11 +50,21 @@ def begin_enrollment(
     port: int,
     tls_fingerprint: str,
     agent_token: str,
-) -> tuple[NodeEnrollment, str]:
+) -> tuple[NodeEnrollment | None, str | int]:
     cleanup_expired(db)
     host = validate_remote_node_host(
         f"https://{source_ip}:{port}", tls_fingerprint, is_local=False
     )
+    
+    # Pruefen, ob ein Node mit diesem TLS-Fingerabdruck bereits existiert
+    existing_node = db.query(Node).filter(Node.tls_fingerprint == tls_fingerprint).first()
+    if existing_node:
+        existing_node.host = host
+        existing_node.auth_token_enc = encrypt_node_token(agent_token)
+        db.commit()
+        db.refresh(existing_node)
+        return None, existing_node.id
+
     claim_secret = secrets.token_urlsafe(48)
     enrollment = NodeEnrollment(
         claim_hash=_claim_hash(claim_secret),
@@ -85,15 +95,23 @@ def find_by_claim(db: Session, claim_secret: str) -> NodeEnrollment | None:
 def approve(db: Session, enrollment: NodeEnrollment) -> Node:
     if is_expired(enrollment) or enrollment.status != "pending":
         raise ValueError("Enrollment ist abgelaufen oder nicht mehr offen")
-    node = Node(
-        name=enrollment.name,
-        host=enrollment.host,
-        auth_token_enc=enrollment.auth_token_enc,
-        tls_fingerprint=enrollment.tls_fingerprint,
-        is_local=False,
-        status="unknown",
-    )
-    db.add(node)
+    
+    # Pruefen, ob ein Node mit diesem TLS-Fingerabdruck bereits existiert (Sicherheitsnetz)
+    node = db.query(Node).filter(Node.tls_fingerprint == enrollment.tls_fingerprint).first()
+    if node:
+        node.name = enrollment.name
+        node.host = enrollment.host
+        node.auth_token_enc = enrollment.auth_token_enc
+    else:
+        node = Node(
+            name=enrollment.name,
+            host=enrollment.host,
+            auth_token_enc=enrollment.auth_token_enc,
+            tls_fingerprint=enrollment.tls_fingerprint,
+            is_local=False,
+            status="unknown",
+        )
+        db.add(node)
     db.flush()
     enrollment.node_id = node.id
     # Noch nicht committen: Der Router prueft zuerst TLS-Pin, Docker und den

@@ -227,7 +227,7 @@ def begin_enrollment(
     _rate_limit(request, _enrollment_begin_limit)
     source_ip = _source_ip(request)
     try:
-        enrollment, claim = node_enrollment_service.begin_enrollment(
+        enrollment, claim_or_id = node_enrollment_service.begin_enrollment(
             db,
             name=body.name,
             source_ip=source_ip,
@@ -237,10 +237,18 @@ def begin_enrollment(
         )
     except Exception:
         raise HTTPException(status_code=503, detail="Node-Enrollment konnte nicht angelegt werden")
+
+    if enrollment is None:
+        return EnrollmentBeginOut(
+            already_enrolled=True,
+            node_id=claim_or_id,
+        )
+
     return EnrollmentBeginOut(
-        claim_secret=claim,
+        claim_secret=claim_or_id,
         display_code=enrollment.display_code,
         expires_at=enrollment.expires_at,
+        already_enrolled=False,
     )
 
 

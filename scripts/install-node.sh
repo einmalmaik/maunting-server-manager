@@ -76,6 +76,16 @@ curl -fsS \
     "$PANEL_URL/api/nodes/enrollments/begin" \
     -o "$BEGIN_RESPONSE"
 
+ALREADY_ENROLLED=$(jq -r '.already_enrolled // false' "$BEGIN_RESPONSE")
+if [[ "$ALREADY_ENROLLED" == "true" ]]; then
+    NODE_ID=$(jq -r '.node_id // empty' "$BEGIN_RESPONSE")
+    curl -fsS --max-time 3 https://127.0.0.1:9000/health \
+        --insecure >/dev/null 2>&1 \
+        || systemctl restart msm-agent.service
+    echo "[OK] Node war bereits eingerichtet und mit dem Panel verbunden (ID ${NODE_ID}). Code wurde aktualisiert."
+    exit 0
+fi
+
 CLAIM=$(jq -r '.claim_secret // empty' "$BEGIN_RESPONSE")
 DISPLAY_CODE=$(jq -r '.display_code // empty' "$BEGIN_RESPONSE")
 [[ ${#CLAIM} -ge 32 ]] || {

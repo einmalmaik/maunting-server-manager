@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from models import Node, NodeEnrollment, Server
 from services.node_client import NodeClientError
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture()
@@ -321,3 +322,46 @@ def test_agent_package_excludes_local_secrets_data_and_test_artifacts(client: Te
     }
     assert not any(forbidden_parts.intersection(name.split("/")) for name in names)
     assert not any(name.endswith((".pyc", ".db", ".sqlite", ".sqlite3")) for name in names)
+
+
+def test_node_enrollment_already_enrolled_returns_node_id(
+    client: TestClient,
+    db: Session,
+):
+    from sqlalchemy.orm import Session
+    # 1. Create an existing node
+    node = Node(
+        name="Already Registered",
+        host="https://198.51.100.25:9000",
+        auth_token_enc="encrypted-token",
+        tls_fingerprint="d" * 64,
+        is_local=False,
+        status="online",
+    )
+    db.add(node)
+    db.commit()
+
+    # 2. Try to begin enrollment with same fingerprint
+    with patch(
+        "services.node_enrollment_service.encrypt_node_token",
+        return_value="encrypted-agent-token",
+    ):
+        response = client.post(
+            "/api/nodes/enrollments/begin",
+            headers={"X-Forwarded-For": "198.51.100.25"},
+            json={
+                "name": "Different Name",
+                "agent_token": "agent-secret-that-is-long-enough-123456",
+                "tls_fingerprint": "d" * 64,
+                "port": 9000,
+            },
+        )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["already_enrolled"] is True
+    assert data["node_id"] == node.id
+
+    # Clean up the node
+    db.delete(node)
+    db.commit()
