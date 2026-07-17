@@ -57,7 +57,7 @@ LEGACY_SQLITE="$MSM_DIR/backend/msm.db"
 [[ -s "$LEGACY_SQLITE" ]] || fail "Legacy-SQLite-Datenbank fehlt oder ist leer."
 
 if ! command -v psql >/dev/null 2>&1; then
-  apt-get update -qq
+  apt-get update -qq --allow-releaseinfo-change=true
   apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev
 fi
 if [[ -d /run/systemd/system ]]; then

@@ -501,7 +501,9 @@ fi
 # ═══════════════════════════════════════════════════════════════
 log "Aktualisiere Paketlisten..."
 disable_caddy_source_for_apt_preflight
-apt-get update -qq | tee -a "$LOG_FILE"
+# --allow-releaseinfo-change=true: PPAs (z.B. ondrej/php) ändern gelegentlich Label/Suite;
+# ohne Flag bricht apt-get update non-interaktiv ab (E: Repository ... changed its 'Label').
+apt-get update -qq --allow-releaseinfo-change=true | tee -a "$LOG_FILE"
 
 log "Installiere Basis-Pakete..."
 apt-get install -y -qq \
@@ -525,7 +527,7 @@ fi
 # Die Quelle wird bei jedem Lauf sicher repariert. Paketupdates behalten eine
 # bestehende Caddyfile ausdrücklich bei.
 configure_caddy_repository
-apt-get update -qq | tee -a "$LOG_FILE"
+apt-get update -qq --allow-releaseinfo-change=true | tee -a "$LOG_FILE"
 log "Installiere beziehungsweise aktualisiere Caddy..."
 apt-get install -y -qq -o Dpkg::Options::="--force-confold" caddy 2>&1 | tee -a "$LOG_FILE"
 if command -v caddy &>/dev/null; then

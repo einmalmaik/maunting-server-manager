@@ -29,7 +29,7 @@ if [[ ! "$PANEL_URL" =~ ^https:// ]] && [[ ! "$PANEL_URL" =~ ^http://(localhost|
 fi
 
 echo "[MSM] Node wird automatisch eingerichtet..."
-apt-get update -qq
+apt-get update -qq --allow-releaseinfo-change=true
 apt-get install -y -qq curl jq ca-certificates tar >/dev/null
 
 TMP_DIR=$(mktemp -d /tmp/msm-node-install.XXXXXX)

@@ -42,7 +42,7 @@ if [[ -f "$caddy_source" ]]; then
     mv "$caddy_source" "$caddy_source_backup"
     trap restore_caddy_source EXIT
 fi
-apt-get update -qq
+apt-get update -qq --allow-releaseinfo-change=true
 apt-get install -y -qq ca-certificates curl git python3 >/dev/null
 restore_caddy_source
 trap - EXIT

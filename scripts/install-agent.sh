@@ -73,7 +73,7 @@ ok "Agent-Quellen: $SRC_AGENT"
 # ── 3. System packages ────────────────────────────────────────
 log "Installiere System-Pakete..."
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq >>"$LOG_FILE" 2>&1 || warn "apt-get update hatte Warnungen"
+apt-get update -qq --allow-releaseinfo-change=true >>"$LOG_FILE" 2>&1 || warn "apt-get update hatte Warnungen"
 apt-get install -y -qq \
   python3 python3-venv python3-pip \
   curl ca-certificates gnupg openssl sudo ufw rsync \
@@ -110,7 +110,7 @@ install_rootless_docker() {
       echo \
         "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${VERSION_CODENAME:-stable} stable" \
         > /etc/apt/sources.list.d/docker.list
-      apt-get update -qq >>"$LOG_FILE" 2>&1
+      apt-get update -qq --allow-releaseinfo-change=true >>"$LOG_FILE" 2>&1
       apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin \
         >>"$LOG_FILE" 2>&1 || warn "docker-ce install unvollstaendig"
     fi
