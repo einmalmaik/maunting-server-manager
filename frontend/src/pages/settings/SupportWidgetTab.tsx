@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Copy, LifeBuoy, Play, RefreshCw, Save, Trash2 } from 'lucide-react'
+import { Copy, LifeBuoy, Play, Save, Trash2 } from 'lucide-react'
+import { notifySupportWidgetUpdated } from '@/lib/supportWidgetLoader'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -17,9 +18,9 @@ export function SupportWidgetTab() {
   const [settings, setSettings] = useState<PanelSettings>(EMPTY_PANEL_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [rotating, setRotating] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [revealedSecret, setRevealedSecret] = useState('')
+  const [newWebhookSecret, setNewWebhookSecret] = useState('')
+  const [savingWebhookSecret, setSavingWebhookSecret] = useState(false)
   const [newInstallId, setNewInstallId] = useState('')
   const [savingInstallId, setSavingInstallId] = useState(false)
 
@@ -67,6 +68,7 @@ export function SupportWidgetTab() {
         }),
       })
       toast.success(t('settings.saved'))
+      notifySupportWidgetUpdated()
     } catch (err: any) {
       toast.error(err.message)
     } finally {
@@ -85,6 +87,7 @@ export function SupportWidgetTab() {
       toast.success(t('settings.supportWidget.installIdSaved'))
       setNewInstallId('')
       await reload()
+      notifySupportWidgetUpdated()
     } catch (err: any) {
       toast.error(err.message)
     } finally {
@@ -108,21 +111,31 @@ export function SupportWidgetTab() {
     toast.success(t('settings.supportWidget.webhookCopied'))
   }
 
-  const rotateSecret = async () => {
-    setRotating(true)
+  const saveWebhookSecret = async () => {
+    if (!newWebhookSecret.trim()) return
+    setSavingWebhookSecret(true)
     try {
-      const res = await api<{ secret: string }>('/settings/singra-webhook-secret/rotate', { method: 'POST' })
-      setRevealedSecret(res.secret)
-      setSettings((s) => ({
-        ...s,
-        singra_webhook_secret_configured: true,
-        singra_webhook_secret_source: 'panel',
-      }))
-      toast.success(t('settings.supportWidget.secretRotated'))
+      await api('/settings/singra-webhook-secret', {
+        method: 'POST',
+        body: JSON.stringify({ webhook_secret: newWebhookSecret.trim() }),
+      })
+      toast.success(t('settings.supportWidget.webhookSecretSaved'))
+      setNewWebhookSecret('')
+      await reload()
     } catch (err: any) {
       toast.error(err.message)
     } finally {
-      setRotating(false)
+      setSavingWebhookSecret(false)
+    }
+  }
+
+  const removeWebhookSecret = async () => {
+    try {
+      await api('/settings/singra-webhook-secret', { method: 'DELETE' })
+      toast.success(t('settings.supportWidget.webhookSecretRemoved'))
+      await reload()
+    } catch (err: any) {
+      toast.error(err.message)
     }
   }
 
@@ -286,17 +299,32 @@ export function SupportWidgetTab() {
               {t(`settings.supportWidget.secretSource.${settings.singra_webhook_secret_source}`)}
             </p>
 
-            {revealedSecret && (
-              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 font-mono text-xs break-all">
-                {revealedSecret}
-              </div>
-            )}
+            <div>
+              <label className="mb-1.5 block text-sm text-on-surface-variant">
+                {t('settings.supportWidget.webhookSecretNew')}
+              </label>
+              <PasswordInput
+                value={newWebhookSecret}
+                onChange={(e) => setNewWebhookSecret(e.target.value)}
+                placeholder={t('settings.supportWidget.webhookSecretPlaceholder')}
+              />
+              <p className="mt-1.5 text-xs text-on-surface-variant">{t('settings.supportWidget.webhookSecretHint')}</p>
+            </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" disabled={rotating} onClick={() => void rotateSecret()} className="gap-2">
-                <RefreshCw className={`h-4 w-4 ${rotating ? 'animate-spin' : ''}`} />
-                {t('settings.supportWidget.rotateSecret')}
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={savingWebhookSecret}
+                onClick={() => void saveWebhookSecret()}
+              >
+                {t('settings.supportWidget.webhookSecretSave')}
               </Button>
+              {settings.singra_webhook_secret_source === 'panel' && settings.singra_webhook_secret_configured && (
+                <Button type="button" variant="ghost" onClick={() => void removeWebhookSecret()} className="text-status-error">
+                  {t('settings.supportWidget.webhookSecretRemove')}
+                </Button>
+              )}
               <Button type="button" variant="secondary" disabled={testing} onClick={() => void testWebhook()} className="gap-2">
                 <Play className="h-4 w-4" />
                 {testing ? t('common.loading') : t('settings.supportWidget.testWebhook')}

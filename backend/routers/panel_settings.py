@@ -19,6 +19,7 @@ from schemas.panel_settings import (
     GitHubTokenRequest,
     GitHubTokenStatus,
     SingraWidgetInstallIdRequest,
+    SingraWebhookSecretRequest,
 )
 from services.panel_settings_service import PanelSettingsService
 from services.email_service import EmailService
@@ -463,6 +464,43 @@ def delete_singra_widget_install_id(
         raise HTTPException(status_code=400, detail="Installations-ID wird per Umgebungsvariable verwaltet")
     singra_install.clear_panel_install_id()
     return {"message": "Widget-Installations-ID entfernt", **singra_install.status()}
+
+
+@router.post("/singra-webhook-secret", status_code=200)
+def set_singra_webhook_secret(
+    req: SingraWebhookSecretRequest,
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Secret aus dem Singra-Widget-Panel (dort „Secret rotieren“) hier hinterlegen."""
+    if singra_secret.current_source() == "env":
+        raise HTTPException(
+            status_code=400,
+            detail="Webhook-Secret wird per Umgebungsvariable verwaltet (SINGRA_WEBHOOK_SECRET)",
+        )
+    raw = (req.webhook_secret or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Secret darf nicht leer sein")
+    if any(c in raw for c in ("\n", "\r", "\0")):
+        raise HTTPException(status_code=400, detail="Ungültige Zeichen")
+    if len(raw) > 512:
+        raise HTTPException(status_code=400, detail="Secret zu lang")
+    try:
+        singra_secret.set_panel_secret(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Secret ungültig")
+    return {"message": "Webhook-Secret gespeichert", **singra_secret.status()}
+
+
+@router.delete("/singra-webhook-secret", status_code=200)
+def delete_singra_webhook_secret(
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    if singra_secret.current_source() == "env":
+        raise HTTPException(status_code=400, detail="Webhook-Secret wird per Umgebungsvariable verwaltet")
+    singra_secret.clear_panel_secret()
+    return {"message": "Webhook-Secret entfernt", **singra_secret.status()}
 
 
 @router.post("/singra-webhook-secret/rotate", status_code=200)

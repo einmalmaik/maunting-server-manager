@@ -90,3 +90,7 @@ class GitHubTokenStatus(BaseModel):
 
 class SingraWidgetInstallIdRequest(BaseModel):
     install_id: str
+
+
+class SingraWebhookSecretRequest(BaseModel):
+    webhook_secret: str
