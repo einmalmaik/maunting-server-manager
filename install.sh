@@ -367,6 +367,73 @@ ensure_subid_entry() {
     echo "${user}:${start}:${count}" >> "$file"
 }
 
+# Create/repair a per-app Python venv as $MSM_USER only.
+# Durable against: root-owned trees after git checkout, half-created venvs,
+# and PEP 668 (system pip) when activate fails.
+# Usage: prepare_app_venv /path/to/app "Label" [recreate=true|false]
+prepare_app_venv() {
+    local app_dir="$1"
+    local label="$2"
+    local recreate="${3:-false}"
+
+    [[ -d "$app_dir" ]] || err "$label: Verzeichnis fehlt: $app_dir"
+    id "$MSM_USER" &>/dev/null || err "$label: Systemuser $MSM_USER existiert nicht"
+    command -v python3 &>/dev/null || err "$label: python3 fehlt"
+    # python3-venv must be present for `python3 -m venv`
+    if ! python3 -c "import venv" 2>/dev/null; then
+        err "$label: python3-venv fehlt (apt install python3-venv)"
+    fi
+
+    # Hard requirement: app tree writable by panel user (no silent chown failure)
+    chown -R "$MSM_USER:$MSM_USER" "$app_dir" \
+        || err "$label: chown $MSM_USER:$MSM_USER auf $app_dir fehlgeschlagen (als root?)"
+
+    if [[ -e "$app_dir/venv" ]]; then
+        local vowner
+        vowner=$(stat -c '%U' "$app_dir/venv" 2>/dev/null || echo "")
+        if [[ "$recreate" == "true" ]] \
+            || [[ "$vowner" != "$MSM_USER" ]] \
+            || [[ ! -x "$app_dir/venv/bin/python" ]]; then
+            rm -rf "$app_dir/venv"
+        fi
+    fi
+
+    # Run entirely as MSM_USER so venv/bin/* never lands root-owned
+    # and pip never hits the externally-managed system Python (PEP 668).
+    if ! su - "$MSM_USER" -c "
+        set -euo pipefail
+        cd $(printf '%q' "$app_dir")
+        if [[ ! -x venv/bin/python ]]; then
+            rm -rf venv
+            python3 -m venv venv
+        fi
+        # shellcheck disable=SC1091
+        source venv/bin/activate
+        test -n \"\${VIRTUAL_ENV:-}\"
+        case \"\$(command -v python)\" in
+            \"\$PWD/venv/bin/python\"|\"\$PWD/venv/bin/python3\"|*/venv/bin/python*) ;;
+            *) echo \"ERROR: $label: pip would use system Python (PEP 668 risk): \$(command -v python)\" >&2; exit 1 ;;
+        esac
+        pip install --upgrade pip -q
+        pip install -r requirements.txt -q
+        test -x venv/bin/python
+    " 2>&1 | tee -a "$LOG_FILE"; then
+        err "$label: venv-Setup fehlgeschlagen. Ownership jetzt: $(stat -c '%U:%G' "$app_dir" 2>/dev/null || echo '?') — erwarte $MSM_USER:$MSM_USER"
+    fi
+
+    if [[ ! -x "$app_dir/venv/bin/python" ]]; then
+        err "$label: venv/bin/python fehlt nach Setup"
+    fi
+    local py_owner
+    py_owner=$(stat -c '%U' "$app_dir/venv/bin/python" 2>/dev/null || echo "")
+    # python is often a symlink; ownership of the link target may vary — check venv dir
+    local venv_owner
+    venv_owner=$(stat -c '%U' "$app_dir/venv" 2>/dev/null || echo "")
+    if [[ "$venv_owner" != "$MSM_USER" ]]; then
+        err "$label: venv gehört $venv_owner, nicht $MSM_USER"
+    fi
+}
+
 stop_legacy_rootful_msm_containers() {
     if ! $REINSTALL_MODE || ! command -v docker &>/dev/null; then
         return 0
@@ -736,6 +803,17 @@ if $SHOULD_COPY_FILES; then
     ok "Dateien bereit"
 elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ! $CODE_CHANGED; then
     log "Quellverzeichnis identisch mit Ziel — keine Datei-Kopie nötig."
+fi
+
+# Always re-own code trees before Python venv work — even when SHOULD_COPY_FILES
+# is false (e.g. git checkout as root left msm-agent root:root).
+if id "$MSM_USER" &>/dev/null; then
+    for _msm_tree in backend frontend dis-sidecar msm-agent docs scripts; do
+        if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
+            chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" \
+                || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$_msm_tree fehlgeschlagen"
+        fi
+    done
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -1244,35 +1322,14 @@ fi
 
 if $RUN_BACKEND_SETUP; then
     log "Installiere Python-Abhängigkeiten..."
-    chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/backend" 2>/dev/null || true
-    su - "$MSM_USER" -c "
-        set -euo pipefail
-        cd $MSM_DIR/backend
-        python3 -m venv venv
-        # shellcheck disable=SC1091
-        source venv/bin/activate
-        pip install --upgrade pip -q
-        pip install -r requirements.txt -q
-    " 2>&1 | tee -a "$LOG_FILE" \
-        || err "Python-Backend-venv konnte nicht eingerichtet werden (Ownership/PEP 668?)."
+    # recreate=true: clean venv after in-place wipe / dependency upgrades
+    prepare_app_venv "$MSM_DIR/backend" "Python-Backend" true
     ok "Python-Backend bereit"
 
     # MSM Agent (lokaler Node, rootless Docker) — eigenes venv, gleiche User-ID
     if $INSTALL_LOCAL_AGENT && [[ -d "$MSM_DIR/msm-agent" ]]; then
         log "Installiere MSM Agent..."
-        # git/checkout as root → root-owned tree; venv as $MSM_USER needs write
-        chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/msm-agent" 2>/dev/null || true
-        rm -rf "$MSM_DIR/msm-agent/venv" 2>/dev/null || true
-        su - "$MSM_USER" -c "
-            set -euo pipefail
-            cd $MSM_DIR/msm-agent
-            python3 -m venv venv
-            # shellcheck disable=SC1091
-            source venv/bin/activate
-            pip install --upgrade pip -q
-            pip install -r requirements.txt -q
-        " 2>&1 | tee -a "$LOG_FILE" \
-            || err "MSM-Agent-venv fehlgeschlagen (Permission denied / PEP 668). Ownership von $MSM_DIR/msm-agent prüfen."
+        prepare_app_venv "$MSM_DIR/msm-agent" "MSM Agent" true
 
         AGENT_ENV="$MSM_DIR/msm-agent/.env"
         if [[ ! -f "$AGENT_ENV" ]]; then
@@ -1290,6 +1347,7 @@ EOF
             chown "$MSM_USER:$MSM_USER" "$AGENT_ENV"
             ok "MSM Agent .env erzeugt (Token wird nicht geloggt)"
         else
+            chown "$MSM_USER:$MSM_USER" "$AGENT_ENV" 2>/dev/null || true
             ok "MSM Agent .env vorhanden — Token unverändert"
         fi
         ok "MSM Agent bereit"

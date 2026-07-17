@@ -58,14 +58,17 @@ restore_panel_ownership() {
     if [[ -d "$MSM_DIR/.git" ]]; then
         chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/.git" 2>/dev/null || true
     fi
-    # ACHTUNG: Auf Produktions-Servern (root server) NIEMALS `git clean -fd` (oder -x) 
+    # ACHTUNG: Auf Produktions-Servern (root server) NIEMALS `git clean -fd` (oder -x)
     # im $MSM_DIR ausfuehren! Auch wenn server-Daten unter $MSM_DIR/servers liegen:
     # git clean loescht untracked Dirs. Die .gitignore schuetzt jetzt die Daten-Pfade,
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
     # Es gibt scripts/reset-msm-docker.sh als Recovery (für den Docker-Store-Corruption-Fall).
     for sub in backend frontend docs dis-sidecar msm-agent; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
-            chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" 2>/dev/null || true
+            # Hard fail for code trees used by venv setup — silent || true left
+            # root-owned msm-agent after git pull and caused PEP 668 cascades.
+            chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" \
+                || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$sub fehlgeschlagen"
         fi
     done
     # npm-Cache des msm-Users (HOME=/opt/msm). Falls ein frueherer fehlge-
@@ -78,6 +81,59 @@ restore_panel_ownership() {
     # `find -maxdepth 1` haelt /opt/msm/servers und /opt/msm/backups raus.
     find "$MSM_DIR" -maxdepth 1 -type f \
         -exec chown "$MSM_USER:$MSM_USER" {} + 2>/dev/null || true
+}
+
+# Create/repair a per-app Python venv as $MSM_USER only (no system pip / PEP 668).
+prepare_app_venv() {
+    local app_dir="$1"
+    local label="$2"
+    local recreate="${3:-false}"
+
+    [[ -d "$app_dir" ]] || err "$label: Verzeichnis fehlt: $app_dir"
+    id "$MSM_USER" &>/dev/null || err "$label: Systemuser $MSM_USER existiert nicht"
+    command -v python3 &>/dev/null || err "$label: python3 fehlt"
+    if ! python3 -c "import venv" 2>/dev/null; then
+        err "$label: python3-venv fehlt (apt install python3-venv)"
+    fi
+
+    chown -R "$MSM_USER:$MSM_USER" "$app_dir" \
+        || err "$label: chown $MSM_USER:$MSM_USER auf $app_dir fehlgeschlagen"
+
+    if [[ -e "$app_dir/venv" ]]; then
+        local vowner
+        vowner=$(stat -c '%U' "$app_dir/venv" 2>/dev/null || echo "")
+        if [[ "$recreate" == "true" ]] \
+            || [[ "$vowner" != "$MSM_USER" ]] \
+            || [[ ! -x "$app_dir/venv/bin/python" ]]; then
+            rm -rf "$app_dir/venv"
+        fi
+    fi
+
+    if ! su - "$MSM_USER" -c "
+        set -euo pipefail
+        cd $(printf '%q' "$app_dir")
+        if [[ ! -x venv/bin/python ]]; then
+            rm -rf venv
+            python3 -m venv venv
+        fi
+        # shellcheck disable=SC1091
+        source venv/bin/activate
+        test -n \"\${VIRTUAL_ENV:-}\"
+        case \"\$(command -v python)\" in
+            */venv/bin/python*) ;;
+            *) echo \"ERROR: $label: not using venv python: \$(command -v python)\" >&2; exit 1 ;;
+        esac
+        pip install --upgrade pip -q
+        pip install -r requirements.txt -q
+        test -x venv/bin/python
+    " 2>&1 | tee -a "$LOG_FILE"; then
+        err "$label: venv-Setup fehlgeschlagen (Ownership/PEP 668). Ownership: $(stat -c '%U:%G' "$app_dir" 2>/dev/null || echo '?')"
+    fi
+
+    [[ -x "$app_dir/venv/bin/python" ]] || err "$label: venv/bin/python fehlt nach Setup"
+    local venv_owner
+    venv_owner=$(stat -c '%U' "$app_dir/venv" 2>/dev/null || echo "")
+    [[ "$venv_owner" == "$MSM_USER" ]] || err "$label: venv gehört $venv_owner, nicht $MSM_USER"
 }
 
 CHECK_ONLY=false
@@ -449,33 +505,13 @@ chown msm:msm /opt/msm/backups 2>/dev/null || true
 
 # ── Backend aktualisieren ──
 log "Aktualisiere Python-Abhängigkeiten..."
-chown -R msm:msm "$MSM_DIR/backend" 2>/dev/null || true
-su - msm -c "
-    set -euo pipefail
-    cd $MSM_DIR/backend
-    if [[ ! -d venv ]]; then python3 -m venv venv; fi
-    # shellcheck disable=SC1091
-    source venv/bin/activate
-    pip install --upgrade pip -q
-    pip install -r requirements.txt -q
-" 2>&1 | tee -a "$LOG_FILE" \
-    || err "Backend-venv Update fehlgeschlagen (Ownership/PEP 668?)."
+prepare_app_venv "$MSM_DIR/backend" "Python-Backend" false
+ok "Backend Dependencies aktualisiert"
 
 # ── MSM Agent aktualisieren (Monorepo, rootless Node) ──
 if [[ -d "$MSM_DIR/msm-agent" ]]; then
     log "Aktualisiere MSM Agent..."
-    # git/checkout as root → root-owned tree; venv as msm needs write
-    chown -R msm:msm "$MSM_DIR/msm-agent" 2>/dev/null || true
-    su - msm -c "
-        set -euo pipefail
-        cd $MSM_DIR/msm-agent
-        if [[ ! -d venv ]]; then python3 -m venv venv; fi
-        # shellcheck disable=SC1091
-        source venv/bin/activate
-        pip install --upgrade pip -q
-        pip install -r requirements.txt -q
-    " 2>&1 | tee -a "$LOG_FILE" \
-        || err "MSM-Agent-venv Update fehlgeschlagen (Permission denied / PEP 668). Ownership von $MSM_DIR/msm-agent prüfen."
+    prepare_app_venv "$MSM_DIR/msm-agent" "MSM Agent" false
     # .env nur anlegen wenn fehlend — Token niemals ueberschreiben/loggen
     if [[ ! -f "$MSM_DIR/msm-agent/.env" ]]; then
         AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
@@ -492,6 +528,8 @@ EOF
         chmod 600 "$MSM_DIR/msm-agent/.env"
         chown msm:msm "$MSM_DIR/msm-agent/.env"
         ok "MSM Agent .env erzeugt"
+    else
+        chown msm:msm "$MSM_DIR/msm-agent/.env" 2>/dev/null || true
     fi
     ok "MSM Agent Dependencies aktualisiert"
 fi
