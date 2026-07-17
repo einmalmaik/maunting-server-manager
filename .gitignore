@@ -12,9 +12,13 @@ postgres/
 /recovery/src-tauri/target
 /recovery/src-tauri/gen
 
-# npm cache (committed by accident, never tracked)
+# Runtime / host noise (never ship production data or package caches)
 .npm/
 .npmrc
+.local/
+/backups/
+/servers/
+/postgres/
 
 # Release notes live next to the GitHub release, not in the repo tree
 RELEASE_NOTES_*.md
