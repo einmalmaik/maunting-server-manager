@@ -31,6 +31,7 @@ from routers import (
     oauth_router,
     databases_router,
     webhooks_outbound_router,
+    singra_webhook_router,
     backup_config_router,
     panel_backups_router,
     panel_database_router,
@@ -109,6 +110,10 @@ async def lifespan(app: FastAPI):
         if 'secret_encrypted' not in wh_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE webhook_subscriptions ADD COLUMN secret_encrypted VARCHAR(4096)"))
+
+    if "singra_webhook_events" not in inspector.get_table_names():
+        from models.singra_webhook_event import SingraWebhookEvent  # noqa: F401
+        SingraWebhookEvent.__table__.create(bind=engine, checkfirst=True)
 
     # Migration: servers.auth_required Spalte hinzufuegen (interaktive Auth-Recovery)
     if 'servers' in inspector.get_table_names():
@@ -489,11 +494,12 @@ async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
     csp = (
         "default-src 'self'; "
-        "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
-        "connect-src 'self'; "
-        "font-src 'self'; "
+        "script-src 'self' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
+        "style-src 'self' 'unsafe-inline' https://singrabot.mauntingstudios.de; "
+        "img-src 'self' data: https://singrabot.mauntingstudios.de; "
+        "connect-src 'self' https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to; "
+        "font-src 'self' https://singrabot.mauntingstudios.de; "
+        "frame-src 'self' https://singrabot.mauntingstudios.de; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self';"
@@ -537,6 +543,7 @@ app.include_router(databases_router)
 # Ausgehende Webhooks (MSM → Drittsystem wie Discord-Bot): per-Server
 # Subscriptions mit Secret-Auth ueber X-Webhook-Secret-Header.
 app.include_router(webhooks_outbound_router)
+app.include_router(singra_webhook_router)
 # OAuth-Endpoints liegen absichtlich NICHT unter auth_rate_limit, weil das
 # Rate-Limit pro IP und pro Minute gilt (10/min). Bei Shared-IPs (Unternehmen,
 # Schulen, mobile Carrier) wuerde der Login-Flow sonst regelmaessig 429

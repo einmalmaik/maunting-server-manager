@@ -741,6 +741,7 @@
     "smtpTls": "TLS verwenden",
     "resendApiKey": "Resend API-Key",
     "defaultLanguage": "Standardsprache",
+    "defaultLanguageHint": "Deutsch/English-Umschalter (kein Sprachen-Dropdown). Gilt als Standard für neue Sitzungen.",
     "timeFormat": "Zeitformat",
     "timeFormat24": "24-Stunden-Format",
     "timeFormat12": "12-Stunden-Format",
@@ -781,6 +782,7 @@
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
       "imprint": "Impressum",
+      "supportWidget": "Support-Widget",
       "backup": "Backup"
     },
     "imprint": {
@@ -790,6 +792,65 @@
       "url": "Impressum-URL",
       "urlHint": "Leer ist erlaubt. Wenn eine URL gesetzt ist, muss sie mit http:// oder https:// beginnen.",
       "preview": "Impressum öffnen"
+    },
+    "supportWidget": {
+      "title": "Support-Widget",
+      "description": "Chat-Widget im Panel einblenden. Singra ist nativ integriert (Installations-ID + Webhook). Crisp und tawk.to nutzen ihre üblichen Embed-IDs. Nur bei „Sonstiger Anbieter“ HTML einfügen.",
+      "enabled": "Widget im Panel anzeigen",
+      "provider": "Anbieter",
+      "providers": {
+        "singra": "Singra (Discord-Bot)",
+        "singraHint": "nativ",
+        "crisp": "Crisp",
+        "crispHint": "Website-ID",
+        "tawk": "tawk.to",
+        "tawkHint": "Property + Widget",
+        "custom": "Sonstiger Anbieter",
+        "customHint": "HTML-Snippet"
+      },
+      "singraAutoInject": "Entspricht dem HTML-Snippet: widget.js mit data-widget-id — das Panel setzt die Installations-ID automatisch ein.",
+      "installIdConfigured": "Installations-ID hinterlegt",
+      "installIdMissing": "Keine Installations-ID",
+      "installIdSource": {
+        "env": "Quelle: Umgebungsvariable MSM_SINGRA_WIDGET_INSTALL_ID",
+        "panel": "Quelle: Panel-Datenbank (DIS)",
+        "none": "Quelle: keine"
+      },
+      "installIdNew": "Neue Widget-Installations-ID",
+      "installIdPlaceholder": "Aus dem Singra-Panel kopieren",
+      "installIdSave": "Installations-ID speichern",
+      "installIdSaved": "Installations-ID gespeichert",
+      "installIdRemove": "Entfernen",
+      "installIdRemoved": "Installations-ID entfernt",
+      "crispWebsiteId": "Crisp Website-ID",
+      "crispHint": "Aus Crisp → Website Settings → Setup.",
+      "tawkPropertyId": "tawk.to Property-ID",
+      "tawkWidgetId": "tawk.to Widget-ID",
+      "tawkHint": "Aus dem tawk.to Embed-Code (embed.tawk.to/PROPERTY/WIDGET).",
+      "customSnippet": "HTML-Snippet (vor </body>)",
+      "customSnippetPlaceholder": "<script>…</script>",
+      "customHint": "Nur wenn der Anbieter kein festes Feld hat — Script-Tags wie vom Anbieter dokumentiert.",
+      "webhookTitle": "Webhook & Signatur (Singra)",
+      "webhookDescription": "1) Diese URL im Singra-Widget-Panel eintragen. 2) Dort „Secret rotieren“ und das Secret unten im MSM-Panel speichern (oder als SINGRA_WEBHOOK_SECRET in der msm-panel-Umgebung).",
+      "webhookSecretNew": "Webhook-Secret (aus Singra)",
+      "webhookSecretPlaceholder": "Nach „Secret rotieren“ im Singra-Panel einfügen",
+      "webhookSecretHint": "Nicht die Widget-Installations-ID — nur das HMAC-Secret für eingehende Webhooks.",
+      "webhookSecretSave": "Secret speichern",
+      "webhookSecretSaved": "Webhook-Secret gespeichert",
+      "webhookSecretRemove": "Secret entfernen",
+      "webhookSecretRemoved": "Webhook-Secret entfernt",
+      "copyWebhook": "URL kopieren",
+      "webhookCopied": "Webhook-URL kopiert",
+      "secretConfigured": "Webhook-Secret ist gesetzt",
+      "secretMissing": "Webhook-Secret fehlt",
+      "secretSource": {
+        "env": "Quelle: Umgebungsvariable",
+        "panel": "Quelle: Panel-Datenbank",
+        "none": "Quelle: keine"
+      },
+      "rotateSecret": "Secret rotieren",
+      "secretRotated": "Neues Webhook-Secret — im Singra-Panel und als Umgebungsvariable hinterlegen",
+      "testWebhook": "Test-Zustellung"
     },
     "githubTokenTitle": "GitHub Personal Access Token",
     "githubWhyNeeded": "Erforderlich für Blueprints vom Typ source.type=github, um private Repositories zu klonen oder zu pullen. Öffentliche Repos funktionieren ohne Token.",
@@ -1052,6 +1113,11 @@
     "powerUserDialogWarn": "Dieses Passwort wird vom Panel NICHT gespeichert und kann nicht wieder angezeigt werden. Bitte jetzt sicher notieren (z. B. in einem Passwort-Manager).",
     "powerUserDialogHint": "Verbindung nur über das Docker-Netz (msm-internal) oder via msm-postgres:5432. Bei externem Zugriff muss der Port durch das Netz getunnelt werden.",
     "powerUserDialogClose": "Schließen — Passwort habe ich notiert"
+  },
+  "language": {
+    "label": "Sprache",
+    "de": "DE",
+    "en": "EN"
   },
   "common": {
     "unlimited": "unbegrenzt",

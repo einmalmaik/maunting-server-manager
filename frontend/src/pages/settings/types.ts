@@ -1,3 +1,5 @@
+export type SupportWidgetProvider = 'singra' | 'crisp' | 'tawk' | 'custom'
+
 export interface PanelSettings {
   panel_url: string
   smtp_host: string
@@ -19,6 +21,17 @@ export interface PanelSettings {
   time_format: '24h' | '12h'
   imprint_enabled: boolean
   imprint_url: string
+  support_widget_enabled: boolean
+  support_widget_mode: SupportWidgetProvider
+  support_widget_crisp_website_id: string
+  support_widget_tawk_property_id: string
+  support_widget_tawk_widget_id: string
+  support_widget_custom_snippet: string
+  singra_widget_install_configured: boolean
+  singra_widget_install_masked: string
+  singra_widget_install_source: 'env' | 'panel' | 'none'
+  singra_webhook_secret_configured: boolean
+  singra_webhook_secret_source: 'env' | 'panel' | 'none'
 }
 
 export const EMPTY_PANEL_SETTINGS: PanelSettings = {
@@ -42,4 +55,15 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   time_format: '24h',
   imprint_enabled: false,
   imprint_url: '',
+  support_widget_enabled: false,
+  support_widget_mode: 'singra',
+  support_widget_crisp_website_id: '',
+  support_widget_tawk_property_id: '',
+  support_widget_tawk_widget_id: '',
+  support_widget_custom_snippet: '',
+  singra_widget_install_configured: false,
+  singra_widget_install_masked: '',
+  singra_widget_install_source: 'none',
+  singra_webhook_secret_configured: false,
+  singra_webhook_secret_source: 'none',
 }
