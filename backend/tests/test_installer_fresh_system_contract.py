@@ -138,9 +138,38 @@ def test_dis_readiness_probe_authenticates_without_exposing_token_in_argv() -> N
     assert '--header "Authorization: Bearer $DIS_TOKEN"' not in readiness
 
 
+def test_wsl_mirrored_loopback_remains_local_after_ufw_is_enabled() -> None:
+    installer = _installer()
+
+    loopback_guard = "if [[ -d /sys/class/net/loopback0 ]]"
+    loopback_rule = (
+        "ufw allow in on loopback0 from 127.0.0.0/8 "
+        "comment 'WSL local loopback'"
+    )
+
+    assert loopback_guard in installer
+    assert loopback_rule in installer
+    assert installer.index(loopback_rule) < installer.index("ufw --force enable")
+
+
+def test_reinstall_never_reowns_runtime_or_postgres_data_recursively() -> None:
+    installer = _installer()
+    copy_section = installer.split("# 4. Dateien kopieren", 1)[1].split(
+        "# 5. Interaktive Konfiguration", 1
+    )[0]
+
+    assert '--chown="$MSM_USER:$MSM_USER"' in copy_section
+    assert 'chown "$MSM_USER:$MSM_USER" "$MSM_DIR"' in copy_section
+    assert 'chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR"' not in copy_section
+
+
 def test_caddy_config_is_validated_and_reload_failures_are_fatal() -> None:
     installer = _installer()
 
+    assert 'chmod 0751 "$MSM_DIR"' in installer
+    assert 'install -d -o root -g caddy -m 0750 "$CADDY_CONFD"' in installer
+    assert 'chown root:caddy "$CADDY_CONFIG" "$MSM_CADDY_FILE"' in installer
+    assert 'chmod 0640 "$CADDY_CONFIG" "$MSM_CADDY_FILE"' in installer
     assert 'caddy validate --config "$CADDY_CONFIG" --adapter caddyfile' in installer
     assert 'err "Caddy-Konfiguration ist ungültig.' in installer
     assert 'err "Caddy konnte die MSM-Konfiguration nicht laden."' in installer

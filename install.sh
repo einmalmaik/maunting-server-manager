@@ -685,33 +685,40 @@ if $SHOULD_COPY_FILES; then
         # niemals durch eine Re-Installation geloescht oder ueberschrieben.
         mkdir -p "$MSM_DIR"
 
-        rsync -a --delete \
+        rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
             --exclude '.env' --exclude 'venv/' --exclude 'msm.db*' \
             --exclude '__pycache__/' --exclude '*.pyc' \
             "$SCRIPT_DIR/backend/" "$MSM_DIR/backend/"
-        rsync -a --delete \
+        rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
             --exclude 'node_modules/' --exclude 'dist/' \
             "$SCRIPT_DIR/frontend/" "$MSM_DIR/frontend/"
         if [[ -d "$SCRIPT_DIR/dis-sidecar" ]]; then
-            rsync -a --delete --exclude '.env' --exclude 'node_modules/' \
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete --exclude '.env' --exclude 'node_modules/' \
                 "$SCRIPT_DIR/dis-sidecar/" "$MSM_DIR/dis-sidecar/"
         fi
         if [[ -d "$SCRIPT_DIR/msm-agent" ]]; then
-            rsync -a --delete \
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
                 --exclude '.env' --exclude 'venv/' --exclude 'servers/' \
                 --exclude 'postgres/' --exclude 'certs/' \
                 --exclude '__pycache__/' --exclude '*.pyc' \
                 "$SCRIPT_DIR/msm-agent/" "$MSM_DIR/msm-agent/"
         fi
         if [[ -d "$SCRIPT_DIR/docs" ]]; then
-            rsync -a --delete "$SCRIPT_DIR/docs/" "$MSM_DIR/docs/"
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete "$SCRIPT_DIR/docs/" "$MSM_DIR/docs/"
         fi
         cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/update.sh" "$MSM_DIR/" 2>/dev/null || true
         chmod +x "$MSM_DIR/update.sh" 2>/dev/null || true
     fi
-    chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR"
+    chown "$MSM_USER:$MSM_USER" "$MSM_DIR"
+    chown "$MSM_USER:$MSM_USER" \
+        "$MSM_DIR/Caddyfile.template" "$MSM_DIR/msm.service.template" "$MSM_DIR/update.sh" \
+        2>/dev/null || true
+    # Caddy braucht nur Traverse-Zugriff bis zum oeffentlichen Frontend. Keine
+    # Verzeichnisauflistung und keine Gruppenmitgliedschaft (die Zugriff auf
+    # den Rootless-Docker-Socket des msm-Users ermoeglichen koennte).
+    chmod 0751 "$MSM_DIR"
     ok "Dateien bereit"
 elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ! $CODE_CHANGED; then
     log "Quellverzeichnis identisch mit Ziel — keine Datei-Kopie nötig."
@@ -1378,7 +1385,8 @@ if $RUN_CADDY_SETUP; then
 
     CADDY_CONFIG="/etc/caddy/Caddyfile"
     CADDY_CONFD="/etc/caddy/conf.d"
-    mkdir -p /etc/caddy "$CADDY_CONFD"
+    mkdir -p /etc/caddy
+    install -d -o root -g caddy -m 0750 "$CADDY_CONFD"
 
     # ── Extension erkennen: .caddy oder .conf? ──
     # Prüfe ob existierende Caddyfile bereits conf.d importiert
@@ -1533,6 +1541,11 @@ EOF
     fi
 
     if ! $DOMAIN_CONFLICT; then
+        # Der Installer nutzt eine restriktive umask. Caddy muss seine
+        # Hauptdatei und die verwaltete Site trotzdem lesen koennen, ohne
+        # beide Dateien fuer andere Benutzer zugaenglich zu machen.
+        chown root:caddy "$CADDY_CONFIG" "$MSM_CADDY_FILE"
+        chmod 0640 "$CADDY_CONFIG" "$MSM_CADDY_FILE"
         caddy validate --config "$CADDY_CONFIG" --adapter caddyfile \
             2>&1 | tee -a "$LOG_FILE" \
             || err "Caddy-Konfiguration ist ungültig. Prüfe: $CADDY_CONFIG"
@@ -1781,6 +1794,13 @@ if command -v ufw &>/dev/null; then
     ufw allow 22/tcp comment 'SSH' 2>/dev/null || true
     ufw allow 80/tcp comment 'HTTP' 2>/dev/null || true
     ufw allow 443/tcp comment 'HTTPS' 2>/dev/null || true
+    # WSL im Mirrored-Networking-Modus routet 127.0.0.1 ueber loopback0
+    # statt lo. UFW erlaubt lo automatisch, loopback0 jedoch nicht. Ohne
+    # diese eng begrenzte Regel sperrt der Installer seine lokalen Dienste
+    # (DIS, Backend und Agent) direkt nach dem Aktivieren der Firewall aus.
+    if [[ -d /sys/class/net/loopback0 ]]; then
+        ufw allow in on loopback0 from 127.0.0.0/8 comment 'WSL local loopback' 2>/dev/null || true
+    fi
     # Spiel-Ports werden ab Phase 2 NICHT mehr als Range freigegeben.
     # Der Port-Manager des Panels öffnet je Server nur die konkret
     # zugewiesenen Einzelports (game/udp, query/udp, rcon/tcp) und schließt
