@@ -7,7 +7,6 @@ import { Logo } from '@/components/Logo'
 import { Bell, Menu, User, LogOut } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
-import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
 
 export function Topbar() {
   const { t } = useTranslation()
@@ -80,7 +79,6 @@ export function Topbar() {
 
         {/* Right Actions */}
         <div className="flex items-center gap-4">
-          <LanguageSwitcher className="hidden sm:block" />
 
           {/* Notifications Toggle */}
           <button

@@ -12,7 +12,6 @@ import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Shield, ArrowRight, KeyRound, Mail, Check } from 'lucide-react'
-import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
 
 export function Login() {
   const { t } = useTranslation()
@@ -401,9 +400,6 @@ function LoginShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
       <div className="absolute inset-0 msm-deep-grid opacity-50" />
       <div className="relative z-10 w-full max-w-md">
-        <div className="flex justify-end mb-4">
-          <LanguageSwitcher />
-        </div>
 
         <div className="flex items-center justify-center gap-3 mb-8">
           <Logo size="md" />
