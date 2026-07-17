@@ -970,7 +970,11 @@ def backup_pg_dump_for_archive(db: Session, server_id: int) -> dict[str, bytes]:
 
 
 def restore_pg_dump_from_archive(
-    db: Session, server_id: int, dumps: dict[str, bytes]
+    db: Session,
+    server_id: int,
+    dumps: dict[str, bytes],
+    *,
+    client: NodeClient | None = None,
 ) -> dict[str, Any]:
     if not dumps:
         return {
@@ -1007,9 +1011,9 @@ def restore_pg_dump_from_archive(
         restored.append(db_name)
 
     if text_dumps:
-        client = _client_for_server_id(db, server_id)
+        restore_client = client or _client_for_server_id(db, server_id)
         try:
-            client.postgres_restore(
+            restore_client.postgres_restore(
                 admin_password=_admin_password(),
                 dumps=text_dumps,
                 owners=_restore_owners(db, server_id),
