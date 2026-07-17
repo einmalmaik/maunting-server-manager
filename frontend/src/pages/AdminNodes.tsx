@@ -23,6 +23,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { ProgressBar } from '@/Singra/UI/ProgressBar'
 import { NodeEnrollmentDialog } from '@/components/nodes/NodeEnrollmentDialog'
 import type { Node } from '@/types'
+import { api } from '@/api/client'
 
 function statusVariant(status: string): 'success' | 'destructive' | 'default' | 'warning' {
   switch (status) {
