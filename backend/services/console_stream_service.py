@@ -311,6 +311,14 @@ async def _proxy_agent_console(
             await _close_safely(ws, code=1011)
             return
 
+        log_path = _console_log_path(server_id)
+        if not state.lines:
+            # Ring-buffer initialisieren
+            try:
+                await _read_initial_backlog(log_path, state)
+            except Exception as exc:
+                logger.warning("ws remote backlog read failed: %s", exc)
+
         # Optional local ring-buffer replay (MSM messages) before agent stream
         async with _STATES_LOCK:
             if last_id is None:
@@ -320,31 +328,35 @@ async def _proxy_agent_console(
         for line in replay:
             await ws.send_text(_serialize(line))
 
+        async def _on_line(text: str, source: str, provided_ts: str | None = None) -> None:
+            ts = provided_ts or _utc_iso()
+            async with _STATES_LOCK:
+                line = _Line(
+                    id=state.next_id,
+                    text=text,
+                    source=source,
+                    timestamp=ts,
+                )
+                state.next_id += 1
+                state.lines.append(line)
+                payload = _serialize(line)
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                pass
+
         async def _agent_to_browser() -> None:
             try:
                 async for message in agent_ws:
                     text = message if isinstance(message, str) else message.decode("utf-8", errors="replace")
-                    ts = _utc_iso()
-                    async with _STATES_LOCK:
-                        line = _Line(
-                            id=state.next_id,
-                            text=text,
-                            source="docker",
-                            timestamp=ts,
-                        )
-                        state.next_id += 1
-                        state.lines.append(line)
-                        payload = _serialize(line)
-                    try:
-                        await ws.send_text(payload)
-                    except Exception:
-                        break
+                    await _on_line(text, "docker")
             except ConnectionClosed:
                 pass
             except Exception as exc:
                 logger.warning("agent→browser console proxy failed: %s", exc)
 
         pump = asyncio.create_task(_agent_to_browser())
+        file_task = asyncio.create_task(_tail_file_loop(log_path, state, _on_line))
         try:
             while True:
                 if ws.client_state != WebSocketState.CONNECTED:
@@ -378,9 +390,10 @@ async def _proxy_agent_console(
                         break
         finally:
             pump.cancel()
+            file_task.cancel()
             try:
-                await pump
-            except (asyncio.CancelledError, Exception):
+                await asyncio.gather(pump, file_task, return_exceptions=True)
+            except Exception:
                 pass
     finally:
         if agent_ws is not None:

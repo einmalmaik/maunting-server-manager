@@ -225,6 +225,30 @@ def create_container(
 
     client = _get_client()
 
+    # Repair permissions for all writable volumes before starting the container
+    if volumes:
+        for host_path, binding in volumes.items():
+            if binding.get("mode") == "ro":
+                continue
+            try:
+                target_uid_gid = None
+                if user:
+                    try:
+                        parts = user.split(":", 1)
+                        if len(parts) == 2:
+                            target_uid_gid = (int(parts[0]), int(parts[1]))
+                        else:
+                            target_uid_gid = (int(parts[0]), int(parts[0]))
+                    except Exception:
+                        pass
+                repair_bind_mount_permissions(
+                    host_path,
+                    container_path=binding.get("bind") or "/data",
+                    owner_uid_gid=target_uid_gid,
+                )
+            except Exception as exc:
+                logger.warning("Agent permission repair failed for %s: %s", host_path, exc)
+
     # Remove existing with same name (idempotent recreate)
     try:
         existing = client.containers.get(name)
@@ -287,11 +311,20 @@ def create_container(
             container.reload()
             state = container.attrs.get("State", {})
             if state.get("Status") in {"exited", "dead"}:
+                exit_code = int(state.get("ExitCode") or 0)
+                logs = ""
+                try:
+                    logs = _decode(container.logs(tail=80, stdout=True, stderr=True)).strip()
+                except Exception:
+                    pass
+                detail = f"Container wurde direkt nach dem Start beendet (Exit-Code {exit_code})."
+                if logs:
+                    detail = f"{detail} Letzte Logs: {logs[:700]}"
                 try:
                     container.remove(force=True)
                 except (DockerException, OSError):
                     logger.warning("docker cleanup after startup failure failed")
-                raise DockerUnavailableError("Container exited during startup check")
+                raise DockerUnavailableError(detail)
         return {
             "ok": True,
             "name": name,
@@ -836,3 +869,27 @@ def _decode(data: bytes | str | None) -> str:
     if isinstance(data, str):
         return data
     return data.decode("utf-8", errors="replace")
+
+
+def repair_bind_mount_permissions(
+    host_path: str,
+    *,
+    container_path: str = "/data",
+    owner_uid_gid: tuple[int, int] | None = None,
+    timeout: int = 600,
+) -> dict:
+    import shlex
+    uid, gid = owner_uid_gid or container_runtime_uid_gid()
+    cmd = [
+        "-c",
+        f"chown -R {uid}:{gid} {shlex.quote(container_path)} 2>/dev/null || true; "
+        f"chmod -R a+rwx {shlex.quote(container_path)} 2>/dev/null || true",
+    ]
+    return run_ephemeral(
+        image="alpine:3.21",
+        command=cmd,
+        volumes={host_path: {"bind": container_path, "mode": "rw"}},
+        user="0:0",
+        entrypoint="sh",
+        timeout=timeout,
+    )
