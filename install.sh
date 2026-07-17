@@ -722,6 +722,13 @@ if $SHOULD_COPY_FILES; then
     chown "$MSM_USER:$MSM_USER" \
         "$MSM_DIR/Caddyfile.template" "$MSM_DIR/msm.service.template" "$MSM_DIR/update.sh" \
         2>/dev/null || true
+    # In-place Install (git checkout as root) leaves trees root-owned. Backend +
+    # agent venvs are created as $MSM_USER and need write access to their dirs.
+    for _msm_tree in backend frontend dis-sidecar msm-agent docs scripts; do
+        if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
+            chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" 2>/dev/null || true
+        fi
+    done
     # Caddy braucht nur Traverse-Zugriff bis zum oeffentlichen Frontend. Keine
     # Verzeichnisauflistung und keine Gruppenmitgliedschaft (die Zugriff auf
     # den Rootless-Docker-Socket des msm-Users ermoeglichen koennte).
@@ -1237,25 +1244,35 @@ fi
 
 if $RUN_BACKEND_SETUP; then
     log "Installiere Python-Abhängigkeiten..."
+    chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/backend" 2>/dev/null || true
     su - "$MSM_USER" -c "
+        set -euo pipefail
         cd $MSM_DIR/backend
         python3 -m venv venv
+        # shellcheck disable=SC1091
         source venv/bin/activate
         pip install --upgrade pip -q
         pip install -r requirements.txt -q
-    " 2>&1 | tee -a "$LOG_FILE"
+    " 2>&1 | tee -a "$LOG_FILE" \
+        || err "Python-Backend-venv konnte nicht eingerichtet werden (Ownership/PEP 668?)."
     ok "Python-Backend bereit"
 
     # MSM Agent (lokaler Node, rootless Docker) — eigenes venv, gleiche User-ID
     if $INSTALL_LOCAL_AGENT && [[ -d "$MSM_DIR/msm-agent" ]]; then
         log "Installiere MSM Agent..."
+        # git/checkout as root → root-owned tree; venv as $MSM_USER needs write
+        chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/msm-agent" 2>/dev/null || true
+        rm -rf "$MSM_DIR/msm-agent/venv" 2>/dev/null || true
         su - "$MSM_USER" -c "
+            set -euo pipefail
             cd $MSM_DIR/msm-agent
             python3 -m venv venv
+            # shellcheck disable=SC1091
             source venv/bin/activate
             pip install --upgrade pip -q
             pip install -r requirements.txt -q
-        " 2>&1 | tee -a "$LOG_FILE"
+        " 2>&1 | tee -a "$LOG_FILE" \
+            || err "MSM-Agent-venv fehlgeschlagen (Permission denied / PEP 668). Ownership von $MSM_DIR/msm-agent prüfen."
 
         AGENT_ENV="$MSM_DIR/msm-agent/.env"
         if [[ ! -f "$AGENT_ENV" ]]; then

@@ -449,23 +449,33 @@ chown msm:msm /opt/msm/backups 2>/dev/null || true
 
 # ── Backend aktualisieren ──
 log "Aktualisiere Python-Abhängigkeiten..."
+chown -R msm:msm "$MSM_DIR/backend" 2>/dev/null || true
 su - msm -c "
+    set -euo pipefail
     cd $MSM_DIR/backend
+    if [[ ! -d venv ]]; then python3 -m venv venv; fi
+    # shellcheck disable=SC1091
     source venv/bin/activate
     pip install --upgrade pip -q
     pip install -r requirements.txt -q
-" 2>&1 | tee -a "$LOG_FILE"
+" 2>&1 | tee -a "$LOG_FILE" \
+    || err "Backend-venv Update fehlgeschlagen (Ownership/PEP 668?)."
 
 # ── MSM Agent aktualisieren (Monorepo, rootless Node) ──
 if [[ -d "$MSM_DIR/msm-agent" ]]; then
     log "Aktualisiere MSM Agent..."
+    # git/checkout as root → root-owned tree; venv as msm needs write
+    chown -R msm:msm "$MSM_DIR/msm-agent" 2>/dev/null || true
     su - msm -c "
+        set -euo pipefail
         cd $MSM_DIR/msm-agent
         if [[ ! -d venv ]]; then python3 -m venv venv; fi
+        # shellcheck disable=SC1091
         source venv/bin/activate
         pip install --upgrade pip -q
         pip install -r requirements.txt -q
-    " 2>&1 | tee -a "$LOG_FILE"
+    " 2>&1 | tee -a "$LOG_FILE" \
+        || err "MSM-Agent-venv Update fehlgeschlagen (Permission denied / PEP 668). Ownership von $MSM_DIR/msm-agent prüfen."
     # .env nur anlegen wenn fehlend — Token niemals ueberschreiben/loggen
     if [[ ! -f "$MSM_DIR/msm-agent/.env" ]]; then
         AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
