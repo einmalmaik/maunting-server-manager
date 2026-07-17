@@ -27,6 +27,7 @@ export interface OAuthProvider {
   scope: string | null
   claims_mapping_json: string | null
   position: number
+  redirect_uri?: string
   created_at: string
   updated_at: string
 }
