@@ -618,6 +618,21 @@ def _safe_detail(resp: httpx.Response) -> str:
         detail = body.get("detail") if isinstance(body, dict) else None
         if isinstance(detail, str) and detail:
             return detail[:300]
+        # FastAPI/Pydantic validation errors: list of {loc, msg, type}
+        if isinstance(detail, list) and detail:
+            parts: list[str] = []
+            for item in detail[:5]:
+                if isinstance(item, dict):
+                    loc = item.get("loc") or ()
+                    # skip leading "body"
+                    path = ".".join(str(p) for p in loc if p != "body")
+                    msg = item.get("msg") or item.get("type") or "invalid"
+                    parts.append(f"{path}: {msg}" if path else str(msg))
+                else:
+                    parts.append(str(item)[:80])
+            joined = "; ".join(parts)
+            if joined:
+                return f"Agent validation HTTP {resp.status_code}: {joined}"[:400]
     except Exception:
         pass
     return f"Agent error HTTP {resp.status_code}"

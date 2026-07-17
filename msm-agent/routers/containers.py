@@ -34,7 +34,7 @@ class CreateContainerRequest(BaseModel):
     tmpfs_paths: list[str] = Field(default_factory=list, max_length=16)
     tty: bool = False
     restart_policy_name: str = Field(default="no", pattern="^(no|on-failure|unless-stopped)$")
-    startup_check_seconds: float = Field(default=0.0, ge=0, le=60)
+    startup_check_seconds: float = Field(default=0.0, ge=0, le=300)
     # Hardening traps — if clients send these, we reject explicitly
     privileged: bool | None = None
     cap_add: list[str] | None = None

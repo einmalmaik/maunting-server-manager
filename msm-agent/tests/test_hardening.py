@@ -75,6 +75,46 @@ def test_api_rejects_bad_name(client: TestClient, auth_headers: dict) -> None:
     assert r.status_code == 400
 
 
+def test_api_accepts_blueprint_startup_check_up_to_300(
+    client: TestClient, auth_headers: dict, monkeypatch
+) -> None:
+    """Panel blueprints may set startupCheckSeconds up to 300 (e.g. Palworld 120)."""
+    from docker.errors import NotFound
+
+    container = MagicMock(id="abcdef1234567890", attrs={"State": {"Status": "running"}})
+    docker_client = SimpleNamespace(
+        containers=SimpleNamespace(
+            get=MagicMock(side_effect=NotFound("missing")),
+            run=MagicMock(return_value=container),
+        ),
+        networks=SimpleNamespace(get=MagicMock()),
+    )
+    monkeypatch.setattr("services.docker_service._get_client", lambda: docker_client)
+    # Avoid real sleep for 120s during test — startup check is still validated by schema
+    monkeypatch.setattr("time.sleep", lambda *_a, **_k: None)
+
+    r = client.post(
+        "/containers",
+        headers=auth_headers,
+        json={
+            "name": "msm-srv-84",
+            "image": "alpine:latest",
+            "startup_check_seconds": 120.0,
+        },
+    )
+    assert r.status_code == 200, r.text
+    r_bad = client.post(
+        "/containers",
+        headers=auth_headers,
+        json={
+            "name": "msm-srv-85",
+            "image": "alpine:latest",
+            "startup_check_seconds": 301.0,
+        },
+    )
+    assert r_bad.status_code == 422
+
+
 def test_create_preserves_runtime_hardening_and_attaches_extra_network(monkeypatch) -> None:
     existing_lookup = MagicMock(side_effect=NotFound("missing"))
     container = MagicMock(id="abcdef1234567890", attrs={"State": {"Status": "running"}})
