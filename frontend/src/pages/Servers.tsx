@@ -23,7 +23,7 @@ export function Servers() {
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [oneTimeCredentials, setOneTimeCredentials] = useState<PostgresCredential[]>([])
-  const { interfaces, defaultBindIp } = useHostInterfaces()
+  const { interfaces, defaultBindIp } = useHostInterfaces(form.node_id)
   const [form, setForm] = useState({
     name: '',
     game_type: 'conan_exiles_ue5',
@@ -40,12 +40,9 @@ export function Servers() {
     node_id: '' as string,
   })
 
-  // Default-Bind-IP setzen, sobald sie vom Backend kommt.
+  // Default-Bind-IP setzen, sobald sie vom Backend kommt (oder sich die Node ändert).
   useEffect(() => {
-    if (defaultBindIp && !form.public_bind_ip) {
-      setForm((prev) => ({ ...prev, public_bind_ip: defaultBindIp }))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setForm((prev) => ({ ...prev, public_bind_ip: defaultBindIp || '' }))
   }, [defaultBindIp])
 
   const fetchServers = async () => {

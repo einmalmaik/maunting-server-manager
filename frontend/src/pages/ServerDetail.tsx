@@ -143,7 +143,7 @@ export function ServerDetail() {
     ports: {} as Record<string, string>,
     protocols: {} as Record<string, string>,
   });
-  const { interfaces } = useHostInterfaces();
+  const { interfaces } = useHostInterfaces(server?.node_id);
 
   const serverId = parseInt(id || "0");
 

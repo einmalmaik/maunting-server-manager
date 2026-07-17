@@ -402,3 +402,33 @@ def delete_node(
     db.delete(node)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/{node_id}/interfaces")
+def node_interfaces(
+    node_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    if not _can_list_nodes(db, user):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node nicht gefunden")
+
+    if node.is_local:
+        from services import network_interfaces_service
+        interfaces = [h.to_dict() for h in network_interfaces_service.list_host_interfaces()]
+        return {
+            "interfaces": interfaces,
+            "default_bind_ip": network_interfaces_service.default_bind_ip(),
+        }
+
+    try:
+        return NodeClient.from_node(node, timeout=10.0).interfaces()
+    except NodeClientError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Verbindung zum Agenten auf Node {node.name} fehlgeschlagen: {exc.message}",
+        ) from exc

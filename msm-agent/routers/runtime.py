@@ -51,3 +51,13 @@ def update_firewall(action: str, body: FirewallBody) -> dict:
     if not result["ok"]:
         raise HTTPException(status_code=503, detail="Node firewall update failed")
     return result
+
+
+@router.get("/interfaces")
+def get_interfaces() -> dict:
+    from services import network_interfaces_service
+    interfaces = [h.to_dict() for h in network_interfaces_service.list_host_interfaces()]
+    return {
+        "interfaces": interfaces,
+        "default_bind_ip": network_interfaces_service.default_bind_ip(),
+    }

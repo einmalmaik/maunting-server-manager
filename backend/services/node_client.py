@@ -359,6 +359,9 @@ class NodeClient:
             "ports": [{"port": port, "protocol": protocol, "role": role} for port, protocol, role in ports],
         })
 
+    def interfaces(self) -> dict[str, Any]:
+        return self._request("GET", "/runtime/interfaces")
+
     def files_search(self, server_id: int | str, query: str) -> dict[str, Any]:
         return self._request("GET", "/files/search", params={"server_id": str(server_id), "q": query})
 
