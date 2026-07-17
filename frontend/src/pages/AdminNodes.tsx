@@ -63,7 +63,7 @@ function freeRamMb(node: Node): number | null {
   if (m?.ram_total_bytes != null && m?.ram_used_bytes != null) {
     return Math.max(0, Math.round((m.ram_total_bytes - m.ram_used_bytes) / (1024 * 1024)))
   }
-  if (node.ram_total != null) return node.ram_total
+  // Capacity alone is not free RAM — do not mislabel totals as free.
   return null
 }
 
@@ -84,9 +84,14 @@ export function AdminNodes() {
   })
 
   useEffect(() => {
-    void fetchNodes().catch((err: unknown) => {
-      toast.error(err instanceof Error ? err.message : t('nodes.loadFailed'))
-    })
+    const load = () =>
+      void fetchNodes().catch((err: unknown) => {
+        toast.error(err instanceof Error ? err.message : t('nodes.loadFailed'))
+      })
+    load()
+    // Live CPU/RAM bars need periodic refresh (list now includes metrics).
+    const id = window.setInterval(load, 20_000)
+    return () => window.clearInterval(id)
   }, [fetchNodes, t])
 
   const openEnrollment = () => {
@@ -383,20 +388,27 @@ export function AdminNodes() {
 
                 <div className="mb-4 space-y-3">
                   <ProgressBar
-                    value={cpu ?? 0}
+                    value={cpu}
                     label="CPU"
                     hint={cpu != null ? `${cpu.toFixed(0)}%` : '—'}
                     heat
+                    data-testid={`node-cpu-${node.id}`}
                   />
                   <ProgressBar
-                    value={ram ?? 0}
+                    value={ram}
                     label="RAM"
                     hint={
                       ram != null
                         ? `${ram.toFixed(0)}% · ${t('nodes.freeRam', { value: formatRamMb(freeRamMb(node)) })}`
-                        : formatRamMb(node.ram_total)
+                        : node.ram_total != null
+                          ? t('nodes.ramCapacity', {
+                              value: formatRamMb(node.ram_total),
+                              defaultValue: `Kapazität ${formatRamMb(node.ram_total)}`,
+                            })
+                          : '—'
                     }
                     heat
+                    data-testid={`node-ram-${node.id}`}
                   />
                 </div>
 

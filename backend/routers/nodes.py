@@ -35,7 +35,13 @@ from schemas.node_enrollment import (
 from middleware.rate_limit import limiter
 from services import node_enrollment_service
 from services.node_client import NodeClient, NodeClientError
-from services.node_service import encrypt_node_token, node_out_dict, validate_remote_node_host
+from services.node_service import (
+    encrypt_node_token,
+    node_out_dict,
+    probe_node_metrics,
+    apply_agent_metrics,
+    validate_remote_node_host,
+)
 from services.permission_service import has_global_permission
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
@@ -84,6 +90,9 @@ def list_nodes(
 
     Auth: logged-in user with Owner OR global ``servers.create``.
     Never returns agent tokens.
+
+    Best-effort live metrics from each agent so CPU/RAM bars in the admin UI
+    are not stuck empty until a manual health click.
     """
     if not _can_list_nodes(db, user):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
@@ -91,7 +100,12 @@ def list_nodes(
     out = []
     for n in nodes:
         count = db.query(Server).filter(Server.node_id == n.id).count()
-        out.append(node_out_dict(n, server_count=count))
+        metrics = probe_node_metrics(n, timeout=2.5, mark_status=True)
+        out.append(node_out_dict(n, server_count=count, metrics=metrics))
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
     return out
 
 
@@ -315,36 +329,15 @@ def get_node(
     if not node:
         raise HTTPException(status_code=404, detail="Node nicht gefunden")
     count = db.query(Server).filter(Server.node_id == node.id).count()
-    data = node_out_dict(node, server_count=count)
 
-    # Live metrics from agent (best-effort; skip offline guard for manual probe)
-    metrics = None
-    status = node.status or "unknown"
+    # Live metrics from agent (best-effort; longer timeout for manual probe)
+    metrics = probe_node_metrics(node, timeout=5.0, mark_status=True)
     try:
-        client = NodeClient.from_node(node)
-        metrics = client.metrics()
-        status = "online"
-        if metrics:
-            if metrics.get("cpu_count") is not None:
-                node.cpu_total = float(metrics["cpu_count"])
-            if metrics.get("ram_total_bytes") is not None:
-                node.ram_total = int(metrics["ram_total_bytes"]) // (1024 * 1024)
-            if metrics.get("disk_total_bytes") is not None:
-                node.disk_total = int(metrics["disk_total_bytes"]) // (1024 * 1024)
-            node.last_heartbeat = datetime.now(timezone.utc)
-            node.status = "online"
-            db.commit()
-            data["cpu_total"] = node.cpu_total
-            data["ram_total"] = node.ram_total
-            data["disk_total"] = node.disk_total
-            data["last_heartbeat"] = node.last_heartbeat
-    except NodeClientError:
-        status = "offline"
-        node.status = "offline"
         db.commit()
-    data["status"] = status
-    data["metrics"] = metrics
-    return data
+        db.refresh(node)
+    except Exception:
+        db.rollback()
+    return node_out_dict(node, server_count=count, metrics=metrics)
 
 
 @router.put("/{node_id}", response_model=NodeOut)

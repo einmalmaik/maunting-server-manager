@@ -47,6 +47,7 @@
     "cpuCores": "{{count}} cores",
     "diskTotal": "Disk {{value}}",
     "freeRam": "free {{value}}",
+    "ramCapacity": "capacity {{value}}",
     "freeRamShort": "free {{value}}",
     "enrollment": {
       "title": "Connect node",

@@ -29,6 +29,45 @@ def test_list_nodes_as_owner(client: TestClient, owner_cookies: dict):
     assert isinstance(r.json(), list)
 
 
+def test_list_nodes_includes_live_metrics(db, client: TestClient, owner_cookies: dict):
+    """Admin cards need metrics on list — not only after GET /nodes/{id}."""
+    node = Node(
+        name="Local Metrics",
+        host="http://127.0.0.1:9000",
+        auth_token_enc="enc",
+        is_local=True,
+        status="unknown",
+    )
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+    metrics_payload = {
+        "cpu_count": 8,
+        "cpu_percent": 12.5,
+        "ram_total_bytes": 16 * 1024 * 1024 * 1024,
+        "ram_used_bytes": 4 * 1024 * 1024 * 1024,
+        "ram_percent": 25.0,
+        "disk_total_bytes": 100 * 1024 * 1024 * 1024,
+        "disk_used_bytes": 40 * 1024 * 1024 * 1024,
+        "disk_percent": 40.0,
+    }
+    with patch("services.node_service.NodeClient.from_node") as from_node:
+        from_node.return_value.metrics.return_value = metrics_payload
+        r = client.get("/api/nodes", cookies=owner_cookies)
+    assert r.status_code == 200, r.text
+    rows = r.json()
+    match = next((row for row in rows if row["id"] == node.id), None)
+    assert match is not None
+    assert match["metrics"] is not None
+    assert match["metrics"]["cpu_percent"] == 12.5
+    assert match["metrics"]["ram_percent"] == 25.0
+    assert match["cpu_total"] == 8.0
+    assert match["status"] == "online"
+    assert "auth_token" not in match
+    assert "auth_token_enc" not in match
+
+
 def test_create_and_list_node(client: TestClient, owner_cookies: dict):
     csrf = owner_cookies.get("__Secure-csrf_token") or owner_cookies.get("csrf") or ""
     with patch("services.node_service.encrypt_node_token", return_value="enc-token"), \

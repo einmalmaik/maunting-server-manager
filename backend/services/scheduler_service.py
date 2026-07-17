@@ -751,24 +751,20 @@ def _ensure_background_update_check_job() -> None:
 
 
 def _node_heartbeat_task() -> None:
-    """Probe every registered node /health; set online/offline + last_heartbeat.
+    """Probe every registered node /metrics; set online/offline + capacity.
 
+    Uses metrics (not only /health) so admin CPU/RAM capacity fields stay fresh.
     Never logs tokens. Fingerprint pinning enforced inside NodeClient.
     """
     from models import Node
-    from services.node_client import NodeClient, NodeClientError
+    from services.node_service import probe_node_metrics
 
     db = SessionLocal()
     try:
         nodes = db.query(Node).order_by(Node.id.asc()).all()
         for node in nodes:
             try:
-                client = NodeClient.from_node(node)
-                client.health()
-                node.status = "online"
-                node.last_heartbeat = _utcnow()
-            except NodeClientError:
-                node.status = "offline"
+                probe_node_metrics(node, timeout=3.0, mark_status=True)
             except Exception:
                 logger.warning("node heartbeat unexpected error node_id=%s", getattr(node, "id", "?"))
                 node.status = "offline"

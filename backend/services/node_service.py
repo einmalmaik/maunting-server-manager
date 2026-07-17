@@ -134,7 +134,68 @@ def effective_server_runtime_status(server: Server, node: Node | None) -> str:
     return getattr(server, "status", None) or "unknown"
 
 
-def node_out_dict(node: Node, server_count: int | None = None) -> dict[str, Any]:
+def apply_agent_metrics(node: Node, metrics: dict[str, Any] | None) -> None:
+    """Persist capacity totals from an agent /metrics payload (no secrets)."""
+    if not metrics:
+        return
+    if metrics.get("cpu_count") is not None:
+        try:
+            node.cpu_total = float(metrics["cpu_count"])
+        except (TypeError, ValueError):
+            pass
+    if metrics.get("ram_total_bytes") is not None:
+        try:
+            node.ram_total = int(metrics["ram_total_bytes"]) // (1024 * 1024)
+        except (TypeError, ValueError):
+            pass
+    if metrics.get("disk_total_bytes") is not None:
+        try:
+            node.disk_total = int(metrics["disk_total_bytes"]) // (1024 * 1024)
+        except (TypeError, ValueError):
+            pass
+
+
+def probe_node_metrics(
+    node: Node,
+    *,
+    timeout: float = 2.5,
+    mark_status: bool = True,
+) -> dict[str, Any] | None:
+    """Best-effort live metrics from the agent. Never raises for admin list UI.
+
+    Updates node.status / capacity / last_heartbeat on success when mark_status.
+    """
+    from datetime import datetime, timezone
+
+    from services.node_client import NodeClient, NodeClientError
+
+    try:
+        client = NodeClient.from_node(node, timeout=timeout)
+        metrics = client.metrics()
+    except NodeClientError:
+        if mark_status:
+            node.status = "offline"
+        return None
+    except Exception:
+        if mark_status:
+            node.status = "offline"
+        return None
+
+    if not isinstance(metrics, dict):
+        metrics = {}
+    if mark_status:
+        node.status = "online"
+        node.last_heartbeat = datetime.now(timezone.utc)
+        apply_agent_metrics(node, metrics)
+    return metrics
+
+
+def node_out_dict(
+    node: Node,
+    server_count: int | None = None,
+    *,
+    metrics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Serialize Node for API without auth_token_enc."""
     count = server_count
     if count is None:
@@ -142,7 +203,7 @@ def node_out_dict(node: Node, server_count: int | None = None) -> dict[str, Any]
             count = len(node.servers) if node.servers is not None else 0
         except Exception:
             count = 0
-    return {
+    out: dict[str, Any] = {
         "id": node.id,
         "name": node.name,
         "host": node.host,
@@ -155,3 +216,6 @@ def node_out_dict(node: Node, server_count: int | None = None) -> dict[str, Any]
         "last_heartbeat": node.last_heartbeat,
         "server_count": int(count or 0),
     }
+    if metrics is not None:
+        out["metrics"] = metrics
+    return out

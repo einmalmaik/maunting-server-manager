@@ -47,6 +47,7 @@
     "cpuCores": "{{count}} Kerne",
     "diskTotal": "Disk {{value}}",
     "freeRam": "frei {{value}}",
+    "ramCapacity": "Kapazität {{value}}",
     "freeRamShort": "frei {{value}}",
     "enrollment": {
       "title": "Node verbinden",
