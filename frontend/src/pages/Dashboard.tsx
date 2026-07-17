@@ -84,19 +84,21 @@ function SystemStatusCard() {
       </div>
       {health && (
         <div className="space-y-2">
-          {Object.entries(health.services).map(([key, svc]) => (
-            <div key={key} className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ServiceDot status={svc.status} />
-                <span className="font-body-md text-sm text-on-surface-variant">
-                  {serviceNames[key] ?? key}
+          {Object.entries(health.services)
+            .filter(([key, svc]) => !(key === 'caddy' && svc.status === 'degraded'))
+            .map(([key, svc]) => (
+              <div key={key} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ServiceDot status={svc.status} />
+                  <span className="font-body-md text-sm text-on-surface-variant">
+                    {serviceNames[key] ?? key}
+                  </span>
+                </div>
+                <span className="font-mono-sm text-xs text-on-surface-variant/60 truncate max-w-[120px]" title={svc.detail}>
+                  {svc.detail}
                 </span>
               </div>
-              <span className="font-mono-sm text-xs text-on-surface-variant/60 truncate max-w-[120px]" title={svc.detail}>
-                {svc.detail}
-              </span>
-            </div>
-          ))}
+            ))}
         </div>
       )}
       {!loading && !health && (

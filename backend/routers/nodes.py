@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from config import settings
-from dependencies import get_current_owner, get_current_user, verify_csrf
+from dependencies import get_current_owner, get_current_user, verify_csrf, require_global
 from models import Node, NodeEnrollment, Server, User
 from schemas.node import NodeCreate, NodeOut, NodeUpdate
 from schemas.node_enrollment import (
@@ -78,7 +78,7 @@ def _bearer_claim(request: Request) -> str:
 def _can_list_nodes(db: Session, user: User) -> bool:
     if user.is_owner:
         return True
-    return has_global_permission(db, user, "servers.create")
+    return has_global_permission(db, user, "nodes.read") or has_global_permission(db, user, "servers.create")
 
 
 @router.get("", response_model=list[NodeOut])
@@ -113,10 +113,10 @@ def list_nodes(
 def create_node(
     body: NodeCreate,
     db: Session = Depends(get_db),
-    owner: User = Depends(get_current_owner),
+    user: User = Depends(require_global("nodes.manage")),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    _ = owner
+    _ = user
     try:
         host = validate_remote_node_host(
             body.host, body.tls_fingerprint, is_local=False
@@ -144,9 +144,9 @@ def create_node(
 
 @router.get("/install-command")
 def install_command(
-    owner: User = Depends(get_current_owner),
+    user: User = Depends(require_global("nodes.manage")),
 ) -> dict:
-    _ = owner
+    _ = user
     origin = (settings.api_url or settings.panel_url).rstrip("/")
     parsed = urlparse(origin)
     local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
@@ -272,9 +272,9 @@ def poll_enrollment(
 @router.get("/enrollments/pending", response_model=list[EnrollmentPendingOut])
 def pending_enrollments(
     db: Session = Depends(get_db),
-    owner: User = Depends(get_current_owner),
+    user: User = Depends(require_global("nodes.manage")),
 ) -> list[NodeEnrollment]:
-    _ = owner
+    _ = user
     node_enrollment_service.cleanup_expired(db)
     return (
         db.query(NodeEnrollment)
@@ -288,10 +288,10 @@ def pending_enrollments(
 def approve_enrollment(
     enrollment_id: int,
     db: Session = Depends(get_db),
-    owner: User = Depends(get_current_owner),
+    user: User = Depends(require_global("nodes.manage")),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    _ = owner
+    _ = user
     enrollment = db.query(NodeEnrollment).filter(NodeEnrollment.id == enrollment_id).first()
     if enrollment is None:
         raise HTTPException(status_code=404, detail="Enrollment nicht gefunden")
@@ -330,9 +330,9 @@ def approve_enrollment(
 def get_node(
     node_id: int,
     db: Session = Depends(get_db),
-    owner: User = Depends(get_current_owner),
+    user: User = Depends(require_global("nodes.read")),
 ) -> dict:
-    _ = owner
+    _ = user
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="Node nicht gefunden")
@@ -353,10 +353,10 @@ def update_node(
     node_id: int,
     body: NodeUpdate,
     db: Session = Depends(get_db),
-    owner: User = Depends(get_current_owner),
+    user: User = Depends(require_global("nodes.manage")),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    _ = owner
+    _ = user
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="Node nicht gefunden")
@@ -392,10 +392,10 @@ def update_node(
 def delete_node(
     node_id: int,
     db: Session = Depends(get_db),
-    owner: User = Depends(get_current_owner),
+    user: User = Depends(require_global("nodes.manage")),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    _ = owner
+    _ = user
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="Node nicht gefunden")

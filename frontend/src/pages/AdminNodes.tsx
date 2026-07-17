@@ -24,6 +24,7 @@ import { ProgressBar } from '@/Singra/UI/ProgressBar'
 import { NodeEnrollmentDialog } from '@/components/nodes/NodeEnrollmentDialog'
 import type { Node } from '@/types'
 import { api } from '@/api/client'
+import { useHasPermission } from '@/hooks/useHasPermission'
 
 function statusVariant(status: string): 'success' | 'destructive' | 'default' | 'warning' {
   switch (status) {
@@ -72,6 +73,7 @@ export function AdminNodes() {
   const { t } = useTranslation()
   const { nodes, loading, fetchNodes, createNode, updateNode, deleteNode, healthCheck } =
     useNodeStore()
+  const canManageNodes = useHasPermission('nodes.manage')
   const [showForm, setShowForm] = useState(false)
   const [showEnrollment, setShowEnrollment] = useState(false)
   const [editing, setEditing] = useState<Node | null>(null)
@@ -249,7 +251,7 @@ export function AdminNodes() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {updateAvailable && (
+          {canManageNodes && updateAvailable && (
             <button
               type="button"
               disabled={updatingNodes}
@@ -260,14 +262,16 @@ export function AdminNodes() {
               {updatingNodes ? t('nodes.updating', 'Updating Nodes...') : t('nodes.updateAll', 'Nodes updaten')}
             </button>
           )}
-          <button
-            type="button"
-            onClick={openEnrollment}
-            className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
-          >
-            <Plus className="h-4 w-4" />
-            {t('nodes.add')}
-          </button>
+          {canManageNodes && (
+            <button
+              type="button"
+              onClick={openEnrollment}
+              className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
+            >
+              <Plus className="h-4 w-4" />
+              {t('nodes.add')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -403,23 +407,27 @@ export function AdminNodes() {
                         className={`h-4 w-4 ${busyId === node.id ? 'animate-spin' : ''}`}
                       />
                     </button>
-                    <button
-                      type="button"
-                      className="msm-btn-secondary p-2"
-                      title={t('nodes.edit')}
-                      onClick={() => openEdit(node)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      className="msm-btn-secondary p-2 text-status-error disabled:opacity-40"
-                      title={t('common.delete')}
-                      disabled={node.is_local || node.server_count > 0}
-                      onClick={() => void handleDelete(node)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {canManageNodes && (
+                      <>
+                        <button
+                          type="button"
+                          className="msm-btn-secondary p-2"
+                          title={t('nodes.edit')}
+                          onClick={() => openEdit(node)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          className="msm-btn-secondary p-2 text-status-error disabled:opacity-40"
+                          title={t('common.delete')}
+                          disabled={node.is_local || node.server_count > 0}
+                          onClick={() => void handleDelete(node)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 

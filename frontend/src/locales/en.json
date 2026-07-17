@@ -464,6 +464,8 @@
     "servers.create": "Create a new server",
     "servers.delete": "Delete servers (global, not delegable)",
     "system.view": "View system resources, interfaces, version",
+    "nodes.read": "View nodes list",
+    "nodes.manage": "Create, edit, delete nodes",
     "server.view": "View server in list and detail",
     "server.start": "Start server",
     "server.stop": "Stop server",

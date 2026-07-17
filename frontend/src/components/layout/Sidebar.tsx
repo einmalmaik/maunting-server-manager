@@ -15,6 +15,7 @@ import {
   Boxes,
   Database,
   Network,
+  Archive,
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -31,8 +32,10 @@ export function Sidebar() {
   const canViewSettings = useHasPermission('panel.settings.read')
   const canManagePanelBackups = useHasPermission('panel.settings.write')
   const canReadPanelDatabase = useHasPermission('panel.database.read')
-  // Nodes API is owner-only; owners pass all permission hooks via bypass.
-  const canManageNodes = Boolean(user?.is_owner)
+  
+  const hasNodesRead = useHasPermission('nodes.read')
+  const hasNodesManage = useHasPermission('nodes.manage')
+  const canManageNodes = Boolean(user?.is_owner) || hasNodesRead || hasNodesManage
 
   const handleLogout = async () => {
     await logout()
@@ -53,7 +56,7 @@ export function Sidebar() {
       { to: '/blueprints', icon: Boxes, label: t('nav.blueprints') },
     ] : []),
     ...((user?.is_owner || canManagePanelBackups) ? [
-      { to: '/panel-backups', icon: Database, label: t('nav.panelBackups') },
+      { to: '/panel-backups', icon: Archive, label: t('nav.panelBackups') },
     ] : []),
     ...((user?.is_owner || canReadPanelDatabase) ? [
       { to: '/panel-database', icon: Database, label: t('nav.panelDatabase', 'Panel-Datenbank') },

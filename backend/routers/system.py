@@ -43,7 +43,26 @@ def public_support_widget() -> dict:
 
 
 def _check_docker() -> dict:
-    """Prüft ob der Docker-Daemon erreichbar ist."""
+    """Prüft die Erreichbarkeit von Docker auf allen Nodes oder lokal."""
+    try:
+        db = SessionLocal()
+        try:
+            from models import Node
+            nodes = db.query(Node).all()
+            if nodes:
+                total_nodes = len(nodes)
+                online_nodes = sum(1 for n in nodes if n.status == "online")
+                if online_nodes == total_nodes:
+                    return {"status": "ok", "detail": f"{online_nodes}/{total_nodes} online"}
+                elif online_nodes == 0:
+                    return {"status": "error", "detail": f"0/{total_nodes} online"}
+                else:
+                    return {"status": "degraded", "detail": f"{online_nodes}/{total_nodes} online"}
+        finally:
+            db.close()
+    except Exception:
+        pass
+
     try:
         result = subprocess.run(
             ["docker", "info", "--format", "{{.ServerVersion}}"],
@@ -256,10 +275,12 @@ async def system_health(user: User = Depends(get_current_user)) -> dict:
     }
 
     # Aggregation: error > degraded > ok
-    # Docker + DB sind Pflicht; Caddy ist optional (degraded wenn fehlt)
+    # Docker + DB sind Pflicht; Caddy ist optional.
     if docker_res["status"] == "error" or db_res["status"] == "error":
         overall = "error"
-    elif any(s["status"] == "degraded" for s in services.values()):
+    elif docker_res["status"] == "degraded" or db_res["status"] == "degraded":
+        overall = "degraded"
+    elif caddy_res["status"] == "error":
         overall = "degraded"
     else:
         overall = "ok"

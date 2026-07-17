@@ -8,6 +8,7 @@ import { confirm } from '@/stores/confirmStore'
 import { Dropdown } from '@/components/ui/Dropdown'
 import type { User } from '@/types'
 import type { PermissionCatalog } from '@/types/permissions'
+import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
 
 interface Props {
   serverId: number
@@ -83,15 +84,6 @@ export function ServerPermissionsPanel({ serverId }: Props) {
   const cancelEdit = () => {
     setEditing(null)
     setEditSelection(new Set())
-  }
-
-  const togglePerm = (key: string) => {
-    setEditSelection((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
   }
 
   const save = async (userId: number) => {
@@ -219,32 +211,12 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                 </div>
 
                 {isEditing ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
-                    {catalog.server_permissions.map((def) => {
-                      const id = `perm-${row.user.id}-${def.key}`
-                      const checked = editSelection.has(def.key)
-                      return (
-                        <label
-                          key={def.key}
-                          htmlFor={id}
-                          className="flex items-start gap-2 p-1.5 rounded text-sm cursor-pointer hover:bg-surface-container-high/50"
-                        >
-                          <input
-                            id={id}
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => togglePerm(def.key)}
-                            className="mt-1"
-                          />
-                          <span className="flex flex-col">
-                            <span className="text-on-surface">
-                              {t(`permissions.${def.key}`, { defaultValue: def.label })}
-                            </span>
-                            <span className="font-mono-sm text-mono-sm text-on-surface-variant">{def.key}</span>
-                          </span>
-                        </label>
-                      )
-                    })}
+                  <div className="mt-2 border-t border-outline-variant/30 pt-3">
+                    <PermissionEditor
+                      permissions={catalog.server_permissions}
+                      selected={editSelection}
+                      onChange={setEditSelection}
+                    />
                   </div>
                 ) : (
                   <div className="flex flex-wrap gap-1.5">

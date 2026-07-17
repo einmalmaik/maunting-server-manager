@@ -36,6 +36,8 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("servers.create",            "servers", "Neuen Server anlegen"),
     PermissionDef("servers.delete",            "servers", "Server loeschen (global, nicht delegierbar)"),
     PermissionDef("system.view",               "system",  "System-Ressourcen, Interfaces, Version"),
+    PermissionDef("nodes.read",                "system",  "Nodeliste sehen"),
+    PermissionDef("nodes.manage",              "system",  "Nodes anlegen, bearbeiten, loeschen"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.
