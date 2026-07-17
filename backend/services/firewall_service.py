@@ -140,7 +140,10 @@ def open_ports(
             raise ValueError("Remote firewall requires normalized port list")
         from services.node_client import NodeClient
 
-        NodeClient.from_node(node).firewall_update("open", name, game_port)
+        try:
+            NodeClient.from_node(node).firewall_update("open", name, game_port)
+        except Exception as exc:
+            logger.warning("Remote firewall update 'open' failed (non-critical): %s", exc)
         return True
     if not _ufw_available():
         return False
@@ -174,7 +177,10 @@ def close_ports(
             raise ValueError("Remote firewall requires normalized port list")
         from services.node_client import NodeClient
 
-        NodeClient.from_node(node).firewall_update("close", name, game_port)
+        try:
+            NodeClient.from_node(node).firewall_update("close", name, game_port)
+        except Exception as exc:
+            logger.warning("Remote firewall update 'close' failed (non-critical): %s", exc)
         return True
     if not _ufw_available():
         return False

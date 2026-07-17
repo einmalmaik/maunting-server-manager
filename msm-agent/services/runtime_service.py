@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import subprocess
 
+logger = logging.getLogger(__name__)
 
 _ENV = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"}
 _FIREWALL_WRAPPER = "/usr/local/sbin/msm-agent-firewall"
@@ -35,5 +37,15 @@ def firewall(action: str, ports: list[tuple[int, str, str]], server_name: str = 
             check=False,
             env=_ENV,
         )
-        results.append({"port": port, "protocol": protocol, "ok": result.returncode == 0})
+        ok = result.returncode == 0
+        if not ok:
+            logger.warning(
+                "Firewall-Wrapper fuer Port %s (%s) fehlgeschlagen (Exit-Code %s): stdout=%s, stderr=%s",
+                port,
+                protocol,
+                result.returncode,
+                result.stdout.strip(),
+                result.stderr.strip(),
+            )
+        results.append({"port": port, "protocol": protocol, "ok": ok})
     return {"ok": all(bool(item["ok"]) for item in results), "results": results}

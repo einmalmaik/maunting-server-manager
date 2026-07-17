@@ -252,9 +252,9 @@ role="${5:-game}"
 [[ "$server_name" =~ ^[A-Za-z0-9_.-]{1,64}$ ]] || exit 2
 [[ "$role" =~ ^[A-Za-z0-9_.-]{1,32}$ ]] || exit 2
 if [[ "$action" == "open" ]]; then
-  exec /usr/sbin/ufw allow "${port}/${protocol}" comment "MSM ${server_name:0:24} ${role}"
+  exec ufw allow "${port}/${protocol}" comment "MSM ${server_name:0:24} ${role}"
 fi
-exec /usr/sbin/ufw delete allow "${port}/${protocol}"
+exec ufw delete allow "${port}/${protocol}"
 EOF
 chown root:root "$FIREWALL_WRAPPER"
 chmod 0755 "$FIREWALL_WRAPPER"
