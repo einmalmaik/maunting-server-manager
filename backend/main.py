@@ -75,12 +75,13 @@ async def lifespan(app: FastAPI):
             "ohne DIS nicht operieren."
         )
 
-    # Schema changes run before service start via Alembic. Startup only syncs
-    # the local agent token and assigns legacy orphan records.
+    # Schema must exist before local-node registration (servers.node_id, etc.).
+    # prepare_phase8 / Alembic should have run at install/update; ensure_multi_node_schema
+    # is idempotent and covers in-place multi-node upgrades that skipped DB init.
     from database import SessionLocal
-    from services.multi_node_migration_service import sync_multi_node_registration
+    from services.multi_node_migration_service import migrate_multi_node_schema
 
-    sync_multi_node_registration(
+    migrate_multi_node_schema(
         engine,
         SessionLocal,
         allow_missing_local_token=is_testing,

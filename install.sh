@@ -1297,7 +1297,7 @@ EOF
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# 8. Datenbank initialisieren
+# 8. Datenbank initialisieren / Phase-8-Schema (immer idempotent)
 # ═══════════════════════════════════════════════════════════════
 RUN_DB_INIT=false
 if ! $REINSTALL_MODE; then
@@ -1308,38 +1308,42 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_DB; then
     RUN_DB_INIT=true
 fi
 
-if $RUN_DB_INIT; then
-    log "Initialisiere Datenbank..."
-
-    if $MIGRATE_LEGACY_SQLITE; then
-        LEGACY_SQLITE="$MSM_DIR/backend/msm.db"
-        [[ -f "$LEGACY_SQLITE" ]] || err "Legacy-SQLite-Datei fehlt: $LEGACY_SQLITE"
-        log "Migriere Legacy-SQLite einmalig nach PostgreSQL..."
-        su - "$MSM_USER" -c "
-            cd $MSM_DIR/backend
-            source venv/bin/activate
-            python3 scripts/migrate_sqlite_to_postgres.py \\
-                --sqlite '$LEGACY_SQLITE'
-        " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-nach-PostgreSQL-Import fehlgeschlagen"
-        ok "Legacy-SQLite vollständig importiert und verifiziert"
-    fi
+if $MIGRATE_LEGACY_SQLITE; then
+    LEGACY_SQLITE="$MSM_DIR/backend/msm.db"
+    [[ -f "$LEGACY_SQLITE" ]] || err "Legacy-SQLite-Datei fehlt: $LEGACY_SQLITE"
+    log "Migriere Legacy-SQLite einmalig nach PostgreSQL..."
     su - "$MSM_USER" -c "
+        set -euo pipefail
         cd $MSM_DIR/backend
         source venv/bin/activate
-        python3 scripts/manage_schema.py
-    " 2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Schema konnte nicht vorbereitet werden"
-    if $MIGRATE_LEGACY_SQLITE; then
-        su - "$MSM_USER" -c "
-            cd $MSM_DIR/backend
-            source venv/bin/activate
-            python3 scripts/migrate_sqlite_to_postgres.py \\
-                --sqlite '$LEGACY_SQLITE' \\
-                --archive-source
-        " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-Archivierung nach erfolgreicher Migration fehlgeschlagen"
-        ok "Legacy-SQLite als Migrationsarchiv gesichert"
-    fi
-    ok "Datenbank initialisiert"
+        python3 scripts/migrate_sqlite_to_postgres.py \\
+            --sqlite '$LEGACY_SQLITE'
+    " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-nach-PostgreSQL-Import fehlgeschlagen"
+    ok "Legacy-SQLite vollständig importiert und verifiziert"
 fi
+
+# KEEP_SETTINGS reinstall previously skipped schema work → missing servers.node_id
+# crashed the panel on multi-node startup. Always bridge/stamp (idempotent).
+log "Bereite PostgreSQL-Schema vor (Phase 8 / Multi-Node)..."
+su - "$MSM_USER" -c "
+    set -euo pipefail
+    cd $MSM_DIR/backend
+    source venv/bin/activate
+    python3 scripts/prepare_phase8_schema.py
+" 2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Schema konnte nicht vorbereitet werden"
+
+if $MIGRATE_LEGACY_SQLITE; then
+    su - "$MSM_USER" -c "
+        set -euo pipefail
+        cd $MSM_DIR/backend
+        source venv/bin/activate
+        python3 scripts/migrate_sqlite_to_postgres.py \\
+            --sqlite '$LEGACY_SQLITE' \\
+            --archive-source
+    " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-Archivierung nach erfolgreicher Migration fehlgeschlagen"
+    ok "Legacy-SQLite als Migrationsarchiv gesichert"
+fi
+ok "Datenbank/Schema bereit"
 
 # ═══════════════════════════════════════════════════════════════
 # 9. Frontend bauen
