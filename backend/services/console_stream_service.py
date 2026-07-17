@@ -290,14 +290,24 @@ async def _proxy_agent_console(
             return
 
         try:
+            import ssl as ssl_mod
+            ssl_context = client._verify()
+            ssl_param = None
+            if agent_url.startswith("wss://"):
+                if isinstance(ssl_context, ssl_mod.SSLContext):
+                    ssl_param = ssl_context
+                else:
+                    ssl_param = ssl_mod.create_default_context()
+
             agent_ws = await websockets.connect(
                 agent_url,
                 additional_headers={"Authorization": f"Bearer {token}"},
                 open_timeout=10,
                 max_size=2 * 1024 * 1024,
+                ssl=ssl_param,
             )
-        except Exception:
-            logger.warning("agent console ws connect failed for server_id=%s", server_id)
+        except Exception as exc:
+            logger.warning("agent console ws connect failed for server_id=%s: %s", server_id, exc)
             await _close_safely(ws, code=1011)
             return
 
