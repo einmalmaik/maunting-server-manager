@@ -40,6 +40,10 @@ class Settings(BaseSettings):
 
     # Panel
     panel_url: str = "http://localhost"
+    # Public backend origin. Usually identical to panel_url for all-in-one
+    # installs; split hosting keeps this on the API host while panel_url points
+    # to the user-facing frontend. Cookie domains derive from this origin.
+    api_url: str = ""
     setup_completed_file: Path = Path("/opt/msm/.setup_completed")
 
     # Cookie-Domain fuer cross-subdomain Setups (z.B. app.X.example.com + api.X.example.com).
@@ -224,11 +228,12 @@ def get_effective_cookie_domain() -> str:
     """Return the cookie domain to use for OAuth state cookie.
 
     If MSM_COOKIE_DOMAIN is explicitly set in .env / env, use it (override).
-    Otherwise derive from MSM_PANEL_URL using the same parent-domain logic
-    that install.sh used for the DOMAIN at first install (or on reinstall "keep").
+    Otherwise derive from MSM_API_URL (falling back to MSM_PANEL_URL for legacy
+    installations) using the same parent-domain logic that install.sh used for
+    the DOMAIN at first install (or on reinstall "keep").
 
-    Self-hosted autonomy: MSM_PANEL_URL (written by install.sh) is the single
-    source of truth. No extra variables needed for the common case.
+    Split hosting requires the response host, not the separately hosted
+    frontend, to own the cookie Domain attribute.
 
     Special cases:
     - localhost / 127.0.0.1 (any port): return "" → no Domain attr (host-only cookie)
@@ -238,15 +243,19 @@ def get_effective_cookie_domain() -> str:
     if explicit:
         return explicit
 
-    panel_url: str = getattr(settings, "panel_url", "") or ""
-    if not panel_url:
+    public_api_url: str = (
+        getattr(settings, "api_url", "")
+        or getattr(settings, "panel_url", "")
+        or ""
+    )
+    if not public_api_url:
         return ""
 
     # robust host extraction (strip scheme, path, port)
-    if "://" in panel_url:
-        host = panel_url.split("://", 1)[1].split("/", 1)[0]
+    if "://" in public_api_url:
+        host = public_api_url.split("://", 1)[1].split("/", 1)[0]
     else:
-        host = panel_url.split("/", 1)[0]
+        host = public_api_url.split("/", 1)[0]
     host = host.split(":", 1)[0].strip().lower()
 
     if not host:

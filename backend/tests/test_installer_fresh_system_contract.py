@@ -176,6 +176,8 @@ def test_external_frontend_uses_exact_origin_and_api_only_caddy() -> None:
     assert 'EXTERNAL_FRONTEND_ORIGIN="${2%/}"' in installer
     assert "SERVE_FRONTEND=false" in installer
     assert "COOKIE_CROSS_SITE=true" in installer
+    assert 'PANEL_URL="$EXTERNAL_FRONTEND_ORIGIN"' in installer
+    assert 'MSM_API_URL="$API_URL"' in installer
     assert 'CORS_ALLOWED_ORIGINS="$EXTERNAL_FRONTEND_ORIGIN"' in installer
     assert "Das Frontend wird extern ausgeliefert; diese Site veröffentlicht nur API/WS." in installer
     assert 'respond "Not Found" 404' in installer

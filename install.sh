@@ -191,6 +191,8 @@ load_current_env() {
     local env_file="$MSM_DIR/backend/.env"
 
     CURRENT_DOMAIN=""
+    CURRENT_PANEL_URL=""
+    CURRENT_SERVE_FRONTEND="true"
     CURRENT_EMAIL_PROVIDER="smtp"
     CURRENT_SMTP_HOST=""
     CURRENT_SMTP_PORT="587"
@@ -210,12 +212,20 @@ load_current_env() {
 
     local val
 
-    val=$(grep -E '^MSM_PANEL_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    CURRENT_PANEL_URL=$(grep -E '^MSM_PANEL_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    val=$(grep -E '^MSM_API_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    if [[ -z "$val" ]]; then
+        # Legacy all-in-one installs did not yet persist a distinct API URL.
+        val="$CURRENT_PANEL_URL"
+    fi
     if [[ -n "$val" ]]; then
         CURRENT_DOMAIN="$val"
         CURRENT_DOMAIN="${CURRENT_DOMAIN#http://}"
         CURRENT_DOMAIN="${CURRENT_DOMAIN#https://}"
     fi
+
+    val=$(grep -E '^MSM_SERVE_FRONTEND=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$val" ]] && CURRENT_SERVE_FRONTEND="$val"
 
     val=$(grep -E '^MSM_EMAIL_PROVIDER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
     [[ -n "$val" ]] && CURRENT_EMAIL_PROVIDER="$val"
@@ -1055,8 +1065,14 @@ if [[ -z "$DIS_TOKEN" ]]; then
 fi
 
 PANEL_URL="http://localhost"
+API_URL="http://localhost"
 if [[ -n "$DOMAIN" ]]; then
     PANEL_URL="https://$DOMAIN"
+    API_URL="https://$DOMAIN"
+fi
+if $REINSTALL_MODE && [[ "$CURRENT_SERVE_FRONTEND" == "false" ]] \
+    && [[ -n "$CURRENT_PANEL_URL" ]] && [[ -z "$EXTERNAL_FRONTEND_ORIGIN" ]]; then
+    PANEL_URL="$CURRENT_PANEL_URL"
 fi
 
 ENV_FILE="$MSM_DIR/backend/.env"
@@ -1105,6 +1121,7 @@ STEAM_API_KEY=$(existing_env_value MSM_STEAM_API_KEY "")
 GITHUB_CLONE_TOKEN=$(existing_env_value MSM_GITHUB_CLONE_TOKEN "")
 
 if [[ -n "$EXTERNAL_FRONTEND_ORIGIN" ]]; then
+    PANEL_URL="$EXTERNAL_FRONTEND_ORIGIN"
     SERVE_FRONTEND=false
     COOKIE_CROSS_SITE=true
     if [[ -z "$CORS_ALLOWED_ORIGINS" ]]; then
@@ -1140,6 +1157,7 @@ MSM_SMTP_TLS=true
 MSM_SMTP_FROM="${SMTP_FROM:-noreply@mauntingstudios.de}"
 MSM_RESEND_API_KEY="$RESEND_API_KEY"
 MSM_PANEL_URL="$PANEL_URL"
+MSM_API_URL="$API_URL"
 MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
 MSM_LOGO_URL="$LOGO_URL"
 MSM_COOKIE_DOMAIN="$COOKIE_DOMAIN"

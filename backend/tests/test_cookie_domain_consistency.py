@@ -79,6 +79,31 @@ class TestAuthCookiesShareDomainWithStateCookie:
             f"Localhost-Cookies bleiben host-only, header war: {joined!r}"
         )
 
+    def test_split_hosting_uses_api_domain_not_frontend_domain(self, monkeypatch):
+        """A response from api.example.com cannot set cookies for vercel.app."""
+        monkeypatch.setattr(
+            config.settings,
+            "panel_url",
+            "https://my-panel.vercel.app",
+            raising=False,
+        )
+        monkeypatch.setattr(
+            config.settings,
+            "api_url",
+            "https://api.example.com",
+            raising=False,
+        )
+        monkeypatch.setattr(config.settings, "cookie_domain", "", raising=False)
+        resp = Response()
+        _set_cookie(resp, "__Secure-access_token", "tok", max_age=600)
+        joined = b" ".join(
+            value
+            for key, value in resp.headers.raw
+            if key.lower() == b"set-cookie" and b"__Secure-access_token" in value
+        ).decode()
+        assert "Domain=.example.com" in joined
+        assert "vercel.app" not in joined
+
     def test_clear_auth_cookies_uses_same_domain(self, monkeypatch):
         """Beim Logout / Cookie-Clear muss die Domain mit der Set-Variante
         uebereinstimmen, sonst verwirft der Browser das Delete und der

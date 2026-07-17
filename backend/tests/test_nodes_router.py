@@ -95,7 +95,7 @@ def test_node_out_never_includes_token_fields():
     assert out["server_count"] == 3
 
 
-def test_install_command_uses_configured_panel_url_and_contains_no_secret(
+def test_install_command_uses_configured_api_url_and_contains_no_secret(
     client: TestClient,
     owner_cookies: dict,
 ):
@@ -107,6 +107,23 @@ def test_install_command_uses_configured_panel_url_and_contains_no_secret(
     assert "--panel http://localhost:3000" in command
     assert "token" not in command.lower()
     assert "claim" not in command.lower()
+
+
+def test_install_command_uses_backend_origin_for_external_frontend(
+    client: TestClient,
+    owner_cookies: dict,
+    monkeypatch,
+):
+    from config import settings
+
+    monkeypatch.setattr(settings, "panel_url", "https://panel.vercel.app")
+    monkeypatch.setattr(settings, "api_url", "https://api.example.com")
+    response = client.get("/api/nodes/install-command", cookies=owner_cookies)
+
+    assert response.status_code == 200, response.text
+    command = response.json()["command"]
+    assert "https://api.example.com/api/nodes/install.sh" in command
+    assert "panel.vercel.app" not in command
 
 
 def test_node_enrollment_requires_owner_approval_and_never_returns_agent_token(

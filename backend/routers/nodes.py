@@ -133,7 +133,7 @@ def install_command(
     owner: User = Depends(get_current_owner),
 ) -> dict:
     _ = owner
-    origin = settings.panel_url.rstrip("/")
+    origin = (settings.api_url or settings.panel_url).rstrip("/")
     parsed = urlparse(origin)
     local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
     if parsed.scheme != "https" and not local_http:
