@@ -292,7 +292,7 @@ StandardError=journal
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths=${AGENT_DIR} ${SERVERS_DIR} /run/user/${MSM_UID} /home/${MSM_USER}
+ReadWritePaths=${AGENT_DIR} ${SERVERS_DIR} -/run/user/${MSM_UID} -/home/${MSM_USER}
 
 [Install]
 WantedBy=multi-user.target
