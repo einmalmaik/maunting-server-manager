@@ -345,15 +345,16 @@ run_backend_migration() {
     ssh_run "curl -fsS --max-time 10 http://127.0.0.1:8000/api/health >/dev/null"
 
     if [[ "$(local_node_count)" != "0" ]]; then
-        local current_api replacement_id
+        local current_api replacement_id enrollment_output
         current_api="$(env_value MSM_API_URL || true)"
         [[ -n "$current_api" ]] || current_api="$(env_value MSM_PANEL_URL || true)"
         validate_origin "$current_api"
         echo ""
         echo "Der vorhandene lokale Gameserver-Agent wird jetzt als eigenständiger TLS-Node neu eingerichtet."
         echo "Das Panel zeigt dabei eine Owner-Freigabe. Diese Sicherheitsfreigabe wird nicht umgangen."
-        bash "$ROOT_DIR/scripts/install-node.sh" --panel "$current_api"
-        ask_value "Im Panel angezeigte/neu angelegte Ersatz-Node-ID" replacement_id
+        enrollment_output="$WORK_DIR/enrollment-result"
+        bash "$ROOT_DIR/scripts/install-node.sh" --panel "$current_api" | tee "$enrollment_output"
+        replacement_id="$(sed -n 's/^MSM_ENROLLED_NODE_ID=//p' "$enrollment_output" | tail -1)"
         [[ "$replacement_id" =~ ^[1-9][0-9]*$ ]] || fail "Ungültige Ersatz-Node-ID"
         (
             cd "$SOURCE_BACKEND"

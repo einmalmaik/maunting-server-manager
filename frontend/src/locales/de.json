@@ -1248,7 +1248,7 @@
         },
         "3": {
           "title": "Backend auslagern",
-          "description": "Installiert das frische Ziel vorab und überträgt beim kurzen Cutover Panel-Datenbank, Konfiguration, DIS-Secrets, Panel-Backups und Community-Blueprints."
+          "description": "Installiert das frische Ziel vorab, übernimmt die vom Owner bestätigte Node-ID automatisch und überträgt beim kurzen Cutover Panel-Datenbank, Konfiguration, DIS-Secrets, Panel-Backups und Community-Blueprints."
         }
       },
       "externalBoundary": "Den DNS-A/AAAA-Eintrag beim externen Anbieter und die einmalige Owner-Freigabe eines neuen Agents kann MSM nicht selbst übernehmen. Diese Grenzen werden deutlich angezeigt und nicht umgangen.",

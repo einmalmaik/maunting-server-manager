@@ -136,7 +136,9 @@ in einer sicheren Reihenfolge aus:
    mit passwortlosem `sudo`. Der Assistent installiert zuerst parallel eine
    Backend-only-Control-Plane. Befindet sich auf der Quelle noch der lokale
    Agent, wird er über das normale, vom Owner zu bestätigende TLS-Enrollment in
-   einen eigenständigen Node umgewandelt. Eine kurzlebige Challenge pro
+   einen eigenständigen Node umgewandelt. Die bestätigte Node-ID übernimmt der
+   Assistent direkt aus der geschützten Enrollment-Antwort; sie muss nicht
+   abgelesen oder erneut eingegeben werden. Eine kurzlebige Challenge pro
    Serververzeichnis beweist, dass der neue Agent exakt dieselben Daten und den
    erwarteten Rootless-Docker-Runtime sieht; erst dann wird die Node-Zuordnung
    atomar geändert.

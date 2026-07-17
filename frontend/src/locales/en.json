@@ -1248,7 +1248,7 @@
         },
         "3": {
           "title": "Move the backend",
-          "description": "Pre-installs the fresh target, then transfers the panel database, configuration, DIS secrets, panel backups and community blueprints during the short cutover."
+          "description": "Pre-installs the fresh target, automatically uses the owner-confirmed node ID, then transfers the panel database, configuration, DIS secrets, panel backups and community blueprints during the short cutover."
         }
       },
       "externalBoundary": "MSM cannot change the DNS A/AAAA record at an external provider or grant the one-time owner approval for a new agent. These boundaries are shown clearly and never bypassed.",

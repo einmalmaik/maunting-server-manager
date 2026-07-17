@@ -36,9 +36,14 @@ def test_script_has_strict_secret_safe_failure_contract() -> None:
 
 def test_script_keeps_node_security_boundary_and_source_data() -> None:
     script = _script()
+    node_installer = (ROOT / "scripts" / "install-node.sh").read_text(encoding="utf-8")
 
     assert "scripts/install-node.sh" in script
     assert "Owner-Freigabe" in script
+    assert "MSM_ENROLLED_NODE_ID=" in script
+    assert "Im Panel angezeigte/neu angelegte Ersatz-Node-ID" not in script
+    assert "NODE_ID=$(jq -r '.node_id // empty'" in node_installer
+    assert 'echo "MSM_ENROLLED_NODE_ID=${NODE_ID}"' in node_installer
     assert "scripts/handoff_local_node.py" in script
     assert "scripts/migrate_server_to_node.py" in script
     assert "Quelldaten werden nicht gelöscht" in script

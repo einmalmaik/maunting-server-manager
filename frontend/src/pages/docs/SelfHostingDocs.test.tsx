@@ -60,6 +60,7 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/keeps source data and the old control plane as a rollback basis/i)).toBeInTheDocument()
     expect(screen.getByText(/DNS A\/AAAA record.*one-time owner approval/i)).toBeInTheDocument()
     expect(screen.getByText(/saves, mods, workshop files, backups and assigned PostgreSQL databases/i)).toBeInTheDocument()
+    expect(screen.getByText(/automatically uses the owner-confirmed node ID/i)).toBeInTheDocument()
   })
 
   it('links to node administration and the documentation index', () => {

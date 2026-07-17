@@ -97,10 +97,16 @@ for _attempt in $(seq 1 180); do
         -o "$POLL_RESPONSE" 2>/dev/null; then
         STATUS=$(jq -r '.status // empty' "$POLL_RESPONSE")
         if [[ "$STATUS" == "approved" || "$STATUS" == "claimed" ]]; then
+            NODE_ID=$(jq -r '.node_id // empty' "$POLL_RESPONSE")
+            [[ "$NODE_ID" =~ ^[1-9][0-9]*$ ]] || {
+                echo "Das Panel hat keine gültige Node-ID bestätigt." >&2
+                exit 1
+            }
             curl -fsS --max-time 3 https://127.0.0.1:9000/health \
                 --insecure >/dev/null 2>&1 \
                 || systemctl restart msm-agent.service
-            echo "[OK] Node ist eingerichtet und mit dem Panel verbunden."
+            echo "[OK] Node ist eingerichtet und mit dem Panel verbunden (ID ${NODE_ID})."
+            echo "MSM_ENROLLED_NODE_ID=${NODE_ID}"
             exit 0
         fi
     fi
