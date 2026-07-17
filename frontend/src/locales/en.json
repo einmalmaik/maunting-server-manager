@@ -1233,6 +1233,27 @@
       "split": "Optional split layout: host 1 serves the static frontend, host 2 runs the control plane, and hosts 3 through 20 are remote nodes.",
       "nodeGridLabel": "Nineteen remote node hosts"
     },
+    "migration": {
+      "title": "Safely split an existing installation",
+      "description": "Run the assistant on the existing all-in-one installation. It collects your choices and migrates game servers before the final backend cutover so that only one control plane is authoritative.",
+      "commandLabel": "Component migration",
+      "steps": {
+        "1": {
+          "title": "Connect an external frontend",
+          "description": "Checks the already-built HTTPS frontend, separates panel and API origins, and verifies CORS, cookies and the API-only Caddy site."
+        },
+        "2": {
+          "title": "Move game servers",
+          "description": "Copies selected stopped servers with saves, mods, workshop files, backups and assigned PostgreSQL databases. Source data is retained."
+        },
+        "3": {
+          "title": "Move the backend",
+          "description": "Pre-installs the fresh target, then transfers the panel database, configuration, DIS secrets, panel backups and community blueprints during the short cutover."
+        }
+      },
+      "externalBoundary": "MSM cannot change the DNS A/AAAA record at an external provider or grant the one-time owner approval for a new agent. These boundaries are shown clearly and never bypassed.",
+      "rollback": "Before target commit, a failure restarts the old control plane. After successful target verification it stays disabled to prevent split brain. The assistant keeps source data and the old control plane as a rollback basis and never deletes them automatically."
+    },
     "enrollment": {
       "title": "Connect a new node",
       "intro": "The standard path is secret-free for the operator: no manual token or TLS fingerprint copy is required.",

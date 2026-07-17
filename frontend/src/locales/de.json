@@ -1233,6 +1233,27 @@
       "split": "Optionale Trennung: Host 1 liefert das statische Frontend aus, Host 2 betreibt die Control Plane und Host 3 bis 20 sind Remote-Nodes.",
       "nodeGridLabel": "Neunzehn Remote-Node-Hosts"
     },
+    "migration": {
+      "title": "Bestehende Installation sicher aufteilen",
+      "description": "Starte den Assistenten auf der bestehenden All-in-one-Installation. Er sammelt deine Auswahl und migriert Gameserver vor dem finalen Backend-Cutover, damit immer nur eine Control Plane maßgeblich ist.",
+      "commandLabel": "Komponenten-Migration",
+      "steps": {
+        "1": {
+          "title": "Externes Frontend verbinden",
+          "description": "Prüft das bereits gebaute HTTPS-Frontend, setzt Panel- und API-Origin getrennt und verifiziert CORS, Cookies und die API-only-Caddy-Site."
+        },
+        "2": {
+          "title": "Gameserver verschieben",
+          "description": "Kopiert ausgewählte gestoppte Server samt Saves, Mods, Workshop-Dateien, Backups und zugeordneten PostgreSQL-Datenbanken. Quelldaten bleiben erhalten."
+        },
+        "3": {
+          "title": "Backend auslagern",
+          "description": "Installiert das frische Ziel vorab und überträgt beim kurzen Cutover Panel-Datenbank, Konfiguration, DIS-Secrets, Panel-Backups und Community-Blueprints."
+        }
+      },
+      "externalBoundary": "Den DNS-A/AAAA-Eintrag beim externen Anbieter und die einmalige Owner-Freigabe eines neuen Agents kann MSM nicht selbst übernehmen. Diese Grenzen werden deutlich angezeigt und nicht umgangen.",
+      "rollback": "Vor dem Ziel-Commit startet ein Fehler die alte Control Plane wieder. Nach erfolgreicher Zielprüfung bleibt sie gegen Split-Brain deaktiviert. Der Assistent behält Quelldaten und die alte Control Plane bewusst als Rollback-Basis; er löscht nichts automatisch."
+    },
     "enrollment": {
       "title": "Einen neuen Node verbinden",
       "intro": "Der Standardweg ist für den Betreiber secret-frei: Agent-Token und TLS-Fingerprint müssen nicht manuell kopiert werden.",

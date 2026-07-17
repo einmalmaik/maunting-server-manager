@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRightLeft,
   Check,
   Clipboard,
   FileArchive,
@@ -17,6 +18,7 @@ import {
 
 export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \\
   | sudo bash -s -- --domain panel.example.com`
+export const COMPONENT_MIGRATION_COMMAND = 'sudo /opt/msm/scripts/migrate-components.sh'
 
 const artifacts = [
   'msm-panel-<VERSION>.tar.gz',
@@ -25,13 +27,13 @@ const artifacts = [
   'SHA256SUMS',
 ] as const
 
-function CommandBlock() {
+function CommandBlock({ command, label, testId }: { command: string; label: string; testId: string }) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(PANEL_BOOTSTRAP_COMMAND)
+      await navigator.clipboard.writeText(command)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
@@ -44,7 +46,7 @@ function CommandBlock() {
       <div className="flex items-center justify-between gap-3 border-b border-outline-variant px-4 py-2.5">
         <span className="inline-flex items-center gap-2 font-label-md text-xs uppercase tracking-wider text-on-surface-variant">
           <Terminal className="h-4 w-4 text-primary" />
-          {t('docsSelfHosting.install.commandLabel')}
+          {label}
         </span>
         <button
           type="button"
@@ -57,7 +59,7 @@ function CommandBlock() {
         </button>
       </div>
       <pre className="overflow-x-auto p-4 font-mono text-xs leading-6 text-on-surface sm:text-sm">
-        <code data-testid="panel-bootstrap-command">{PANEL_BOOTSTRAP_COMMAND}</code>
+        <code data-testid={testId}>{command}</code>
       </pre>
       <span className="sr-only" role="status" aria-live="polite">
         {copied ? t('docsSelfHosting.install.copied') : ''}
@@ -149,7 +151,11 @@ export function SelfHostingDocs() {
             </p>
           </div>
         </div>
-        <CommandBlock />
+        <CommandBlock
+          command={PANEL_BOOTSTRAP_COMMAND}
+          label={t('docsSelfHosting.install.commandLabel')}
+          testId="panel-bootstrap-command"
+        />
         <p className="mt-4 border-l-2 border-primary/50 pl-4 text-sm leading-6 text-on-surface-variant">
           {t('docsSelfHosting.install.releaseNote')}
         </p>
@@ -187,6 +193,45 @@ export function SelfHostingDocs() {
             {t('docsSelfHosting.topology.split')}
           </p>
         </div>
+      </section>
+
+      <section aria-labelledby="component-migration" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <ArrowRightLeft className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="component-migration" className="font-headline text-headline-md text-on-surface">
+              {t('docsSelfHosting.migration.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.migration.description')}
+            </p>
+          </div>
+        </div>
+        <CommandBlock
+          command={COMPONENT_MIGRATION_COMMAND}
+          label={t('docsSelfHosting.migration.commandLabel')}
+          testId="component-migration-command"
+        />
+        <ol className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant lg:grid-cols-3">
+          {Array.from({ length: 3 }, (_, index) => (
+            <li key={index} className="bg-surface-container p-4 sm:p-5">
+              <span className="font-mono text-xs font-semibold text-primary">0{index + 1}</span>
+              <h3 className="mt-2 text-sm font-semibold text-on-surface">
+                {t(`docsSelfHosting.migration.steps.${index + 1}.title`)}
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-on-surface-variant">
+                {t(`docsSelfHosting.migration.steps.${index + 1}.description`)}
+              </p>
+            </li>
+          ))}
+        </ol>
+        <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p className="text-sm leading-6">{t('docsSelfHosting.migration.externalBoundary')}</p>
+        </div>
+        <p className="mt-4 text-sm leading-6 text-on-surface-variant">
+          {t('docsSelfHosting.migration.rollback')}
+        </p>
       </section>
 
       <section aria-labelledby="enrollment" className="mb-10">

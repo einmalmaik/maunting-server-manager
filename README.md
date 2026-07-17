@@ -110,6 +110,20 @@ Die vollständige Komponenten-, Release- und Node-Anleitung steht in
 [`docs/self-hosting.md`](docs/self-hosting.md) und nach der Anmeldung im Panel
 unter **Dokumentation → Self-Hosting & Nodes**.
 
+Eine bestehende All-in-one-Installation wird mit dem interaktiven Assistenten
+aufgeteilt. Er kann ein bereits gebautes externes Frontend verbinden,
+ausgewählte Gameserver vollständig zwischen Nodes kopieren und die
+Backend-Control-Plane fehlersicher auf einen frischen Linux-Server verschieben:
+
+```bash
+sudo /opt/msm/scripts/migrate-components.sh
+```
+
+Der Assistent behält Quelldaten und eine deaktivierte Quell-Control-Plane als
+Rollback-Basis. DNS beim externen Anbieter und die einmalige Owner-Freigabe
+eines neuen Agents bleiben bewusst menschliche Sicherheitsgrenzen. Details,
+Vorbedingungen und `--dry-run` stehen in [`docs/self-hosting.md`](docs/self-hosting.md).
+
 ---
 
 ## Update (neue Version installieren)

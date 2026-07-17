@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import i18n from '@/i18n'
-import { PANEL_BOOTSTRAP_COMMAND, SelfHostingDocs } from './SelfHostingDocs'
+import { COMPONENT_MIGRATION_COMMAND, PANEL_BOOTSTRAP_COMMAND, SelfHostingDocs } from './SelfHostingDocs'
 
 function renderPage() {
   return render(
@@ -51,6 +51,15 @@ describe('SelfHostingDocs', () => {
 
     expect(screen.getByText(/continued without deletion using --resume-partial/i)).toBeInTheDocument()
     expect(screen.getByText(/foreign PostgreSQL state remains blocked/i)).toBeInTheDocument()
+  })
+
+  it('documents the interactive component migration and its safety boundaries', () => {
+    renderPage()
+
+    expect(screen.getByTestId('component-migration-command').textContent).toBe(COMPONENT_MIGRATION_COMMAND)
+    expect(screen.getByText(/keeps source data and the old control plane as a rollback basis/i)).toBeInTheDocument()
+    expect(screen.getByText(/DNS A\/AAAA record.*one-time owner approval/i)).toBeInTheDocument()
+    expect(screen.getByText(/saves, mods, workshop files, backups and assigned PostgreSQL databases/i)).toBeInTheDocument()
   })
 
   it('links to node administration and the documentation index', () => {

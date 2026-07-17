@@ -105,6 +105,91 @@ stehen. Das Backend benötigt für getrenntes Hosting passende CORS- und
 Cookie-Einstellungen; Details stehen in `frontend/.env.example` und
 `backend/.env.example`.
 
+## Bestehende All-in-one-Installation aufteilen
+
+Für eine bereits installierte MSM-Instanz ist der interaktive Assistent der
+Standardweg:
+
+```bash
+sudo /opt/msm/scripts/migrate-components.sh
+```
+
+Er fragt unabhängig voneinander nach drei Aktionen und führt sie anschließend
+in einer sicheren Reihenfolge aus:
+
+1. **Externes Frontend verbinden:** Das statische Frontend muss beim Anbieter
+   bereits mit `VITE_API_URL=https://api.example.com` gebaut und über eine
+   HTTPS-Origin erreichbar sein. Der Assistent prüft die Origin, stellt Backend,
+   CORS, Cross-Site-Cookies und die API-only-Caddy-Site ein und prüft den
+   Preflight. Er lädt selbst nichts zu Vercel, Wurzel oder einem anderen
+   Hostinganbieter hoch, weil dafür anbieterspezifische Zugangsdaten nötig wären.
+2. **Ausgewählte Gameserver verschieben:** Eine komma-separierte Liste wie
+   `1,2,3,8` wird nacheinander auf einen bereits registrierten Zielnode kopiert.
+   Jeder Server muss gestoppt sein. Das vollständige Serververzeichnis enthält
+   Saves, Konfiguration, Mods, Workshop-Dateien, Blueprint-erzeugte Laufzeitdaten
+   und Backups. Zugeordnete node-eigene PostgreSQL-Datenbanken werden als Dumps
+   mitgesichert und auf dem Ziel wiederhergestellt. Die DB-Zuordnung wechselt
+   erst nach erfolgreicher Zielprüfung; Quelldaten werden nicht automatisch
+   gelöscht.
+3. **Backend/Control Plane verschieben:** Das Ziel muss ein frischer
+   Ubuntu-/Debian-Server sein, erreichbar per Root-SSH oder über einen Benutzer
+   mit passwortlosem `sudo`. Der Assistent installiert zuerst parallel eine
+   Backend-only-Control-Plane. Befindet sich auf der Quelle noch der lokale
+   Agent, wird er über das normale, vom Owner zu bestätigende TLS-Enrollment in
+   einen eigenständigen Node umgewandelt. Eine kurzlebige Challenge pro
+   Serververzeichnis beweist, dass der neue Agent exakt dieselben Daten und den
+   erwarteten Rootless-Docker-Runtime sieht; erst dann wird die Node-Zuordnung
+   atomar geändert.
+
+Beim finalen Backend-Cutover stoppt nur die alte Control Plane kurz. Danach
+werden ein konsistenter PostgreSQL-Dump, die Backend-Konfiguration, dieselben
+DIS-/Anwendungs-Secrets, Panel-Backups, Community-Blueprints und der
+Setup-Zustand übertragen. Das Ziel behält sein frisch generiertes lokales
+PostgreSQL-Passwort; Datenbank-URLs der Quelle werden nicht übernommen. Nach
+Restore, DIS-, Backend-, Caddy- und Health-Prüfung bleibt die alte Control Plane
+deaktiviert, während ihr eigenständiger Agent weiterläuft. Die Quelle wird nicht
+gelöscht und kann bewusst als Rollback-Basis erhalten bleiben.
+
+Vor dem Commit des Zielzustands startet jeder Fehler die alte Control Plane
+wieder. Nach erfolgreicher lokaler Zielprüfung gibt es absichtlich keinen
+automatischen Split-Brain-Fallback mehr: Es darf nie gleichzeitig auf zwei
+Panel-Datenbanken geschrieben werden. Falls die öffentliche Health-Prüfung noch
+nicht grün ist, bleibt das Ziel maßgeblich und der Assistent fordert zur Prüfung
+von DNS und Cloud-Firewall auf.
+
+### Voraussetzungen und unvermeidbare externe Schritte
+
+- Die Quellinstallation läuft und verwendet PostgreSQL.
+- Backend-Ziel: frisches unterstütztes Linux, mindestens die vom Preflight
+  berechnete freie Kapazität, SSH-Host-Key-Prüfung und Root beziehungsweise
+  passwortloses `sudo`.
+- Gameserver-Ziel: bereits im Panel registrierter, online geprüfter TLS-Node mit
+  genügend Speicher und freien Zielports.
+- Das Frontend muss bereits beim gewählten Hostinganbieter gebaut sein. In
+  `VITE_*` stehen ausschließlich öffentliche Origins, niemals Secrets.
+- Den DNS-A/AAAA-Eintrag der API-Domain muss der Betreiber beim DNS-Anbieter auf
+  den Zielserver setzen. Ohne Zugang zu diesem externen Anbieter darf und kann
+  MSM diesen Schritt nicht vortäuschen.
+- Die einmalige Owner-Freigabe eines neuen Agents bleibt eine bewusste
+  Sicherheitsgrenze und wird auch mit `--yes` nicht umgangen.
+
+Eine reine Vorprüfung ohne Änderungen ist möglich:
+
+```bash
+sudo /opt/msm/scripts/migrate-components.sh \
+  --migrate-backend \
+  --backend-target root@203.0.113.10 \
+  --api-domain api.example.com \
+  --dry-run
+```
+
+Alle Automationsoptionen zeigt
+`sudo /opt/msm/scripts/migrate-components.sh --help`. SSH-Passwörter,
+Private Keys, Datenbankpasswörter, Agent-Tokens und DIS-Secrets werden weder als
+Argumente angenommen noch ausgegeben. Temporäre Klartext-Konfigurationen und
+Dumps liegen ausschließlich in Verzeichnissen mit Modus `0700`, Dateien mit
+`0600`, und werden nach dem Ziel-Cutover entfernt.
+
 ## Einen neuen Node verbinden
 
 Der Standardweg benötigt weder einen Repository-Clone noch manuelles Kopieren
@@ -148,9 +233,16 @@ bewusste Sicherheitsgrenze.
 Jede Vorlage erklärt Status, Zweck, Herkunft und Format aller Betreiberwerte.
 Automatisch erzeugte `.env`-Dateien dürfen niemals committed werden.
 
+Bei getrenntem Hosting bezeichnet `MSM_PANEL_URL` die vom Benutzer geöffnete
+Frontend-Origin, während `MSM_API_URL` die öffentliche Backend-Origin bezeichnet.
+Bei einer All-in-one-Installation sind beide identisch. Cookies werden ohne
+manuellen Override aus `MSM_API_URL` abgeleitet, weil nur der API-Host sie setzen
+darf. `MSM_LOCAL_AGENT_ENABLED=false` wird auf einer migrierten Backend-only-
+Control-Plane automatisch gesetzt; Betreiber müssen dafür keinen Token kopieren.
+
 ## Aktualität dieser Dokumentation
 
 Änderungen an Bootstrap, `install.sh`, `update.sh`, Node-Enrollment,
-Release-Artefakten, Komponentenaufteilung oder Environment-Verträgen müssen in
-demselben Commit sowohl diese Datei als auch die sichtbare Panel-Seite
-`/docs/self-hosting` aktualisieren.
+`scripts/migrate-components.sh`, Release-Artefakten, Komponentenaufteilung oder
+Environment-Verträgen müssen in demselben Commit sowohl diese Datei als auch die
+sichtbare Panel-Seite `/docs/self-hosting` aktualisieren.
