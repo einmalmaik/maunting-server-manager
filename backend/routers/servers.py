@@ -798,32 +798,35 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
             )
 
     # 4. Backup-Verzeichnis (Files) löschen - DB-Cascade räumt Records
+    #    Nur fuer lokale Nodes, da Remote-Backups auf dem Node liegen.
     backup_dir = f"/opt/msm/backups/{server.id}"
     backups_removed = False
-    if os.path.exists(backup_dir):
-        try:
-            shutil.rmtree(backup_dir)
-            backups_removed = True
-        except OSError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Abbruch (Atomar): Backup-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
-            )
+    if node is None or node.is_local:
+        if os.path.exists(backup_dir):
+            try:
+                shutil.rmtree(backup_dir)
+                backups_removed = True
+            except OSError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Abbruch (Atomar): Backup-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
+                )
 
-    # 5. MSM-Console-Log-Verzeichnis räumen
-    console_log_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "logs",
-        str(server.id),
-    )
-    if os.path.exists(console_log_dir):
-        try:
-            shutil.rmtree(console_log_dir)
-        except OSError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Abbruch (Atomar): Console-Log-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
-            )
+    # 5. MSM-Console-Log-Verzeichnis räumen (nur lokal vorhanden)
+    if node is None or node.is_local:
+        console_log_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "logs",
+            str(server.id),
+        )
+        if os.path.exists(console_log_dir):
+            try:
+                shutil.rmtree(console_log_dir)
+            except OSError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Abbruch (Atomar): Console-Log-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
+                )
 
     # 6. Verwaltete PostgreSQL-Ressourcen loeschen. Bei Fehler bleibt der
     # Server-Datensatz erhalten, damit der Cleanup erneut versucht werden kann.
