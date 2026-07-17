@@ -148,8 +148,9 @@ if ! $MIGRATE_FRONTEND && ! $MIGRATE_BACKEND && ! $MIGRATE_SERVERS; then
     exit 0
 fi
 
-[[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] && (( SSH_PORT >= 1 && SSH_PORT <= 65535 )) \
-    || fail "Ungültiger SSH-Port"
+if [[ ! "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+    fail "Ungültiger SSH-Port"
+fi
 
 if $MIGRATE_FRONTEND; then
     [[ -n "$FRONTEND_ORIGIN" ]] || ask_value "Exakte Frontend-Origin (https://...)" FRONTEND_ORIGIN

@@ -31,6 +31,7 @@ def test_script_has_strict_secret_safe_failure_contract() -> None:
     assert "MSM_SECRET_KEY=" not in script
     assert "MSM_DIS_SIDECAR_TOKEN=" not in script
     assert "PGPASSWORD=" not in script
+    assert "--exclude='.env'" in script
 
 
 def test_script_keeps_node_security_boundary_and_source_data() -> None:
