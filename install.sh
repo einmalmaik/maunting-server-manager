@@ -224,29 +224,31 @@ load_current_env() {
         CURRENT_DOMAIN="${CURRENT_DOMAIN#https://}"
     fi
 
+    # Optional keys: missing vars must not make this function return non-zero
+    # under `set -e` (a trailing `[[ -n ]] && assign` with empty val does).
     val=$(grep -E '^MSM_SERVE_FRONTEND=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SERVE_FRONTEND="$val"
+    if [[ -n "$val" ]]; then CURRENT_SERVE_FRONTEND="$val"; fi
 
     val=$(grep -E '^MSM_EMAIL_PROVIDER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_EMAIL_PROVIDER="$val"
+    if [[ -n "$val" ]]; then CURRENT_EMAIL_PROVIDER="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_HOST=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_HOST="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_HOST="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_PORT=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_PORT="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_PORT="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_USER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_USER="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_USER="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_PASSWORD=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_PASS="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_PASS="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_FROM=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_FROM="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_FROM="$val"; fi
 
     val=$(grep -E '^MSM_RESEND_API_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_RESEND_API_KEY="$val"
+    if [[ -n "$val" ]]; then CURRENT_RESEND_API_KEY="$val"; fi
 
     val=$(grep -E '^MSM_DATABASE_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
     if [[ "$val" == postgresql* ]]; then
@@ -254,22 +256,25 @@ load_current_env() {
     else
         CURRENT_USE_POSTGRES=false
     fi
-    [[ -n "$val" ]] && CURRENT_DB_URL="$val"
+    if [[ -n "$val" ]]; then CURRENT_DB_URL="$val"; fi
 
     val=$(grep -E '^MSM_DATABASE_URL_ASYNC=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_DB_URL_ASYNC="$val"
+    if [[ -n "$val" ]]; then CURRENT_DB_URL_ASYNC="$val"; fi
 
     val=$(grep -E '^MSM_REDIS_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_REDIS_URL="$val"
+    if [[ -n "$val" ]]; then CURRENT_REDIS_URL="$val"; fi
 
     val=$(grep -E '^MSM_AUTO_UPDATE=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_AUTO_UPDATE="$val"
+    if [[ -n "$val" ]]; then CURRENT_AUTO_UPDATE="$val"; fi
 
     val=$(grep -E '^MSM_SECRET_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SECRET_KEY="$val"
+    if [[ -n "$val" ]]; then CURRENT_SECRET_KEY="$val"; fi
 
+    # Multi-node: absent on pre-multi-node .env → keep default "true"
     val=$(grep -E '^MSM_LOCAL_AGENT_ENABLED=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_LOCAL_AGENT_ENABLED="$val"
+    if [[ -n "$val" ]]; then CURRENT_LOCAL_AGENT_ENABLED="$val"; fi
+
+    return 0
 }
 
 show_current_config() {
