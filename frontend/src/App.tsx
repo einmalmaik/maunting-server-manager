@@ -34,6 +34,7 @@ import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
 import { DisBadge } from './components/DisBadge'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
+import { SupportWidgetLoader } from './components/SupportWidgetLoader'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
@@ -157,6 +158,7 @@ function App() {
       </Routes>
       </Suspense>
       <PrivacyAcknowledgementNotice />
+      <SupportWidgetLoader />
       <ToastContainer />
       <ConfirmDialog />
       <PromptDialog />

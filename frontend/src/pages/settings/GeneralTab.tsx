@@ -4,8 +4,9 @@ import { Clock, Save } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { supportedLocales } from '@/config/locales'
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
 import { Dropdown } from '@/components/ui/Dropdown'
+import { normalizePanelLanguage } from '@/config/panelLocales'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
 export function GeneralTab() {
@@ -18,7 +19,11 @@ export function GeneralTab() {
   useEffect(() => {
     let active = true
     api<PanelSettings>('/settings')
-      .then((data) => { if (active) setSettings(data) })
+      .then((data) => {
+        if (!active) return
+        setSettings(data)
+        void i18n.changeLanguage(normalizePanelLanguage(data.default_language))
+      })
       .catch((err) => toast.error(err.message))
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
@@ -28,7 +33,14 @@ export function GeneralTab() {
     e.preventDefault()
     setSaving(true)
     try {
-      await api('/settings', { method: 'POST', body: JSON.stringify(settings) })
+      await api('/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          panel_url: settings.panel_url,
+          default_language: normalizePanelLanguage(i18n.language),
+          time_format: settings.time_format,
+        }),
+      })
       toast.success(t('settings.saved'))
     } catch (err: any) {
       toast.error(err.message)
@@ -71,15 +83,13 @@ export function GeneralTab() {
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                 {t('settings.defaultLanguage')}
               </label>
-              <Dropdown
-                value={settings.default_language}
-                onChange={(lang) => {
-                  setSettings({ ...settings, default_language: lang })
-                  i18n.changeLanguage(lang)
-                }}
-                options={supportedLocales.map((locale) => ({ value: locale.code, label: locale.nativeLabel }))}
-                disabled={!canWrite}
+              <LanguageSwitcher
+                className={!canWrite ? 'pointer-events-none opacity-60' : ''}
+                onLanguageChange={(code) => setSettings({ ...settings, default_language: code })}
               />
+              <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+                {t('settings.defaultLanguageHint')}
+              </p>
             </div>
             <div>
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">

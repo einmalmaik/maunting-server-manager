@@ -821,6 +821,7 @@
     "smtpTls": "Use TLS",
     "resendApiKey": "Resend API Key",
     "defaultLanguage": "Default Language",
+    "defaultLanguageHint": "German/English toggle (no language dropdown). Used as the default for new sessions.",
     "timeFormat": "Time format",
     "timeFormat24": "24-hour format",
     "timeFormat12": "12-hour format",
@@ -861,6 +862,7 @@
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
       "imprint": "Imprint",
+      "supportWidget": "Support widget",
       "backup": "Backup"
     },
     "imprint": {
@@ -870,6 +872,65 @@
       "url": "Imprint URL",
       "urlHint": "Empty is allowed. If set, the URL must start with http:// or https://.",
       "preview": "Open imprint"
+    },
+    "supportWidget": {
+      "title": "Support widget",
+      "description": "Show a chat widget in the panel. Singra is native (installation ID + webhook). Crisp and tawk.to use their standard embed IDs. Use custom HTML only for other vendors.",
+      "enabled": "Show widget in the panel",
+      "provider": "Provider",
+      "providers": {
+        "singra": "Singra (Discord bot)",
+        "singraHint": "native",
+        "crisp": "Crisp",
+        "crispHint": "Website ID",
+        "tawk": "tawk.to",
+        "tawkHint": "Property + widget",
+        "custom": "Other provider",
+        "customHint": "HTML snippet"
+      },
+      "singraAutoInject": "Same as the HTML snippet: widget.js with data-widget-id — the panel injects your installation ID automatically.",
+      "installIdConfigured": "Installation ID set",
+      "installIdMissing": "No installation ID",
+      "installIdSource": {
+        "env": "Source: MSM_SINGRA_WIDGET_INSTALL_ID",
+        "panel": "Source: panel database (DIS)",
+        "none": "Source: none"
+      },
+      "installIdNew": "New widget installation ID",
+      "installIdPlaceholder": "Copy from the Singra panel",
+      "installIdSave": "Save installation ID",
+      "installIdSaved": "Installation ID saved",
+      "installIdRemove": "Remove",
+      "installIdRemoved": "Installation ID removed",
+      "crispWebsiteId": "Crisp website ID",
+      "crispHint": "From Crisp → Website Settings → Setup.",
+      "tawkPropertyId": "tawk.to property ID",
+      "tawkWidgetId": "tawk.to widget ID",
+      "tawkHint": "From the tawk.to embed URL (embed.tawk.to/PROPERTY/WIDGET).",
+      "customSnippet": "HTML snippet (before </body>)",
+      "customSnippetPlaceholder": "<script>…</script>",
+      "customHint": "Only when the vendor has no dedicated field — paste their documented script tags.",
+      "webhookTitle": "Webhook & signature (Singra)",
+      "webhookDescription": "1) Register this URL in the Singra widget panel. 2) Rotate the secret there and paste it below in MSM (or set SINGRA_WEBHOOK_SECRET for msm-panel).",
+      "webhookSecretNew": "Webhook secret (from Singra)",
+      "webhookSecretPlaceholder": "Paste after “Rotate secret” in the Singra panel",
+      "webhookSecretHint": "Not the widget installation ID — only the HMAC secret for inbound webhooks.",
+      "webhookSecretSave": "Save secret",
+      "webhookSecretSaved": "Webhook secret saved",
+      "webhookSecretRemove": "Remove secret",
+      "webhookSecretRemoved": "Webhook secret removed",
+      "copyWebhook": "Copy URL",
+      "webhookCopied": "Webhook URL copied",
+      "secretConfigured": "Webhook secret is set",
+      "secretMissing": "Webhook secret missing",
+      "secretSource": {
+        "env": "Source: environment variable",
+        "panel": "Source: panel database",
+        "none": "Source: none"
+      },
+      "rotateSecret": "Rotate secret",
+      "secretRotated": "New webhook secret — configure in Singra and as an environment variable",
+      "testWebhook": "Run test delivery"
     },
     "githubTokenTitle": "GitHub Personal Access Token",
     "githubWhyNeeded": "Required for blueprints of type source.type=github to clone or pull private repositories. Public repos work without a token.",
@@ -1132,6 +1193,11 @@
     "powerUserDialogWarn": "This password is NOT saved by the panel and cannot be shown again. Store it securely now (e.g. in a password manager).",
     "powerUserDialogHint": "Connect via the docker network (msm-internal) only, or via msm-postgres:5432. External access requires tunneling.",
     "powerUserDialogClose": "Close — I have stored the password"
+  },
+  "language": {
+    "label": "Language",
+    "de": "DE",
+    "en": "EN"
   },
   "common": {
     "unlimited": "unlimited",

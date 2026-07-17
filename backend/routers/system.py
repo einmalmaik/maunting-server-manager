@@ -34,6 +34,14 @@ def legal_settings() -> dict:
     }
 
 
+@router.get("/support-widget")
+def public_support_widget() -> dict:
+    """Oeffentliche Widget-Konfiguration fuer Script-Injektion (keine Webhook-Secrets)."""
+    from services.support_widget_service import public_widget_config
+
+    return public_widget_config()
+
+
 def _check_docker() -> dict:
     """Prüft ob der Docker-Daemon erreichbar ist."""
     try:
