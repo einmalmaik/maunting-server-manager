@@ -6,10 +6,9 @@ from models import Node
 
 @patch("subprocess.run")
 def test_get_update_status_no_update(mock_run):
-    # Mocking git fetch, branch, local SHA, remote SHA
+    # Mocking git fetch, local SHA, remote SHA
     mock_run.side_effect = [
         MagicMock(returncode=0),
-        MagicMock(returncode=0, stdout="main\n"),
         MagicMock(returncode=0, stdout="abc12345\n"),
         MagicMock(returncode=0, stdout="abc12345\n"),
     ]
@@ -25,7 +24,6 @@ def test_get_update_status_no_update(mock_run):
 def test_get_update_status_update_available(mock_run):
     mock_run.side_effect = [
         MagicMock(returncode=0),
-        MagicMock(returncode=0, stdout="main\n"),
         MagicMock(returncode=0, stdout="localsha\n"),
         MagicMock(returncode=0, stdout="remotesh\n"),
     ]

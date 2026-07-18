@@ -28,12 +28,8 @@ def get_update_status() -> dict:
         # 1. Fetch remote changes
         subprocess.run(["git", "fetch"], check=True, capture_output=True, text=True, cwd=repo_root, timeout=15)
 
-        # 2. Get active branch name
-        branch_res = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            check=True, capture_output=True, text=True, cwd=repo_root, timeout=10
-        )
-        branch = branch_res.stdout.strip()
+        # 2. Always check main branch
+        branch = "main"
 
         # 3. Get local SHA
         local_res = subprocess.run(
@@ -42,20 +38,12 @@ def get_update_status() -> dict:
         )
         local_sha = local_res.stdout.strip()
 
-        # 4. Get remote SHA
+        # 4. Get remote SHA of origin/main
         upstream_res = subprocess.run(
-            ["git", "rev-parse", "@{u}"],
+            ["git", "rev-parse", "origin/main"],
             capture_output=True, text=True, cwd=repo_root, timeout=10
         )
-        if upstream_res.returncode == 0:
-            remote_sha = upstream_res.stdout.strip()
-        else:
-            # Fallback to origin/<branch>
-            remote_res = subprocess.run(
-                ["git", "rev-parse", f"origin/{branch}"],
-                capture_output=True, text=True, cwd=repo_root, timeout=10
-            )
-            remote_sha = remote_res.stdout.strip() if remote_res.returncode == 0 else ""
+        remote_sha = upstream_res.stdout.strip() if upstream_res.returncode == 0 else ""
 
         if not remote_sha:
             return {"update_available": False, "error": "Could not determine remote commit hash", "ok": False}
