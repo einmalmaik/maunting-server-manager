@@ -55,7 +55,6 @@ def test_operator_docs_and_environment_contract_stay_synchronized() -> None:
     command = "sudo /opt/msm/helper-scripts/migrate-panel-components.sh"
     self_hosting = (ROOT / "docs" / "self-hosting.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     visible_docs = (ROOT / "frontend" / "src" / "pages" / "docs" / "SelfHostingDocs.tsx").read_text(
         encoding="utf-8"
     )
@@ -65,10 +64,15 @@ def test_operator_docs_and_environment_contract_stay_synchronized() -> None:
     assert command in self_hosting
     assert command in readme
     assert command in visible_docs
-    assert "helper-scripts/migrate-panel-components.sh" in agents
     assert "MSM_API_URL=" in backend_env
     assert "MSM_LOCAL_AGENT_ENABLED=" in backend_env
     assert "helper-scripts/migrate-panel-components.sh" in frontend_env
+
+    # AGENTS.md lives locally (defined in .gitignore) and is not present in CI runner.
+    agents_path = ROOT / "AGENTS.md"
+    if agents_path.exists():
+        agents = agents_path.read_text(encoding="utf-8")
+        assert "helper-scripts/migrate-panel-components.sh" in agents
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Native Bash execution is verified in Linux CI")
