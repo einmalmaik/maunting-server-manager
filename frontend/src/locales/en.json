@@ -884,6 +884,16 @@
       "urlHint": "Empty is allowed. If set, the URL must start with http:// or https://.",
       "preview": "Open imprint"
     },
+    "captcha": {
+      "title": "CAPTCHA Protection",
+      "description": "Protect registration, login, and password recovery from spam and brute-force attacks.",
+      "enable": "Enable CAPTCHA",
+      "provider": "Provider",
+      "siteKey": "Site Key",
+      "siteKeyHint": "Public key to display the widget in the browser.",
+      "secretKey": "Secret Key",
+      "secretKeyHint": "Private key for server-side token validation."
+    },
     "supportWidget": {
       "title": "Support widget",
       "description": "Show a chat widget in the panel. Singra is native (installation ID + webhook). Crisp and tawk.to use their standard embed IDs. Use custom HTML only for other vendors.",

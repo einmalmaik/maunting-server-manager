@@ -884,6 +884,16 @@
       "urlHint": "Leer ist erlaubt. Wenn eine URL gesetzt ist, muss sie mit http:// oder https:// beginnen.",
       "preview": "Impressum öffnen"
     },
+    "captcha": {
+      "title": "CAPTCHA-Schutz",
+      "description": "Schütze Registrierung, Anmeldung und Passwortwiederherstellung vor Spam und Bruteforce.",
+      "enable": "CAPTCHA aktivieren",
+      "provider": "Anbieter",
+      "siteKey": "Site Key (Website-Schlüssel)",
+      "siteKeyHint": "Öffentlicher Schlüssel zur Anzeige des Widgets im Browser.",
+      "secretKey": "Secret Key (Geheimer Schlüssel)",
+      "secretKeyHint": "Privater Schlüssel zur serverseitigen Token-Validierung."
+    },
     "supportWidget": {
       "title": "Support-Widget",
       "description": "Chat-Widget im Panel einblenden. Singra ist nativ integriert (Installations-ID + Webhook). Crisp und tawk.to nutzen ihre üblichen Embed-IDs. Nur bei „Sonstiger Anbieter“ HTML einfügen.",
