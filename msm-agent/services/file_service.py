@@ -579,19 +579,24 @@ def init_chunked_upload(
     )
 
 
-def append_upload_chunk(server_id: str | int, upload_id: str, data: bytes) -> int:
-    if len(data) > MAX_CHUNK_SIZE:
-        raise ValueError("Chunk exceeds maximum size")
+def append_upload_chunk(server_id: str | int, upload_id: str, data_stream: Any) -> int:
     part, meta = _upload_paths(server_id, upload_id)
     if not part.exists() or not meta.exists():
         raise FileNotFoundError("Upload not found")
     current = part.stat().st_size
     expected = int(json.loads(meta.read_text(encoding="utf-8"))["total_size"])
-    if current + len(data) > MAX_CHUNKED_UPLOAD_SIZE or (expected and current + len(data) > expected):
-        raise ValueError("Upload exceeds declared size")
+    
+    total_written = 0
     with part.open("ab") as handle:
-        handle.write(data)
-    return current + len(data)
+        while block := data_stream.read(1024 * 1024):  # 1MB buffer
+            total_written += len(block)
+            if current + total_written > MAX_CHUNKED_UPLOAD_SIZE or (expected and current + total_written > expected):
+                raise ValueError("Upload exceeds declared size")
+            if total_written > MAX_CHUNK_SIZE:
+                raise ValueError("Chunk exceeds maximum size")
+            handle.write(block)
+            
+    return current + total_written
 
 
 def upload_status(server_id: str | int, upload_id: str) -> int:

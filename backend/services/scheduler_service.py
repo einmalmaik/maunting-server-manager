@@ -191,7 +191,7 @@ async def _backup_server_task(server_id: int) -> None:
         from services.backup_orchestrator import create_server_backup
         # Scheduler path: kuerzerer Timeout (300s), damit der Scheduler-Loop nicht zu lange blockiert.
         # Orchestrator uebernimmt tar + DB-Record + Retention-Cleanup + S3-Upload (Best-Effort).
-        create_server_backup(server_id, db, timeout_seconds=300)
+        await asyncio.to_thread(create_server_backup, server_id, db, timeout_seconds=300)
     except Exception:
         import logging
         logging.warning("Auto-backup failed for server %s (details redacted for security)", server_id)
@@ -335,7 +335,7 @@ async def _panel_backup_task() -> None:
     db = SessionLocal()
     try:
         from services.panel_backup_service import create_panel_backup
-        create_panel_backup(db)
+        await asyncio.to_thread(create_panel_backup, db)
     except Exception:
         # Generische Warning — keine Secrets, kein Crash (VAL-PANEL-SCHED-005).
         logger.warning(
@@ -532,7 +532,7 @@ async def _disk_soft_limit_task() -> None:
     try:
         servers = db.query(Server).all()
         for server in servers:
-            result = evaluate_disk_soft_limit(db, server)
+            result = await asyncio.to_thread(evaluate_disk_soft_limit, db, server)
             if not result.get("ok"):
                 continue
         db.commit()
@@ -656,7 +656,7 @@ async def _background_update_check_task() -> None:
                                 release_install_update_lock,
                             )
                             lock_acquired = try_acquire_install_update_lock(
-                                server.id, "scheduler_mod_update"
+                                server.id, "scheduler_mod_update", node_id=server.node_id
                             )
                             if not lock_acquired:
                                 _append_console_log(
@@ -832,7 +832,7 @@ async def _background_git_update_check_task() -> None:
     if not auto_enabled:
         return
 
-    status = get_update_status()
+    status = await asyncio.to_thread(get_update_status)
     if status.get("update_available"):
         logger.info(
             "Automatisches Update: Neues Commit gefunden (%s -> %s). Updates werden gestartet...",
@@ -840,8 +840,8 @@ async def _background_git_update_check_task() -> None:
         )
         db = SessionLocal()
         try:
-            trigger_node_updates(db)
-            trigger_panel_update(db)
+            await asyncio.to_thread(trigger_node_updates, db)
+            await asyncio.to_thread(trigger_panel_update, db)
         except Exception as e:
             logger.error("Automatisches Update fehlgeschlagen: %s", e)
         finally:

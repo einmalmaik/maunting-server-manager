@@ -241,14 +241,16 @@ def node_out_dict(
         
         ram_total_bytes = (ram_total or 0) * 1024 * 1024
         disk_total_bytes = (disk_total or 0) * 1024 * 1024
+        ram_used_bytes = (ram_used or 0) * 1024 * 1024
+        disk_used_bytes = (disk_used or 0) * 1024 * 1024
         metrics = {
             "cpu_percent": cpu_percent,
-            "ram_percent": (ram_used / ram_total_bytes * 100) if (ram_total_bytes and ram_used) else 0.0,
+            "ram_percent": (ram_used_bytes / ram_total_bytes * 100) if ram_total_bytes else 0.0,
             "ram_total_bytes": ram_total_bytes,
-            "ram_used_bytes": ram_used or 0,
+            "ram_used_bytes": ram_used_bytes,
             "disk_total_bytes": disk_total_bytes,
-            "disk_used_bytes": disk_used or 0,
-            "disk_percent": (disk_used / disk_total_bytes * 100) if (disk_total_bytes and disk_used) else 0.0,
+            "disk_used_bytes": disk_used_bytes,
+            "disk_percent": (disk_used_bytes / disk_total_bytes * 100) if disk_total_bytes else 0.0,
             "agent_version": getattr(node, "agent_version", None),
             "docker_connected": getattr(node, "docker_connected", None),
             "container_count": getattr(node, "container_count", None),

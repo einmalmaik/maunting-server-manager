@@ -649,7 +649,7 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     update_lock_acquired = False
     try:
         if _server_file_update_needed(server_update_check) or mod_updates:
-            update_lock_acquired = try_acquire_install_update_lock(server.id, "start_update")
+            update_lock_acquired = try_acquire_install_update_lock(server.id, "start_update", node_id=server.node_id)
             if not update_lock_acquired:
                 raise HTTPException(
                     status_code=409,
@@ -767,7 +767,7 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     update_lock_acquired = False
     try:
         if _server_file_update_needed(server_update_check) or bool(mod_updates):
-            update_lock_acquired = try_acquire_install_update_lock(server.id, "restart_update")
+            update_lock_acquired = try_acquire_install_update_lock(server.id, "restart_update", node_id=server.node_id)
             if not update_lock_acquired:
                 raise HTTPException(
                     status_code=409,

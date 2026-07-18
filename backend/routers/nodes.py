@@ -57,11 +57,38 @@ def _rate_limit(key: str, limit) -> None:
         raise HTTPException(status_code=429, detail="Zu viele Enrollment-Anfragen")
 
 
+def _is_trusted_proxy(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+        if addr.is_loopback:
+            return True
+        if addr.version == 4:
+            octets = addr.packed
+            if octets[0] == 10:
+                return True
+            if octets[0] == 172 and 16 <= octets[1] <= 31:
+                return True
+            if octets[0] == 192 and octets[1] == 168:
+                return True
+        else:
+            if (addr.packed[0] & 0xfe) == 0xfc:
+                return True
+            if addr.packed[0] == 0xfe and (addr.packed[1] & 0xc0) == 0x80:
+                return True
+        return False
+    except ValueError:
+        return False
+
+
 def _source_ip(request: Request) -> str:
     direct = request.client.host if request.client else ""
     candidate = direct
-    if direct in {"127.0.0.1", "::1"}:
-        candidate = request.headers.get("x-forwarded-for", direct).split(",", 1)[0].strip()
+    is_trusted = _is_trusted_proxy(direct) if direct else False
+
+    if is_trusted:
+        x_forwarded_for = request.headers.get("x-forwarded-for", "")
+        if x_forwarded_for:
+            candidate = x_forwarded_for.split(",", 1)[0].strip()
     elif settings.debug and direct == "testclient":
         candidate = request.headers.get("x-forwarded-for", "127.0.0.1").split(",", 1)[0].strip()
     try:
@@ -128,6 +155,8 @@ def list_nodes(
     query = query.order_by(Node.id.asc())
 
     if page is not None and limit is not None:
+        page = max(1, page)
+        limit = max(1, limit)
         total = query.count()
         nodes = query.offset((page - 1) * limit).limit(limit).all()
         result_page = {
@@ -397,14 +426,49 @@ def get_node(
         raise HTTPException(status_code=404, detail="Node nicht gefunden")
     count = db.query(Server).filter(Server.node_id == node.id).count()
 
-    # Live metrics from agent (best-effort; longer timeout for manual probe)
-    metrics = probe_node_metrics(node, timeout=5.0, mark_status=True)
+    # Build client from node
+    from services.node_client import NodeClient
+    client = NodeClient.from_node(node, timeout=5.0)
+
+    # Commit and close/release the current DB connection back to the pool during the slow HTTP call
+    db.commit()
+    db.close()
+
+    metrics = None
+    status = "offline"
     try:
-        db.commit()
-        db.refresh(node)
+        metrics = client.metrics()
+        status = "online"
     except Exception:
-        db.rollback()
-    return node_out_dict(node, server_count=count, metrics=metrics)
+        pass
+
+    # Open a new short-lived DB transaction to apply the heartbeat/metric results
+    from database import SessionLocal
+    from datetime import datetime, timezone
+    from services.node_service import apply_agent_metrics
+
+    db_new = SessionLocal()
+    try:
+        node = db_new.query(Node).filter(Node.id == node_id).first()
+        if node:
+            node.status = status
+            if status == "online":
+                node.last_heartbeat = datetime.now(timezone.utc)
+                if isinstance(metrics, dict):
+                    apply_agent_metrics(node, metrics)
+            db_new.commit()
+            db_new.refresh(node)
+            # Re-read count in the new session to return accurate serializable data
+            count = db_new.query(Server).filter(Server.node_id == node.id).count()
+            # Return serialized output
+            return node_out_dict(node, server_count=count, metrics=metrics)
+        else:
+            raise HTTPException(status_code=404, detail="Node nicht gefunden")
+    except Exception as exc:
+        db_new.rollback()
+        raise exc
+    finally:
+        db_new.close()
 
 
 @router.put("/{node_id}", response_model=NodeOut)
@@ -423,16 +487,17 @@ def update_node(
     if body.name is not None:
         node.name = body.name.strip()
 
-    new_fp = body.tls_fingerprint if body.tls_fingerprint is not None else node.tls_fingerprint
+    has_fp_field = "tls_fingerprint" in body.model_fields_set
+    new_fp = body.tls_fingerprint if has_fp_field else node.tls_fingerprint
     new_host = body.host.strip() if body.host is not None else node.host
-    if body.host is not None or body.tls_fingerprint is not None:
+    if body.host is not None or has_fp_field:
         try:
             node.host = validate_remote_node_host(
                 new_host, new_fp, is_local=bool(node.is_local)
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if body.tls_fingerprint is not None:
+        if has_fp_field:
             node.tls_fingerprint = body.tls_fingerprint
 
     if body.auth_token is not None:

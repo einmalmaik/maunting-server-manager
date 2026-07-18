@@ -27,6 +27,7 @@ import os
 import shlex
 import socket
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
@@ -1037,18 +1038,20 @@ def run_ephemeral(
         container = client.containers.run(**kwargs)
 
         if log_callback is not None:
-            # Live-Streaming: Logs zeilenweise lesen und an Callback senden.
-            # container.logs(stream=True, follow=True) liefert einen Generator
-            # ueber bytes-Chunks (eine Zeile pro Chunk bei Docker JSON-Log).
-            # Timeout via container.wait() parallel nicht moeglich; wir nutzen
-            # stattdessen den Generator mit einem separaten wait nach Abschluss.
-            try:
-                for chunk in container.logs(stream=True, follow=True, stdout=True, stderr=True):
-                    line = _decode(chunk).rstrip("\r\n")
-                    if line:
-                        log_callback(line + "\n")
-            except Exception as stream_exc:
-                logger.warning("Live-Log-Stream unterbrochen fuer ephemeral container: %s", stream_exc)
+            # Live-Streaming: Logs zeilenweise in separatem Daemon-Thread lesen,
+            # damit container.wait(timeout=...) auf dem Haupt-Thread blockieren kann.
+            # Timeout/Remove beendet den Stream und bereinigt den Thread automatisch.
+            def stream_logs():
+                try:
+                    for chunk in container.logs(stream=True, follow=True, stdout=True, stderr=True):
+                        line = _decode(chunk).rstrip("\r\n")
+                        if line:
+                            log_callback(line + "\n")
+                except Exception as stream_exc:
+                    logger.debug("Live-Log-Stream beendet/unterbrochen: %s", stream_exc)
+
+            log_thread = threading.Thread(target=stream_logs, daemon=True)
+            log_thread.start()
 
         wait_result = container.wait(timeout=timeout)
         if log_callback is None:

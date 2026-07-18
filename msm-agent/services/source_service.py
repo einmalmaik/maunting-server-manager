@@ -59,7 +59,8 @@ def install_http(
     written = 0
     current_url = url
     try:
-        with httpx.Client(timeout=600) as client:
+        timeout = httpx.Timeout(60.0, read=60.0, connect=15.0)
+        with httpx.Client(timeout=timeout) as client:
             for _ in range(6):
                 _validate_public_https(current_url)
                 with client.stream("GET", current_url, follow_redirects=False) as response:

@@ -74,8 +74,8 @@ async def test_node_heartbeat_task_scale(db: Session):
     for node in updated_nodes:
         assert node.status == "online"
         assert node.cpu_percent == 15.5
-        assert node.ram_used == 4 * 1024 * 1024 * 1024
-        assert node.disk_used == 20 * 1024 * 1024 * 1024
+        assert node.ram_used == 4096
+        assert node.disk_used == 20480
         assert node.container_count == 3
         assert node.docker_connected is True
         assert node.agent_version == "1.0.0"
@@ -92,7 +92,7 @@ def test_nodes_api_pagination_and_search(client: TestClient, db: Session, owner_
             auth_token_enc=token_enc,
             status="online",
             cpu_percent=12.5,
-            ram_used=2 * 1024 * 1024 * 1024,
+            ram_used=2048,
             cpu_total=4.0,
             ram_total=8192,
             disk_total=51200,

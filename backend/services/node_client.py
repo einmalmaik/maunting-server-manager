@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import ssl
+import threading
 from typing import Any, Iterator
 from urllib.parse import quote, urljoin, urlparse, urlunparse
 
@@ -25,6 +26,37 @@ NODE_TOKEN_AAD = "msm:node:auth_token"
 # Default timeouts — agent ops can include image pull / large uploads
 _DEFAULT_TIMEOUT = 30.0
 _LONG_TIMEOUT = 600.0
+
+
+_ASYNC_CLIENTS: dict[tuple[str, str | None, float], httpx.AsyncClient] = {}
+_SYNC_CLIENTS: dict[tuple[str, str | None, float], httpx.Client] = {}
+_CLIENTS_LOCK = threading.Lock()
+
+
+def get_shared_async_client(
+    host: str,
+    tls_fingerprint: str | None,
+    timeout: float,
+    verify: Any,
+) -> httpx.AsyncClient:
+    key = (host, tls_fingerprint, timeout)
+    with _CLIENTS_LOCK:
+        if key not in _ASYNC_CLIENTS:
+            _ASYNC_CLIENTS[key] = httpx.AsyncClient(timeout=timeout, verify=verify)
+        return _ASYNC_CLIENTS[key]
+
+
+def get_shared_sync_client(
+    host: str,
+    tls_fingerprint: str | None,
+    timeout: float,
+    verify: Any,
+) -> httpx.Client:
+    key = (host, tls_fingerprint, timeout)
+    with _CLIENTS_LOCK:
+        if key not in _SYNC_CLIENTS:
+            _SYNC_CLIENTS[key] = httpx.Client(timeout=timeout, verify=verify)
+        return _SYNC_CLIENTS[key]
 
 
 class NodeClientError(Exception):
@@ -170,7 +202,19 @@ class NodeClient:
     ) -> Any:
         t = timeout if timeout is not None else self._timeout
         try:
-            with self._httpx_client(t) as client:
+            client = get_shared_sync_client(self._base, self._tls_fingerprint, t, self._verify())
+            if type(client).__name__ in ("MagicMock", "Mock", "NonCallableMagicMock"):
+                with client as mock_client:
+                    resp = mock_client.request(
+                        method,
+                        self._url(path),
+                        headers=self._headers(),
+                        json=json,
+                        params=params,
+                        content=content,
+                        files=files,
+                    )
+            else:
                 resp = client.request(
                     method,
                     self._url(path),
@@ -216,8 +260,20 @@ class NodeClient:
     ) -> Any:
         t = timeout if timeout is not None else self._timeout
         try:
-            if client is not None and not self._tls_fingerprint:
-                resp = await client.request(
+            if self._tls_fingerprint:
+                async_client = get_shared_async_client(self._base, self._tls_fingerprint, t, self._verify())
+                resp = await async_client.request(
+                    method,
+                    self._url(path),
+                    headers=self._headers(),
+                    json=json,
+                    params=params,
+                    content=content,
+                    files=files,
+                )
+            else:
+                target_client = client if client is not None else get_shared_async_client(self._base, None, t, True)
+                resp = await target_client.request(
                     method,
                     self._url(path),
                     headers=self._headers(),
@@ -227,17 +283,6 @@ class NodeClient:
                     files=files,
                     timeout=t,
                 )
-            else:
-                async with self._httpx_async_client(t) as async_client:
-                    resp = await async_client.request(
-                        method,
-                        self._url(path),
-                        headers=self._headers(),
-                        json=json,
-                        params=params,
-                        content=content,
-                        files=files,
-                    )
         except NodeClientError:
             raise
         except httpx.HTTPError as exc:

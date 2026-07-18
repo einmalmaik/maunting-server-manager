@@ -8,6 +8,7 @@ import psutil
 from fastapi import APIRouter
 
 from config import settings
+from services import docker_service
 
 router = APIRouter(tags=["metrics"])
 
@@ -24,6 +25,16 @@ def metrics() -> dict[str, Any]:
         disk = psutil.disk_usage("/")
 
     net = psutil.net_io_counters()
+
+    docker_connected = False
+    container_count = 0
+    try:
+        docker_connected = docker_service.ping()
+        if docker_connected:
+            container_count = len(docker_service.list_containers())
+    except Exception:
+        pass
+
     return {
         "cpu_count": cpu_count,
         "cpu_percent": cpu_percent,
@@ -35,4 +46,7 @@ def metrics() -> dict[str, Any]:
         "disk_percent": float(disk.percent),
         "network_bytes_sent": int(getattr(net, "bytes_sent", 0) or 0),
         "network_bytes_recv": int(getattr(net, "bytes_recv", 0) or 0),
+        "agent_version": settings.agent_version,
+        "docker_connected": docker_connected,
+        "container_count": container_count,
     }

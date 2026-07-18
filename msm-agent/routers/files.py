@@ -165,7 +165,7 @@ def rename_file(
 
 
 @router.post("/upload")
-async def upload_file(
+def upload_file(
     server_id: str = Query(...),
     path: str = Query(...),
     file: UploadFile = File(...),
@@ -184,7 +184,7 @@ async def upload_file(
         ) as tmp:
             os.fchmod(tmp.fileno(), 0o600)
             tmp_path = Path(tmp.name)
-            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+            while chunk := file.file.read(UPLOAD_CHUNK_SIZE):
                 total += len(chunk)
                 if total > limit:
                     raise HTTPException(status_code=413, detail="Upload too large")
@@ -324,15 +324,16 @@ def init_chunked_upload(body: ChunkedUploadInitBody, server_id: str = Query(...)
 
 
 @router.put("/upload/{upload_id}/chunk")
-async def append_upload_chunk(
+def append_upload_chunk(
     upload_id: str,
     server_id: str = Query(...),
     chunk: UploadFile = File(...),
 ) -> dict[str, int]:
     try:
-        data = await chunk.read(file_service.MAX_CHUNK_SIZE + 1)
-        total = file_service.append_upload_chunk(server_id, upload_id, data)
-        return {"received": len(data), "total_received": total}
+        current_size = file_service.upload_status(server_id, upload_id)
+        total = file_service.append_upload_chunk(server_id, upload_id, chunk.file)
+        received = total - current_size
+        return {"received": received, "total_received": total}
     except Exception as exc:
         raise _map_path_errors(exc) from exc
 

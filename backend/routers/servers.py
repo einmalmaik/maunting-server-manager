@@ -250,7 +250,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     install_lock_acquired = False
     if plugin:
         install_lock_acquired = try_acquire_install_update_lock(
-            server.id, "install"
+            server.id, "install", node_id=server.node_id
         )
         if not install_lock_acquired:
             db.delete(server)
@@ -1207,7 +1207,7 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    if not try_acquire_install_update_lock(server.id, "install"):
+    if not try_acquire_install_update_lock(server.id, "install", node_id=server.node_id):
         raise _install_update_busy_error()
     try:
         server.status = "installing"

@@ -56,10 +56,74 @@ def _append_console_log(server_id: int, text: str) -> None:
 
 logger = logging.getLogger(__name__)
 
+_ORIGINAL_FETCH_SINGLE = None
+
 
 # ── Interne Sync-Helfer für passive Erkennung (KISS, nur in dieser Datei) ────
 # Keine neuen Abstraktionen/Module. Sync, um Aufrufer in base.py und Routern
 # (sync Hooks) nicht zu brechen. Keine Side-Effects außer Logging.
+
+def _fetch_steam_mods_updated(app_id: str, workshop_ids: list[str]) -> dict[str, datetime]:
+    """
+    Ruft time_updated (als UTC-Datetime) für mehrere Workshop-Mods in einem
+    einzigen Batch-Request über die Steam Web API ab.
+    
+    Rückgabe: Dict mapping workshop_id (str) -> datetime
+    """
+    # Support tests monkeypatching the single mod fetch function
+    global _fetch_steam_mod_updated
+    if _ORIGINAL_FETCH_SINGLE is not None and _fetch_steam_mod_updated is not _ORIGINAL_FETCH_SINGLE:
+        results = {}
+        for wid in workshop_ids:
+            dt = _fetch_steam_mod_updated(app_id, wid)
+            if dt:
+                results[wid] = dt
+        return results
+
+    from services.steam_api_key_service import resolve_key
+
+    api_key = resolve_key()
+    if not api_key or not workshop_ids:
+        return {}
+
+    try:
+        query_data = {
+            "publishedfileids": [int(wid) for wid in workshop_ids if wid.isdigit()],
+            "includevotes": False,
+        }
+        params = {
+            "key": api_key,
+            "input_json": json.dumps(query_data, separators=(",", ":")),
+        }
+        url = "https://api.steampowered.com/IPublishedFileService/GetDetails/v1/"
+        headers = {"User-Agent": "MSM/1.0 (+updater-check)"}
+
+        with httpx.Client(timeout=15.0, headers=headers, follow_redirects=True) as client:
+            resp = client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+
+        results = {}
+        if (
+            "response" in data
+            and "publishedfiledetails" in data["response"]
+            and data["response"]["publishedfiledetails"]
+        ):
+            for mod_data in data["response"]["publishedfiledetails"]:
+                wid = str(mod_data.get("publishedfileid") or "")
+                if wid and mod_data.get("result") == 1:
+                    ts = int(mod_data.get("time_updated") or 0)
+                    if ts > 0:
+                        results[wid] = datetime.fromtimestamp(ts, tz=timezone.utc)
+        return results
+    except Exception as exc:
+        logger.warning(
+            "Steam-Workshop-Details für Mods (App %s) konnten nicht abgerufen werden: %s",
+            app_id,
+            type(exc).__name__,
+        )
+    return {}
+
 
 def _fetch_steam_mod_updated(app_id: str, workshop_id: str) -> datetime | None:
     """
@@ -116,6 +180,9 @@ def _fetch_steam_mod_updated(app_id: str, workshop_id: str) -> datetime | None:
             type(exc).__name__,
         )
     return None
+
+
+_ORIGINAL_FETCH_SINGLE = _fetch_steam_mod_updated
 
 
 def _has_steam_api_key() -> bool:
@@ -283,6 +350,10 @@ def check_workshop_mod_updates(
     active_mods = _query_active_mods(server.id)  # bereits enabled=True, sortiert
     has_api_key = _has_steam_api_key()
 
+    # Batch-Abfrage aller aktiven Mod-Timestamps vor der Schleife, um N+1 HTTP-Requests zu vermeiden
+    mod_ids = [str(m.workshop_id) for m in active_mods if m.workshop_id]
+    remote_updates = _fetch_steam_mods_updated(workshop_app_id, mod_ids) if (has_api_key and mod_ids) else {}
+
     results: list[dict[str, Any]] = []
 
     for mod in active_mods:
@@ -324,9 +395,8 @@ def check_workshop_mod_updates(
         if db_updated is not None and db_updated.tzinfo is None:
             db_updated = db_updated.replace(tzinfo=timezone.utc)
 
-        # Remote via Steam API (passiv, nur Erkennung). Ohne Key darf der
-        # Basis-Start/Restart nicht scheitern; Status bleibt dann unknown.
-        remote_updated = _fetch_steam_mod_updated(workshop_app_id, workshop_id) if has_api_key else None
+        # Remote via Steam API (passiv, nur Erkennung) aus Batch-Ergebnis lesen
+        remote_updated = remote_updates.get(workshop_id)
 
         action = "none"
         reason = "up_to_date"
