@@ -40,7 +40,7 @@ def test_get_update_status_update_available(mock_run):
 @patch("services.update_service.create_panel_backup")
 @patch("subprocess.Popen")
 def test_trigger_panel_update(mock_popen, mock_backup, db):
-    mock_backup.return_value = MagicMock(filename="backup.tar.gz")
+    mock_backup.return_value = MagicMock(local_path="backups/panel/backup.tar.gz")
     
     res = trigger_panel_update(db)
     assert res["ok"] is True

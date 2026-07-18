@@ -78,7 +78,7 @@ def trigger_panel_update(db: Session) -> dict:
     # 1. Backup erstellen
     try:
         backup_record = create_panel_backup(db, name="Pre-Update Auto-Backup")
-        logger.info("Pre-Update Backup erfolgreich erstellt: %s", backup_record.filename)
+        logger.info("Pre-Update Backup erfolgreich erstellt: %s", os.path.basename(backup_record.local_path))
     except Exception as e:
         logger.error("Pre-Update Backup fehlgeschlagen, Update wird abgebrochen: %s", e)
         raise RuntimeError(f"Backup vor Update fehlgeschlagen: {str(e)}")
