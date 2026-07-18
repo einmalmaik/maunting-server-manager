@@ -187,7 +187,7 @@ def install_command(
 
 @router.get("/install.sh", include_in_schema=False)
 def node_installer_script() -> FileResponse:
-    path = Path(__file__).resolve().parent.parent.parent / "scripts" / "install-node.sh"
+    path = Path(__file__).resolve().parent.parent.parent / "helper-scripts" / "install-msm-node.sh"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="Node-Installer ist nicht verfügbar")
     return FileResponse(path, media_type="text/x-shellscript", filename="install-node.sh")
@@ -198,7 +198,7 @@ def node_agent_package(request: Request) -> FileResponse:
     _rate_limit(request, _enrollment_begin_limit)
     root = Path(__file__).resolve().parent.parent.parent
     agent_dir = root / "msm-agent"
-    installer = root / "scripts" / "install-agent.sh"
+    installer = root / "helper-scripts" / "install-msm-agent.sh"
     if not agent_dir.is_dir() or not installer.is_file():
         raise HTTPException(status_code=503, detail="Agent-Paket ist nicht verfügbar")
 
@@ -228,7 +228,7 @@ def node_agent_package(request: Request) -> FileResponse:
     try:
         with tarfile.open(archive_name, "w:gz") as archive:
             archive.add(agent_dir, arcname="msm-agent", filter=package_filter)
-            archive.add(installer, arcname="scripts/install-agent.sh", filter=package_filter)
+            archive.add(installer, arcname="helper-scripts/install-msm-agent.sh", filter=package_filter)
     except Exception:
         Path(archive_name).unlink(missing_ok=True)
         raise HTTPException(status_code=503, detail="Agent-Paket konnte nicht erstellt werden")

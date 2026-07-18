@@ -28,7 +28,7 @@
     "tokenLeaveBlank": "Leave blank to keep the current token",
     "tokenTooShort": "Token must be at least 16 characters.",
     "tlsFingerprint": "TLS fingerprint (SHA-256)",
-    "fingerprintPlaceholder": "64 hex chars from install-agent.sh",
+    "fingerprintPlaceholder": "64 hex chars from install-msm-agent.sh",
     "fingerprintHint": "SHA-256 of the agent certificate (self-signed pin). Required for remote nodes.",
     "fingerprintRequired": "TLS fingerprint is required for remote nodes.",
     "searchPlaceholder": "Filter nodes...",

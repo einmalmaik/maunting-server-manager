@@ -116,7 +116,7 @@ ausgewählte Gameserver vollständig zwischen Nodes kopieren und die
 Backend-Control-Plane fehlersicher auf einen frischen Linux-Server verschieben:
 
 ```bash
-sudo /opt/msm/scripts/migrate-components.sh
+sudo /opt/msm/helper-scripts/migrate-panel-components.sh
 ```
 
 Der Assistent behält Quelldaten und eine deaktivierte Quell-Control-Plane als

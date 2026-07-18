@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# reset-msm-docker.sh
+# recover-docker-storage.sh
 # Safe recovery script for rootless Docker corruption on MSM prod deploys.
 # 
 # Typical cause: accidental `git clean -fd` in /opt/msm (the git root on many prod servers)
@@ -10,7 +10,7 @@ set -euo pipefail
 # for server install/reinstall.
 #
 # Usage (as root):
-#   sudo bash scripts/reset-msm-docker.sh
+#   sudo bash helper-scripts/recover-docker-storage.sh
 #
 # This will:
 # - Stop the rootless docker for msm
@@ -102,3 +102,4 @@ echo "If you still see blob errors in MSM logs, the improved error message now c
 echo ""
 echo "Lesson learned: NEVER git clean -fd on a prod deploy dir. --dry-run first. Always."
 echo "(This exact scenario once happened to the maintainer at 2am after git clean nuked the blobs. You're not alone. xD)"
+echo ""

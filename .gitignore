@@ -42,6 +42,7 @@ RELEASE_NOTES_*.md
 /backend/scripts/__pycache__
 /backend/venv
 /scripts/__pycache__/
+/helper-scripts/__pycache__/
 /frontend/dist
 /frontend/node_modules
 /Design idee für mssm

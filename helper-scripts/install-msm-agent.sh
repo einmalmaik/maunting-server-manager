@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
 #  MSM Agent Installer (Phase 5) — remote node runtime
-#  Usage:  sudo bash scripts/install-agent.sh
-#          sudo bash install-agent.sh   (when run from repo root)
+#  Usage:  sudo bash helper-scripts/install-msm-agent.sh
+#          sudo bash install-msm-agent.sh   (when run from repo root)
 #  Requires: Ubuntu 22.04+ / Debian 12+, root, Python 3.11+
 #  Sets up: msm user, rootless Docker, TLS cert, systemd unit
 # ═══════════════════════════════════════════════════════════════
@@ -66,7 +66,7 @@ if [[ -d "$REPO_ROOT/msm-agent" && -f "$REPO_ROOT/msm-agent/main.py" ]]; then
 elif [[ -d "./msm-agent" && -f "./msm-agent/main.py" ]]; then
   SRC_AGENT="$(cd ./msm-agent && pwd)"
 else
-  err "msm-agent/ Quellverzeichnis nicht gefunden (Repo-Root neben scripts/ erwarten)"
+  err "msm-agent/ Quellverzeichnis nicht gefunden (Repo-Root neben helper-scripts/ erwarten)"
 fi
 ok "Agent-Quellen: $SRC_AGENT"
 
@@ -219,7 +219,7 @@ else
 fi
 
 cat > "$ENV_FILE" <<EOF
-# Automatisch durch install-agent.sh generiert — niemals committen.
+# Automatisch durch install-msm-agent.sh generiert — niemals committen.
 # Vollständige Erklärung aller Werte: ${AGENT_DIR}/.env.example
 MSM_AGENT_TOKEN=${AGENT_TOKEN}
 MSM_AGENT_HOST=${AGENT_HOST}
@@ -304,7 +304,7 @@ systemctl enable msm-agent.service >>"$LOG_FILE" 2>&1
 systemctl restart msm-agent.service >>"$LOG_FILE" 2>&1 || warn "Service-Start fehlgeschlagen — journalctl -u msm-agent"
 sleep 1
 if systemctl is-active --quiet msm-agent.service; then
-  ok "msm-agent.service aktiv"
+  ok "msm-agent.service active"
 else
   if [[ "${MSM_AGENT_ENROLLMENT:-false}" == "true" ]]; then
     err "msm-agent.service ist nicht aktiv — siehe: journalctl -u msm-agent -n 50"

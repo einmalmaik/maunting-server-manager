@@ -42,7 +42,7 @@ usage() {
 MSM Komponenten-Migrationsassistent
 
 Interaktiv:
-  sudo ./scripts/migrate-components.sh
+  sudo ./helper-scripts/migrate-panel-components.sh
 
 Geprüfte Automation:
   --migrate-frontend --frontend-origin https://panel.example.com --api-domain api.example.com
@@ -277,7 +277,7 @@ create_code_archive() {
         --exclude='.ruff_cache' --exclude='*.pyc' --exclude='.env' --exclude='.env.local' \
         --exclude='backend/tests' --exclude='msm-agent/tests' --exclude='frontend/dist' \
         README.md Caddyfile.template install.sh update.sh msm-update.service msm-update.timer \
-        msm.service.template backend blueprints dis-sidecar docs frontend msm-agent scripts
+        msm.service.template backend blueprints dis-sidecar docs frontend msm-agent scripts helper-scripts
 }
 
 create_runtime_archive() {
@@ -353,7 +353,7 @@ run_backend_migration() {
         echo "Der vorhandene lokale Gameserver-Agent wird jetzt als eigenständiger TLS-Node neu eingerichtet."
         echo "Das Panel zeigt dabei eine Owner-Freigabe. Diese Sicherheitsfreigabe wird nicht umgangen."
         enrollment_output="$WORK_DIR/enrollment-result"
-        bash "$ROOT_DIR/scripts/install-node.sh" --panel "$current_api" | tee "$enrollment_output"
+        bash "$ROOT_DIR/helper-scripts/install-msm-node.sh" --panel "$current_api" | tee "$enrollment_output"
         replacement_id="$(sed -n 's/^MSM_ENROLLED_NODE_ID=//p' "$enrollment_output" | tail -1)"
         [[ "$replacement_id" =~ ^[1-9][0-9]*$ ]] || fail "Ungültige Ersatz-Node-ID"
         (

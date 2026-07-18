@@ -18,7 +18,7 @@ import {
 
 export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \\
   | sudo bash -s -- --domain panel.example.com`
-export const COMPONENT_MIGRATION_COMMAND = 'sudo /opt/msm/scripts/migrate-components.sh'
+export const COMPONENT_MIGRATION_COMMAND = 'sudo /opt/msm/helper-scripts/migrate-panel-components.sh'
 
 const artifacts = [
   'msm-panel-<VERSION>.tar.gz',

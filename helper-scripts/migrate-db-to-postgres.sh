@@ -51,7 +51,7 @@ if [[ "$CURRENT_URL" == postgresql* ]]; then
   MIGRATION_COMMITTED=true
   exit 0
 fi
-[[ "$CURRENT_URL" == sqlite* ]] || fail "Nicht unterstützte bestehende Datenbank-Konfiguration."
+[[ "$CURRENT_URL" == sqlite* ]] || fail "Nicht unterstützte bestehende database-Konfiguration."
 
 LEGACY_SQLITE="$MSM_DIR/backend/msm.db"
 [[ -s "$LEGACY_SQLITE" ]] || fail "Legacy-SQLite-Datenbank fehlt oder ist leer."

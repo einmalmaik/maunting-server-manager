@@ -39,7 +39,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 curl -fsSL "$PANEL_URL/api/nodes/agent-package" -o "$TMP_DIR/agent.tar.gz"
 tar -xzf "$TMP_DIR/agent.tar.gz" -C "$TMP_DIR"
 
-MSM_AGENT_ENROLLMENT=true bash "$TMP_DIR/scripts/install-agent.sh"
+MSM_AGENT_ENROLLMENT=true bash "$TMP_DIR/helper-scripts/install-msm-agent.sh"
 
 AGENT_ENV="/opt/msm-agent/.env"
 CERT_FILE="/opt/msm-agent/certs/agent.crt"

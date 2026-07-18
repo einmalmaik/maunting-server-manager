@@ -9,7 +9,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "migrate-components.sh"
+SCRIPT = ROOT / "helper-scripts" / "migrate-panel-components.sh"
 
 
 def _script() -> str:
@@ -36,9 +36,9 @@ def test_script_has_strict_secret_safe_failure_contract() -> None:
 
 def test_script_keeps_node_security_boundary_and_source_data() -> None:
     script = _script()
-    node_installer = (ROOT / "scripts" / "install-node.sh").read_text(encoding="utf-8")
+    node_installer = (ROOT / "helper-scripts" / "install-msm-node.sh").read_text(encoding="utf-8")
 
-    assert "scripts/install-node.sh" in script
+    assert "helper-scripts/install-msm-node.sh" in script
     assert "Owner-Freigabe" in script
     assert "MSM_ENROLLED_NODE_ID=" in script
     assert "Im Panel angezeigte/neu angelegte Ersatz-Node-ID" not in script
@@ -52,7 +52,7 @@ def test_script_keeps_node_security_boundary_and_source_data() -> None:
 
 
 def test_operator_docs_and_environment_contract_stay_synchronized() -> None:
-    command = "sudo /opt/msm/scripts/migrate-components.sh"
+    command = "sudo /opt/msm/helper-scripts/migrate-panel-components.sh"
     self_hosting = (ROOT / "docs" / "self-hosting.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
@@ -65,10 +65,10 @@ def test_operator_docs_and_environment_contract_stay_synchronized() -> None:
     assert command in self_hosting
     assert command in readme
     assert command in visible_docs
-    assert "scripts/migrate-components.sh" in agents
+    assert "helper-scripts/migrate-panel-components.sh" in agents
     assert "MSM_API_URL=" in backend_env
     assert "MSM_LOCAL_AGENT_ENABLED=" in backend_env
-    assert "scripts/migrate-components.sh" in frontend_env
+    assert "helper-scripts/migrate-panel-components.sh" in frontend_env
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Native Bash execution is verified in Linux CI")

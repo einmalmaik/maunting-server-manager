@@ -111,7 +111,7 @@ Für eine bereits installierte MSM-Instanz ist der interaktive Assistent der
 Standardweg:
 
 ```bash
-sudo /opt/msm/scripts/migrate-components.sh
+sudo /opt/msm/helper-scripts/migrate-panel-components.sh
 ```
 
 Er fragt unabhängig voneinander nach drei Aktionen und führt sie anschließend
@@ -178,7 +178,7 @@ von DNS und Cloud-Firewall auf.
 Eine reine Vorprüfung ohne Änderungen ist möglich:
 
 ```bash
-sudo /opt/msm/scripts/migrate-components.sh \
+sudo /opt/msm/helper-scripts/migrate-panel-components.sh \
   --migrate-backend \
   --backend-target root@203.0.113.10 \
   --api-domain api.example.com \
@@ -186,7 +186,7 @@ sudo /opt/msm/scripts/migrate-components.sh \
 ```
 
 Alle Automationsoptionen zeigt
-`sudo /opt/msm/scripts/migrate-components.sh --help`. SSH-Passwörter,
+`sudo /opt/msm/helper-scripts/migrate-panel-components.sh --help`. SSH-Passwörter,
 Private Keys, Datenbankpasswörter, Agent-Tokens und DIS-Secrets werden weder als
 Argumente angenommen noch ausgegeben. Temporäre Klartext-Konfigurationen und
 Dumps liegen ausschließlich in Verzeichnissen mit Modus `0700`, Dateien mit
@@ -245,6 +245,6 @@ Control-Plane automatisch gesetzt; Betreiber müssen dafür keinen Token kopiere
 ## Aktualität dieser Dokumentation
 
 Änderungen an Bootstrap, `install.sh`, `update.sh`, Node-Enrollment,
-`scripts/migrate-components.sh`, Release-Artefakten, Komponentenaufteilung oder
+`helper-scripts/migrate-panel-components.sh`, Release-Artefakten, Komponentenaufteilung oder
 Environment-Verträgen müssen in demselben Commit sowohl diese Datei als auch die
 sichtbare Panel-Seite `/docs/self-hosting` aktualisieren.

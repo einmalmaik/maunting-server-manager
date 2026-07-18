@@ -62,8 +62,8 @@ restore_panel_ownership() {
     # im $MSM_DIR ausfuehren! Auch wenn server-Daten unter $MSM_DIR/servers liegen:
     # git clean loescht untracked Dirs. Die .gitignore schuetzt jetzt die Daten-Pfade,
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
-    # Es gibt scripts/reset-msm-docker.sh als Recovery (für den Docker-Store-Corruption-Fall).
-    for sub in backend frontend docs dis-sidecar msm-agent; do
+    # Es gibt helper-scripts/recover-docker-storage.sh als Recovery (für den Docker-Store-Corruption-Fall).
+    for sub in backend frontend docs dis-sidecar msm-agent scripts helper-scripts; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
             # Hard fail for code trees used by venv setup — silent || true left
             # root-owned msm-agent after git pull and caused PEP 668 cascades.
@@ -543,7 +543,7 @@ fi
 if $LEGACY_SQLITE_UPDATE; then
     log "Migriere bestehende Panel-Datenbank einmalig nach PostgreSQL..."
     MSM_DIR="$MSM_DIR" MSM_USER="$MSM_USER" \
-        bash "$MSM_DIR/scripts/migrate-panel-to-postgres.sh" 2>&1 | tee -a "$LOG_FILE" \
+        bash "$MSM_DIR/helper-scripts/migrate-db-to-postgres.sh" 2>&1 | tee -a "$LOG_FILE" \
         || err "SQLite-nach-PostgreSQL-Migration fehlgeschlagen."
 fi
 log "Führe geprüfte PostgreSQL-Schemamigration durch..."

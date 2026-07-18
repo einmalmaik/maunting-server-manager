@@ -35,7 +35,7 @@ PANEL_ROOT="$WORK_DIR/mauntingservermanager-$VERSION"
 archive_tracked "$PANEL_ROOT" \
     README.md Caddyfile.template install.sh update.sh \
     msm-update.service msm-update.timer msm.service.template \
-    backend blueprints dis-sidecar docs frontend msm-agent scripts
+    backend blueprints dis-sidecar docs frontend msm-agent scripts helper-scripts
 rm -rf "$PANEL_ROOT/backend/tests" "$PANEL_ROOT/msm-agent/tests"
 rm -f "$PANEL_ROOT/dis-sidecar/test-backup-endpoints.mjs" \
     "$PANEL_ROOT/dis-sidecar/_isolated_test_deferred.mjs"
@@ -49,7 +49,7 @@ cp -a frontend/dist/. "$FRONTEND_ROOT/dist/"
 cp frontend/.env.example "$FRONTEND_ROOT/.env.example"
 
 AGENT_ROOT="$WORK_DIR/msm-agent-$VERSION"
-archive_tracked "$AGENT_ROOT" msm-agent scripts/install-agent.sh
+archive_tracked "$AGENT_ROOT" msm-agent helper-scripts/install-msm-agent.sh
 rm -rf "$AGENT_ROOT/msm-agent/tests"
 
 tar -czf "$OUTPUT_DIR/msm-panel-$VERSION.tar.gz" -C "$WORK_DIR" "mauntingservermanager-$VERSION"

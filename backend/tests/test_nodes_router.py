@@ -305,7 +305,7 @@ def test_agent_package_excludes_local_secrets_data_and_test_artifacts(client: Te
         names = archive.getnames()
 
     assert "msm-agent/main.py" in names
-    assert "scripts/install-agent.sh" in names
+    assert "helper-scripts/install-msm-agent.sh" in names
     forbidden_parts = {
         ".env",
         ".dev",

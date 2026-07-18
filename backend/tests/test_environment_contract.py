@@ -111,7 +111,7 @@ def test_installer_writes_multinode_and_split_hosting_settings() -> None:
     assert "dis-sidecar/.env.example" in installer
 
     updater = (ROOT / "update.sh").read_text(encoding="utf-8")
-    remote_installer = (ROOT / "scripts" / "install-agent.sh").read_text(encoding="utf-8")
+    remote_installer = (ROOT / "helper-scripts" / "install-msm-agent.sh").read_text(encoding="utf-8")
     for script in (installer, updater):
         assert "MSM_DIS_SIDECAR_PORT=9100" in script
         assert "NODE_ENV=production" in script

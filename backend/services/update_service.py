@@ -104,7 +104,7 @@ def generate_agent_package() -> bytes:
     """Generiert das aktuelle Agenten-Paket als tar.gz im Arbeitsspeicher."""
     repo_root = Path(_get_repo_root())
     agent_dir = repo_root / "msm-agent"
-    installer = repo_root / "scripts" / "install-agent.sh"
+    installer = repo_root / "helper-scripts" / "install-msm-agent.sh"
 
     if not agent_dir.is_dir() or not installer.is_file():
         raise FileNotFoundError("Agent-Quellen nicht gefunden")
@@ -124,7 +124,7 @@ def generate_agent_package() -> bytes:
     try:
         with tarfile.open(archive_path, "w:gz") as archive:
             archive.add(agent_dir, arcname="msm-agent", filter=package_filter)
-            archive.add(installer, arcname="scripts/install-agent.sh", filter=package_filter)
+            archive.add(installer, arcname="helper-scripts/install-msm-agent.sh", filter=package_filter)
 
         with open(archive_path, "rb") as f:
             data = f.read()
