@@ -157,14 +157,19 @@ def _fetch_http_last_modified(url: str) -> datetime | None:
     return None
 
 
+def _parse_appmanifest_content(text: str) -> str | None:
+    """Liest buildid aus Steam appmanifest-Inhalt (VDF-Text)."""
+    match = re.search(r'"buildid"\s+"(\d+)"', text)
+    return match.group(1) if match else None
+
+
 def _parse_appmanifest_build_id(manifest_path: Path) -> str | None:
     """Liest buildid aus Steam appmanifest_*.acf (VDF-Text, kein vollständiger Parser)."""
     try:
         text = manifest_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return None
-    match = re.search(r'"buildid"\s+"(\d+)"', text)
-    return match.group(1) if match else None
+    return _parse_appmanifest_content(text)
 
 
 def _steam_effective_branch(steam: Any | None) -> str:
@@ -258,6 +263,22 @@ def check_workshop_mod_updates(
         logger.debug("Workshop-Update-Check übersprungen: kein Steam-Workshop-Support im Blueprint.")
         return []
 
+    from services.node_service import client_for_server, resolve_server_node
+    from services.node_client import NodeClientError
+
+    node = resolve_server_node(server)
+    client = None
+    if node is not None and not getattr(node, "is_local", False):
+        try:
+            client = client_for_server(server)
+        except NodeClientError as exc:
+            logger.warning(
+                "Workshop-Update-Check übersprungen für Server %s: Node offline (%s)",
+                server.id,
+                exc.message,
+            )
+            return []
+
     workshop_app_id = bp_mods.workshopAppId
     active_mods = _query_active_mods(server.id)  # bereits enabled=True, sortiert
     has_api_key = _has_steam_api_key()
@@ -269,7 +290,7 @@ def check_workshop_mod_updates(
         if not workshop_id:
             continue
 
-        # Lokale Präsenz-Heuristik (exakt wie SteamCMD-Layout)
+        # Präsenz-Heuristik (exakt wie SteamCMD-Layout)
         local_path = (
             Path(server.install_dir)
             / "steamapps"
@@ -279,11 +300,24 @@ def check_workshop_mod_updates(
             / workshop_id
         )
         is_installed = False
-        if local_path.exists():
+        if client is not None:
             try:
-                is_installed = any(local_path.iterdir())
-            except OSError:
-                is_installed = False
+                remote_path = f"steamapps/workshop/content/{workshop_app_id}/{workshop_id}"
+                files = client.files_list(server.id, remote_path)
+                is_installed = len(files) > 0
+            except NodeClientError as exc:
+                if exc.status_code == 404:
+                    is_installed = False
+                else:
+                    is_installed = True
+            except Exception:
+                is_installed = True
+        else:
+            if local_path.exists():
+                try:
+                    is_installed = any(local_path.iterdir())
+                except OSError:
+                    is_installed = False
 
         db_updated: datetime | None = getattr(mod, "last_updated", None)
         # Normalisiere auf aware UTC falls nötig (DB-Sicherheit)
@@ -461,32 +495,61 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
         "details": "",
     }
 
-    install_dir = Path(getattr(server, "install_dir", "") or "")
-    if not install_dir or not install_dir.exists():
-        result["action"] = "update"
-        result["reason"] = "missing"
-        result["details"] = "Installationsverzeichnis fehlt oder ist nicht erreichbar."
-        logger.info(
-            "Server-Datei-Check: Verzeichnis fehlt für Server %s (Source %s).",
-            getattr(server, "id", "?"),
-            src_type,
-        )
-        return result
+    from services.node_service import client_for_server, resolve_server_node
+    from services.node_client import NodeClientError
 
-    # Schnelle Präsenz-Prüfung (short-circuit bei erstem Treffer, KISS)
+    node = resolve_server_node(server)
+    client = None
+    if node is not None and not getattr(node, "is_local", False):
+        try:
+            client = client_for_server(server)
+        except NodeClientError as exc:
+            result["details"] = f"Node offline: {exc.message}"
+            return result
+
+    install_dir = Path(getattr(server, "install_dir", "") or "")
     has_any_files = False
-    try:
-        for f in install_dir.rglob("*"):
-            if f.is_file():
-                has_any_files = True
-                break
-    except Exception as exc:  # pragma: no cover - FS-Probleme
-        logger.warning(
-            "Datei-Scan im Install-Dir fehlgeschlagen (Server %s): %s",
-            getattr(server, "id", "?"),
-            type(exc).__name__,
-        )
-        has_any_files = False
+    files_cache = None
+
+    if client is not None:
+        try:
+            files = client.files_list(server.id, "")
+            files_cache = files
+            has_any_files = any(f.get("is_dir") or f.get("size", 0) > 0 for f in files)
+        except NodeClientError as exc:
+            if exc.status_code == 404:
+                has_any_files = False
+            else:
+                result["details"] = f"Agent-Fehler: {exc.message}"
+                return result
+        except Exception as exc:
+            result["details"] = f"Verbindungsfehler: {str(exc)}"
+            return result
+    else:
+        if not install_dir or not install_dir.exists():
+            result["action"] = "update"
+            result["reason"] = "missing"
+            result["details"] = "Installationsverzeichnis fehlt oder ist nicht erreichbar."
+            logger.info(
+                "Server-Datei-Check: Verzeichnis fehlt für Server %s (Source %s).",
+                getattr(server, "id", "?"),
+                src_type,
+            )
+            return result
+
+        # Schnelle Präsenz-Prüfung (short-circuit bei erstem Treffer, KISS)
+        try:
+            for f in install_dir.rglob("*"):
+                if f.is_file():
+                    has_any_files = True
+                    break
+        except Exception as exc:  # pragma: no cover - FS-Probleme
+            logger.warning(
+                "Datei-Scan im Install-Dir fehlgeschlagen (Server %s): %s",
+                getattr(server, "id", "?"),
+                type(exc).__name__,
+            )
+            has_any_files = False
 
     if not has_any_files:
         result["action"] = "update"
@@ -501,8 +564,22 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
         steam_cfg = bp_source.steam
         steam_app_id = str(steam_cfg.appId or "") if steam_cfg else ""
         depot_branch = _steam_effective_branch(steam_cfg)
-        manifest_path = install_dir / "steamapps" / f"appmanifest_{steam_app_id}.acf"
-        local_build = _parse_appmanifest_build_id(manifest_path) if manifest_path.is_file() else None
+        
+        local_build = None
+        if client is not None:
+            try:
+                manifest_rel = f"steamapps/appmanifest_{steam_app_id}.acf"
+                content = client.files_read(server.id, manifest_rel)
+                local_build = _parse_appmanifest_content(content)
+            except NodeClientError as exc:
+                if exc.status_code != 404:
+                    logger.warning("Fehler beim Lesen des remote Manifests: %s", exc.message)
+            except Exception as exc:
+                logger.warning("Fehler beim Lesen des remote Manifests: %s", exc)
+        else:
+            manifest_path = install_dir / "steamapps" / f"appmanifest_{steam_app_id}.acf"
+            local_build = _parse_appmanifest_build_id(manifest_path) if manifest_path.is_file() else None
+
         remote_build, remote_dt = (
             _fetch_steam_branch_build(steam_app_id, depot_branch) if steam_app_id else (None, None)
         )
@@ -569,19 +646,31 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
         url = bp_source.http.url
         remote_dt = _fetch_http_last_modified(url)
 
-        # Lokale Referenz: neueste Datei-mtime außerhalb geschützter Bereiche
+        # Lokale/Remote Referenz: neueste Datei-mtime außerhalb geschützter Bereiche
         max_mtime = 0.0
-        try:
-            for f in install_dir.rglob("*"):
-                if f.is_file() and "steamapps" not in str(f) and "workshop" not in str(f):
-                    try:
-                        mt = f.stat().st_mtime
-                        if mt > max_mtime:
-                            max_mtime = mt
-                    except OSError:
-                        continue
-        except Exception:
-            pass
+        if client is not None:
+            try:
+                files = files_cache if files_cache is not None else client.files_list(server.id, "")
+                for f in files:
+                    name = f.get("name", "")
+                    if name not in ("steamapps", "workshop"):
+                        mtime = f.get("mtime", 0)
+                        if mtime > max_mtime:
+                            max_mtime = float(mtime)
+            except Exception as exc:
+                logger.warning("Fehler beim Abrufen der Remote-Mtimes: %s", exc)
+        else:
+            try:
+                for f in install_dir.rglob("*"):
+                    if f.is_file() and "steamapps" not in str(f) and "workshop" not in str(f):
+                        try:
+                            mt = f.stat().st_mtime
+                            if mt > max_mtime:
+                                max_mtime = mt
+                        except OSError:
+                            continue
+            except Exception:
+                pass
 
         local_mtime = datetime.fromtimestamp(max_mtime, tz=timezone.utc) if max_mtime > 0 else None
 

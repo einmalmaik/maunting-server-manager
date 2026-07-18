@@ -627,7 +627,7 @@ async def _background_update_check_task() -> None:
                     continue
 
                 # 1. Workshop-Mod-Updates werden autonom vorbereitet.
-                mod_updates = plugin.check_for_mod_updates(server)
+                mod_updates = await asyncio.to_thread(plugin.check_for_mod_updates, server)
                 if mod_updates:
                     from services.mod_install_status_service import mark_mod_pending
 
@@ -681,7 +681,7 @@ async def _background_update_check_task() -> None:
                                     release_install_update_lock(server.id)
 
                 # 2. Server-Datei-Update (Game-Binaries, passiv)
-                server_update = plugin.check_for_server_file_update(server)
+                server_update = await asyncio.to_thread(plugin.check_for_server_file_update, server)
                 if server_update.get("action") == "update":
                     reason = server_update.get("reason", "unbekannt")
                     _append_console_log(
