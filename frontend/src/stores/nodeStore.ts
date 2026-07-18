@@ -8,9 +8,12 @@ import type { Node } from '@/types'
 
 interface NodeState {
   nodes: Node[]
+  total: number
+  page: number
+  limit: number
   loading: boolean
   error: string | null
-  fetchNodes: () => Promise<void>
+  fetchNodes: (page?: number, limit?: number, search?: string) => Promise<void>
   createNode: (input: {
     name: string
     host: string
@@ -33,14 +36,38 @@ interface NodeState {
 
 export const useNodeStore = create<NodeState>((set, get) => ({
   nodes: [],
+  total: 0,
+  page: 1,
+  limit: 50,
   loading: false,
   error: null,
 
-  fetchNodes: async () => {
+  fetchNodes: async (page, limit, search) => {
     set({ loading: true, error: null })
     try {
-      const nodes = await api<Node[]>('/nodes')
-      set({ nodes, loading: false })
+      let url = '/nodes'
+      const params = new URLSearchParams()
+      if (page !== undefined) params.append('page', String(page))
+      if (limit !== undefined) params.append('limit', String(limit))
+      if (search !== undefined && search.trim() !== '') params.append('search', search.trim())
+
+      const queryStr = params.toString()
+      if (queryStr) {
+        url += `?${queryStr}`
+      }
+
+      const res = await api<Node[] | { items: Node[]; total: number; page: number; limit: number }>(url)
+      if (Array.isArray(res)) {
+        set({ nodes: res, total: res.length, page: 1, limit: res.length, loading: false })
+      } else {
+        set({
+          nodes: res.items,
+          total: res.total,
+          page: res.page,
+          limit: res.limit,
+          loading: false,
+        })
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Nodes konnten nicht geladen werden'
       set({ error: message, loading: false })

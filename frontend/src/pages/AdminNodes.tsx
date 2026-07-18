@@ -3,7 +3,7 @@
  * Uses existing msm-card / msm-btn / msm-input patterns + Singra ProgressBar.
  * Never displays agent tokens (API does not return them).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Activity,
@@ -71,7 +71,7 @@ function freeRamMb(node: Node): number | null {
 
 export function AdminNodes() {
   const { t } = useTranslation()
-  const { nodes, loading, fetchNodes, createNode, updateNode, deleteNode, healthCheck } =
+  const { nodes, total, loading, fetchNodes, createNode, updateNode, deleteNode, healthCheck } =
     useNodeStore()
   const canManageNodes = useHasPermission('nodes.manage')
   const [showForm, setShowForm] = useState(false)
@@ -88,6 +88,25 @@ export function AdminNodes() {
     tls_fingerprint: '',
   })
 
+  const [searchVal, setSearchVal] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize] = useState(25)
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchVal)
+      setCurrentPage(1)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [searchVal])
+
+  const load = useCallback(() => {
+    void fetchNodes(currentPage, pageSize, debouncedSearch).catch((err: unknown) => {
+      toast.error(err instanceof Error ? err.message : t('nodes.loadFailed'))
+    })
+  }, [fetchNodes, currentPage, pageSize, debouncedSearch, t])
+
   useEffect(() => {
     api<{ update_available: boolean }>('/system/update/status')
       .then((data) => {
@@ -101,7 +120,7 @@ export function AdminNodes() {
     try {
       const res = await api<{ message: string }>('/system/update/nodes', { method: 'POST' })
       toast.success(res.message || 'Node-Updates gestartet')
-      await fetchNodes()
+      await fetchNodes(currentPage, pageSize, debouncedSearch)
     } catch (err: any) {
       toast.error(err.message || 'Node-Update fehlgeschlagen')
     } finally {
@@ -110,15 +129,10 @@ export function AdminNodes() {
   }
 
   useEffect(() => {
-    const load = () =>
-      void fetchNodes().catch((err: unknown) => {
-        toast.error(err instanceof Error ? err.message : t('nodes.loadFailed'))
-      })
     load()
-    // Live CPU/RAM bars need periodic refresh (list now includes metrics).
     const id = window.setInterval(load, 20_000)
     return () => window.clearInterval(id)
-  }, [fetchNodes, t])
+  }, [load])
 
   const openEnrollment = () => {
     setShowForm(false)
@@ -274,12 +288,36 @@ export function AdminNodes() {
           )}
         </div>
       </div>
+      <div className="flex items-center gap-4 bg-surface-variant/20 p-4 rounded-xl">
+        <div className="relative flex-1 max-w-sm">
+          <input
+            type="text"
+            value={searchVal}
+            onChange={(e) => setSearchVal(e.target.value)}
+            placeholder={t('nodes.searchPlaceholder', { defaultValue: 'Nodes filtern...' })}
+            className="w-full bg-surface border border-surface-variant-outline rounded-lg py-2 px-3 pl-9 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+          />
+          <svg
+            className="absolute left-3 top-2.5 h-4 w-4 text-on-surface-variant"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+        </div>
+      </div>
 
       {showEnrollment && (
         <NodeEnrollmentDialog
           onClose={() => setShowEnrollment(false)}
           onManualSetup={openManualCreate}
-          onApproved={fetchNodes}
+          onApproved={() => fetchNodes(currentPage, pageSize, debouncedSearch)}
         />
       )}
 
@@ -478,6 +516,33 @@ export function AdminNodes() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {Math.ceil(total / pageSize) > 1 && (
+        <div className="mt-8 flex items-center justify-between border-t border-surface-variant pt-4 text-sm text-on-surface-variant">
+          <div>
+            Zeige {(currentPage - 1) * pageSize + 1} bis {Math.min(currentPage * pageSize, total)} von {total} Nodes
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => p - 1)}
+              className="msm-btn-secondary px-3 py-1.5 text-xs disabled:opacity-50"
+            >
+              Zurück
+            </button>
+            <span className="font-medium px-2">
+              Seite {currentPage} von {Math.ceil(total / pageSize)}
+            </span>
+            <button
+              disabled={currentPage >= Math.ceil(total / pageSize)}
+              onClick={() => setCurrentPage((p) => p + 1)}
+              className="msm-btn-secondary px-3 py-1.5 text-xs disabled:opacity-50"
+            >
+              Weiter
+            </button>
+          </div>
         </div>
       )}
     </div>

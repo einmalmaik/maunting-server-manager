@@ -89,7 +89,8 @@ def test_offline_guard():
     assert effective_server_runtime_status(server, SimpleNamespace(status="online")) == "running"
 
 
-def test_heartbeat_marks_offline(db):
+@pytest.mark.anyio
+async def test_heartbeat_marks_offline(db):
     from models import Node
     from services.scheduler_service import _node_heartbeat_task
 
@@ -106,8 +107,8 @@ def test_heartbeat_marks_offline(db):
     db.refresh(node)
 
     with patch("services.node_client.DisClient.decrypt", return_value="tok"), \
-         patch.object(NodeClient, "health", side_effect=NodeClientError("down")):
-        _node_heartbeat_task()
+         patch.object(NodeClient, "metrics_async", side_effect=NodeClientError("down")):
+        await _node_heartbeat_task()
 
     db.refresh(node)
     assert node.status == "offline"

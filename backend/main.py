@@ -60,6 +60,10 @@ def auth_rate_limit(request: Request) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    import httpx
+    limits = httpx.Limits(max_connections=200, max_keepalive_connections=50)
+    app.state.http_client = httpx.AsyncClient(limits=limits, timeout=5.0)
+
     os.makedirs(settings.servers_dir, exist_ok=True)
     os.makedirs("/opt/msm/backups", exist_ok=True)
 
@@ -480,6 +484,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    await app.state.http_client.aclose()
     stop_scheduler()
     await close_steam_service()
 

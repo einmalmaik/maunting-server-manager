@@ -153,6 +153,9 @@ class NodeClient:
     def _httpx_client(self, timeout: float) -> httpx.Client:
         return httpx.Client(timeout=timeout, verify=self._verify())
 
+    def _httpx_async_client(self, timeout: float) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=timeout, verify=self._verify())
+
     def _request(
         self,
         method: str,
@@ -198,6 +201,64 @@ class NodeClient:
         except Exception:
             return {}
 
+    async def _request_async(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict | list | None = None,
+        params: dict | None = None,
+        content: bytes | None = None,
+        files: Any = None,
+        timeout: float | None = None,
+        expect_json: bool = True,
+        client: httpx.AsyncClient | None = None,
+    ) -> Any:
+        t = timeout if timeout is not None else self._timeout
+        try:
+            if client is not None and not self._tls_fingerprint:
+                resp = await client.request(
+                    method,
+                    self._url(path),
+                    headers=self._headers(),
+                    json=json,
+                    params=params,
+                    content=content,
+                    files=files,
+                    timeout=t,
+                )
+            else:
+                async with self._httpx_async_client(t) as async_client:
+                    resp = await async_client.request(
+                        method,
+                        self._url(path),
+                        headers=self._headers(),
+                        json=json,
+                        params=params,
+                        content=content,
+                        files=files,
+                    )
+        except NodeClientError:
+            raise
+        except httpx.HTTPError as exc:
+            logger.warning("node agent async request failed path=%s", path)
+            raise NodeClientError("Agent not reachable") from exc
+
+        if resp.status_code == 401:
+            raise NodeClientError("Agent authentication failed", status_code=401)
+        if resp.status_code >= 400:
+            detail = _safe_detail(resp)
+            raise NodeClientError(detail or f"Agent error HTTP {resp.status_code}", status_code=resp.status_code)
+
+        if not expect_json:
+            return resp.content
+        if resp.status_code == 204 or not resp.content:
+            return {}
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+
     # ── Health / metrics ─────────────────────────────────────────────────
 
     def health(self) -> dict[str, Any]:
@@ -218,6 +279,9 @@ class NodeClient:
 
     def metrics(self) -> dict[str, Any]:
         return self._request("GET", "/metrics")
+
+    async def metrics_async(self, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
+        return await self._request_async("GET", "/metrics", client=client)
 
     # ── Containers ───────────────────────────────────────────────────────
 

@@ -751,24 +751,47 @@ def _ensure_background_update_check_job() -> None:
     )
 
 
-def _node_heartbeat_task() -> None:
-    """Probe every registered node /metrics; set online/offline + capacity.
+async def _node_heartbeat_task() -> None:
+    """Probe every registered node /metrics in parallel; set online/offline + capacity.
 
     Uses metrics (not only /health) so admin CPU/RAM capacity fields stay fresh.
     Never logs tokens. Fingerprint pinning enforced inside NodeClient.
     """
+    import httpx
+    import asyncio
     from models import Node
-    from services.node_service import probe_node_metrics
+    from services.node_client import NodeClient, NodeClientError
+    from services.node_service import apply_agent_metrics
 
     db = SessionLocal()
     try:
         nodes = db.query(Node).order_by(Node.id.asc()).all()
-        for node in nodes:
-            try:
-                probe_node_metrics(node, timeout=3.0, mark_status=True)
-            except Exception:
-                logger.warning("node heartbeat unexpected error node_id=%s", getattr(node, "id", "?"))
-                node.status = "offline"
+        if not nodes:
+            return
+
+        semaphore = asyncio.Semaphore(50)  # max 50 concurrent requests
+        limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
+
+        async def check_node(client: httpx.AsyncClient, node: Node):
+            async with semaphore:
+                try:
+                    node_client = NodeClient.from_node(node, timeout=3.0)
+                    metrics = await node_client.metrics_async(client=client)
+                    if isinstance(metrics, dict):
+                        node.status = "online"
+                        node.last_heartbeat = datetime.now(timezone.utc)
+                        apply_agent_metrics(node, metrics)
+                    else:
+                        node.status = "offline"
+                        node.docker_connected = False
+                except (NodeClientError, Exception):
+                    node.status = "offline"
+                    node.docker_connected = False
+
+        async with httpx.AsyncClient(limits=limits, timeout=4.0) as client:
+            tasks = [check_node(client, node) for node in nodes]
+            await asyncio.gather(*tasks)
+
         db.commit()
     except Exception as exc:
         logger.warning("node heartbeat task failed: %s", exc)

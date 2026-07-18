@@ -153,6 +153,28 @@ def apply_agent_metrics(node: Node, metrics: dict[str, Any] | None) -> None:
             node.disk_total = int(metrics["disk_total_bytes"]) // (1024 * 1024)
         except (TypeError, ValueError):
             pass
+    if metrics.get("cpu_percent") is not None:
+        try:
+            node.cpu_percent = float(metrics["cpu_percent"])
+        except (TypeError, ValueError):
+            pass
+    if metrics.get("ram_used_bytes") is not None:
+        try:
+            node.ram_used = int(metrics["ram_used_bytes"])
+        except (TypeError, ValueError):
+            pass
+    if metrics.get("disk_used_bytes") is not None:
+        try:
+            node.disk_used = int(metrics["disk_used_bytes"])
+        except (TypeError, ValueError):
+            pass
+    if metrics.get("container_count") is not None:
+        try:
+            node.container_count = int(metrics["container_count"])
+        except (TypeError, ValueError):
+            pass
+    node.docker_connected = True
+    node.agent_version = "1.0.0"
 
 
 def probe_node_metrics(
@@ -175,10 +197,12 @@ def probe_node_metrics(
     except NodeClientError:
         if mark_status:
             node.status = "offline"
+            node.docker_connected = False
         return None
     except Exception:
         if mark_status:
             node.status = "offline"
+            node.docker_connected = False
         return None
 
     if not isinstance(metrics, dict):
@@ -203,6 +227,29 @@ def node_out_dict(
             count = len(node.servers) if node.servers is not None else 0
         except Exception:
             count = 0
+
+    cpu_percent = getattr(node, "cpu_percent", None)
+    if metrics is None and cpu_percent is not None:
+        ram_total = getattr(node, "ram_total", None)
+        disk_total = getattr(node, "disk_total", None)
+        ram_used = getattr(node, "ram_used", None)
+        disk_used = getattr(node, "disk_used", None)
+        
+        ram_total_bytes = (ram_total or 0) * 1024 * 1024
+        disk_total_bytes = (disk_total or 0) * 1024 * 1024
+        metrics = {
+            "cpu_percent": cpu_percent,
+            "ram_percent": (ram_used / ram_total_bytes * 100) if (ram_total_bytes and ram_used) else 0.0,
+            "ram_total_bytes": ram_total_bytes,
+            "ram_used_bytes": ram_used or 0,
+            "disk_total_bytes": disk_total_bytes,
+            "disk_used_bytes": disk_used or 0,
+            "disk_percent": (disk_used / disk_total_bytes * 100) if (disk_total_bytes and disk_used) else 0.0,
+            "agent_version": getattr(node, "agent_version", None),
+            "docker_connected": getattr(node, "docker_connected", None),
+            "container_count": getattr(node, "container_count", None),
+        }
+
     out: dict[str, Any] = {
         "id": node.id,
         "name": node.name,

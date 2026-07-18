@@ -37,25 +37,22 @@ def test_list_nodes_includes_live_metrics(db, client: TestClient, owner_cookies:
         host="http://127.0.0.1:9000",
         auth_token_enc="enc",
         is_local=True,
-        status="unknown",
+        status="online",
+        cpu_total=8.0,
+        ram_total=16384,
+        disk_total=102400,
+        cpu_percent=12.5,
+        ram_used=4 * 1024 * 1024 * 1024,
+        disk_used=40 * 1024 * 1024 * 1024,
+        docker_connected=True,
+        agent_version="1.0.0",
+        container_count=0,
     )
     db.add(node)
     db.commit()
     db.refresh(node)
 
-    metrics_payload = {
-        "cpu_count": 8,
-        "cpu_percent": 12.5,
-        "ram_total_bytes": 16 * 1024 * 1024 * 1024,
-        "ram_used_bytes": 4 * 1024 * 1024 * 1024,
-        "ram_percent": 25.0,
-        "disk_total_bytes": 100 * 1024 * 1024 * 1024,
-        "disk_used_bytes": 40 * 1024 * 1024 * 1024,
-        "disk_percent": 40.0,
-    }
-    with patch("services.node_service.NodeClient.from_node") as from_node:
-        from_node.return_value.metrics.return_value = metrics_payload
-        r = client.get("/api/nodes", cookies=owner_cookies)
+    r = client.get("/api/nodes", cookies=owner_cookies)
     assert r.status_code == 200, r.text
     rows = r.json()
     match = next((row for row in rows if row["id"] == node.id), None)

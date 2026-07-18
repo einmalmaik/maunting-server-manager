@@ -21,6 +21,12 @@ class Node(Base):
     cpu_total: Mapped[float | None] = mapped_column(Float, nullable=True)
     ram_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     disk_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cpu_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ram_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    disk_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    agent_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    docker_connected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    container_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

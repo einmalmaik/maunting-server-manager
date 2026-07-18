@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from datetime import datetime, timezone
 import ipaddress
 from pathlib import Path
@@ -81,32 +82,54 @@ def _can_list_nodes(db: Session, user: User) -> bool:
     return has_global_permission(db, user, "nodes.read") or has_global_permission(db, user, "servers.create")
 
 
-@router.get("", response_model=list[NodeOut])
+@router.get("")
 def list_nodes(
+    page: int | None = None,
+    limit: int | None = None,
+    search: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[dict]:
+) -> Any:
     """List nodes for the create-server picker and admin UI.
 
     Auth: logged-in user with Owner OR global ``servers.create``.
     Never returns agent tokens.
 
-    Best-effort live metrics from each agent so CPU/RAM bars in the admin UI
-    are not stuck empty until a manual health click.
+    Uses cached live metrics from the database (updated by the background heartbeat job)
+    for high scale, supporting pagination and search.
     """
     if not _can_list_nodes(db, user):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
-    nodes = db.query(Node).order_by(Node.id.asc()).all()
-    out = []
-    for n in nodes:
-        count = db.query(Server).filter(Server.node_id == n.id).count()
-        metrics = probe_node_metrics(n, timeout=2.5, mark_status=True)
-        out.append(node_out_dict(n, server_count=count, metrics=metrics))
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-    return out
+
+    query = db.query(Node)
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(Node.name.ilike(search_term) | Node.host.ilike(search_term))
+
+    query = query.order_by(Node.id.asc())
+
+    from sqlalchemy import func
+    server_counts_raw = (
+        db.query(Server.node_id, func.count(Server.id))
+        .filter(Server.node_id.isnot(None))
+        .group_by(Server.node_id)
+        .all()
+    )
+    server_counts = {node_id: count for node_id, count in server_counts_raw}
+
+    if page is not None and limit is not None:
+        total = query.count()
+        nodes = query.offset((page - 1) * limit).limit(limit).all()
+        items = [node_out_dict(n, server_count=server_counts.get(n.id, 0)) for n in nodes]
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "limit": limit
+        }
+    else:
+        nodes = query.all()
+        return [node_out_dict(n, server_count=server_counts.get(n.id, 0)) for n in nodes]
 
 
 @router.post("", response_model=NodeOut, status_code=201)
