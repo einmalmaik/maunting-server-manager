@@ -11,6 +11,7 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, KeyRound, Mail, Check } from 'lucide-react'
 
 export function Login() {
@@ -19,6 +20,7 @@ export function Login() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { finishLogin } = useAuthStore()
   const [error, setError] = useState('')
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
   const [useBackupCode, setUseBackupCode] = useState(false)
@@ -66,6 +68,7 @@ export function Login() {
           username: form.username,
           password: form.password,
           otp_code: form.otp || null,
+          captcha_token: captchaToken,
         }),
       })
 
@@ -331,6 +334,10 @@ export function Login() {
                       : t('auth.useBackupCode', 'Backup-Code verwenden')}
                   </button>
                 </>
+              )}
+
+              {!requires2FA && (
+                <CaptchaWidget onVerify={setCaptchaToken} />
               )}
 
               <ErrorMessage message={error} className="text-sm" />

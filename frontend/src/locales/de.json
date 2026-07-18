@@ -871,6 +871,7 @@
       "steam": "Steam",
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
+      "captcha": "CAPTCHA",
       "imprint": "Impressum",
       "supportWidget": "Support-Widget",
       "backup": "Backup"

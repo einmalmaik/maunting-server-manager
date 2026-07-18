@@ -23,6 +23,7 @@ from schemas.panel_settings import (
 )
 from services.panel_settings_service import PanelSettingsService
 from services.email_service import EmailService
+from services.auth_service import AuthService
 from services.steam_account_service import SteamAccountService
 from services.steam_api_key_service import (
     current_source as steam_api_source,
@@ -89,6 +90,15 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "singra_webhook_secret_configured": bool(singra_secret.resolve_secret()),
         "singra_webhook_secret_source": singra_secret.current_source(),
         "updates_automatic": all_db.get("updates_automatic", "false") == "true",
+        "captcha_enabled": all_db.get("captcha_enabled", "false") == "true",
+        "captcha_provider": all_db.get("captcha_provider", "none"),
+        "captcha_site_key": all_db.get("captcha_site_key", ""),
+        "captcha_secret_key": _mask_secret(
+            AuthService.decrypt_secret(
+                all_db.get("captcha_secret_key_encrypted", ""),
+                aad="msm:settings:captcha_secret_key"
+            ) if all_db.get("captcha_secret_key_encrypted", "") else all_db.get("captcha_secret_key", "")
+        ),
     }
 
 
@@ -144,6 +154,13 @@ def update_settings(
             value = "true" if bool(value) else "false"
         if key == "updates_automatic":
             value = "true" if bool(value) else "false"
+        if key == "captcha_enabled":
+            value = "true" if bool(value) else "false"
+        if key == "captcha_provider":
+            mode = str(value).strip().lower()
+            if mode not in ("none", "turnstile", "hcaptcha", "recaptcha"):
+                raise HTTPException(status_code=400, detail="Ungueltiger CAPTCHA-Anbieter")
+            value = mode
         if key == "support_widget_mode":
             mode = str(value).strip().lower()
             if mode not in ("singra", "crisp", "tawk", "custom"):
@@ -173,6 +190,10 @@ def update_settings(
             enc = AuthService.encrypt_secret(str(value), aad="msm:settings:resend_api_key")
             PanelSettingsService.set("resend_api_key_encrypted", enc)
             PanelSettingsService.set("resend_api_key", "")  # Lösche legacy plain-text
+        elif key == "captcha_secret_key":
+            enc = AuthService.encrypt_secret(str(value), aad="msm:settings:captcha_secret_key")
+            PanelSettingsService.set("captcha_secret_key_encrypted", enc)
+            PanelSettingsService.set("captcha_secret_key", "")  # Lösche legacy plain-text
         else:
             PanelSettingsService.set(key, str(value))
     return {"message": "Einstellungen gespeichert"}

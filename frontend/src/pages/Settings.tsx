@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, KeyRound, Github, Cloud, FileText, LifeBuoy } from 'lucide-react'
+import { Globe, Mail, Gamepad2, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
@@ -10,9 +10,10 @@ import { GitHubTab } from './settings/GitHubTab'
 import { BackupTab } from './settings/BackupTab'
 import { ImprintTab } from './settings/ImprintTab'
 import { SupportWidgetTab } from './settings/SupportWidgetTab'
+import { CaptchaTab } from './settings/CaptchaTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
-type TabId = 'general' | 'email' | 'steam' | 'github' | 'oauth' | 'imprint' | 'backup' | 'supportWidget'
+type TabId = 'general' | 'email' | 'steam' | 'github' | 'oauth' | 'imprint' | 'captcha' | 'supportWidget' | 'backup'
 
 export function Settings() {
   const { t } = useTranslation()
@@ -26,6 +27,7 @@ export function Settings() {
     { id: 'steam', labelKey: 'settings.tabs.steam', icon: Gamepad2 },
     { id: 'github', labelKey: 'settings.tabs.github', icon: Github },
     { id: 'oauth', labelKey: 'settings.tabs.oauth', icon: KeyRound },
+    { id: 'captcha', labelKey: 'settings.tabs.captcha', icon: Shield },
     { id: 'imprint', labelKey: 'settings.tabs.imprint', icon: FileText },
     { id: 'supportWidget', labelKey: 'settings.tabs.supportWidget', icon: LifeBuoy },
     ...(canManageBackup ? [{ id: 'backup' as TabId, labelKey: 'settings.tabs.backup', icon: Cloud }] : []),
@@ -52,6 +54,7 @@ export function Settings() {
       {activeTab === 'steam' && <SteamTab />}
       {activeTab === 'github' && <GitHubTab />}
       {activeTab === 'oauth' && <OAuthTab />}
+      {activeTab === 'captcha' && <CaptchaTab />}
       {activeTab === 'imprint' && <ImprintTab />}
       {activeTab === 'supportWidget' && <SupportWidgetTab />}
       {activeTab === 'backup' && <BackupTab />}

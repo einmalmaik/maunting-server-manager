@@ -33,6 +33,10 @@ export interface PanelSettings {
   singra_webhook_secret_configured: boolean
   singra_webhook_secret_source: 'env' | 'panel' | 'none'
   updates_automatic: boolean
+  captcha_enabled: boolean
+  captcha_provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
+  captcha_site_key: string
+  captcha_secret_key: string
 }
 
 export const EMPTY_PANEL_SETTINGS: PanelSettings = {
@@ -68,4 +72,8 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   singra_webhook_secret_configured: false,
   singra_webhook_secret_source: 'none',
   updates_automatic: false,
+  captcha_enabled: false,
+  captcha_provider: 'none',
+  captcha_site_key: '',
+  captcha_secret_key: '',
 }

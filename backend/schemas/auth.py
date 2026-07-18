@@ -5,6 +5,7 @@ class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=1)
     otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
+    captcha_token: str | None = None
 
 
 class LoginVerifyRequest(BaseModel):
@@ -33,11 +34,13 @@ class ResendVerificationRequest(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     email: str
+    captcha_token: str | None = None
 
 
 class PasswordResetConfirm(BaseModel):
     token: str
     new_password: str = Field(..., min_length=8)
+    captcha_token: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):

@@ -5,11 +5,13 @@ import { api } from '@/api/client'
 import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
+import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, Mail, ArrowRight, ArrowLeft } from 'lucide-react'
 
 export function ForgotPassword() {
   const { t } = useTranslation()
   const [email, setEmail] = useState('')
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [status, setStatus] = useState<'idle' | 'submitting' | 'sent'>('idle')
   const [error, setError] = useState('')
 
@@ -21,7 +23,7 @@ export function ForgotPassword() {
     try {
       await api('/auth/forgot-password', {
         method: 'POST',
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, captcha_token: captchaToken }),
       })
       setStatus('sent')
     } catch (err: any) {
@@ -89,6 +91,8 @@ export function ForgotPassword() {
                   required
                 />
               </div>
+
+              <CaptchaWidget onVerify={setCaptchaToken} />
 
               <ErrorMessage message={error} className="text-sm" />
 

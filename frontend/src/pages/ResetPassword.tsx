@@ -6,6 +6,7 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, Check, X, ArrowRight } from 'lucide-react'
 
 export function ResetPassword() {
@@ -15,6 +16,7 @@ export function ResetPassword() {
 
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
 
@@ -43,7 +45,7 @@ export function ResetPassword() {
     try {
       await api('/auth/reset-password', {
         method: 'POST',
-        body: JSON.stringify({ token, new_password: password }),
+        body: JSON.stringify({ token, new_password: password, captcha_token: captchaToken }),
       })
       setStatus('success')
       setMessage(t('resetPassword.success'))
@@ -132,6 +134,8 @@ export function ResetPassword() {
                 placeholder="••••••••"
                 required
               />
+
+              <CaptchaWidget onVerify={setCaptchaToken} />
 
               <ErrorMessage message={message} className="text-sm" />
 

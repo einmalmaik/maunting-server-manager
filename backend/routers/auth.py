@@ -22,7 +22,22 @@ from services.permission_catalog import SYSTEM_ROLE_USER
 from services.role_service import get_role_by_name
 from services.panel_settings_service import PanelSettingsService
 
+from services.captcha_service import CaptchaService
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+@router.get("/captcha-config")
+def get_captcha_config() -> dict:
+    """Oeffentliche CAPTCHA-Konfiguration fuer das Frontend."""
+    enabled = PanelSettingsService.get("captcha_enabled", "false") == "true"
+    provider = PanelSettingsService.get("captcha_provider", "none")
+    site_key = PanelSettingsService.get("captcha_site_key", "")
+    return {
+        "enabled": enabled,
+        "provider": provider,
+        "site_key": site_key,
+    }
 
 
 logger = logging.getLogger(__name__)
@@ -185,7 +200,12 @@ async def resend_verification(req: ResendVerificationRequest, db: Session = Depe
 
 
 @router.post("/register", response_model=RegistrationResponse, status_code=201)
-async def register(req: UserCreate, db: Session = Depends(get_db)) -> dict:
+async def register(
+    req: UserCreate,
+    request: Request,
+    db: Session = Depends(get_db)
+) -> dict:
+    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     if AuthService.get_user_by_username(db, req.username):
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
@@ -280,6 +300,7 @@ async def login(
     request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
+    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     user = AuthService.get_user_by_username(db, req.username)
     if not user or not AuthService.verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
@@ -477,7 +498,12 @@ async def change_email(
 
 
 @router.post("/forgot-password")
-async def forgot_password(req: PasswordResetRequest, db: Session = Depends(get_db)) -> dict:
+async def forgot_password(
+    req: PasswordResetRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+) -> dict:
+    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     user = AuthService.get_user_by_email(db, req.email)
     if not user:
         return {"message": "Falls die E-Mail existiert, wurde eine Nachricht gesendet"}
@@ -487,10 +513,12 @@ async def forgot_password(req: PasswordResetRequest, db: Session = Depends(get_d
 
 
 @router.post("/reset-password")
-def reset_password(
+async def reset_password(
     req: PasswordResetConfirm,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
+    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     token_hash = AuthService._hash_reset_token(req.token)
     user = db.query(User).filter(
         User.password_reset_token == token_hash,
