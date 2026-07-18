@@ -8,10 +8,14 @@ import tarfile
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from models import Node, NodeEnrollment, Server
 from services.node_client import NodeClientError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+from routers.nodes import _source_ip
 
 
 @pytest.fixture()
@@ -225,6 +229,13 @@ def test_node_enrollment_requires_owner_approval_and_never_returns_agent_token(
     assert "auth_token" not in approved.text
     node_id = approved.json()["id"]
 
+    repeated_approval = client.post(
+        f"/api/nodes/enrollments/{enrollment_id}/approve",
+        cookies=owner_cookies,
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert repeated_approval.status_code == 409
+
     after_approval = client.post(
         "/api/nodes/enrollments/poll",
         headers={"Authorization": f"Bearer {begin_body['claim_secret']}"},
@@ -297,6 +308,36 @@ def test_node_enrollment_rejects_untrusted_source_ip(
     assert response.status_code == 400
 
 
+def test_source_ip_uses_forwarded_address_only_from_trusted_loopback_proxy():
+    trusted_proxy_request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/nodes/enrollments/begin",
+            "headers": [(b"x-forwarded-for", b"198.51.100.70")],
+            "client": ("127.0.0.1", 12345),
+            "scheme": "https",
+            "server": ("panel.example", 443),
+            "query_string": b"",
+        }
+    )
+    untrusted_direct_request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/nodes/enrollments/begin",
+            "headers": [(b"x-forwarded-for", b"203.0.113.99")],
+            "client": ("198.51.100.71", 12345),
+            "scheme": "https",
+            "server": ("panel.example", 443),
+            "query_string": b"",
+        }
+    )
+
+    assert _source_ip(trusted_proxy_request) == "198.51.100.70"
+    assert _source_ip(untrusted_direct_request) == "198.51.100.71"
+
+
 def test_agent_package_excludes_local_secrets_data_and_test_artifacts(client: TestClient):
     response = client.get("/api/nodes/agent-package")
 
@@ -321,7 +362,7 @@ def test_agent_package_excludes_local_secrets_data_and_test_artifacts(client: Te
     assert not any(name.endswith((".pyc", ".db", ".sqlite", ".sqlite3")) for name in names)
 
 
-def test_node_enrollment_already_enrolled_returns_node_id(
+def test_node_reenrollment_stays_pending_and_does_not_mutate_existing_node(
     client: TestClient,
     db: Session,
 ):
@@ -356,9 +397,69 @@ def test_node_enrollment_already_enrolled_returns_node_id(
 
     assert response.status_code == 201
     data = response.json()
-    assert data["already_enrolled"] is True
-    assert data["node_id"] == node.id
+    assert data["already_enrolled"] is False
+    assert data["node_id"] is None
+    assert data["claim_secret"]
+
+    db.refresh(node)
+    assert node.name == "Already Registered"
+    assert node.host == "https://198.51.100.25:9000"
+    assert node.auth_token_enc == "encrypted-token"
+    enrollment = db.query(NodeEnrollment).filter_by(tls_fingerprint="d" * 64).one()
+    assert enrollment.status == "pending"
 
     # Clean up the node
     db.delete(node)
     db.commit()
+
+
+def test_node_names_reject_whitespace_only(client: TestClient, owner_cookies: dict):
+    csrf = owner_cookies.get("__Secure-csrf_token") or ""
+    response = client.post(
+        "/api/nodes",
+        cookies=owner_cookies,
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "name": "   ",
+            "host": "https://10.0.0.8:9000",
+            "auth_token": "synthetic-agent-token-long-enough",
+            "tls_fingerprint": "e" * 64,
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_node_tls_fingerprint_is_unique_in_database(db: Session):
+    first = Node(
+        name="First",
+        host="https://198.51.100.30:9000",
+        auth_token_enc="enc-one",
+        tls_fingerprint="f" * 64,
+        is_local=False,
+    )
+    second = Node(
+        name="Second",
+        host="https://198.51.100.31:9000",
+        auth_token_enc="enc-two",
+        tls_fingerprint="f" * 64,
+        is_local=False,
+    )
+    db.add_all([first, second])
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_node_tls_fingerprint_must_be_normalized_in_database(db: Session):
+    db.add(
+        Node(
+            name="Uppercase fingerprint",
+            host="https://198.51.100.32:9000",
+            auth_token_enc="enc",
+            tls_fingerprint="A" * 64,
+            is_local=False,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()

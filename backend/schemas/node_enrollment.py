@@ -11,6 +11,14 @@ class EnrollmentBegin(BaseModel):
     tls_fingerprint: str = Field(..., min_length=64, max_length=128)
     port: int = Field(default=9000, ge=1, le=65535)
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, value: object) -> str:
+        name = str(value).strip()
+        if not name:
+            raise ValueError("name darf nicht leer sein")
+        return name
+
     @field_validator("tls_fingerprint")
     @classmethod
     def validate_fingerprint(cls, value: str) -> str:

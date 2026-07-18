@@ -28,25 +28,96 @@ class LocalNodeHandoffError(RuntimeError):
 _TRANSIENT_SERVER_STATES = {"installing", "updating", "restoring", "deleting"}
 
 
-def _server_root(server_id: int) -> Path:
+def _server_root(server: Server) -> Path:
     base = Path(settings.servers_dir).resolve()
-    candidate = base / str(server_id)
+    candidate = Path(server.install_dir)
+    if not candidate.is_absolute():
+        candidate = base / candidate
     if candidate.is_symlink():
         raise LocalNodeHandoffError(
-            f"Server {server_id}: symbolische Server-Roots werden nicht automatisch uebergeben"
+            f"Server {server.id}: symbolische Server-Roots werden nicht automatisch uebergeben"
         )
     try:
         root = candidate.resolve(strict=True)
         root.relative_to(base)
     except (FileNotFoundError, NotADirectoryError, ValueError, OSError) as exc:
         raise LocalNodeHandoffError(
-            f"Server {server_id}: lokales Datenverzeichnis fehlt oder ist unsicher"
+            f"Server {server.id}: lokales Datenverzeichnis fehlt oder ist unsicher"
         ) from exc
     if not root.is_dir():
         raise LocalNodeHandoffError(
-            f"Server {server_id}: lokaler Server-Root ist kein Verzeichnis"
+            f"Server {server.id}: lokaler Server-Root ist kein Verzeichnis"
         )
     return root
+
+
+def _prepare_agent_server_roots(servers: list[Server]) -> list[tuple[Path, Path]]:
+    """Normalize legacy local roots to the agent's numeric root contract.
+
+    Local all-in-one installs historically used ``<game_type>_<id>`` while a
+    standalone agent resolves every server as ``<servers_dir>/<id>``. Renames
+    stay on the same filesystem and are rolled back if verification or the DB
+    cutover fails.
+    """
+
+    base = Path(settings.servers_dir).resolve()
+    renamed: list[tuple[Path, Path]] = []
+    try:
+        for server in servers:
+            source = _server_root(server)
+            destination = base / str(server.id)
+            if source == destination:
+                continue
+            if destination.exists() or destination.is_symlink():
+                raise LocalNodeHandoffError(
+                    f"Server {server.id}: numerisches Zielverzeichnis ist bereits belegt"
+                )
+            source.rename(destination)
+            renamed.append((source, destination))
+            server.install_dir = str(destination)
+        return renamed
+    except Exception:
+        if not _rollback_agent_server_roots(servers, renamed):
+            raise LocalNodeHandoffError(
+                "Vorbereitung abgebrochen; ein Serververzeichnis konnte nicht "
+                "zurückbenannt werden und muss manuell geprüft werden"
+            )
+        raise
+
+
+def _rollback_agent_server_roots(
+    servers: list[Server],
+    renamed: list[tuple[Path, Path]],
+) -> bool:
+    original_by_destination = {destination: source for source, destination in renamed}
+    server_by_destination = {
+        Path(server.install_dir): server
+        for server in servers
+        if Path(server.install_dir) in original_by_destination
+    }
+    complete = True
+    for source, destination in reversed(renamed):
+        try:
+            if source.exists() and not destination.exists():
+                continue
+            destination.rename(source)
+            server = server_by_destination.get(destination)
+            if server is not None:
+                server.install_dir = str(source)
+        except OSError:
+            complete = False
+    return complete
+
+
+def _require_root_rollback(
+    servers: list[Server],
+    renamed: list[tuple[Path, Path]],
+) -> None:
+    if not _rollback_agent_server_roots(servers, renamed):
+        raise LocalNodeHandoffError(
+            "Handoff abgebrochen; mindestens ein Serververzeichnis konnte nicht "
+            "zurückbenannt werden und muss vor einem Neustart manuell geprüft werden"
+        )
 
 
 def _write_challenge(root: Path) -> tuple[Path, str]:
@@ -78,7 +149,7 @@ def _verify_shared_server_roots(
     markers: list[Path] = []
     try:
         for server in servers:
-            root = _server_root(server.id)
+            root = _server_root(server)
             marker, expected = _write_challenge(root)
             markers.append(marker)
             observed = client.files_read(server.id, marker.name)
@@ -141,9 +212,9 @@ def handoff_local_node(
 ) -> dict[str, Any]:
     """Replace the local-node record after proving shared storage/runtime.
 
-    The operation intentionally leaves all files and containers untouched.  The
-    only committed mutation is the atomic reassignment of server rows followed
-    by removal of the obsolete local-node record.
+    Legacy local directory names are normalized atomically to the standalone
+    agent contract. Containers and file contents remain untouched. The database
+    reassignment is committed only after storage and runtime verification.
     """
 
     local_nodes = db.query(Node).filter(Node.is_local.is_(True)).all()
@@ -171,13 +242,34 @@ def handoff_local_node(
             f"Laufende Installations-/Updatevorgaenge zuerst abschliessen: {joined}"
         )
 
+    renamed_roots: list[tuple[Path, Path]] = []
+    locks = []
     try:
+        from services.server_lifecycle_service import get_server_lifecycle_lock
+
+        for server in servers:
+            lock = get_server_lifecycle_lock(server.id)
+            if not lock.acquire(blocking=False):
+                raise LocalNodeHandoffError(
+                    f"Server {server.id}: eine andere Server-Operation ist noch aktiv"
+                )
+            locks.append(lock)
+
+        renamed_roots = _prepare_agent_server_roots(servers)
         client = NodeClient.from_node(replacement)
         _verify_runtime(client, servers)
         _verify_shared_server_roots(client, servers)
     except LocalNodeHandoffError:
+        db.rollback()
+        _require_root_rollback(servers, renamed_roots)
+        for lock in reversed(locks):
+            lock.release()
         raise
     except Exception as exc:
+        db.rollback()
+        _require_root_rollback(servers, renamed_roots)
+        for lock in reversed(locks):
+            lock.release()
         raise LocalNodeHandoffError(
             "Der Ersatz-Node konnte nicht sicher verifiziert werden"
         ) from exc
@@ -190,14 +282,18 @@ def handoff_local_node(
         db.commit()
     except Exception as exc:
         db.rollback()
+        _require_root_rollback(servers, renamed_roots)
         raise LocalNodeHandoffError(
             "Die Node-Zuordnung konnte nicht atomar umgestellt werden"
         ) from exc
+    finally:
+        for lock in reversed(locks):
+            lock.release()
 
     return {
         "ok": True,
         "replacement_node_id": replacement.id,
         "server_ids": [server.id for server in servers],
-        "data_moved": False,
+        "data_moved": bool(renamed_roots),
         "source_data_retained": True,
     }

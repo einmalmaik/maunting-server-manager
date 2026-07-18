@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { KeyRound, Info, AlertTriangle, ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 function Alert({ type = 'info', title, children }: { type?: 'info' | 'warning', title: string, children: React.ReactNode }) {
   const styles = {
@@ -35,16 +36,13 @@ export function OAuthDocs() {
   ]
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl">
-      <div className="flex items-center gap-3 mb-2">
-        <KeyRound className="w-8 h-8 text-primary" />
-        <h1 className="font-headline text-display-sm font-extrabold text-on-surface">
-          {t('docsOAuth.title')}
-        </h1>
-      </div>
-      <p className="font-body-md text-body-md text-on-surface-variant mb-6">
-        {t('docsOAuth.subtitle')}
-      </p>
+    <div className="msm-page mx-auto max-w-6xl">
+      <PageHeader
+        eyebrow={t('pageContext.help', 'Help & guidance')}
+        title={t('docsOAuth.title')}
+        description={t('docsOAuth.subtitle')}
+        status={<KeyRound className="h-6 w-6 text-primary" aria-hidden="true" />}
+      />
 
       <div className="mb-8">
         <Link
@@ -56,8 +54,21 @@ export function OAuthDocs() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[220px,1fr] gap-8">
-        <nav className="lg:sticky lg:top-20 lg:self-start">
+      <details className="msm-card mb-5 p-4 lg:hidden">
+        <summary className="cursor-pointer font-label-md text-sm font-semibold text-on-surface">
+          {t('docsOAuth.tocTitle')}
+        </summary>
+        <nav className="mt-3 border-t border-outline-variant pt-3" aria-label={t('docsOAuth.tocTitle')}>
+          <ul className="grid gap-1.5 sm:grid-cols-2">
+            {TOC.map(({ key, title }) => (
+              <li key={key}><a href={`#oauth-docs-${key}`} className="block min-h-11 py-2 text-sm text-on-surface-variant hover:text-on-surface">{title}</a></li>
+            ))}
+          </ul>
+        </nav>
+      </details>
+
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[220px,1fr]">
+        <nav className="hidden lg:sticky lg:top-20 lg:block lg:self-start" aria-label={t('docsOAuth.tocTitle')}>
           <h2 className="font-headline text-label-lg uppercase tracking-wide text-on-surface-variant mb-3">
             {t('docsOAuth.tocTitle')}
           </h2>

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './Card'
 import { Button } from './Button'
 
 const STORAGE_KEY = 'msm.privacyNotice.dismissed'
-const PRIVACY_VERSION = '1.0.0'
+const PRIVACY_VERSION = '2.0.0'
 
 function hasAcknowledged(raw: string | null): boolean {
   if (!raw) return false
@@ -18,19 +18,26 @@ function hasAcknowledged(raw: string | null): boolean {
   }
 }
 
-export function PrivacyAcknowledgementNotice() {
-  const { t, i18n } = useTranslation()
+interface PrivacyAcknowledgementNoticeProps {
+  onVisibilityChange?: (visible: boolean) => void
+}
+
+export function PrivacyAcknowledgementNotice({ onVisibilityChange }: PrivacyAcknowledgementNoticeProps) {
+  const { t } = useTranslation()
   const titleId = useId()
+  const descriptionId = useId()
   const [visible, setVisible] = useState(false)
-  const isGerman = i18n.language.startsWith('de')
 
   useEffect(() => {
+    let nextVisible = true
     try {
-      setVisible(!hasAcknowledged(window.localStorage.getItem(STORAGE_KEY)))
+      nextVisible = !hasAcknowledged(window.localStorage.getItem(STORAGE_KEY))
     } catch {
-      setVisible(true)
+      nextVisible = true
     }
-  }, [])
+    setVisible(nextVisible)
+    onVisibilityChange?.(nextVisible)
+  }, [onVisibilityChange])
 
   const dismiss = useCallback(() => {
     try {
@@ -42,37 +49,40 @@ export function PrivacyAcknowledgementNotice() {
       // localStorage can be unavailable; hide for the current view.
     }
     setVisible(false)
-  }, [])
+    onVisibilityChange?.(false)
+  }, [onVisibilityChange])
 
   if (!visible) return null
 
   return (
-    <aside aria-labelledby={titleId} className="fixed inset-x-0 bottom-0 z-50 px-4 pb-4">
+    <aside
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      className="fixed inset-x-0 bottom-0 z-40 px-4 pb-4"
+    >
       <Card className="mx-auto max-w-3xl shadow-panel">
         <CardHeader className="gap-2 pb-3">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-on-surface-variant">
             <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{isGerman ? 'Datenschutz-Hinweis' : 'Privacy notice'}</span>
+            <span>{t('privacyNotice.eyebrow')}</span>
           </div>
           <CardTitle id={titleId} className="text-base font-semibold">
-            {isGerman ? 'Wir respektieren deine Privatsphäre' : 'We respect your privacy'}
+            {t('privacyNotice.title')}
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm leading-relaxed text-on-surface-variant">
-            {isGerman
-              ? 'MSM nutzt nur technisch notwendige Cookies und lokale Speicherung für Login, Sicherheit und Panel-Funktionen. Kein Tracking, keine Werbung.'
-              : 'MSM only uses technically necessary cookies and local storage for login, security, and panel features. No tracking, no advertising.'}
+          <p id={descriptionId} className="text-sm leading-relaxed text-on-surface-variant">
+            {t('privacyNotice.description')}
           </p>
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
             <Link
               to="/privacy"
               className="text-xs font-medium text-primary underline-offset-4 hover:underline"
             >
-              {isGerman ? 'Datenschutzerklärung lesen' : 'Read privacy policy'}
+              {t('privacyNotice.readPolicy')}
             </Link>
             <Button variant="primary" size="sm" onClick={dismiss}>
-              {isGerman ? 'Verstanden' : t('common.confirm', 'Understood')}
+              {t('privacyNotice.confirm')}
             </Button>
           </div>
         </CardContent>

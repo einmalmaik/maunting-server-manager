@@ -50,21 +50,12 @@ def begin_enrollment(
     port: int,
     tls_fingerprint: str,
     agent_token: str,
-) -> tuple[NodeEnrollment | None, str | int]:
+) -> tuple[NodeEnrollment, str]:
     cleanup_expired(db)
     host = validate_remote_node_host(
         f"https://{source_ip}:{port}", tls_fingerprint, is_local=False
     )
     
-    # Pruefen, ob ein Node mit diesem TLS-Fingerabdruck bereits existiert
-    existing_node = db.query(Node).filter(Node.tls_fingerprint == tls_fingerprint).first()
-    if existing_node:
-        existing_node.host = host
-        existing_node.auth_token_enc = encrypt_node_token(agent_token)
-        db.commit()
-        db.refresh(existing_node)
-        return None, existing_node.id
-
     claim_secret = secrets.token_urlsafe(48)
     enrollment = NodeEnrollment(
         claim_hash=_claim_hash(claim_secret),
@@ -119,6 +110,16 @@ def approve(db: Session, enrollment: NodeEnrollment) -> Node:
     enrollment.status = "verifying"
     db.flush()
     return node
+
+
+def lock_pending_for_approval(db: Session, enrollment_id: int) -> NodeEnrollment | None:
+    """Lock one enrollment so concurrent approvals cannot both claim it."""
+    return (
+        db.query(NodeEnrollment)
+        .filter(NodeEnrollment.id == enrollment_id)
+        .with_for_update()
+        .first()
+    )
 
 
 def mark_claimed(db: Session, enrollment: NodeEnrollment) -> None:

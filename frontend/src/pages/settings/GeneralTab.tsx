@@ -21,8 +21,12 @@ export function GeneralTab() {
     api<PanelSettings>('/settings')
       .then((data) => {
         if (!active) return
-        setSettings(data)
-        void i18n.changeLanguage(normalizePanelLanguage(data.default_language))
+        const normalizedSettings = {
+          ...EMPTY_PANEL_SETTINGS,
+          ...(data && typeof data === 'object' ? data : {}),
+        }
+        setSettings(normalizedSettings)
+        void i18n.changeLanguage(normalizePanelLanguage(normalizedSettings.default_language))
       })
       .catch((err) => toast.error(err.message))
       .finally(() => { if (active) setLoading(false) })

@@ -69,4 +69,11 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByRole('link', { name: /open node administration/i })).toHaveAttribute('href', '/admin/nodes')
     expect(screen.getByRole('link', { name: /back to documentation/i })).toHaveAttribute('href', '/docs')
   })
+
+  it('provides mobile landmark links for long-form wayfinding', () => {
+    renderPage()
+
+    expect(document.querySelector('a[href="#deployment-units"]')).toBeInTheDocument()
+    expect(document.querySelector('a[href="#component-migration"]')).toBeInTheDocument()
+  })
 })

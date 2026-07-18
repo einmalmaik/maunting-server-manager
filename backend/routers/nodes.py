@@ -20,13 +20,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from limits import parse
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import get_db
 from config import settings
 from dependencies import get_current_owner, get_current_user, verify_csrf, require_global
 from models import Node, NodeEnrollment, Server, User
-from schemas.node import NodeCreate, NodeOut, NodeUpdate
+from schemas.node import NodeCreate, NodeOut, NodePickerOut, NodeUpdate
 from schemas.node_enrollment import (
     EnrollmentBegin,
     EnrollmentBeginOut,
@@ -50,8 +52,7 @@ _enrollment_begin_limit = parse("5/minute")
 _enrollment_poll_limit = parse("60/minute")
 
 
-def _rate_limit(request: Request, limit) -> None:
-    key = request.client.host if request.client else "unknown"
+def _rate_limit(key: str, limit) -> None:
     if not limiter.limiter.hit(limit, key):
         raise HTTPException(status_code=429, detail="Zu viele Enrollment-Anfragen")
 
@@ -59,8 +60,10 @@ def _rate_limit(request: Request, limit) -> None:
 def _source_ip(request: Request) -> str:
     direct = request.client.host if request.client else ""
     candidate = direct
-    if direct in {"127.0.0.1", "::1"} or (settings.debug and direct == "testclient"):
-        candidate = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    if direct in {"127.0.0.1", "::1"}:
+        candidate = request.headers.get("x-forwarded-for", direct).split(",", 1)[0].strip()
+    elif settings.debug and direct == "testclient":
+        candidate = request.headers.get("x-forwarded-for", "127.0.0.1").split(",", 1)[0].strip()
     try:
         address = ipaddress.ip_address(candidate)
     except ValueError as exc:
@@ -82,6 +85,18 @@ def _can_list_nodes(db: Session, user: User) -> bool:
     return has_global_permission(db, user, "nodes.read") or has_global_permission(db, user, "servers.create")
 
 
+def _can_read_node_details(db: Session, user: User) -> bool:
+    return user.is_owner or has_global_permission(db, user, "nodes.read")
+
+
+def _picker_out(node: Node) -> dict[str, Any]:
+    return NodePickerOut(
+        id=node.id,
+        name=node.name,
+        status=node.status or "unknown",
+    ).model_dump()
+
+
 @router.get("")
 def list_nodes(
     page: int | None = None,
@@ -101,34 +116,59 @@ def list_nodes(
     if not _can_list_nodes(db, user):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
 
+    can_read_details = _can_read_node_details(db, user)
     query = db.query(Node)
     if search:
         search_term = f"%{search}%"
-        query = query.filter(Node.name.ilike(search_term) | Node.host.ilike(search_term))
+        if can_read_details:
+            query = query.filter(Node.name.ilike(search_term) | Node.host.ilike(search_term))
+        else:
+            query = query.filter(Node.name.ilike(search_term))
 
     query = query.order_by(Node.id.asc())
-
-    from sqlalchemy import func
-    server_counts_raw = (
-        db.query(Server.node_id, func.count(Server.id))
-        .filter(Server.node_id.isnot(None))
-        .group_by(Server.node_id)
-        .all()
-    )
-    server_counts = {node_id: count for node_id, count in server_counts_raw}
 
     if page is not None and limit is not None:
         total = query.count()
         nodes = query.offset((page - 1) * limit).limit(limit).all()
-        items = [node_out_dict(n, server_count=server_counts.get(n.id, 0)) for n in nodes]
-        return {
-            "items": items,
+        result_page = {
+            "items": [],
             "total": total,
             "page": page,
-            "limit": limit
+            "limit": limit,
         }
+        if not can_read_details:
+            result_page["items"] = [_picker_out(node) for node in nodes]
+            return result_page
+
+        node_ids = [node.id for node in nodes]
+        server_counts_raw = (
+            db.query(Server.node_id, func.count(Server.id))
+            .filter(Server.node_id.in_(node_ids))
+            .group_by(Server.node_id)
+            .all()
+            if node_ids
+            else []
+        )
+        server_counts = {node_id: count for node_id, count in server_counts_raw}
+        result_page["items"] = [
+            node_out_dict(node, server_count=server_counts.get(node.id, 0))
+            for node in nodes
+        ]
+        return result_page
     else:
         nodes = query.all()
+        if not can_read_details:
+            return [_picker_out(node) for node in nodes]
+        node_ids = [node.id for node in nodes]
+        server_counts_raw = (
+            db.query(Server.node_id, func.count(Server.id))
+            .filter(Server.node_id.in_(node_ids))
+            .group_by(Server.node_id)
+            .all()
+            if node_ids
+            else []
+        )
+        server_counts = {node_id: count for node_id, count in server_counts_raw}
         return [node_out_dict(n, server_count=server_counts.get(n.id, 0)) for n in nodes]
 
 
@@ -195,7 +235,7 @@ def node_installer_script() -> FileResponse:
 
 @router.get("/agent-package", include_in_schema=False)
 def node_agent_package(request: Request) -> FileResponse:
-    _rate_limit(request, _enrollment_begin_limit)
+    _rate_limit(_source_ip(request), _enrollment_begin_limit)
     root = Path(__file__).resolve().parent.parent.parent
     agent_dir = root / "msm-agent"
     installer = root / "helper-scripts" / "install-msm-agent.sh"
@@ -247,10 +287,10 @@ def begin_enrollment(
     request: Request,
     db: Session = Depends(get_db),
 ) -> EnrollmentBeginOut:
-    _rate_limit(request, _enrollment_begin_limit)
     source_ip = _source_ip(request)
+    _rate_limit(source_ip, _enrollment_begin_limit)
     try:
-        enrollment, claim_or_id = node_enrollment_service.begin_enrollment(
+        enrollment, claim_secret = node_enrollment_service.begin_enrollment(
             db,
             name=body.name,
             source_ip=source_ip,
@@ -261,14 +301,8 @@ def begin_enrollment(
     except Exception:
         raise HTTPException(status_code=503, detail="Node-Enrollment konnte nicht angelegt werden")
 
-    if enrollment is None:
-        return EnrollmentBeginOut(
-            already_enrolled=True,
-            node_id=claim_or_id,
-        )
-
     return EnrollmentBeginOut(
-        claim_secret=claim_or_id,
+        claim_secret=claim_secret,
         display_code=enrollment.display_code,
         expires_at=enrollment.expires_at,
         already_enrolled=False,
@@ -280,7 +314,7 @@ def poll_enrollment(
     request: Request,
     db: Session = Depends(get_db),
 ) -> EnrollmentPollOut:
-    _rate_limit(request, _enrollment_poll_limit)
+    _rate_limit(_source_ip(request), _enrollment_poll_limit)
     enrollment = node_enrollment_service.find_by_claim(db, _bearer_claim(request))
     if enrollment is None or node_enrollment_service.is_expired(enrollment):
         raise HTTPException(status_code=404, detail="Enrollment nicht gefunden oder abgelaufen")
@@ -295,7 +329,7 @@ def poll_enrollment(
 @router.get("/enrollments/pending", response_model=list[EnrollmentPendingOut])
 def pending_enrollments(
     db: Session = Depends(get_db),
-    user: User = Depends(require_global("nodes.manage")),
+    user: User = Depends(get_current_owner),
 ) -> list[NodeEnrollment]:
     _ = user
     node_enrollment_service.cleanup_expired(db)
@@ -311,11 +345,11 @@ def pending_enrollments(
 def approve_enrollment(
     enrollment_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_global("nodes.manage")),
+    user: User = Depends(get_current_owner),
     _: None = Depends(verify_csrf),
 ) -> dict:
     _ = user
-    enrollment = db.query(NodeEnrollment).filter(NodeEnrollment.id == enrollment_id).first()
+    enrollment = node_enrollment_service.lock_pending_for_approval(db, enrollment_id)
     if enrollment is None:
         raise HTTPException(status_code=404, detail="Enrollment nicht gefunden")
     try:
@@ -337,14 +371,16 @@ def approve_enrollment(
 
     node.status = "online"
     node.last_heartbeat = datetime.now(timezone.utc)
-    if metrics.get("cpu_count") is not None:
-        node.cpu_total = float(metrics["cpu_count"])
-    if metrics.get("ram_total_bytes") is not None:
-        node.ram_total = int(metrics["ram_total_bytes"]) // (1024 * 1024)
-    if metrics.get("disk_total_bytes") is not None:
-        node.disk_total = int(metrics["disk_total_bytes"]) // (1024 * 1024)
+    apply_agent_metrics(node, metrics)
     enrollment.status = "approved"
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="TLS-Fingerprint ist bereits einer anderen Node zugeordnet",
+        ) from exc
     db.refresh(node)
     return node_out_dict(node, server_count=0)
 

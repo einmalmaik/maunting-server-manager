@@ -18,6 +18,7 @@ CERT_DIR="${AGENT_DIR}/certs"
 LOG_FILE="/tmp/msm-agent-install.log"
 AGENT_PORT="${MSM_AGENT_PORT:-9000}"
 AGENT_HOST="${MSM_AGENT_HOST:-0.0.0.0}"
+TOKEN_HANDOFF_FILE="${MSM_AGENT_TOKEN_HANDOFF_FILE:-/root/msm-agent-token}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -325,8 +326,12 @@ PUBLIC_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 PUBLIC_IP="${PUBLIC_IP:-127.0.0.1}"
 AGENT_URL="https://${PUBLIC_IP}:${AGENT_PORT}"
 
-# Enrollment installs never print the token. Manual installs retain the legacy
-# copy flow until all supported panels provide enrollment.
+# Enrollment installs never expose the token. Manual installs use a protected
+# one-time handoff file instead of printing a reusable bearer token to stdout.
+if [[ "${MSM_AGENT_ENROLLMENT:-false}" != "true" ]]; then
+  install -m 0600 /dev/null "$TOKEN_HANDOFF_FILE"
+  printf '%s\n' "$AGENT_TOKEN" > "$TOKEN_HANDOFF_FILE"
+fi
 echo ""
 echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN} MSM Agent Installation abgeschlossen${NC}"
@@ -336,8 +341,8 @@ echo -e "  Agent-URL (Panel → Node host):"
 echo -e "    ${CYAN}${AGENT_URL}${NC}"
 echo ""
 if [[ "${MSM_AGENT_ENROLLMENT:-false}" != "true" ]]; then
-  echo -e "  MSM_AGENT_TOKEN (nur jetzt anzeigen — in Panel speichern):"
-  echo -e "    ${YELLOW}${AGENT_TOKEN}${NC}"
+  echo -e "  MSM_AGENT_TOKEN (geschuetzte Uebergabedatei, Mode 0600):"
+  echo -e "    ${YELLOW}${TOKEN_HANDOFF_FILE}${NC}"
   echo ""
 fi
 echo -e "  TLS Fingerprint SHA-256 (Panel → tls_fingerprint):"
@@ -352,7 +357,7 @@ echo -e "  Firewall:     UFW automatisch konfiguriert, falls aktiv"
 echo -e "                Cloud-Firewall muss Port ${AGENT_PORT}/tcp erlauben"
 echo ""
 if [[ "${MSM_AGENT_ENROLLMENT:-false}" != "true" ]]; then
-  echo -e "${BOLD}Im Panel:${NC} Admin → Nodes → Node hinzufuegen mit URL, Token und Fingerprint."
+  echo -e "${BOLD}Im Panel:${NC} Admin → Nodes → Token aus ${TOKEN_HANDOFF_FILE} einmalig uebernehmen und Datei danach loeschen."
 else
   echo -e "${BOLD}Enrollment:${NC} Agent lokal bereit; warte auf Bestätigung im Panel."
 fi

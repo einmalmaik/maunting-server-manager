@@ -6,6 +6,8 @@ import { create } from 'zustand'
 import { api } from '@/api/client'
 import type { Node } from '@/types'
 
+let latestFetchRequest = 0
+
 interface NodeState {
   nodes: Node[]
   total: number
@@ -43,6 +45,7 @@ export const useNodeStore = create<NodeState>((set, get) => ({
   error: null,
 
   fetchNodes: async (page, limit, search) => {
+    const requestId = ++latestFetchRequest
     set({ loading: true, error: null })
     try {
       let url = '/nodes'
@@ -58,8 +61,10 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 
       const res = await api<Node[] | { items: Node[]; total: number; page: number; limit: number }>(url)
       if (Array.isArray(res)) {
+        if (requestId !== latestFetchRequest) return
         set({ nodes: res, total: res.length, page: 1, limit: res.length, loading: false })
       } else {
+        if (requestId !== latestFetchRequest) return
         set({
           nodes: res.items,
           total: res.total,
@@ -69,6 +74,7 @@ export const useNodeStore = create<NodeState>((set, get) => ({
         })
       }
     } catch (err: unknown) {
+      if (requestId !== latestFetchRequest) return
       const message = err instanceof Error ? err.message : 'Nodes konnten nicht geladen werden'
       set({ error: message, loading: false })
       throw err
@@ -80,7 +86,8 @@ export const useNodeStore = create<NodeState>((set, get) => ({
       method: 'POST',
       body: JSON.stringify(input),
     })
-    set({ nodes: [...get().nodes, created] })
+    latestFetchRequest += 1
+    set({ nodes: [...get().nodes, created].slice(0, get().limit), total: get().total + 1, loading: false })
     return created
   },
 
@@ -89,6 +96,7 @@ export const useNodeStore = create<NodeState>((set, get) => ({
       method: 'PUT',
       body: JSON.stringify(input),
     })
+    latestFetchRequest += 1
     set({
       nodes: get().nodes.map((n) => (n.id === id ? updated : n)),
     })
@@ -97,7 +105,8 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 
   deleteNode: async (id) => {
     await api(`/nodes/${id}`, { method: 'DELETE' })
-    set({ nodes: get().nodes.filter((n) => n.id !== id) })
+    latestFetchRequest += 1
+    set({ nodes: get().nodes.filter((n) => n.id !== id), total: Math.max(0, get().total - 1), loading: false })
   },
 
   healthCheck: async (id) => {
@@ -109,5 +118,8 @@ export const useNodeStore = create<NodeState>((set, get) => ({
     return fresh
   },
 
-  clear: () => set({ nodes: [], loading: false, error: null }),
+  clear: () => {
+    latestFetchRequest += 1
+    set({ nodes: [], total: 0, page: 1, loading: false, error: null })
+  },
 }))

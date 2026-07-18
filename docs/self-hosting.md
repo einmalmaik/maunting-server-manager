@@ -175,7 +175,10 @@ von DNS und Cloud-Firewall auf.
 - Die einmalige Owner-Freigabe eines neuen Agents bleibt eine bewusste
   Sicherheitsgrenze und wird auch mit `--yes` nicht umgangen.
 
-Eine reine Vorprüfung ohne Änderungen ist möglich:
+Eine reine Vorprüfung ohne Änderungen ist möglich. Sie prüft die lokale
+Installation und – passend zur Auswahl – Frontend-Erreichbarkeit,
+Gameserver-Zustände oder die SSH-Erreichbarkeit der Ziel-Control-Plane. Sie
+erstellt keine Archive, stoppt keine Dienste und verändert keine Daten:
 
 ```bash
 sudo /opt/msm/helper-scripts/migrate-panel-components.sh \
@@ -211,8 +214,15 @@ von Agent-Token oder TLS-Fingerprint:
    schaltet den Node frei.
 
 Enrollment-Anfragen laufen nach 15 Minuten ab und sind rate-limited. Der
-manuelle Dialog für Host, Token und Fingerprint bleibt nur als Fallback für
-bereits separat installierte oder speziell angebundene Agents bestehen.
+Installationsbefehl enthält kein wiederverwendbares Agent-Token. Eine bereits
+registrierte Node kann über den öffentlichen Enrollment-Endpunkt niemals
+überschrieben werden; eine erneute Vertrauensfreigabe bleibt eine bewusste
+Owner-Aktion. Der manuelle Dialog für Host, Token und Fingerprint bleibt nur als Fallback für
+bereits separat installierte oder speziell angebundene Agents bestehen. Bei
+einer manuellen Agent-Installation liegt das einmal zu übernehmende Token in
+`/root/msm-agent-token` mit Modus `0600`; nach dem Eintragen im Panel muss diese
+Übergabedatei gelöscht werden. Im normalen Enrollment-Flow wird sie nicht
+angelegt.
 
 ## Beispiel mit 20 Hosts
 

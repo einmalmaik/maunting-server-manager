@@ -121,9 +121,9 @@ sudo /opt/msm/helper-scripts/migrate-panel-components.sh
 
 Der Assistent behält Quelldaten und eine deaktivierte Quell-Control-Plane als
 Rollback-Basis. DNS beim externen Anbieter und die einmalige Owner-Freigabe
-eines neuen Agents bleiben bewusst menschliche Sicherheitsgrenzen; die danach
-bestätigte Node-ID übernimmt der Assistent automatisch. Details,
-Vorbedingungen und `--dry-run` stehen in [`docs/self-hosting.md`](docs/self-hosting.md).
+eines neuen Agents bleiben bewusste Sicherheitsgrenzen. `--dry-run` führt eine
+echte, rein lesende Vorprüfung der gewählten Ziele durch. Die kurze,
+verbindliche Anleitung steht in [`docs/self-hosting.md`](docs/self-hosting.md).
 
 ---
 

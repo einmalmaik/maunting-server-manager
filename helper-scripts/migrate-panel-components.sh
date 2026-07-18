@@ -28,6 +28,7 @@ EXPLICIT_ACTION=false
 
 WORK_DIR=""
 SOURCE_STOPPED=false
+SOURCE_UPDATE_TIMER_ACTIVE=false
 TARGET_COMMITTED=false
 SSH_CONTROL=""
 REMOTE_SUDO="sudo"
@@ -123,6 +124,9 @@ restart_source_on_error() {
         warn "Ziel-Cutover fehlgeschlagen; die Quell-Control-Plane wird wieder gestartet."
         systemctl start msm-dis-sidecar.service >/dev/null 2>&1 || true
         systemctl start msm-panel.service >/dev/null 2>&1 || true
+        if $SOURCE_UPDATE_TIMER_ACTIVE; then
+            systemctl start msm-update.timer >/dev/null 2>&1 || true
+        fi
     fi
     cleanup
     exit "$code"
@@ -193,14 +197,46 @@ $MIGRATE_FRONTEND && printf '  - externes Frontend %s mit API https://%s verbind
 $MIGRATE_SERVERS && printf '  - Gameserver %s nacheinander auf Node %s migrieren\n' "$SERVER_IDS" "$TARGET_NODE_ID"
 $MIGRATE_BACKEND && printf '  - Backend nach %s:%s für https://%s migrieren\n' "$BACKEND_TARGET" "$SSH_PORT" "$API_DOMAIN"
 
-if $DRY_RUN; then
-    ok "Dry-run abgeschlossen; es wurde nichts verändert."
-    exit 0
-fi
-
 [[ $EUID -eq 0 ]] || fail "Bitte mit sudo ausführen."
 [[ -f "$SOURCE_ENV" ]] || fail "Bestehende MSM-Installation fehlt: $SOURCE_ENV"
 [[ -x "$SOURCE_PYTHON" ]] || fail "Backend-Python fehlt: $SOURCE_PYTHON"
+
+run_dry_run_preflight() {
+    command -v curl >/dev/null || fail "curl fehlt"
+    if $MIGRATE_FRONTEND; then
+        local status
+        status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$FRONTEND_ORIGIN" || true)"
+        [[ "$status" =~ ^[23][0-9][0-9]$ ]] \
+            || fail "Frontend ist nicht erfolgreich erreichbar (HTTP ${status:-0})"
+    fi
+    if $MIGRATE_SERVERS; then
+        local server_id
+        IFS=',' read -r -a ids <<< "$SERVER_IDS"
+        for server_id in "${ids[@]}"; do
+            (
+                cd "$SOURCE_BACKEND"
+                "$SOURCE_PYTHON" scripts/migrate_server_to_node.py \
+                    --server-id "$server_id" --target-node-id "$TARGET_NODE_ID" \
+                    --preflight-only
+            )
+        done
+    fi
+    if $MIGRATE_BACKEND; then
+        command -v ssh >/dev/null || fail "ssh fehlt"
+        command -v scp >/dev/null || fail "scp fehlt"
+        command -v tar >/dev/null || fail "tar fehlt"
+        command -v pg_dump >/dev/null || fail "pg_dump fehlt"
+        systemctl is-active --quiet msm-panel.service || fail "Quell-Panel läuft nicht"
+        ssh -o BatchMode=yes -o ConnectTimeout=15 -p "$SSH_PORT" "$BACKEND_TARGET" true \
+            || fail "SSH-Ziel ist ohne interaktive Rückfrage nicht erreichbar"
+    fi
+    ok "Dry-run und lokale Vorprüfung abgeschlossen; es wurde nichts verändert."
+}
+
+if $DRY_RUN; then
+    run_dry_run_preflight
+    exit 0
+fi
 
 run_frontend_migration() {
     info "Prüfe das bereits veröffentlichte Frontend..."
@@ -342,6 +378,7 @@ run_backend_migration() {
         remote_install+=" --external-frontend '$FRONTEND_ORIGIN'"
     fi
     ssh_run "$remote_install"
+    ssh_run "$REMOTE_SUDO caddy validate --config /etc/caddy/Caddyfile >/dev/null"
     ssh_run "curl -fsS --max-time 10 http://127.0.0.1:8000/api/health >/dev/null"
 
     if [[ "$(local_node_count)" != "0" ]]; then
@@ -378,6 +415,7 @@ run_backend_migration() {
     runtime_archive="$WORK_DIR/runtime.tar.gz"
 
     info "Stoppe die Quell-Control-Plane für den konsistenten finalen Dump..."
+    systemctl is-active --quiet msm-update.timer && SOURCE_UPDATE_TIMER_ACTIVE=true
     systemctl stop msm-update.timer >/dev/null 2>&1 || true
     systemctl stop msm-panel.service
     SOURCE_STOPPED=true
@@ -399,7 +437,13 @@ set -Eeuo pipefail
 umask 077
 stage="\$1"
 api_origin="\$2"
-cleanup_stage() { rm -rf -- "\$stage"; }
+cutover_ok=false
+cleanup_stage() {
+    if ! \$cutover_ok; then
+        systemctl stop msm-panel.service msm-dis-sidecar.service >/dev/null 2>&1 || true
+    fi
+    rm -rf -- "\$stage"
+}
 trap cleanup_stage EXIT
 systemctl stop msm-panel.service
 cp /opt/msm/backend/.env "\$stage/target.env"
@@ -425,6 +469,7 @@ caddy validate --config /etc/caddy/Caddyfile >/dev/null
 if grep -Eq '^MSM_AUTO_UPDATE=(true|"true")$' /opt/msm/backend/.env; then
     systemctl enable --now msm-update.timer >/dev/null 2>&1 || true
 fi
+cutover_ok=true
 REMOTE_CUTOVER
 
     TARGET_COMMITTED=true

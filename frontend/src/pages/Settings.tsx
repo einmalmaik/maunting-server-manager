@@ -12,6 +12,7 @@ import { ImprintTab } from './settings/ImprintTab'
 import { SupportWidgetTab } from './settings/SupportWidgetTab'
 import { CaptchaTab } from './settings/CaptchaTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 type TabId = 'general' | 'email' | 'steam' | 'github' | 'oauth' | 'imprint' | 'captcha' | 'supportWidget' | 'backup'
 
@@ -34,13 +35,8 @@ export function Settings() {
   ]
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-headline text-headline-sm text-primary">{t('settings.title')}</h1>
-        <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-          {t('settings.subtitle')}
-        </p>
-      </div>
+    <div className="msm-page">
+      <PageHeader eyebrow={t('pageContext.panel', 'Panel')} title={t('settings.title')} description={t('settings.subtitle')} status={<span className="msm-badge-info">{t(`settings.tabs.${activeTab}`)}</span>} />
 
       <TabBar
         tabs={tabs}

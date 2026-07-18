@@ -1,4 +1,8 @@
-# Multi-Node: Umgesetzte Phasen — Pflicht-Dateien behalten
+# Multi-Node: Technischer Umsetzungsstand
+
+> Entwicklerübersicht, keine Installationsanleitung. Für Betrieb und Einrichtung
+> gilt [`../self-hosting.md`](../self-hosting.md). Ältere Phasendokumente bilden
+> die damalige Planung ab und können von der heutigen Oberfläche abweichen.
 
 Stand: 2026-07-15, Branch `feature/multi-node`
 Dieses Dokument listet die **wichtigen Dateien**, die zu den bereits umgesetzten Phasen gehören.
@@ -159,13 +163,13 @@ Bestehende UI-Primitives (behalten, werden genutzt):
 | `backend/tests/test_phase5_tls_heartbeat.py` | Pin/Offline/Heartbeat-Tests |
 | `msm-agent/config.py` + `main.py` | `MSM_TLS_CERTFILE` / `MSM_TLS_KEYFILE` |
 | `msm-agent/.env.example` | TLS-Variablen |
-| `scripts/install-agent.sh` | Rootless Docker, Cert, Token, systemd |
+| `helper-scripts/install-msm-agent.sh` | Rootless Docker, Zertifikat, Token und systemd |
 | `frontend/src/pages/AdminNodes.tsx` | Fingerprint-Feld |
 | `frontend/src/pages/ServerDetail.tsx` | Aktionen disabled bei `node_unreachable` |
 
 **Installer:** Standardmäßig im Panel **Node hinzufügen** öffnen, den dortigen
 secret-freien Einmal-Befehl auf dem Node ausführen und den kurzen Code im Panel
-bestätigen. `sudo bash scripts/install-agent.sh` mit manueller Eingabe von URL,
+bestätigen. Der direkte Aufruf von `helper-scripts/install-msm-agent.sh` mit manueller Eingabe von URL,
 Token und Fingerprint bleibt nur der Fallback für Spezialfälle.
 
 ---
@@ -256,7 +260,7 @@ test -f frontend/src/pages/AdminNodes.tsx && test -f frontend/src/stores/nodeSto
 test -f frontend/src/config/api.ts && test -f frontend/vercel.json
 
 # Phase 5
-test -f scripts/install-agent.sh && test -f backend/services/tls_pinning.py
+test -f helper-scripts/install-msm-agent.sh && test -f backend/services/tls_pinning.py
 
 # Phase 6
 test -f msm-agent/services/stream_crypto.py && test -f msm-agent/routers/backup.py
@@ -277,7 +281,7 @@ PowerShell:
   'frontend/vercel.json',
   'backend/tests/test_phase4_frontend_decouple.py',
   'backend/services/tls_pinning.py',
-  'scripts/install-agent.sh',
+  'helper-scripts/install-msm-agent.sh',
   'backend/tests/test_phase5_tls_heartbeat.py',
   'msm-agent/services/stream_crypto.py',
   'msm-agent/routers/backup.py',

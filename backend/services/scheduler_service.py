@@ -783,10 +783,13 @@ async def _node_heartbeat_task() -> None:
                         apply_agent_metrics(node, metrics)
                     else:
                         node.status = "offline"
-                        node.docker_connected = False
-                except (NodeClientError, Exception):
+                except NodeClientError:
                     node.status = "offline"
-                    node.docker_connected = False
+                except Exception:
+                    node.status = "offline"
+                    logger.exception(
+                        "unexpected node heartbeat failure (node_id=%s)", node.id
+                    )
 
         async with httpx.AsyncClient(limits=limits, timeout=4.0) as client:
             tasks = [check_node(client, node) for node in nodes]

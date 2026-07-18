@@ -147,8 +147,8 @@ def trigger_node_updates(db: Session) -> dict:
 
     results = []
     for node in nodes:
-        logger.info("Sende Agent-Update an Node '%s' (%s)...", node.name, node.ip_host)
         try:
+            logger.info("Sende Agent-Update an Node '%s' (%s)...", node.name, node.host)
             client = NodeClient.from_node(node)
             res = client.update_agent(archive_bytes)
             results.append({"node_id": node.id, "name": node.name, "ok": True, "message": res.get("message", "")})

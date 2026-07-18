@@ -880,10 +880,13 @@ def repair_bind_mount_permissions(
 ) -> dict:
     import shlex
     uid, gid = owner_uid_gid or container_runtime_uid_gid()
+    target = shlex.quote(container_path)
     cmd = [
         "-c",
-        f"chown -R {uid}:{gid} {shlex.quote(container_path)} 2>/dev/null || true; "
-        f"chmod -R a+rwx {shlex.quote(container_path)} 2>/dev/null || true",
+        f"find {target} -xdev -exec chown -h {uid}:{gid} {{}} + 2>/dev/null || true; "
+        f"find {target} -xdev -type d -exec chmod 0750 {{}} + 2>/dev/null || true; "
+        f"find {target} -xdev -type f -perm /111 -exec chmod 0750 {{}} + 2>/dev/null || true; "
+        f"find {target} -xdev -type f ! -perm /111 -exec chmod 0640 {{}} + 2>/dev/null || true",
     ]
     return run_ephemeral(
         image="alpine:3.21",

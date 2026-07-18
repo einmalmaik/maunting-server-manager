@@ -55,8 +55,10 @@ describe('resolveRouteAccessState', () => {
     expect(resolve('settings', userWith([]))).toBe('forbidden')
   })
 
-  it('allows nodes only for owners (empty required keys)', () => {
+  it('allows node administration with read or manage permission', () => {
     expect(resolve('nodes', owner)).toBe('allowed')
+    expect(resolve('nodes', userWith(['nodes.read']))).toBe('allowed')
+    expect(resolve('nodes', userWith(['nodes.manage']))).toBe('allowed')
     expect(resolve('nodes', userWith(['panel.settings.write']))).toBe('forbidden')
   })
 

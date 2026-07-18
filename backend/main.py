@@ -80,13 +80,13 @@ async def lifespan(app: FastAPI):
             "ohne DIS nicht operieren."
         )
 
-    # Schema must exist before local-node registration (servers.node_id, etc.).
-    # prepare_phase8 / Alembic should have run at install/update; ensure_multi_node_schema
-    # is idempotent and covers in-place multi-node upgrades that skipped DB init.
+    # Schema changes belong to the installer/update Alembic path. The web
+    # process only synchronizes runtime registration and fails if deployment
+    # skipped the required schema upgrade.
     from database import SessionLocal
-    from services.multi_node_migration_service import migrate_multi_node_schema
+    from services.multi_node_migration_service import sync_multi_node_registration
 
-    migrate_multi_node_schema(
+    sync_multi_node_registration(
         engine,
         SessionLocal,
         allow_missing_local_token=is_testing,

@@ -12,6 +12,11 @@ from services.node_client import NODE_TOKEN_AAD, NodeClient, NodeClientError
 from services.scheduler_service import _node_heartbeat_task
 
 
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
+
+
 @pytest.mark.anyio
 async def test_node_heartbeat_task_scale(db: Session):
     """Simulate 120 nodes under load and verify async parallel heartbeat updates."""
@@ -23,7 +28,7 @@ async def test_node_heartbeat_task_scale(db: Session):
             name=f"ScaleNode-{i}",
             host=f"http://127.0.0.1:900{i}" if not is_https else f"https://remote-node-{i}.test",
             auth_token_enc=token_enc,
-            tls_fingerprint="0" * 64 if is_https else None,
+            tls_fingerprint=f"{i:064x}" if is_https else None,
             status="unknown",
             is_local=(i == 0),
         )

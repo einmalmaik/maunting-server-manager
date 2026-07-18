@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { DatabaseConsole } from '@/Singra/UI/DatabaseConsole'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { toast } from '@/stores/toastStore'
 import type {
@@ -21,6 +23,7 @@ const PANEL_DATABASE = {
 const DEFAULT_SQL = 'SELECT table_schema, table_name\nFROM information_schema.tables\nWHERE table_schema NOT IN (\'pg_catalog\', \'information_schema\')\nORDER BY table_schema, table_name\nLIMIT 50;'
 
 export function PanelDatabase() {
+  const { t } = useTranslation()
   const canAdmin = useHasPermission('panel.database.admin')
   const [stats, setStats] = useState<PostgresDatabaseStats | null>(null)
   const [tables, setTables] = useState<PostgresTable[]>([])
@@ -112,9 +115,16 @@ export function PanelDatabase() {
     })
 
   return (
-    <DatabaseConsole
-      title="Panel-Datenbank"
-      subtitle="Verwalte die eigene PostgreSQL-Datenbank des Panels ohne Terminal-Zugriff."
+    <div className="msm-page">
+      <PageHeader
+        eyebrow={t('pageContext.data', 'Data')}
+        title={t('panelDatabase.title', 'Panel database')}
+        description={t('panelDatabase.subtitle', 'Manage the panel PostgreSQL database without terminal access.')}
+        status={<span className={canAdmin ? 'msm-badge-warning' : 'msm-badge-info'}>{canAdmin ? t('panelDatabase.admin', 'Admin') : t('panelDatabase.readOnly', 'Read only')}</span>}
+      />
+      <DatabaseConsole
+      title={t('panelDatabase.workspace', 'Database explorer')}
+      subtitle={t('panelDatabase.workspaceSubtitle', 'Inspect tables, rows and database statistics.')}
       databaseLabel="Panel"
       databases={[PANEL_DATABASE]}
       selectedDatabaseId={PANEL_DB_ID}
@@ -136,6 +146,7 @@ export function PanelDatabase() {
       onRunSql={runSql}
       onImport={canAdmin ? importSql : undefined}
       onRefresh={() => void run('refresh', load)}
-    />
+      />
+    </div>
   )
 }

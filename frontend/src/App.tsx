@@ -32,13 +32,14 @@ const AdminNodes = lazy(() => import('./pages/AdminNodes').then(module => ({ def
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
 import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
-import { DisBadge } from './components/DisBadge'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
+import { PrivacyNoticeVisibilityContext } from './components/ui/PrivacyNoticeVisibility'
 import { SupportWidgetLoader } from './components/SupportWidgetLoader'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
   const [setupEmailConfigured, setSetupEmailConfigured] = useState(false)
+  const [privacyNoticeVisible, setPrivacyNoticeVisible] = useState(true)
   const { isAuthenticated } = useAuthStore()
 
   useEffect(() => {
@@ -69,10 +70,7 @@ function App() {
   }
 
   return (
-    <>
-      <div className="fixed bottom-4 right-4 z-[9999] pointer-events-auto">
-        <DisBadge />
-      </div>
+    <PrivacyNoticeVisibilityContext.Provider value={privacyNoticeVisible}>
       <Suspense fallback={
         <Loader fullScreen label="Maunting Server Manager" />
       }>
@@ -157,12 +155,12 @@ function App() {
         </Route>
       </Routes>
       </Suspense>
-      <PrivacyAcknowledgementNotice />
-      <SupportWidgetLoader />
+      <PrivacyAcknowledgementNotice onVisibilityChange={setPrivacyNoticeVisible} />
+      <SupportWidgetLoader enabled={!privacyNoticeVisible} />
       <ToastContainer />
       <ConfirmDialog />
       <PromptDialog />
-    </>
+    </PrivacyNoticeVisibilityContext.Provider>
   )
 }
 

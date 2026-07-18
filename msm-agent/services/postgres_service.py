@@ -208,13 +208,12 @@ def provision(
     if not all([admin_password, owner_password, user_password]):
         raise PostgresAgentError("Passwords required")
 
-    owner_create_stmt = (
-        sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s SUPERUSER").format(sql.Identifier(owner_role))
-        if power_user
-        else sql.SQL(
-            "CREATE ROLE {} LOGIN PASSWORD %s NOSUPERUSER NOCREATEDB NOCREATEROLE"
-        ).format(sql.Identifier(owner_role))
-    )
+    # A server-scoped power user remains owner of only its own database.  The
+    # node-local PostgreSQL cluster is shared by multiple managed servers, so a
+    # cluster-wide SUPERUSER role would break tenant isolation.
+    owner_create_stmt = sql.SQL(
+        "CREATE ROLE {} LOGIN PASSWORD %s NOSUPERUSER NOCREATEDB NOCREATEROLE"
+    ).format(sql.Identifier(owner_role))
 
     conn = _admin_connect(admin_password)
     try:
@@ -278,7 +277,8 @@ def provision(
         "user_name": user_name,
         "host": settings.managed_postgres_container_name,
         "port": 5432,
-        "is_superuser": power_user,
+        "is_superuser": False,
+        "power_user": power_user,
     }
 
 
@@ -393,7 +393,9 @@ def promote_owner(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                sql.SQL("ALTER ROLE {} WITH SUPERUSER LOGIN PASSWORD %s").format(
+                sql.SQL(
+                    "ALTER ROLE {} WITH NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN PASSWORD %s"
+                ).format(
                     sql.Identifier(owner_role)
                 ),
                 (new_password,),
@@ -405,6 +407,7 @@ def promote_owner(
         "username": owner_role,
         "host": settings.managed_postgres_container_name,
         "port": 5432,
+        "scope": "database",
     }
 
 
@@ -1083,7 +1086,7 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
         name = validate_identifier(db_name)
         cmd_in_container = (
             "pg_dump "
-            "--format=plain --no-owner --no-acl --clean --if-exists "
+            "--format=plain --no-owner --no-acl --clean --if-exists --inserts "
             f"--dbname={shlex.quote(name)} "
             f"--username={shlex.quote(ADMIN_USER)}"
         )
@@ -1098,8 +1101,24 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
                 f"pg_dump failed for database: {(exec_result.get('error') or '')[:200]}",
                 status_code=500,
             )
-        result[name] = exec_result.get("stdout") or ""
+        dump_text = exec_result.get("stdout") or ""
+        # PostgreSQL 17 may wrap plain dumps in psql's \restrict commands.
+        # Remove only these tool-generated guards. User-controlled restore SQL
+        # is still rejected below if any psql meta-command remains.
+        result[name] = "\n".join(
+            line
+            for line in dump_text.splitlines()
+            if not re.match(r"^[ \t]*\\(?:un)?restrict(?:[ \t]|$)", line)
+        )
     return result
+
+
+def _reject_psql_meta_commands(sql_text: str) -> None:
+    if re.search(r"(?m)^[^\S\r\n]*\\", sql_text or ""):
+        raise PostgresAgentError(
+            "PostgreSQL restore rejects psql meta-commands",
+            status_code=400,
+        )
 
 
 def restore_sql(
@@ -1119,12 +1138,16 @@ def restore_sql(
         database_names=database_names,
     )
     def apply_dump(name: str, sql_text: str) -> None:
+        _reject_psql_meta_commands(sql_text)
         owner = (owners or {}).get(name) or {}
         restore_user = validate_identifier(str(owner.get("owner_role") or ADMIN_USER))
         restore_password = str(owner.get("owner_password") or admin_password)
         result = docker_service.exec_in_managed_stdin(
             settings.managed_postgres_container_name,
-            ["psql", "--set", "ON_ERROR_STOP=1", "--username", restore_user, "--dbname", name],
+            [
+                "psql", "--no-psqlrc", "--set", "ON_ERROR_STOP=1",
+                "--username", restore_user, "--dbname", name,
+            ],
             sql_text,
             environment={"PGPASSWORD": restore_password},
         )

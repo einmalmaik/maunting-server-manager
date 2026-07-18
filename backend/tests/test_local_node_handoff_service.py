@@ -14,7 +14,13 @@ from services.local_node_handoff_service import (
 )
 
 
-def _topology(db: Session, root: Path, *, status: str = "running") -> tuple[Node, Node, Server]:
+def _topology(
+    db: Session,
+    root: Path,
+    *,
+    status: str = "running",
+    legacy_root: bool = False,
+) -> tuple[Node, Node, Server]:
     local = Node(
         name="Local",
         host="http://127.0.0.1:9000",
@@ -34,7 +40,7 @@ def _topology(db: Session, root: Path, *, status: str = "running") -> tuple[Node
     server = Server(
         name="Game",
         game_type="test",
-        install_dir=str(root / "1"),
+        install_dir=str(root / ("test_1" if legacy_root else "1")),
         status=status,
         node=local,
         container_name="msm-srv-1" if status == "running" else None,
@@ -42,7 +48,7 @@ def _topology(db: Session, root: Path, *, status: str = "running") -> tuple[Node
     db.add(server)
     db.commit()
     db.refresh(server)
-    server_root = root / str(server.id)
+    server_root = root / (f"test_{server.id}" if legacy_root else str(server.id))
     server_root.mkdir(parents=True)
     (server_root / "world.dat").write_text("world", encoding="utf-8")
     return local, replacement, server
@@ -81,6 +87,26 @@ def test_handoff_proves_shared_storage_and_atomically_reassigns(
     assert list(tmp_path.rglob(".msm-handoff-*")) == []
 
 
+def test_handoff_normalizes_legacy_local_root_for_agent_contract(
+    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "servers_dir", str(tmp_path))
+    _local, replacement, server = _topology(db, tmp_path, legacy_root=True)
+    client = _shared_agent(tmp_path, server)
+
+    with patch(
+        "services.local_node_handoff_service.NodeClient.from_node",
+        return_value=client,
+    ):
+        result = handoff_local_node(db, replacement_node_id=replacement.id)
+
+    db.refresh(server)
+    assert result["data_moved"] is True
+    assert server.install_dir == str(tmp_path / str(server.id))
+    assert not (tmp_path / f"test_{server.id}").exists()
+    assert (tmp_path / str(server.id) / "world.dat").read_text(encoding="utf-8") == "world"
+
+
 def test_handoff_rejects_agent_that_cannot_read_same_storage(
     db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -103,6 +129,32 @@ def test_handoff_rejects_agent_that_cannot_read_same_storage(
     assert db.query(Node).filter(Node.id == local.id).one().is_local is True
     assert db.query(Server).filter(Server.id == server.id).one().node_id == local.id
     assert list(tmp_path.rglob(".msm-handoff-*")) == []
+
+
+def test_failed_handoff_restores_legacy_directory_name(
+    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "servers_dir", str(tmp_path))
+    local, replacement, server = _topology(db, tmp_path, legacy_root=True)
+    client = _shared_agent(tmp_path, server)
+    client.files_read.return_value = "wrong-runtime"
+    client.files_read.side_effect = None
+
+    with (
+        patch(
+            "services.local_node_handoff_service.NodeClient.from_node",
+            return_value=client,
+        ),
+        pytest.raises(LocalNodeHandoffError, match="nicht dasselbe Datenverzeichnis"),
+    ):
+        handoff_local_node(db, replacement_node_id=replacement.id)
+
+    db.expire_all()
+    stored = db.query(Server).filter(Server.id == server.id).one()
+    assert stored.node_id == local.id
+    assert stored.install_dir == str(tmp_path / f"test_{server.id}")
+    assert (tmp_path / f"test_{server.id}" / "world.dat").is_file()
+    assert not (tmp_path / str(server.id)).exists()
 
 
 def test_handoff_rejects_missing_running_container(

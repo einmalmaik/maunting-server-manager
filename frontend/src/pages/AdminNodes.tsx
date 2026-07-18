@@ -25,6 +25,7 @@ import { NodeEnrollmentDialog } from '@/components/nodes/NodeEnrollmentDialog'
 import type { Node } from '@/types'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 function statusVariant(status: string): 'success' | 'destructive' | 'default' | 'warning' {
   switch (status) {
@@ -116,13 +117,19 @@ export function AdminNodes() {
   }, [])
 
   const handleUpdateNodes = async () => {
+    const approved = await confirm({
+      title: t('nodes.updateConfirmTitle'),
+      message: t('nodes.updateConfirmBody'),
+      confirmText: t('nodes.updateAll'),
+    })
+    if (!approved) return
     setUpdatingNodes(true)
     try {
       const res = await api<{ message: string }>('/system/update/nodes', { method: 'POST' })
-      toast.success(res.message || 'Node-Updates gestartet')
+      toast.success(res.message || t('nodes.updateStarted'))
       await fetchNodes(currentPage, pageSize, debouncedSearch)
-    } catch (err: any) {
-      toast.error(err.message || 'Node-Update fehlgeschlagen')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t('nodes.updateFailed'))
     } finally {
       setUpdatingNodes(false)
     }
@@ -256,45 +263,38 @@ export function AdminNodes() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-headline text-headline-sm text-primary">{t('nav.nodes')}</h1>
-          <p className="mt-1 font-body-md text-body-md text-on-surface-variant">
-            {t('nodes.subtitle')}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="msm-page">
+      <PageHeader eyebrow={t('pageContext.infrastructure')} title={t('nav.nodes')} description={t('nodes.subtitle')} status={<span className="msm-badge-info">{total} {t('nav.nodes')}</span>} actions={<div className="flex flex-wrap items-center gap-2">
           {canManageNodes && updateAvailable && (
             <button
               type="button"
               disabled={updatingNodes}
               onClick={handleUpdateNodes}
-              className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2 disabled:opacity-60"
+              className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-4 py-2 disabled:opacity-60"
             >
               <RefreshCw className={`h-4 w-4 ${updatingNodes ? 'animate-spin' : ''}`} />
-              {updatingNodes ? t('nodes.updating', 'Updating Nodes...') : t('nodes.updateAll', 'Nodes updaten')}
+              {updatingNodes ? t('nodes.updating') : t('nodes.updateAll')}
             </button>
           )}
           {canManageNodes && (
             <button
               type="button"
               onClick={openEnrollment}
-              className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
+              className="msm-btn-primary inline-flex min-h-11 items-center gap-2 px-4 py-2"
             >
               <Plus className="h-4 w-4" />
               {t('nodes.add')}
             </button>
           )}
-        </div>
-      </div>
-      <div className="flex items-center gap-4 bg-surface-variant/20 p-4 rounded-xl">
+        </div>} />
+      <div className="flex items-center gap-4 bg-surface-variant/20 p-4 rounded-xl" role="search">
         <div className="relative flex-1 max-w-sm">
           <input
             type="text"
+            aria-label={t('nodes.searchPlaceholder')}
             value={searchVal}
             onChange={(e) => setSearchVal(e.target.value)}
-            placeholder={t('nodes.searchPlaceholder', { defaultValue: 'Nodes filtern...' })}
+            placeholder={t('nodes.searchPlaceholder')}
             className="msm-input pl-9"
           />
           <svg
@@ -438,6 +438,7 @@ export function AdminNodes() {
                       type="button"
                       className="msm-btn-secondary p-2"
                       title={t('nodes.healthCheck')}
+                      aria-label={t('nodes.healthCheckLabel', { name: node.name })}
                       onClick={() => void handleHealth(node)}
                       disabled={busyId === node.id}
                     >
@@ -451,6 +452,7 @@ export function AdminNodes() {
                           type="button"
                           className="msm-btn-secondary p-2"
                           title={t('nodes.edit')}
+                          aria-label={t('nodes.editLabel', { name: node.name })}
                           onClick={() => openEdit(node)}
                         >
                           <Pencil className="h-4 w-4" />
@@ -459,6 +461,7 @@ export function AdminNodes() {
                           type="button"
                           className="msm-btn-secondary p-2 text-status-error disabled:opacity-40"
                           title={t('common.delete')}
+                          aria-label={t('nodes.deleteLabel', { name: node.name })}
                           disabled={node.is_local || node.server_count > 0}
                           onClick={() => void handleDelete(node)}
                         >
@@ -486,7 +489,6 @@ export function AdminNodes() {
                         : node.ram_total != null
                           ? t('nodes.ramCapacity', {
                               value: formatRamMb(node.ram_total),
-                              defaultValue: `Kapazität ${formatRamMb(node.ram_total)}`,
                             })
                           : '—'
                     }
@@ -522,7 +524,7 @@ export function AdminNodes() {
       {Math.ceil(total / pageSize) > 1 && (
         <div className="mt-8 flex items-center justify-between border-t border-surface-variant pt-4 text-sm text-on-surface-variant">
           <div>
-            Zeige {(currentPage - 1) * pageSize + 1} bis {Math.min(currentPage * pageSize, total)} von {total} Nodes
+            {t('nodes.pagination.range', { from: (currentPage - 1) * pageSize + 1, to: Math.min(currentPage * pageSize, total), total })}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -530,17 +532,17 @@ export function AdminNodes() {
               onClick={() => setCurrentPage((p) => p - 1)}
               className="msm-btn-secondary px-3 py-1.5 text-xs disabled:opacity-50"
             >
-              Zurück
+              {t('common.back')}
             </button>
             <span className="font-medium px-2">
-              Seite {currentPage} von {Math.ceil(total / pageSize)}
+              {t('nodes.pagination.page', { current: currentPage, total: Math.ceil(total / pageSize) })}
             </span>
             <button
               disabled={currentPage >= Math.ceil(total / pageSize)}
               onClick={() => setCurrentPage((p) => p + 1)}
               className="msm-btn-secondary px-3 py-1.5 text-xs disabled:opacity-50"
             >
-              Weiter
+              {t('common.next')}
             </button>
           </div>
         </div>

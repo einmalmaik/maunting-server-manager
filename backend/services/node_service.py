@@ -160,21 +160,26 @@ def apply_agent_metrics(node: Node, metrics: dict[str, Any] | None) -> None:
             pass
     if metrics.get("ram_used_bytes") is not None:
         try:
-            node.ram_used = int(metrics["ram_used_bytes"])
+            node.ram_used = int(metrics["ram_used_bytes"]) // (1024 * 1024)
         except (TypeError, ValueError):
             pass
     if metrics.get("disk_used_bytes") is not None:
         try:
-            node.disk_used = int(metrics["disk_used_bytes"])
+            node.disk_used = int(metrics["disk_used_bytes"]) // (1024 * 1024)
         except (TypeError, ValueError):
             pass
     if metrics.get("container_count") is not None:
         try:
-            node.container_count = int(metrics["container_count"])
+            container_count = int(metrics["container_count"])
+            if container_count >= 0:
+                node.container_count = container_count
         except (TypeError, ValueError):
             pass
-    node.docker_connected = True
-    node.agent_version = "1.0.0"
+    if isinstance(metrics.get("docker_connected"), bool):
+        node.docker_connected = metrics["docker_connected"]
+    agent_version = metrics.get("agent_version")
+    if isinstance(agent_version, str) and agent_version.strip():
+        node.agent_version = agent_version.strip()[:50]
 
 
 def probe_node_metrics(
@@ -197,12 +202,11 @@ def probe_node_metrics(
     except NodeClientError:
         if mark_status:
             node.status = "offline"
-            node.docker_connected = False
         return None
     except Exception:
+        logger.exception("unexpected node metrics probe failure (node_id=%s)", node.id)
         if mark_status:
             node.status = "offline"
-            node.docker_connected = False
         return None
 
     if not isinstance(metrics, dict):

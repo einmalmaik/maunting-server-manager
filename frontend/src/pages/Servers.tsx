@@ -11,6 +11,7 @@ import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive, Database, Network
 import { PostgresCredentialsDialog } from '@/components/server/PostgresCredentialsDialog'
 import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 export function Servers() {
   const { t } = useTranslation()
@@ -22,6 +23,7 @@ export function Servers() {
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [nodesLoading, setNodesLoading] = useState(false)
   const [oneTimeCredentials, setOneTimeCredentials] = useState<PostgresCredential[]>([])
   const [form, setForm] = useState({
     name: '',
@@ -38,7 +40,11 @@ export function Servers() {
     postgres_database_count: '1',
     node_id: '' as string,
   })
-  const { interfaces, defaultBindIp } = useHostInterfaces(form.node_id)
+  const { interfaces, defaultBindIp, loading: interfacesLoading } = useHostInterfaces(form.node_id)
+
+  useEffect(() => {
+    setForm(prev => ({ ...prev, public_bind_ip: '' }))
+  }, [form.node_id])
 
   // Default-Bind-IP setzen, sobald sie vom Backend kommt (oder sich die Node ändert).
   useEffect(() => {
@@ -62,6 +68,7 @@ export function Servers() {
 
   const loadNodes = async () => {
     if (!canCreateServer) return
+    setNodesLoading(true)
     try {
       const list = await api<Node[]>('/nodes')
       setNodes(list)
@@ -71,6 +78,8 @@ export function Servers() {
       }
     } catch {
       setNodes([])
+    } finally {
+      setNodesLoading(false)
     }
   }
 
@@ -109,6 +118,10 @@ export function Servers() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (nodesLoading || interfacesLoading || interfaces.length === 0 || !form.public_bind_ip) {
+      toast.error(t(interfacesLoading ? 'servers.bindIp.loading' : 'servers.bindIp.noneAvailable'))
+      return
+    }
     if (showNodePicker && !form.node_id) {
       toast.error(t('servers.nodeRequired'))
       return
@@ -218,27 +231,18 @@ export function Servers() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-headline text-headline-sm text-primary">{t('nav.servers')}</h1>
-          <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-            {t('servers.subtitle')}
-          </p>
-        </div>
-        {canCreateServer && (
+    <div className="msm-page">
+      <PageHeader eyebrow={t('pageContext.infrastructure', 'Infrastructure')} title={t('nav.servers')} description={t('servers.subtitle')} status={<span className="msm-badge-info">{servers.length} {t('nav.servers')}</span>} actions={canCreateServer ? (
           <button
             onClick={() => {
               setShowCreate(true)
               void loadNodes()
             }}
-            className="msm-btn-primary flex items-center gap-2 px-4 py-2"
+            className="msm-btn-primary flex min-h-11 items-center gap-2 px-4 py-2"
           >
             <Plus className="w-4 h-4" />
             {t('servers.create')}
-          </button>
-        )}
-      </div>
+          </button>) : undefined} />
 
       {servers.length === 0 && (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
@@ -413,7 +417,9 @@ export function Servers() {
                   className="msm-input"
                   value={form.public_bind_ip}
                   onChange={(e) => setForm({ ...form, public_bind_ip: e.target.value })}
+                  disabled={interfacesLoading}
                 >
+                  {interfacesLoading && <option value="">{t('servers.bindIp.loading')}</option>}
                   {interfaces.length === 0 && (
                     <option value="">{t('servers.bindIp.noneAvailable')}</option>
                   )}
@@ -546,7 +552,7 @@ export function Servers() {
                 <button
                   type="submit"
                   className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
-                  disabled={creating}
+                  disabled={creating || nodesLoading || interfacesLoading || interfaces.length === 0 || !form.public_bind_ip}
                 >
                   {creating ? t('common.loading') : t('servers.create')}
                 </button>

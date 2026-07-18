@@ -1,3 +1,4 @@
+@import '@maunting/design-dna/tokens.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -16,7 +17,9 @@
     min-height: 100vh;
     margin: 0;
     padding: 0;
-    background: #071013;
+    background:
+      radial-gradient(70rem 32rem at 50% -12rem, hsl(var(--dna-focus) / 0.12), transparent 68%),
+      hsl(var(--dna-background));
   }
 
   ::selection {
@@ -70,6 +73,37 @@
   .msm-panel {
     @apply bg-surface-container/85 backdrop-blur-xl border border-outline-variant/70;
     box-shadow: 0 20px 48px hsl(0 0% 0% / 0.34);
+  }
+
+  .msm-page {
+    @apply mx-auto w-full max-w-[1500px] space-y-6;
+  }
+
+  .msm-page-header {
+    @apply relative overflow-hidden rounded-2xl border border-outline-variant/70 bg-surface-container-low/80 px-5 py-5 shadow-panel md:px-7 md:py-6;
+  }
+
+  .msm-page-header::before {
+    content: '';
+    @apply absolute inset-x-0 top-0 h-px;
+    background: linear-gradient(90deg, transparent, hsl(var(--dna-focus) / .75), transparent);
+  }
+
+  .msm-field-help {
+    @apply mt-1.5 text-xs leading-5 text-on-surface-variant;
+  }
+
+  .msm-field-error {
+    @apply mt-1.5 text-xs leading-5 text-status-destructive;
+  }
+
+  .msm-status-rail {
+    @apply relative pl-4;
+  }
+
+  .msm-status-rail::before {
+    content: '';
+    @apply absolute inset-y-1 left-0 w-0.5 rounded-full bg-primary/70 shadow-primary-glow;
   }
 
   .msm-card {
@@ -271,5 +305,14 @@
     background-color: hsl(194 44% 68% / 0.6) !important;
     box-shadow: 0 0 0 1px hsl(194 44% 68%) !important;
     border-radius: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

@@ -15,12 +15,53 @@
     "panelDatabase": "Panel-Datenbank",
     "nodes": "Nodes"
   },
+  "navGroups": {
+    "overview": "Überblick",
+    "infrastructure": "Infrastruktur",
+    "administration": "Administration",
+    "panel": "Panel",
+    "help": "Hilfe"
+  },
+  "pageContext": {
+    "overview": "Übersicht",
+    "infrastructure": "Infrastruktur",
+    "administration": "Administration",
+    "panel": "Panel",
+    "help": "Hilfe & Anleitungen",
+    "data": "Daten"
+  },
+  "panelDatabase": {
+    "title": "Panel-Datenbank",
+    "subtitle": "Verwalte die PostgreSQL-Datenbank des Panels ohne Terminal-Zugriff.",
+    "workspace": "Datenbank-Explorer",
+    "workspaceSubtitle": "Prüfe Tabellen, Zeilen und Datenbankstatistiken.",
+    "admin": "Admin-Zugriff",
+    "readOnly": "Nur lesen"
+  },
+  "shell": {
+    "openNavigation": "Navigation öffnen",
+    "closeNavigation": "Navigation schließen",
+    "mainNavigation": "Hauptnavigation",
+    "areas": "Bereiche",
+    "openUserMenu": "Benutzermenü öffnen"
+  },
   "nodes": {
     "subtitle": "Remote- und Local-Nodes verwalten, Status prüfen und Agenten-Tokens hinterlegen.",
     "add": "Node hinzufügen",
     "edit": "Node bearbeiten",
     "updateAll": "Nodes updaten",
-    "updating": "Nodes updaten...",
+    "updating": "Nodes werden aktualisiert …",
+    "updateConfirmTitle": "Alle Nodes aktualisieren?",
+    "updateConfirmBody": "Startet das konfigurierte Update auf allen registrierten Nodes. Laufende Game-Server werden dadurch nicht neu gestartet.",
+    "updateStarted": "Node-Updates wurden gestartet.",
+    "updateFailed": "Node-Update fehlgeschlagen.",
+    "healthCheckLabel": "Status von {{name}} prüfen",
+    "editLabel": "{{name}} bearbeiten",
+    "deleteLabel": "{{name}} löschen",
+    "pagination": {
+      "range": "Zeige {{from}} bis {{to}} von {{total}} Nodes",
+      "page": "Seite {{current}} von {{total}}"
+    },
     "name": "Name",
     "host": "Host-URL (HTTPS)",
     "agentToken": "Agent-Token",
@@ -93,6 +134,12 @@
     "errorBody": "Bitte lade die Seite erneut. Wenn das Problem bleibt, prüfe die Verbindung zum Panel."
   },
   "blueprints": {
+    "eyebrow": "Panel · Bereitstellung",
+    "guide": "Anleitung",
+    "create": "Blueprint erstellen",
+    "tools": "Blueprint-Werkzeuge",
+    "filterSummary": "Filter · {{value}}",
+    "clone": "Als eigene Kopie",
     "pageTitle": "Blueprints verwalten",
     "pageSubtitle": "Native und Community-Blueprints einsehen, herunterladen, ersetzen oder löschen.",
     "loading": "Lade Blueprints …",
@@ -164,8 +211,8 @@
       "s2": "Öffne die Datei (z.B. my_custom_server.blueprint.json) in einem Editor und passe die Werte an. Lass die Kommentare (//) gerne stehen – das Panel ignoriert sie beim Upload automatisch.",
       "s3": "Gehe im Menü auf „Blueprints\" und klicke auf „Neu hochladen\".",
       "s4": "Gehe zu „Server\", klicke „Server erstellen\" – dein neues Spiel taucht nun im Dropdown auf!",
-      "alertTitle": "Wichtig: Dateiname = ID",
-      "alertBody": "Der Dateiname muss zwingend mit der meta.id übereinstimmen (z.B. meta.id = \"rust_server\" -> Datei: rust_server.blueprint.json)."
+      "alertTitle": "Wichtig: Die Blueprint-ID ist maßgeblich",
+      "alertBody": "Der Upload-Dateiname ist frei wählbar. Das Panel validiert meta.id und speichert die Community-Blueprint unter dieser ID."
     },
     "minimal": {
       "body": "Das kleinste funktionierende Beispiel für einen Server, der ohne externe Dateien direkt aus einem Docker-Image startet."
@@ -197,7 +244,7 @@
       "portsDesc": "Deklariere nur die benötigten Port-Rollen. Konkrete Nummern weist der User beim Erstellen zu. Dieselbe Standardrolle darf einmal pro Protokoll vorkommen, z. B. query/udp und query/tcp; MSM speichert daraus eindeutige Rollen wie query und query_2.",
       "portsName": "Rolle des Ports. Du schreibst nicht 'ports.name' hinein, sondern einen Wert wie game, query, rcon, voice, web oder custom. Konkrete Portnummern kommen später beim Server-Erstellen.",
       "portsProtocol": "tcp oder udp. Das Protokoll bestimmt Docker-Mapping und Firewall-Freigabe und kann im Netzwerk-Panel nachträglich geändert werden.",
-      "sourceType": "Quelle der Serverdateien: steam = SteamCMD, http = HTTPS-Archiv, dockerOnly = Image enthält alles, manualUpload = Nutzer lädt Dateien selbst hoch.",
+      "sourceType": "Quelle der Serverdateien: steam = SteamCMD, http = HTTPS-Archiv, github = Repository, dockerOnly = Image enthält alles, custom = eigene Laufzeitlogik, manualUpload = Nutzer lädt Dateien selbst hoch.",
       "sourceUpdateStrategy": "Steuert Server-Datei-Updates vor Start/Restart: alwaysValidate = SteamCMD/Install immer; checkBased = nur wenn ein Update-Check positiv ist (bei Steam: buildid-Vergleich); none = kein Auto-Update.",
       "sourceSteam": "Steam-Dedicated-Server: appId, platform, compatibility, requiresLogin, validate, optional branch (Depot-Branch, Default public).",
       "steamFieldsTitle": "↳ source.steam — Felder",
@@ -318,6 +365,8 @@
     "diskLimit": "Disk-Limit",
     "notFound": "Server nicht gefunden",
     "backToList": "Zurück zur Liste",
+    "copyContainerId": "Container-ID kopieren",
+    "containerIdCopied": "Container-ID kopiert",
     "start": "Starten",
     "stop": "Stoppen",
     "restart": "Neustarten",
@@ -369,6 +418,7 @@
     "editNetworkTitle": "Netzwerk bearbeiten",
     "editNetworkDescription": "Bind-IP und Ports anpassen. Bei laufendem Server werden alte Firewall-Regeln entfernt, der Container neu erstellt und mit den neuen Bindings gestartet.",
     "bindIp": {
+      "loading": "Host-Interfaces werden geladen …",
       "hint": "Aus den verfügbaren Host-Interfaces wählen. 0.0.0.0 ist nicht erlaubt, da Docker sonst die UFW-Regeln umgeht.",
       "choose": "-- Host-IP wählen --",
       "noneAvailable": "Keine Host-Interfaces verfügbar",
@@ -564,7 +614,10 @@
     "signInWith": "Anmelden mit {{provider}}",
     "oauth2faTitle": "2FA-Code für OAuth-Login",
     "oauth2faDescription": "Dein Account {{provider}} ist mit 2FA geschützt. Gib den 6-stelligen Code aus deiner Authenticator-App ein.",
-    "oauth2faSubmit": "2FA bestätigen"
+    "oauth2faSubmit": "2FA bestätigen",
+    "backupCode": "Backup-Code",
+    "resendFailed": "Der Code konnte nicht erneut gesendet werden.",
+    "use2FAInstead": "Stattdessen einen 2FA-Code verwenden"
   },
   "setup": {
     "welcome": "Willkommen beim MSM",
@@ -633,6 +686,8 @@
     "updateQueued": "Mod-Update wurde queued",
     "reinstall": "Neu installieren",
     "reinstallAll": "Alle neu installieren",
+    "etaHours": "Noch etwa {{count}} Stunden",
+    "etaMinutes": "Noch etwa {{count}} Minuten",
     "reinstallAllHint": "Workshop-Cache und Mod-Dateien aller abonnierten Mods löschen und per SteamCMD neu laden (Server am besten gestoppt).",
     "confirmReinstallAll": "Alle {{count}} Workshop-Mods nacheinander neu installieren? (kann bei vielen Mods länger dauern)",
     "reinstallAllQueued": "Neuinstallation für alle Mods gestartet",
@@ -1243,7 +1298,11 @@
     "confirm": "Bestätigen",
     "back": "Zurück",
     "refresh": "Aktualisieren",
-    "send": "Senden"
+    "send": "Senden",
+    "next": "Weiter",
+    "remove": "Entfernen",
+    "select": "Auswählen",
+    "working": "Wird verarbeitet …"
   },
   "serverDetail": {
     "limit": "Limit",
@@ -1502,6 +1561,7 @@
     "deleted": "Webhook gelöscht",
     "deleteTitle": "Webhook löschen?",
     "deleteMsg": "Die Subscription wird entfernt. Events werden danach nicht mehr an diese URL gesendet.",
+    "delete": "Löschen",
     "currentSecretHint": "Aktives Secret endet auf",
     "lastDelivery": "Letzte Zustellung",
     "test": "Test senden",
@@ -1556,6 +1616,172 @@
     "s3ItemPassword": "Entschlüsselung ist nur mit dem auf dieser Instanz gesetzten Backup-Passwort möglich",
     "s3ItemLocalOnly": "Keine Konfiguration: Backups verbleiben lokal — es werden keine Daten an Dritte übertragen",
     "section4Updated": "Es erfolgt keine Weitergabe von personenbezogenen Daten an Dritte. Technisch bedingt können verschlüsselte Backup-Daten auf externem, S3-kompatiblem Speicher abgelegt werden, sofern der Administrator dies konfiguriert (siehe Abschnitt 6). In diesem Fall erhält der Speicher-Anbieter ausschließlich verschlüsselte Daten."
+  },
+  "privacyNotice": {
+    "eyebrow": "Datenschutz-Hinweis",
+    "title": "Verstehe, wie diese Instanz Daten verarbeitet",
+    "description": "MSM nutzt notwendige Browser-Speicherung für Anmeldung, Sicherheit und Einstellungen. Aktiviert der Betreiber ein Support-Widget eines Drittanbieters, lädt es erst nach Bestätigung dieses Hinweises und kann Verbindungs- und Nachrichtendaten nach den Regeln des Betreibers verarbeiten.",
+    "readPolicy": "Datenschutzerklärung lesen",
+    "confirm": "Bestätigen und fortfahren"
+  },
+  "privacyPolicy": {
+    "title": "Datenschutzerklärung",
+    "intro": "Diese Erklärung beschreibt die vom Maunting Server Manager unterstützten Datenflüsse. Der Betreiber dieser selbst gehosteten Instanz wählt optionale Anbieter und ist für Rechtsgrundlage, Hinweise, Aufbewahrungsfristen und Kontaktdaten seiner Instanz verantwortlich.",
+    "callout": "Kurzfassung: MSM minimiert Daten, schützt sensible Zugangsdaten und verschweigt keine Infrastruktur-Metadaten, die für den Betrieb von Servern und Nodes erforderlich sind.",
+    "documentLabel": "MSM Datenschutz",
+    "summaryLabel": "Datenschutz",
+    "versionLabel": "Version",
+    "updatedLabel": "Aktualisiert",
+    "sections": {
+      "scope": { "heading": "1. Geltungsbereich und Betreiber", "body": "MSM wird selbst gehostet. MauntingStudios stellt die Software bereit; die Organisation, die diese Instanz betreibt, bestimmt Zwecke, optionale Integrationen, Zugriffsregeln und Aufbewahrung ihrer Installation." },
+      "accounts": {
+        "heading": "2. Accounts, Anmeldung und Berechtigungen",
+        "body": "Das Panel verarbeitet die Account- und Sicherheitsdaten, die zur Anmeldung, Durchsetzung von Berechtigungen und Untersuchung sicherheitsrelevanter Aktivitäten erforderlich sind.",
+        "items": {
+          "identity": "Benutzername und E-Mail-Adresse zur Account-Zuordnung und Anmeldung",
+          "security": "Passwort-Prüfdaten, Sitzungen, optionale Zwei-Faktor-Daten und Wiederherstellungsstatus",
+          "rbac": "Rollen, globale Berechtigungen, serverspezifische Berechtigungen und Eigentümerstatus",
+          "audit": "Sicherheits- und Audit-Ereignisse wie Anmeldungen, Berechtigungsänderungen und administrative Aktionen"
+        }
+      },
+      "infrastructure": {
+        "heading": "3. Server- und Node-Daten",
+        "body": "Der Infrastrukturbetrieb benötigt Metadaten. Sie sind nur für berechtigte Nutzer verfügbar und werden nicht als anonym oder metadatenfrei dargestellt.",
+        "items": {
+          "server": "Servernamen, Spieltypen, Ressourcenlimits, Netzwerkbindungen, Ports, Status, Konfiguration und Backup-Metadaten",
+          "node": "Node-Namen, Host-Adressen, gepinnte TLS-Fingerprints, Versionen, Zustand, Kapazität und Auslastungswerte",
+          "operations": "Ergebnisse administrativer Aktionen, Logs und Befehlsausgaben können Infrastruktur- oder nutzerbereitgestellte Daten enthalten"
+        }
+      },
+      "protection": {
+        "heading": "4. Zugangsdaten und Backups",
+        "body": "MSM trennt Geheimnisse von gewöhnlichen Metadaten und schützt sie in der Komponente, die sie benötigt.",
+        "items": {
+          "dis": "Sensible Panel-Zugangsdaten einschließlich Agent- und Anbieter-Credentials werden vor der Datenbankspeicherung über DIS verschlüsselt",
+          "backups": "Backup-Archive werden vom zuständigen Agenten vor der Übertragung an konfigurierten Remote-Speicher verschlüsselt",
+          "metadata": "Für Auswahl, Wiederherstellung und Audit notwendige Betriebsmetadaten bleiben für die berechtigte Instanz und den konfigurierten Speicheranbieter sichtbar"
+        }
+      },
+      "providers": {
+        "heading": "5. Optionale externe Anbieter",
+        "body": "Kein optionaler Anbieter ist für das Basispanel erforderlich. Aktiviert der Betreiber einen Anbieter, erhält er die für diese Integration erforderlichen Daten.",
+        "items": {
+          "email": "E-Mail-Versand: Empfängeradresse und Zustelldaten",
+          "captcha": "CAPTCHA: Browser-, Netzwerk- und Challenge-Daten nach den Regeln des Anbieters",
+          "oauth": "OAuth: Account-Kennung, vom Anbieter freigegebene Profildaten und Anmeldemetadaten",
+          "support": "Support-Widget: Verbindungsmetadaten und vom Nutzer eingegebene Inhalte; das Widget wartet auf die Bestätigung dieses Hinweises",
+          "s3": "S3-kompatibler Speicher: verschlüsselte Backup-Objekte sowie technische Objekt-, Account-, Zeit- und Übertragungsmetadaten"
+        }
+      },
+      "storage": {
+        "heading": "6. Cookies und lokale Browser-Speicherung",
+        "body": "Das Panel nutzt Browser-Speicherung, die für den sicheren Betrieb und gewählte Einstellungen benötigt wird.",
+        "items": {
+          "session": "Session- oder Auth-Cookies, um Nutzer angemeldet zu halten",
+          "csrf": "CSRF-Schutzwerte zum Schutz zustandsändernder Anfragen",
+          "preferences": "Sprache und Bestätigung des Datenschutzhinweises im lokalen Browser-Speicher"
+        }
+      },
+      "retention": {
+        "heading": "7. Aufbewahrung und Account-Löschung",
+        "body": "Die Aufbewahrung hängt von Betreiberkonfiguration, Infrastruktur, Backups und rechtlichen Pflichten ab.",
+        "items": {
+          "operator": "Der Betreiber muss geeignete Fristen festlegen, dokumentieren und nicht mehr benötigte Daten löschen",
+          "deletion": "Die Account-Löschung entfernt accountbezogene personenbezogene Daten nach dem implementierten Löschablauf aus dem aktiven Panel; Kopien können vorübergehend in geschützten Backups verbleiben",
+          "audit": "Sicherheits-Audit-Ereignisse können anonymisiert aufbewahrt werden, damit Angriffe und privilegierte Änderungen nachvollziehbar bleiben, ohne die gelöschte Account-Identität zu erhalten"
+        }
+      },
+      "responsibility": { "heading": "8. Verantwortung des Betreibers und Anfragen", "body": "Nutzer richten Auskunfts-, Berichtigungs-, Lösch-, Widerspruchs- und Anbieterfragen an den Betreiber dieser MSM-Instanz. Der Betreiber ist für Veröffentlichung seiner Identität, Kontaktmöglichkeit, Rechtsgrundlage, Anbieterliste und instanzspezifischen Aufbewahrungsinformationen verantwortlich." }
+    }
+  },
+  "blueprintBuilder": {
+    "studio": "Blueprint Studio",
+    "draft": "Entwurf",
+    "close": "Blueprint-Editor schließen",
+    "loading": "Blueprint wird geladen …",
+    "loadFailed": "Blueprint konnte nicht für die Bearbeitung geladen werden.",
+    "cloneName": "{{name}} – Kopie",
+    "sectionNavigation": "Blueprint-Abschnitte",
+    "fieldsArea": "Blueprint-Felder",
+    "step": "Schritt {{current}} von {{total}}",
+    "downloadJson": "JSON laden",
+    "saving": "Wird gespeichert …",
+    "saveChanges": "Änderungen speichern",
+    "addDirectly": "Direkt hinzufügen",
+    "saved": "Blueprint gespeichert.",
+    "added": "Blueprint hinzugefügt.",
+    "saveFailed": "Blueprint konnte nicht gespeichert werden.",
+    "title": { "create": "Blueprint erstellen", "edit": "Community-Blueprint bearbeiten", "clone": "Native Blueprint klonen" },
+    "description": {
+      "create": "Erstelle eine neue Community-Blueprint. Bestehende IDs werden niemals stillschweigend ersetzt.",
+      "edit": "Die Community-ID bleibt gesperrt. Speichern ersetzt ausschließlich diese Community-Blueprint nach Backend-Prüfung.",
+      "clone": "Native Blueprints bleiben unverändert. Für die eigene Community-Kopie ist eine neue ID erforderlich."
+    },
+    "sections": { "basics": "Grundlagen", "runtime": "Laufzeit", "ports": "Ports", "source": "Quelle", "mods": "Mods & Workshop", "backup": "Backup", "review": "Prüfen" },
+    "collision": { "native": "Native Blueprint-IDs können nicht überschrieben werden. Wähle eine neue ID.", "title": "Community-Blueprint ersetzen?", "message": "Die ID „{{id}}“ existiert bereits. Beim Speichern wird diese Community-Blueprint ausdrücklich ersetzt.", "confirm": "Bewusst ersetzen" },
+    "exec": { "title": "Exec-Konsole freigeben", "help": "Erweitert die möglichen Container-Aktionen. Backend-RBAC bleibt maßgeblich." },
+    "ports": { "roleLabel": "Port {{index}} Rolle", "protocolLabel": "Port {{index}} Protokoll", "removeLabel": "Port {{index}} entfernen", "add": "Port hinzufügen" },
+    "steam": { "requiresLogin": "Steam-Anmeldung erforderlich", "validate": "SteamCMD-Dateien validieren" },
+    "mods": { "supportsMods": "Mods unterstützen", "supportsWorkshop": "Steam Workshop unterstützen" },
+    "review": { "issueCount": "{{count}} Angaben prüfen", "issueCount_one": "{{count}} Angabe prüfen", "issueCount_other": "{{count}} Angaben prüfen", "ready": "Der Entwurf ist bereit für die autoritative Backend-Validierung.", "backend": "Das Panel prüft häufige Eingabefehler. Beim Speichern validiert das Backend das vollständige Schema autoritativ.", "json": "JSON-Vorschau" },
+    "environment": { "title": "Umgebungswerte", "add": "Eintrag hinzufügen", "help": "Nur nicht-geheime Konfiguration. Zugangsdaten gehören nicht in Blueprints.", "nameLabel": "Umgebungsname {{index}}", "valueLabel": "Umgebungswert {{index}}", "removeLabel": "Umgebungswert {{index}} entfernen" },
+    "setup": { "title": "Setup-Argumente", "help": "Strukturierte argv-Befehle; Argumente mit Leerzeichen bleiben ein Argument.", "addCommand": "Befehl hinzufügen", "command": "Befehl {{index}}", "argumentLabel": "Befehl {{command}}, Argument {{argument}}", "removeArgument": "Argument {{index}} entfernen", "addArgument": "Argument hinzufügen", "removeCommand": "Befehl entfernen", "notice": "Setup-Befehle sind begrenzte Argumentlisten, keine frei ausführbaren Shell-Hooks. Komplexe Installationsskripte gehören nicht in ein Blueprint." },
+    "profiles": { "title": "Alternative Starts", "help": "Maximal 8, aktiviert wenn die Marker-Datei existiert.", "add": "Profil hinzufügen", "markerLabel": "Marker-Datei {{index}}", "startupLabel": "Startbefehl {{index}}", "removeLabel": "Startprofil {{index}} entfernen" },
+    "patches": { "title": "Konfigurations-Patches", "help": "Explizite INI- oder Regex-Patches, maximal 32.", "add": "Patch hinzufügen", "typeLabel": "Patch-Typ {{index}}", "fileLabel": "Patch-Datei {{index}}", "sectionLabel": "INI-Sektion {{index}}", "keyLabel": "INI-Schlüssel {{index}}", "regexLabel": "Regex {{index}}", "valueLabel": "Patch-Wert {{index}}" },
+    "postInstall": { "title": "Post-Install-Dateien", "add": "Aktion hinzufügen", "operationLabel": "Dateiaktion {{index}}", "copy": "Kopieren", "symlink": "Symlink", "sourceLabel": "Quelle {{index}}", "targetLabel": "Ziel {{index}}", "removeLabel": "Dateiaktion {{index}} entfernen", "required": "Fehler blockiert die Installation" },
+    "fields": {
+      "id": { "label": "Eindeutige ID", "help": "Kleinbuchstaben, Ziffern und Unterstriche; bei Bearbeitung gesperrt." },
+      "name": { "label": "Anzeigename", "help": "Der verständliche Name in der Serverauswahl." },
+      "category": { "label": "Kategorie", "help": "Ordnet das Blueprint in der Serverauswahl ein." },
+      "author": { "label": "Autor (optional)", "help": "Name oder Organisation, niemals Zugangsdaten." },
+      "description": { "label": "Beschreibung (optional)", "help": "Kurz erklären, was installiert wird und wofür es gedacht ist." },
+      "image": { "label": "Docker Image", "help": "Registry/Image:Tag; keine Shell-Syntax." },
+      "workdir": { "label": "Arbeitsordner (optional)", "help": "Absoluter Container-Pfad, zum Beispiel /server." },
+      "user": { "label": "Container-Nutzer (optional)", "help": "Nicht-root UID:GID, zum Beispiel 1000:1000." },
+      "startup": { "label": "Startbefehl", "help": "Wird als Befehl ausgeführt; Shell-Verkettungen und Substitution sind gesperrt." },
+      "stopGrace": { "label": "Stop-Zeitfenster", "help": "5–600 Sekunden für einen sauberen Stopp." },
+      "startCheck": { "label": "Startprüfung", "help": "0–300 Sekunden bis zur ersten Zustandsprüfung." },
+      "execTimeout": { "label": "Exec-Zeitlimit", "help": "1–600 Sekunden; gilt nur wenn Exec freigegeben ist." },
+      "dirs": { "label": "Benötigte Ordner", "help": "Ein sicherer relativer Pfad pro Zeile; maximal 16." },
+      "files": { "label": "Benötigte Dateien", "help": "Ein sicherer relativer Pfad pro Zeile; maximal 16." },
+      "source": { "label": "Quelle", "help": "Nur Felder der gewählten Quelle werden serialisiert." },
+      "update": { "label": "Update-Strategie", "help": "Prüfbasiert ist der sichere Standard für Steam, HTTP und GitHub." },
+      "appId": { "label": "Steam App-ID", "help": "Numerische Dedicated-Server-App-ID." },
+      "platform": { "label": "Plattform", "help": "Windows benötigt Wine oder Proton." },
+      "compatibility": { "label": "Kompatibilität", "help": "Linux ist nativ; Windows nutzt Wine oder Proton." },
+      "steamBranch": { "label": "Steam Branch (optional)", "help": "Leer verwendet den öffentlichen Standard-Branch." },
+      "url": { "label": "HTTPS-Download-URL", "help": "Direkte Archiv-URL; HTTPS ist Pflicht." },
+      "archive": { "label": "Archivformat (optional)", "help": "Leer lassen, wenn es aus der URL erkannt werden kann." },
+      "extract": { "label": "Entpacken nach (optional)", "help": "Sicherer relativer Unterordner." },
+      "sha": { "label": "SHA-256 (optional)", "help": "64 Kleinbuchstaben-Hexzeichen zur Archivprüfung." },
+      "repo": { "label": "GitHub Repository", "help": "Nur github.com, im Format owner/repo." },
+      "branch": { "label": "Branch", "help": "Ein Branchname ohne Pfadtrenner." },
+      "subPath": { "label": "Unterordner (optional)", "help": "Sicherer relativer Pfad innerhalb des Repositories." },
+      "manualFiles": { "label": "Pflichtdateien", "help": "Mindestens ein und maximal 16 sichere relative Pfade." },
+      "instructions": { "label": "Upload-Anleitung", "help": "Verständlich erklären, welche Dateien wohin gehören." },
+      "instructionsUrl": { "label": "Anleitungs-URL (optional)", "help": "Nur HTTPS-Dokumentation." },
+      "workshopId": { "label": "Workshop App-ID", "help": "Numerische App-ID des Workshop-Bereichs." },
+      "filterTags": { "label": "Workshop-Filter", "help": "Maximal 10 Tags, einer pro Zeile." },
+      "injection": { "label": "Mod-Einbindung", "help": "Keine, Startargument oder verwaltete Datei." },
+      "modFormat": { "label": "Argumentformat", "help": "Muss den Platzhalter {mods} enthalten." },
+      "modFile": { "label": "Mod-Listenpfad", "help": "Sicherer relativer Pfad." },
+      "modContent": { "label": "Listeninhalt", "help": "Workshop-IDs oder Ziel-Dateinamen der Dateiaktionen." },
+      "backup": { "label": "Zu sichernde Pfade", "help": "Ein relativer Pfad oder Glob pro Zeile; leer bedeutet vollständiges Server-Backup." }
+    },
+    "options": {
+      "category": { "steamGame": "Steam-Spiel", "nonSteamGame": "Nicht-Steam-Spiel", "voiceServer": "Voice-Server", "bot": "Bot" },
+      "port": { "game": "Game", "query": "Query", "rcon": "RCon", "voice": "Voice", "web": "Web", "custom": "Benutzerdefiniert" },
+      "source": { "http": "HTTPS-Archiv", "dockerOnly": "Nur Docker Image", "custom": "Benutzerdefiniert", "manualUpload": "Manueller Upload" },
+      "update": { "checkBased": "Nur bei erkanntem Update", "alwaysValidate": "Bei jedem Start validieren", "none": "Keine automatischen Updates" },
+      "platform": { "linux": "Linux (nativ)", "windows": "Windows (Kompatibilitätsschicht)" },
+      "compatibility": { "native": "Nativ" },
+      "archiveAuto": "Automatisch erkennen",
+      "injection": { "none": "Keine", "startupArg": "Startargument", "file": "Mod-Liste als Datei" },
+      "modContent": { "workshopIds": "Workshop-IDs", "targetNames": "Ziel-Dateinamen" }
+    },
+    "validation": {
+      "metaId": "1–64 Kleinbuchstaben, Ziffern oder Unterstriche verwenden.", "metaName": "Einen Namen mit maximal 128 Zeichen angeben.", "image": "Einen gültigen Docker-Image-Namen angeben.", "startup": "Einen Startbefehl mit maximal 2048 Zeichen angeben.", "shellSyntax": "Shell-Substitutionen und logische Verkettungen sind nicht erlaubt.", "workdir": "Der Arbeitsordner muss ein sicherer absoluter Container-Pfad sein.", "user": "UID:GID numerisch und ohne Root angeben.", "stopGrace": "Wert zwischen 5 und 600 verwenden.", "startCheck": "Wert zwischen 0 und 300 verwenden.", "execTimeout": "Wert zwischen 1 und 600 verwenden.", "envName": "Ungültiger Umgebungsname: {{name}}", "envValue": "Unsicherer Umgebungswert bei {{name}}", "envEmpty": "Umgebungszeile {{row}} benötigt einen Namen.", "envDuplicate": "Der Umgebungsname {{name}} ist doppelt.", "maxLines": "Maximal {{count}} Zeilen verwenden.", "maxProfiles": "Maximal 8 Startprofile verwenden.", "markerFile": "Eine sichere Marker-Datei angeben.", "profileStartup": "Einen sicheren Startbefehl angeben.", "patchFile": "Eine sichere Konfigurationsdatei angeben.", "patchValue": "Ein Patch-Wert ist erforderlich.", "patchIni": "INI benötigt Sektion und Schlüssel.", "patchRegex": "Regex benötigt einen Ausdruck.", "maxPorts": "Maximal 32 Port-Einträge verwenden.", "duplicatePort": "Diese Port-Rolle und dieses Protokoll sind bereits vorhanden.", "steamAppId": "Eine numerische Steam App-ID angeben.", "windowsCompatibility": "Windows benötigt Wine oder Proton.", "httpsUrl": "Nur HTTPS-Download-URLs sind erlaubt.", "githubRepo": "Repository als owner/repo angeben.", "sha256": "SHA-256 muss aus 64 Kleinbuchstaben-Hexzeichen bestehen.", "relativePath": "Einen sicheren relativen Unterordner angeben.", "maxSetupCommands": "Maximal 8 Setup-Befehle verwenden.", "setupCommand": "Jeder Setup-Befehl benötigt 1–32 nicht-leere Argumente.", "manualInstructions": "Installationshinweise angeben.", "manualFiles": "Mindestens eine benötigte Datei angeben.", "unsafePath": "Unsicherer relativer Pfad: {{path}}", "workshopAppId": "Für Workshop-Unterstützung ist eine numerische App-ID erforderlich.", "modArgument": "Das Startargument muss {mods} enthalten.", "modListPath": "Einen sicheren relativen Listenpfad angeben.", "postInstall": "Für Ziel-Dateinamen ist mindestens eine Dateiaktion nötig."
+    }
   },
   "server": {
     "authSetup": {

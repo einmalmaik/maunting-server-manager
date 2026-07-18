@@ -20,8 +20,18 @@ class CaptchaService:
             return
 
         provider = PanelSettingsService.get("captcha_provider", "none")
-        if provider == "none":
-            return
+        verify_urls = {
+            "turnstile": "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            "hcaptcha": "https://hcaptcha.com/siteverify",
+            "recaptcha": "https://www.google.com/recaptcha/api/siteverify",
+        }
+        verify_url = verify_urls.get(provider)
+        if verify_url is None:
+            logger.error("CAPTCHA ist aktiviert, aber der Provider ist ungueltig konfiguriert")
+            raise HTTPException(
+                status_code=503,
+                detail="CAPTCHA ist derzeit nicht korrekt konfiguriert.",
+            )
 
         # 2. Require token
         if not token:
@@ -35,24 +45,22 @@ class CaptchaService:
                 secret_key = AuthService.decrypt_secret(enc_secret, aad="msm:settings:captcha_secret_key")
             except Exception as exc:
                 logger.error("Konnte CAPTCHA-Secret-Key nicht entschlüsseln: %s", exc)
-                raise HTTPException(status_code=500, detail="Interner Serverfehler bei der CAPTCHA-Verifizierung.")
+                raise HTTPException(status_code=503, detail="CAPTCHA ist derzeit nicht korrekt konfiguriert.")
         else:
             secret_key = PanelSettingsService.get("captcha_secret_key", "")
 
-        # Safe fallback/mocking for tests or empty values
-        if not secret_key or secret_key.startswith("mock-") or secret_key == "test-secret":
-            return
-
-        # 4. Resolve provider siteverify URL
-        if provider == "turnstile":
-            verify_url = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-        elif provider == "hcaptcha":
-            verify_url = "https://hcaptcha.com/siteverify"
-        elif provider == "recaptcha":
-            verify_url = "https://www.google.com/recaptcha/api/siteverify"
-        else:
-            logger.warning("Unbekannter CAPTCHA-Provider: %s", provider)
-            return
+        placeholders = {"test-secret", "changeme", "change-me", "placeholder"}
+        normalized_secret = secret_key.strip().lower()
+        if (
+            not normalized_secret
+            or normalized_secret in placeholders
+            or normalized_secret.startswith("mock-")
+        ):
+            logger.error("CAPTCHA ist aktiviert, aber das Secret fehlt oder ist ein Platzhalter")
+            raise HTTPException(
+                status_code=503,
+                detail="CAPTCHA ist derzeit nicht korrekt konfiguriert.",
+            )
 
         # 5. Execute HTTP siteverify POST request (Form encoded)
         try:

@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from models import Node, Server
+from config import settings
 from services.server_node_migration_service import (
     ServerNodeMigrationError,
     migrate_server_to_node,
@@ -98,6 +99,7 @@ def test_migration_switches_node_only_after_target_restore(db: Session, tmp_path
     }
     assert server.node_id == target.id
     assert server.public_bind_ip == "198.51.100.20"
+    assert server.install_dir == str(Path(settings.servers_dir) / str(server.id))
     target_client.files_restore_archive.assert_called_once()
     target_client.files_finalize_restore.assert_called_once_with(server.id)
     target_client.files_rollback_restore.assert_not_called()

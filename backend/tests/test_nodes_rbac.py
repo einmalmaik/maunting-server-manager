@@ -2,7 +2,8 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from models import Node, Role, RolePermission, User
+from models import Node, NodeEnrollment, Role, RolePermission, User
+from datetime import datetime, timedelta, timezone
 
 @pytest.fixture()
 def setup_rbac_user(db: Session, regular_user: User):
@@ -29,12 +30,64 @@ def test_list_nodes_rbac_allowed_read(db: Session, client: TestClient, regular_u
     db.add(node)
     db.commit()
 
-    with patch("services.node_service.NodeClient.from_node") as from_node:
-        from_node.return_value.metrics.return_value = {}
-        r = client.get("/api/nodes", cookies=user_cookies)
+    r = client.get("/api/nodes", cookies=user_cookies)
     assert r.status_code == 200
     db.delete(node)
     db.commit()
+
+
+def test_servers_create_gets_reduced_node_picker_without_trust_metadata(
+    db: Session, client: TestClient, user_cookies: dict, setup_rbac_user
+):
+    setup_rbac_user(["servers.create"])
+    node = Node(
+        name="Picker Node",
+        host="https://198.51.100.44:9000",
+        auth_token_enc="synthetic-encrypted-token",
+        tls_fingerprint="b" * 64,
+        is_local=False,
+        status="online",
+    )
+    db.add(node)
+    db.commit()
+
+    response = client.get("/api/nodes", cookies=user_cookies)
+
+    assert response.status_code == 200
+    picker_node = next(item for item in response.json() if item["id"] == node.id)
+    assert picker_node == {"id": node.id, "name": "Picker Node", "status": "online"}
+
+
+def test_pending_enrollments_and_approval_are_owner_only(
+    db: Session,
+    client: TestClient,
+    user_cookies: dict,
+    user_csrf_token: str,
+    setup_rbac_user,
+):
+    setup_rbac_user(["nodes.manage"])
+    enrollment = NodeEnrollment(
+        claim_hash="a" * 64,
+        display_code="ABCD-EFGH",
+        name="Pending Node",
+        host="https://198.51.100.45:9000",
+        tls_fingerprint="c" * 64,
+        auth_token_enc="synthetic-encrypted-token",
+        status="pending",
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+    )
+    db.add(enrollment)
+    db.commit()
+
+    pending = client.get("/api/nodes/enrollments/pending", cookies=user_cookies)
+    approve = client.post(
+        f"/api/nodes/enrollments/{enrollment.id}/approve",
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
+    )
+
+    assert pending.status_code == 403
+    assert approve.status_code == 403
 
 def test_create_node_rbac_denied_read_only(db: Session, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str, setup_rbac_user):
     setup_rbac_user(["nodes.read"]) # Read-only, cannot write

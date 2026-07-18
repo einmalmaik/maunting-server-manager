@@ -33,6 +33,7 @@ import { Backups } from "./Backups";
 import { ServerConsolePanel } from "@/components/server/ServerConsolePanel";
 import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
 import { AuthSetupBanner } from "@/components/server/AuthSetupBanner";
+import { PageHeader } from "@/Singra/UI/PageHeader";
 import { DatabaseManager } from "@/components/server/DatabaseManager";
 import { OutgoingWebhooksPanel } from "@/components/server/OutgoingWebhooksPanel";
 import type { GameInfo, Server } from "@/types";
@@ -510,48 +511,40 @@ export function ServerDetail() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-4">
+    <div className="msm-page">
+      <PageHeader
+        eyebrow={t("pageContext.infrastructure", "Infrastructure")}
+        title={server.name}
+        description={`${gameName(server.game_type)}${server.node_name ? ` · ${t("servers.node")}: ${server.node_name}` : ""}`}
+        status={(
+          <span className={`font-mono-sm text-mono-sm px-3 py-1 rounded-full border ${statusClasses(effectiveStatus)}`}>
+            {t(`servers.status.${effectiveStatus}`, { defaultValue: effectiveStatus })}
+          </span>
+        )}
+        actions={(
+          <div className="flex flex-wrap gap-2">
           <button
-            className="p-2 rounded-md border border-outline bg-surface-container-highest hover:bg-surface-container text-on-surface transition-colors"
+            className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 py-2"
             onClick={() => navigate("/servers")}
+            aria-label={t("servers.backToList", "Back to servers")}
           >
             <ArrowLeft className="w-4 h-4" />
+            <span>{t("common.back", "Back")}</span>
           </button>
-          <div>
-            <h1 className="font-headline text-headline-sm text-primary flex items-center gap-2">
-              {server.name}
-              <span 
-                className="text-xs font-mono px-2 py-0.5 rounded bg-surface-container-highest border border-outline text-on-surface-variant cursor-pointer hover:bg-surface-container hover:text-on-surface transition-colors"
-                title="Copy Container ID"
-                onClick={() => {
-                  navigator.clipboard.writeText(`msm-srv-${server.id}`);
-                  toast.success("Container ID copied!");
-                }}
-              >
-                msm-srv-{server.id}
-              </span>
-            </h1>
-            <p className="font-body-md text-sm text-on-surface-variant">
-              {gameName(server.game_type)}
-              {server.node_name ? (
-                <span className="ml-2 text-on-surface-variant/80">
-                  · {t("servers.node")}: {server.node_name}
-                </span>
-              ) : null}
-            </p>
+          <button
+            type="button"
+            className="msm-btn-secondary inline-flex min-h-11 items-center px-3 py-2 font-mono text-xs"
+            title={t("servers.copyContainerId", "Copy container ID")}
+            onClick={() => {
+              void navigator.clipboard.writeText(`msm-srv-${server.id}`);
+              toast.success(t("servers.containerIdCopied", "Container ID copied"));
+            }}
+          >
+            msm-srv-{server.id}
+          </button>
           </div>
-        </div>
-        <span
-          className={`font-mono-sm text-mono-sm px-3 py-1 rounded-full border ${statusClasses(effectiveStatus)}`}
-        >
-          {t(`servers.status.${effectiveStatus}`, {
-            defaultValue: effectiveStatus,
-          })}
-        </span>
-      </div>
+        )}
+      />
 
       {/* Auth-Setup-Banner: sichtbar waehrend der Container auf interaktiven Auth-Flow wartet */}
       {server.auth_required && <AuthSetupBanner serverId={server.id} />}

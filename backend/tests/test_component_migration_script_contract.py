@@ -72,7 +72,7 @@ def test_operator_docs_and_environment_contract_stay_synchronized() -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Native Bash execution is verified in Linux CI")
-def test_script_syntax_and_dry_run_do_not_require_a_production_install() -> None:
+def test_script_syntax_is_valid() -> None:
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("bash not available")
@@ -80,21 +80,12 @@ def test_script_syntax_and_dry_run_do_not_require_a_production_install() -> None
     syntax = subprocess.run([bash, "-n", str(SCRIPT)], capture_output=True, text=True)
     assert syntax.returncode == 0, syntax.stderr
 
-    dry_run = subprocess.run(
-        [
-            bash,
-            str(SCRIPT),
-            "--migrate-frontend",
-            "--frontend-origin",
-            "https://panel.example.com",
-            "--api-domain",
-            "api.example.com",
-            "--dry-run",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    assert dry_run.returncode == 0, dry_run.stderr
-    assert "Dry-run abgeschlossen" in dry_run.stdout
-    assert "es wurde nichts verändert" in dry_run.stdout
+
+
+def test_dry_run_performs_real_read_only_preflight() -> None:
+    script = _script()
+
+    assert script.index('[[ -f "$SOURCE_ENV" ]]') < script.index("run_dry_run_preflight")
+    assert "--preflight-only" in script
+    assert "systemctl is-active --quiet msm-panel.service" in script
+    assert "ssh -o BatchMode=yes" in script

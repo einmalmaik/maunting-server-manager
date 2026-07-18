@@ -13,6 +13,14 @@ class NodeCreate(BaseModel):
     # SHA-256 cert fingerprint (hex). Required for remote https:// agents.
     tls_fingerprint: str | None = Field(default=None, max_length=128)
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _trim_name(cls, value: object) -> str:
+        name = str(value).strip()
+        if not name:
+            raise ValueError("name darf nicht leer sein")
+        return name
+
     @field_validator("tls_fingerprint", mode="before")
     @classmethod
     def _norm_fp(cls, v: object) -> str | None:
@@ -29,6 +37,16 @@ class NodeUpdate(BaseModel):
     host: str | None = Field(default=None, min_length=1, max_length=255)
     auth_token: str | None = Field(default=None, min_length=16, max_length=512)
     tls_fingerprint: str | None = Field(default=None, max_length=128)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _trim_optional_name(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        name = str(value).strip()
+        if not name:
+            raise ValueError("name darf nicht leer sein")
+        return name
 
     @field_validator("tls_fingerprint", mode="before")
     @classmethod
@@ -60,3 +78,11 @@ class NodeOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class NodePickerOut(BaseModel):
+    """Minimal node identity exposed to users that may only create servers."""
+
+    id: int
+    name: str
+    status: str

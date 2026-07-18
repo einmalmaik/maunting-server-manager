@@ -1,5 +1,9 @@
 # Phase 5: Agent-Installer & Produktionsreife
 
+> Historische Spezifikation. Die aktuelle Einrichtung verwendet ein zeitlich
+> begrenztes Enrollment mit Owner-Bestätigung im Panel. Verbindliche Schritte
+> und Sicherheitsgrenzen stehen in [`../self-hosting.md`](../self-hosting.md).
+
 Dieses Dokument beschreibt die Maßnahmen zur Absicherung und Überwachung der Node-Agenten im produktiven Betrieb sowie die Bereitstellung eines automatisierten Installers.
 
 ---
@@ -32,7 +36,7 @@ Aus Kostengründen (keine eigenen Domains/Zertifikate für jeden Node notwendig)
 
 ---
 
-## 3. Automatisierter Agent-Installer (`scripts/install-agent.sh`)
+## 3. Automatisierter Agent-Installer (`helper-scripts/install-msm-agent.sh`)
 
 Ein robustes Bash-Skript für den Node-Server:
 1. **System-Check**: Prüft auf Ubuntu/Debian, Root-Rechte und Python 3.11+.

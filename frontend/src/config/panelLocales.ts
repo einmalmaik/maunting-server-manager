@@ -2,6 +2,6 @@
 export const panelLanguageCodes = ['de', 'en'] as const
 export type PanelLanguageCode = (typeof panelLanguageCodes)[number]
 
-export function normalizePanelLanguage(code: string): PanelLanguageCode {
-  return code.startsWith('de') ? 'de' : 'en'
+export function normalizePanelLanguage(code: unknown): PanelLanguageCode {
+  return typeof code === 'string' && code.toLowerCase().startsWith('de') ? 'de' : 'en'
 }

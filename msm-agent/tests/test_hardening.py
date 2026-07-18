@@ -209,6 +209,23 @@ def test_bind_mount_outside_managed_root_is_rejected(monkeypatch, servers_dir: P
         )
 
 
+def test_permission_repair_uses_owner_scoped_modes(monkeypatch, servers_dir: Path) -> None:
+    target = servers_dir / "42"
+    target.mkdir()
+    run = MagicMock(return_value={"ok": True})
+    monkeypatch.setattr("services.docker_service.run_ephemeral", run)
+
+    from services.docker_service import repair_bind_mount_permissions
+
+    repair_bind_mount_permissions(str(target), owner_uid_gid=(1000, 1000))
+
+    script = run.call_args.kwargs["command"][1]
+    assert "chown -h 1000:1000" in script
+    assert "chmod 0750" in script
+    assert "chmod 0640" in script
+    assert "a+rwx" not in script
+
+
 def test_managed_postgres_avoids_default_bridge_and_attaches_internal_network(
     monkeypatch, tmp_path: Path
 ) -> None:

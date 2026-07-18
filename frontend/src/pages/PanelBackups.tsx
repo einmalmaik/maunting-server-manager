@@ -4,6 +4,7 @@ import { Database, Plus, Trash2, Cloud, CloudOff, Save, Settings as SettingsIcon
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 /** Panel-Backup-List-Item (GET /api/panel-backups). */
 interface PanelBackupItem {
@@ -201,21 +202,11 @@ export function PanelBackups() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="font-headline text-headline-sm text-primary">
-            {t('panelBackups.title')}
-          </h1>
-          <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-            {t('panelBackups.subtitle')}
-          </p>
-        </div>
-        <div className="flex gap-2">
+    <div className="msm-page">
+      <PageHeader eyebrow={t('pageContext.panel', 'Panel')} title={t('panelBackups.title')} description={t('panelBackups.subtitle')} status={<span className="msm-badge-info">{backups.length} Backups</span>} actions={<div className="flex flex-wrap gap-2">
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className={`msm-btn-secondary flex items-center gap-2 px-3 py-2 ${showSettings ? 'bg-surface-container' : ''}`}
+            className={`msm-btn-secondary flex min-h-11 items-center gap-2 px-3 py-2 ${showSettings ? 'bg-surface-container' : ''}`}
             title={t('panelBackups.settingsTitle')}
           >
             <SettingsIcon className="w-4 h-4" />
@@ -224,7 +215,7 @@ export function PanelBackups() {
           <button
             onClick={createBackup}
             disabled={creating}
-            className="msm-btn-primary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="msm-btn-primary flex min-h-11 items-center gap-2 px-4 py-2 disabled:opacity-50"
           >
             {creating ? (
               <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -233,8 +224,7 @@ export function PanelBackups() {
             )}
             {creating ? t('common.loading') : t('panelBackups.create')}
           </button>
-        </div>
-      </div>
+        </div>} />
 
       {/* Settings Section */}
       {showSettings && (

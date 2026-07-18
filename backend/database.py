@@ -9,7 +9,6 @@ from database_policy import validate_panel_database_url
 _DB_URL = validate_panel_database_url(
     settings.database_url,
     testing=os.getenv("MSM_TESTING", "").lower() == "true",
-    sqlite_migration=os.getenv("MSM_SQLITE_MIGRATION", "").lower() == "true",
 )
 _engine_kwargs: dict = {
     "pool_pre_ping": True,

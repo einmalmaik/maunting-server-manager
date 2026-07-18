@@ -16,6 +16,9 @@ export function useHostInterfaces(nodeId?: string | number | null) {
     let cancelled = false
     const load = async () => {
       setLoading(true)
+      setInterfaces([])
+      setDefaultBindIp(null)
+      setError(null)
       try {
         const url = nodeId ? `/nodes/${nodeId}/interfaces` : '/system/interfaces'
         const res = await api<HostInterfacesResponse>(url)

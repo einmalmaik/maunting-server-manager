@@ -1,0 +1,14 @@
+:root {
+  --dna-background: 206 31% 4%;
+  --dna-foreground: 188 29% 95%;
+  --dna-panel: 204 25% 10%;
+  --dna-panel-raised: 202 26% 14%;
+  --dna-primary: 193 45% 86%;
+  --dna-focus: 194 44% 68%;
+  --dna-success: 158 64% 52%;
+  --dna-warning: 38 92% 50%;
+  --dna-danger: 0 70% 55%;
+  --dna-radius-control: .65rem;
+  --dna-radius-panel: 1rem;
+  --dna-shadow-panel: 0 20px 48px hsl(0 0% 0% / .38);
+}

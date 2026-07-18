@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Terminal,
 } from 'lucide-react'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \\
   | sudo bash -s -- --domain panel.example.com`
@@ -93,23 +94,26 @@ export function SelfHostingDocs() {
   ]
 
   return (
-    <main className="container mx-auto max-w-6xl px-4 py-8">
-      <header className="mb-8 border-b border-outline-variant pb-6">
-        <div className="mb-3 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
-            <Network className="h-5 w-5" />
-          </div>
-          <p className="font-label-md text-xs uppercase tracking-[0.14em] text-primary">
-            {t('docsSelfHosting.eyebrow')}
-          </p>
-        </div>
-        <h1 className="font-headline text-display-sm font-extrabold text-on-surface">
-          {t('docsSelfHosting.title')}
-        </h1>
-        <p className="mt-2 max-w-3xl font-body-md text-body-md text-on-surface-variant">
-          {t('docsSelfHosting.subtitle')}
-        </p>
-      </header>
+    <main className="msm-page mx-auto max-w-6xl">
+      <PageHeader
+        eyebrow={t('docsSelfHosting.eyebrow')}
+        title={t('docsSelfHosting.title')}
+        description={t('docsSelfHosting.subtitle')}
+        status={<Network className="h-6 w-6 text-primary" aria-hidden="true" />}
+      />
+
+      <nav className="sticky top-16 z-10 -mx-1 mb-6 flex gap-2 overflow-x-auto bg-surface/95 px-1 py-2 backdrop-blur lg:hidden" aria-label={t('docsSelfHosting.navigation.label')}>
+        {[
+          ['deployment-units', t('docsSelfHosting.units.title')],
+          ['panel-install', t('docsSelfHosting.install.title')],
+          ['topology', t('docsSelfHosting.topology.title')],
+          ['component-migration', t('docsSelfHosting.migration.title')],
+          ['enrollment', t('docsSelfHosting.enrollment.title')],
+          ['artifacts', t('docsSelfHosting.artifacts.title')],
+        ].map(([id, label]) => (
+          <a key={id} href={`#${id}`} className="msm-btn-secondary shrink-0 px-3 py-2 text-xs">{label}</a>
+        ))}
+      </nav>
 
       <section aria-labelledby="deployment-units" className="mb-10">
         <div className="mb-4 flex items-center gap-2">

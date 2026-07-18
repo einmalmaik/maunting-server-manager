@@ -117,3 +117,5 @@ def test_installer_writes_multinode_and_split_hosting_settings() -> None:
         assert "NODE_ENV=production" in script
         assert "dis-sidecar/.env.example" in script
     assert "${AGENT_DIR}/.env.example" in remote_installer
+    assert 'install -m 0600 /dev/null "$TOKEN_HANDOFF_FILE"' in remote_installer
+    assert '${YELLOW}${AGENT_TOKEN}${NC}' not in remote_installer

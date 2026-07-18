@@ -29,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Explizite Textbestätigung überspringen (nur für geprüfte Automation).",
     )
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Auswahl und sichere DB-Vorbedingungen prüfen, ohne Daten zu verändern.",
+    )
     return parser
 
 
@@ -64,12 +69,25 @@ def main(argv: list[str] | None = None) -> int:
         target = db.query(Node).filter(Node.id == target_node_id).first()
         if server is None or target is None:
             raise ServerNodeMigrationError("Server oder Zielnode wurde nicht gefunden")
+        if server.node is None or server.node_id == target.id:
+            raise ServerNodeMigrationError("Server hat keine gültige, abweichende Quellnode")
+        if server.status not in {"stopped", "error"}:
+            raise ServerNodeMigrationError("Server muss vor dem Umzug gestoppt sein")
 
         target_bind_ip = args.target_bind_ip
         if target_bind_ip is None and server.public_bind_ip:
-            target_bind_ip = input(
-                "Der Server nutzt eine feste Quell-IP. Neue Bind-IP auf dem Zielnode: "
-            ).strip()
+            if not args.preflight_only:
+                target_bind_ip = input(
+                    "Der Server nutzt eine feste Quell-IP. Neue Bind-IP auf dem Zielnode: "
+                ).strip()
+
+        if args.preflight_only:
+            if server.public_bind_ip and target_bind_ip is None:
+                print("Hinweis: Beim Umzug muss die neue Ziel-Bind-IP angegeben werden.")
+            print(
+                f"Vorprüfung bestanden: Server {server_id} kann auf Node {target_node_id} geprüft migriert werden."
+            )
+            return 0
 
         if not args.yes:
             expected = f"MIGRATE {server_id}"

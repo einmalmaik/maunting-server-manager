@@ -172,6 +172,10 @@ def migrate_server_to_node(
             source_node_id = server.node_id
             server.node = target
             server.node_id = target.id
+            # Remote agents address server files by the stable numeric ID.
+            # Persist that canonical destination so later local fallback paths
+            # can never point back at the retained source directory.
+            server.install_dir = str(Path(settings.servers_dir) / str(server.id))
             server.public_bind_ip = normalized_bind_ip or None
             server.status = "stopped"
             server.status_message = "Auf Zielnode migriert; Quelldaten wurden beibehalten"

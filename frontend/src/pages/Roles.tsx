@@ -7,6 +7,7 @@ import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { PermissionCatalog, Role } from '@/types/permissions'
 import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 interface RoleFormProps {
   catalog: PermissionCatalog
@@ -191,27 +192,18 @@ export function Roles() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-headline text-headline-sm text-primary">{t('roles.title')}</h1>
-          <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-            {t('roles.subtitle')}
-          </p>
-        </div>
-        {canManage && (
+    <div className="msm-page">
+      <PageHeader eyebrow={t('pageContext.administration', 'Administration')} title={t('roles.title')} description={t('roles.subtitle')} status={<span className="msm-badge-info">{roles.length} {t('roles.title')}</span>} actions={canManage ? (
           <button
             onClick={() => {
               setEditing(null)
               setCreating(true)
             }}
-            className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
+            className="msm-btn-primary min-h-11 px-4 py-2 inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             {t('roles.create')}
-          </button>
-        )}
-      </div>
+          </button>) : undefined} />
 
       {creating && (
         <div className="msm-card p-6">

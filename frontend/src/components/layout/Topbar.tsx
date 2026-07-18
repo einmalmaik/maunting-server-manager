@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { useConfirmStore } from '@/stores/confirmStore'
@@ -8,7 +8,12 @@ import { Bell, Menu, User, LogOut } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 
-export function Topbar() {
+interface TopbarProps {
+  onOpenNavigation?: () => void
+  menuButtonRef?: RefObject<HTMLButtonElement>
+}
+
+export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user, logout, updateUser } = useAuthStore()
@@ -30,8 +35,12 @@ export function Topbar() {
         setMenuOpen(false)
       }
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => { document.removeEventListener('mousedown', handleClickOutside); document.removeEventListener('keydown', handleKeyDown) }
   }, [])
 
   const handleLogout = async () => {
@@ -66,7 +75,14 @@ export function Topbar() {
       <header className="msm-topbar h-16 flex items-center justify-between px-margin-mobile md:px-margin-desktop">
         {/* Mobile Brand + Breadcrumbs */}
         <div className="flex items-center gap-3">
-          <button className="md:hidden text-on-surface-variant hover:text-primary transition-colors">
+          <button
+            ref={menuButtonRef}
+            type="button"
+            onClick={onOpenNavigation}
+            className="md:hidden grid min-h-11 min-w-11 place-items-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors"
+            aria-label={t('shell.openNavigation', 'Open navigation')}
+            aria-haspopup="dialog"
+          >
             <Menu className="w-5 h-5" />
           </button>
           <div className="md:hidden">
@@ -102,6 +118,9 @@ export function Topbar() {
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              aria-label={t('shell.openUserMenu', 'Open user menu')}
               className="flex items-center gap-2 hover:bg-surface-variant/50 p-1.5 rounded-lg transition-colors"
             >
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary border border-outline-variant">
@@ -120,7 +139,7 @@ export function Topbar() {
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg z-50 overflow-hidden">
+              <div role="menu" className="absolute right-0 top-full mt-2 w-56 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg z-50 overflow-hidden">
                 <div className="p-3 border-b border-outline-variant/30">
                   <p className="font-label-md text-sm text-on-surface font-medium truncate">
                     {user?.username}
@@ -132,6 +151,7 @@ export function Topbar() {
                 <div className="py-1">
                   <button
                     onClick={() => { setMenuOpen(false); navigate('/profile') }}
+                    role="menuitem"
                     className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm text-on-surface hover:bg-surface-container-highest transition-colors"
                   >
                     <User className="w-4 h-4 text-on-surface-variant" />
@@ -141,6 +161,7 @@ export function Topbar() {
                 <div className="border-t border-outline-variant/30 py-1">
                   <button
                     onClick={handleLogout}
+                    role="menuitem"
                     className="w-full text-left px-3 py-2 flex items-center gap-2 text-sm text-status-error hover:bg-error-container/20 transition-colors"
                   >
                     <LogOut className="w-4 h-4" />

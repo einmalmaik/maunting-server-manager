@@ -1,5 +1,9 @@
 # MSM → Multi-Node Infrastructure Panel: Roadmap
 
+> Historische Planungsübersicht. Die aktuelle, endnutzerfreundliche Einrichtung
+> steht in [`../self-hosting.md`](../self-hosting.md). Neue Nodes werden heute
+> über **Nodes → Node hinzufügen** und den dort erzeugten Einmal-Befehl verbunden.
+
 Dieses Dokument beschreibt die langfristige Roadmap zur Umstellung des Maunting Server Managers (MSM) von einem Single-Host Game-Server-Panel auf eine skalierbare Multi-Node Infrastruktur.
 
 ## Ausgangslage (IST-Zustand)
@@ -41,7 +45,7 @@ Die Entwicklung ist in 9 logische Phasen (Phase 0 bis 8) aufgeteilt. Für jede P
 6. **[Phase 5: Agent-Installer & Produktionsreife](phase-5.md)** (ABGESCHLOSSEN)
    - TLS-Absicherung der Agenten-API (Self-signed mit Fingerprint-Pinning im Panel).
    - Heartbeat-System und automatische Ausfallsicherung (Offline-Status der Nodes).
-   - Bash-Installer für Remote-Server (`scripts/install-agent.sh`).
+   - Geführter Installer für Remote-Server (`helper-scripts/install-msm-agent.sh`).
 
 7. **[Phase 6: Backup-System für Multi-Node optimieren](phase-6.md)** (ABGESCHLOSSEN)
    - Direktes Backup-Streaming vom Agenten zu S3 mit temporären Credentials (vermeidet Traffic-Engpässe am zentralen Panel).

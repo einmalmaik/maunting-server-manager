@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -13,6 +16,8 @@ from services import file_service
 from services.file_service import PathEscapeError, PathValidationError
 
 router = APIRouter(prefix="/files", tags=["files"])
+MAX_SINGLE_UPLOAD_SIZE = 100 * 1024 * 1024
+UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 class WriteBody(BaseModel):
@@ -165,16 +170,38 @@ async def upload_file(
     path: str = Query(...),
     file: UploadFile = File(...),
 ) -> dict[str, bool]:
+    tmp_path: Path | None = None
     try:
-        data = await file.read()
-        if len(data) > settings.max_upload_size:
-            raise HTTPException(status_code=413, detail="Upload too large")
-        file_service.write_upload(server_id, path, data)
+        target = file_service.safe_path(server_id, path)
+        if target == file_service.server_root(server_id):
+            raise PathValidationError("Upload path must name a file")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        destination_mode = target.stat().st_mode & 0o777 if target.is_file() else 0o644
+        limit = min(settings.max_upload_size, MAX_SINGLE_UPLOAD_SIZE)
+        total = 0
+        with tempfile.NamedTemporaryFile(
+            mode="wb", delete=False, dir=target.parent, prefix=".msm-upload-"
+        ) as tmp:
+            os.fchmod(tmp.fileno(), 0o600)
+            tmp_path = Path(tmp.name)
+            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+                total += len(chunk)
+                if total > limit:
+                    raise HTTPException(status_code=413, detail="Upload too large")
+                tmp.write(chunk)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            os.fchmod(tmp.fileno(), destination_mode)
+        os.replace(tmp_path, target)
+        tmp_path = None
         return {"ok": True}
     except HTTPException:
         raise
     except Exception as exc:
         raise _map_path_errors(exc) from exc
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
 
 @router.get("/download")

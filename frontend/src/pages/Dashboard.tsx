@@ -7,6 +7,7 @@ import { UpdateBanner } from '@/components/UpdateBanner'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Server as ServerIcon, Activity, MemoryStick, CheckCircle2, AlertTriangle, XCircle, Loader2, Clock } from 'lucide-react'
 import { UptimeDisplay } from '@/components/server/UptimeDisplay'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 interface ServiceStatus {
   status: 'ok' | 'degraded' | 'error'
@@ -141,15 +142,9 @@ export function Dashboard() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="msm-page">
       <UpdateBanner />
-
-      <div>
-        <h1 className="font-headline text-headline-sm text-primary">{t('dashboard.title')}</h1>
-        <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-          {t('dashboard.subtitle')}
-        </p>
-      </div>
+      <PageHeader eyebrow={t('pageContext.overview', 'Overview')} title={t('dashboard.title')} description={t('dashboard.subtitle')} status={<span className={runningCount > 0 ? 'msm-badge-success' : 'msm-badge-info'}>{runningCount} {t('dashboard.running')}</span>} />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

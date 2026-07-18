@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from config import settings
 from database import SessionLocal
-from dependencies import get_current_user, require_global
+from dependencies import get_current_user, require_global, verify_csrf
 from games import list_game_info
 from models import User
 from services import network_interfaces_service
@@ -307,6 +307,7 @@ def update_status(
 @router.post("/update/panel")
 def update_panel_endpoint(
     _=Depends(require_global("panel.settings.write")),
+    __: None = Depends(verify_csrf),
 ) -> dict:
     from database import SessionLocal
     from services.update_service import trigger_panel_update
@@ -323,6 +324,8 @@ def update_panel_endpoint(
 @router.post("/update/nodes")
 def update_nodes_endpoint(
     _=Depends(require_global("panel.settings.write")),
+    __=Depends(require_global("nodes.manage")),
+    ___: None = Depends(verify_csrf),
 ) -> dict:
     from database import SessionLocal
     from services.update_service import trigger_node_updates

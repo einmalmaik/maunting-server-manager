@@ -4,7 +4,10 @@ import { Link } from 'react-router-dom'
 import {
   Boxes,
   BookOpen,
+  Copy,
   Download,
+  Pencil,
+  Plus,
   RefreshCw,
   Search,
   Trash2,
@@ -16,6 +19,8 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { BlueprintListEntry } from '@/types'
+import { PageHeader } from '@/Singra/UI/PageHeader'
+import { BlueprintBuilder, type BlueprintBuilderMode } from '@/features/blueprints/BlueprintBuilder'
 
 /** Hilfsfunktion: lesbarer Label pro source_type */
 function sourceLabel(src: string): string {
@@ -50,6 +55,7 @@ export function Blueprints() {
   const newFileRef = useRef<HTMLInputElement | null>(null)
   const replaceFileRef = useRef<HTMLInputElement | null>(null)
   const replaceTargetIdRef = useRef<string | null>(null)
+  const [builder, setBuilder] = useState<{ mode: BlueprintBuilderMode; sourceId?: string } | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -180,17 +186,18 @@ export function Blueprints() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-2">
-        <Boxes className="w-8 h-8 text-primary" />
-        <h1 className="font-headline text-display-sm font-extrabold text-on-surface">
-          {t('blueprints.pageTitle')}
-        </h1>
-      </div>
-      <p className="font-body-md text-body-md text-on-surface-variant mb-6">
-        {t('blueprints.pageSubtitle')}
-      </p>
+    <div className="msm-page">
+      <PageHeader
+        eyebrow={t('blueprints.eyebrow')}
+        title={t('blueprints.pageTitle')}
+        description={t('blueprints.pageSubtitle')}
+        actions={(
+          <div className="grid grid-flow-col auto-cols-max items-stretch gap-1.5" data-testid="blueprints-header-actions">
+            <Link to="/docs/blueprints#docs-howto" className="msm-btn-secondary inline-flex h-10 items-center gap-1.5 whitespace-nowrap px-2 text-xs"><BookOpen className="h-4 w-4" />{t('blueprints.guide')}</Link>
+            {canWrite && <button type="button" onClick={() => setBuilder({ mode: 'create' })} className="msm-btn-primary inline-flex h-10 items-center gap-1.5 whitespace-nowrap px-2.5 text-xs" data-testid="blueprints-create"><Plus className="h-4 w-4" />{t('blueprints.create')}</button>}
+          </div>
+        )}
+      />
 
       {/* Help Banner: Host custom blueprints & Discord bots */}
       <div className="mb-6 bg-primary/10 border border-primary/20 rounded-md p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -203,7 +210,7 @@ export function Blueprints() {
           </p>
         </div>
         <Link
-          to="/docs#docs-howto"
+          to="/docs/blueprints#docs-howto"
           className="msm-btn-secondary py-1.5 px-3 text-xs shrink-0 self-start sm:self-center inline-flex items-center gap-1.5"
         >
           <BookOpen className="w-3.5 h-3.5" />
@@ -212,14 +219,26 @@ export function Blueprints() {
       </div>
 
       {/* Toolbar: Upload + Suche + Filter */}
-      <div className="flex flex-wrap gap-3 mb-6 items-start">
+      <div className="grid gap-3 md:flex md:flex-wrap md:items-start" aria-label={t('blueprints.tools')}>
+        {/* Suche steht auf schmalen Displays bewusst zuerst und nutzt die volle Breite. */}
+        <div className="relative w-full md:max-w-sm md:flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant/50 pointer-events-none" />
+          <input
+            type="search"
+            aria-label={t('blueprints.search')}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('blueprints.search')}
+            className="min-h-11 w-full rounded-lg border border-outline-variant/50 bg-surface-container py-2 pl-9 pr-3 font-body-md text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
         {canWrite && (
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => newFileRef.current?.click()}
               disabled={busy === 'new'}
-              className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+              className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-4 py-2 disabled:opacity-50"
               data-testid="blueprints-upload-new"
             >
               {busy === 'new' ? (
@@ -248,26 +267,24 @@ export function Blueprints() {
           </div>
         )}
 
-        {/* Suche */}
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant/50 pointer-events-none" />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('blueprints.search')}
-            className="w-full pl-9 pr-3 py-2 rounded-md bg-surface-container text-on-surface border border-outline-variant/50 focus:outline-none focus:ring-1 focus:ring-primary font-body-md text-sm"
-          />
-        </div>
+        <details className="rounded-lg border border-outline-variant/50 bg-surface-container p-2 md:hidden">
+          <summary className="flex min-h-9 cursor-pointer items-center font-label-md text-sm font-semibold">{t('blueprints.filterSummary', { value: originFilter === 'all' ? t('blueprints.filterAll') : originFilter === 'native' ? t('blueprints.filterNative') : t('blueprints.filterCommunity') })}</summary>
+          <div className="mt-2 grid gap-3 border-t border-outline-variant/40 pt-3">
+            <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-outline-variant/50 text-sm">
+              {(['all', 'native', 'community'] as const).map((f) => <button key={f} type="button" onClick={() => setOriginFilter(f)} className={`min-h-11 px-2 font-label-md ${originFilter === f ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'}`}>{f === 'all' ? t('blueprints.filterAll') : f === 'native' ? t('blueprints.filterNative') : t('blueprints.filterCommunity')}</button>)}
+            </div>
+            {categories.length > 1 && <select aria-label={t('blueprints.filterCategory')} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="msm-input min-h-11"><option value="all">{t('blueprints.filterCategory')}: {t('blueprints.filterAll')}</option>{categories.map(c => <option key={c} value={c}>{categoryLabel(c)}</option>)}</select>}
+          </div>
+        </details>
 
-        {/* Origin-Filter */}
-        <div className="flex rounded-md overflow-hidden border border-outline-variant/50 text-sm">
+        {/* Breite Ansicht: Filter bleiben direkt vergleichbar. */}
+        <div className="hidden min-h-11 overflow-hidden rounded-md border border-outline-variant/50 text-sm md:flex">
           {(['all', 'native', 'community'] as const).map((f) => (
             <button
               key={f}
               type="button"
               onClick={() => setOriginFilter(f)}
-              className={`px-3 py-2 font-label-md transition-colors ${
+              className={`min-h-11 px-3 py-2 font-label-md transition-colors ${
                 originFilter === f
                   ? 'bg-primary text-on-primary'
                   : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-highest'
@@ -281,9 +298,10 @@ export function Blueprints() {
         {/* Kategorie-Filter */}
         {categories.length > 1 && (
           <select
+            aria-label={t('blueprints.filterCategory')}
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-3 py-2 rounded-md bg-surface-container text-on-surface border border-outline-variant/50 focus:outline-none focus:ring-1 focus:ring-primary font-body-md text-sm"
+            className="hidden min-h-11 rounded-md border border-outline-variant/50 bg-surface-container px-3 py-2 font-body-md text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary md:block"
           >
             <option value="all">{t('blueprints.filterCategory')}: {t('blueprints.filterAll')}</option>
             {categories.map((c) => (
@@ -375,24 +393,32 @@ export function Blueprints() {
                   </p>
 
                   {/* Aktionen */}
-                  <div className="flex items-center gap-2 mt-auto pt-1 border-t border-outline-variant/20">
+                  <div className="grid grid-cols-2 gap-2 mt-auto pt-2 border-t border-outline-variant/20 sm:flex sm:flex-wrap">
                     <a
                       href={apiUrl(`/blueprints/${encodeURIComponent(entry.id)}`)}
                       download
-                      className="msm-btn-secondary inline-flex items-center gap-1 px-3 py-1.5 text-xs"
+                      className="msm-btn-secondary inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs"
                       data-testid={`blueprint-download-${entry.id}`}
                       title={t('blueprints.download')}
                     >
                       <Download className="w-3.5 h-3.5" />
                       {t('blueprints.download')}
                     </a>
+                    {canWrite && isNative && (
+                      <button type="button" onClick={() => setBuilder({ mode: 'clone', sourceId: entry.id })} className="msm-btn-secondary inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs" data-testid={`blueprint-clone-${entry.id}`}>
+                        <Copy className="h-3.5 w-3.5" />{t('blueprints.clone')}
+                      </button>
+                    )}
                     {canWrite && !isNative && (
                       <>
+                        <button type="button" onClick={() => setBuilder({ mode: 'edit', sourceId: entry.id })} className="msm-btn-secondary inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs" data-testid={`blueprint-edit-${entry.id}`}>
+                          <Pencil className="h-3.5 w-3.5" />{t('common.edit')}
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleReplace(entry.id)}
                           disabled={isReplacing}
-                          className="msm-btn-secondary inline-flex items-center gap-1 px-3 py-1.5 text-xs disabled:opacity-50"
+                          className="msm-btn-secondary inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs disabled:opacity-50"
                           data-testid={`blueprint-replace-${entry.id}`}
                           title={t('blueprints.replace')}
                         >
@@ -407,7 +433,7 @@ export function Blueprints() {
                           type="button"
                           onClick={() => handleDelete(entry)}
                           disabled={isDeleting}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-md text-status-destructive hover:bg-status-destructive/10 transition-colors disabled:opacity-50 ml-auto"
+                          className="inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs rounded-md text-status-destructive hover:bg-status-destructive/10 transition-colors disabled:opacity-50 sm:ml-auto"
                           data-testid={`blueprint-delete-${entry.id}`}
                           title={t('blueprints.delete')}
                         >
@@ -427,6 +453,7 @@ export function Blueprints() {
           </div>
         </>
       )}
+      {builder && entries && <BlueprintBuilder mode={builder.mode} sourceId={builder.sourceId} entries={entries} onClose={() => setBuilder(null)} onSaved={load} />}
     </div>
   )
 }

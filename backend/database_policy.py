@@ -22,7 +22,9 @@ def validate_panel_database_url(
         )
     if url.startswith(("postgresql://", "postgresql+psycopg2://")):
         return url
-    if url.startswith("sqlite") and (testing or sqlite_migration):
+    # The migration CLI opens its SQLite source through a dedicated read-only
+    # engine; it must never turn the full panel runtime into SQLite mode.
+    if url.startswith("sqlite") and testing:
         return url
     if url.startswith("sqlite"):
         raise RuntimeError(

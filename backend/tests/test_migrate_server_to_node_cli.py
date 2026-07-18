@@ -13,6 +13,7 @@ def test_cli_accepts_explicit_automation_inputs() -> None:
             "--target-bind-ip",
             "198.51.100.40",
             "--yes",
+            "--preflight-only",
         ]
     )
 
@@ -20,3 +21,4 @@ def test_cli_accepts_explicit_automation_inputs() -> None:
     assert args.target_node_id == 4
     assert args.target_bind_ip == "198.51.100.40"
     assert args.yes is True
+    assert args.preflight_only is True

@@ -16,7 +16,8 @@ def test_sqlite_runtime_is_rejected_with_actionable_error() -> None:
 def test_sqlite_is_limited_to_tests_or_explicit_migration() -> None:
     url = "sqlite:///:memory:"
     assert validate_panel_database_url(url, testing=True) == url
-    assert validate_panel_database_url(url, sqlite_migration=True) == url
+    with pytest.raises(RuntimeError, match="SQLite"):
+        validate_panel_database_url(url, sqlite_migration=True)
 
 
 @pytest.mark.parametrize("url", ["", "mysql://localhost/msm", "mariadb://localhost/msm"])

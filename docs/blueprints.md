@@ -385,7 +385,7 @@ Wenn ein Port-Token leer ist, wird dieser Patch übersprungen.
 ## Stop-Grace-Period und Update-Strategie (runtime + source)
 
 Diese beiden Felder sind provider-neutral und gelten für **alle** Blueprint-Quellen
-(Steam, HTTP, dockerOnly, manualUpload, custom). Steam und Workshop sind
+(Steam, HTTP, GitHub, dockerOnly, manualUpload, custom). Steam und Workshop sind
 optionale Provider — der Blueprint-Core bleibt generisch.
 
 ### stopGracePeriodSeconds (unter `runtime`)
@@ -433,7 +433,7 @@ Mögliche Werte:
 
 | Source-Typ       | Default          | Begründung |
 |------------------|------------------|------------|
-| steam            | checkBased       | Default seit Blueprint v1: buildid-Check + SteamCMD nur bei Bedarf; `alwaysValidate` erzwingt Validate bei jedem Start. |
+| steam            | checkBased       | Standard: buildid-Check + SteamCMD nur bei Bedarf; `alwaysValidate` erzwingt Validate bei jedem Start. |
 | http             | checkBased       | HEAD + Last-Modified vs. lokale mtime (siehe `games/updater.py`). |
 | dockerOnly / custom / manualUpload | none | MSM verwaltet keine Dateien; Verantwortung liegt beim Image oder User. |
 
