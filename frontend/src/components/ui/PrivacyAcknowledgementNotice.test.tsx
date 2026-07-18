@@ -18,10 +18,10 @@ describe('PrivacyAcknowledgementNotice', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('link', { name: 'Datenschutzerklärung lesen' })).toHaveAttribute('href', '/privacy')
+    expect(screen.getByRole('link', { name: i18n.t('privacyNotice.readPolicy') })).toHaveAttribute('href', '/privacy')
     expect(onVisibilityChange).toHaveBeenCalledWith(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Verstanden' }))
-    expect(screen.queryByText('Wir respektieren deine Privatsphäre')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('privacyNotice.confirm') }))
+    expect(screen.queryByText(i18n.t('privacyNotice.title'))).toBeNull()
     expect(onVisibilityChange).toHaveBeenLastCalledWith(false)
   })
 
@@ -32,10 +32,13 @@ describe('PrivacyAcknowledgementNotice', () => {
       </MemoryRouter>,
     )
 
-    const notice = screen.getByRole('complementary', { name: 'Wir respektieren deine Privatsphäre' })
+    const notice = screen.getByRole('complementary', { name: i18n.t('privacyNotice.title') })
     expect(notice).toHaveClass('fixed', 'inset-x-0', 'bottom-0')
     expect(notice).not.toHaveClass('relative')
     expect(notice).toHaveAttribute('aria-describedby')
-    expect(document.getElementById(notice.getAttribute('aria-describedby')!)).toHaveTextContent(/technisch notwendige Cookies/)
+    expect(document.getElementById(notice.getAttribute('aria-describedby')!)).toHaveTextContent(
+      i18n.t('privacyNotice.description').substring(0, 30)
+    )
   })
 })
+

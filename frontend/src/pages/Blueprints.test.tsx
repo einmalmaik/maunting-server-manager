@@ -109,7 +109,7 @@ describe('Blueprints page', () => {
     fetchSpy.mockReturnValueOnce(mockJson(200, sampleList))
     renderPage()
 
-    expect(await screen.findByRole('searchbox', { name: /search blueprints/i })).toBeInTheDocument()
+    expect(await screen.findByRole('searchbox', { name: new RegExp(i18n.t('blueprints.search'), 'i') })).toBeInTheDocument()
   })
 
   it('keeps header actions aligned and removes visible schema-version chrome', async () => {
@@ -120,7 +120,7 @@ describe('Blueprints page', () => {
     await screen.findByTestId('blueprint-row-minecraft_paper')
     const actions = screen.getByTestId('blueprints-header-actions')
     expect(actions).toHaveClass('grid-flow-col', 'items-stretch')
-    expect(screen.getByRole('link', { name: 'Anleitung' })).toHaveClass('h-10')
+    expect(screen.getByRole('link', { name: i18n.t('blueprints.guide') })).toHaveClass('h-10')
     expect(screen.getByTestId('blueprints-create')).toHaveClass('h-10')
     expect(screen.queryByText(/schema v1/i)).toBeNull()
   })
@@ -133,7 +133,7 @@ describe('Blueprints page', () => {
     await screen.findByTestId('blueprint-row-minecraft_paper')
     fireEvent.click(screen.getByTestId('blueprints-create'))
 
-    const dialog = screen.getByRole('dialog', { name: 'Blueprint erstellen' })
+    const dialog = screen.getByRole('dialog', { name: i18n.t('blueprintBuilder.title.create') })
     expect(dialog).toHaveClass('fixed', 'inset-0', 'md:pl-64')
     expect(screen.getByTestId('blueprint-builder-panel')).toHaveClass('h-[100dvh]', 'max-h-[100dvh]', 'overflow-hidden')
     expect(screen.getByTestId('blueprint-builder-actions')).toHaveClass('shrink-0')
