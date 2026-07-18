@@ -65,7 +65,7 @@ export function ResetPassword() {
               MauntingStudios
             </h1>
             <p className="font-mono-sm text-mono-sm text-on-surface-variant">
-              Infrastructure Control
+              Server Manager
             </p>
           </div>
         </div>

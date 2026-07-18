@@ -31,6 +31,7 @@
     "fingerprintPlaceholder": "64 Hex-Zeichen vom install-agent.sh",
     "fingerprintHint": "SHA-256 des Agent-Zertifikats (Self-signed Pinning). Pflicht für Remote-Nodes.",
     "fingerprintRequired": "TLS-Fingerprint ist für Remote-Nodes erforderlich.",
+    "searchPlaceholder": "Nodes filtern...",
     "loadFailed": "Nodes konnten nicht geladen werden.",
     "created": "Node angelegt.",
     "updated": "Node aktualisiert.",
