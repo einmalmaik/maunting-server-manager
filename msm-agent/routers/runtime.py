@@ -257,9 +257,7 @@ def update_agent(file: UploadFile = File(...)) -> dict:
     except subprocess.CalledProcessError as exc:
         raise HTTPException(status_code=500, detail="Dependency installation failed") from exc
     except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Update des Agents fehlgeschlagen: {type(exc).__name__}: {str(exc)}") from exc
+        raise HTTPException(status_code=500, detail="Update des Agents fehlgeschlagen") from exc
     finally:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
