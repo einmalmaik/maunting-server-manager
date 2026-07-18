@@ -155,6 +155,7 @@ def run_auth_setup_recovery(
     on_status,
     restart_callback,
     wait_timeout: float = 300.0,
+    node=None,
 ) -> str:
     """Orchestriert den Auth-Setup-Recovery-Flow.
 
@@ -174,7 +175,24 @@ def run_auth_setup_recovery(
     """
     on_log(f"[MSM] Auth-Setup erkannt. Verschiebe Credentials...\n")
 
-    moved = move_credentials(install_dir)
+    remote_client = None
+    if node is not None and not getattr(node, "is_local", True):
+        from services.node_client import NodeClient
+
+        remote_client = NodeClient.from_node(node)
+        moved = 0
+        for entry in remote_client.files_list(server_id):
+            name = str(entry.get("name", ""))
+            if entry.get("is_dir", False) or not _is_credential_file(name):
+                continue
+            try:
+                remote_client.files_delete(server_id, f"{name}.bak")
+            except Exception:
+                pass
+            remote_client.files_rename(server_id, name, f"{name}.bak")
+            moved += 1
+    else:
+        moved = move_credentials(install_dir)
     if moved == 0:
         on_status(False, "Auth-Setup erforderlich, aber keine Credential-Dateien gefunden.")
         return "no_credentials_moved"
@@ -202,6 +220,7 @@ def run_auth_setup_recovery(
         startup_check_seconds=0.0,  # NICHT nach 2s abbrechen - wir wollen auf Input warten
         server_id=server_id,
         tty=True,  # Pseudo-TTY fuer interaktiven Auth-Flow
+        node=node,
     )
     if not result["ok"]:
         on_status(False, f"Auth-Setup-Container konnte nicht starten: {result['error']}")
@@ -212,14 +231,29 @@ def run_auth_setup_recovery(
         f"und Anmeldung abschliessen (max. {int(wait_timeout)}s).\n"
     )
 
-    found = wait_for_credentials(install_dir, timeout=wait_timeout)
+    if remote_client is not None:
+        deadline = time.monotonic() + wait_timeout
+        found_name = None
+        while time.monotonic() < deadline:
+            for entry in remote_client.files_list(server_id):
+                name = str(entry.get("name", ""))
+                if not entry.get("is_dir", False) and _is_credential_file(name):
+                    found_name = name
+                    break
+            if found_name:
+                break
+            time.sleep(1.0)
+        found = found_name
+    else:
+        found = wait_for_credentials(install_dir, timeout=wait_timeout)
     if found is None:
         on_status(False, "Auth-Setup Timeout. Bitte manuell pruefen.")
-        docker_service.stop(container_name, timeout=10)
+        docker_service.stop(container_name, timeout=10, node=node)
         return "timeout"
 
-    on_log(f"[MSM] Neue Credentials gefunden ({found.name}). Starte Server neu...\n")
-    docker_service.stop(container_name, timeout=15)
+    found_label = found.name if isinstance(found, Path) else found
+    on_log(f"[MSM] Neue Credentials gefunden ({found_label}). Starte Server neu...\n")
+    docker_service.stop(container_name, timeout=15, node=node)
     on_status(False, None)  # auth_required -> False, status_message -> None
     restart_callback()
     return "recovered"

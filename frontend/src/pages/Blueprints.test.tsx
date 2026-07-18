@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Blueprints } from './Blueprints'
 import i18n from '@/i18n'
@@ -103,6 +103,41 @@ describe('Blueprints page', () => {
     await screen.findByTestId('blueprint-row-my_custom')
     expect(screen.getByText('Minecraft (Paper)')).toBeInTheDocument()
     expect(screen.getByText('My Custom Game')).toBeInTheDocument()
+  })
+
+  it('gives the blueprint search an accessible name', async () => {
+    fetchSpy.mockReturnValueOnce(mockJson(200, sampleList))
+    renderPage()
+
+    expect(await screen.findByRole('searchbox', { name: new RegExp(i18n.t('blueprints.search'), 'i') })).toBeInTheDocument()
+  })
+
+  it('keeps header actions aligned and removes visible schema-version chrome', async () => {
+    setMe(ownerMe)
+    fetchSpy.mockReturnValueOnce(mockJson(200, sampleList))
+    renderPage()
+
+    await screen.findByTestId('blueprint-row-minecraft_paper')
+    const actions = screen.getByTestId('blueprints-header-actions')
+    expect(actions).toHaveClass('grid-flow-col', 'items-stretch')
+    expect(screen.getByRole('link', { name: i18n.t('blueprints.guide') })).toHaveClass('h-10')
+    expect(screen.getByTestId('blueprints-create')).toHaveClass('h-10')
+    expect(screen.queryByText(/schema v1/i)).toBeNull()
+  })
+
+  it('opens a viewport-safe blueprint editor above the app shell', async () => {
+    setMe(ownerMe)
+    fetchSpy.mockReturnValueOnce(mockJson(200, sampleList))
+    renderPage()
+
+    await screen.findByTestId('blueprint-row-minecraft_paper')
+    fireEvent.click(screen.getByTestId('blueprints-create'))
+
+    const dialog = screen.getByRole('dialog', { name: i18n.t('blueprintBuilder.title.create') })
+    expect(dialog).toHaveClass('fixed', 'inset-0', 'md:pl-64')
+    expect(screen.getByTestId('blueprint-builder-panel')).toHaveClass('h-[100dvh]', 'max-h-[100dvh]', 'overflow-hidden')
+    expect(screen.getByTestId('blueprint-builder-actions')).toHaveClass('shrink-0')
+    expect(within(dialog).queryByText(/schema v1/i)).toBeNull()
   })
 
   it('hides Replace/Delete buttons for native blueprints', async () => {

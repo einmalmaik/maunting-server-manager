@@ -27,6 +27,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { api } from '@/api/client'
+import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import {
@@ -424,7 +425,7 @@ export function FileManager({ serverId }: FileManagerProps) {
 
   const downloadEntry = (entry: FileEntry) => {
     const relPath = joinPath(currentPath, entry.name)
-    window.open(`/api/files/${serverId}/download?path=${encodeURIComponent(relPath)}`, '_blank')
+    window.open(apiUrl(`/files/${serverId}/download?path=${encodeURIComponent(relPath)}`), '_blank')
   }
 
   const handleExtract = async (entry: FileEntry) => {

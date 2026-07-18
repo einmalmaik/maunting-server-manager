@@ -12,6 +12,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Dropdown } from '@/components/ui/Dropdown'
 import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 export function Users() {
   const { t } = useTranslation()
@@ -104,24 +105,15 @@ export function Users() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-headline text-headline-sm text-primary">{t('nav.users')}</h1>
-          <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-            {t('users.subtitle')}
-          </p>
-        </div>
-        {canManageUsers && (
+    <div className="msm-page">
+      <PageHeader eyebrow={t('pageContext.administration', 'Administration')} title={t('nav.users')} description={t('users.subtitle')} status={<span className="msm-badge-info">{users.length} {t('nav.users')}</span>} actions={canManageUsers ? (
           <button
             onClick={() => setShowCreate(!showCreate)}
-            className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
+            className="msm-btn-primary min-h-11 px-4 py-2 inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             {t('users.createUser')}
-          </button>
-        )}
-      </div>
+          </button>) : undefined} />
 
       {showCreate && (
         <div className="msm-card p-6">

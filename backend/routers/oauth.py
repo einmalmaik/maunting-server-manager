@@ -737,11 +737,29 @@ def _handle_login_callback(
 
 
 def _login_redirect_path() -> str:
-    return "/login"
+    return _frontend_url("/login")
 
 
 def _profile_redirect_path() -> str:
-    return "/profile"
+    return _frontend_url("/profile")
+
+
+def _frontend_url(path: str) -> str:
+    """Browser landing URL after OAuth — always the user-facing SPA origin.
+
+    Relative redirects after a callback on ``api.*`` would keep the user on
+    the API host (404). Absolute panel_url fixes split hosting; all-in-one
+    still works (panel_url is the same public origin).
+    """
+    if not path.startswith("/"):
+        path = f"/{path}"
+    # only same-site paths — never open-redirect to arbitrary hosts
+    if path.startswith("//") or "://" in path.split("?", 1)[0]:
+        path = "/"
+    base = (settings.panel_url or "").rstrip("/")
+    if not base:
+        return path
+    return f"{base}{path}"
 
 
 def _redirect_login_error(reason: str) -> Response:
@@ -760,7 +778,12 @@ def _redirect_oauth_2fa(slug: str, challenge: str) -> Response:
 
 
 def _redirect_ok(next_path: str) -> Response:
-    resp = _no_cache_redirect(next_path)
+    # next_path is usually "/" or a relative SPA route from state
+    if not next_path or not next_path.startswith("/") or next_path.startswith("//"):
+        next_path = "/"
+    if "://" in next_path.split("?", 1)[0]:
+        next_path = "/"
+    resp = _no_cache_redirect(_frontend_url(next_path))
     return resp
 
 

@@ -24,7 +24,7 @@ import os
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Deque
+from typing import Any, Deque  # noqa: F401 — Any used by node proxy path
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect, WebSocketState
@@ -253,12 +253,167 @@ async def _close_safely(ws: WebSocket, code: int = 1000) -> None:
         pass
 
 
+async def _proxy_agent_console(
+    ws: WebSocket,
+    server_id: int,
+    container: str,
+    node: Any,
+    last_id: int | None = None,
+) -> None:
+    """Bidirectional WebSocket proxy: browser ↔ panel ↔ agent console.
+
+    Token is used only for the agent upgrade Authorization header and is never
+    logged or sent to the browser.
+    """
+    import websockets
+    from websockets.exceptions import ConnectionClosed
+
+    from services.node_client import NodeClient, NodeClientError
+
+    async with _STATES_LOCK:
+        state = _get_state(server_id)
+        if state.active_connections >= MAX_CONCURRENT_WS_PER_SERVER:
+            await ws.accept()
+            await _close_safely(ws, code=1013)
+            return
+        state.active_connections += 1
+
+    agent_ws = None
+    try:
+        await ws.accept()
+        try:
+            client = NodeClient.from_node(node)
+            agent_url = client.console_ws_url(container)
+            token = client.bearer_token
+        except NodeClientError:
+            await _close_safely(ws, code=1011)
+            return
+
+        try:
+            import ssl as ssl_mod
+            ssl_context = client._verify()
+            ssl_param = None
+            if agent_url.startswith("wss://"):
+                if isinstance(ssl_context, ssl_mod.SSLContext):
+                    ssl_param = ssl_context
+                else:
+                    ssl_param = ssl_mod.create_default_context()
+
+            agent_ws = await websockets.connect(
+                agent_url,
+                additional_headers={"Authorization": f"Bearer {token}"},
+                open_timeout=10,
+                max_size=2 * 1024 * 1024,
+                ssl=ssl_param,
+            )
+        except Exception as exc:
+            logger.warning("agent console ws connect failed for server_id=%s: %s", server_id, exc)
+            await _close_safely(ws, code=1011)
+            return
+
+        log_path = _console_log_path(server_id)
+        if not state.lines:
+            # Ring-buffer initialisieren
+            try:
+                await _read_initial_backlog(log_path, state)
+            except Exception as exc:
+                logger.warning("ws remote backlog read failed: %s", exc)
+
+        # Optional local ring-buffer replay (MSM messages) before agent stream
+        async with _STATES_LOCK:
+            if last_id is None:
+                replay = list(state.lines)
+            else:
+                replay = [l for l in state.lines if l.id > last_id]
+        for line in replay:
+            await ws.send_text(_serialize(line))
+
+        async def _on_line(text: str, source: str, provided_ts: str | None = None) -> None:
+            ts = provided_ts or _utc_iso()
+            async with _STATES_LOCK:
+                line = _Line(
+                    id=state.next_id,
+                    text=text,
+                    source=source,
+                    timestamp=ts,
+                )
+                state.next_id += 1
+                state.lines.append(line)
+                payload = _serialize(line)
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                pass
+
+        async def _agent_to_browser() -> None:
+            try:
+                async for message in agent_ws:
+                    text = message if isinstance(message, str) else message.decode("utf-8", errors="replace")
+                    await _on_line(text, "docker")
+            except ConnectionClosed:
+                pass
+            except Exception as exc:
+                logger.warning("agent→browser console proxy failed: %s", exc)
+
+        pump = asyncio.create_task(_agent_to_browser())
+        file_task = asyncio.create_task(_tail_file_loop(log_path, state, _on_line))
+        try:
+            while True:
+                if ws.client_state != WebSocketState.CONNECTED:
+                    break
+                try:
+                    msg = await ws.receive_text()
+                except WebSocketDisconnect:
+                    break
+                try:
+                    payload = json.loads(msg)
+                except json.JSONDecodeError:
+                    # Raw text → agent stdin
+                    try:
+                        await agent_ws.send(msg)
+                    except Exception:
+                        break
+                    continue
+                action = payload.get("action") if isinstance(payload, dict) else None
+                if action == "ping":
+                    await ws.send_text(json.dumps({"action": "pong"}))
+                elif action == "input" and isinstance(payload.get("data"), str):
+                    # Never log stdin (may contain secrets)
+                    try:
+                        await agent_ws.send(payload["data"])
+                    except Exception:
+                        break
+                elif isinstance(payload.get("line"), str):
+                    try:
+                        await agent_ws.send(payload["line"])
+                    except Exception:
+                        break
+        finally:
+            pump.cancel()
+            file_task.cancel()
+            try:
+                await asyncio.gather(pump, file_task, return_exceptions=True)
+            except Exception:
+                pass
+    finally:
+        if agent_ws is not None:
+            try:
+                await agent_ws.close()
+            except Exception:
+                pass
+        async with _STATES_LOCK:
+            state.active_connections -= 1
+            if state.active_connections < 0:
+                state.active_connections = 0
+
+
 async def connect(
     ws: WebSocket,
     server_id: int,
     container: str,
     log_path: str,
     last_id: int | None = None,
+    node: Any | None = None,
 ) -> None:
     """Hauptcoroutine: akzeptiert die WS-Verbindung, spult Replay ab, streamed live.
 
@@ -267,7 +422,21 @@ async def connect(
     - server_id, container, log_path: bereits aufgeloeste Identifiers
     - last_id: Wenn gesetzt, werden Zeilen mit id > last_id aus dem Ring-Buffer
       zuerst repliziert, dann live gestreamt. None = voller Backlog + live.
+    - node: wenn gesetzt und nicht lokal mit install_dir-Fallback, Proxy zum Agent.
     """
+    # Remote node → always agent proxy. Local node with agent token → proxy when
+    # is_local but we still prefer local docker when no remote separation.
+    if node is not None and not getattr(node, "is_local", False):
+        await _proxy_agent_console(ws, server_id, container, node, last_id=last_id)
+        return
+    # Local node: try agent proxy first if token works and env wants it; default
+    # keep local docker stream for single-host stability.
+    if node is not None and getattr(node, "is_local", False):
+        # Prefer agent for local when docker unavailable (panel without docker)
+        if not docker_service.is_available():
+            await _proxy_agent_console(ws, server_id, container, node, last_id=last_id)
+            return
+
     async with _STATES_LOCK:
         state = _get_state(server_id)
         if state.active_connections >= MAX_CONCURRENT_WS_PER_SERVER:

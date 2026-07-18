@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Shield } from 'lucide-react'
-import { api } from '@/api/client'
+import { api, getCsrfToken } from '@/api/client'
+import { apiUrl } from '@/config/api'
 import { DatabaseConsole } from '@/Singra/UI/DatabaseConsole'
 import { PostgresCredentialsDialog } from '@/components/server/PostgresCredentialsDialog'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -243,7 +244,7 @@ export function DatabaseManager({ serverId }: Props) {
 
   const exportSql = () =>
     run('export', async () => {
-      const res = await fetch(`/api/servers/${serverId}/databases/export`, {
+      const res = await fetch(apiUrl(`/servers/${serverId}/databases/export`), {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -417,8 +418,8 @@ export function DatabaseManager({ serverId }: Props) {
 }
 
 function csrfHeader(): Record<string, string> {
-  const match = document.cookie.match(new RegExp('(^| )__Secure-csrf_token=([^;]+)'))
-  return match ? { 'X-CSRF-Token': decodeURIComponent(match[2]) } : {}
+  const csrf = getCsrfToken()
+  return csrf ? { 'X-CSRF-Token': csrf } : {}
 }
 
 function PowerUserDialog({ state, onClose }: { state: { db: PostgresDatabase; password: string } | null; onClose: () => void }) {

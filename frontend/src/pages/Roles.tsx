@@ -5,58 +5,9 @@ import { rbacApi } from '@/api/rbac'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import type { PermissionCatalog, PermissionDef, Role } from '@/types/permissions'
-
-interface PermissionGroupProps {
-  title: string
-  defs: PermissionDef[]
-  selected: Set<string>
-  onToggle: (key: string) => void
-  disabled?: boolean
-}
-
-function PermissionGroup({ title, defs, selected, onToggle, disabled }: PermissionGroupProps) {
-  const { t } = useTranslation()
-  return (
-    <fieldset className="space-y-2">
-      <legend className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
-        {title}
-      </legend>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-        {defs.map((def) => {
-          const id = `perm-${def.key}`
-          const checked = selected.has(def.key)
-          // i18n: Backend liefert den Default-Label; Frontend uebersetzt ueber
-          // `permissions.<key>`. Fallback bleibt der Backend-Label, damit neue
-          // Permissions ohne i18n-Eintrag nicht leer erscheinen.
-          const label = t(`permissions.${def.key}`, { defaultValue: def.label })
-          return (
-            <label
-              key={def.key}
-              htmlFor={id}
-              className={`flex items-start gap-2 p-2 rounded-md border border-outline-variant/30 transition-colors ${
-                disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-surface-container-high/50 cursor-pointer'
-              }`}
-            >
-              <input
-                id={id}
-                type="checkbox"
-                checked={checked}
-                onChange={() => onToggle(def.key)}
-                disabled={disabled}
-                className="mt-1"
-              />
-              <span className="flex flex-col">
-                <span className="font-body-md text-sm text-on-surface">{label}</span>
-                <span className="font-mono-sm text-mono-sm text-on-surface-variant">{def.key}</span>
-              </span>
-            </label>
-          )
-        })}
-      </div>
-    </fieldset>
-  )
-}
+import type { PermissionCatalog, Role } from '@/types/permissions'
+import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 interface RoleFormProps {
   catalog: PermissionCatalog
@@ -75,26 +26,10 @@ function RoleForm({ catalog, initial, onSubmit, onCancel }: RoleFormProps) {
   )
   const [saving, setSaving] = useState(false)
 
-  const toggle = (key: string) => {
-    if (isAdminRole) return
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  const selectAll = () => {
-    if (isAdminRole) return
-    const all = [...catalog.global_permissions, ...catalog.server_permissions].map((p) => p.key)
-    setSelected(new Set(all))
-  }
-
-  const clear = () => {
-    if (isAdminRole) return
-    setSelected(new Set())
-  }
+  const allPerms = useMemo(() => [
+    ...catalog.global_permissions,
+    ...catalog.server_permissions,
+  ], [catalog])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -144,36 +79,17 @@ function RoleForm({ catalog, initial, onSubmit, onCancel }: RoleFormProps) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
-        <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
+      <div className="space-y-2">
+        <span className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
           {t('roles.permissions')} ({selected.size})
         </span>
-        {!isAdminRole && (
-          <div className="flex gap-2">
-            <button type="button" onClick={selectAll} className="msm-btn-tertiary text-xs px-3 py-1">
-              {t('roles.selectAll')}
-            </button>
-            <button type="button" onClick={clear} className="msm-btn-tertiary text-xs px-3 py-1">
-              {t('roles.deselectAll')}
-            </button>
-          </div>
-        )}
+        <PermissionEditor
+          permissions={allPerms}
+          selected={selected}
+          onChange={setSelected}
+          disabled={isAdminRole}
+        />
       </div>
-
-      <PermissionGroup
-        title={t('roles.globalGroup')}
-        defs={catalog.global_permissions}
-        selected={selected}
-        onToggle={toggle}
-        disabled={isAdminRole}
-      />
-      <PermissionGroup
-        title={t('roles.serverGroup')}
-        defs={catalog.server_permissions}
-        selected={selected}
-        onToggle={toggle}
-        disabled={isAdminRole}
-      />
 
       <div className="flex gap-3 pt-2">
         <button type="button" onClick={onCancel} className="msm-btn-secondary px-4 py-2">
@@ -276,27 +192,18 @@ export function Roles() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-headline text-headline-sm text-primary">{t('roles.title')}</h1>
-          <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-            {t('roles.subtitle')}
-          </p>
-        </div>
-        {canManage && (
+    <div className="msm-page">
+      <PageHeader eyebrow={t('pageContext.administration', 'Administration')} title={t('roles.title')} description={t('roles.subtitle')} status={<span className="msm-badge-info">{roles.length} {t('roles.title')}</span>} actions={canManage ? (
           <button
             onClick={() => {
               setEditing(null)
               setCreating(true)
             }}
-            className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
+            className="msm-btn-primary min-h-11 px-4 py-2 inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             {t('roles.create')}
-          </button>
-        )}
-      </div>
+          </button>) : undefined} />
 
       {creating && (
         <div className="msm-card p-6">

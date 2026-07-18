@@ -290,7 +290,7 @@ def queue_lifecycle_operation(
         # Das loest das User-Problem "Kill bringt den Server nicht aus der Warteschlange".
         container = container_name_for(server.id)
         try:
-            docker_service.remove(container, force=True)
+            docker_service.remove(container, force=True, node=server.node)
         except Exception:
             pass
 
@@ -302,9 +302,10 @@ def queue_lifecycle_operation(
 
         ports_list = _ports(server)
         try:
-            close_ports(ports_list)
-            from services.docker_iptables_service import revoke_server as iptables_revoke_server
-            iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+            close_ports(ports_list, node=server.node, name=server.name)
+            if server.node is None or server.node.is_local:
+                from services.docker_iptables_service import revoke_server as iptables_revoke_server
+                iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         except Exception:
             pass
 
@@ -533,7 +534,7 @@ def _try_start_auth_setup_recovery(
     # zwischenzeitlich weg ist (entfernt beim startup_check).
     container_name = container_name_for(server.id)
     try:
-        raw_logs = docker_service.logs(container_name, lines=200)
+        raw_logs = docker_service.logs(container_name, lines=200, node=server.node)
     except Exception:
         raw_logs = start_error  # fallback: error-string selbst hat die URL
 
@@ -606,6 +607,7 @@ def _try_start_auth_setup_recovery(
                 on_log=on_log,
                 on_status=on_status,
                 restart_callback=restart_callback,
+                node=server.node,
             )
         except Exception as exc:
             logger.warning("Auth-Setup-Recovery fuer Server %s fehlgeschlagen: %s", server.id, exc)
@@ -647,7 +649,7 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     update_lock_acquired = False
     try:
         if _server_file_update_needed(server_update_check) or mod_updates:
-            update_lock_acquired = try_acquire_install_update_lock(server.id, "start_update")
+            update_lock_acquired = try_acquire_install_update_lock(server.id, "start_update", node_id=server.node_id)
             if not update_lock_acquired:
                 raise HTTPException(
                     status_code=409,
@@ -684,20 +686,23 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     _run_pre_start_backup_if_enabled(db, server, context="Start")
 
     ports_list = _ports(server)
-    open_ports(server.name, ports_list)
-    iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    open_ports(server.name, ports_list, node=server.node)
+    if server.node is None or server.node.is_local:
+        iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
     _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
     _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start möglich (Image-Pull/Steam-Update).\n")
     _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         result = plugin.start(server)
     except Exception:
-        close_ports(ports_list)
-        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        close_ports(ports_list, node=server.node, name=server.name)
+        if server.node is None or server.node.is_local:
+            iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         raise
     if "error" in result:
-        close_ports(ports_list)
-        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        close_ports(ports_list, node=server.node, name=server.name)
+        if server.node is None or server.node.is_local:
+            iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         # Auth-Setup-Recovery: wenn der Container-Output auf einen interaktiven
         # Auth-Flow hinweist (z.B. Hytale OAuth-Refresh expired), starten wir
         # den Container im TTY-Modus neu und warten auf den User.
@@ -720,13 +725,14 @@ def _run_stop(db: Session, server: Server, plugin) -> None:
     server.last_started_at = None
     db.commit()
     ports_list = _ports(server)
-    close_ports(ports_list)
-    iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+    close_ports(ports_list, node=server.node, name=server.name)
+    if server.node is None or server.node.is_local:
+        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
 
 
 def _run_kill(db: Session, server: Server) -> None:
     container = container_name_for(server.id)
-    result = docker_service.remove(container, force=True)
+    result = docker_service.remove(container, force=True, node=server.node)
     if isinstance(result, dict) and "error" in result:
         raise HTTPException(status_code=500, detail="Erzwungenes Beenden fehlgeschlagen")
     server.status = "stopped"
@@ -734,8 +740,9 @@ def _run_kill(db: Session, server: Server) -> None:
     server.last_started_at = None
     db.commit()
     ports_list = _ports(server)
-    close_ports(ports_list)
-    iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+    close_ports(ports_list, node=server.node, name=server.name)
+    if server.node is None or server.node.is_local:
+        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
 
 
 def _run_restart(db: Session, server: Server, plugin) -> None:
@@ -760,7 +767,7 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     update_lock_acquired = False
     try:
         if _server_file_update_needed(server_update_check) or bool(mod_updates):
-            update_lock_acquired = try_acquire_install_update_lock(server.id, "restart_update")
+            update_lock_acquired = try_acquire_install_update_lock(server.id, "restart_update", node_id=server.node_id)
             if not update_lock_acquired:
                 raise HTTPException(
                     status_code=409,
@@ -771,8 +778,9 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
                 )
 
         ports_list = _ports(server)
-        close_ports(ports_list)
-        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        close_ports(ports_list, node=server.node, name=server.name)
+        if server.node is None or server.node.is_local:
+            iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
 
         stop_result = plugin.stop(server)
         if "error" in stop_result:
@@ -801,20 +809,23 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     _run_pre_start_backup_if_enabled(db, server, context="Restart")
 
     ports_list = _ports(server)
-    open_ports(server.name, ports_list)
-    iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
+    open_ports(server.name, ports_list, node=server.node)
+    if server.node is None or server.node.is_local:
+        iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
     _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
     _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start möglich (Image-Pull/Steam-Update).\n")
     _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         start_result = plugin.start(server)
     except Exception:
-        close_ports(ports_list)
-        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        close_ports(ports_list, node=server.node, name=server.name)
+        if server.node is None or server.node.is_local:
+            iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         raise
     if "error" in start_result:
-        close_ports(ports_list)
-        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
+        close_ports(ports_list, node=server.node, name=server.name)
+        if server.node is None or server.node.is_local:
+            iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         raise HTTPException(status_code=500, detail=start_result["error"])
 
     server.status = "running"

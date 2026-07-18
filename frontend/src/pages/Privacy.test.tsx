@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Privacy } from './Privacy';
 import { useAuthStore } from '@/stores/authStore';
+import i18n from '@/i18n';
 
 function renderPrivacy() {
   return render(
@@ -13,7 +14,8 @@ function renderPrivacy() {
 }
 
 describe('Privacy page', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('de');
     // Reset auth state
     useAuthStore.setState({ isAuthenticated: false });
   });
@@ -22,42 +24,48 @@ describe('Privacy page', () => {
     useAuthStore.setState({ isAuthenticated: false });
     renderPrivacy();
 
-    expect(screen.getByRole('link', { name: /Zurück|Back/ })).toHaveAttribute('href', '/login');
+    expect(screen.getByRole('link', { name: new RegExp(i18n.t('common.back')) })).toHaveAttribute('href', '/login');
 
-    expect(screen.getAllByText('Datenschutzerklärung').length).toBeGreaterThan(0);
-    expect(screen.getByText('1. Grundprinzip')).toBeInTheDocument();
-    expect(screen.getAllByText((content) => content.includes('Datensparsamkeit')).length).toBeGreaterThan(0);
-    expect(screen.getByText('2. Gespeicherte Daten')).toBeInTheDocument();
-    expect(screen.getByText('3. Cookies und lokale Speicherung')).toBeInTheDocument();
-    expect(screen.getByText('4. Weitergabe an Dritte')).toBeInTheDocument();
-    expect(screen.getByText('5. Recht auf Löschung')).toBeInTheDocument();
-    expect(screen.getByText('MSM Legal')).toBeInTheDocument();
+    expect(screen.getAllByText(i18n.t('privacyPolicy.title')).length).toBeGreaterThan(0);
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.scope.heading'))).toBeInTheDocument();
+    const calloutText1 = i18n.t('privacyPolicy.callout').replace(/^Kurzfassung:\s*|^Summary:\s*/i, '');
+    expect(screen.getAllByText((content) => content.includes(calloutText1.substring(0, 15))).length).toBeGreaterThan(0);
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.accounts.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.infrastructure.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.protection.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.providers.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.storage.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.retention.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.responsibility.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.documentLabel'))).toBeInTheDocument();
   });
 
-  it('renders S3 encrypted backup section with zero-knowledge emphasis', () => {
+
+  it('renders S3 encrypted backup section', () => {
     useAuthStore.setState({ isAuthenticated: false });
     renderPrivacy();
 
-    expect(screen.getByText('6. Verschlüsselte Cloud-Backups (S3)')).toBeInTheDocument();
-    // Zero-knowledge emphasis: provider cannot read data
-    expect(screen.getAllByText((c) => c.includes('Zero-Knowledge')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText((c) => c.includes('kann die Backup-Inhalte nicht lesen')).length).toBeGreaterThan(0);
-    // Encrypted before upload
-    expect(screen.getAllByText((c) => c.includes('clientseitig verschlüsselt')).length).toBeGreaterThan(0);
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.protection.items.backups'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.providers.items.s3'))).toBeInTheDocument();
   });
 
   it('renders privacy policy sections when authenticated (in-app page)', () => {
     useAuthStore.setState({ isAuthenticated: true });
     renderPrivacy();
 
-    expect(screen.getByRole('link', { name: /Zurück|Back/ })).toHaveAttribute('href', '/docs');
+    expect(screen.getByRole('link', { name: new RegExp(i18n.t('common.back')) })).toHaveAttribute('href', '/docs');
 
-    expect(screen.getAllByText('Datenschutzerklärung').length).toBeGreaterThan(0);
-    expect(screen.getByText('1. Grundprinzip')).toBeInTheDocument();
-    expect(screen.getAllByText((content) => content.includes('Datensparsamkeit')).length).toBeGreaterThan(0);
-    expect(screen.getByText('2. Gespeicherte Daten')).toBeInTheDocument();
-    expect(screen.getByText('3. Cookies und lokale Speicherung')).toBeInTheDocument();
-    expect(screen.getByText('4. Weitergabe an Dritte')).toBeInTheDocument();
-    expect(screen.getByText('5. Recht auf Löschung')).toBeInTheDocument();
+    expect(screen.getAllByText(i18n.t('privacyPolicy.title')).length).toBeGreaterThan(0);
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.scope.heading'))).toBeInTheDocument();
+    const calloutText2 = i18n.t('privacyPolicy.callout').replace(/^Kurzfassung:\s*|^Summary:\s*/i, '');
+    expect(screen.getAllByText((content) => content.includes(calloutText2.substring(0, 15))).length).toBeGreaterThan(0);
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.accounts.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.infrastructure.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.protection.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.providers.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.storage.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.retention.heading'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.responsibility.heading'))).toBeInTheDocument();
   });
 });
+

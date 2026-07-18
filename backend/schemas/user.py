@@ -1,4 +1,6 @@
 from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, Field, EmailStr
 
 
@@ -6,6 +8,7 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=64)
     email: EmailStr
     password: str = Field(..., min_length=8)
+    captcha_token: str | None = None
 
 
 class UserUpdate(BaseModel):
@@ -31,10 +34,19 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class OwnerEmailConfig(BaseModel):
+    # Der anonyme First-Run erlaubt bewusst keinen frei waehlbaren SMTP-Host:
+    # Resend hat einen festen Ziel-Endpunkt und oeffnet damit keinen SSRF-Pfad.
+    provider: Literal["resend"]
+    from_address: EmailStr
+    resend_api_key: str = Field(..., min_length=8, max_length=512)
+
+
 class OwnerSetupRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=64)
     email: EmailStr
     password: str = Field(..., min_length=8)
+    email_config: OwnerEmailConfig | None = None
 
 
 class SetupVerifyRequest(BaseModel):

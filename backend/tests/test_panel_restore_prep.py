@@ -81,7 +81,7 @@ def _create_moto_bucket() -> None:
     boto3.client("s3", region_name=TEST_REGION).create_bucket(Bucket=TEST_BUCKET)
 
 
-def _create_backup(db, *, name: str = "test", db_type: str = "sqlite3",
+def _create_backup(db, *, name: str = "test", db_type: str = "postgresql",
                    config_names: list[str] | None = None) -> PanelBackup:
     """Erstellt ein Panel-Backup mit gemocktem DB-Dump."""
     if config_names is None:
@@ -468,7 +468,7 @@ class TestPrepareRestoreScriptStopAndBackup:
 
 
 class TestPrepareRestoreScriptDB:
-    """VAL-PANEL-RESTORE-008: Script stellt DB wieder her (PostgreSQL und SQLite)."""
+    """VAL-PANEL-RESTORE-008: Restore supports PostgreSQL only."""
 
     def test_script_postgres_restore(self, db, tmp_path, monkeypatch):
         """PostgreSQL: Script enthaelt psql mit msm_db.sql."""
@@ -481,16 +481,16 @@ class TestPrepareRestoreScriptDB:
         assert "psql" in content
         assert "msm_db.sql" in content
 
-    def test_script_sqlite_restore(self, db, tmp_path, monkeypatch):
-        """SQLite: Script enthaelt sqlite3 mit msm_db.sql."""
+    def test_script_rejects_legacy_sqlite_restore(self, db, tmp_path, monkeypatch):
+        """Legacy SQLite backups cannot re-enable a SQLite runtime."""
         config_dir, _ = _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(config_dir, [".env"])
-        backup = _create_backup(db, db_type="sqlite3")
+        backup = _create_backup(db, db_type="postgresql")
+        backup.db_type = "sqlite3"
+        db.commit()
 
-        result = pbs.prepare_panel_restore(backup.id, db)
-        content = _read_script(result["script_path"])
-        assert "sqlite3" in content
-        assert "msm_db.sql" in content
+        with pytest.raises(RuntimeError, match="Legacy-SQLite"):
+            pbs.prepare_panel_restore(backup.id, db)
 
 
 # ── VAL-PANEL-RESTORE-009: Script stellt Configs wieder her und restartet ─

@@ -12,6 +12,7 @@ export interface DropdownOption {
 }
 
 interface DropdownProps {
+  id?: string
   value: string | null
   onChange: (value: string) => void
   options: DropdownOption[]
@@ -21,6 +22,8 @@ interface DropdownProps {
   buttonClassName?: string
   align?: 'start' | 'end'
   'aria-label'?: string
+  'aria-describedby'?: string
+  'aria-invalid'?: boolean
   'data-testid'?: string
 }
 
@@ -28,6 +31,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
   (
     {
       value,
+      id,
       onChange,
       options,
       placeholder = 'Auswählen',
@@ -36,6 +40,8 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
       buttonClassName = '',
       align = 'start',
       'aria-label': ariaLabel,
+      'aria-describedby': ariaDescribedBy,
+      'aria-invalid': ariaInvalid,
       'data-testid': testId,
     },
     ref,
@@ -98,9 +104,12 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
       <div ref={ref} className={cx('relative', className)}>
         <div ref={rootRef}>
           <button
+            id={id}
             type="button"
             disabled={disabled}
             aria-label={ariaLabel}
+            aria-describedby={ariaDescribedBy}
+            aria-invalid={ariaInvalid}
             aria-haspopup="listbox"
             aria-expanded={open}
             aria-controls={listId}

@@ -105,6 +105,7 @@ def run_in_container(
     command: list[str],
     timeout: int,
     user_id: int | None = None,
+    node: Any | None = None,
 ) -> dict[str, Any]:
     """Fuehrt ``command`` als argv im MSM-Container von ``server_id`` aus.
 
@@ -127,22 +128,22 @@ def run_in_container(
     # Audit-Log VOR dem exec -- so wissen wir auch bei Crashes, dass der
     # Befehl versucht wurde. Output wird NIE geloggt.
     logger.info(
-        "exec attempt server=%d user=%s container=%s argv=%r timeout=%ds",
+        "exec attempt server=%d user=%s container=%s argc=%d timeout=%ds",
         server_id,
         user_id,
         container,
-        command,
+        len(command),
         timeout,
     )
 
-    raw = docker_service.exec_in(container, command, timeout=timeout)
+    raw = docker_service.exec_in(container, command, timeout=timeout, node=node)
 
     if raw.get("ok"):
         logger.info(
-            "exec ok server=%d user=%s argv=%r",
+            "exec ok server=%d user=%s argc=%d",
             server_id,
             user_id,
-            command,
+            len(command),
         )
         return {
             "ok": True,
@@ -156,10 +157,10 @@ def run_in_container(
     # zurueck. NICHT loggen -- koennte args enthalten, die in Logs nichts
     # zu suchen haben (z. B. Tokens als argv). Stattdessen nur "failed":
     logger.info(
-        "exec failed server=%d user=%s argv=%r",
+        "exec failed server=%d user=%s argc=%d",
         server_id,
         user_id,
-        command,
+        len(command),
     )
     return {
         "ok": False,

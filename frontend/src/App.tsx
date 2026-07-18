@@ -24,23 +24,31 @@ const Profile = lazy(() => import('./pages/Profile').then(module => ({ default: 
 const Docs = lazy(() => import('./pages/Docs').then(module => ({ default: module.Docs })))
 const BlueprintsDocs = lazy(() => import('./pages/docs/BlueprintsDocs').then(module => ({ default: module.BlueprintsDocs })))
 const OAuthDocs = lazy(() => import('./pages/docs/OAuthDocs').then(module => ({ default: module.OAuthDocs })))
+const SelfHostingDocs = lazy(() => import('./pages/docs/SelfHostingDocs').then(module => ({ default: module.SelfHostingDocs })))
 const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ default: module.Blueprints })))
 const PanelBackups = lazy(() => import('./pages/PanelBackups').then(module => ({ default: module.PanelBackups })))
 const PanelDatabase = lazy(() => import('./pages/PanelDatabase').then(module => ({ default: module.PanelDatabase })))
+const AdminNodes = lazy(() => import('./pages/AdminNodes').then(module => ({ default: module.AdminNodes })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
+import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
-import { DisBadge } from './components/DisBadge'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
+import { PrivacyNoticeVisibilityContext } from './components/ui/PrivacyNoticeVisibility'
 import { SupportWidgetLoader } from './components/SupportWidgetLoader'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
+  const [setupEmailConfigured, setSetupEmailConfigured] = useState(false)
+  const [privacyNoticeVisible, setPrivacyNoticeVisible] = useState(true)
   const { isAuthenticated } = useAuthStore()
 
   useEffect(() => {
-    fetch('/api/auth/setup-status')
+    fetch(apiUrl('/auth/setup-status'), { credentials: 'include' })
       .then((res) => res.json())
-      .then((data) => setSetupRequired(data.setup_required))
+      .then((data) => {
+        setSetupRequired(data.setup_required)
+        setSetupEmailConfigured(Boolean(data.email_configured))
+      })
       .catch(() => setSetupRequired(false))
   }, [])
 
@@ -53,16 +61,16 @@ function App() {
       <Suspense fallback={
         <Loader fullScreen label="Maunting Server Manager" />
       }>
-        <SetupWizard onComplete={() => setSetupRequired(false)} />
+        <SetupWizard
+          onComplete={() => setSetupRequired(false)}
+          emailConfigured={setupEmailConfigured}
+        />
       </Suspense>
     )
   }
 
   return (
-    <>
-      <div className="fixed bottom-4 right-4 z-[9999] pointer-events-auto">
-        <DisBadge />
-      </div>
+    <PrivacyNoticeVisibilityContext.Provider value={privacyNoticeVisible}>
       <Suspense fallback={
         <Loader fullScreen label="Maunting Server Manager" />
       }>
@@ -109,6 +117,7 @@ function App() {
           <Route path="docs" element={<Docs />} />
           <Route path="docs/blueprints" element={<BlueprintsDocs />} />
           <Route path="docs/oauth" element={<OAuthDocs />} />
+          <Route path="docs/self-hosting" element={<SelfHostingDocs />} />
           <Route path="privacy" element={<Privacy />} />
           <Route
             path="blueprints"
@@ -134,16 +143,24 @@ function App() {
               </RequirePermission>
             }
           />
+          <Route
+            path="admin/nodes"
+            element={
+              <RequirePermission routeKey="nodes">
+                <AdminNodes />
+              </RequirePermission>
+            }
+          />
           <Route path="*" element={<RequirePermission routeKey="missing-route" />} />
         </Route>
       </Routes>
       </Suspense>
-      <PrivacyAcknowledgementNotice />
-      <SupportWidgetLoader />
+      <PrivacyAcknowledgementNotice onVisibilityChange={setPrivacyNoticeVisible} />
+      <SupportWidgetLoader enabled={!privacyNoticeVisible} />
       <ToastContainer />
       <ConfirmDialog />
       <PromptDialog />
-    </>
+    </PrivacyNoticeVisibilityContext.Provider>
   )
 }
 

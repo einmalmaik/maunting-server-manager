@@ -20,8 +20,24 @@ from services.jwt_blacklist_service import blacklist_jwt
 from services.backup_code_service import BackupCodeService
 from services.permission_catalog import SYSTEM_ROLE_USER
 from services.role_service import get_role_by_name
+from services.panel_settings_service import PanelSettingsService
+
+from services.captcha_service import CaptchaService
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+@router.get("/captcha-config")
+def get_captcha_config() -> dict:
+    """Oeffentliche CAPTCHA-Konfiguration fuer das Frontend."""
+    enabled = PanelSettingsService.get("captcha_enabled", "false") == "true"
+    provider = PanelSettingsService.get("captcha_provider", "none")
+    site_key = PanelSettingsService.get("captcha_site_key", "")
+    return {
+        "enabled": enabled,
+        "provider": provider,
+        "site_key": site_key,
+    }
 
 
 logger = logging.getLogger(__name__)
@@ -42,9 +58,45 @@ def _set_login_session(response: Response, db: Session, user: User) -> None:
     _set_auth_cookies(response, access_token, refresh_token, csrf_token)
 
 
+def _save_initial_email_config(req: OwnerSetupRequest) -> None:
+    """Speichert die einmalige Setup-Konfiguration verschluesselt.
+
+    Der Aufrufer stellt sicher, dass noch kein Owner existiert. Secrets werden
+    weder zurueckgegeben noch geloggt und nur DIS-verschluesselt persistiert.
+    """
+    config = req.email_config
+    if config is None:
+        raise HTTPException(
+            status_code=503,
+            detail="E-Mail-Versand muss fuer die Verifikation eingerichtet werden.",
+        )
+
+    PanelSettingsService.set("smtp_from", str(config.from_address))
+    encrypted = AuthService.encrypt_secret(
+        config.resend_api_key,
+        aad="msm:settings:resend_api_key",
+    )
+    PanelSettingsService.set("resend_api_key_encrypted", encrypted)
+    PanelSettingsService.set("resend_api_key", "")
+    PanelSettingsService.set("smtp_host", "")
+    PanelSettingsService.set("smtp_user", "")
+    PanelSettingsService.set("smtp_password_encrypted", "")
+    PanelSettingsService.set("smtp_password", "")
+
+
+def _clear_failed_initial_email_config() -> None:
+    """Entfernt nur die im fehlgeschlagenen First-Run gesetzten Werte."""
+    PanelSettingsService.set("smtp_from", "")
+    PanelSettingsService.set("resend_api_key_encrypted", "")
+    PanelSettingsService.set("resend_api_key", "")
+
+
 @router.get("/setup-status")
 def setup_status(db: Session = Depends(get_db)) -> dict:
-    return {"setup_required": not AuthService.is_owner_exists(db)}
+    return {
+        "setup_required": not AuthService.is_owner_exists(db),
+        "email_configured": EmailService.is_configured(),
+    }
 
 
 @router.post("/setup", status_code=201)
@@ -56,6 +108,10 @@ async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> 
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
 
+    configured_during_request = not EmailService.is_configured()
+    if configured_during_request:
+        _save_initial_email_config(req)
+
     # Owner erstellen (noch nicht verifiziert)
     user = AuthService.create_owner(db, req.username, req.email, req.password)
     user.email_verified = False
@@ -63,9 +119,13 @@ async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> 
 
     # Verifikations-Code generieren und per Email senden
     code = EmailVerificationService.create_verification(db, req.email, "setup")
-    if EmailService.is_configured():
-        await EmailService.send_verification_code_email(req.email, req.username, code)
-    else:
+    try:
+        email_sent = await EmailService.send_verification_code_email(
+            req.email, req.username, code
+        )
+    except Exception:
+        email_sent = False
+    if not email_sent:
         _log_smtp_missing(req.email)
         # Setup-User und Verifikationseintrag wieder entfernen
         db.query(EmailVerification).filter(
@@ -73,9 +133,11 @@ async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> 
         ).delete()
         db.delete(user)
         db.commit()
+        if configured_during_request:
+            _clear_failed_initial_email_config()
         raise HTTPException(
             status_code=503,
-            detail="SMTP nicht konfiguriert. Verifikation nicht möglich."
+            detail="Verifikations-E-Mail konnte nicht gesendet werden. Einstellungen pruefen."
         )
 
     return {"message": "Verifikations-Code gesendet", "requires_verification": True}
@@ -99,15 +161,15 @@ def setup_verify(req: SetupVerifyRequest, db: Session = Depends(get_db)) -> dict
 
 
 @router.post("/setup-resend")
-async def setup_resend(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> dict:
+async def setup_resend(req: ResendVerificationRequest, db: Session = Depends(get_db)) -> dict:
     user = AuthService.get_user_by_email(db, req.email)
     if not user or user.email_verified:
         raise HTTPException(status_code=400, detail="Ungültige Anfrage")
 
-    code = EmailVerificationService.create_verification(db, req.email, LOGIN_VERIFICATION_PURPOSE)
-    if EmailService.is_configured():
-        await EmailService.send_verification_code_email(req.email, user.username, code)
-    else:
+    code = EmailVerificationService.create_verification(db, req.email, "setup")
+    if not EmailService.is_configured() or not await EmailService.send_verification_code_email(
+        req.email, user.username, code
+    ):
         _log_smtp_missing(req.email)
         raise HTTPException(
             status_code=503,
@@ -138,7 +200,12 @@ async def resend_verification(req: ResendVerificationRequest, db: Session = Depe
 
 
 @router.post("/register", response_model=RegistrationResponse, status_code=201)
-async def register(req: UserCreate, db: Session = Depends(get_db)) -> dict:
+async def register(
+    req: UserCreate,
+    request: Request,
+    db: Session = Depends(get_db)
+) -> dict:
+    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     if AuthService.get_user_by_username(db, req.username):
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
@@ -233,6 +300,7 @@ async def login(
     request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
+    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     user = AuthService.get_user_by_username(db, req.username)
     if not user or not AuthService.verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
@@ -266,9 +334,24 @@ async def login(
 
     # Sicherheitsbenachrichtigung bei Login
     if EmailService.is_configured() and user.email_notifications:
-        client_ip = request.client.host if request.client else "unbekannt"
-        user_agent = request.headers.get("user-agent", "unbekannt")
-        await EmailService.send_new_device_login_notification(user.email, user.username, client_ip, user_agent)
+        try:
+            email = user.email
+            if email:
+                client_ip = request.client.host if request.client else "unbekannt"
+                user_agent = request.headers.get("user-agent", "unbekannt")
+                await EmailService.send_new_device_login_notification(
+                    email, user.username, client_ip, user_agent
+                )
+        except Exception as exc:
+            # Eine optionale Benachrichtigung darf eine bereits erfolgreich
+            # authentifizierte Session nicht in einen HTTP 500 verwandeln.
+            # Keine Exception-Details loggen: SMTP-/DIS-Fehler koennen
+            # sensible Infrastrukturinformationen enthalten.
+            logger.warning(
+                "Login-Benachrichtigung fehlgeschlagen user_id=%s error_type=%s",
+                user.id,
+                type(exc).__name__,
+            )
 
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False}
 
@@ -339,7 +422,16 @@ def refresh(
 
 
 @router.get("/me", response_model=UserResponse)
-def me(user: User = Depends(get_current_user)) -> User:
+def me(
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+) -> User:
+    # Cross-Origin SPA: CSRF-Cookie ist nicht per document.cookie lesbar.
+    # Echo des Cookie-Werts als Header (bereits vom Browser mitgeschickt).
+    csrf = request.cookies.get("__Secure-csrf_token")
+    if csrf:
+        response.headers["X-CSRF-Token"] = csrf
     return user
 
 
@@ -406,7 +498,12 @@ async def change_email(
 
 
 @router.post("/forgot-password")
-async def forgot_password(req: PasswordResetRequest, db: Session = Depends(get_db)) -> dict:
+async def forgot_password(
+    req: PasswordResetRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+) -> dict:
+    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     user = AuthService.get_user_by_email(db, req.email)
     if not user:
         return {"message": "Falls die E-Mail existiert, wurde eine Nachricht gesendet"}
@@ -416,10 +513,12 @@ async def forgot_password(req: PasswordResetRequest, db: Session = Depends(get_d
 
 
 @router.post("/reset-password")
-def reset_password(
+async def reset_password(
     req: PasswordResetConfirm,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
+    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     token_hash = AuthService._hash_reset_token(req.token)
     user = db.query(User).filter(
         User.password_reset_token == token_hash,

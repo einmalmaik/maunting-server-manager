@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
 import { oauthApi, type OAuthProviderPublic } from '@/api/oauth'
 import { toast } from '@/stores/toastStore'
@@ -10,8 +11,8 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, KeyRound, Mail, Check } from 'lucide-react'
-import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
 
 export function Login() {
   const { t } = useTranslation()
@@ -19,6 +20,7 @@ export function Login() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { finishLogin } = useAuthStore()
   const [error, setError] = useState('')
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
   const [useBackupCode, setUseBackupCode] = useState(false)
@@ -66,6 +68,7 @@ export function Login() {
           username: form.username,
           password: form.password,
           otp_code: form.otp || null,
+          captcha_token: captchaToken,
         }),
       })
 
@@ -333,6 +336,10 @@ export function Login() {
                 </>
               )}
 
+              {!requires2FA && (
+                <CaptchaWidget onVerify={setCaptchaToken} />
+              )}
+
               <ErrorMessage message={error} className="text-sm" />
 
               <button
@@ -363,7 +370,7 @@ export function Login() {
                   {oauthProviders.map((p) => (
                     <a
                       key={p.slug}
-                      href={`/api/oauth/${p.slug}/start?next=/&cb=${Date.now().toString(36)}`}
+                      href={apiUrl(`/oauth/${p.slug}/start?next=/&cb=${Date.now().toString(36)}`)}
                       className="msm-btn-secondary w-full py-2.5 inline-flex items-center justify-center gap-2"
                     >
                       <KeyRound className="w-4 h-4" />
@@ -400,9 +407,6 @@ function LoginShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background text-on-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop relative overflow-hidden">
       <div className="absolute inset-0 msm-deep-grid opacity-50" />
       <div className="relative z-10 w-full max-w-md">
-        <div className="flex justify-end mb-4">
-          <LanguageSwitcher />
-        </div>
 
         <div className="flex items-center justify-center gap-3 mb-8">
           <Logo size="md" />
@@ -411,7 +415,7 @@ function LoginShell({ children }: { children: React.ReactNode }) {
               MauntingStudios
             </h1>
             <p className="font-mono-sm text-mono-sm text-on-surface-variant">
-              Infrastructure Control
+              Server Manager
             </p>
           </div>
         </div>
@@ -438,7 +442,7 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
     try {
       // redirect: 'manual' — wir werten den 302 als Erfolg; die Set-Cookie-Header
       // nimmt der Browser mit, danach machen wir eine Hartnavigation.
-      const res = await fetch(`/api/oauth/${slug}/2fa`, {
+      const res = await fetch(apiUrl(`/oauth/${slug}/2fa`), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

@@ -52,6 +52,10 @@ def get_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
+# Phase 5: Node heartbeat interval (seconds)
+NODE_HEARTBEAT_INTERVAL_SECONDS = 60
+
+
 def start_scheduler():
     """Start the scheduler if not running."""
     scheduler = get_scheduler()
@@ -60,6 +64,8 @@ def start_scheduler():
     # Globalen passiven Background-Update-Check-Job sicherstellen (auch hier,
     # damit der Job nach Scheduler-Restart/Neustart aktiv ist; KISS, idempotent).
     _ensure_background_update_check_job()
+    _ensure_git_update_check_job()
+    _ensure_node_heartbeat_job()
 
 
 def _utcnow() -> datetime:
@@ -185,7 +191,7 @@ async def _backup_server_task(server_id: int) -> None:
         from services.backup_orchestrator import create_server_backup
         # Scheduler path: kuerzerer Timeout (300s), damit der Scheduler-Loop nicht zu lange blockiert.
         # Orchestrator uebernimmt tar + DB-Record + Retention-Cleanup + S3-Upload (Best-Effort).
-        create_server_backup(server_id, db, timeout_seconds=300)
+        await asyncio.to_thread(create_server_backup, server_id, db, timeout_seconds=300)
     except Exception:
         import logging
         logging.warning("Auto-backup failed for server %s (details redacted for security)", server_id)
@@ -329,7 +335,7 @@ async def _panel_backup_task() -> None:
     db = SessionLocal()
     try:
         from services.panel_backup_service import create_panel_backup
-        create_panel_backup(db)
+        await asyncio.to_thread(create_panel_backup, db)
     except Exception:
         # Generische Warning — keine Secrets, kein Crash (VAL-PANEL-SCHED-005).
         logger.warning(
@@ -460,7 +466,11 @@ def evaluate_disk_soft_limit(db, server) -> dict:
     """
     from models import AuditLog
 
-    usage_mb = docker_service.disk_usage_mb(server.install_dir)
+    usage_mb = docker_service.disk_usage_mb(
+        server.install_dir,
+        node=getattr(server, "node", None),
+        server_id=server.id,
+    )
     if usage_mb is None:
         return {"ok": False, "error": "Disk-Nutzung konnte nicht ermittelt werden"}
 
@@ -522,7 +532,7 @@ async def _disk_soft_limit_task() -> None:
     try:
         servers = db.query(Server).all()
         for server in servers:
-            result = evaluate_disk_soft_limit(db, server)
+            result = await asyncio.to_thread(evaluate_disk_soft_limit, db, server)
             if not result.get("ok"):
                 continue
         db.commit()
@@ -617,7 +627,7 @@ async def _background_update_check_task() -> None:
                     continue
 
                 # 1. Workshop-Mod-Updates werden autonom vorbereitet.
-                mod_updates = plugin.check_for_mod_updates(server)
+                mod_updates = await asyncio.to_thread(plugin.check_for_mod_updates, server)
                 if mod_updates:
                     from services.mod_install_status_service import mark_mod_pending
 
@@ -646,7 +656,7 @@ async def _background_update_check_task() -> None:
                                 release_install_update_lock,
                             )
                             lock_acquired = try_acquire_install_update_lock(
-                                server.id, "scheduler_mod_update"
+                                server.id, "scheduler_mod_update", node_id=server.node_id
                             )
                             if not lock_acquired:
                                 _append_console_log(
@@ -671,7 +681,7 @@ async def _background_update_check_task() -> None:
                                     release_install_update_lock(server.id)
 
                 # 2. Server-Datei-Update (Game-Binaries, passiv)
-                server_update = plugin.check_for_server_file_update(server)
+                server_update = await asyncio.to_thread(plugin.check_for_server_file_update, server)
                 if server_update.get("action") == "update":
                     reason = server_update.get("reason", "unbekannt")
                     _append_console_log(
@@ -741,15 +751,130 @@ def _ensure_background_update_check_job() -> None:
     )
 
 
+async def _node_heartbeat_task() -> None:
+    """Probe every registered node /metrics in parallel; set online/offline + capacity.
+
+    Uses metrics (not only /health) so admin CPU/RAM capacity fields stay fresh.
+    Never logs tokens. Fingerprint pinning enforced inside NodeClient.
+    """
+    import httpx
+    import asyncio
+    from models import Node
+    from services.node_client import NodeClient, NodeClientError
+    from services.node_service import apply_agent_metrics
+
+    db = SessionLocal()
+    try:
+        nodes = db.query(Node).order_by(Node.id.asc()).all()
+        if not nodes:
+            return
+
+        semaphore = asyncio.Semaphore(50)  # max 50 concurrent requests
+        limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
+
+        async def check_node(client: httpx.AsyncClient, node: Node):
+            async with semaphore:
+                try:
+                    node_client = NodeClient.from_node(node, timeout=3.0)
+                    metrics = await node_client.metrics_async(client=client)
+                    if isinstance(metrics, dict):
+                        node.status = "online"
+                        node.last_heartbeat = datetime.now(timezone.utc)
+                        apply_agent_metrics(node, metrics)
+                    else:
+                        node.status = "offline"
+                except NodeClientError:
+                    node.status = "offline"
+                except Exception:
+                    node.status = "offline"
+                    logger.exception(
+                        "unexpected node heartbeat failure (node_id=%s)", node.id
+                    )
+
+        async with httpx.AsyncClient(limits=limits, timeout=4.0) as client:
+            tasks = [check_node(client, node) for node in nodes]
+            await asyncio.gather(*tasks)
+
+        db.commit()
+    except Exception as exc:
+        logger.warning("node heartbeat task failed: %s", exc)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _ensure_node_heartbeat_job() -> None:
+    """Register periodic node health probes (Phase 5)."""
+    scheduler = get_scheduler()
+    job_id = "global_node_heartbeat"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_node_heartbeat_task,
+        trigger=IntervalTrigger(seconds=NODE_HEARTBEAT_INTERVAL_SECONDS),
+        id=job_id,
+        name="Node Agent Heartbeat",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
+async def _background_git_update_check_task() -> None:
+    """Periodischer Job fuer automatische Git-Updates (Panel + remote Nodes)."""
+    from services.panel_settings_service import PanelSettingsService
+    from services.update_service import get_update_status, trigger_panel_update, trigger_node_updates
+    from database import SessionLocal
+
+    auto_enabled = PanelSettingsService.get("updates_automatic", "false") == "true"
+    if not auto_enabled:
+        return
+
+    status = await asyncio.to_thread(get_update_status)
+    if status.get("update_available"):
+        logger.info(
+            "Automatisches Update: Neues Commit gefunden (%s -> %s). Updates werden gestartet...",
+            status.get("local_sha"), status.get("remote_sha")
+        )
+        db = SessionLocal()
+        try:
+            await asyncio.to_thread(trigger_node_updates, db)
+            await asyncio.to_thread(trigger_panel_update, db)
+        except Exception as e:
+            logger.error("Automatisches Update fehlgeschlagen: %s", e)
+        finally:
+            db.close()
+
+
+def _ensure_git_update_check_job() -> None:
+    """Stellt sicher, dass der Git-Update-Check-Job registriert ist."""
+    scheduler = get_scheduler()
+    job_id = "global_git_update_checks"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_background_git_update_check_task,
+        trigger=IntervalTrigger(hours=1),
+        id=job_id,
+        name="Git Commit Update Checks & Auto-Update",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def init_server_schedules(db):
     """Initialize schedules for all servers on startup."""
     from models import Server
 
     _ensure_disk_check_job()
-    # Passiver Hintergrund-Update-Check-Job (global, für alle Server):
-    # Ruft check_for_mod_updates + check_for_server_file_update passiv auf.
-    # Integriert hier + in start_scheduler (genau nach Plan).
     _ensure_background_update_check_job()
+    _ensure_git_update_check_job()
+    _ensure_node_heartbeat_job()
 
     servers = db.query(Server).all()
     for server in servers:

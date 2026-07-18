@@ -42,6 +42,36 @@ export interface Server {
   public_bind_ip: string | null
   ports?: Array<{ role: string; port: number | null; protocol: string }>
   created_at: string
+  /** Multi-node: host node id (never contains secrets) */
+  node_id?: number | null
+  node_name?: string | null
+}
+
+/** Node registry entry from GET /api/nodes (no auth tokens). */
+export interface Node {
+  id: number
+  name: string
+  host: string
+  is_local: boolean
+  status: string
+  /** SHA-256 of agent TLS cert (hex). Required for remote HTTPS nodes. */
+  tls_fingerprint?: string | null
+  cpu_total: number | null
+  ram_total: number | null
+  disk_total: number | null
+  last_heartbeat: string | null
+  server_count: number
+  /** Live metrics from agent (optional, GET /nodes/{id}) */
+  metrics?: {
+    cpu_count?: number
+    cpu_percent?: number
+    ram_total_bytes?: number
+    ram_used_bytes?: number
+    ram_percent?: number
+    disk_total_bytes?: number
+    disk_used_bytes?: number
+    disk_percent?: number
+  } | null
 }
 
 export interface PostgresCredential {
@@ -225,4 +255,14 @@ export interface HostInterface {
 export interface HostInterfacesResponse {
   interfaces: HostInterface[]
   default_bind_ip: string | null
+}
+
+export interface GitUpdateStatus {
+  update_available: boolean
+  local_sha: string
+  remote_sha: string
+  branch: string
+  updates_automatic: boolean
+  ok: boolean
+  error?: string
 }

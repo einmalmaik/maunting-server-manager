@@ -45,3 +45,11 @@ def test_verify_rejects_bad_signature():
     body = json.dumps({"event": "webhook_test"})
     ts = str(int(datetime.now(timezone.utc).timestamp()))
     assert verify_request(body.encode(), ts, "sha256=deadbeef") == "invalid_signature"
+
+
+def test_verify_accepts_iso_8601_timestamp():
+    secret_svc.rotate_panel_secret()
+    secret = secret_svc.resolve_secret()
+    body = json.dumps({"event": "webhook_test"})
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    assert verify_request(body.encode(), ts, _sign(body, secret, ts)) is None

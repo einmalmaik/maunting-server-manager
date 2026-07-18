@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { BookOpen, KeyRound, ArrowRight, BookOpenCheck, FileText, ExternalLink } from 'lucide-react'
+import { BookOpen, KeyRound, ArrowRight, BookOpenCheck, FileText, ExternalLink, Network } from 'lucide-react'
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 export function Docs() {
   const { t } = useTranslation()
@@ -9,16 +10,13 @@ export function Docs() {
   const imprintUrl = legal.imprint_enabled ? legal.imprint_url : ''
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-5xl">
-      <div className="flex items-center gap-3 mb-2">
-        <BookOpen className="w-8 h-8 text-primary" />
-        <h1 className="font-headline text-display-sm font-extrabold text-on-surface">
-          {t('docsIndex.title')}
-        </h1>
-      </div>
-      <p className="font-body-md text-body-md text-on-surface-variant mb-8">
-        {t('docsIndex.subtitle')}
-      </p>
+    <div className="msm-page mx-auto max-w-5xl">
+      <PageHeader
+        eyebrow={t('pageContext.help', 'Help & guidance')}
+        title={t('docsIndex.title')}
+        description={t('docsIndex.subtitle')}
+        status={<BookOpen className="h-6 w-6 text-primary" aria-hidden="true" />}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <DocCard
@@ -34,6 +32,13 @@ export function Docs() {
           title={t('docsIndex.oauthTitle')}
           description={t('docsIndex.oauthDesc')}
           cta={t('docsIndex.oauthLink')}
+        />
+        <DocCard
+          to="/docs/self-hosting"
+          icon={<Network className="w-6 h-6" />}
+          title={t('docsIndex.selfHostingTitle')}
+          description={t('docsIndex.selfHostingDesc')}
+          cta={t('docsIndex.selfHostingLink')}
         />
         <LegalCard imprintUrl={imprintUrl} />
       </div>
@@ -76,7 +81,7 @@ function LegalCard({ imprintUrl }: { imprintUrl: string }) {
   const { t } = useTranslation()
 
   return (
-    <div className="msm-card p-6 md:col-span-2">
+    <div className="msm-card p-6">
       <div className="flex items-center gap-3 mb-3">
         <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center text-secondary">
           <FileText className="w-6 h-6" />

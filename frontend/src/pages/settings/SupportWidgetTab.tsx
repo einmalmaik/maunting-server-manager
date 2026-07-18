@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS, type SupportWidgetProvider } from './types'
+import { API_ORIGIN } from '@/config/api'
 
 export function SupportWidgetTab() {
   const { t } = useTranslation()
@@ -26,6 +27,11 @@ export function SupportWidgetTab() {
 
   const provider = settings.support_widget_mode as SupportWidgetProvider
 
+  const webhookUrl = useMemo(() => {
+    const base = API_ORIGIN || (typeof window !== 'undefined' ? window.location.origin : '')
+    return base ? `${base.replace(/\/$/, '')}/api/singra-webhook` : ''
+  }, [])
+
   const providerOptions = useMemo(
     () => [
       { value: 'singra', label: t('settings.supportWidget.providers.singra'), hint: t('settings.supportWidget.providers.singraHint') },
@@ -36,10 +42,6 @@ export function SupportWidgetTab() {
     [t],
   )
 
-  const webhookUrl = useMemo(() => {
-    const base = settings.panel_url || (typeof window !== 'undefined' ? window.location.origin : '')
-    return base ? `${base.replace(/\/$/, '')}/api/singra-webhook` : ''
-  }, [settings.panel_url])
 
   const reload = () =>
     api<PanelSettings>('/settings')

@@ -6,6 +6,7 @@ import {
 import { oauthApi, OAUTH_PRESETS, type OAuthProvider, type OAuthPreset, type OAuthSwitches } from '@/api/oauth'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { API_ORIGIN } from '@/config/api'
 import { confirm } from '@/stores/confirmStore'
 import { Switch } from '@/components/ui/Switch'
 import { NumberStepper } from '@/components/ui/NumberStepper'
@@ -218,9 +219,7 @@ export function OAuthTab() {
     }
   }
 
-  const copyRedirectUri = async (slug: string, id: number) => {
-    const origin = window.location.origin
-    const uri = `${origin}/api/oauth/${slug}/callback`
+  const copyRedirectUri = async (uri: string, id: number) => {
     try {
       await navigator.clipboard.writeText(uri)
       setCopiedId(id)
@@ -268,7 +267,7 @@ export function OAuthTab() {
         ) : (
           <ul className="divide-y divide-outline-variant/30">
             {sortedProviders.map((p) => {
-              const callbackUri = `${window.location.origin}/api/oauth/${p.slug}/callback`
+              const callbackUri = p.redirect_uri || `${API_ORIGIN}/api/oauth/${p.slug}/callback`
               const isCopied = copiedId === p.id
               return (
                 <li key={p.id} className="py-4 first:pt-0 last:pb-0 flex items-start gap-4">
@@ -291,7 +290,7 @@ export function OAuthTab() {
                       </code>
                       <button
                         type="button"
-                        onClick={() => copyRedirectUri(p.slug, p.id)}
+                        onClick={() => copyRedirectUri(callbackUri, p.id)}
                         className="text-on-surface-variant hover:text-on-surface inline-flex items-center gap-1"
                         title={t('common.copy')}
                       >
@@ -426,7 +425,7 @@ function ProviderDialog({
   const showClaims = isCustom
   const showScope = isCustom || form.preset === 'twitter'
 
-  const callbackUri = `${window.location.origin}/api/oauth/${form.slug || '<slug>'}/callback`
+  const callbackUri = `${API_ORIGIN}/api/oauth/${form.slug || '<slug>'}/callback`
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>

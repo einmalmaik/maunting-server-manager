@@ -17,6 +17,7 @@ from .singra_webhook import router as singra_webhook_router
 from .backup_config import router as backup_config_router
 from .panel_backups import router as panel_backups_router
 from .panel_database import router as panel_database_router
+from .nodes import router as nodes_router
 
 __all__ = [
     "auth_router",
@@ -38,4 +39,5 @@ __all__ = [
     "backup_config_router",
     "panel_backups_router",
     "panel_database_router",
+    "nodes_router",
 ]  # noqa: E501

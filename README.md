@@ -38,11 +38,11 @@ Bevor du loslegst, brauchst du:
 1. Einen **Linux-Server** (Ubuntu 22.04 oder Debian 12 empfohlen)
 2. **Root-Zugang** (SSH-Key oder Passwort)
 3. Eine **Domain** (optional, aber empfohlen für HTTPS)
-4. Einen **SMTP-Server oder Resend-Account** (optional, für Email-Verifikation und 2FA)
+4. Einen **Resend-Account** für die einfache Browser-Einrichtung (SMTP bleibt über den klassischen Installer möglich)
 
 ---
 
-## Installation (3 Schritte)
+## Installation
 
 ### Schritt 1: Auf den Server verbinden
 
@@ -52,34 +52,28 @@ Bevor du loslegst, brauchst du:
 ssh root@DEINE-SERVER-IP
 ```
 
-### Schritt 2: Repository klonen
+### Schritt 2: Ein Befehl
 
 ```bash
-cd /opt
-git clone https://github.com/einmalmaik/maunting-server-manager.git msm
-cd msm
-```
-**Wichtig (Prod):** Die Installations- und Server-Daten liegen unter `/opt/msm/servers`, `/opt/msm/backups` etc.
-Führe auf dem Server **niemals** `git clean -fd` (oder ähnliche "aufräumen"-Befehle) im Clone-Verzeichnis aus – auch wenn Daten in Sub-Dirs liegen. Die `.gitignore` schützt die Laufzeit-Daten, aber manuelle Git-Clean-Befehle können trotzdem gefährlich sein. Immer erst mit `--dry-run` testen.
-
-Es gibt ein Hilfsskript `scripts/reset-msm-docker.sh` für den (hoffentlich nie wieder auftretenden) Notfall.
-
-**PS vom Entwickler (der das selbst mal um 2 Uhr nachts verbockt hat):** Ja, genau das ist mir passiert. Git clean hat den rootless Docker-Content-Store des msm-Users zerschossen (Blobs weg, "lease content" Horror). Nie wieder. Lernt aus meinen Schmerzen, Leute! 😂 Wenn's bei euch passiert: Es gibt jetzt `scripts/reset-msm-docker.sh` (als root ausführen). Danach git pull + Panel restart. Die .gitignore + Warnungen hier schützen euch (hoffentlich) davor.
-
-### Schritt 3: Installer starten
-
-```bash
-sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com
 ```
 
-Der Installer fragt dich nach:
+Ersetze `panel.example.com` durch die Domain, deren DNS bereits auf den Server
+zeigt. Der Befehl fragt keine weiteren technischen Einstellungen ab.
 
-1. **Domain** — gib deine Domain ein oder lasse sie leer für IP-Zugriff
-2. **Email** — wähle Resend (API-Key) oder SMTP
-3. **Datenbank** — PostgreSQL (empfohlen) oder SQLite
-4. **Redis** — Ja/Nein für Rate-Limiting
-
-**Das war's.** Der Rest läuft automatisch.
+**Das war's.** PostgreSQL, Rootless Docker, DIS, der lokale Agent, Caddy und die
+Systemdienste werden automatisch eingerichtet. Eine vorhandene Legacy-SQLite-
+Datenbank wird vor dem Update gesichert, einmalig geprüft nach PostgreSQL
+importiert und anschließend als Migrationsarchiv behalten. Erkennt der
+Bootstrap eine vorhandene Installation, verwendet er automatisch den sicheren
+Updater; Serverdaten, Backups, Agent-Tokens und Konfigurationen bleiben erhalten.
+Auf minimalen Ubuntu-/Debian-Systemen installiert derselbe `install.sh`-Pfad
+alle benötigten Basispakete und repariert auch eine zuvor unvollständig
+eingerichtete Caddy-Paketquelle, ohne eine vorhandene Caddyfile zu ersetzen.
+Falls eine Erstinstallation nach dem Anlegen der lokalen `msm`-Datenbank
+abbricht, kann sie ausdrücklich mit `--resume-partial` fortgesetzt werden. Der
+Installer übernimmt dabei nur eine exakt passende, unprivilegierte Datenbank
+`msm` mit Eigentümer `msm`; fremde PostgreSQL-Zustände bleiben blockiert.
 
 MSM richtet Docker im Rootless-Modus für den `msm`-User ein. Der Panel-User
 ist nicht Mitglied der globalen `docker`-Gruppe und nutzt
@@ -90,9 +84,46 @@ ist nicht Mitglied der globalen `docker`-Gruppe und nutzt
 ## Nach der Installation
 
 1. Öffne die Panel-URL im Browser (steht im Installer am Ende)
-2. Folge dem **Setup-Wizard** (erfordert eine gültige Email-Adresse)
-3. Erstelle deinen ersten **Owner-Account**
+2. Hinterlege im **Setup-Wizard** Absender und Resend-API-Key
+3. Erstelle den ersten **Owner-Account** und bestätige die E-Mail
 4. Lege deinen ersten **Game-Server** an
+
+---
+
+## Umgebungsvariablen
+
+Für Self-Hosting und manuelle Installationen enthält jede Komponente eine
+vollständige, kommentierte Vorlage. Bei jeder Variable steht, was sie macht,
+ob sie automatisch erzeugt wird, wann sie geändert werden muss und wo ein
+externer Wert bezogen wird:
+
+- [`backend/.env.example`](backend/.env.example) — Panel, Panel-Datenbank, E-Mail, DIS, Steam/GitHub und Updates
+- [`msm-agent/.env.example`](msm-agent/.env.example) — lokaler oder entfernter Node, TLS, Docker und node-eigenes PostgreSQL
+- [`frontend/.env.example`](frontend/.env.example) — ausschließlich öffentliche Build-Werte, niemals Secrets
+- [`dis-sidecar/.env.example`](dis-sidecar/.env.example) — lokale Kryptografie-Secrets, identisch zum Backend
+
+Der normale Installer generiert alle sicherheitskritischen Werte und verweist
+in den erzeugten `.env`-Dateien auf die jeweilige Vorlage. Manuell angelegte
+Dateien müssen Modus `600` erhalten und dürfen niemals committed werden.
+
+Die vollständige Komponenten-, Release- und Node-Anleitung steht in
+[`docs/self-hosting.md`](docs/self-hosting.md) und nach der Anmeldung im Panel
+unter **Dokumentation → Self-Hosting & Nodes**.
+
+Eine bestehende All-in-one-Installation wird mit dem interaktiven Assistenten
+aufgeteilt. Er kann ein bereits gebautes externes Frontend verbinden,
+ausgewählte Gameserver vollständig zwischen Nodes kopieren und die
+Backend-Control-Plane fehlersicher auf einen frischen Linux-Server verschieben:
+
+```bash
+sudo /opt/msm/helper-scripts/migrate-panel-components.sh
+```
+
+Der Assistent behält Quelldaten und eine deaktivierte Quell-Control-Plane als
+Rollback-Basis. DNS beim externen Anbieter und die einmalige Owner-Freigabe
+eines neuen Agents bleiben bewusste Sicherheitsgrenzen. `--dry-run` führt eine
+echte, rein lesende Vorprüfung der gewählten Ziele durch. Die kurze,
+verbindliche Anleitung steht in [`docs/self-hosting.md`](docs/self-hosting.md).
 
 ---
 
@@ -103,6 +134,11 @@ ist nicht Mitglied der globalen `docker`-Gruppe und nutzt
 ```bash
 sudo bash /opt/msm/update.sh
 ```
+
+Der Updater erstellt vor Schemaänderungen einen verifizierten PostgreSQL-Dump
+(bei Altinstallationen eine bytegenau geprüfte SQLite-Sicherung), nimmt nur das
+Panel kurz in Wartung und meldet erst nach Agent- und Backend-Healthchecks
+Erfolg. Laufende Game-Server auf den Nodes werden nicht gestoppt.
 
 ### Automatisch (optional)
 
@@ -170,12 +206,12 @@ Die Game-Server-Ports werden **automatisch** aus der Range 27015-27999 vergeben.
 ┌────────────▼────────────────────────────┐
 │  FastAPI Backend (Python)                 │
 │  → Port 8000 (nur localhost)              │
-│  → SQLite oder PostgreSQL                 │
+│  → PostgreSQL (nur Loopback)              │
 │  → Redis (optional)                       │
 └────────────┬────────────────────────────┘
              │
 ┌────────────▼────────────────────────────┐
-│  Game-Server (systemd)                    │
+│  Local Node Agent + Rootless Docker       │
 │  → Conan Exiles UE5 (Linux native)      │
 │  → DayZ (Linux native)                    │
 │  → Jeder Server eigener Linux-User        │

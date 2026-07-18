@@ -11,10 +11,14 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // Same-origin proxy when VITE_API_URL is unset. For true split hosting
+    // set VITE_API_URL=http://127.0.0.1:8000 and skip the proxy.
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        // Console WebSocket upgrades
+        ws: true,
       },
     },
   },

@@ -558,7 +558,7 @@ class TestOAuth2FA:
             follow_redirects=False,
         )
         assert res.status_code == 302
-        assert res.headers["location"] == "/"
+        assert res.headers["location"] in {"/", "http://localhost:3000/"}
         # Auth-Cookies gesetzt
         assert "__Secure-access_token" in res.cookies
         assert "__Secure-refresh_token" in res.cookies

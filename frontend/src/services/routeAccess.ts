@@ -11,6 +11,7 @@ export const routeAccessRules = {
   blueprints: ['panel.settings.read'],
   panelBackups: ['panel.settings.write'],
   panelDatabase: ['panel.database.read'],
+  nodes: ['nodes.read', 'nodes.manage'],
 } as const
 
 export function resolveRouteAccessState({

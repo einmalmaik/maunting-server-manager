@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 # ── Global PATH: verhindert "mkdir: not found" in steamcmd-Wrapper ──
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 
 # ═══════════════════════════════════════════════════════════════
 #  Maunting Server Manager — Zero-Config One-Line Installer
@@ -26,6 +28,12 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 MSM_USER="msm"
 MSM_DIR="/opt/msm"
 LOG_FILE="/tmp/msm-install.log"
+CADDY_SOURCE_FILE="/etc/apt/sources.list.d/caddy-stable.list"
+CADDY_KEYRING_FILE="/usr/share/keyrings/caddy-stable-archive-keyring.gpg"
+# Primary repository key. Signing subkeys may rotate without changing this
+# pinned trust anchor.
+CADDY_SIGNING_FINGERPRINT="65760C51EDEA2017CEA2CA15155B6D79CA56EA34"
+CADDY_SOURCE_BACKUP=""
 
 # Farben
 RED='\033[0;31m'
@@ -40,6 +48,10 @@ ok()   { echo -e "${GREEN}[OK]${NC}   $1" | tee -a "$LOG_FILE"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1" | tee -a "$LOG_FILE"; }
 err()  { echo -e "${RED}[ERR]${NC}  $1" | tee -a "$LOG_FILE"; exit 1; }
 ask()  { read -rp "$(echo -e "${BOLD}[?]${NC} $1 ")" "$2"; }
+ask_secret() {
+    read -rsp "$(echo -e "${BOLD}[?]${NC} $1 ")" "$2"
+    echo ""
+}
 ask_yesno() {
     local ans
     while true; do
@@ -71,6 +83,106 @@ ask_yesno_default() {
     done
 }
 
+disable_caddy_source_for_apt_preflight() {
+    # A previous interrupted installation may have written the repository
+    # before its keyring was ready. Temporarily disable only MSM's known Caddy
+    # source so the base apt update can repair that state safely.
+    if [[ ! -f "$CADDY_SOURCE_FILE" ]]; then
+        return 0
+    fi
+
+    CADDY_SOURCE_BACKUP=$(mktemp "${CADDY_SOURCE_FILE}.msm-disabled.XXXXXX")
+    rm -f "$CADDY_SOURCE_BACKUP"
+    mv "$CADDY_SOURCE_FILE" "$CADDY_SOURCE_BACKUP"
+    log "Bestehende Caddy-Paketquelle wird vor der Schlüsselprüfung vorübergehend deaktiviert."
+}
+
+configure_caddy_repository() {
+    local armored_key keyring_tmp source_tmp
+
+    install -d -m 0755 /usr/share/keyrings /etc/apt/sources.list.d
+    armored_key=$(mktemp /tmp/msm-caddy-key.XXXXXX.asc)
+    keyring_tmp=$(mktemp /usr/share/keyrings/.caddy-stable-keyring.XXXXXX)
+    source_tmp=$(mktemp /etc/apt/sources.list.d/.caddy-stable.XXXXXX)
+
+    if ! curl -fsSL --retry 3 --retry-delay 2 \
+        https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+        -o "$armored_key"; then
+        rm -f "$armored_key" "$keyring_tmp" "$source_tmp"
+        err "Caddy-Signaturschlüssel konnte nicht geladen werden. Paketquelle bleibt sicher deaktiviert."
+    fi
+
+    if ! gpg --batch --show-keys --with-colons "$armored_key" 2>/dev/null \
+        | awk -F: -v expected="$CADDY_SIGNING_FINGERPRINT" \
+            '$1 == "fpr" && $10 == expected { found=1 } END { exit found ? 0 : 1 }'; then
+        rm -f "$armored_key" "$keyring_tmp" "$source_tmp"
+        err "Caddy-Signaturschlüssel hat nicht den erwarteten Fingerprint. Paketquelle bleibt deaktiviert."
+    fi
+
+    if ! gpg --batch --yes --dearmor --output "$keyring_tmp" "$armored_key"; then
+        rm -f "$armored_key" "$keyring_tmp" "$source_tmp"
+        err "Caddy-Signaturschlüssel konnte nicht verarbeitet werden. Paketquelle bleibt deaktiviert."
+    fi
+    chmod 0644 "$keyring_tmp"
+
+    cat > "$source_tmp" <<EOF
+# Source: Caddy stable (managed by MSM install.sh)
+deb [signed-by=$CADDY_KEYRING_FILE] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
+EOF
+    chmod 0644 "$source_tmp"
+
+    mv -f "$keyring_tmp" "$CADDY_KEYRING_FILE"
+    mv -f "$source_tmp" "$CADDY_SOURCE_FILE"
+    rm -f "$armored_key"
+    if [[ -n "$CADDY_SOURCE_BACKUP" ]]; then
+        rm -f "$CADDY_SOURCE_BACKUP"
+        CADDY_SOURCE_BACKUP=""
+    fi
+    ok "Caddy-Paketquelle und Signaturschlüssel geprüft"
+}
+
+SIMPLE_INSTALL=false
+INSTALL_DOMAIN=""
+RESUME_PARTIAL=false
+CONTROL_PLANE_ONLY=false
+EXTERNAL_FRONTEND_ORIGIN=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --simple)
+            SIMPLE_INSTALL=true
+            shift
+            ;;
+        --domain)
+            [[ $# -ge 2 ]] || err "--domain benötigt einen Domainnamen."
+            INSTALL_DOMAIN="$2"
+            shift 2
+            ;;
+        --resume-partial)
+            RESUME_PARTIAL=true
+            shift
+            ;;
+        --control-plane-only)
+            CONTROL_PLANE_ONLY=true
+            shift
+            ;;
+        --external-frontend)
+            [[ $# -ge 2 ]] || err "--external-frontend benötigt eine HTTPS-Origin."
+            EXTERNAL_FRONTEND_ORIGIN="${2%/}"
+            shift 2
+            ;;
+        *)
+            err "Unbekannte Option: $1"
+            ;;
+    esac
+done
+if [[ -n "$INSTALL_DOMAIN" ]] && [[ ! "$INSTALL_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+    err "Ungültige Domain. Beispiel: panel.example.com"
+fi
+if [[ -n "$EXTERNAL_FRONTEND_ORIGIN" ]] \
+    && [[ ! "$EXTERNAL_FRONTEND_ORIGIN" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]]; then
+    err "Ungültige Frontend-Origin. Erwartet: https://panel.example.com ohne Pfad."
+fi
+
 # ═══════════════════════════════════════════════════════════════
 # Re-Install Hilfsfunktionen
 # ═══════════════════════════════════════════════════════════════
@@ -79,6 +191,8 @@ load_current_env() {
     local env_file="$MSM_DIR/backend/.env"
 
     CURRENT_DOMAIN=""
+    CURRENT_PANEL_URL=""
+    CURRENT_SERVE_FRONTEND="true"
     CURRENT_EMAIL_PROVIDER="smtp"
     CURRENT_SMTP_HOST=""
     CURRENT_SMTP_PORT="587"
@@ -92,38 +206,49 @@ load_current_env() {
     CURRENT_SECRET_KEY=""
     CURRENT_DB_URL=""
     CURRENT_DB_URL_ASYNC=""
+    CURRENT_LOCAL_AGENT_ENABLED="true"
 
     [[ -f "$env_file" ]] || return
 
     local val
 
-    val=$(grep -E '^MSM_PANEL_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    CURRENT_PANEL_URL=$(grep -E '^MSM_PANEL_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    val=$(grep -E '^MSM_API_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    if [[ -z "$val" ]]; then
+        # Legacy all-in-one installs did not yet persist a distinct API URL.
+        val="$CURRENT_PANEL_URL"
+    fi
     if [[ -n "$val" ]]; then
         CURRENT_DOMAIN="$val"
         CURRENT_DOMAIN="${CURRENT_DOMAIN#http://}"
         CURRENT_DOMAIN="${CURRENT_DOMAIN#https://}"
     fi
 
+    # Optional keys: missing vars must not make this function return non-zero
+    # under `set -e` (a trailing `[[ -n ]] && assign` with empty val does).
+    val=$(grep -E '^MSM_SERVE_FRONTEND=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    if [[ -n "$val" ]]; then CURRENT_SERVE_FRONTEND="$val"; fi
+
     val=$(grep -E '^MSM_EMAIL_PROVIDER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_EMAIL_PROVIDER="$val"
+    if [[ -n "$val" ]]; then CURRENT_EMAIL_PROVIDER="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_HOST=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_HOST="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_HOST="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_PORT=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_PORT="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_PORT="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_USER=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_USER="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_USER="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_PASSWORD=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_PASS="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_PASS="$val"; fi
 
     val=$(grep -E '^MSM_SMTP_FROM=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SMTP_FROM="$val"
+    if [[ -n "$val" ]]; then CURRENT_SMTP_FROM="$val"; fi
 
     val=$(grep -E '^MSM_RESEND_API_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_RESEND_API_KEY="$val"
+    if [[ -n "$val" ]]; then CURRENT_RESEND_API_KEY="$val"; fi
 
     val=$(grep -E '^MSM_DATABASE_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
     if [[ "$val" == postgresql* ]]; then
@@ -131,19 +256,25 @@ load_current_env() {
     else
         CURRENT_USE_POSTGRES=false
     fi
-    [[ -n "$val" ]] && CURRENT_DB_URL="$val"
+    if [[ -n "$val" ]]; then CURRENT_DB_URL="$val"; fi
 
     val=$(grep -E '^MSM_DATABASE_URL_ASYNC=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_DB_URL_ASYNC="$val"
+    if [[ -n "$val" ]]; then CURRENT_DB_URL_ASYNC="$val"; fi
 
     val=$(grep -E '^MSM_REDIS_URL=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_REDIS_URL="$val"
+    if [[ -n "$val" ]]; then CURRENT_REDIS_URL="$val"; fi
 
     val=$(grep -E '^MSM_AUTO_UPDATE=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_AUTO_UPDATE="$val"
+    if [[ -n "$val" ]]; then CURRENT_AUTO_UPDATE="$val"; fi
 
     val=$(grep -E '^MSM_SECRET_KEY=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$val" ]] && CURRENT_SECRET_KEY="$val"
+    if [[ -n "$val" ]]; then CURRENT_SECRET_KEY="$val"; fi
+
+    # Multi-node: absent on pre-multi-node .env → keep default "true"
+    val=$(grep -E '^MSM_LOCAL_AGENT_ENABLED=' "$env_file" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    if [[ -n "$val" ]]; then CURRENT_LOCAL_AGENT_ENABLED="$val"; fi
+
+    return 0
 }
 
 show_current_config() {
@@ -156,7 +287,7 @@ show_current_config() {
     echo -e "  ${BOLD}Email-Provider:${NC}  ${CURRENT_EMAIL_PROVIDER}"
     if [[ "$CURRENT_EMAIL_PROVIDER" == "resend" ]]; then
         if [[ -n "$CURRENT_RESEND_API_KEY" ]]; then
-            echo -e "  ${BOLD}Resend API-Key:${NC}  ${CURRENT_RESEND_API_KEY:0:8}..."
+            echo -e "  ${BOLD}Resend API-Key:${NC}  *** konfiguriert ***"
         else
             echo -e "  ${BOLD}Resend API-Key:${NC}  <nicht gesetzt>"
         fi
@@ -174,7 +305,7 @@ show_current_config() {
     if $CURRENT_USE_POSTGRES; then
         echo -e "  ${BOLD}Datenbank:${NC}       PostgreSQL"
     else
-        echo -e "  ${BOLD}Datenbank:${NC}       SQLite"
+        echo -e "  ${BOLD}Datenbank:${NC}       Legacy-SQLite (wird nach PostgreSQL migriert)"
     fi
     if [[ -n "$CURRENT_REDIS_URL" ]]; then
         echo -e "  ${BOLD}Redis:${NC}           Aktiviert"
@@ -211,6 +342,9 @@ if [[ -d /run/systemd/system ]] && command -v systemctl &>/dev/null; then
 else
     SYSTEMD_AVAILABLE=false
 fi
+if $SIMPLE_INSTALL && ! $SYSTEMD_AVAILABLE; then
+    err "Die einfache Produktionsinstallation benötigt systemd (Ubuntu/Debian Server)."
+fi
 
 ensure_subid_entry() {
     local file="$1"
@@ -231,6 +365,73 @@ ensure_subid_entry() {
         END { print max + 1 }
     ' "$file")
     echo "${user}:${start}:${count}" >> "$file"
+}
+
+# Create/repair a per-app Python venv as $MSM_USER only.
+# Durable against: root-owned trees after git checkout, half-created venvs,
+# and PEP 668 (system pip) when activate fails.
+# Usage: prepare_app_venv /path/to/app "Label" [recreate=true|false]
+prepare_app_venv() {
+    local app_dir="$1"
+    local label="$2"
+    local recreate="${3:-false}"
+
+    [[ -d "$app_dir" ]] || err "$label: Verzeichnis fehlt: $app_dir"
+    id "$MSM_USER" &>/dev/null || err "$label: Systemuser $MSM_USER existiert nicht"
+    command -v python3 &>/dev/null || err "$label: python3 fehlt"
+    # python3-venv must be present for `python3 -m venv`
+    if ! python3 -c "import venv" 2>/dev/null; then
+        err "$label: python3-venv fehlt (apt install python3-venv)"
+    fi
+
+    # Hard requirement: app tree writable by panel user (no silent chown failure)
+    chown -R "$MSM_USER:$MSM_USER" "$app_dir" \
+        || err "$label: chown $MSM_USER:$MSM_USER auf $app_dir fehlgeschlagen (als root?)"
+
+    if [[ -e "$app_dir/venv" ]]; then
+        local vowner
+        vowner=$(stat -c '%U' "$app_dir/venv" 2>/dev/null || echo "")
+        if [[ "$recreate" == "true" ]] \
+            || [[ "$vowner" != "$MSM_USER" ]] \
+            || [[ ! -x "$app_dir/venv/bin/python" ]]; then
+            rm -rf "$app_dir/venv"
+        fi
+    fi
+
+    # Run entirely as MSM_USER so venv/bin/* never lands root-owned
+    # and pip never hits the externally-managed system Python (PEP 668).
+    if ! su - "$MSM_USER" -c "
+        set -euo pipefail
+        cd $(printf '%q' "$app_dir")
+        if [[ ! -x venv/bin/python ]]; then
+            rm -rf venv
+            python3 -m venv venv
+        fi
+        # shellcheck disable=SC1091
+        source venv/bin/activate
+        test -n \"\${VIRTUAL_ENV:-}\"
+        case \"\$(command -v python)\" in
+            \"\$PWD/venv/bin/python\"|\"\$PWD/venv/bin/python3\"|*/venv/bin/python*) ;;
+            *) echo \"ERROR: $label: pip would use system Python (PEP 668 risk): \$(command -v python)\" >&2; exit 1 ;;
+        esac
+        pip install --upgrade pip -q
+        pip install -r requirements.txt -q
+        test -x venv/bin/python
+    " 2>&1 | tee -a "$LOG_FILE"; then
+        err "$label: venv-Setup fehlgeschlagen. Ownership jetzt: $(stat -c '%U:%G' "$app_dir" 2>/dev/null || echo '?') — erwarte $MSM_USER:$MSM_USER"
+    fi
+
+    if [[ ! -x "$app_dir/venv/bin/python" ]]; then
+        err "$label: venv/bin/python fehlt nach Setup"
+    fi
+    local py_owner
+    py_owner=$(stat -c '%U' "$app_dir/venv/bin/python" 2>/dev/null || echo "")
+    # python is often a symlink; ownership of the link target may vary — check venv dir
+    local venv_owner
+    venv_owner=$(stat -c '%U' "$app_dir/venv" 2>/dev/null || echo "")
+    if [[ "$venv_owner" != "$MSM_USER" ]]; then
+        err "$label: venv gehört $venv_owner, nicht $MSM_USER"
+    fi
 }
 
 stop_legacy_rootful_msm_containers() {
@@ -322,39 +523,64 @@ if [[ -f "$MSM_DIR/backend/.env" ]]; then
     load_current_env
     show_current_config
 
-    echo -e "${BOLD}[?]${NC} Einstellungen beibehalten oder ändern?"
-    echo "    1) Beibehalten — nur Code aktualisieren, Frontend neu bauen, Services neustarten"
-    echo "    2) Ändern — Konfiguration anpassen (Domain, Email, DB, Redis, Auto-Update)"
-    ask "[1/2]: " choice
-
-    if [[ "$choice" == "1" ]]; then
+    if $SIMPLE_INSTALL; then
         KEEP_SETTINGS=true
         NEED_FULL_REBUILD=true
-        log "Re-Install Modus: Einstellungen beibehalten, Code aktualisieren..."
+        if [[ -n "$INSTALL_DOMAIN" && "$INSTALL_DOMAIN" != "$CURRENT_DOMAIN" ]]; then
+            CHANGED_DOMAIN=true
+            log "Bestehende Einstellungen bleiben erhalten; Domain wird auf '$INSTALL_DOMAIN' aktualisiert."
+        else
+            log "Bestehende Einstellungen werden unverändert übernommen."
+        fi
     else
-        KEEP_SETTINGS=false
-        log "Re-Install Modus: Konfiguration wird angepasst..."
+        echo -e "${BOLD}[?]${NC} Einstellungen beibehalten oder ändern?"
+        echo "    1) Beibehalten — nur Code aktualisieren, Frontend neu bauen, Services neustarten"
+        echo "    2) Ändern — Konfiguration anpassen (Domain, Email, DB, Redis, Auto-Update)"
+        ask "[1/2]: " choice
+
+        if [[ "$choice" == "1" ]]; then
+            KEEP_SETTINGS=true
+            NEED_FULL_REBUILD=true
+            log "Re-Install Modus: Einstellungen beibehalten, Code aktualisieren..."
+        else
+            KEEP_SETTINGS=false
+            log "Re-Install Modus: Konfiguration wird angepasst..."
+        fi
     fi
 else
     log "Frische Installation erkannt..."
+fi
+if $RESUME_PARTIAL && $REINSTALL_MODE; then
+    err "--resume-partial ist nur für eine abgebrochene Erstinstallation ohne backend/.env erlaubt."
+fi
+INSTALL_LOCAL_AGENT=true
+if $CONTROL_PLANE_ONLY; then
+    INSTALL_LOCAL_AGENT=false
+elif $REINSTALL_MODE && [[ "$CURRENT_LOCAL_AGENT_ENABLED" == "false" ]]; then
+    INSTALL_LOCAL_AGENT=false
+fi
+if $CONTROL_PLANE_ONLY && $REINSTALL_MODE && [[ "$CURRENT_LOCAL_AGENT_ENABLED" != "false" ]]; then
+    err "Eine bestehende All-in-one-Installation darf nur über den Migrationsassistenten auf Backend-only umgestellt werden."
 fi
 
 # ═══════════════════════════════════════════════════════════════
 # 1. System-Abhängigkeiten
 # ═══════════════════════════════════════════════════════════════
 log "Aktualisiere Paketlisten..."
-apt-get update -qq | tee -a "$LOG_FILE"
+# --allow-releaseinfo-change=true: PPAs (z.B. ondrej/php) ändern gelegentlich Label/Suite;
+# ohne Flag bricht apt-get update non-interaktiv ab (E: Repository ... changed its 'Label').
+disable_caddy_source_for_apt_preflight
+apt-get update -qq --allow-releaseinfo-change=true | tee -a "$LOG_FILE"
 
 log "Installiere Basis-Pakete..."
 apt-get install -y -qq \
-    curl wget git jq \
+    ca-certificates curl wget git gnupg jq openssl rsync sudo \
     python3 python3-pip python3-venv \
-    sqlite3 \
     systemd systemd-sysv \
     libc6-i386 lib32stdc++6 lib32gcc-s1 \
-    software-properties-common \
-    debian-archive-keyring apt-transport-https \
-    slirp4netns \
+    software-properties-common lsb-release \
+    debian-keyring debian-archive-keyring apt-transport-https \
+    uidmap dbus-user-session slirp4netns ufw iptables \
     2>&1 | tee -a "$LOG_FILE"
 
 # ── Node.js 20 (nicht das veraltete aus apt) ──
@@ -365,16 +591,13 @@ if ! command -v node &>/dev/null || [[ "$(node -v | cut -d'v' -f2 | cut -d'.' -f
 fi
 
 # ── Caddy (offizielles Repo für aktuelle Version) ──
-# Nur installieren, wenn Caddy noch nicht vorhanden ist.
-# Bestehende Caddyfile wird niemals überschrieben.
-if ! command -v caddy &>/dev/null; then
-    log "Installiere Caddy (erstmalige Installation)..."
-    apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https 2>&1 | tee -a "$LOG_FILE"
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' 2>/dev/null | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>&1 | tee -a "$LOG_FILE"
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' 2>/dev/null | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-    apt-get update -qq | tee -a "$LOG_FILE"
-    apt-get install -y -qq caddy 2>&1 | tee -a "$LOG_FILE"
-else
+# Die Quelle wird bei jedem Lauf sicher repariert. Paketupdates behalten eine
+# bestehende Caddyfile ausdrücklich bei.
+configure_caddy_repository
+apt-get update -qq --allow-releaseinfo-change=true | tee -a "$LOG_FILE"
+log "Installiere beziehungsweise aktualisiere Caddy..."
+apt-get install -y -qq -o Dpkg::Options::="--force-confold" caddy 2>&1 | tee -a "$LOG_FILE"
+if command -v caddy &>/dev/null; then
     if [[ -f /etc/caddy/Caddyfile ]]; then
         ok "Caddy bereits vorhanden — bestehende Caddyfile wird erhalten."
     else
@@ -386,20 +609,25 @@ import /etc/caddy/conf.d/*.conf
 CADDYEOF
         ok "Minimal-Caddyfile angelegt."
     fi
+else
+    err "Caddy wurde nicht vollständig installiert."
 fi
 
 # ── Docker (Game-Server-Runtime — Rootless) ──
 # Docker Engine/CLI bleiben Systempakete. MSM nutzt danach ausschließlich den
 # Rootless-Daemon des msm-Users, nie /var/run/docker.sock.
-apt-get install -y -qq uidmap dbus-user-session 2>&1 | tee -a "$LOG_FILE"
-if ! command -v docker &>/dev/null; then
-    log "Installiere Docker (offizieller Installer von docker.com)..."
-    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-    sh /tmp/get-docker.sh 2>&1 | tee -a "$LOG_FILE"
-    rm -f /tmp/get-docker.sh
-    ok "Docker installiert"
+if $INSTALL_LOCAL_AGENT; then
+    if ! command -v docker &>/dev/null; then
+        log "Installiere Docker (offizieller Installer von docker.com)..."
+        curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+        sh /tmp/get-docker.sh 2>&1 | tee -a "$LOG_FILE"
+        rm -f /tmp/get-docker.sh
+        ok "Docker installiert"
+    else
+        log "Docker bereits installiert ($(docker --version 2>/dev/null || echo unbekannt))"
+    fi
 else
-    log "Docker bereits installiert ($(docker --version 2>/dev/null || echo unbekannt))"
+    log "Backend-only: lokale Docker-/Agent-Runtime wird nicht installiert."
 fi
 
 ok "System-Abhängigkeiten installiert"
@@ -453,7 +681,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
     fi
 else
     # Fresh install
-    if ask_yesno "Redis für verteiltes Rate-Limiting installieren? (empfohlen für Produktion)"; then
+    if $SIMPLE_INSTALL || ask_yesno "Redis für verteiltes Rate-Limiting installieren? (empfohlen für Produktion)"; then
         INSTALL_REDIS=true
         MSM_REDIS_URL="redis://localhost:6379"
     else
@@ -477,6 +705,8 @@ if $INSTALL_REDIS; then
     if ! $REINSTALL_MODE || ($REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_REDIS); then
         ok "Redis installiert und gestartet"
     fi
+    redis-cli ping 2>/dev/null | grep -qx 'PONG' \
+        || err "Redis wurde ausgewählt, ist aber nicht erreichbar."
 else
     if ! $REINSTALL_MODE; then
         log "Redis wird übersprungen (Rate-Limiting nutzt in-memory Fallback)."
@@ -498,7 +728,10 @@ chown "$MSM_USER:$MSM_USER" /opt/msm/servers
 mkdir -p /opt/msm/backups
 chown "$MSM_USER:$MSM_USER" /opt/msm/backups
 
-setup_rootless_docker
+MSM_DOCKER_HOST=""
+if $INSTALL_LOCAL_AGENT; then
+    setup_rootless_docker
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 4. Dateien kopieren
@@ -520,24 +753,73 @@ if $SHOULD_COPY_FILES; then
         rm -rf "$MSM_DIR/frontend/dist" 2>/dev/null || true
         rm -rf "$MSM_DIR/frontend/node_modules" 2>/dev/null || true
         rm -rf "$MSM_DIR/backend/venv" 2>/dev/null || true
+        rm -rf "$MSM_DIR/msm-agent/venv" 2>/dev/null || true
     else
-        # Install.sh läuft außerhalb des Zielverzeichnisses → sauberes Verzeichnis anlegen
-        rm -rf "$MSM_DIR" 2>/dev/null || true
+        # Code gezielt synchronisieren. Laufzeitdaten und Secrets im Ziel werden
+        # niemals durch eine Re-Installation geloescht oder ueberschrieben.
         mkdir -p "$MSM_DIR"
 
-        cp -r "$SCRIPT_DIR/backend" "$MSM_DIR/"
-        cp -r "$SCRIPT_DIR/frontend" "$MSM_DIR/"
-        cp -r "$SCRIPT_DIR/dis-sidecar" "$MSM_DIR/" 2>/dev/null || true
-        cp -r "$SCRIPT_DIR/docs" "$MSM_DIR/" 2>/dev/null || true
+        rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
+            --exclude '.env' --exclude 'venv/' --exclude 'msm.db*' \
+            --exclude '__pycache__/' --exclude '*.pyc' \
+            "$SCRIPT_DIR/backend/" "$MSM_DIR/backend/"
+        rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
+            --exclude 'node_modules/' --exclude 'dist/' \
+            "$SCRIPT_DIR/frontend/" "$MSM_DIR/frontend/"
+        if [[ -d "$SCRIPT_DIR/dis-sidecar" ]]; then
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete --exclude '.env' --exclude 'node_modules/' \
+                "$SCRIPT_DIR/dis-sidecar/" "$MSM_DIR/dis-sidecar/"
+        fi
+        if [[ -d "$SCRIPT_DIR/msm-agent" ]]; then
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
+                --exclude '.env' --exclude 'venv/' --exclude 'servers/' \
+                --exclude 'postgres/' --exclude 'certs/' \
+                --exclude '__pycache__/' --exclude '*.pyc' \
+                "$SCRIPT_DIR/msm-agent/" "$MSM_DIR/msm-agent/"
+        fi
+        if [[ -d "$SCRIPT_DIR/docs" ]]; then
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete "$SCRIPT_DIR/docs/" "$MSM_DIR/docs/"
+        fi
+        if [[ -d "$SCRIPT_DIR/helper-scripts" ]]; then
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete "$SCRIPT_DIR/helper-scripts/" "$MSM_DIR/helper-scripts/"
+        fi
+        if [[ -d "$SCRIPT_DIR/scripts" ]]; then
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete "$SCRIPT_DIR/scripts/" "$MSM_DIR/scripts/"
+        fi
         cp "$SCRIPT_DIR/Caddyfile.template" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/msm.service.template" "$MSM_DIR/" 2>/dev/null || true
         cp "$SCRIPT_DIR/update.sh" "$MSM_DIR/" 2>/dev/null || true
         chmod +x "$MSM_DIR/update.sh" 2>/dev/null || true
     fi
-    chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR"
+    chown "$MSM_USER:$MSM_USER" "$MSM_DIR"
+    chown "$MSM_USER:$MSM_USER" \
+        "$MSM_DIR/Caddyfile.template" "$MSM_DIR/msm.service.template" "$MSM_DIR/update.sh" \
+        2>/dev/null || true
+    # In-place Install (git checkout as root) leaves trees root-owned. Backend +
+    # agent venvs are created as $MSM_USER and need write access to their dirs.
+    for _msm_tree in backend frontend dis-sidecar msm-agent docs scripts helper-scripts; do
+        if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
+            chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" 2>/dev/null || true
+        fi
+    done
+    # Caddy braucht nur Traverse-Zugriff bis zum oeffentlichen Frontend. Keine
+    # Verzeichnisauflistung und keine Gruppenmitgliedschaft (die Zugriff auf
+    # den Rootless-Docker-Socket des msm-Users ermoeglichen koennte).
+    chmod 0751 "$MSM_DIR"
     ok "Dateien bereit"
 elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ! $CODE_CHANGED; then
     log "Quellverzeichnis identisch mit Ziel — keine Datei-Kopie nötig."
+fi
+
+# Always re-own code trees before Python venv work — even when SHOULD_COPY_FILES
+# is false (e.g. git checkout as root left msm-agent root:root).
+if id "$MSM_USER" &>/dev/null; then
+    for _msm_tree in backend frontend dis-sidecar msm-agent docs scripts helper-scripts; do
+        if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
+            chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" \
+                || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$_msm_tree fehlgeschlagen"
+        fi
+    done
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -553,13 +835,14 @@ SMTP_USER=""
 SMTP_PASS=""
 SMTP_FROM=""
 RESEND_API_KEY=""
-USE_POSTGRES=false
+USE_POSTGRES=true
+MIGRATE_LEGACY_SQLITE=false
 PG_PASSWORD=""
 MSM_AUTO_UPDATE="false"
 
 if $REINSTALL_MODE && $KEEP_SETTINGS; then
     # Keep mode: alle aktuellen Werte übernehmen
-    DOMAIN="$CURRENT_DOMAIN"
+    DOMAIN="${INSTALL_DOMAIN:-$CURRENT_DOMAIN}"
     EMAIL_PROVIDER="$CURRENT_EMAIL_PROVIDER"
     SMTP_HOST="$CURRENT_SMTP_HOST"
     SMTP_PORT="${CURRENT_SMTP_PORT:-587}"
@@ -567,10 +850,10 @@ if $REINSTALL_MODE && $KEEP_SETTINGS; then
     SMTP_PASS="$CURRENT_SMTP_PASS"
     SMTP_FROM="$CURRENT_SMTP_FROM"
     RESEND_API_KEY="$CURRENT_RESEND_API_KEY"
-    if $CURRENT_USE_POSTGRES; then
-        USE_POSTGRES=true
-    else
-        USE_POSTGRES=false
+    if ! $CURRENT_USE_POSTGRES; then
+        MIGRATE_LEGACY_SQLITE=true
+        CHANGED_DB=true
+        warn "Legacy-SQLite erkannt — der geprüfte PostgreSQL-Import wird automatisch ausgeführt."
     fi
     MSM_AUTO_UPDATE="$CURRENT_AUTO_UPDATE"
 
@@ -616,7 +899,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
 
         if [[ "$EMAIL_CHOICE" == "1" ]]; then
             EMAIL_PROVIDER="resend"
-            ask "Resend API-Key [${CURRENT_RESEND_API_KEY:-re_...}]: " RESEND_API_KEY
+            ask_secret "Resend API-Key [leer = bestehenden behalten]: " RESEND_API_KEY
             RESEND_API_KEY="${RESEND_API_KEY:-$CURRENT_RESEND_API_KEY}"
             ask "Absender-Adresse [${CURRENT_SMTP_FROM:-noreply@mauntingstudios.de}]: " SMTP_FROM_INPUT
             SMTP_FROM="${SMTP_FROM_INPUT:-${CURRENT_SMTP_FROM:-noreply@mauntingstudios.de}}"
@@ -629,7 +912,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
             SMTP_PORT="${SMTP_PORT_INPUT:-${CURRENT_SMTP_PORT:-587}}"
             ask "SMTP-Benutzername [${CURRENT_SMTP_USER:-}]: " SMTP_USER
             SMTP_USER="${SMTP_USER:-$CURRENT_SMTP_USER}"
-            ask "SMTP-Passwort [leer = bestehendes behalten]: " SMTP_PASS
+            ask_secret "SMTP-Passwort [leer = bestehendes behalten]: " SMTP_PASS
             if [[ -z "$SMTP_PASS" ]]; then
                 SMTP_PASS="$CURRENT_SMTP_PASS"
             fi
@@ -654,31 +937,11 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
     echo ""
     echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
     if $CURRENT_USE_POSTGRES; then
-        echo "  Aktuell: PostgreSQL"
+        ok "PostgreSQL bleibt als Panel-Datenbank aktiv."
     else
-        echo "  Aktuell: SQLite"
-    fi
-    echo "  'Ja' wählen um zu wechseln (mit Warnung)."
-    echo ""
-
-    USE_POSTGRES=$CURRENT_USE_POSTGRES
-
-    if ask_yesno "Datenbank-Typ wechseln?"; then
-        if $CURRENT_USE_POSTGRES; then
-            warn "WARNUNG: Wechsel von PostgreSQL zu SQLite!"
-            warn "Existierende PostgreSQL-Daten werden NICHT automatisch migriert."
-            if ask_yesno "Wirklich zu SQLite wechseln?"; then
-                USE_POSTGRES=false
-                CHANGED_DB=true
-            fi
-        else
-            warn "WARNUNG: Wechsel von SQLite zu PostgreSQL!"
-            warn "Existierende SQLite-Daten werden NICHT automatisch migriert."
-            if ask_yesno "Wirklich zu PostgreSQL wechseln?"; then
-                USE_POSTGRES=true
-                CHANGED_DB=true
-            fi
-        fi
+        MIGRATE_LEGACY_SQLITE=true
+        CHANGED_DB=true
+        warn "Legacy-SQLite erkannt — MSM migriert die Daten automatisch nach PostgreSQL."
     fi
 
     # ── 4/4 Auto-Update ──
@@ -712,6 +975,16 @@ else
     # Fresh install flow (Original)
     # ═══════════════════════════════════════════════════════════════
 
+    if $SIMPLE_INSTALL; then
+        [[ -n "$INSTALL_DOMAIN" ]] \
+            || err "Die einfache Installation benötigt --domain panel.example.com"
+        DOMAIN="$INSTALL_DOMAIN"
+        MSM_AUTO_UPDATE="false"
+        ok "Domain: $DOMAIN"
+        ok "PostgreSQL und Redis werden automatisch lokal eingerichtet."
+        log "E-Mail wird sicher im Browser-Setup eingerichtet; automatische Updates bleiben aus."
+    else
+
     # ── 5a. Domain ──
     echo ""
     echo -e "${BOLD}Schritt 1/4: Domain${NC}"
@@ -740,7 +1013,7 @@ else
 
         if [[ "$EMAIL_CHOICE" == "1" ]]; then
             EMAIL_PROVIDER="resend"
-            ask "Resend API-Key (re_...): " RESEND_API_KEY
+            ask_secret "Resend API-Key (re_...): " RESEND_API_KEY
             ask "Absender-Adresse [noreply@mauntingstudios.de]: " SMTP_FROM_INPUT
             SMTP_FROM="${SMTP_FROM_INPUT:-noreply@mauntingstudios.de}"
             ok "Resend konfiguriert"
@@ -750,7 +1023,7 @@ else
             ask "SMTP-Port [587]: " SMTP_PORT_INPUT
             SMTP_PORT="${SMTP_PORT_INPUT:-587}"
             ask "SMTP-Benutzername: " SMTP_USER
-            ask "SMTP-Passwort: " SMTP_PASS
+            ask_secret "SMTP-Passwort: " SMTP_PASS
             ask "Absender-Adresse [noreply@mauntingstudios.de]: " SMTP_FROM_INPUT
             SMTP_FROM="${SMTP_FROM_INPUT:-noreply@mauntingstudios.de}"
             ok "SMTP konfiguriert"
@@ -762,11 +1035,7 @@ else
     # ── 5c. PostgreSQL ──
     echo ""
     echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
-    if ask_yesno "PostgreSQL für die Datenbank nutzen? (empfohlen für Produktion, sonst SQLite)"; then
-        USE_POSTGRES=true
-    else
-        USE_POSTGRES=false
-    fi
+    ok "PostgreSQL wird automatisch und sicher auf Loopback eingerichtet."
 
     # ── 5d. Auto-Update ──
     echo ""
@@ -779,48 +1048,81 @@ else
     else
         MSM_AUTO_UPDATE="false"
     fi
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# 5b. PostgreSQL Setup (falls nötig)
+# 5b. PostgreSQL Setup
 # ═══════════════════════════════════════════════════════════════
-if $USE_POSTGRES; then
-    if ! command -v psql &>/dev/null; then
-        log "Installiere PostgreSQL..."
-        apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev 2>&1 | tee -a "$LOG_FILE"
+if ! command -v psql &>/dev/null; then
+    log "Installiere PostgreSQL..."
+    apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev 2>&1 | tee -a "$LOG_FILE"
+fi
+
+# Nur bei frischer Installation oder Legacy-SQLite-Migration: Passwort + User/DB erstellen
+if ! $REINSTALL_MODE || $CHANGED_DB; then
+    PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
+
+    log "Richte PostgreSQL-User und Datenbank ein..."
+    PG_ROLE_EXISTS=false
+    if su - postgres -c "psql --no-psqlrc -tAc \"SELECT 1 FROM pg_roles WHERE rolname='msm'\"" | grep -q 1; then
+        PG_ROLE_EXISTS=true
     fi
+    PG_DATABASE_OWNER=$(su - postgres -c \
+        "psql --no-psqlrc -tAc \"SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='msm'\"" \
+        | tr -d '[:space:]')
 
-    # Nur bei frischer Installation oder Wechsel zu PostgreSQL: Passwort + User/DB erstellen
-    if ! $REINSTALL_MODE || $CHANGED_DB; then
-        PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
+    if $RESUME_PARTIAL; then
+        $PG_ROLE_EXISTS \
+            || err "Partielle Installation kann nicht fortgesetzt werden: PostgreSQL-Rolle 'msm' fehlt."
+        [[ "$PG_DATABASE_OWNER" == "msm" ]] \
+            || err "Partielle Installation kann nicht fortgesetzt werden: Datenbank 'msm' fehlt oder hat einen fremden Eigentümer."
 
-        log "Richte PostgreSQL-User und Datenbank ein..."
-        cat > /tmp/msm_pg_setup.sql <<EOF
-DO \$\$
-BEGIN
-  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'msm') THEN
-    ALTER USER msm WITH PASSWORD '${PG_PASSWORD}';
-  ELSE
-    CREATE USER msm WITH PASSWORD '${PG_PASSWORD}';
-  END IF;
-END \$\$;
-EOF
-        su - postgres -c "psql -f /tmp/msm_pg_setup.sql" 2>&1 | tee -a "$LOG_FILE"
-        rm -f /tmp/msm_pg_setup.sql
+        PG_ROLE_FLAGS=$(su - postgres -c \
+            "psql --no-psqlrc -tAc \"SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname='msm'\"" \
+            | tr -d '[:space:]')
+        PG_ROLE_MEMBERSHIPS=$(su - postgres -c \
+            "psql --no-psqlrc -tAc \"SELECT count(*) FROM pg_auth_members WHERE roleid=(SELECT oid FROM pg_roles WHERE rolname='msm') OR member=(SELECT oid FROM pg_roles WHERE rolname='msm')\"" \
+            | tr -d '[:space:]')
+        PG_OTHER_DATABASES=$(su - postgres -c \
+            "psql --no-psqlrc -tAc \"SELECT count(*) FROM pg_database WHERE NOT datistemplate AND datname <> 'msm' AND datdba=(SELECT oid FROM pg_roles WHERE rolname='msm')\"" \
+            | tr -d '[:space:]')
+        [[ "$PG_ROLE_FLAGS" == "f" && "$PG_ROLE_MEMBERSHIPS" == "0" && "$PG_OTHER_DATABASES" == "0" ]] \
+            || err "Partielle Installation wird nicht fortgesetzt: PostgreSQL-Rolle 'msm' besitzt unerwartete Rechte oder weitere Objekte."
 
-        # CREATE DATABASE darf NICHT in einem DO/Transaktions-Block laufen
-        su - postgres -c "psql -c \"CREATE DATABASE msm OWNER msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
-
-        su - postgres -c "psql -d msm -c \"GRANT ALL ON SCHEMA public TO msm;\"" 2>&1 | tee -a "$LOG_FILE" || true
-
-        ok "PostgreSQL eingerichtet (DB: msm, User: msm)"
+        log "Setze die eindeutig erkannte partielle PostgreSQL-Installation sicher fort..."
+        if ! printf '%s\n' "ALTER ROLE msm WITH PASSWORD '${PG_PASSWORD}';" \
+            | su - postgres -c "psql --no-psqlrc --set ON_ERROR_STOP=1" \
+            2>&1 | tee -a "$LOG_FILE"; then
+            err "PostgreSQL-Zugang der partiellen Installation konnte nicht erneuert werden."
+        fi
     else
-        log "PostgreSQL bleibt bestehend — User/DB nicht neu angelegt."
+        if $PG_ROLE_EXISTS || [[ -n "$PG_DATABASE_OWNER" ]]; then
+            err "PostgreSQL-Rolle oder Datenbank 'msm' existiert bereits. Für eine nachweislich abgebrochene Erstinstallation erneut mit --resume-partial starten; fremde Daten werden niemals überschrieben."
+        fi
+
+        # Übergabe ausschließlich über stdin: kein Passwort in Prozessargumenten
+        # und keine temporäre Root-Datei, die der postgres-User nicht lesen kann.
+        if ! printf '%s\n' "CREATE USER msm WITH PASSWORD '${PG_PASSWORD}';" \
+            | su - postgres -c "psql --no-psqlrc --set ON_ERROR_STOP=1" \
+            2>&1 | tee -a "$LOG_FILE"; then
+            err "PostgreSQL-Rolle konnte nicht eingerichtet werden."
+        fi
+
+        su - postgres -c "createdb --owner=msm msm" 2>&1 | tee -a "$LOG_FILE" \
+            || { su - postgres -c "dropuser --if-exists msm" >/dev/null 2>&1 || true; err "PostgreSQL-Datenbank konnte nicht erstellt werden."; }
     fi
 
-    # pg_hba.conf sicherstellen (auch bei Re-Install)
-    PG_HBA=$(find /etc/postgresql -name pg_hba.conf | head -1)
-    if [[ -n "$PG_HBA" ]]; then
+    su - postgres -c "psql -d msm -c \"GRANT ALL ON SCHEMA public TO msm;\"" 2>&1 | tee -a "$LOG_FILE"
+
+    ok "PostgreSQL eingerichtet (DB: msm, User: msm)"
+else
+    log "PostgreSQL bleibt bestehend — User/DB nicht neu angelegt."
+fi
+
+# pg_hba.conf sicherstellen (auch bei Re-Install)
+PG_HBA=$(find /etc/postgresql -name pg_hba.conf | head -1)
+if [[ -n "$PG_HBA" ]]; then
         sed -i -E 's/^(host\s+all\s+all\s+127\.0\.0\.1\/32)\s+.*/\1            scram-sha-256/' "$PG_HBA"
         sed -i -E 's/^(host\s+all\s+all\s+::1\/128)\s+.*/\1                 scram-sha-256/' "$PG_HBA"
         if ! grep -qE '^host\s+all\s+all\s+127\.0\.0\.1/32' "$PG_HBA"; then
@@ -834,15 +1136,10 @@ EOF
         else
             service postgresql restart 2>/dev/null || pg_ctlcluster $(pg_lsclusters | tail -1 | awk '{print $1}') main restart 2>/dev/null || true
         fi
-    fi
+fi
 
-    if ! $REINSTALL_MODE || $CHANGED_DB; then
-        ok "PostgreSQL installiert (DB: msm, User: msm)"
-    fi
-else
-    if ! $REINSTALL_MODE; then
-        log "SQLite wird als Datenbank genutzt (einfach, aber nicht für hohe Last)."
-    fi
+if ! $REINSTALL_MODE || $CHANGED_DB; then
+    ok "PostgreSQL installiert (DB: msm, User: msm)"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -856,7 +1153,11 @@ else
     SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
 fi
 
-# DIS Sidecar: Salt + Token generieren (oder beibehalten bei Re-Install)
+# DIS Sidecar: Salt + Token generieren (oder beibehalten bei Re-Install).
+# Unter ``set -u`` muessen beide Werte auch im frischen Installationspfad
+# definiert sein, bevor sie auf Leerwerte geprueft werden.
+DIS_SALT=""
+DIS_TOKEN=""
 if $REINSTALL_MODE && [[ -f "$MSM_DIR/backend/.env" ]]; then
     DIS_SALT=$(grep -E '^MSM_DIS_SALT=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
     DIS_TOKEN=$(grep -E '^MSM_DIS_SIDECAR_TOKEN=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
@@ -869,23 +1170,34 @@ if [[ -z "$DIS_TOKEN" ]]; then
 fi
 
 PANEL_URL="http://localhost"
+API_URL="http://localhost"
 if [[ -n "$DOMAIN" ]]; then
     PANEL_URL="https://$DOMAIN"
+    API_URL="https://$DOMAIN"
+fi
+if $REINSTALL_MODE && [[ "$CURRENT_SERVE_FRONTEND" == "false" ]] \
+    && [[ -n "$CURRENT_PANEL_URL" ]] && [[ -z "$EXTERNAL_FRONTEND_ORIGIN" ]]; then
+    PANEL_URL="$CURRENT_PANEL_URL"
 fi
 
 ENV_FILE="$MSM_DIR/backend/.env"
 
+existing_env_value() {
+    local key="$1"
+    local fallback="$2"
+    local value=""
+    if [[ -f "$ENV_FILE" ]]; then
+        value=$(grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    fi
+    printf '%s' "${value:-$fallback}"
+}
+
 # Datenbank-URL bestimmen
 if ! $REINSTALL_MODE || $CHANGED_DB; then
-    # Frische URL generieren
-    if $USE_POSTGRES; then
-        PG_PASSWORD_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$PG_PASSWORD''', safe=''))")
-        DB_URL="postgresql+psycopg2://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
-        DB_URL_ASYNC="postgresql+asyncpg://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
-    else
-        DB_URL="sqlite:///./msm.db"
-        DB_URL_ASYNC="sqlite+aiosqlite:///./msm.db"
-    fi
+    # Frische PostgreSQL-URL generieren
+    PG_PASSWORD_ENCODED=$(printf '%s' "$PG_PASSWORD" | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=''))")
+    DB_URL="postgresql+psycopg2://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
+    DB_URL_ASYNC="postgresql+asyncpg://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
 else
     # Bestehende URLs beibehalten
     if [[ -n "${CURRENT_DB_URL:-}" && -n "${CURRENT_DB_URL_ASYNC:-}" ]]; then
@@ -893,13 +1205,8 @@ else
         DB_URL_ASYNC="$CURRENT_DB_URL_ASYNC"
     else
         # Fallback (sollte bei gültigem .env nie passieren)
-        if $USE_POSTGRES; then
-            DB_URL="postgresql+psycopg2://msm:@localhost:5432/msm"
-            DB_URL_ASYNC="postgresql+asyncpg://msm:@localhost:5432/msm"
-        else
-            DB_URL="sqlite:///./msm.db"
-            DB_URL_ASYNC="sqlite+aiosqlite:///./msm.db"
-        fi
+        DB_URL="postgresql+psycopg2://msm:@localhost:5432/msm"
+        DB_URL_ASYNC="postgresql+asyncpg://msm:@localhost:5432/msm"
         warn "Bestehende DB-URL nicht gefunden — Fallback generiert."
     fi
 fi
@@ -910,9 +1217,29 @@ if $INSTALL_REDIS && [[ -z "$MSM_REDIS_URL" ]]; then
     MSM_REDIS_URL="redis://localhost:6379"
 fi
 
+COOKIE_DOMAIN=$(existing_env_value MSM_COOKIE_DOMAIN "")
+COOKIE_CROSS_SITE=$(existing_env_value MSM_COOKIE_CROSS_SITE "false")
+CORS_ALLOWED_ORIGINS=$(existing_env_value MSM_CORS_ALLOWED_ORIGINS "")
+SERVE_FRONTEND=$(existing_env_value MSM_SERVE_FRONTEND "true")
+LOGO_URL=$(existing_env_value MSM_LOGO_URL "")
+STEAM_API_KEY=$(existing_env_value MSM_STEAM_API_KEY "")
+GITHUB_CLONE_TOKEN=$(existing_env_value MSM_GITHUB_CLONE_TOKEN "")
+
+if [[ -n "$EXTERNAL_FRONTEND_ORIGIN" ]]; then
+    PANEL_URL="$EXTERNAL_FRONTEND_ORIGIN"
+    SERVE_FRONTEND=false
+    COOKIE_CROSS_SITE=true
+    if [[ -z "$CORS_ALLOWED_ORIGINS" ]]; then
+        CORS_ALLOWED_ORIGINS="$EXTERNAL_FRONTEND_ORIGIN"
+    elif [[ ",${CORS_ALLOWED_ORIGINS}," != *",${EXTERNAL_FRONTEND_ORIGIN},"* ]]; then
+        CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS},${EXTERNAL_FRONTEND_ORIGIN}"
+    fi
+fi
+
 cat > "$ENV_FILE" <<EOF
 # Automatisch generiert durch install.sh am $(date -Iseconds)
 # ÄNDERUNGEN NUR MIT VORSICHT
+# Vollständige Erklärung aller Werte: $MSM_DIR/backend/.env.example
 
 MSM_APP_NAME="Maunting Server Manager"
 MSM_DEBUG=false
@@ -935,9 +1262,31 @@ MSM_SMTP_TLS=true
 MSM_SMTP_FROM="${SMTP_FROM:-noreply@mauntingstudios.de}"
 MSM_RESEND_API_KEY="$RESEND_API_KEY"
 MSM_PANEL_URL="$PANEL_URL"
+MSM_API_URL="$API_URL"
 MSM_SETUP_COMPLETED_FILE="/opt/msm/.setup_completed"
+MSM_LOGO_URL="$LOGO_URL"
+MSM_COOKIE_DOMAIN="$COOKIE_DOMAIN"
+MSM_COOKIE_CROSS_SITE=$COOKIE_CROSS_SITE
+MSM_CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS"
+MSM_SERVE_FRONTEND=$SERVE_FRONTEND
+MSM_SERVERS_DIR="$MSM_DIR/servers"
+MSM_LOCAL_AGENT_ENV_FILE="$MSM_DIR/msm-agent/.env"
+MSM_LOCAL_AGENT_ENABLED=$INSTALL_LOCAL_AGENT
+MSM_PANEL_CONFIG_DIR="$MSM_DIR"
+MSM_PANEL_BACKUP_DIR="$MSM_DIR/backups/panel"
+MSM_BLUEPRINTS_DIR="$MSM_DIR/blueprints/community"
 MSM_DOCKER_HOST="$MSM_DOCKER_HOST"
+MSM_MANAGED_POSTGRES_IMAGE="postgres:17-alpine"
+MSM_MANAGED_POSTGRES_CONTAINER_NAME="msm-postgres"
+MSM_MANAGED_POSTGRES_NETWORK="msm-internal"
+MSM_MANAGED_POSTGRES_HOST="127.0.0.1"
+MSM_MANAGED_POSTGRES_PORT=15432
+MSM_MANAGED_POSTGRES_DATA_DIR="$MSM_DIR/postgres"
+MSM_MANAGED_POSTGRES_STATEMENT_TIMEOUT_MS=5000
+MSM_MANAGED_POSTGRES_ROW_LIMIT=500
 MSM_STEAMCMD_PATH="/usr/games/steamcmd"
+MSM_STEAM_API_KEY="$STEAM_API_KEY"
+MSM_GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN"
 MSM_REDIS_URL="$MSM_REDIS_URL"
 
 # Auto-Update (GitHub Releases)
@@ -950,6 +1299,20 @@ EOF
 chmod 600 "$ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$ENV_FILE"
 ok ".env geschrieben (chmod 600)"
+
+# Der DIS-Sidecar benoetigt dieselben Crypto-Secrets. Sie gehoeren nicht in
+# eine weltweit lesbare systemd-Unit, sondern in eine geschuetzte Environment-Datei.
+DIS_ENV_FILE="$MSM_DIR/dis-sidecar/.env"
+cat > "$DIS_ENV_FILE" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/dis-sidecar/.env.example
+MSM_SECRET_KEY="$SECRET_KEY"
+MSM_DIS_SALT="$DIS_SALT"
+MSM_DIS_SIDECAR_TOKEN="$DIS_TOKEN"
+MSM_DIS_SIDECAR_PORT=9100
+NODE_ENV=production
+EOF
+chmod 600 "$DIS_ENV_FILE"
+chown "$MSM_USER:$MSM_USER" "$DIS_ENV_FILE"
 
 # ═══════════════════════════════════════════════════════════════
 # 7. Python-Backend einrichten
@@ -965,48 +1328,86 @@ fi
 
 if $RUN_BACKEND_SETUP; then
     log "Installiere Python-Abhängigkeiten..."
-    su - "$MSM_USER" -c "
-        cd $MSM_DIR/backend
-        python3 -m venv venv
-        source venv/bin/activate
-        pip install --upgrade pip -q
-        pip install -r requirements.txt -q
-    " 2>&1 | tee -a "$LOG_FILE"
+    # recreate=true: clean venv after in-place wipe / dependency upgrades
+    prepare_app_venv "$MSM_DIR/backend" "Python-Backend" true
     ok "Python-Backend bereit"
+
+    # MSM Agent (lokaler Node, rootless Docker) — eigenes venv, gleiche User-ID
+    if $INSTALL_LOCAL_AGENT && [[ -d "$MSM_DIR/msm-agent" ]]; then
+        log "Installiere MSM Agent..."
+        prepare_app_venv "$MSM_DIR/msm-agent" "MSM Agent" true
+
+        AGENT_ENV="$MSM_DIR/msm-agent/.env"
+        if [[ ! -f "$AGENT_ENV" ]]; then
+            AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+            cat > "$AGENT_ENV" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/msm-agent/.env.example
+MSM_AGENT_TOKEN="$AGENT_TOKEN"
+MSM_AGENT_HOST="127.0.0.1"
+MSM_AGENT_PORT="9000"
+MSM_SERVERS_DIR="$MSM_DIR/servers"
+MSM_DOCKER_HOST="$MSM_DOCKER_HOST"
+MSM_AGENT_LOG_LEVEL="INFO"
+EOF
+            chmod 600 "$AGENT_ENV"
+            chown "$MSM_USER:$MSM_USER" "$AGENT_ENV"
+            ok "MSM Agent .env erzeugt (Token wird nicht geloggt)"
+        else
+            chown "$MSM_USER:$MSM_USER" "$AGENT_ENV" 2>/dev/null || true
+            ok "MSM Agent .env vorhanden — Token unverändert"
+        fi
+        ok "MSM Agent bereit"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# 8. Datenbank initialisieren
+# 8. Datenbank initialisieren / Phase-8-Schema (immer idempotent)
 # ═══════════════════════════════════════════════════════════════
 RUN_DB_INIT=false
 if ! $REINSTALL_MODE; then
+    RUN_DB_INIT=true
+elif $MIGRATE_LEGACY_SQLITE; then
     RUN_DB_INIT=true
 elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_DB; then
     RUN_DB_INIT=true
 fi
 
-if $RUN_DB_INIT; then
-    log "Initialisiere Datenbank..."
-
-    # Bei SQLite: alte DB entfernen, damit create_all ein sauberes Schema erzeugt
-    # (außer Re-Install mit unveränderter SQLite-DB)
-    if [[ "$DB_URL" == sqlite* ]]; then
-        SHOULD_DELETE_DB=true
-        if $REINSTALL_MODE && ! $CHANGED_DB; then
-            SHOULD_DELETE_DB=false
-        fi
-        if $SHOULD_DELETE_DB; then
-            rm -f "$MSM_DIR/backend/msm.db"
-        fi
-    fi
-
+if $MIGRATE_LEGACY_SQLITE; then
+    LEGACY_SQLITE="$MSM_DIR/backend/msm.db"
+    [[ -f "$LEGACY_SQLITE" ]] || err "Legacy-SQLite-Datei fehlt: $LEGACY_SQLITE"
+    log "Migriere Legacy-SQLite einmalig nach PostgreSQL..."
     su - "$MSM_USER" -c "
+        set -euo pipefail
         cd $MSM_DIR/backend
         source venv/bin/activate
-        python3 -c \"from database import engine, Base; from models import *; Base.metadata.create_all(engine)\"
-    " 2>&1 | tee -a "$LOG_FILE"
-    ok "Datenbank initialisiert"
+        python3 scripts/migrate_sqlite_to_postgres.py \\
+            --sqlite '$LEGACY_SQLITE'
+    " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-nach-PostgreSQL-Import fehlgeschlagen"
+    ok "Legacy-SQLite vollständig importiert und verifiziert"
 fi
+
+# KEEP_SETTINGS reinstall previously skipped schema work → missing servers.node_id
+# crashed the panel on multi-node startup. Always bridge/stamp (idempotent).
+log "Bereite PostgreSQL-Schema vor (Phase 8 / Multi-Node)..."
+su - "$MSM_USER" -c "
+    set -euo pipefail
+    cd $MSM_DIR/backend
+    source venv/bin/activate
+    python3 scripts/prepare_phase8_schema.py
+" 2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Schema konnte nicht vorbereitet werden"
+
+if $MIGRATE_LEGACY_SQLITE; then
+    su - "$MSM_USER" -c "
+        set -euo pipefail
+        cd $MSM_DIR/backend
+        source venv/bin/activate
+        python3 scripts/migrate_sqlite_to_postgres.py \\
+            --sqlite '$LEGACY_SQLITE' \\
+            --archive-source
+    " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-Archivierung nach erfolgreicher Migration fehlgeschlagen"
+    ok "Legacy-SQLite als Migrationsarchiv gesichert"
+fi
+ok "Datenbank/Schema bereit"
 
 # ═══════════════════════════════════════════════════════════════
 # 9. Frontend bauen
@@ -1020,7 +1421,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CODE_CHANGED; then
     RUN_FRONTEND_BUILD=true
 fi
 
-if $RUN_FRONTEND_BUILD; then
+if $RUN_FRONTEND_BUILD && [[ "$SERVE_FRONTEND" == "true" ]]; then
     log "Baue Frontend..."
     if ! su - "$MSM_USER" -c "
         set -e
@@ -1031,6 +1432,8 @@ if $RUN_FRONTEND_BUILD; then
         err "Frontend-Build fehlgeschlagen. Prüfe npm-Log und package.json."
     fi
     ok "Frontend gebaut"
+elif [[ "$SERVE_FRONTEND" != "true" ]]; then
+    log "Externes Frontend: lokaler Frontend-Build wird übersprungen."
 fi
 
 # ── DIS Sidecar: npm ci (@msdis/shield) ──
@@ -1074,7 +1477,8 @@ if $RUN_CADDY_SETUP; then
 
     CADDY_CONFIG="/etc/caddy/Caddyfile"
     CADDY_CONFD="/etc/caddy/conf.d"
-    mkdir -p /etc/caddy "$CADDY_CONFD"
+    mkdir -p /etc/caddy
+    install -d -o root -g caddy -m 0750 "$CADDY_CONFD"
 
     # ── Extension erkennen: .caddy oder .conf? ──
     # Prüfe ob existierende Caddyfile bereits conf.d importiert
@@ -1134,6 +1538,33 @@ EOF
     # MSM-Config nur schreiben, wenn kein Domain-Conflict besteht
     if $DOMAIN_CONFLICT; then
         warn "MSM-Caddy-Config wurde NICHT geschrieben (Domain-Konflikt)."
+    elif [[ -n "$DOMAIN" && "$SERVE_FRONTEND" != "true" ]]; then
+        cat > "$MSM_CADDY_FILE" <<EOF
+# MSM API — managed by install.sh
+# Das Frontend wird extern ausgeliefert; diese Site veröffentlicht nur API/WS.
+$DOMAIN {
+    encode gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    }
+
+    handle /api/* {
+        reverse_proxy localhost:8000
+    }
+
+    handle /ws/* {
+        reverse_proxy localhost:8000
+    }
+
+    handle {
+        respond "Not Found" 404
+    }
+}
+EOF
     elif [[ -n "$DOMAIN" ]]; then
         cat > "$MSM_CADDY_FILE" <<EOF
 # MSM Panel — managed by install.sh
@@ -1202,10 +1633,23 @@ EOF
     fi
 
     if ! $DOMAIN_CONFLICT; then
+        # Der Installer nutzt eine restriktive umask. Caddy muss seine
+        # Hauptdatei und die verwaltete Site trotzdem lesen koennen, ohne
+        # beide Dateien fuer andere Benutzer zugaenglich zu machen.
+        chown root:caddy "$CADDY_CONFIG" "$MSM_CADDY_FILE"
+        chmod 0640 "$CADDY_CONFIG" "$MSM_CADDY_FILE"
+        caddy validate --config "$CADDY_CONFIG" --adapter caddyfile \
+            2>&1 | tee -a "$LOG_FILE" \
+            || err "Caddy-Konfiguration ist ungültig. Prüfe: $CADDY_CONFIG"
         if $SYSTEMD_AVAILABLE; then
-            systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
+            systemctl reload caddy 2>&1 | tee -a "$LOG_FILE" \
+                || systemctl restart caddy 2>&1 | tee -a "$LOG_FILE" \
+                || err "Caddy konnte die MSM-Konfiguration nicht laden."
         else
-            service caddy restart 2>/dev/null || caddy reload --config "$CADDY_CONFIG" 2>/dev/null || true
+            service caddy restart 2>&1 | tee -a "$LOG_FILE" \
+                || caddy reload --config "$CADDY_CONFIG" --adapter caddyfile \
+                    2>&1 | tee -a "$LOG_FILE" \
+                || err "Caddy konnte die MSM-Konfiguration nicht laden."
         fi
     else
         warn "Caddy wurde NICHT neugestartet (Domain-Konflikt). Bitte Konflikt lösen und install.sh erneut ausführen."
@@ -1240,10 +1684,7 @@ User=$MSM_USER
 Group=$MSM_USER
 WorkingDirectory=$MSM_DIR/dis-sidecar
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="MSM_SECRET_KEY=$SECRET_KEY"
-Environment="MSM_DIS_SALT=$DIS_SALT"
-Environment="MSM_DIS_SIDECAR_TOKEN=$DIS_TOKEN"
-Environment="MSM_DIS_SIDECAR_URL=http://127.0.0.1:9100"
+EnvironmentFile=$MSM_DIR/dis-sidecar/.env
 ExecStart=/usr/bin/node $MSM_DIR/dis-sidecar/server.mjs
 Restart=on-failure
 RestartSec=3
@@ -1293,10 +1734,43 @@ ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/u
 WantedBy=multi-user.target
 EOF
 
+    # MSM Agent (local node) — rootless Docker, loopback only
+    if $INSTALL_LOCAL_AGENT && [[ -d "$MSM_DIR/msm-agent" ]]; then
+        cat > /etc/systemd/system/msm-agent.service <<EOF
+[Unit]
+Description=MSM Agent (Node Runtime)
+After=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/msm-agent
+Environment="PATH=$MSM_DIR/msm-agent/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+EnvironmentFile=-$MSM_DIR/msm-agent/.env
+ExecStart=$MSM_DIR/msm-agent/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=$MSM_DIR -/run/user
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     if $SYSTEMD_AVAILABLE; then
         systemctl daemon-reload
         systemctl enable msm-dis-sidecar.service
         systemctl enable msm-panel.service
+        if $INSTALL_LOCAL_AGENT && [[ -f /etc/systemd/system/msm-agent.service ]]; then
+            systemctl enable msm-agent.service
+        fi
 
         # Update-Timer (optional — deaktiviert per Default)
         cp "$SCRIPT_DIR/msm-update.service" /etc/systemd/system/msm-update.service 2>/dev/null || true
@@ -1412,6 +1886,13 @@ if command -v ufw &>/dev/null; then
     ufw allow 22/tcp comment 'SSH' 2>/dev/null || true
     ufw allow 80/tcp comment 'HTTP' 2>/dev/null || true
     ufw allow 443/tcp comment 'HTTPS' 2>/dev/null || true
+    # WSL im Mirrored-Networking-Modus routet 127.0.0.1 ueber loopback0
+    # statt lo. UFW erlaubt lo automatisch, loopback0 jedoch nicht. Ohne
+    # diese eng begrenzte Regel sperrt der Installer seine lokalen Dienste
+    # (DIS, Backend und Agent) direkt nach dem Aktivieren der Firewall aus.
+    if [[ -d /sys/class/net/loopback0 ]]; then
+        ufw allow in on loopback0 from 127.0.0.0/8 comment 'WSL local loopback' 2>/dev/null || true
+    fi
     # Spiel-Ports werden ab Phase 2 NICHT mehr als Range freigegeben.
     # Der Port-Manager des Panels öffnet je Server nur die konkret
     # zugewiesenen Einzelports (game/udp, query/udp, rcon/tcp) und schließt
@@ -1476,11 +1957,23 @@ fi
 log "Starte Panel-Service..."
 if $SYSTEMD_AVAILABLE; then
     # DIS Sidecar zuerst starten (Panel haengt davon ab)
-    systemctl restart msm-dis-sidecar.service 2>/dev/null || systemctl start msm-dis-sidecar.service 2>/dev/null || true
-    sleep 1
-    if ! systemctl is-active --quiet msm-dis-sidecar.service; then
-        warn "DIS Sidecar startet nicht. Pruefe: journalctl -u msm-dis-sidecar -n 50"
-    fi
+    systemctl restart msm-dis-sidecar.service 2>/dev/null \
+        || systemctl start msm-dis-sidecar.service 2>/dev/null \
+        || err "DIS Sidecar konnte nicht gestartet werden."
+    DIS_READY=false
+    for _attempt in $(seq 1 30); do
+        # /health ist wie alle Sidecar-Routen authentifiziert. Den Token ueber
+        # stdin statt als Prozessargument uebergeben, damit er nicht in ps
+        # oder dem Installationslog sichtbar werden kann.
+        if printf 'Authorization: Bearer %s\n' "$DIS_TOKEN" \
+            | curl -fsS --max-time 2 --header @- http://127.0.0.1:9100/health \
+                >/dev/null 2>&1; then
+            DIS_READY=true
+            break
+        fi
+        sleep 1
+    done
+    $DIS_READY || err "DIS Sidecar ist nicht bereit. Prüfe: journalctl -u msm-dis-sidecar -n 50"
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
     if [[ -f "$MSM_DIR/backend/msm.db" ]] || [[ "$DB_URL" == postgresql* ]]; then
@@ -1492,16 +1985,47 @@ if $SYSTEMD_AVAILABLE; then
         " 2>&1 | tee -a "$LOG_FILE" || err "DIS-Migration fehlgeschlagen! Migration abgebrochen. Prüfe das Log: $LOG_FILE"
     fi
 
-    systemctl restart msm-panel.service 2>/dev/null || systemctl start msm-panel.service 2>/dev/null || true
-    sleep 2
-    if systemctl is-active --quiet msm-panel.service; then
-        ok "Panel-Service läuft"
-    else
-        warn "Panel-Service startet nicht automatisch. Prüfe: journalctl -u msm-panel -n 50"
+    if $INSTALL_LOCAL_AGENT && [[ -f /etc/systemd/system/msm-agent.service ]]; then
+        systemctl restart msm-agent.service 2>/dev/null \
+            || systemctl start msm-agent.service 2>/dev/null \
+            || err "MSM Agent konnte nicht gestartet werden."
+        AGENT_READY=false
+        for _attempt in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:9000/health >/dev/null 2>&1; then
+                AGENT_READY=true
+                break
+            fi
+            sleep 1
+        done
+        $AGENT_READY || err "MSM Agent ist nicht bereit. Prüfe: journalctl -u msm-agent -n 50"
+        ok "MSM Agent läuft (Port 9000)"
     fi
+
+    systemctl restart msm-panel.service 2>/dev/null \
+        || systemctl start msm-panel.service 2>/dev/null \
+        || err "Panel-Service konnte nicht gestartet werden."
+    PANEL_READY=false
+    # Der erste Start kann auf kleiner Hardware durch Schema-, Firewall- und
+    # Runtime-Abgleich deutlich laenger als ein normaler Neustart dauern.
+    PANEL_READY_DEADLINE=$((SECONDS + 180))
+    while (( SECONDS < PANEL_READY_DEADLINE )); do
+        if curl -fsS --max-time 2 http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+            PANEL_READY=true
+            break
+        fi
+        sleep 1
+    done
+    $PANEL_READY || err "Panel-Service ist nicht bereit. Prüfe: journalctl -u msm-panel -n 50"
+    ok "Panel-Service läuft"
+    systemctl is-active --quiet caddy \
+        || err "Caddy ist nicht aktiv. Prüfe: journalctl -u caddy -n 50"
+    ok "Caddy läuft"
 else
     warn "systemd nicht verfügbar — Service muss manuell gestartet werden."
     warn "Starte manuell mit: cd /opt/msm/backend && source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"
+    if $INSTALL_LOCAL_AGENT; then
+        warn "Agent: cd /opt/msm/msm-agent && source venv/bin/activate && python main.py"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -1552,11 +2076,7 @@ echo -e "  ${BOLD}Log-Datei:${NC}          $LOG_FILE"
 echo -e "  ${BOLD}Konfiguration:${NC}      $ENV_FILE"
 echo ""
 
-if $USE_POSTGRES; then
-    echo -e "  ${GREEN}Datenbank:${NC}         PostgreSQL (DB: msm, User: msm)"
-else
-    echo -e "  ${YELLOW}Datenbank:${NC}         SQLite (empfohlen: PostgreSQL für Produktion)"
-fi
+echo -e "  ${GREEN}Datenbank:${NC}         PostgreSQL (DB: msm, User: msm)"
 
 if [[ "$EMAIL_PROVIDER" == "resend" && -n "$RESEND_API_KEY" ]]; then
     echo -e "  ${GREEN}Email:${NC}             Resend (API-Key konfiguriert)"
@@ -1564,7 +2084,7 @@ elif [[ -n "$SMTP_HOST" ]]; then
     echo -e "  ${GREEN}Email:${NC}             SMTP $SMTP_HOST:$SMTP_PORT"
 else
     echo -e "  ${YELLOW}Email nicht konfiguriert.${NC}"
-    echo -e "         Setze MSM_RESEND_API_KEY oder MSM_SMTP_* in $ENV_FILE."
+    echo -e "         Wird beim ersten Oeffnen sicher im Setup-Wizard eingerichtet."
 fi
 
 if $INSTALL_REDIS; then
@@ -1582,8 +2102,8 @@ fi
 echo ""
 echo -e "  ${BOLD}Nächste Schritte:${NC}"
 echo -e "    1. Panel im Browser öffnen"
-echo -e "    2. Setup-Wizard durchlaufen (erfordert gültige Email-Adresse)"
-echo -e "    3. Ersten Owner-Account erstellen"
+echo -e "    2. E-Mail-Versand und Owner im Setup-Wizard einrichten"
+echo -e "    3. E-Mail-Adresse mit dem zugesandten Code bestaetigen"
 echo -e "    4. Game-Server erstellen — jeder Server läuft isoliert mit eigenem Linux-User"
 echo ""
 echo -e "  ${BOLD}Wichtige Befehle:${NC}"

@@ -25,16 +25,17 @@ class InstallUpdateLockInfo:
 
 
 _LOCK = threading.Lock()
-_ACTIVE: InstallUpdateLockInfo | None = None
+_ACTIVE: dict[int | None, InstallUpdateLockInfo] = {}
 
 
 def try_acquire_install_update_lock(
     server_id: int,
     operation: str,
     *,
+    node_id: int | None = None,
     ttl_seconds: int = DEFAULT_INSTALL_UPDATE_LOCK_TTL_SECONDS,
 ) -> bool:
-    """Reserve the single install/update slot.
+    """Reserve the install/update slot for a specific node and server.
 
     Stale process-local locks are replaced after ``ttl_seconds``. This does not
     claim cross-process serialization; production should run one panel worker or
@@ -43,9 +44,17 @@ def try_acquire_install_update_lock(
     global _ACTIVE
     now = time.monotonic()
     with _LOCK:
-        if _ACTIVE is not None and _ACTIVE.expires_at > now:
+        # Prevent concurrent operations on the exact same server
+        for k, v in list(_ACTIVE.items()):
+            if v.expires_at > now and v.server_id == server_id:
+                return False
+        
+        # Prevent concurrent SteamCMD operations on the exact same node (to avoid SteamCMD locks)
+        current = _ACTIVE.get(node_id)
+        if current is not None and current.expires_at > now:
             return False
-        _ACTIVE = InstallUpdateLockInfo(
+
+        _ACTIVE[node_id] = InstallUpdateLockInfo(
             server_id=server_id,
             operation=operation,
             acquired_at=now,
@@ -62,33 +71,38 @@ def release_install_update_lock(server_id: int) -> None:
     """
     global _ACTIVE
     with _LOCK:
-        if _ACTIVE is not None and _ACTIVE.server_id == server_id:
-            _ACTIVE = None
+        for k, v in list(_ACTIVE.items()):
+            if v.server_id == server_id:
+                _ACTIVE.pop(k, None)
 
 
 def active_install_update_lock() -> InstallUpdateLockInfo | None:
-    """Return the current non-stale lock for tests and diagnostics."""
+    """Return the first active non-stale lock (for backward-compatible diagnostic/test checks)."""
     global _ACTIVE
     now = time.monotonic()
     with _LOCK:
-        if _ACTIVE is not None and _ACTIVE.expires_at <= now:
-            _ACTIVE = None
-        return _ACTIVE
+        for k, v in list(_ACTIVE.items()):
+            if v.expires_at <= now:
+                _ACTIVE.pop(k, None)
+        if _ACTIVE:
+            return list(_ACTIVE.values())[0]
+        return None
 
 
 def reset_install_update_lock_for_tests() -> None:
     global _ACTIVE
     with _LOCK:
-        _ACTIVE = None
+        _ACTIVE.clear()
 
 
 def force_release_install_update_lock(server_id: int) -> bool:
     """Admin/cancel: lock freigeben wenn es zu diesem Server gehoert."""
     global _ACTIVE
     with _LOCK:
-        if _ACTIVE is not None and _ACTIVE.server_id == server_id:
-            _ACTIVE = None
-            return True
+        for k, v in list(_ACTIVE.items()):
+            if v.server_id == server_id:
+                _ACTIVE.pop(k, None)
+                return True
         return False
 
 
@@ -96,11 +110,12 @@ def acquire_install_update_lock_blocking(
     server_id: int,
     operation: str,
     *,
+    node_id: int | None = None,
     ttl_seconds: int = DEFAULT_INSTALL_UPDATE_LOCK_TTL_SECONDS,
 ) -> None:
-    """Reserve the single install/update slot, blocking until it is free.
+    """Reserve the install/update slot, blocking until it is free.
 
     Stale process-local locks are replaced after ``ttl_seconds``.
     """
-    while not try_acquire_install_update_lock(server_id, operation, ttl_seconds=ttl_seconds):
+    while not try_acquire_install_update_lock(server_id, operation, node_id=node_id, ttl_seconds=ttl_seconds):
         time.sleep(1)

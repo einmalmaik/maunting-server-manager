@@ -59,6 +59,32 @@ class BackupCryptoService:
         return {}
 
     @staticmethod
+    def derive_raw_key_b64(password: str, salt: str) -> str:
+        """Derive AES-256 key (base64) via DIS for one-shot agent handoff (Phase 6).
+
+        Same Argon2id params as init_key. Key is not stored in DIS — caller must
+        pass it only in-memory to the agent and never log it.
+        """
+        url = BackupCryptoService._dis_url("/backup/derive-raw-key")
+        headers = BackupCryptoService._auth_headers()
+        headers["Content-Type"] = "application/json"
+        try:
+            resp = httpx.post(
+                url,
+                json={"password": password, "salt": salt},
+                headers=headers,
+                timeout=_JSON_TIMEOUT,
+            )
+        except httpx.HTTPError as e:
+            raise BackupCryptoError(f"DIS nicht erreichbar: {e}") from e
+        if resp.status_code != 200:
+            raise BackupCryptoError(f"DIS derive-raw-key fehlgeschlagen: HTTP {resp.status_code}")
+        key_b64 = resp.json().get("key_b64")
+        if not key_b64 or not isinstance(key_b64, str):
+            raise BackupCryptoError("DIS derive-raw-key: missing key_b64")
+        return key_b64
+
+    @staticmethod
     def init_key(password: str, salt: str) -> str:
         """Initialisiert einen Backup-Verschluesselungskey via DIS.
 

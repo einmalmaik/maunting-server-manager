@@ -10,7 +10,7 @@ _DEFAULT_BLACKLIST_TTL_DAYS = 7
 
 
 def blacklist_jwt(db: Session, jti: str, user_id: int | None, expires_at: datetime | None) -> None:
-    """Speichert einen JWT-JTI in der SQLite-Blacklist.
+    """Speichert einen JWT-JTI in der zentralen PostgreSQL-Blacklist.
 
     Falls expires_at None ist, wird ein Default-TTL verwendet, damit der
     Eintrag nicht fuer immer in der Datenbank verbleibt.

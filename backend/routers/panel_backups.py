@@ -63,7 +63,7 @@ def create_panel_backup_endpoint(
 
     Admin-only (panel.settings.write) + CSRF.
 
-    Bei DB-Dump-Fehler (pg_dump/sqlite3) wird 500 zurueckgegeben — kein
+    Bei DB-Dump-Fehler (pg_dump) wird 500 zurueckgegeben — kein
     partieller Backup-Record wird angelegt. S3/DIS-Fehler blockieren nicht
     das lokale Backup (Best-Effort).
     """

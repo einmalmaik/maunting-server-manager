@@ -37,6 +37,15 @@ _FAKE_SQLITE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY
 # ── Helper (analog test_panel_backup_service.py) ────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _postgres_panel_runtime(monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        "postgresql+psycopg2://msm:test@localhost/msm",
+    )
+
+
 def _prepare_dirs(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
     config_dir = tmp_path / "config"
     backup_dir = tmp_path / "backups" / "panel"

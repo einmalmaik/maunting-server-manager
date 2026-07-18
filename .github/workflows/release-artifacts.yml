@@ -1,0 +1,125 @@
+name: Release deployment artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Artifact version label (for example v1.8.0-rc1)"
+        required: false
+      vite_api_url:
+        description: "Optional public API URL for a separately hosted frontend"
+        required: false
+      vite_ws_url:
+        description: "Optional public WebSocket URL for a separately hosted frontend"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-artifacts-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    name: Build tested deployment units
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            msm-agent/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            dis-sidecar/package-lock.json
+
+      - name: Test backend
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m pytest tests -q
+
+      - name: Test agent
+        working-directory: msm-agent
+        run: |
+          pip install -r requirements.txt
+          python -m pytest tests -q
+
+      - name: Build and test frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ inputs.vite_api_url }}
+          VITE_WS_URL: ${{ inputs.vite_ws_url }}
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Test DIS sidecar
+        working-directory: dis-sidecar
+        run: |
+          npm ci
+          node --test test-backup-endpoints.mjs
+
+      - name: Resolve artifact version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_VERSION}" ]]; then
+            version="${INPUT_VERSION}"
+          else
+            version="manual-${GITHUB_SHA::12}"
+          fi
+          [[ "$version" =~ ^[A-Za-z0-9._-]+$ ]]
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Package panel, frontend and agent
+        run: bash scripts/build-release-artifacts.sh "${{ steps.version.outputs.value }}" release
+
+      - name: Verify checksums and archive contents
+        working-directory: release
+        run: |
+          sha256sum --check SHA256SUMS
+          tar -tzf "msm-panel-${{ steps.version.outputs.value }}.tar.gz" | grep -q '/backend/main.py$'
+          tar -tzf "msm-frontend-${{ steps.version.outputs.value }}.tar.gz" | grep -q '/dist/index.html$'
+          tar -tzf "msm-agent-${{ steps.version.outputs.value }}.tar.gz" | grep -q '/msm-agent/main.py$'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msm-deployment-${{ steps.version.outputs.value }}
+          path: |
+            release/*.tar.gz
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach assets to draft GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --draft --title "MSM $TAG" \
+              --notes "Getrennte, getestete Deployment-Artefakte für Panel, Frontend und Node-Agent."
+          fi
+          gh release upload "$TAG" release/*.tar.gz release/SHA256SUMS --clobber

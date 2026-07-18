@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { BookOpen, Check, Copy, Download, ExternalLink, Info, AlertTriangle } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { apiUrl } from '@/config/api'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 interface CodeBlockProps {
   example: string | object
@@ -284,20 +286,17 @@ export function BlueprintsDocs() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl">
-      <div className="flex items-center gap-3 mb-2">
-        <BookOpen className="w-8 h-8 text-primary" />
-        <h1 className="font-headline text-display-sm font-extrabold text-on-surface">
-          {t('docs.pageTitle')}
-        </h1>
-      </div>
-      <p className="font-body-md text-body-md text-on-surface-variant mb-6">
-        {t('docs.pageSubtitle')}
-      </p>
+    <div className="msm-page mx-auto max-w-6xl">
+      <PageHeader
+        eyebrow={t('pageContext.help', 'Help & guidance')}
+        title={t('docs.pageTitle')}
+        description={t('docs.pageSubtitle')}
+        status={<BookOpen className="h-6 w-6 text-primary" aria-hidden="true" />}
+      />
 
       <div className="mb-8 flex flex-wrap items-center gap-3">
         <a
-          href={`/api/blueprints/template?lang=${i18n.language}`}
+          href={apiUrl(`/blueprints/template?lang=${i18n.language}`)}
           download
           data-testid="docs-template-download"
           className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
@@ -318,8 +317,21 @@ export function BlueprintsDocs() {
         </span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[220px,1fr] gap-8">
-        <nav className="lg:sticky lg:top-20 lg:self-start">
+      <details className="msm-card mb-5 p-4 lg:hidden">
+        <summary className="cursor-pointer font-label-md text-sm font-semibold text-on-surface">
+          {t('docs.tocTitle')}
+        </summary>
+        <nav className="mt-3 border-t border-outline-variant pt-3" aria-label={t('docs.tocTitle')}>
+          <ul className="grid gap-1.5 sm:grid-cols-2">
+            {TOC.map(({ key, title }) => (
+              <li key={key}><a href={`#docs-${key}`} className="block min-h-11 py-2 text-sm text-on-surface-variant hover:text-on-surface">{title}</a></li>
+            ))}
+          </ul>
+        </nav>
+      </details>
+
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[220px,1fr]">
+        <nav className="hidden lg:sticky lg:top-20 lg:block lg:self-start" aria-label={t('docs.tocTitle')}>
           <h2 className="font-headline text-label-lg uppercase tracking-wide text-on-surface-variant mb-3">
             {t('docs.tocTitle')}
           </h2>

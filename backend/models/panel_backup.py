@@ -9,7 +9,7 @@ from database import Base
 class PanelBackup(Base):
     """Panel Self-Backup Record (MSM-Datenbank + Config-Dateien).
 
-    Speichert Metadaten eines Panel-Backups (pg_dump/sqlite3-Dump der zentralen
+    Speichert Metadaten eines Panel-Backups (pg_dump der zentralen
     MSM-DB + Config-Dateien wie .env, install.sh, Caddyfile.template, ...).
 
     Felder:
@@ -20,7 +20,7 @@ class PanelBackup(Base):
     - s3_bucket: S3-Bucket-Name (null wenn nicht nach S3 hochgeladen)
     - encrypted: True wenn verschluesselt in S3 hochgeladen
     - size_mb: Groesse der lokalen tar.gz in MB
-    - db_type: Datenbank-Typ ("postgresql" oder "sqlite3")
+    - db_type: Datenbank-Typ ("postgresql"; alte "sqlite3"-Records sind read-only legacy)
     - created_at: Zeitstempel der Erstellung
     """
     __tablename__ = "panel_backups"

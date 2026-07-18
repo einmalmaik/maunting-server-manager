@@ -326,6 +326,7 @@ def run_steamcmd_install(
     steamcmd_image: str | None = None,
     validate: bool = True,
     beta_branch: str | None = None,
+    node: Any | None = None,
 ) -> dict:
     """Lädt/aktualisiert eine Steam-App in `install_dir` via ephemerem
     SteamCMD-Container. Blockiert bis SteamCMD fertig ist.
@@ -334,21 +335,39 @@ def run_steamcmd_install(
     """
     from services.steam_account_service import SteamAccountService
 
-    os.makedirs(install_dir, exist_ok=True)
+    if node is None:
+        os.makedirs(install_dir, exist_ok=True)
 
     # 0x226/0x202 auto-recovery (generic for all Steam Blueprint servers)
     # If previous update left a bad manifest (StateFlags 550 etc.), delete it (with backup).
     # SteamCMD will recreate a clean one during the validate. No player data touched.
     try:
-        man = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
-        if os.path.exists(man):
-            with open(man) as mf:
-                mt = mf.read()
-            if ("550" in mt or "0x226" in mt or "0x206" in mt or "0x2" in mt or "Timed out waiting" in mt or ("UpdateResult" in mt and ("43" in mt or "8" in mt))):
-                bak = man + ".bad-state." + str(int(__import__("time").time()))
-                __import__("shutil").copy2(man, bak)
-                os.unlink(man)
-                _append_console_log(server_id, f"[MSM] Bad Steam manifest detected (0x2xx / timeout state) - backed up and removed: {bak}\n")
+        from services.node_client import NodeClient, NodeClientError
+        if node is not None:
+            client = NodeClient.from_node(node)
+            manifest_rel = f"steamapps/appmanifest_{app_id}.acf"
+            try:
+                mt = client.files_read(server_id, manifest_rel)
+                if ("550" in mt or "0x226" in mt or "0x206" in mt or "0x2" in mt or "Timed out waiting" in mt or ("UpdateResult" in mt and ("43" in mt or "8" in mt))):
+                    bak_rel = f"{manifest_rel}.bad-state.{int(__import__('time').time())}"
+                    client.files_write(server_id, bak_rel, mt)
+                    client.files_delete(server_id, manifest_rel)
+                    _append_console_log(server_id, f"[MSM] Bad Steam manifest detected (0x2xx / timeout state) on agent - backed up to {bak_rel} and removed\n")
+            except NodeClientError as exc:
+                if exc.status_code != 404:
+                    logger.warning("Fehler beim pre-flight manifest check auf remote agent: %s", exc.message)
+            except Exception as exc:
+                logger.warning("Fehler beim pre-flight manifest check auf remote agent: %s", exc)
+        else:
+            man = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
+            if os.path.exists(man):
+                with open(man) as mf:
+                    mt = mf.read()
+                if ("550" in mt or "0x226" in mt or "0x206" in mt or "0x2" in mt or "Timed out waiting" in mt or ("UpdateResult" in mt and ("43" in mt or "8" in mt))):
+                    bak = man + ".bad-state." + str(int(__import__("time").time()))
+                    __import__("shutil").copy2(man, bak)
+                    os.unlink(man)
+                    _append_console_log(server_id, f"[MSM] Bad Steam manifest detected (0x2xx / timeout state) - backed up and removed: {bak}\n")
     except Exception as _e:
         pass  # non-fatal
 
@@ -396,6 +415,8 @@ def run_steamcmd_install(
     #   297601:297593 or whatever os.stat reports). This avoids the subuid namespace chown
     #   conflict that often leaves manifests in 0x202/0x226 state.
     try:
+        if node is not None:
+            raise FileNotFoundError
         st = os.stat(install_dir)
         chown_uid, chown_gid = st.st_uid, st.st_gid
     except Exception:
@@ -420,6 +441,7 @@ def run_steamcmd_install(
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=3600,
         log_callback=_live_log,
+        node=node,
     )
 
     # Bei Live-Streaming ist out leer (— wurde bereits live geschrieben).
@@ -439,52 +461,42 @@ def run_steamcmd_install(
             _append_console_log(server_id, f"\n[MSM] SteamCMD Diagnose: {classified['error']}\n")
         _append_console_log(server_id, f"\n[MSM] SteamCMD fehlgeschlagen: {result['error']}\n")
 
-        # Post-failure 0x2xx safety (0x226, 0x206, 0x202, timeout, exit 8 etc.)
-        # SteamCMD often ends with these states on large Wine apps like SCUM even after pre-clean.
-        # We force a clean manifest here so the "best effort continue" (server starts anyway)
-        # has a usable StateFlags=4 and the user can play without being blocked.
-        try:
-            manp = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
-            combined_err = str(result.get("error", "")) + "".join(live_output)
-            if ("0x2" in combined_err or "0x226" in combined_err or "0x206" in combined_err or
-                "Timed out" in combined_err or "exit 8" in combined_err):
-                if os.path.exists(manp):
-                    bak = manp + ".post-fail." + str(int(__import__("time").time()))
-                    __import__("shutil").copy2(manp, bak)
-                clean = ('"AppState"\n{\n\t"appid"\t\t"' + app_id + '"\n\t"StateFlags"\t\t"4"\n\t"UpdateResult"\t\t"0"\n\t"BytesToDownload"\t\t"0"\n\t"BytesToStage"\t\t"0"\n}\n')
-                with open(manp, "w") as mf:
-                    mf.write(clean)
-                _append_console_log(server_id, f"[MSM] Forced clean manifest (State 4) after 0x2xx failure — best effort start can proceed\\n")
-                try:
-                    uid, gid = docker_service.container_runtime_uid_gid()
-                    __import__("os").chown(manp, uid, gid)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
     # Post-failure 0x2xx safety (0x226, 0x206, 0x202, timeout, exit 8 etc.)
     # SteamCMD often ends with these states on large Wine apps like SCUM even after pre-clean.
     # We force a clean manifest here so the "best effort continue" (server starts anyway)
     # has a usable StateFlags=4 and the user can play without being blocked.
     if not result.get("ok", False):
         try:
-            manp = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
             combined_err = str(result.get("error", "")) + "".join(live_output)
             if ("0x2" in combined_err or "0x226" in combined_err or "0x206" in combined_err or
                 "Timed out" in combined_err or "exit 8" in combined_err):
-                if os.path.exists(manp):
-                    bak = manp + ".post-fail." + str(int(__import__("time").time()))
-                    __import__("shutil").copy2(manp, bak)
-                clean = ('"AppState"\n{\n\t"appid"\t\t"' + app_id + '"\n\t"StateFlags"\t\t"4"\n\t"UpdateResult"\t\t"0"\n\t"BytesToDownload"\t\t"0"\n\t"BytesToStage"\t\t"0"\n}\n')
-                with open(manp, "w") as mf:
-                    mf.write(clean)
-                _append_console_log(server_id, f"[MSM] Forced clean manifest (State 4) after 0x2xx failure — best effort start can proceed\n")
-                try:
-                    uid, gid = docker_service.container_runtime_uid_gid()
-                    __import__("os").chown(manp, uid, gid)
-                except Exception:
-                    pass
+                if node is not None:
+                    from services.node_client import NodeClient
+                    client = NodeClient.from_node(node)
+                    manifest_rel = f"steamapps/appmanifest_{app_id}.acf"
+                    try:
+                        mt = client.files_read(server_id, manifest_rel)
+                        bak_rel = f"{manifest_rel}.post-fail.{int(__import__('time').time())}"
+                        client.files_write(server_id, bak_rel, mt)
+                    except Exception:
+                        pass
+                    clean = ('"AppState"\n{\n\t"appid"\t\t"' + app_id + '"\n\t"StateFlags"\t\t"4"\n\t"UpdateResult"\t\t"0"\n\t"BytesToDownload"\t\t"0"\n\t"BytesToStage"\t\t"0"\n}\n')
+                    client.files_write(server_id, manifest_rel, clean)
+                    _append_console_log(server_id, f"[MSM] Forced clean manifest (State 4) after 0x2xx failure on agent — best effort start can proceed\n")
+                else:
+                    manp = os.path.join(install_dir, "steamapps", f"appmanifest_{app_id}.acf")
+                    if os.path.exists(manp):
+                        bak = manp + ".post-fail." + str(int(__import__("time").time()))
+                        __import__("shutil").copy2(manp, bak)
+                    clean = ('"AppState"\n{\n\t"appid"\t\t"' + app_id + '"\n\t"StateFlags"\t\t"4"\n\t"UpdateResult"\t\t"0"\n\t"BytesToDownload"\t\t"0"\n\t"BytesToStage"\t\t"0"\n}\n')
+                    with open(manp, "w") as mf:
+                        mf.write(clean)
+                    _append_console_log(server_id, f"[MSM] Forced clean manifest (State 4) after 0x2xx failure — best effort start can proceed\n")
+                    try:
+                        uid, gid = docker_service.container_runtime_uid_gid()
+                        __import__("os").chown(manp, uid, gid)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -493,10 +505,11 @@ def run_steamcmd_install(
     # find + chmod a+rwX + chown to the real owner. This normalizes the bind mount
     # so both the panel (unprivileged) and the Wine game container can access files
     # without namespace/permission fights.
-    try:
-        docker_service.repair_bind_mount_permissions(install_dir)
-    except Exception:
-        pass
+    if node is None:
+        try:
+            docker_service.repair_bind_mount_permissions(install_dir)
+        except Exception:
+            pass
 
     return result
 
@@ -509,6 +522,7 @@ def run_steamcmd_workshop_download(
     workshop_item_id: str,
     use_authenticated_login: bool = False,
     steamcmd_image: str | None = None,
+    node: Any | None = None,
 ) -> dict:
     """Kompatibler Single-Mod-Einstieg; intern ein Batch mit einer Mod."""
     result = run_steamcmd_workshop_download_batch(
@@ -518,6 +532,7 @@ def run_steamcmd_workshop_download(
         workshop_item_ids=[workshop_item_id],
         use_authenticated_login=use_authenticated_login,
         steamcmd_image=steamcmd_image,
+        node=node,
     )
     if not result.get("ok", False):
         item = (result.get("items") or {}).get(str(workshop_item_id), {})
@@ -537,6 +552,7 @@ def run_steamcmd_workshop_download_batch(
     timeout: int = 3600,
     retry: bool = True,
     steamcmd_image: str | None = None,
+    node: Any | None = None,
 ) -> dict:
     """Lädt mehrere Workshop-Items in einer SteamCMD-Session.
 
@@ -615,6 +631,7 @@ def run_steamcmd_workshop_download_batch(
         env={"HOME": CONTAINER_DATA_DIR},
         timeout=timeout,
         log_callback=_live_log,
+        node=node,
     )
     out = (result.get("stdout") or "") + (result.get("stderr") or "")
     if out:
@@ -635,11 +652,12 @@ def run_steamcmd_workshop_download_batch(
     # Rootless Docker + overlayfs repair after workshop batch (with owner like main installs).
     # This makes newly written workshop folders visible and owned correctly for the
     # immediate host-side check.
-    try:
-        uid, gid = docker_service.container_runtime_uid_gid()
-        docker_service.repair_bind_mount_permissions(install_dir, owner_uid_gid=(uid, gid))
-    except Exception:
-        pass
+    if node is None:
+        try:
+            uid, gid = docker_service.container_runtime_uid_gid()
+            docker_service.repair_bind_mount_permissions(install_dir, owner_uid_gid=(uid, gid))
+        except Exception:
+            pass
 
     full_log = "\n".join(live_output) + "\n" + (out or "")
     verify_started_at = time.time()
@@ -657,7 +675,7 @@ def run_steamcmd_workshop_download_batch(
                 server_id,
                 f"[MSM] Mod {item_id}: trusted via SteamCMD success log (overlayfs visibility fix)\n",
             )
-        if not installed and target.exists():
+        if node is None and not installed and target.exists():
             # Secondary: folder visible on host with content or recent mtime
             for _ in range(10):
                 try:
@@ -702,6 +720,7 @@ def run_steamcmd_workshop_download_batch(
             timeout=timeout,
             retry=False,
             steamcmd_image=steamcmd_image,
+            node=node,
         )
         retry_items = retry_result.get("items", {}) if isinstance(retry_result, dict) else {}
         for item_id in failed_ids:
@@ -787,6 +806,17 @@ def write_workshop_modlist(server, relative_path: str, lines: list[str]) -> None
         return
     if any(part == ".." for part in relative_path.split("/")):
         _append_console_log(server.id, "[MSM] Modliste: Pfad enthaelt '..'\n")
+        return
+
+    node = getattr(server, "node", None)
+    if node is not None and not getattr(node, "is_local", False):
+        try:
+            from services.node_client import NodeClient
+
+            content = "".join(f"{line}\n" for line in _finalize_modlist_lines(server, lines))
+            NodeClient.from_node(node).files_write(server.id, relative_path, content)
+        except Exception:
+            _append_console_log(server.id, "[MSM] Modliste: Schreiben auf Node fehlgeschlagen\n")
         return
 
     try:
@@ -1149,11 +1179,17 @@ class GamePlugin(ABC):
 
     # ─ Default Lifecycle (Docker) ────────────────────────────────────────
 
+    def _runtime_node(self, server):
+        """Node ORM object for multi-node routing (None = local docker_service)."""
+        return getattr(server, "node", None)
+
     def start(self, server) -> dict:
         """Standard-Start: Container mit aktuellen Limits/Ports neu hochziehen."""
         if not self.docker_image:
             return {"error": "Plugin hat kein docker_image konfiguriert"}
-        if not docker_service.is_available():
+        node = self._runtime_node(server)
+        # Remote node: agent must be used; local without node: panel docker
+        if node is None and not docker_service.is_available():
             return {"error": "Docker ist auf diesem Host nicht verfügbar"}
 
         # Pflicht-Bind-IP früh validieren — sonst riskieren wir 0.0.0.0.
@@ -1171,26 +1207,29 @@ class GamePlugin(ABC):
         # Rechte VOR Runtime-Patches/Preflight normalisieren. Wenn externe Tools
         # root-/fremd-eigene Dateien erzeugen, darf prepare_runtime nicht schon
         # an Permission-Denied scheitern, bevor MSM reparieren konnte.
-        for volume in volume_binds:
-            if volume.read_only:
-                continue
-            repair = docker_service.repair_bind_mount_permissions(
-                volume.host_path,
-                container_path=volume.container_path,
-                owner_uid_gid=(uid, gid),
-            )
-            if not repair.get("ok"):
-                err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
-                _append_console_log(
-                    server.id,
-                    f"[MSM] Permission-Repair Hinweis (Start wird fortgesetzt): {err}\n",
+        # Permission-Repair laeuft am Panel-Host nur wenn kein Remote-Node
+        # (Agent uebernimmt Dateirechte auf dem Node selbst).
+        if node is None or getattr(node, "is_local", False):
+            for volume in volume_binds:
+                if volume.read_only:
+                    continue
+                repair = docker_service.repair_bind_mount_permissions(
+                    volume.host_path,
+                    container_path=volume.container_path,
+                    owner_uid_gid=(uid, gid),
                 )
-            elif repair.get("stderr", "").strip():
-                _append_console_log(
-                    server.id,
-                    "[MSM] Permission-Repair: einige Dateien konnten nicht angepasst werden "
-                    "(z. B. root-owned unter Rootless Docker). Start wird fortgesetzt.\n",
-                )
+                if not repair.get("ok"):
+                    err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] Permission-Repair Hinweis (Start wird fortgesetzt): {err}\n",
+                    )
+                elif repair.get("stderr", "").strip():
+                    _append_console_log(
+                        server.id,
+                        "[MSM] Permission-Repair: einige Dateien konnten nicht angepasst werden "
+                        "(z. B. root-owned unter Rootless Docker). Start wird fortgesetzt.\n",
+                    )
 
         # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
         try:
@@ -1217,6 +1256,7 @@ class GamePlugin(ABC):
             extra_networks=self.container_extra_networks(server),
             startup_check_seconds=getattr(getattr(self.get_blueprint(), "runtime", None), "startupCheckSeconds", None) or 2.0,
             server_id=server.id,  # enables pull progress in console
+            node=node,
         )
         if not result["ok"]:
             _append_console_log(server.id, f"[MSM] Container-Start fehlgeschlagen: {result['error']}\n")
@@ -1236,7 +1276,7 @@ class GamePlugin(ABC):
         """
         name = container_name_for(server.id)
         timeout = self.stop_grace_period_seconds(server)
-        result = docker_service.stop(name, timeout=timeout)
+        result = docker_service.stop(name, timeout=timeout, node=self._runtime_node(server))
         if not result["ok"]:
             return {"error": result["error"]}
         _append_console_log(server.id, f"[MSM] Container {name} gestoppt\n")
@@ -1257,12 +1297,13 @@ class GamePlugin(ABC):
     def get_status(self, server) -> ServerStatus:
         """Liefert Live-Status aus Docker (Container-State + CPU/RAM via stats)."""
         name = container_name_for(server.id)
-        state = docker_service.inspect_state(name)
+        node = self._runtime_node(server)
+        state = docker_service.inspect_state(name, node=node)
         if state is None:
             return ServerStatus(status="stopped")
 
         is_running = state["status"] == "running"
-        live_stats = docker_service.stats(name) if is_running else None
+        live_stats = docker_service.stats(name, node=node) if is_running else None
         started_at = _parse_docker_started_at(state.get("started_at")) if is_running else None
         uptime_seconds = None
         if started_at is not None:

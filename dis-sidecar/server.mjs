@@ -156,6 +156,10 @@ const server = http.createServer(async (req, res) => {
   if (req.url === '/backup/invalidate-key') {
     return handleInvalidateKey(req, res);
   }
+  // One-shot raw AES key for MSM Agent handoff (Phase 6). Not stored in backupKeys.
+  if (req.url === '/backup/derive-raw-key') {
+    return handleDeriveRawKey(req, res);
+  }
 
   let data;
   try {
@@ -257,6 +261,53 @@ function lookupBackupKey(res, keyId) {
     return null;
   }
   return key;
+}
+
+/**
+ * POST /backup/derive-raw-key — Argon2id → base64 AES-256 key for agent handoff.
+ * Same KDF params as init-key. Key is NOT stored in backupKeys (RAM only on caller).
+ * Response key material must not be logged by the panel.
+ */
+async function handleDeriveRawKey(req, res) {
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    return jsonReply(res, 400, { error: 'invalid json' });
+  }
+  const password = body?.password;
+  const salt = body?.salt;
+  if (typeof password !== 'string' || password.length === 0) {
+    return jsonReply(res, 400, { error: 'MissingPassword' });
+  }
+  if (typeof salt !== 'string' || salt.length === 0) {
+    return jsonReply(res, 400, { error: 'MissingSalt' });
+  }
+  let saltBytes;
+  try {
+    saltBytes = new Uint8Array(Buffer.from(salt, 'base64'));
+  } catch {
+    return jsonReply(res, 400, { error: 'InvalidSalt' });
+  }
+  if (saltBytes.length === 0) {
+    return jsonReply(res, 400, { error: 'InvalidSalt' });
+  }
+  let rawKey;
+  try {
+    rawKey = await argon2idRaw({
+      password,
+      salt: saltBytes,
+      ...BACKUP_KDF_PARAMS,
+    });
+  } catch {
+    return jsonReply(res, 400, { error: 'KeyDerivationFailed' });
+  }
+  try {
+    const key_b64 = Buffer.from(rawKey).toString('base64');
+    return jsonReply(res, 200, { key_b64 });
+  } finally {
+    rawKey.fill(0);
+  }
 }
 
 /** POST /backup/init-key — derive Argon2id key from password+salt, store in memory. */

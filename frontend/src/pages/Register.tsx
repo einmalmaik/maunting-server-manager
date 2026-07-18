@@ -8,6 +8,7 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
 
 export function Register() {
@@ -15,6 +16,7 @@ export function Register() {
   const navigate = useNavigate()
   const { finishLogin } = useAuthStore()
   const [error, setError] = useState('')
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [requiresVerification, setRequiresVerification] = useState(false)
   const [registeredEmail, setRegisteredEmail] = useState('')
@@ -44,6 +46,7 @@ export function Register() {
           username: form.username,
           email: form.email,
           password: form.password,
+          captcha_token: captchaToken,
         }),
       })
       setRegisteredEmail(res.email)
@@ -122,7 +125,7 @@ export function Register() {
               MauntingStudios
             </h1>
             <p className="font-mono-sm text-mono-sm text-on-surface-variant">
-              Infrastructure Control
+              Server Manager
             </p>
           </div>
         </div>
@@ -246,6 +249,8 @@ export function Register() {
               placeholder="••••••••"
               required
             />
+
+            <CaptchaWidget onVerify={setCaptchaToken} />
 
             <ErrorMessage message={error} className="text-sm" />
 

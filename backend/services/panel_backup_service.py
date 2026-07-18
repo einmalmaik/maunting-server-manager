@@ -1,8 +1,7 @@
 """Panel Backup Service — Panel Self-Backup (MSM-Datenbank + Configs).
 
 Erstellt Panel-Backups bestehend aus:
-1. DB-Dump der zentralen MSM-Datenbank (pg_dump fuer PostgreSQL,
-   sqlite3 .dump fuer SQLite-Dev)
+1. DB-Dump der zentralen MSM-PostgreSQL-Datenbank (pg_dump)
 2. Config-Dateien (.env, install.sh, Caddyfile.template, msm.service.template,
    msm-update.service, msm-update.timer, update.sh — fehlende werden mit
    Warning skipped)
@@ -13,7 +12,7 @@ Erstellt Panel-Backups bestehend aus:
 7. Retention-Cleanup (lokal + S3 + DB, best-effort S3)
 
 Datenfluss:
-   pg_dump/sqlite3 -> msm_db.sql
+   pg_dump -> msm_db.sql
    Config-Dateien -> configs/<name>
    manifest.json
    -> tar.gz lokal
@@ -77,7 +76,7 @@ _DEFAULT_ENABLED = False
 _DEFAULT_INTERVAL = 24
 _DEFAULT_RETENTION = 7
 
-# Timeout fuer pg_dump / sqlite3 (Sekunden).
+# Timeout fuer pg_dump (Sekunden).
 _DUMP_TIMEOUT = 300
 
 
@@ -89,7 +88,7 @@ def create_panel_backup(db: Session, *, name: str | None = None) -> "PanelBackup
 
     Gibt den PanelBackup-Record zurueck.
 
-    Wirft bei pg_dump/sqlite3-Fehler (kein partieller Backup-Record, Temp
+    Wirft bei pg_dump-Fehler (kein partieller Backup-Record, Temp
     wird bereinigt). S3/DIS-Fehler werden NICHT propagiert (Best-Effort).
     """
     from models import PanelBackup  # Inline-Import gegen Zyklen
@@ -116,7 +115,7 @@ def create_panel_backup(db: Session, *, name: str | None = None) -> "PanelBackup
     enc_tmp_dir: str | None = None
 
     try:
-        # 1. DB-Dump erstellen (pg_dump oder sqlite3 .dump).
+        # 1. PostgreSQL-Dump erstellen.
         # Bei Fehlern wird kein Backup angelegt (atomic — kein partieller State).
         db_dump_bytes = _dump_database(db_type)
         if not db_dump_bytes:
@@ -463,6 +462,10 @@ def prepare_panel_restore(backup_id: int, db: Session) -> dict:
         raise PanelRestoreNotFoundError(
             "Panel-Backup nicht gefunden"
         )
+    if backup.db_type != "postgresql":
+        raise RuntimeError(
+            "Legacy-SQLite-Backups können nicht in den PostgreSQL-Betrieb restored werden."
+        )
 
     backup_dir = _get_backup_dir()
     os.makedirs(backup_dir, exist_ok=True)
@@ -808,21 +811,16 @@ def _generate_restore_script(
     _step_cfg = 6 if is_encrypted else 5
     _step_restart = 7 if is_encrypted else 6
 
-    if db_type == "sqlite3":
-        lines.append(f"# {_step_db}. Restore database (SQLite)")
-        lines.append("# Load current DATABASE_URL from .env (before overwrite)")
-        lines.append('set -a')
-        lines.append('. "$CONFIG_DIR/.env" 2>/dev/null || true')
-        lines.append('set +a')
-        lines.append('DB_PATH="${DATABASE_URL#sqlite:///}"')
-        lines.append('sqlite3 "$DB_PATH" < "$RESTORE_DIR/msm_db.sql"')
-    else:
-        lines.append(f"# {_step_db}. Restore database (PostgreSQL)")
-        lines.append("# Load current DATABASE_URL from .env (before overwrite)")
-        lines.append('set -a')
-        lines.append('. "$CONFIG_DIR/.env" 2>/dev/null || true')
-        lines.append('set +a')
-        lines.append('psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$RESTORE_DIR/msm_db.sql"')
+    if db_type != "postgresql":
+        raise RuntimeError(
+            "Legacy-SQLite-Backups können nicht in den PostgreSQL-Betrieb restored werden."
+        )
+    lines.append(f"# {_step_db}. Restore database (PostgreSQL)")
+    lines.append("# Load current DATABASE_URL from .env (before overwrite)")
+    lines.append('set -a')
+    lines.append('. "$CONFIG_DIR/.env" 2>/dev/null || true')
+    lines.append('set +a')
+    lines.append('psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$RESTORE_DIR/msm_db.sql"')
 
     lines.append("")
     lines.append(f"# {_step_cfg}. Restore config files")
@@ -969,33 +967,22 @@ def _maybe_upload_to_s3(
 
 
 def _detect_db_type() -> str:
-    """Erkennt den DB-Typ aus der konfigurierten database_url.
-
-    Returns: "postgresql" oder "sqlite3".
-    """
+    """Require the PostgreSQL control-plane database."""
     url = (settings.database_url or "").strip()
-    if url.startswith("postgresql://") or url.startswith("postgres://"):
+    if url.startswith("postgresql") or url.startswith("postgres://"):
         return "postgresql"
-    if url.startswith("sqlite"):
-        return "sqlite3"
-    # Fallback-Default (Produktion nutzt PostgreSQL)
-    return "postgresql"
+    raise RuntimeError("Panel-Backups erfordern PostgreSQL.")
 
 
 def _dump_database(db_type: str) -> bytes:
     """Erstellt den DB-Dump und gibt ihn als Bytes zurueck.
-
-    PostgreSQL: pg_dump via subprocess (env PGPASSWORD fuer Passwordless-Auth).
-    SQLite (dev): sqlite3 <db_path> .dump via subprocess.
 
     Wirft bei Fehlern (nicht-leerer Exit-Code) — Caller stellt Atomicity sicher
     (kein partieller Backup-Record).
     """
     if db_type == "postgresql":
         return _pg_dump_postgres()
-    if db_type == "sqlite3":
-        return _sqlite3_dump()
-    raise RuntimeError(f"Unbekannter db_type: {db_type}")
+    raise RuntimeError("Panel-Backups unterstützen ausschließlich PostgreSQL.")
 
 
 def _pg_dump_postgres() -> bytes:
@@ -1049,46 +1036,6 @@ def _pg_dump_postgres() -> bytes:
     if not dump:
         raise RuntimeError("pg_dump: leerer Dump")
     # pg_dump-Marker (Comment) sollte enthalten sein.
-    return dump
-
-
-def _sqlite3_dump() -> bytes:
-    """sqlite3 .dump der zentralen MSM-SQLite-Datenbank (Dev-Modus).
-
-    Extrahiert den Dateipfad aus der database_url (sqlite:///./msm.db -> ./msm.db).
-    :memory:-DBs koennen nicht via CLI gedumpt werden — Caller muss das mocken.
-    """
-    url = settings.database_url
-    # sqlite:///path -> path ; sqlite:///:memory: -> :memory:
-    prefix = "sqlite:///"
-    if not url.startswith(prefix):
-        raise RuntimeError("SQLite database_url nicht parsebar")
-    db_path = url[len(prefix):]
-
-    if db_path == ":memory:":
-        # In-Memory-DB kann nicht via CLI gedumpt werden. Der Caller (Tests)
-        # sollte _dump_database mocken. Als Fallback leeren Dump melden.
-        raise RuntimeError("sqlite3 .dump fuer :memory: nicht moeglich")
-
-    cmd = ["sqlite3", db_path, ".dump"]
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=_DUMP_TIMEOUT,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError("sqlite3 nicht installiert") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("sqlite3 Timeout") from exc
-
-    if result.returncode != 0:
-        logger.warning("sqlite3 .dump fehlgeschlagen (exit=%s)", result.returncode)
-        raise RuntimeError("sqlite3 .dump fehlgeschlagen")
-
-    dump = result.stdout
-    if not dump:
-        raise RuntimeError("sqlite3: leerer Dump")
     return dump
 
 

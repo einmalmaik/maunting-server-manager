@@ -55,6 +55,11 @@ describe('BlueprintsDocs page', () => {
     expect(introLink).toBeDefined()
   })
 
+  it('provides a compact mobile table of contents', () => {
+    renderDocs()
+    expect(document.querySelector('details summary')).toHaveTextContent(i18n.t('docs.tocTitle'))
+  })
+
   it('renders the minimal example JSON code block', () => {
     const { container } = renderDocs()
     const minimalSection = container.querySelector('#docs-minimal')

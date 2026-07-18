@@ -1,9 +1,15 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 from config import settings
+from database_policy import validate_panel_database_url
 
-_DB_URL = settings.database_url
+_DB_URL = validate_panel_database_url(
+    settings.database_url,
+    testing=os.getenv("MSM_TESTING", "").lower() == "true",
+)
 _engine_kwargs: dict = {
     "pool_pre_ping": True,
 }

@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
-from config import settings
+from config import get_cors_origins, settings
 from database import engine, Base
 from routers import (
     auth_router,
@@ -35,6 +35,7 @@ from routers import (
     backup_config_router,
     panel_backups_router,
     panel_database_router,
+    nodes_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -59,6 +60,10 @@ def auth_rate_limit(request: Request) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    import httpx
+    limits = httpx.Limits(max_connections=200, max_keepalive_connections=50)
+    app.state.http_client = httpx.AsyncClient(limits=limits, timeout=5.0)
+
     os.makedirs(settings.servers_dir, exist_ok=True)
     os.makedirs("/opt/msm/backups", exist_ok=True)
 
@@ -75,37 +80,54 @@ async def lifespan(app: FastAPI):
             "ohne DIS nicht operieren."
         )
 
-    Base.metadata.create_all(bind=engine)
+    # Schema changes belong to the installer/update Alembic path. The web
+    # process only synchronizes runtime registration and fails if deployment
+    # skipped the required schema upgrade.
+    from database import SessionLocal
+    from services.multi_node_migration_service import sync_multi_node_registration
+
+    sync_multi_node_registration(
+        engine,
+        SessionLocal,
+        allow_missing_local_token=is_testing,
+        local_agent_enabled=settings.local_agent_enabled,
+    )
 
     # Migration: fehlende Spalten nachträglich hinzufügen
     from sqlalchemy import inspect, text
     inspector = inspect(engine)
+    # Phase 8: Sobald Alembic die Datenbank verwaltet, darf der Webprozess
+    # keinerlei Schema mehr veraendern. Die folgenden historischen Bruecken
+    # bleiben nur fuer einen ungeversionierten Altstart erhalten.
+    legacy_schema_bridge = "alembic_version" not in inspector.get_table_names()
     if 'users' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('users')]
-        if 'email_notifications' not in cols:
+        if legacy_schema_bridge and 'email_notifications' not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_notifications BOOLEAN DEFAULT true"))
         # E-Mail-Verschluesselung: email_encrypted + email_hash Spalten
-        if 'email_encrypted' not in cols:
+        if legacy_schema_bridge and 'email_encrypted' not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_encrypted VARCHAR(4096)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_hash VARCHAR(64)"))
                 conn.execute(text("CREATE INDEX ix_users_email_hash ON users (email_hash)"))
-            # Bestehende Klartext-E-Mails verschluesseln
-            from database import SessionLocal as _SL
-            from models import User as _U
-            from services.dis_client import DisClient as _DC
-            _db = _SL()
-            try:
-                for _u in _db.query(_U).filter(_U.email_encrypted.is_(None)).all():
-                    if _u.email_plain:
-                        _u.email = _u.email_plain  # setter verschluesselt + hasht
-                _db.commit()
-            finally:
-                _db.close()
+
+        # Bestehende Klartext-E-Mails immer nachziehen. Das ist auch fuer den
+        # SQLite->PostgreSQL-Import noetig: das Zielschema besitzt die neuen
+        # Spalten bereits, die importierten Legacy-Zeilen aber noch nicht.
+        from database import SessionLocal as _SL
+        from models import User as _U
+        _db = _SL()
+        try:
+            for _u in _db.query(_U).filter(_U.email_encrypted.is_(None)).all():
+                if _u.email_plain:
+                    _u.email = _u.email_plain  # setter verschluesselt + hasht
+            _db.commit()
+        finally:
+            _db.close()
 
     # Migration: webhook_subscriptions.secret_encrypted Spalte hinzufuegen
-    if 'webhook_subscriptions' in inspector.get_table_names():
+    if legacy_schema_bridge and 'webhook_subscriptions' in inspector.get_table_names():
         wh_cols = [c['name'] for c in inspector.get_columns('webhook_subscriptions')]
         if 'secret_encrypted' not in wh_cols:
             with engine.begin() as conn:
@@ -116,14 +138,14 @@ async def lifespan(app: FastAPI):
         SingraWebhookEvent.__table__.create(bind=engine, checkfirst=True)
 
     # Migration: servers.auth_required Spalte hinzufuegen (interaktive Auth-Recovery)
-    if 'servers' in inspector.get_table_names():
+    if legacy_schema_bridge and 'servers' in inspector.get_table_names():
         srv_cols = [c['name'] for c in inspector.get_columns('servers')]
         if 'auth_required' not in srv_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE servers ADD COLUMN auth_required BOOLEAN NOT NULL DEFAULT false"))
 
     # Migration: email_verifications table cleanup for hashing
-    if 'email_verifications' in inspector.get_table_names():
+    if legacy_schema_bridge and 'email_verifications' in inspector.get_table_names():
         ev_cols = [c['name'] for c in inspector.get_columns('email_verifications')]
         if 'email' in ev_cols and 'email_hash' not in ev_cols:
             # Ephemerale Tabelle neu aufbauen
@@ -132,7 +154,7 @@ async def lifespan(app: FastAPI):
             Base.metadata.create_all(bind=engine)
 
     # Migration: oauth_user_links encryption columns
-    if 'oauth_user_links' in inspector.get_table_names():
+    if legacy_schema_bridge and 'oauth_user_links' in inspector.get_table_names():
         ol_cols = [c['name'] for c in inspector.get_columns('oauth_user_links')]
         if 'email_at_link_encrypted' not in ol_cols:
             with engine.begin() as conn:
@@ -142,7 +164,7 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE oauth_user_links ADD COLUMN username_at_link_encrypted VARCHAR(4096)"))
 
     # Migration: server_ports Tabelle anlegen & Daten migrieren
-    if 'server_ports' not in inspector.get_table_names():
+    if legacy_schema_bridge and 'server_ports' not in inspector.get_table_names():
         with engine.begin() as conn:
             conn.execute(text("""
                 CREATE TABLE server_ports (
@@ -157,7 +179,7 @@ async def lifespan(app: FastAPI):
             conn.execute(text("CREATE INDEX ix_server_ports_id ON server_ports (id)"))
 
     # Migration: Backup-Scheduling-Spalten + Phase-1 Docker-Spalten
-    if 'servers' in inspector.get_table_names():
+    if legacy_schema_bridge and 'servers' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('servers')]
         # Falls game_port noch in servers existiert, migrieren wir die Daten zuerst in server_ports
         if 'game_port' in cols:
@@ -224,7 +246,7 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE servers DROP COLUMN linux_user"))
 
     # Migration: Mod enabled-Spalte
-    if 'mods' in inspector.get_table_names():
+    if legacy_schema_bridge and 'mods' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('mods')]
         with engine.begin() as conn:
             if 'enabled' not in cols:
@@ -251,7 +273,7 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE mods ADD COLUMN update_checked_at TIMESTAMP"))
 
     # Migration: Backup name-Spalte
-    if 'backups' in inspector.get_table_names():
+    if legacy_schema_bridge and 'backups' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('backups')]
         if 'name' not in cols:
             with engine.begin() as conn:
@@ -276,7 +298,7 @@ async def lifespan(app: FastAPI):
     # Phase 3 — RBAC: users.role_id-Spalte (Tabellen `roles`/`role_permissions`/
     # `server_permissions` werden von `Base.metadata.create_all` angelegt) und
     # einmalige Migration der alten `permissions`-Tabelle in `server_permissions`.
-    if 'users' in inspector.get_table_names():
+    if legacy_schema_bridge and 'users' in inspector.get_table_names():
         user_cols = [c['name'] for c in inspector.get_columns('users')]
         if 'role_id' not in user_cols:
             with engine.begin() as conn:
@@ -310,7 +332,7 @@ async def lifespan(app: FastAPI):
     # Idempotent: prueft jeweils, ob Ziel-Rows bereits existieren. Danach wird
     # die Legacy-Tabelle gedroppt (nur, wenn sie existiert).
     inspector = inspect(engine)
-    if 'permissions' in inspector.get_table_names():
+    if legacy_schema_bridge and 'permissions' in inspector.get_table_names():
         import logging as _logging
         _log_mig = _logging.getLogger(__name__)
         legacy_cols = {c['name'] for c in inspector.get_columns('permissions')}
@@ -382,35 +404,40 @@ async def lifespan(app: FastAPI):
     #    Regeln bleiben unangetastet (siehe firewall_service.cleanup_legacy_msm_ranges).
     # 2. DOCKER-USER iptables Baseline-DROP fuer die MSM-Port-Range setzen
     #    (Defense-in-Depth gegen Docker-UFW-Bypass). Idempotent.
-    try:
-        from services.firewall_service import cleanup_legacy_msm_ranges
-        from services.docker_iptables_service import ensure_baseline_drop
-        removed = cleanup_legacy_msm_ranges()
-        if removed:
+    if settings.local_agent_enabled:
+        try:
+            from services.firewall_service import cleanup_legacy_msm_ranges
+            from services.docker_iptables_service import ensure_baseline_drop
+            removed = cleanup_legacy_msm_ranges()
+            if removed:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Port-Manager: %d Legacy-MSM-Range(s) aus UFW entfernt.", removed,
+                )
+            ensure_baseline_drop()
+        except Exception as exc:
             import logging
-            logging.getLogger(__name__).info(
-                "Port-Manager: %d Legacy-MSM-Range(s) aus UFW entfernt.", removed,
+            logging.getLogger(__name__).warning(
+                "Phase-2 Port-Manager-Init partiell fehlgeschlagen: %s", exc,
             )
-        ensure_baseline_drop()
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning(
-            "Phase-2 Port-Manager-Init partiell fehlgeschlagen: %s", exc,
-        )
 
-    # Managed PostgreSQL fuer Server-Datenbanken: beim Panel-Start sicherstellen
-    # (laeuft + Restart-Policy unless-stopped), damit Game-Container msm-postgres
-    # per DNS erreichen koennen.
-    try:
-        from services.postgres_service import ensure_internal_postgres
+    # Managed PostgreSQL: on local node agent only (Phase 7 — no panel psycopg2).
+    if settings.local_agent_enabled:
+        try:
+            from database import SessionLocal
+            from services.postgres_service import ensure_internal_postgres
 
-        ensure_internal_postgres()
-    except Exception as exc:
-        import logging
+            _pg_db = SessionLocal()
+            try:
+                ensure_internal_postgres(_pg_db)
+            finally:
+                _pg_db.close()
+        except Exception as exc:
+            import logging
 
-        logging.getLogger(__name__).warning(
-            "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
-        )
+            logging.getLogger(__name__).warning(
+                "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
+            )
 
     # Initialize scheduler and load existing schedules
     start_scheduler()
@@ -432,7 +459,7 @@ async def lifespan(app: FastAPI):
     # DIS-Decrypt im Listing-Pfad. Die Spalte wird beim naechsten
     # Create/Update des Providers automatisch befuellt; alte Provider
     # bekommen NULL (Fallback im Response-Builder).
-    if 'oauth_providers' in inspector.get_table_names():
+    if legacy_schema_bridge and 'oauth_providers' in inspector.get_table_names():
         cols = [c['name'] for c in inspector.get_columns('oauth_providers')]
         if 'client_secret_mask' not in cols:
             with engine.begin() as conn:
@@ -457,6 +484,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    await app.state.http_client.aclose()
     stop_scheduler()
     await close_steam_service()
 
@@ -464,14 +492,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     description="Maunting Server Manager — Universeller Game Server Manager",
-    version="1.7.9",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
-# ── CORS: Nicht mehr wildcard, sondern explizite Origins ──
-_cors_origins = [settings.panel_url]
-if settings.debug:
-    _cors_origins.extend(["http://localhost:5173", "http://localhost", "http://127.0.0.1:5173"])
+# ── CORS: Explizite Origins (panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev) ──
+_cors_origins = get_cors_origins()
 
 app.add_middleware(
     CORSMiddleware,
@@ -479,6 +505,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
+    expose_headers=["X-CSRF-Token"],
 )
 
 
@@ -489,6 +516,20 @@ app.add_middleware(SlowAPIMiddleware)
 
 
 # ── CSP + Security Headers Middleware ──
+def _csp_connect_src() -> str:
+    """connect-src: 'self' plus panel/CORS origins (split FE + API / Vercel)."""
+    parts = ["'self'"]
+    for origin in _cors_origins:
+        if origin and origin not in parts:
+            parts.append(origin)
+        # ws/wss counterpart for console streams when SPA is same CSP host
+        if origin.startswith("https://"):
+            parts.append("wss://" + origin[len("https://") :])
+        elif origin.startswith("http://"):
+            parts.append("ws://" + origin[len("http://") :])
+    return " ".join(parts)
+
+
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
@@ -497,7 +538,7 @@ async def security_headers_middleware(request: Request, call_next):
         "script-src 'self' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
         "style-src 'self' 'unsafe-inline' https://singrabot.mauntingstudios.de; "
         "img-src 'self' data: https://singrabot.mauntingstudios.de; "
-        "connect-src 'self' https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to; "
+        f"connect-src {_csp_connect_src()} https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to; "
         "font-src 'self' https://singrabot.mauntingstudios.de; "
         "frame-src 'self' https://singrabot.mauntingstudios.de; "
         "frame-ancestors 'none'; "
@@ -535,6 +576,7 @@ app.include_router(mods_router)
 app.include_router(system_router)
 app.include_router(steam_router)
 app.include_router(panel_settings_router)
+app.include_router(nodes_router)
 app.include_router(files_router)
 app.include_router(roles_router)
 app.include_router(permissions_router)
@@ -560,21 +602,21 @@ app.include_router(panel_database_router)
 
 @app.get("/api/version")
 def app_version():
-    return {"name": settings.app_name, "version": "1.7.10"}
+    return {"name": settings.app_name, "version": "2.0.0"}
 
 
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
 
-# Static Frontend (nur in Produktion)
+# Static Frontend (Single-Host Produktion). Phase 4: abschaltbar fuer API-only.
 # Wichtig: Mount NACH allen API-Routern und expliziten Routes hinzufügen,
 # damit /api/* und Health nicht vom SPA-Static-Fallback geschluckt werden.
 # /assets/* ohne html-Fallback: fehlende JS-Chunks liefern 404 (text/plain),
 # nicht index.html — verhindert „MIME type text/html“ bei veralteten Lazy-Chunks.
 import os
 _FRONTEND_DIST = "/opt/msm/frontend/dist"
-if os.path.exists(_FRONTEND_DIST):
+if settings.serve_frontend and os.path.exists(_FRONTEND_DIST):
     app.mount(
         "/assets",
         StaticFiles(directory=_FRONTEND_DIST, html=False),

@@ -107,6 +107,8 @@ class ServerCreate(BaseModel):
     public_bind_ip: str | None = Field(None, max_length=64)
     postgres_enabled: bool = False
     postgres_database_count: int | None = Field(None, ge=1, le=20)
+    # Phase 3: optional target node. None → default local node.
+    node_id: int | None = Field(None, ge=1)
 
     @field_validator("public_bind_ip")
     @classmethod
@@ -195,6 +197,9 @@ class ServerResponse(BaseModel):
     public_bind_ip: str | None
     ports: list[ServerPortResponse] = Field(default_factory=list)
     created_at: datetime
+    # Phase 3 multi-node: which node hosts this server (no secrets)
+    node_id: int | None = None
+    node_name: str | None = None
 
     class Config:
         from_attributes = True

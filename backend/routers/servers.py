@@ -54,6 +54,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _assert_remote_ports_available(node, ports: list[tuple[str, int, str]], bind_ip: str) -> None:
+    if node is None or node.is_local:
+        return
+    from services.node_client import NodeClient
+
+    normalized = [(port, protocol, role) for role, port, protocol in ports]
+    result = NodeClient.from_node(node).ports_available(normalized, bind_ip or "0.0.0.0")
+    if not result.get("available", False):
+        conflicts = ", ".join(
+            f"{item.get('port')}/{item.get('protocol')}" for item in result.get("conflicts", [])
+        )
+        raise HTTPException(status_code=409, detail=f"Port auf dem Ziel-Node belegt: {conflicts}")
+
+
 def _normalize_server_restart_mode(server: Server) -> None:
     """Stellt sicher, dass nicht beide Auto-Restart-Modi (Intervall + feste Zeiten) gleichzeitig aktiv sind.
 
@@ -144,11 +158,6 @@ def _install_update_busy_error() -> HTTPException:
 
 
 
-@router.get("", response_model=list[ServerResponse])
-def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Server]:
-    return permission_service.list_visible_servers(db, user)
-
-
 @router.post("", response_model=ServerCreateResponse, status_code=201)
 async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(require_global("servers.create")), _: None = Depends(verify_csrf)) -> ServerCreateResponse:
 
@@ -174,6 +183,21 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         requested_ports["rcon"] = req.rcon_port
 
     bind_ip = req.public_bind_ip or default_bind_ip()
+    # Phase 2/3: node from request or default local; ports scoped per node
+    from models import Node
+    from services.node_service import get_local_node
+
+    target_node = None
+    if req.node_id is not None:
+        target_node = db.query(Node).filter(Node.id == req.node_id).first()
+        if not target_node:
+            raise HTTPException(status_code=400, detail="Node nicht gefunden")
+    else:
+        target_node = get_local_node(db)
+    if target_node is not None and not target_node.is_local and req.public_bind_ip is None:
+        bind_ip = "0.0.0.0"
+    target_node_id = target_node.id if target_node else None
+    check_host = True if (target_node is None or target_node.is_local) else False
     try:
         allocated = allocate_ports(
             db,
@@ -181,6 +205,8 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
             bind_ip=bind_ip or "0.0.0.0",
             port_requirements=port_requirements,
             requested_ports=requested_ports,
+            node_id=target_node_id,
+            check_host=check_host,
         )
     except PortConflictError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -195,6 +221,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
             ("query", allocated[1], "udp"),
             ("rcon", allocated[2], "tcp"),
         ]
+    _assert_remote_ports_available(target_node, allocated, bind_ip or "0.0.0.0")
 
     # Placeholder-Row zuerst einfügen, um stabile PK (server.id) zu erhalten.
     # Danach install_dir = f".../{game_type}_{id}" - kollisionsfrei über alle Zeit,
@@ -213,6 +240,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         ram_limit_mb=req.ram_limit_mb,
         disk_limit_gb=req.disk_limit_gb,
         public_bind_ip=bind_ip,
+        node_id=target_node_id,
     )
     _normalize_server_restart_mode(server)
     db.add(server)
@@ -222,7 +250,7 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     install_lock_acquired = False
     if plugin:
         install_lock_acquired = try_acquire_install_update_lock(
-            server.id, "install"
+            server.id, "install", node_id=server.node_id
         )
         if not install_lock_acquired:
             db.delete(server)
@@ -240,12 +268,13 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         db.commit()
         db.refresh(server)
 
-        install_dir = os.path.join(base_dir, f"{req.game_type}_{server.id}")
+        is_remote_node = bool(target_node is not None and not target_node.is_local)
+        install_dir = os.path.join(base_dir, str(server.id) if is_remote_node else f"{req.game_type}_{server.id}")
 
         # Vorheriges Verzeichnis auf Host prüfen (verwaist von abgebrochenem Install,
         # manuellem Eingriff oder root-owned SteamCMD-Artifact). Saubere 409 statt
         # mysteriösem EPERM auf chmod.
-        if os.path.exists(install_dir):
+        if not is_remote_node and os.path.exists(install_dir):
             db.delete(server)
             db.commit()
             server_deleted = True
@@ -264,8 +293,15 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         # konsistent auf dieselben Dateien zugreifen können.
         # exist_ok=False ist jetzt sicher (Guard oben).
         try:
-            os.makedirs(install_dir, exist_ok=False)
-            os.chmod(install_dir, 0o777)
+            if is_remote_node:
+                from services.node_client import NodeClient
+                from services.node_service import ensure_node_online
+
+                ensure_node_online(target_node)
+                NodeClient.from_node(target_node).files_ensure_server_root(server.id)
+            else:
+                os.makedirs(install_dir, exist_ok=False)
+                os.chmod(install_dir, 0o777)
             created_install_dir = True
         except OSError as e:
             # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
@@ -320,10 +356,15 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
                 db.commit()
             except Exception:
                 db.rollback()
-            if created_install_dir and os.path.exists(server.install_dir):
+            if created_install_dir:
                 try:
-                    shutil.rmtree(server.install_dir)
-                except OSError:
+                    if target_node is not None and not target_node.is_local:
+                        from services.node_client import NodeClient
+
+                        NodeClient.from_node(target_node).files_delete_server_root(server.id)
+                    elif os.path.exists(server.install_dir):
+                        shutil.rmtree(server.install_dir)
+                except Exception:
                     logger.warning("Install-Verzeichnis konnte nach Create-Abbruch nicht entfernt werden")
         raise
 
@@ -331,21 +372,56 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
         await EmailService.send_server_installed_notification(user.email, user.username, server.name)
 
     sync_server_restart_schedule(server)
-    response = ServerCreateResponse.model_validate(server)
-    response.postgres_credentials = [
+    response = _server_response(server)
+    create_resp = ServerCreateResponse.model_validate(response.model_dump())
+    create_resp.postgres_credentials = [
         PostgresOneTimeCredential.model_validate(item)
         for item in postgres_credentials
     ]
-    return response
+    return create_resp
+
+
+def _server_response(server: Server) -> ServerResponse:
+    """Serialize server including safe node label (never auth tokens)."""
+    from services.node_service import effective_server_runtime_status, is_node_offline
+
+    data = ServerResponse.model_validate(server)
+    node = getattr(server, "node", None)
+    if node is not None:
+        data.node_id = node.id
+        data.node_name = node.name
+        # Graceful degradation: keep server visible; surface node_unreachable
+        if is_node_offline(node):
+            data.status = effective_server_runtime_status(server, node)
+            data.status_message = "Node offline — Aktionen deaktiviert"
+    else:
+        data.node_id = getattr(server, "node_id", None)
+        data.node_name = None
+    return data
+
+
+def _reject_if_node_offline(server: Server) -> None:
+    """Block start/stop/file-ops when heartbeat marked the node offline."""
+    from services.node_service import NODE_OFFLINE_MSG, is_node_offline
+
+    node = getattr(server, "node", None)
+    if is_node_offline(node):
+        raise HTTPException(status_code=503, detail=NODE_OFFLINE_MSG)
+
+
+@router.get("", response_model=list[ServerResponse])
+def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[ServerResponse]:
+    servers = permission_service.list_visible_servers(db, user)
+    return [_server_response(s) for s in servers]
 
 
 @router.get("/{server_id}", response_model=ServerResponse)
-def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Server:
+def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> ServerResponse:
     require_server_permission(user, server_id, db, "server.view")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    return server
+    return _server_response(server)
 
 
 @router.patch("/{server_id}", response_model=ServerResponse)
@@ -452,6 +528,9 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                     requested_ports[role] = current_ports.get(role)
 
             bind_ip_for_check = payload.get("public_bind_ip", old_bind_ip) or "0.0.0.0"
+            node = getattr(server, "node", None)
+            node_id = getattr(server, "node_id", None)
+            check_host = True if (node is None or getattr(node, "is_local", True)) else False
             try:
                 allocated = allocate_ports(
                     db,
@@ -459,6 +538,8 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                     bind_ip=bind_ip_for_check,
                     port_requirements=port_requirements,
                     requested_ports=requested_ports,
+                    node_id=node_id,
+                    check_host=check_host,
                 )
             except PortConflictError as e:
                 raise HTTPException(status_code=400, detail=str(e))
@@ -473,6 +554,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                     ("query", allocated[1], "udp"),
                     ("rcon", allocated[2], "tcp"),
                 ]
+            _assert_remote_ports_available(node, allocated, bind_ip_for_check)
 
             from models.server_port import ServerPort
             db.query(ServerPort).filter(ServerPort.server_id == server.id).delete()
@@ -540,7 +622,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                 # persistieren, die ein Live-Update behaupten, ohne dass der
                 # Container aktualisiert wurde).
                 if resource_live_change:
-                    docker_running = docker_service.is_running(container_name)
+                    docker_running = docker_service.is_running(container_name, node=server.node)
                     if server.status == "running" and not docker_running:
                         raise HTTPException(
                             status_code=409,
@@ -560,7 +642,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                         if ram_changed:
                             docker_updates["ram_limit_mb"] = server.ram_limit_mb
                         result = docker_service.update_container_resources(
-                            container_name, docker_updates,
+                            container_name, docker_updates, node=server.node,
                         )
                         if not result.get("ok"):
                             # Generische, sanitisierte Meldung (VAL-API-010):
@@ -633,28 +715,24 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         # nur, wenn der Server gerade laeuft. Fuer gestoppte Server bleiben die
         # Regeln zu (Lifecycle-Kopplung).
         plugin = get_plugin(server.game_type)
-        was_running = plugin is not None and docker_service.is_running(container_name_for(server.id))
+        was_running = plugin is not None and docker_service.is_running(
+            container_name_for(server.id), node=server.node
+        )
 
         if was_running:
-            close_ports(old_ports)
-            iptables_revoke_server(
-                server.name,
-                old_bind_ip or "",
-                old_ports,
-            )
+            close_ports(old_ports, node=server.node, name=server.name)
+            if server.node is None or server.node.is_local:
+                iptables_revoke_server(server.name, old_bind_ip or "", old_ports)
             # Container stoppen - Plugin.start() legt ihn mit den neuen Ports/
             # Bind-Werten frisch an.
             plugin.stop(server)
             new_ports = [(p.port, p.protocol, p.role) for p in server.ports]
-            open_ports(server.name, new_ports)
-            iptables_accept_server(
-                server.name,
-                server.public_bind_ip or "",
-                new_ports,
-            )
+            open_ports(server.name, new_ports, node=server.node)
+            if server.node is None or server.node.is_local:
+                iptables_accept_server(server.name, server.public_bind_ip or "", new_ports)
             plugin.start(server)
 
-    return server
+    return _server_response(server)
 
 
 @router.delete("/{server_id}")
@@ -678,21 +756,32 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
 
     # 1. Container stoppen + entfernen (idempotent - force killt running)
     container = container_name_for(server.id)
-    docker_service.remove(container, force=True)
+    node = getattr(server, "node", None)
+    remove_result = docker_service.remove(container, force=True, node=node)
+    if not remove_result.get("ok"):
+        raise HTTPException(status_code=503, detail="Container konnte auf dem Node nicht entfernt werden")
 
     # 2. Firewall- und iptables-Regeln schließen
     ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
-    close_ports(ports_list)
-    iptables_revoke_server(
-        server.name,
-        server.public_bind_ip or "",
-        ports_list,
-    )
+    close_ports(ports_list, node=node, name=server.name)
+    if node is None or node.is_local:
+        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
 
     # 3. Install-Verzeichnis physisch löschen
     install_dir = server.install_dir
     dir_removed = False
-    if install_dir and os.path.exists(install_dir):
+    if node is not None and not node.is_local:
+        try:
+            from services.node_client import NodeClient
+
+            NodeClient.from_node(node).files_delete_server_root(server.id)
+            dir_removed = True
+        except Exception as e:
+            raise HTTPException(
+                status_code=503,
+                detail="Abbruch: Server-Verzeichnis konnte auf dem Node nicht gelöscht werden",
+            ) from e
+    elif install_dir and os.path.exists(install_dir):
         repair = docker_service.repair_bind_mount_permissions(install_dir)
         if not repair.get("ok"):
             logger.warning(
@@ -709,32 +798,35 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
             )
 
     # 4. Backup-Verzeichnis (Files) löschen - DB-Cascade räumt Records
+    #    Nur fuer lokale Nodes, da Remote-Backups auf dem Node liegen.
     backup_dir = f"/opt/msm/backups/{server.id}"
     backups_removed = False
-    if os.path.exists(backup_dir):
-        try:
-            shutil.rmtree(backup_dir)
-            backups_removed = True
-        except OSError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Abbruch (Atomar): Backup-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
-            )
+    if node is None or node.is_local:
+        if os.path.exists(backup_dir):
+            try:
+                shutil.rmtree(backup_dir)
+                backups_removed = True
+            except OSError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Abbruch (Atomar): Backup-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
+                )
 
-    # 5. MSM-Console-Log-Verzeichnis räumen
-    console_log_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "logs",
-        str(server.id),
-    )
-    if os.path.exists(console_log_dir):
-        try:
-            shutil.rmtree(console_log_dir)
-        except OSError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Abbruch (Atomar): Console-Log-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
-            )
+    # 5. MSM-Console-Log-Verzeichnis räumen (nur lokal vorhanden)
+    if node is None or node.is_local:
+        console_log_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "logs",
+            str(server.id),
+        )
+        if os.path.exists(console_log_dir):
+            try:
+                shutil.rmtree(console_log_dir)
+            except OSError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Abbruch (Atomar): Console-Log-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
+                )
 
     # 6. Verwaltete PostgreSQL-Ressourcen loeschen. Bei Fehler bleibt der
     # Server-Datensatz erhalten, damit der Cleanup erneut versucht werden kann.
@@ -803,6 +895,7 @@ async def start_server(server_id: int, db: Session = Depends(get_db), user: User
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    _reject_if_node_offline(server)
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
@@ -849,6 +942,7 @@ async def stop_server(server_id: int, db: Session = Depends(get_db), user: User 
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    _reject_if_node_offline(server)
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
@@ -867,6 +961,7 @@ async def restart_server(server_id: int, db: Session = Depends(get_db), user: Us
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    _reject_if_node_offline(server)
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
@@ -903,7 +998,7 @@ async def cancel_auth_setup(server_id: int, db: Session = Depends(get_db), user:
     server.auth_required = False
     server.status_message = "Auth-Setup vom User abgebrochen"
     db.commit()
-    stop_result = docker_service.stop(container_name, timeout=10)
+    stop_result = docker_service.stop(container_name, timeout=10, node=server.node)
     _append_console_log(server.id, "[MSM] Auth-Setup vom User abgebrochen.\n")
     return {
         "message": "Auth-Setup abgebrochen",
@@ -1010,7 +1105,16 @@ def server_status(server_id: int, db: Session = Depends(get_db), user: User = De
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
     plugin = get_plugin(server.game_type)
     disk_used = server.disk_usage_mb
-    disk_free = _disk_free_mb(server.install_dir) if server.install_dir else None
+    if server.node is not None and not server.node.is_local:
+        try:
+            from services.node_client import NodeClient
+
+            disk_data = NodeClient.from_node(server.node).files_disk_info(server.id)
+            disk_free = int(disk_data["free_bytes"]) // (1024 * 1024)
+        except Exception:
+            disk_free = None
+    else:
+        disk_free = _disk_free_mb(server.install_dir) if server.install_dir else None
 
     # Update-Info leichtgewichtig + cached (nicht bei jedem Status-Call teuer).
     # Ergebnisse von check_for_server_file_update + check_for_mod_updates.
@@ -1103,7 +1207,7 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
     plugin = get_plugin(server.game_type)
     if not plugin:
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    if not try_acquire_install_update_lock(server.id, "install"):
+    if not try_acquire_install_update_lock(server.id, "install", node_id=server.node_id):
         raise _install_update_busy_error()
     try:
         server.status = "installing"
@@ -1120,14 +1224,8 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
 
 
 # ── Erlaubte Origins fuer WebSocket-Upgrades ───────────────────────────────
-# Dieselbe Logik wie die CORS-Middleware: in Dev mehr, in Prod strikt.
-_WS_ALLOWED_ORIGINS: tuple[str, ...] = (
-    settings.panel_url,
-    "http://localhost",
-    "http://localhost:5173",
-    "http://127.0.0.1",
-    "http://127.0.0.1:5173",
-)
+# Dieselbe Allowlist wie CORS (panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev).
+from config import get_cors_origins
 
 
 def _ws_origin_allowed(origin: str | None) -> bool:
@@ -1136,7 +1234,8 @@ def _ws_origin_allowed(origin: str | None) -> bool:
     """
     if not origin:
         return False
-    return origin.rstrip("/") in {o.rstrip("/") for o in _WS_ALLOWED_ORIGINS}
+    allowed = {o.rstrip("/") for o in get_cors_origins()}
+    return origin.rstrip("/") in allowed
 
 
 @router.websocket("/{server_id}/console/ws")
@@ -1161,6 +1260,7 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
         return
 
     db = SessionLocal()
+    node = None
     try:
         try:
             user = get_current_user_for_ws(websocket, db)
@@ -1169,6 +1269,11 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
                 await websocket.close(code=1008)
                 return
             require_server_permission(user, server_id, db, "server.console.read")
+            # Eager-load node before session closes (avoid DetachedInstanceError)
+            node = server.node
+            if node is not None:
+                # Touch attributes while session is open
+                _ = (node.id, node.host, node.is_local, node.auth_token_enc)
         except HTTPException:
             await websocket.close(code=1008)
             return
@@ -1191,6 +1296,7 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
             container=container,
             log_path=log_path,
             last_id=last_id,
+            node=node,
         )
     finally:
         if db.is_active:
@@ -1224,11 +1330,11 @@ def server_console_input(
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
     container = container_name_for(server.id)
-    if not docker_service.is_running(container):
+    if not docker_service.is_running(container, node=server.node):
         raise HTTPException(status_code=409, detail="Container läuft nicht")
     # Newline erzwingen - die meisten Game-Server lesen zeilenweise.
     data = body.line if body.line.endswith("\n") else body.line + "\n"
-    result = docker_service.send_stdin(container, data)
+    result = docker_service.send_stdin(container, data, node=server.node)
     if not result["ok"]:
         # Generische Fehlermeldung - keine Container-Internas leaken.
         raise HTTPException(status_code=500, detail="Eingabe konnte nicht zugestellt werden")
@@ -1314,6 +1420,7 @@ def server_exec(
         command=body.command,
         timeout=timeout,
         user_id=user.id,
+        node=server.node,
     )
 
     if not result["ok"]:

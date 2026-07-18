@@ -1,0 +1,260 @@
+# Self-Hosting, Deployment-Artefakte und Nodes
+
+Diese Seite ist die kanonische Betriebsdokumentation für die Installation der
+MSM-Komponenten. Das Repository ist ein Monorepo, die ausgelieferten Komponenten
+sind trotzdem getrennte Deployment-Einheiten.
+
+## Welche Komponente läuft wo?
+
+Eine normale Installation verwendet einen Control-Plane-Server und beliebig
+viele Nodes:
+
+| Rolle | Enthält | Benötigt das vollständige Repository? |
+| --- | --- | --- |
+| Panel/Control Plane | Backend, DIS-Sidecar, Panel-PostgreSQL, Frontend und lokaler Agent | Nein, das Panel-Release enthält nur die benötigten Projektteile. |
+| Separates Frontend | Fertig gebautes statisches Vite-Bundle | Nein, `msm-frontend-<VERSION>.tar.gz` genügt. |
+| Remote-Node | Agent, Rootless Docker, TLS und node-eigene Serverdaten | Nein, der Node lädt sein Agent-Paket direkt vom Panel. |
+
+Das Monorepo ist die gemeinsame Quelle für Entwicklung und Releases. Es ist
+kein Zwang, jede Komponente per `git clone` auszuliefern.
+
+## Empfohlene Panel-Installation
+
+Eine frische Produktionsinstallation benötigt eine HTTPS-Domain, deren DNS
+bereits auf den Panel-Server zeigt:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \
+  | sudo bash -s -- --domain panel.example.com
+```
+
+Der Bootstrap lädt bevorzugt das getestete `msm-panel-<VERSION>.tar.gz` des
+neuesten GitHub-Releases. Nur wenn noch kein passendes Release existiert, nutzt
+er als Kompatibilitätsfallback einen flachen Git-Checkout. Anschließend ruft er
+`install.sh --simple` auf. Vor dem Entpacken wird das Archiv zwingend gegen den
+mitgelieferten Eintrag in `SHA256SUMS` geprüft.
+
+`install.sh` bleibt die zentrale Installationslogik. Der einfache Bootstrap-
+Modus richtet PostgreSQL, Redis, Rootless Docker, DIS, lokalen Agent, Caddy und
+systemd automatisch ein. E-Mail wird anschließend im Browser-Setup konfiguriert.
+Wer bewusst den interaktiven Expertenweg benötigt, kann das Repository oder
+Panel-Artefakt entpacken und `sudo bash install.sh` ausführen.
+
+Alle drei Einstiege – direkter interaktiver Aufruf, `--simple` und öffentlicher
+Bootstrap – durchlaufen dieselbe idempotente Systemvorbereitung. Sie installiert
+die benötigten Basispakete auch auf einem minimalen Ubuntu-/Debian-System,
+repariert eine unvollständige Caddy-Paketquelle sicher und erhält vorhandene
+Caddy-Konfigurationen. Der Installer aktualisiert die von MSM benötigten Pakete,
+führt aber bewusst kein pauschales Betriebssystem-`dist-upgrade` und keinen
+automatischen Reboot fremder Systeme durch.
+
+### Abgebrochene Erstinstallation fortsetzen
+
+Hat ein abgebrochener Lauf bereits die lokale PostgreSQL-Rolle und Datenbank
+`msm`, aber noch keine `backend/.env` angelegt, bleibt der normale Installer aus
+Sicherheitsgründen stehen. Nach Prüfung des Zustands kann der Lauf ohne Löschen
+der Datenbank ausdrücklich fortgesetzt werden:
+
+```bash
+sudo bash install.sh --simple --domain panel.example.com --resume-partial
+```
+
+Der Resume-Pfad akzeptiert ausschließlich die Datenbank `msm` mit Eigentümer
+`msm`, eine unprivilegierte Rolle ohne Mitgliedschaften und ohne weitere eigene
+Datenbanken. Er erzeugt ein neues Passwort, überträgt es ausschließlich über
+`stdin` an PostgreSQL und schreibt es anschließend in die geschützte `.env`.
+Abweichende oder fremde PostgreSQL-Zustände werden nicht verändert.
+
+PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code im
+Installer dient ausschließlich dazu, bestehende Altinstallationen einmalig und
+geprüft nach PostgreSQL zu migrieren; neue SQLite-Installationen gibt es nicht.
+
+## Getrennte GitHub-Release-Artefakte
+
+Der Workflow `.github/workflows/release-artifacts.yml` erzeugt für `v*`-Tags:
+
+- `msm-panel-<VERSION>.tar.gz`: installierbare Control Plane inklusive Backend,
+  DIS, Frontend, Agent-Paket und Installationsskripten.
+- `msm-frontend-<VERSION>.tar.gz`: ausschließlich das gebaute `frontend/dist`
+  plus öffentliche `.env.example`.
+- `msm-agent-<VERSION>.tar.gz`: Agent-Quellen und Agent-Installer für
+  kontrollierte Offline-/Automationsfälle.
+- `SHA256SUMS`: Prüfsummen aller drei Archive.
+
+Bei einem Tag werden die Dateien an einen zunächst als Entwurf angelegten
+GitHub-Release gehängt. Ein manueller Workflow-Lauf stellt sie 30 Tage als
+GitHub-Actions-Artefakt bereit.
+
+### Separates Frontend
+
+Für ein getrenntes Frontend wird nur das Frontend-Archiv benötigt:
+
+```bash
+VERSION=v1.8.0
+curl -fLO "https://github.com/einmalmaik/maunting-server-manager/releases/download/${VERSION}/msm-frontend-${VERSION}.tar.gz"
+tar -xzf "msm-frontend-${VERSION}.tar.gz"
+```
+
+Der Inhalt unter `dist/` wird von einem statischen Webserver oder Hostingdienst
+ausgeliefert. `VITE_API_URL` und optional `VITE_WS_URL` sind Build-Werte und
+müssen deshalb bereits beim Workflow-/Frontend-Build korrekt gesetzt sein. Ein
+manueller Workflow-Lauf bietet dafür die Eingaben `vite_api_url` und
+`vite_ws_url`; Tag-Releases ohne diese Werte verwenden relative URLs für ein
+Frontend am gleichen Origin wie das Backend. In `VITE_*` dürfen niemals Secrets
+stehen. Das Backend benötigt für getrenntes Hosting passende CORS- und
+Cookie-Einstellungen; Details stehen in `frontend/.env.example` und
+`backend/.env.example`.
+
+## Bestehende All-in-one-Installation aufteilen
+
+Für eine bereits installierte MSM-Instanz ist der interaktive Assistent der
+Standardweg:
+
+```bash
+sudo /opt/msm/helper-scripts/migrate-panel-components.sh
+```
+
+Er fragt unabhängig voneinander nach drei Aktionen und führt sie anschließend
+in einer sicheren Reihenfolge aus:
+
+1. **Externes Frontend verbinden:** Das statische Frontend muss beim Anbieter
+   bereits mit `VITE_API_URL=https://api.example.com` gebaut und über eine
+   HTTPS-Origin erreichbar sein. Der Assistent prüft die Origin, stellt Backend,
+   CORS, Cross-Site-Cookies und die API-only-Caddy-Site ein und prüft den
+   Preflight. Er lädt selbst nichts zu Vercel, Wurzel oder einem anderen
+   Hostinganbieter hoch, weil dafür anbieterspezifische Zugangsdaten nötig wären.
+2. **Ausgewählte Gameserver verschieben:** Eine komma-separierte Liste wie
+   `1,2,3,8` wird nacheinander auf einen bereits registrierten Zielnode kopiert.
+   Jeder Server muss gestoppt sein. Das vollständige Serververzeichnis enthält
+   Saves, Konfiguration, Mods, Workshop-Dateien, Blueprint-erzeugte Laufzeitdaten
+   und Backups. Zugeordnete node-eigene PostgreSQL-Datenbanken werden als Dumps
+   mitgesichert und auf dem Ziel wiederhergestellt. Die DB-Zuordnung wechselt
+   erst nach erfolgreicher Zielprüfung; Quelldaten werden nicht automatisch
+   gelöscht.
+3. **Backend/Control Plane verschieben:** Das Ziel muss ein frischer
+   Ubuntu-/Debian-Server sein, erreichbar per Root-SSH oder über einen Benutzer
+   mit passwortlosem `sudo`. Der Assistent installiert zuerst parallel eine
+   Backend-only-Control-Plane. Befindet sich auf der Quelle noch der lokale
+   Agent, wird er über das normale, vom Owner zu bestätigende TLS-Enrollment in
+   einen eigenständigen Node umgewandelt. Die bestätigte Node-ID übernimmt der
+   Assistent direkt aus der geschützten Enrollment-Antwort; sie muss nicht
+   abgelesen oder erneut eingegeben werden. Eine kurzlebige Challenge pro
+   Serververzeichnis beweist, dass der neue Agent exakt dieselben Daten und den
+   erwarteten Rootless-Docker-Runtime sieht; erst dann wird die Node-Zuordnung
+   atomar geändert.
+
+Beim finalen Backend-Cutover stoppt nur die alte Control Plane kurz. Danach
+werden ein konsistenter PostgreSQL-Dump, die Backend-Konfiguration, dieselben
+DIS-/Anwendungs-Secrets, Panel-Backups, Community-Blueprints und der
+Setup-Zustand übertragen. Das Ziel behält sein frisch generiertes lokales
+PostgreSQL-Passwort; Datenbank-URLs der Quelle werden nicht übernommen. Nach
+Restore, DIS-, Backend-, Caddy- und Health-Prüfung bleibt die alte Control Plane
+deaktiviert, während ihr eigenständiger Agent weiterläuft. Die Quelle wird nicht
+gelöscht und kann bewusst als Rollback-Basis erhalten bleiben.
+
+Vor dem Commit des Zielzustands startet jeder Fehler die alte Control Plane
+wieder. Nach erfolgreicher lokaler Zielprüfung gibt es absichtlich keinen
+automatischen Split-Brain-Fallback mehr: Es darf nie gleichzeitig auf zwei
+Panel-Datenbanken geschrieben werden. Falls die öffentliche Health-Prüfung noch
+nicht grün ist, bleibt das Ziel maßgeblich und der Assistent fordert zur Prüfung
+von DNS und Cloud-Firewall auf.
+
+### Voraussetzungen und unvermeidbare externe Schritte
+
+- Die Quellinstallation läuft und verwendet PostgreSQL.
+- Backend-Ziel: frisches unterstütztes Linux, mindestens die vom Preflight
+  berechnete freie Kapazität, SSH-Host-Key-Prüfung und Root beziehungsweise
+  passwortloses `sudo`.
+- Gameserver-Ziel: bereits im Panel registrierter, online geprüfter TLS-Node mit
+  genügend Speicher und freien Zielports.
+- Das Frontend muss bereits beim gewählten Hostinganbieter gebaut sein. In
+  `VITE_*` stehen ausschließlich öffentliche Origins, niemals Secrets.
+- Den DNS-A/AAAA-Eintrag der API-Domain muss der Betreiber beim DNS-Anbieter auf
+  den Zielserver setzen. Ohne Zugang zu diesem externen Anbieter darf und kann
+  MSM diesen Schritt nicht vortäuschen.
+- Die einmalige Owner-Freigabe eines neuen Agents bleibt eine bewusste
+  Sicherheitsgrenze und wird auch mit `--yes` nicht umgangen.
+
+Eine reine Vorprüfung ohne Änderungen ist möglich. Sie prüft die lokale
+Installation und – passend zur Auswahl – Frontend-Erreichbarkeit,
+Gameserver-Zustände oder die SSH-Erreichbarkeit der Ziel-Control-Plane. Sie
+erstellt keine Archive, stoppt keine Dienste und verändert keine Daten:
+
+```bash
+sudo /opt/msm/helper-scripts/migrate-panel-components.sh \
+  --migrate-backend \
+  --backend-target root@203.0.113.10 \
+  --api-domain api.example.com \
+  --dry-run
+```
+
+Alle Automationsoptionen zeigt
+`sudo /opt/msm/helper-scripts/migrate-panel-components.sh --help`. SSH-Passwörter,
+Private Keys, Datenbankpasswörter, Agent-Tokens und DIS-Secrets werden weder als
+Argumente angenommen noch ausgegeben. Temporäre Klartext-Konfigurationen und
+Dumps liegen ausschließlich in Verzeichnissen mit Modus `0700`, Dateien mit
+`0600`, und werden nach dem Ziel-Cutover entfernt.
+
+## Einen neuen Node verbinden
+
+Der Standardweg benötigt weder einen Repository-Clone noch manuelles Kopieren
+von Agent-Token oder TLS-Fingerprint:
+
+1. Als Owner im Panel **Nodes** öffnen und **Node hinzufügen** wählen.
+2. Den angezeigten secret-freien Installationsbefehl kopieren.
+3. Den Befehl einmal als Root auf dem neuen Ubuntu-/Debian-Node ausführen.
+4. Der Installer lädt das zur Panel-Version gehörende Agent-Paket direkt vom
+   Panel, installiert Rootless Docker, erzeugt Agent-Token und TLS-Zertifikat
+   lokal und startet den systemd-Service.
+5. Der Node sendet Token und Zertifikatsfingerprint über HTTPS an das Panel.
+   Das Panel speichert den Token DIS-verschlüsselt; UI, URL und Logs zeigen ihn
+   nicht an.
+6. Im Panel den angezeigten kurzen Code vergleichen und die Anfrage einmalig
+   bestätigen. Erst danach prüft das Panel Token, TLS-Pin und Erreichbarkeit und
+   schaltet den Node frei.
+
+Enrollment-Anfragen laufen nach 15 Minuten ab und sind rate-limited. Der
+Installationsbefehl enthält kein wiederverwendbares Agent-Token. Eine bereits
+registrierte Node kann über den öffentlichen Enrollment-Endpunkt niemals
+überschrieben werden; eine erneute Vertrauensfreigabe bleibt eine bewusste
+Owner-Aktion. Der manuelle Dialog für Host, Token und Fingerprint bleibt nur als Fallback für
+bereits separat installierte oder speziell angebundene Agents bestehen. Bei
+einer manuellen Agent-Installation liegt das einmal zu übernehmende Token in
+`/root/msm-agent-token` mit Modus `0600`; nach dem Eintragen im Panel muss diese
+Übergabedatei gelöscht werden. Im normalen Enrollment-Flow wird sie nicht
+angelegt.
+
+## Beispiel mit 20 Hosts
+
+- Host 1: Panel/Control Plane, optional einschließlich Frontend.
+- Host 2 bis 20: jeweils nur ein Remote-Agent; kein Git-Checkout.
+
+Wenn Frontend und Backend bewusst getrennt werden, kann Host 1 das statische
+Frontend, Host 2 die Control Plane und Host 3 bis 20 die Nodes betreiben. Für
+größere Mengen wird derselbe secret-freie Node-Befehl über Cloud-Init, Ansible
+oder eine Provider-Automation ausgeführt. Die Owner-Bestätigung bleibt eine
+bewusste Sicherheitsgrenze.
+
+## Dateien und Konfiguration
+
+- Panel: `backend/.env.example`
+- Frontend: `frontend/.env.example`
+- Agent/Node: `msm-agent/.env.example`
+- DIS-Sidecar: `dis-sidecar/.env.example`
+
+Jede Vorlage erklärt Status, Zweck, Herkunft und Format aller Betreiberwerte.
+Automatisch erzeugte `.env`-Dateien dürfen niemals committed werden.
+
+Bei getrenntem Hosting bezeichnet `MSM_PANEL_URL` die vom Benutzer geöffnete
+Frontend-Origin, während `MSM_API_URL` die öffentliche Backend-Origin bezeichnet.
+Bei einer All-in-one-Installation sind beide identisch. Cookies werden ohne
+manuellen Override aus `MSM_API_URL` abgeleitet, weil nur der API-Host sie setzen
+darf. `MSM_LOCAL_AGENT_ENABLED=false` wird auf einer migrierten Backend-only-
+Control-Plane automatisch gesetzt; Betreiber müssen dafür keinen Token kopieren.
+
+## Aktualität dieser Dokumentation
+
+Änderungen an Bootstrap, `install.sh`, `update.sh`, Node-Enrollment,
+`helper-scripts/migrate-panel-components.sh`, Release-Artefakten, Komponentenaufteilung oder
+Environment-Verträgen müssen in demselben Commit sowohl diese Datei als auch die
+sichtbare Panel-Seite `/docs/self-hosting` aktualisieren.

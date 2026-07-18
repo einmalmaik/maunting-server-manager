@@ -5,6 +5,7 @@ import * as client from '@/api/client'
 
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
+  clearCsrfTokenMemory: vi.fn(),
 }))
 
 describe('authStore', () => {

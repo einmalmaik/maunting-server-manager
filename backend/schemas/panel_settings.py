@@ -34,6 +34,11 @@ class PanelSettingsResponse(BaseModel):
     singra_widget_install_source: str = "none"
     singra_webhook_secret_configured: bool = False
     singra_webhook_secret_source: str = "none"
+    updates_automatic: bool = False
+    captcha_enabled: bool = False
+    captcha_provider: str = "none"
+    captcha_site_key: str = ""
+    captcha_secret_key: str = ""
 
 
 class PanelSettingsUpdate(BaseModel):
@@ -55,6 +60,11 @@ class PanelSettingsUpdate(BaseModel):
     support_widget_tawk_property_id: str | None = None
     support_widget_tawk_widget_id: str | None = None
     support_widget_custom_snippet: str | None = None
+    updates_automatic: bool | None = None
+    captcha_enabled: bool | None = None
+    captcha_provider: str | None = None
+    captcha_site_key: str | None = None
+    captcha_secret_key: str | None = None
 
 
 class TestEmailRequest(BaseModel):

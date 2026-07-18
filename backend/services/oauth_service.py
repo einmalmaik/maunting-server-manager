@@ -472,8 +472,16 @@ def list_public_providers(db: Session) -> list[dict[str, Any]]:
 # ── OAuth-Flow: Authorization URL ──────────────────────────────────────
 
 def build_redirect_uri(provider_slug: str) -> str:
-    """Deterministische redirect_uri, gebildet aus panel_url."""
-    base = settings.panel_url.rstrip("/")
+    """IdP callback URL — must hit the API host, not a decoupled frontend.
+
+    Split hosting: ``MSM_API_URL`` is the public backend origin while
+    ``MSM_PANEL_URL`` is the user-facing SPA. OAuth callbacks are backend
+    routes under ``/api/oauth/...`` and must use the API origin.
+    All-in-one: ``api_url`` empty → fall back to ``panel_url``.
+    """
+    base = (settings.api_url or settings.panel_url or "").rstrip("/")
+    if not base:
+        base = settings.panel_url.rstrip("/")
     return f"{base}/api/oauth/{provider_slug}/callback"
 
 

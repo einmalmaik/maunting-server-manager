@@ -1,16 +1,18 @@
 {
   "name": "maunting-server-manager",
   "private": true,
-  "version": "1.7.10",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:i18n": "node scripts/check-i18n.mjs"
   },
   "dependencies": {
+    "@maunting/design-dna": "file:packages/design-dna",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/lang-xml": "^6.1.0",

@@ -45,15 +45,27 @@ def verify_request(
     secret = resolve_secret()
     if not secret:
         return "secret_not_configured"
+
     if not timestamp_header:
         return "missing_timestamp"
+    
+    ts = None
     try:
         ts = int(timestamp_header)
     except ValueError:
-        return "invalid_timestamp"
+        try:
+            iso_str = timestamp_header
+            if iso_str.endswith("Z"):
+                iso_str = iso_str[:-1] + "+00:00"
+            dt = datetime.fromisoformat(iso_str)
+            ts = int(dt.timestamp())
+        except ValueError:
+            return "invalid_timestamp"
+
     now = int(datetime.now(timezone.utc).timestamp())
     if abs(now - ts) > _MAX_SKEW_SECONDS:
         return "stale_webhook"
+
     expected = hmac.new(
         secret.encode("utf-8"),
         f"{timestamp_header}.{raw_body.decode('utf-8')}".encode("utf-8"),

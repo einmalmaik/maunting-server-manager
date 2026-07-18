@@ -136,7 +136,7 @@ class AuthService:
     # ── Generic Token ──
     @staticmethod
     def generate_token() -> str:
-        return uuid4().hex
+        return secrets.token_urlsafe(32)
 
     @staticmethod
     def _hash_reset_token(token: str) -> str:

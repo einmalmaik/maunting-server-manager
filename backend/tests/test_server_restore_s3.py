@@ -353,7 +353,7 @@ class TestRestoreFromS3:
                 call_order = []
                 with patch("services.docker_service.is_running", return_value=True) as mock_run, \
                      patch("services.docker_service.stop", side_effect=lambda *a, **k: call_order.append("stop")) as mock_stop, \
-                     patch("services.docker_service.remove", side_effect=lambda *a, **k: call_order.append("remove")):
+                     patch("services.docker_service.remove", side_effect=lambda *a, **k: (call_order.append("remove") or {"ok": True})):
                     mock_stop.return_value = {"ok": True}
                     mock_run.return_value = True
                     resp = client.post(

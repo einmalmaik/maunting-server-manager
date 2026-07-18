@@ -40,17 +40,41 @@ class PortConflictError(ValueError):
     """Wird geworfen, wenn ein Port bereits belegt ist (DB oder Host)."""
 
 
-def _db_used_ports(db: Session, exclude_server_id: int | None = None) -> set[tuple[int, str]]:
-    """Liefert alle Port/Protokoll-Paare, die andere MSM-Server halten."""
+def _db_used_ports(
+    db: Session,
+    exclude_server_id: int | None = None,
+    node_id: int | None = None,
+) -> set[tuple[int, str]]:
+    """Liefert Port/Protokoll-Paare, die andere MSM-Server **auf demselben Node** halten.
+
+    Phase 2 Multi-Node: Port 27015 darf auf Node A und Node B gleichzeitig
+    vergeben sein. Ohne ``node_id`` (Legacy/Tests) bleibt das globale Verhalten.
+    """
     from models.server_port import ServerPort
     query = db.query(ServerPort.port, ServerPort.protocol)
+    if node_id is not None:
+        query = query.join(Server, Server.id == ServerPort.server_id).filter(
+            Server.node_id == node_id
+        )
     if exclude_server_id is not None:
         query = query.filter(ServerPort.server_id != exclude_server_id)
     return {(int(port), normalize_port_protocol(protocol)) for port, protocol in query.all()}
 
 
-def _assert_host_free(port: int, protocol: str, bind_ip: str) -> None:
-    """Wirft ``PortConflictError``, wenn Host-System den Port belegt."""
+def _assert_host_free(
+    port: int,
+    protocol: str,
+    bind_ip: str,
+    *,
+    check_host: bool = True,
+) -> None:
+    """Wirft ``PortConflictError``, wenn Host-System den Port belegt.
+
+    Bei Remote-Nodes (``check_host=False``) entfaellt der lokale ss/Bind-Check —
+    der Panel-Host sieht die Socket-Tabelle des Remote-Nodes nicht.
+    """
+    if not check_host:
+        return
     if not is_port_available(port, protocol, bind_ip):
         raise PortConflictError(
             f"Port {port}/{protocol} ist auf dem Host bereits belegt."
@@ -86,11 +110,16 @@ def allocate_ports(
     *,
     port_requirements: list[tuple[str, str]] | None = None,
     requested_ports: dict[str, int | None] | None = None,
+    node_id: int | None = None,
+    check_host: bool = True,
 ) -> list[tuple[str, int, str]] | tuple[int, int, int]:
     """Vergibt Ports fuer einen Server (dynamisch oder legacy).
 
     Wenn ``port_requirements`` uebergeben wird → gibt Liste von ``(role, port, protocol)`` zurueck.
     Sonst (Legacy-Verhalten) → gibt 3-Tuple ``(game_port, query_port, rcon_port)`` zurueck.
+
+    ``node_id``: DB-Kollisionen nur gegen Server auf demselben Node (Phase 2).
+    ``check_host``: False fuer Remote-Nodes (kein lokaler ss/Bind-Check).
     """
     is_legacy = port_requirements is None
     if is_legacy:
@@ -114,7 +143,7 @@ def allocate_ports(
         (role, normalize_port_protocol(proto))
         for role, proto in port_requirements
     ]
-    db_used = _db_used_ports(db, exclude_server_id=exclude_server_id)
+    db_used = _db_used_ports(db, exclude_server_id=exclude_server_id, node_id=node_id)
 
     # 1) Explizite Vorgaben validieren und setzen
     allocated_ports: dict[str, int] = {}
@@ -130,7 +159,7 @@ def allocate_ports(
                     raise PortConflictError(
                         f"Port {req_port}/{proto} ({role}) ist bereits an einen anderen MSM-Server vergeben."
                     )
-                _assert_host_free(req_port, proto, bind_ip)
+                _assert_host_free(req_port, proto, bind_ip, check_host=check_host)
                 allocated_ports[role] = req_port
 
     # 2) Uebrige Ports automatisch vergeben
@@ -151,7 +180,7 @@ def allocate_ports(
             raise PortConflictError(
                 f"Port {shared_port}/{proto} ({role}) ist bereits an einen anderen MSM-Server vergeben."
             )
-        _assert_host_free(shared_port, proto, bind_ip)
+        _assert_host_free(shared_port, proto, bind_ip, check_host=check_host)
         allocated_ports[role] = shared_port
     remaining_reqs = [r for r in port_requirements if r[0] not in allocated_ports]
     if not remaining_reqs:
@@ -184,7 +213,7 @@ def allocate_ports(
                 if (shared_port, proto) in db_used:
                     conflict = True
                     break
-                if not is_port_available(shared_port, proto, bind_ip):
+                if check_host and not is_port_available(shared_port, proto, bind_ip):
                     conflict = True
                     break
                 temp_allocated[role] = shared_port
@@ -195,7 +224,7 @@ def allocate_ports(
             if (cand_port, proto) in db_used:
                 conflict = True
                 break
-            if not is_port_available(cand_port, proto, bind_ip):
+            if check_host and not is_port_available(cand_port, proto, bind_ip):
                 conflict = True
                 break
             temp_allocated[role] = cand_port
@@ -223,14 +252,16 @@ def allocate_ports(
                     raise PortConflictError(
                         f"Port {shared_port}/{proto} ({role}) ist bereits an einen anderen MSM-Server vergeben."
                     )
-                _assert_host_free(shared_port, proto, bind_ip)
+                _assert_host_free(shared_port, proto, bind_ip, check_host=check_host)
                 temp_allocated[role] = shared_port
                 continue
             found_port = False
             for p in range(PORT_RANGE_START, PORT_RANGE_END + 1):
                 if (p, proto) in db_used or p in temp_allocated.values():
                     continue
-                if is_port_available(p, proto, bind_ip):
+                if check_host and not is_port_available(p, proto, bind_ip):
+                    continue
+                if not check_host or is_port_available(p, proto, bind_ip):
                     temp_allocated[role] = p
                     found_port = True
                     break

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 # ═══════════════════════════════════════════════════════════════
 #  Maunting Server Manager — Updater
@@ -57,14 +58,17 @@ restore_panel_ownership() {
     if [[ -d "$MSM_DIR/.git" ]]; then
         chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/.git" 2>/dev/null || true
     fi
-    # ACHTUNG: Auf Produktions-Servern (root server) NIEMALS `git clean -fd` (oder -x) 
+    # ACHTUNG: Auf Produktions-Servern (root server) NIEMALS `git clean -fd` (oder -x)
     # im $MSM_DIR ausfuehren! Auch wenn server-Daten unter $MSM_DIR/servers liegen:
     # git clean loescht untracked Dirs. Die .gitignore schuetzt jetzt die Daten-Pfade,
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
-    # Es gibt scripts/reset-msm-docker.sh als Recovery (für den Docker-Store-Corruption-Fall).
-    for sub in backend frontend docs dis-sidecar; do
+    # Es gibt helper-scripts/recover-docker-storage.sh als Recovery (für den Docker-Store-Corruption-Fall).
+    for sub in backend frontend docs dis-sidecar msm-agent scripts helper-scripts; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
-            chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" 2>/dev/null || true
+            # Hard fail for code trees used by venv setup — silent || true left
+            # root-owned msm-agent after git pull and caused PEP 668 cascades.
+            chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" \
+                || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$sub fehlgeschlagen"
         fi
     done
     # npm-Cache des msm-Users (HOME=/opt/msm). Falls ein frueherer fehlge-
@@ -79,8 +83,77 @@ restore_panel_ownership() {
         -exec chown "$MSM_USER:$MSM_USER" {} + 2>/dev/null || true
 }
 
+# Create/repair a per-app Python venv as $MSM_USER only (no system pip / PEP 668).
+prepare_app_venv() {
+    local app_dir="$1"
+    local label="$2"
+    local recreate="${3:-false}"
+
+    [[ -d "$app_dir" ]] || err "$label: Verzeichnis fehlt: $app_dir"
+    id "$MSM_USER" &>/dev/null || err "$label: Systemuser $MSM_USER existiert nicht"
+    command -v python3 &>/dev/null || err "$label: python3 fehlt"
+    if ! python3 -c "import venv" 2>/dev/null; then
+        err "$label: python3-venv fehlt (apt install python3-venv)"
+    fi
+
+    chown -R "$MSM_USER:$MSM_USER" "$app_dir" \
+        || err "$label: chown $MSM_USER:$MSM_USER auf $app_dir fehlgeschlagen"
+
+    if [[ -e "$app_dir/venv" ]]; then
+        local vowner
+        vowner=$(stat -c '%U' "$app_dir/venv" 2>/dev/null || echo "")
+        if [[ "$recreate" == "true" ]] \
+            || [[ "$vowner" != "$MSM_USER" ]] \
+            || [[ ! -x "$app_dir/venv/bin/python" ]]; then
+            rm -rf "$app_dir/venv"
+        fi
+    fi
+
+    if ! su - "$MSM_USER" -c "
+        set -euo pipefail
+        cd $(printf '%q' "$app_dir")
+        if [[ ! -x venv/bin/python ]]; then
+            rm -rf venv
+            python3 -m venv venv
+        fi
+        # shellcheck disable=SC1091
+        source venv/bin/activate
+        test -n \"\${VIRTUAL_ENV:-}\"
+        case \"\$(command -v python)\" in
+            */venv/bin/python*) ;;
+            *) echo \"ERROR: $label: not using venv python: \$(command -v python)\" >&2; exit 1 ;;
+        esac
+        pip install --upgrade pip -q
+        pip install -r requirements.txt -q
+        test -x venv/bin/python
+    " 2>&1 | tee -a "$LOG_FILE"; then
+        err "$label: venv-Setup fehlgeschlagen (Ownership/PEP 668). Ownership: $(stat -c '%U:%G' "$app_dir" 2>/dev/null || echo '?')"
+    fi
+
+    [[ -x "$app_dir/venv/bin/python" ]] || err "$label: venv/bin/python fehlt nach Setup"
+    local venv_owner
+    venv_owner=$(stat -c '%U' "$app_dir/venv" 2>/dev/null || echo "")
+    [[ "$venv_owner" == "$MSM_USER" ]] || err "$label: venv gehört $venv_owner, nicht $MSM_USER"
+}
+
 CHECK_ONLY=false
 FORCE=false
+UPDATE_SUCCEEDED=false
+PANEL_WAS_ACTIVE=false
+DB_BACKUP_FILE=""
+LEGACY_SQLITE_UPDATE=false
+
+cleanup_on_failure() {
+    local exit_code=$?
+    if [[ "$UPDATE_SUCCEEDED" != "true" && $exit_code -ne 0 ]]; then
+        warn "Update nicht abgeschlossen. Es wird bewusst kein Erfolg gemeldet."
+        [[ -n "$DB_BACKUP_FILE" ]] && warn "PostgreSQL-Sicherung: $DB_BACKUP_FILE"
+        if ${SYSTEMD_AVAILABLE:-false} && $PANEL_WAS_ACTIVE; then
+            systemctl restart msm-panel.service 2>/dev/null || true
+        fi
+    fi
+}
+trap cleanup_on_failure EXIT
 
 for arg in "$@"; do
     case "$arg" in
@@ -154,6 +227,21 @@ if [[ -z "$LATEST_TAG" ]]; then
         }
         LOCAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
         REMOTE_SHA=$(git rev-parse origin/main 2>/dev/null || echo "")
+
+        # Never continue inside a script that is about to overwrite itself.
+        # Execute the updater from the target revision in /tmp first.
+        if [[ -n "$LOCAL_SHA" && -n "$REMOTE_SHA" && "$LOCAL_SHA" != "$REMOTE_SHA" ]] \
+            && [[ "${MSM_UPDATE_STAGE2:-}" != "1" ]]; then
+            NEXT_UPDATER="/tmp/msm-update-${REMOTE_SHA:0:12}.sh"
+            git show "${REMOTE_SHA}:update.sh" > "$NEXT_UPDATER" \
+                || err "Updater der Zielversion konnte nicht geladen werden."
+            chmod 700 "$NEXT_UPDATER"
+            bash -n "$NEXT_UPDATER" \
+                || err "Updater der Zielversion ist syntaktisch ungültig."
+            log "Übergabe an geprüften Updater der Zielversion..."
+            export MSM_UPDATE_STAGE2=1
+            exec bash "$NEXT_UPDATER" "$@"
+        fi
 
         if [[ -z "$LOCAL_SHA" ]] || [[ -z "$REMOTE_SHA" ]]; then
             warn "Konnte Git-Commits nicht ermitteln."
@@ -236,28 +324,56 @@ tar -czf "$BACKUP_FILE" \
     --exclude=venv \
     --exclude=node_modules \
     --exclude=__pycache__ \
-    backend frontend .env 2>/dev/null || true
+    --exclude='*.db' \
+    --exclude='*.db.*' \
+    backend frontend 2>>"$LOG_FILE" \
+    || err "Code-/Konfigurationsbackup fehlgeschlagen."
+[[ -s "$BACKUP_FILE" ]] || err "Code-/Konfigurationsbackup ist leer."
 
-# DB extra backup (wenn SQLite)
-DB_PATH="$MSM_DIR/backend/msm.db"
-if [[ -f "$DB_PATH" ]]; then
-    cp "$DB_PATH" "$BACKUP_DIR/msm-db-$(date +%Y%m%d-%H%M%S).db"
+# PostgreSQL is the only runtime database after Phase 8. Existing SQLite is
+# copied byte-for-byte here and migrated only after the target code is ready.
+CURRENT_DATABASE_URL=$(grep -E '^MSM_DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+if [[ "$CURRENT_DATABASE_URL" == sqlite* ]]; then
+    LEGACY_SQLITE_UPDATE=true
+    LEGACY_SQLITE_FILE="$MSM_DIR/backend/msm.db"
+    [[ -s "$LEGACY_SQLITE_FILE" ]] || err "Legacy-SQLite-Datenbank fehlt oder ist leer."
+    DB_BACKUP_FILE="$BACKUP_DIR/msm-sqlite-pre-phase8-$(date +%Y%m%d-%H%M%S).db"
+    cp -p "$LEGACY_SQLITE_FILE" "$DB_BACKUP_FILE" \
+        || err "Legacy-SQLite-Sicherung fehlgeschlagen."
+    cmp -s "$LEGACY_SQLITE_FILE" "$DB_BACKUP_FILE" \
+        || err "Legacy-SQLite-Sicherung konnte nicht verifiziert werden."
+else
+    DB_BACKUP_FILE="$BACKUP_DIR/msm-postgres-$(date +%Y%m%d-%H%M%S).dump"
+    DB_BACKUP_HELPER="/tmp/msm-update-db-backup.py"
+    if [[ "$UPDATE_MODE" == "git" ]]; then
+        git show "${REMOTE_SHA}:backend/scripts/update_database_backup.py" > "$DB_BACKUP_HELPER" \
+            || err "PostgreSQL-Backuphelfer der Zielversion fehlt."
+    elif [[ -f "$MSM_DIR/backend/scripts/update_database_backup.py" ]]; then
+        cp "$MSM_DIR/backend/scripts/update_database_backup.py" "$DB_BACKUP_HELPER"
+    else
+        curl -fsSL \
+            "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/$LATEST_TAG/backend/scripts/update_database_backup.py" \
+            -o "$DB_BACKUP_HELPER" || err "PostgreSQL-Backuphelfer konnte nicht geladen werden."
+    fi
+    python3 -m py_compile "$DB_BACKUP_HELPER" \
+        || err "PostgreSQL-Backuphelfer ist ungültig."
+    python3 "$DB_BACKUP_HELPER" --env-file "$ENV_FILE" --output "$DB_BACKUP_FILE" \
+        2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Sicherung fehlgeschlagen. Update abgebrochen."
 fi
 
-ok "Backup erstellt: $BACKUP_FILE"
+ok "Code-/Konfigurationsbackup erstellt: $BACKUP_FILE"
+ok "Datenbank-Backup erstellt und verifiziert: $DB_BACKUP_FILE"
 
 # ── Git Pull oder Tarball ──
 cd "$MSM_DIR"
 
 if [[ "$UPDATE_MODE" == "git" ]]; then
     log "Aktualisiere via Git pull..."
-    # Backup des aktuellen HEAD für Rollback
-    ROLLBACK_SHA="$LOCAL_SHA"
-    git pull origin main || {
-        err "Git pull fehlgeschlagen. Versuche Rollback..."
-        git reset --hard "$ROLLBACK_SHA" 2>/dev/null || true
-        exit 1
-    }
+    if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+        err "Lokale Änderungen erkannt. Update sicher abgebrochen; bitte Änderungen zuerst sichern."
+    fi
+    git pull --ff-only origin main \
+        || err "Git-Update ist kein sicherer Fast-Forward und wurde abgebrochen."
     # Alte Build-Artefakte entfernen (nur dist/, keine Server-Daten!)
     rm -rf frontend/dist 2>/dev/null || true
     # git pull lief als root -> neue/geaenderte Dateien sind jetzt root-owned.
@@ -275,29 +391,49 @@ elif [[ -d ".git" ]]; then
     restore_panel_ownership
 else
     log "Lade Release-Tarball..."
-    TARBALL_URL=$(echo "$RELEASE_JSON" | python3 -c "
+    readarray -t RELEASE_URLS < <(echo "$RELEASE_JSON" | python3 -c '
 import sys, json
 data = json.load(sys.stdin)
-for asset in data.get('assets', []):
-    if asset['name'].endswith('.tar.gz'):
-        print(asset['browser_download_url'])
-        break
-" 2>/dev/null || echo "")
+expected = "msm-panel-{}.tar.gz".format(data.get("tag_name", ""))
+tarball_url = ""
+checksum_url = ""
+for asset in data.get("assets", []):
+    if asset.get("name") == expected:
+        tarball_url = asset.get("browser_download_url", "")
+    elif asset.get("name") == "SHA256SUMS":
+        checksum_url = asset.get("browser_download_url", "")
+print(tarball_url)
+print(checksum_url)
+' 2>/dev/null || true)
+    TARBALL_URL="${RELEASE_URLS[0]:-}"
+    CHECKSUM_URL="${RELEASE_URLS[1]:-}"
 
-    if [[ -z "$TARBALL_URL" ]]; then
-        warn "Kein Tarball im Release gefunden. Versuche git clone..."
+    if [[ -z "$TARBALL_URL" || -z "$CHECKSUM_URL" ]]; then
+        warn "Kein vollständig prüfbares Panel-Artefakt gefunden. Versuche git clone..."
         git clone --depth 1 --branch "$LATEST_TAG" \
             "https://github.com/$GITHUB_OWNER/$GITHUB_REPO.git" /tmp/msm-update
         cp -r /tmp/msm-update/* "$MSM_DIR/"
         rm -rf /tmp/msm-update
     else
-        curl -sL "$TARBALL_URL" | tar -xz -C /tmp
-        # Annahme: Tarball enthält Ordner mit Release-Name
-        EXTRACTED=$(ls -d /tmp/mauntingservermanager* 2>/dev/null | head -1)
-        if [[ -n "$EXTRACTED" ]]; then
-            cp -r "$EXTRACTED"/* "$MSM_DIR/"
-            rm -rf "$EXTRACTED"
-        fi
+        RELEASE_TMP=$(mktemp -d /tmp/msm-release-update.XXXXXX)
+        PANEL_ASSET="msm-panel-$LATEST_TAG.tar.gz"
+        curl -fsSL "$TARBALL_URL" -o "$RELEASE_TMP/$PANEL_ASSET" \
+            || err "Panel-Release konnte nicht geladen werden."
+        curl -fsSL "$CHECKSUM_URL" -o "$RELEASE_TMP/SHA256SUMS" \
+            || err "Release-Prüfsummen konnten nicht geladen werden."
+        awk -v expected="$PANEL_ASSET" \
+            '$2 == expected && $1 ~ /^[[:xdigit:]]{64}$/ { print; found=1 } END { exit found ? 0 : 1 }' \
+            "$RELEASE_TMP/SHA256SUMS" > "$RELEASE_TMP/panel.sha256" \
+            || err "Prüfsumme für Panel-Artefakt fehlt oder ist ungültig."
+        (cd "$RELEASE_TMP" && sha256sum --check panel.sha256) \
+            || err "Panel-Release hat eine ungültige Prüfsumme."
+        tar -xzf "$RELEASE_TMP/$PANEL_ASSET" -C "$RELEASE_TMP" \
+            || err "Panel-Release konnte nicht sicher entpackt werden."
+        EXTRACTED="$RELEASE_TMP/mauntingservermanager-$LATEST_TAG"
+        [[ -d "$EXTRACTED/backend" && -f "$EXTRACTED/update.sh" ]] \
+            || err "Panel-Release hat nicht die erwartete Struktur."
+        cp -r "$EXTRACTED"/. "$MSM_DIR/"
+        rm -rf "$RELEASE_TMP"
     fi
     restore_panel_ownership
 fi
@@ -369,20 +505,53 @@ chown msm:msm /opt/msm/backups 2>/dev/null || true
 
 # ── Backend aktualisieren ──
 log "Aktualisiere Python-Abhängigkeiten..."
-su - msm -c "
-    cd $MSM_DIR/backend
-    source venv/bin/activate
-    pip install --upgrade pip -q
-    pip install -r requirements.txt -q
-" 2>&1 | tee -a "$LOG_FILE"
+prepare_app_venv "$MSM_DIR/backend" "Python-Backend" false
+ok "Backend Dependencies aktualisiert"
+
+# ── MSM Agent aktualisieren (Monorepo, rootless Node) ──
+if [[ -d "$MSM_DIR/msm-agent" ]]; then
+    log "Aktualisiere MSM Agent..."
+    prepare_app_venv "$MSM_DIR/msm-agent" "MSM Agent" false
+    # .env nur anlegen wenn fehlend — Token niemals ueberschreiben/loggen
+    if [[ ! -f "$MSM_DIR/msm-agent/.env" ]]; then
+        AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+        MSM_UID=$(id -u msm 2>/dev/null || echo 0)
+        cat > "$MSM_DIR/msm-agent/.env" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/msm-agent/.env.example
+MSM_AGENT_TOKEN="$AGENT_TOKEN"
+MSM_AGENT_HOST="127.0.0.1"
+MSM_AGENT_PORT="9000"
+MSM_SERVERS_DIR="$MSM_DIR/servers"
+MSM_DOCKER_HOST="unix:///run/user/${MSM_UID}/docker.sock"
+MSM_AGENT_LOG_LEVEL="INFO"
+EOF
+        chmod 600 "$MSM_DIR/msm-agent/.env"
+        chown msm:msm "$MSM_DIR/msm-agent/.env"
+        ok "MSM Agent .env erzeugt"
+    else
+        chown msm:msm "$MSM_DIR/msm-agent/.env" 2>/dev/null || true
+    fi
+    ok "MSM Agent Dependencies aktualisiert"
+fi
 
 # ── Datenbank-Migrationen ──
-log "Führe Datenbank-Migrationen durch..."
+if $SYSTEMD_AVAILABLE && systemctl is-active --quiet msm-panel.service; then
+    PANEL_WAS_ACTIVE=true
+    log "Nehme Panel für das Schema-Upgrade kurz in Wartung..."
+    systemctl stop msm-panel.service || err "Panel konnte nicht in Wartung genommen werden."
+fi
+if $LEGACY_SQLITE_UPDATE; then
+    log "Migriere bestehende Panel-Datenbank einmalig nach PostgreSQL..."
+    MSM_DIR="$MSM_DIR" MSM_USER="$MSM_USER" \
+        bash "$MSM_DIR/helper-scripts/migrate-db-to-postgres.sh" 2>&1 | tee -a "$LOG_FILE" \
+        || err "SQLite-nach-PostgreSQL-Migration fehlgeschlagen."
+fi
+log "Führe geprüfte PostgreSQL-Schemamigration durch..."
 su - msm -c "
     cd $MSM_DIR/backend
     source venv/bin/activate
-    alembic upgrade head 2>/dev/null || python3 -c \"from database import engine, Base; from models import *; Base.metadata.create_all(engine)\"
-" 2>&1 | tee -a "$LOG_FILE"
+    python3 scripts/prepare_phase8_schema.py
+" 2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Schemamigration fehlgeschlagen."
 
 # ── DIS Config laden/generieren ──
 log "Lade/Generiere kryptografischen DIS-Config..."
@@ -410,6 +579,20 @@ fi
 if ! grep -q '^MSM_DIS_SIDECAR_URL=' "$ENV_FILE"; then
     echo 'MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"' >> "$ENV_FILE"
 fi
+chmod 600 "$ENV_FILE"
+chown "$MSM_USER:$MSM_USER" "$ENV_FILE"
+
+DIS_ENV_FILE="$MSM_DIR/dis-sidecar/.env"
+cat > "$DIS_ENV_FILE" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/dis-sidecar/.env.example
+MSM_SECRET_KEY="$SECRET_KEY"
+MSM_DIS_SALT="$DIS_SALT"
+MSM_DIS_SIDECAR_TOKEN="$DIS_TOKEN"
+MSM_DIS_SIDECAR_PORT=9100
+NODE_ENV=production
+EOF
+chmod 600 "$DIS_ENV_FILE"
+chown "$MSM_USER:$MSM_USER" "$DIS_ENV_FILE"
 
 # ── DIS Sidecar Abhängigkeiten installieren ──
 log "Installiere DIS Sidecar-Abhängigkeiten..."
@@ -441,10 +624,7 @@ Group=$MSM_USER
 WorkingDirectory=$MSM_DIR/dis-sidecar
 Environment="NODE_ENV=production"
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="MSM_SECRET_KEY=$SECRET_KEY"
-Environment="MSM_DIS_SALT=$DIS_SALT"
-Environment="MSM_DIS_SIDECAR_TOKEN=$DIS_TOKEN"
-Environment="MSM_DIS_SIDECAR_URL=http://127.0.0.1:9100"
+EnvironmentFile=$MSM_DIR/dis-sidecar/.env
 ExecStart=/usr/bin/node $MSM_DIR/dis-sidecar/server.mjs
 Restart=on-failure
 RestartSec=3
@@ -485,9 +665,42 @@ ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/u
 WantedBy=multi-user.target
 EOF
 
+    # MSM Agent (local node)
+    if [[ -d "$MSM_DIR/msm-agent" ]]; then
+        cat > /etc/systemd/system/msm-agent.service <<EOF
+[Unit]
+Description=MSM Agent (Node Runtime)
+After=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/msm-agent
+Environment="PATH=$MSM_DIR/msm-agent/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+EnvironmentFile=-$MSM_DIR/msm-agent/.env
+ExecStart=$MSM_DIR/msm-agent/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=$MSM_DIR -/run/user
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     systemctl daemon-reload
     systemctl enable msm-dis-sidecar.service
     systemctl enable msm-panel.service
+    if [[ -f /etc/systemd/system/msm-agent.service ]]; then
+        systemctl enable msm-agent.service
+    fi
     ok "systemd Services registriert."
 fi
 
@@ -599,10 +812,11 @@ fi
 log "Starte Services neu..."
 if $SYSTEMD_AVAILABLE; then
     log "Starte DIS Sidecar..."
-    systemctl restart msm-dis-sidecar.service 2>/dev/null || systemctl start msm-dis-sidecar.service 2>/dev/null || true
-    sleep 1
+    systemctl restart msm-dis-sidecar.service 2>/dev/null \
+        || systemctl start msm-dis-sidecar.service 2>/dev/null \
+        || err "DIS Sidecar konnte nicht gestartet werden."
     if ! systemctl is-active --quiet msm-dis-sidecar.service; then
-        warn "DIS Sidecar startet nicht. Pruefe: journalctl -u msm-dis-sidecar -n 50"
+        err "DIS Sidecar ist nicht aktiv. Prüfe: journalctl -u msm-dis-sidecar -n 50"
     fi
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
@@ -615,10 +829,37 @@ if $SYSTEMD_AVAILABLE; then
         " 2>&1 | tee -a "$LOG_FILE" || err "DIS-Migration fehlgeschlagen! Migration abgebrochen."
     fi
 
-    systemctl restart msm-panel.service
-    systemctl restart caddy 2>/dev/null || true
+    if [[ -f /etc/systemd/system/msm-agent.service ]]; then
+        systemctl restart msm-agent.service 2>/dev/null \
+            || systemctl start msm-agent.service 2>/dev/null \
+            || err "Lokaler MSM Agent konnte nicht gestartet werden."
+        AGENT_READY=false
+        for _attempt in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:9000/health >/dev/null 2>&1; then
+                AGENT_READY=true
+                break
+            fi
+            sleep 1
+        done
+        $AGENT_READY || err "Lokaler MSM Agent ist nicht erreichbar. Prüfe: journalctl -u msm-agent -n 50"
+    fi
+
+    systemctl restart msm-panel.service || err "Panel konnte nicht gestartet werden."
+    PANEL_READY=false
+    for _attempt in $(seq 1 30); do
+        if curl -fsS --max-time 2 http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+            PANEL_READY=true
+            break
+        fi
+        sleep 1
+    done
+    $PANEL_READY || err "Panel-Healthcheck fehlgeschlagen. Prüfe: journalctl -u msm-panel -n 50"
+    systemctl restart caddy 2>/dev/null \
+        || err "Caddy konnte nicht neu gestartet werden."
+    systemctl is-active --quiet caddy \
+        || err "Caddy ist nach dem Update nicht aktiv."
 else
-    warn "systemd nicht verfügbar — Services können nicht neu gestartet werden."
+    err "systemd ist für sichere Produktionsupdates erforderlich."
 fi
 
 # ── Version aktualisieren ──
@@ -639,3 +880,4 @@ echo -e "  ${BOLD}Wichtig:${NC}"
 echo -e "    - Prüfe das Panel im Browser"
 echo -e "    - Bei Problemen: Rollback via Backup"
 echo ""
+UPDATE_SUCCEEDED=true

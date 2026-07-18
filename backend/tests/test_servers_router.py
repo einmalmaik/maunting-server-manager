@@ -3301,7 +3301,7 @@ class TestExecEndpoint:
         )
 
         seen: dict = {}
-        def _fake_run(*, server_id, command, timeout, user_id):
+        def _fake_run(*, server_id, command, timeout, user_id, node=None):
             seen["server_id"] = server_id
             seen["command"] = command
             seen["timeout"] = timeout

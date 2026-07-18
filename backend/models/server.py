@@ -14,6 +14,12 @@ class Server(Base):
     game_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     install_dir: Mapped[str] = mapped_column(String(512), nullable=False)
 
+    # Node Zuordnung
+    node_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("nodes.id"), nullable=True, index=True
+    )
+    node: Mapped["Node"] = relationship("Node", back_populates="servers")
+
     # Docker-Runtime: stabiler Container-Name (msm-srv-<id>) wird zur Laufzeit
     # vom Plugin via `container_name_for(server.id)` generiert. Hier wird der
     # konkret zuletzt verwendete Name gecached für Debug-/Audit-Zwecke.

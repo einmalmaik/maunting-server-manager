@@ -28,7 +28,9 @@ def _make_pg_db(db: Session, server_id: int, name: str, *, index: int = 1) -> Po
         server_id=server_id,
         name=name,
         owner_role=f"msm_s{server_id}_o{index}",
-        owner_password_encrypted="test-enc-v1:msm:pg:db:owner:dummy",
+        owner_password_encrypted=(
+            f"test-enc-v1:{'msm:pg:db:owner'.encode().hex()}:{'dummy'.encode().hex()}"
+        ),
         is_superuser=False,
     )
     db.add(pg)
@@ -249,16 +251,17 @@ class TestValFix009PerDbDumps:
         _make_pg_db(db, test_server.id, "db_alpha", index=1)
         _make_pg_db(db, test_server.id, "db_beta", index=2)
 
-        def fake_exec(container, cmd, timeout=180):
-            # cmd ist ["sh", "-c", "PGPASSWORD=... pg_dump ... --dbname=db_alpha ..."]
-            cmd_str = cmd[2]
-            for name in ("db_alpha", "db_beta"):
-                if f"--dbname={name}" in cmd_str:
-                    return {"ok": True, "stdout": f"-- dump for {name}\nCREATE TABLE t_{name}();\n"}
-            return {"ok": False, "error": "unknown"}
+        mock_client = MagicMock()
+        mock_client.postgres_dump.return_value = {
+            "ok": True,
+            "dumps": {
+                "db_alpha": "-- dump for db_alpha\nCREATE TABLE t_db_alpha();\n",
+                "db_beta": "-- dump for db_beta\nCREATE TABLE t_db_beta();\n",
+            },
+        }
 
-        with patch("services.postgres_service.docker_service.exec_in", side_effect=fake_exec), \
-             patch("services.postgres_service._admin_password", return_value="pw"):
+        with patch.object(postgres_service, "_client_for_server_id", return_value=mock_client), \
+             patch.object(postgres_service, "_admin_password", return_value="pw"):
             result = postgres_service.backup_pg_dump_for_archive(db, test_server.id)
 
         assert isinstance(result, dict)
@@ -371,81 +374,35 @@ class TestValFix009PerDbDumps:
         _make_pg_db(db, test_server.id, "db_alpha", index=1)
         _make_pg_db(db, test_server.id, "db_beta", index=2)
 
-        executed: dict[str, str] = {}  # db_name -> ausgefuehrtes SQL
-
-        class FakeCursor:
-            def execute(self, sql):
-                executed.setdefault("_current", sql)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
-
-        class FakeConn:
-            def __init__(self, dbname):
-                self.dbname = dbname
-                self._committed = False
-
-            def cursor(self):
-                return FakeCursor()
-
-            def commit(self):
-                self._committed = True
-
-            def rollback(self):
-                pass
-
-            def close(self):
-                pass
-
-        def fake_connect(host, port, dbname, user, password, connect_timeout=5):
-            conn = FakeConn(dbname)
-            return conn
-
         dumps = {
             "db_alpha": b"CREATE TABLE t_alpha();",
             "db_beta": b"CREATE TABLE t_beta();",
         }
+        captured: dict = {}
 
-        with patch("services.postgres_service.psycopg2.connect", side_effect=fake_connect), \
-             patch("services.postgres_service._admin_password", return_value="pw"):
-            # Track which SQL was executed on which DB connection
-            executed_sqls: dict[str, str] = {}
+        mock_client = MagicMock()
 
-            original_connect = postgres_service.psycopg2.connect
+        def capture_restore(*, admin_password, dumps, owners):
+            captured["dumps"] = dict(dumps)
+            captured["owners"] = owners
+            return {"ok": True, "databases": list(dumps.keys()), "duration_ms": 1}
 
-            class TrackingConn(FakeConn):
-                def cursor(self):
-                    outer = self
-                    class TrackingCursor:
-                        def execute(self, sql):
-                            executed_sqls.setdefault(outer.dbname, sql)
+        mock_client.postgres_restore.side_effect = capture_restore
 
-                        def __enter__(self):
-                            return self
-
-                        def __exit__(self, *a):
-                            return False
-                    return TrackingCursor()
-
-            with patch("services.postgres_service.psycopg2.connect",
-                       side_effect=lambda **kw: TrackingConn(kw["dbname"])):
-                result = postgres_service.restore_pg_dump_from_archive(
-                    db, test_server.id, dumps
-                )
+        with patch.object(postgres_service, "_client_for_server_id", return_value=mock_client), \
+             patch.object(postgres_service, "_admin_password", return_value="pw"):
+            result = postgres_service.restore_pg_dump_from_archive(
+                db, test_server.id, dumps
+            )
 
         assert result.get("ok") is True
-        # db_alpha erhielt nur alpha-SQL
-        assert b"t_alpha" in executed_sqls.get("db_alpha", "").encode() if isinstance(executed_sqls.get("db_alpha"), str) else b"t_alpha" in executed_sqls.get("db_alpha", b"")
-        # db_beta erhielt nur beta-SQL
-        assert b"t_beta" in executed_sqls.get("db_beta", "").encode() if isinstance(executed_sqls.get("db_beta"), str) else b"t_beta" in executed_sqls.get("db_beta", b"")
-        # Keine Cross-Kontamination
-        beta_sql = executed_sqls.get("db_beta", b"")
-        if isinstance(beta_sql, str):
-            beta_sql = beta_sql.encode()
-        assert b"t_alpha" not in beta_sql
+        assert "db_alpha" in captured["dumps"]
+        assert "db_beta" in captured["dumps"]
+        assert "t_alpha" in captured["dumps"]["db_alpha"]
+        assert "t_beta" in captured["dumps"]["db_beta"]
+        assert "t_alpha" not in captured["dumps"]["db_beta"]
+        assert "t_beta" not in captured["dumps"]["db_alpha"]
+        assert captured["owners"]["db_alpha"]["owner_role"] == "msm_s1_o1"
 
     def test_restore_pg_dump_from_archive_skips_unknown_dbs(self, db, test_server):
         """Dumps fuer DBs die nicht mehr existieren werden uebersprungen."""
@@ -454,43 +411,27 @@ class TestValFix009PerDbDumps:
         _make_pg_db(db, test_server.id, "db_alpha", index=1)
         # db_beta existiert nicht mehr im Server, ist aber im Dump
 
-        executed_sqls: dict[str, str] = {}
+        captured: dict = {}
+        mock_client = MagicMock()
 
-        class FakeConn:
-            def __init__(self, dbname):
-                self.dbname = dbname
+        def capture_restore(*, admin_password, dumps, owners):
+            captured["dumps"] = dict(dumps)
+            captured["owners"] = owners
+            return {"ok": True, "databases": list(dumps.keys()), "duration_ms": 1}
 
-            def cursor(self):
-                outer = self
-                class C:
-                    def execute(self, sql):
-                        executed_sqls[outer.dbname] = sql
-
-                    def __enter__(self):
-                        return self
-
-                    def __exit__(self, *a):
-                        return False
-                return C()
-
-            def commit(self): pass
-            def rollback(self): pass
-            def close(self): pass
+        mock_client.postgres_restore.side_effect = capture_restore
 
         dumps = {"db_alpha": b"CREATE TABLE a();", "db_beta": b"CREATE TABLE b();"}
 
-        with patch("services.postgres_service.psycopg2.connect",
-                   side_effect=lambda **kw: FakeConn(kw["dbname"])), \
-             patch("services.postgres_service._admin_password", return_value="pw"):
+        with patch.object(postgres_service, "_client_for_server_id", return_value=mock_client), \
+             patch.object(postgres_service, "_admin_password", return_value="pw"):
             result = postgres_service.restore_pg_dump_from_archive(
                 db, test_server.id, dumps
             )
 
         assert result.get("ok") is True
-        # db_alpha wurde restored
-        assert "db_alpha" in executed_sqls
-        # db_beta wurde NICHT restored (existiert nicht mehr)
-        assert "db_beta" not in executed_sqls
+        assert "db_alpha" in captured["dumps"]
+        assert "db_beta" not in captured["dumps"]
 
     def test_restore_pg_dump_from_archive_empty_dict_skips(self, db, test_server):
         """Leeres dumps-dict → skipped, kein Fehler."""

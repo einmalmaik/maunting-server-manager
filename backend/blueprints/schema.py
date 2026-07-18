@@ -1092,7 +1092,7 @@ BlueprintRuntime.model_rebuild()
 COMMENTED_TEMPLATE_DE: str = """{
   "version": 1,
   "meta": {
-    // Eindeutige ID (nur Kleinbuchstaben, Zahlen, Unterstrich). Dateiname muss <id>.blueprint.json sein.
+    // Eindeutige ID (nur Kleinbuchstaben, Zahlen, Unterstrich). MSM leitet den gespeicherten Dateinamen daraus ab.
     "id": "my_custom_server",
     // Name, der in der UI (z.B. im Dropdown) angezeigt wird.
     "name": "Mein Eigener Server",
@@ -1137,9 +1137,9 @@ COMMENTED_TEMPLATE_DE: str = """{
     }
   ],
   "source": {
-    // Woher kommen die Server-Dateien? Erlaubte Typen: steam, http, dockerOnly, manualUpload
+    // Woher kommen die Server-Dateien? Erlaubte Typen: steam, http, github, dockerOnly, custom, manualUpload
     "type": "dockerOnly",
-    // Optionale Update-Strategie (Default pro Typ: steam=alwaysValidate, http=checkBased, andere=none).
+    // Optionale Update-Strategie (Default: steam/http/github=checkBased, andere=none).
     // alwaysValidate: bei jedem Start/Restart updaten (validate).
     // checkBased: nur wenn passiver Check (Last-Modified / Steam) Update meldet.
     // none: kein Auto-Update durch MSM.
@@ -1153,7 +1153,7 @@ COMMENTED_TEMPLATE_DE: str = """{
       "compatibility": "native",
       "requiresLogin": false
     },
-    "updateStrategy": "alwaysValidate"
+    "updateStrategy": "checkBased"
     */
     
     // Beispiel fuer HTTP-Download (entkommentieren und type auf "http" setzen):
@@ -1192,7 +1192,7 @@ COMMENTED_TEMPLATE_DE: str = """{
 COMMENTED_TEMPLATE_EN: str = """{
   "version": 1,
   "meta": {
-    // Unique ID (lowercase letters, numbers, underscores only). Filename must be <id>.blueprint.json.
+    // Unique ID (lowercase letters, numbers, underscores only). MSM derives the stored filename from this ID.
     "id": "my_custom_server",
     // Name displayed in the UI (e.g., in the server creation dropdown).
     "name": "My Custom Server",
@@ -1237,9 +1237,9 @@ COMMENTED_TEMPLATE_EN: str = """{
     }
   ],
   "source": {
-    // Where do the server files come from? Allowed types: steam, http, dockerOnly, manualUpload
+    // Where do the server files come from? Allowed types: steam, http, github, dockerOnly, custom, manualUpload
     "type": "dockerOnly",
-    // Optional update strategy (defaults: steam=alwaysValidate, http=checkBased, others=none).
+    // Optional update strategy (defaults: steam/http/github=checkBased, others=none).
     // alwaysValidate: force update on every start/restart (validate).
     // checkBased: only if passive check (Last-Modified/Steam) reports an update.
     // none: no auto file updates by MSM.
@@ -1253,7 +1253,7 @@ COMMENTED_TEMPLATE_EN: str = """{
       "compatibility": "native",
       "requiresLogin": false
     },
-    "updateStrategy": "alwaysValidate"
+    "updateStrategy": "checkBased"
     */
     
     // Example for HTTP download (uncomment and set type to "http"):

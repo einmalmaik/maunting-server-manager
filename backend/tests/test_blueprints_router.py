@@ -67,6 +67,9 @@ def test_template_downloadable(client: TestClient, user_cookies: dict) -> None:
     data = json.loads(_strip_json_comments(response.text))
     assert data["version"] == 1
     assert "meta" in data and "runtime" in data and "ports" in data
+    assert "steam/http/github=checkBased" in response.text
+    assert "github, dockerOnly, custom, manualUpload" in response.text
+    assert "Dateiname muss <id>.blueprint.json sein" not in response.text
 
 
 def test_template_requires_auth(client: TestClient) -> None:

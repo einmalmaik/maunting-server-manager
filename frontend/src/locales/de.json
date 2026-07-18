@@ -12,7 +12,118 @@
     "docs": "Hilfe",
     "logout": "Abmelden",
     "panelBackups": "Panel-Backups",
-    "panelDatabase": "Panel-Datenbank"
+    "panelDatabase": "Panel-Datenbank",
+    "nodes": "Nodes"
+  },
+  "navGroups": {
+    "overview": "Überblick",
+    "infrastructure": "Infrastruktur",
+    "administration": "Administration",
+    "panel": "Panel",
+    "help": "Hilfe"
+  },
+  "pageContext": {
+    "overview": "Übersicht",
+    "infrastructure": "Infrastruktur",
+    "administration": "Administration",
+    "panel": "Panel",
+    "help": "Hilfe & Anleitungen",
+    "data": "Daten"
+  },
+  "panelDatabase": {
+    "title": "Panel-Datenbank",
+    "subtitle": "Verwalte die PostgreSQL-Datenbank des Panels ohne Terminal-Zugriff.",
+    "workspace": "Datenbank-Explorer",
+    "workspaceSubtitle": "Prüfe Tabellen, Zeilen und Datenbankstatistiken.",
+    "admin": "Admin-Zugriff",
+    "readOnly": "Nur lesen"
+  },
+  "shell": {
+    "openNavigation": "Navigation öffnen",
+    "closeNavigation": "Navigation schließen",
+    "mainNavigation": "Hauptnavigation",
+    "areas": "Bereiche",
+    "openUserMenu": "Benutzermenü öffnen"
+  },
+  "nodes": {
+    "subtitle": "Remote- und Local-Nodes verwalten, Status prüfen und Agenten-Tokens hinterlegen.",
+    "add": "Node hinzufügen",
+    "edit": "Node bearbeiten",
+    "updateAll": "Nodes updaten",
+    "updating": "Nodes werden aktualisiert …",
+    "updateConfirmTitle": "Alle Nodes aktualisieren?",
+    "updateConfirmBody": "Startet das konfigurierte Update auf allen registrierten Nodes. Laufende Game-Server werden dadurch nicht neu gestartet.",
+    "updateStarted": "Node-Updates wurden gestartet.",
+    "updateFailed": "Node-Update fehlgeschlagen.",
+    "healthCheckLabel": "Status von {{name}} prüfen",
+    "editLabel": "{{name}} bearbeiten",
+    "deleteLabel": "{{name}} löschen",
+    "pagination": {
+      "range": "Zeige {{from}} bis {{to}} von {{total}} Nodes",
+      "page": "Seite {{current}} von {{total}}"
+    },
+    "name": "Name",
+    "host": "Host-URL (HTTPS)",
+    "agentToken": "Agent-Token",
+    "tokenHint": "Wird im Panel mit DIS verschlüsselt gespeichert und nie wieder im Klartext angezeigt.",
+    "tokenLeaveBlank": "Leer lassen, um den Token nicht zu ändern",
+    "tokenTooShort": "Token muss mindestens 16 Zeichen haben.",
+    "tlsFingerprint": "TLS-Fingerprint (SHA-256)",
+    "fingerprintPlaceholder": "64 Hex-Zeichen vom install-msm-agent.sh",
+    "fingerprintHint": "SHA-256 des Agent-Zertifikats (Self-signed Pinning). Pflicht für Remote-Nodes.",
+    "fingerprintRequired": "TLS-Fingerprint ist für Remote-Nodes erforderlich.",
+    "searchPlaceholder": "Nodes filtern...",
+    "loadFailed": "Nodes konnten nicht geladen werden.",
+    "created": "Node angelegt.",
+    "updated": "Node aktualisiert.",
+    "deleted": "Node gelöscht.",
+    "confirmDelete": "Node „{{name}}“ wirklich löschen?",
+    "cannotDeleteLocal": "Der lokale Default-Node kann nicht gelöscht werden.",
+    "cannotDeleteWithServers": "Node hat noch {{count}} Server — zuerst Server verschieben oder löschen.",
+    "healthCheck": "Health-Check",
+    "healthOnline": "Node ist online.",
+    "healthOffline": "Node ist offline oder nicht erreichbar.",
+    "healthFailed": "Health-Check fehlgeschlagen.",
+    "empty": "Keine Nodes registriert",
+    "emptyHint": "Lege den ersten Remote-Node an, sobald ein Agent auf einem weiteren Server läuft.",
+    "local": "Lokal",
+    "serverCount": "{{count}} Server",
+    "cpuCores": "{{count}} Kerne",
+    "diskTotal": "Disk {{value}}",
+    "freeRam": "frei {{value}}",
+    "ramCapacity": "Kapazität {{value}}",
+    "freeRamShort": "frei {{value}}",
+    "enrollment": {
+      "title": "Node verbinden",
+      "subtitle": "Führe einen Befehl auf dem neuen Linux-Server aus und bestätige anschließend den passenden Code.",
+      "steps": {
+        "copy": "Befehl kopieren",
+        "run": "Als root auf dem Zielserver ausführen",
+        "confirm": "Passenden Code bestätigen"
+      },
+      "commandLabel": "Installationsbefehl",
+      "copy": "Kopieren",
+      "copied": "Kopiert",
+      "copyFailed": "Der Befehl konnte nicht kopiert werden.",
+      "commandFailed": "Der Installationsbefehl konnte nicht geladen werden.",
+      "retryCommand": "Erneut versuchen",
+      "pendingTitle": "Wartende Verbindungen",
+      "pendingEmpty": "Noch keine Anfrage",
+      "pendingEmptyHint": "Sobald der Befehl auf dem Zielserver läuft, erscheint die Anfrage hier automatisch.",
+      "pendingFailed": "Wartende Verbindungen konnten nicht geladen werden.",
+      "live": "Wird automatisch aktualisiert",
+      "expiresAt": "Gültig bis {{time}} Uhr",
+      "approve": "Bestätigen",
+      "approved": "Node „{{name}}“ wurde verbunden.",
+      "approveFailed": "Die Node-Verbindung konnte nicht bestätigt werden.",
+      "manual": "Manuell einrichten",
+      "manualHint": "Für abweichende Agent- oder Netzwerk-Konfigurationen"
+    },
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "unknown": "Unbekannt"
+    }
   },
   "routes": {
     "forbiddenTitle": "Kein Zugriff",
@@ -23,6 +134,12 @@
     "errorBody": "Bitte lade die Seite erneut. Wenn das Problem bleibt, prüfe die Verbindung zum Panel."
   },
   "blueprints": {
+    "eyebrow": "Panel · Bereitstellung",
+    "guide": "Anleitung",
+    "create": "Blueprint erstellen",
+    "tools": "Blueprint-Werkzeuge",
+    "filterSummary": "Filter · {{value}}",
+    "clone": "Als eigene Kopie",
     "pageTitle": "Blueprints verwalten",
     "pageSubtitle": "Native und Community-Blueprints einsehen, herunterladen, ersetzen oder löschen.",
     "loading": "Lade Blueprints …",
@@ -94,8 +211,8 @@
       "s2": "Öffne die Datei (z.B. my_custom_server.blueprint.json) in einem Editor und passe die Werte an. Lass die Kommentare (//) gerne stehen – das Panel ignoriert sie beim Upload automatisch.",
       "s3": "Gehe im Menü auf „Blueprints\" und klicke auf „Neu hochladen\".",
       "s4": "Gehe zu „Server\", klicke „Server erstellen\" – dein neues Spiel taucht nun im Dropdown auf!",
-      "alertTitle": "Wichtig: Dateiname = ID",
-      "alertBody": "Der Dateiname muss zwingend mit der meta.id übereinstimmen (z.B. meta.id = \"rust_server\" -> Datei: rust_server.blueprint.json)."
+      "alertTitle": "Wichtig: Die Blueprint-ID ist maßgeblich",
+      "alertBody": "Der Upload-Dateiname ist frei wählbar. Das Panel validiert meta.id und speichert die Community-Blueprint unter dieser ID."
     },
     "minimal": {
       "body": "Das kleinste funktionierende Beispiel für einen Server, der ohne externe Dateien direkt aus einem Docker-Image startet."
@@ -127,7 +244,7 @@
       "portsDesc": "Deklariere nur die benötigten Port-Rollen. Konkrete Nummern weist der User beim Erstellen zu. Dieselbe Standardrolle darf einmal pro Protokoll vorkommen, z. B. query/udp und query/tcp; MSM speichert daraus eindeutige Rollen wie query und query_2.",
       "portsName": "Rolle des Ports. Du schreibst nicht 'ports.name' hinein, sondern einen Wert wie game, query, rcon, voice, web oder custom. Konkrete Portnummern kommen später beim Server-Erstellen.",
       "portsProtocol": "tcp oder udp. Das Protokoll bestimmt Docker-Mapping und Firewall-Freigabe und kann im Netzwerk-Panel nachträglich geändert werden.",
-      "sourceType": "Quelle der Serverdateien: steam = SteamCMD, http = HTTPS-Archiv, dockerOnly = Image enthält alles, manualUpload = Nutzer lädt Dateien selbst hoch.",
+      "sourceType": "Quelle der Serverdateien: steam = SteamCMD, http = HTTPS-Archiv, github = Repository, dockerOnly = Image enthält alles, custom = eigene Laufzeitlogik, manualUpload = Nutzer lädt Dateien selbst hoch.",
       "sourceUpdateStrategy": "Steuert Server-Datei-Updates vor Start/Restart: alwaysValidate = SteamCMD/Install immer; checkBased = nur wenn ein Update-Check positiv ist (bei Steam: buildid-Vergleich); none = kein Auto-Update.",
       "sourceSteam": "Steam-Dedicated-Server: appId, platform, compatibility, requiresLogin, validate, optional branch (Depot-Branch, Default public).",
       "steamFieldsTitle": "↳ source.steam — Felder",
@@ -248,6 +365,8 @@
     "diskLimit": "Disk-Limit",
     "notFound": "Server nicht gefunden",
     "backToList": "Zurück zur Liste",
+    "copyContainerId": "Container-ID kopieren",
+    "containerIdCopied": "Container-ID kopiert",
     "start": "Starten",
     "stop": "Stoppen",
     "restart": "Neustarten",
@@ -262,6 +381,9 @@
     "consolePlaceholder": "Befehl eingeben…",
     "consoleSend": "Senden",
     "consoleInputFailed": "Eingabe konnte nicht zugestellt werden.",
+    "consoleConnecting": "Verbinde…",
+    "consoleReconnecting": "Verbindung verloren — verbinde neu…",
+    "consoleConnectionFailed": "Verbindung fehlgeschlagen",
     "execTab": "Exec (Container)",
     "execPlaceholder": "Befehl im Container ausführen (z. B. ls -la /data)",
     "execSend": "Ausführen",
@@ -278,6 +400,11 @@
     "deleted": "Server gelöscht",
     "confirmDelete": "Server wirklich löschen? Alle Daten werden unwiderruflich entfernt.",
     "createDescription": "Erstelle einen neuen Game-Server.",
+    "node": "Node",
+    "selectNode": "Node auswählen",
+    "nodeHint": "Ziel-Node für Docker und Dateien dieses Servers (Local oder Remote).",
+    "nodeRequired": "Bitte einen Ziel-Node auswählen.",
+    "nodeUnknown": "—",
     "fileManager": "Datei-Manager",
     "containerName": "Container-Name",
     "publicBindIp": "Host-IP",
@@ -291,6 +418,7 @@
     "editNetworkTitle": "Netzwerk bearbeiten",
     "editNetworkDescription": "Bind-IP und Ports anpassen. Bei laufendem Server werden alte Firewall-Regeln entfernt, der Container neu erstellt und mit den neuen Bindings gestartet.",
     "bindIp": {
+      "loading": "Host-Interfaces werden geladen …",
       "hint": "Aus den verfügbaren Host-Interfaces wählen. 0.0.0.0 ist nicht erlaubt, da Docker sonst die UFW-Regeln umgeht.",
       "choose": "-- Host-IP wählen --",
       "noneAvailable": "Keine Host-Interfaces verfügbar",
@@ -325,8 +453,10 @@
       "queued": "In Warteschlange",
       "awaiting_files": "wartet auf Dateien",
       "stopping": "Wird gestoppt...",
-      "restarting": "Wird neu gestartet..."
+      "restarting": "Wird neu gestartet...",
+      "node_unreachable": "Node offline"
     },
+    "nodeUnreachableHint": "Node ist offline — Start/Stopp und Dateioperationen sind deaktiviert, bis der Agent wieder erreichbar ist.",
     "kill": "Erzwingen",
     "killConfirm": "Server wirklich erzwungen beenden? Alle ungespeicherten Daten gehen verloren.",
     "killSuccess": "Server wurde erzwungen beendet"
@@ -385,6 +515,8 @@
     "servers.create": "Neuen Server anlegen",
     "servers.delete": "Server löschen (global, nicht delegierbar)",
     "system.view": "System-Ressourcen, Interfaces, Version",
+    "nodes.read": "Nodeliste sehen",
+    "nodes.manage": "Nodes anlegen, bearbeiten, löschen",
     "server.view": "Server in Liste und Detail sehen",
     "server.start": "Server starten",
     "server.stop": "Server stoppen",
@@ -482,7 +614,10 @@
     "signInWith": "Anmelden mit {{provider}}",
     "oauth2faTitle": "2FA-Code für OAuth-Login",
     "oauth2faDescription": "Dein Account {{provider}} ist mit 2FA geschützt. Gib den 6-stelligen Code aus deiner Authenticator-App ein.",
-    "oauth2faSubmit": "2FA bestätigen"
+    "oauth2faSubmit": "2FA bestätigen",
+    "backupCode": "Backup-Code",
+    "resendFailed": "Der Code konnte nicht erneut gesendet werden.",
+    "use2FAInstead": "Stattdessen einen 2FA-Code verwenden"
   },
   "setup": {
     "welcome": "Willkommen beim MSM",
@@ -491,6 +626,12 @@
     "title": "Ersteinrichtung",
     "description": "Erstelle den Owner-Account für deinen Server Manager",
     "createOwner": "Owner erstellen",
+    "emailDelivery": "E-Mail-Versand",
+    "emailDeliveryDesc": "Wird einmalig für Verifizierung und System-E-Mails eingerichtet. Zugangsdaten werden verschlüsselt gespeichert.",
+    "resendRecommended": "Sicherer Schnellstart mit Resend",
+    "fromAddress": "Absenderadresse",
+    "resendApiKey": "Resend API-Key",
+    "smtpAfterLogin": "Eigenes SMTP kannst du über die klassische Installation oder später nach dem Login einrichten.",
     "error": "Einrichtung fehlgeschlagen.",
     "verifyEmail": "E-Mail verifizieren",
     "verifyEmailDesc": "Wir haben einen 6-stelligen Code an {{email}} gesendet. Gib ihn ein, um fortzufahren.",
@@ -545,6 +686,8 @@
     "updateQueued": "Mod-Update wurde queued",
     "reinstall": "Neu installieren",
     "reinstallAll": "Alle neu installieren",
+    "etaHours": "Noch etwa {{count}} Stunden",
+    "etaMinutes": "Noch etwa {{count}} Minuten",
     "reinstallAllHint": "Workshop-Cache und Mod-Dateien aller abonnierten Mods löschen und per SteamCMD neu laden (Server am besten gestoppt).",
     "confirmReinstallAll": "Alle {{count}} Workshop-Mods nacheinander neu installieren? (kann bei vielen Mods länger dauern)",
     "reinstallAllQueued": "Neuinstallation für alle Mods gestartet",
@@ -767,6 +910,8 @@
     "steamAccountRemoved": "Steam-Account entfernt",
     "save": "Speichern",
     "saved": "Einstellungen gespeichert",
+    "updatesAutomatic": "Automatische Updates",
+    "updatesAutomaticHint": "Das Panel und die remote Nodes aktualisieren sich automatisch, sobald ein neues Commit auf GitHub verfügbar ist.",
     "testEmail": "Test-E-Mail senden",
     "testEmailTo": "Test-E-Mail an",
     "testEmailSent": "Test-E-Mail gesendet",
@@ -781,6 +926,7 @@
       "steam": "Steam",
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
+      "captcha": "CAPTCHA",
       "imprint": "Impressum",
       "supportWidget": "Support-Widget",
       "backup": "Backup"
@@ -792,6 +938,16 @@
       "url": "Impressum-URL",
       "urlHint": "Leer ist erlaubt. Wenn eine URL gesetzt ist, muss sie mit http:// oder https:// beginnen.",
       "preview": "Impressum öffnen"
+    },
+    "captcha": {
+      "title": "CAPTCHA-Schutz",
+      "description": "Schütze Registrierung, Anmeldung und Passwortwiederherstellung vor Spam und Bruteforce.",
+      "enable": "CAPTCHA aktivieren",
+      "provider": "Anbieter",
+      "siteKey": "Site Key (Website-Schlüssel)",
+      "siteKeyHint": "Öffentlicher Schlüssel zur Anzeige des Widgets im Browser.",
+      "secretKey": "Secret Key (Geheimer Schlüssel)",
+      "secretKeyHint": "Privater Schlüssel zur serverseitigen Token-Validierung."
     },
     "supportWidget": {
       "title": "Support-Widget",
@@ -1052,7 +1208,13 @@
     "panelUpdateAvailable": "Panel-Aktualisierung verfügbar",
     "current": "Aktuell",
     "viewRelease": "Release ansehen",
-    "manualUpdateCommand": "Update auf dem Server:"
+    "manualUpdateCommand": "Update auf dem Server:",
+    "startUpdate": "Update starten",
+    "updating": "Update läuft...",
+    "updateStarted": "Update wird ausgeführt. Das Panel startet gleich neu.",
+    "updateSuccess": "Update erfolgreich abgeschlossen!",
+    "updateTimeout": "Update-Timeout. Bitte lade die Seite manuell neu.",
+    "branch": "Branch"
   },
   "connection": {
     "connecting": "Verbinde…",
@@ -1136,7 +1298,11 @@
     "confirm": "Bestätigen",
     "back": "Zurück",
     "refresh": "Aktualisieren",
-    "send": "Senden"
+    "send": "Senden",
+    "next": "Weiter",
+    "remove": "Entfernen",
+    "select": "Auswählen",
+    "working": "Wird verarbeitet …"
   },
   "serverDetail": {
     "limit": "Limit",
@@ -1175,10 +1341,123 @@
     "oauthTitle": "OAuth & Social Login",
     "oauthDesc": "Login mit Google, Discord, GitHub, Microsoft, Twitter oder einem eigenen OIDC-Provider (Authentik, Keycloak, Zitadel).",
     "oauthLink": "OAuth-Doku öffnen",
+    "selfHostingTitle": "Self-Hosting & Deployment",
+    "selfHostingDesc": "Panel, Frontend und Remote-Nodes ausliefern, ohne auf jedem Host das vollständige Monorepo zu klonen.",
+    "selfHostingLink": "Self-Hosting-Anleitung öffnen",
     "legalTitle": "Rechtliches",
     "legalDesc": "Datenschutzerklärung und optionales Betreiber-Impressum dieser Instanz.",
     "privacyLink": "Datenschutz öffnen",
     "imprintLink": "Impressum öffnen"
+  },
+  "docsSelfHosting": {
+    "eyebrow": "Betriebshandbuch",
+    "title": "Self-Hosting & Deployment",
+    "subtitle": "Verstehe, welche MSM-Komponente auf welchen Host gehört, nutze versionierte Release-Artefakte und verbinde neue Nodes ohne Agent-Zugangsdaten offenzulegen.",
+    "units": {
+      "title": "Ein Repository, drei Deployment-Einheiten",
+      "intro": "Das Monorepo ist die gemeinsame Quelle für Entwicklung und Releases. Produktivsysteme erhalten nur das Artefakt für ihre Rolle; ein vollständiger Git-Checkout ist nicht erforderlich.",
+      "panel": {
+        "title": "Panel / Control Plane",
+        "description": "Backend, DIS-Sidecar, Panel-PostgreSQL, Frontend, lokaler Agent und Installationsskripte. Dies ist die zentrale Steuerungsebene."
+      },
+      "frontend": {
+        "title": "Separates Frontend",
+        "description": "Das bereits gebaute statische Vite-Bundle samt öffentlicher Environment-Vorlage. Backend- oder Agent-Quellen sind nicht enthalten."
+      },
+      "node": {
+        "title": "Remote-Node",
+        "description": "Agent, Rootless Docker, TLS-Identität und node-eigene Serverdaten. Beim Standard-Enrollment wird das Agent-Paket direkt vom Panel geladen."
+      }
+    },
+    "install": {
+      "title": "Empfohlene Panel-Installation mit einem Befehl",
+      "description": "Richte eine HTTPS-Domain auf den frischen Ubuntu- oder Debian-Host und führe anschließend den öffentlichen Bootstrap als Root aus. Ersetze panel.example.com durch deine echte Panel-Domain.",
+      "commandLabel": "Öffentlicher Bootstrap",
+      "copy": "Befehl kopieren",
+      "copied": "Kopiert",
+      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt für Bootstrap, Simple- und interaktiven Modus der zentrale Installer: Er installiert auf Minimal-Systemen alle benötigten Basispakete und repariert eine unvollständige Caddy-Paketquelle sicher, ohne eine vorhandene Caddyfile zu ersetzen."
+    },
+    "topology": {
+      "title": "Beispiel-Topologie: 20 Hosts",
+      "controlLabel": "Control Plane",
+      "nodesLabel": "Remote-Nodes",
+      "control": "Host 1 betreibt das Panel beziehungsweise die Control Plane und kann zusätzlich das Frontend ausliefern. Er koordiniert Nutzer, Konfiguration und Remote-Nodes.",
+      "nodes": "Host 2 bis 20 betreiben jeweils nur den Remote-Agent. Keiner dieser neunzehn Nodes benötigt einen Repository-Checkout.",
+      "split": "Optionale Trennung: Host 1 liefert das statische Frontend aus, Host 2 betreibt die Control Plane und Host 3 bis 20 sind Remote-Nodes.",
+      "nodeGridLabel": "Neunzehn Remote-Node-Hosts"
+    },
+    "migration": {
+      "title": "Bestehende Installation sicher aufteilen",
+      "description": "Starte den Assistenten auf der bestehenden All-in-one-Installation. Er sammelt deine Auswahl und migriert Gameserver vor dem finalen Backend-Cutover, damit immer nur eine Control Plane maßgeblich ist.",
+      "commandLabel": "Komponenten-Migration",
+      "steps": {
+        "1": {
+          "title": "Externes Frontend verbinden",
+          "description": "Prüft das bereits gebaute HTTPS-Frontend, setzt Panel- und API-Origin getrennt und verifiziert CORS, Cookies und die API-only-Caddy-Site."
+        },
+        "2": {
+          "title": "Gameserver verschieben",
+          "description": "Kopiert ausgewählte gestoppte Server samt Saves, Mods, Workshop-Dateien, Backups und zugeordneten PostgreSQL-Datenbanken. Quelldaten bleiben erhalten."
+        },
+        "3": {
+          "title": "Backend auslagern",
+          "description": "Installiert das frische Ziel vorab, übernimmt die vom Owner bestätigte Node-ID automatisch und überträgt beim kurzen Cutover Panel-Datenbank, Konfiguration, DIS-Secrets, Panel-Backups und Community-Blueprints."
+        }
+      },
+      "externalBoundary": "Den DNS-A/AAAA-Eintrag beim externen Anbieter und die einmalige Owner-Freigabe eines neuen Agents kann MSM nicht selbst übernehmen. Diese Grenzen werden deutlich angezeigt und nicht umgangen.",
+      "rollback": "Vor dem Ziel-Commit startet ein Fehler die alte Control Plane wieder. Nach erfolgreicher Zielprüfung bleibt sie gegen Split-Brain deaktiviert. Der Assistent behält Quelldaten und die alte Control Plane bewusst als Rollback-Basis; er löscht nichts automatisch."
+    },
+    "enrollment": {
+      "title": "Einen neuen Node verbinden",
+      "intro": "Der Standardweg ist für den Betreiber secret-frei: Agent-Token und TLS-Fingerprint müssen nicht manuell kopiert werden.",
+      "steps": {
+        "1": {
+          "title": "Nodes öffnen",
+          "description": "Als Owner anmelden, Nodes öffnen und Node hinzufügen wählen."
+        },
+        "2": {
+          "title": "Befehl kopieren",
+          "description": "Das Panel zeigt einen öffentlichen Installationsbefehl ohne Secrets an."
+        },
+        "3": {
+          "title": "Einmal ausführen",
+          "description": "Den Befehl als Root auf dem neuen Ubuntu- oder Debian-Node ausführen."
+        },
+        "4": {
+          "title": "Identität lokal erzeugen",
+          "description": "Der Installer erzeugt Agent-Token und TLS-Zertifikat auf dem Node und sendet Token und Fingerprint über HTTPS an das Panel. Der Token wird DIS-verschlüsselt gespeichert und nie in UI, URL oder Logs angezeigt."
+        },
+        "5": {
+          "title": "Code vergleichen",
+          "description": "Das ausstehende Enrollment erscheint im Panel. Vor der Freigabe wird der kurze angezeigte Code verglichen."
+        },
+        "6": {
+          "title": "Bestätigen und prüfen",
+          "description": "Die Owner-Bestätigung schaltet die Prüfung von Erreichbarkeit, Agent-Token und TLS-Pin frei. Erst eine erfolgreiche Verifikation aktiviert den Node."
+        }
+      },
+      "fallback": "Ausstehende Enrollments laufen nach 15 Minuten ab und sind rate-limited. Die manuelle Eingabe von Host, Token und Fingerprint bleibt nur als Fallback für separat installierte oder speziell angebundene Agents verfügbar."
+    },
+    "artifacts": {
+      "title": "GitHub-Release-Artefakte",
+      "file": "Artefakt",
+      "contains": "Inhalt und Zweck",
+      "descriptions": {
+        "panel": "Installierbare Control Plane mit Backend, DIS, Frontend, Agent-Paket und Installationsskripten.",
+        "frontend": "Nur das gebaute Verzeichnis frontend/dist und die öffentliche Environment-Vorlage.",
+        "agent": "Agent-Quellen und Installer für kontrollierte Offline- oder Automationsfälle.",
+        "sums": "SHA-256-Prüfsummen zur Prüfung aller drei Archive vor der Installation."
+      }
+    },
+    "compatibility": {
+      "title": "Neue Installationen ausschließlich mit PostgreSQL",
+      "description": "PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code existiert ausschließlich für die einmalige, geprüfte Migration bestehender Altinstallationen. Eine nach dem Anlegen von Rolle und Datenbank abgebrochene Erstinstallation kann geprüft und ohne Löschen mit --resume-partial fortgesetzt werden; fremde PostgreSQL-Zustände bleiben blockiert."
+    },
+    "navigation": {
+      "label": "Links der Self-Hosting-Dokumentation",
+      "nodes": "Node-Verwaltung öffnen",
+      "docs": "Zurück zur Dokumentation"
+    }
   },
   "docsOAuth": {
     "title": "OAuth & Social Login",
@@ -1282,6 +1561,7 @@
     "deleted": "Webhook gelöscht",
     "deleteTitle": "Webhook löschen?",
     "deleteMsg": "Die Subscription wird entfernt. Events werden danach nicht mehr an diese URL gesendet.",
+    "delete": "Löschen",
     "currentSecretHint": "Aktives Secret endet auf",
     "lastDelivery": "Letzte Zustellung",
     "test": "Test senden",
@@ -1336,6 +1616,172 @@
     "s3ItemPassword": "Entschlüsselung ist nur mit dem auf dieser Instanz gesetzten Backup-Passwort möglich",
     "s3ItemLocalOnly": "Keine Konfiguration: Backups verbleiben lokal — es werden keine Daten an Dritte übertragen",
     "section4Updated": "Es erfolgt keine Weitergabe von personenbezogenen Daten an Dritte. Technisch bedingt können verschlüsselte Backup-Daten auf externem, S3-kompatiblem Speicher abgelegt werden, sofern der Administrator dies konfiguriert (siehe Abschnitt 6). In diesem Fall erhält der Speicher-Anbieter ausschließlich verschlüsselte Daten."
+  },
+  "privacyNotice": {
+    "eyebrow": "Datenschutz-Hinweis",
+    "title": "Verstehe, wie diese Instanz Daten verarbeitet",
+    "description": "MSM nutzt notwendige Browser-Speicherung für Anmeldung, Sicherheit und Einstellungen. Aktiviert der Betreiber ein Support-Widget eines Drittanbieters, lädt es erst nach Bestätigung dieses Hinweises und kann Verbindungs- und Nachrichtendaten nach den Regeln des Betreibers verarbeiten.",
+    "readPolicy": "Datenschutzerklärung lesen",
+    "confirm": "Bestätigen und fortfahren"
+  },
+  "privacyPolicy": {
+    "title": "Datenschutzerklärung",
+    "intro": "Diese Erklärung beschreibt die vom Maunting Server Manager unterstützten Datenflüsse. Der Betreiber dieser selbst gehosteten Instanz wählt optionale Anbieter und ist für Rechtsgrundlage, Hinweise, Aufbewahrungsfristen und Kontaktdaten seiner Instanz verantwortlich.",
+    "callout": "Kurzfassung: MSM minimiert Daten, schützt sensible Zugangsdaten und verschweigt keine Infrastruktur-Metadaten, die für den Betrieb von Servern und Nodes erforderlich sind.",
+    "documentLabel": "MSM Datenschutz",
+    "summaryLabel": "Datenschutz",
+    "versionLabel": "Version",
+    "updatedLabel": "Aktualisiert",
+    "sections": {
+      "scope": { "heading": "1. Geltungsbereich und Betreiber", "body": "MSM wird selbst gehostet. MauntingStudios stellt die Software bereit; die Organisation, die diese Instanz betreibt, bestimmt Zwecke, optionale Integrationen, Zugriffsregeln und Aufbewahrung ihrer Installation." },
+      "accounts": {
+        "heading": "2. Accounts, Anmeldung und Berechtigungen",
+        "body": "Das Panel verarbeitet die Account- und Sicherheitsdaten, die zur Anmeldung, Durchsetzung von Berechtigungen und Untersuchung sicherheitsrelevanter Aktivitäten erforderlich sind.",
+        "items": {
+          "identity": "Benutzername und E-Mail-Adresse zur Account-Zuordnung und Anmeldung",
+          "security": "Passwort-Prüfdaten, Sitzungen, optionale Zwei-Faktor-Daten und Wiederherstellungsstatus",
+          "rbac": "Rollen, globale Berechtigungen, serverspezifische Berechtigungen und Eigentümerstatus",
+          "audit": "Sicherheits- und Audit-Ereignisse wie Anmeldungen, Berechtigungsänderungen und administrative Aktionen"
+        }
+      },
+      "infrastructure": {
+        "heading": "3. Server- und Node-Daten",
+        "body": "Der Infrastrukturbetrieb benötigt Metadaten. Sie sind nur für berechtigte Nutzer verfügbar und werden nicht als anonym oder metadatenfrei dargestellt.",
+        "items": {
+          "server": "Servernamen, Spieltypen, Ressourcenlimits, Netzwerkbindungen, Ports, Status, Konfiguration und Backup-Metadaten",
+          "node": "Node-Namen, Host-Adressen, gepinnte TLS-Fingerprints, Versionen, Zustand, Kapazität und Auslastungswerte",
+          "operations": "Ergebnisse administrativer Aktionen, Logs und Befehlsausgaben können Infrastruktur- oder nutzerbereitgestellte Daten enthalten"
+        }
+      },
+      "protection": {
+        "heading": "4. Zugangsdaten und Backups",
+        "body": "MSM trennt Geheimnisse von gewöhnlichen Metadaten und schützt sie in der Komponente, die sie benötigt.",
+        "items": {
+          "dis": "Sensible Panel-Zugangsdaten einschließlich Agent- und Anbieter-Credentials werden vor der Datenbankspeicherung über DIS verschlüsselt",
+          "backups": "Backup-Archive werden vom zuständigen Agenten vor der Übertragung an konfigurierten Remote-Speicher verschlüsselt",
+          "metadata": "Für Auswahl, Wiederherstellung und Audit notwendige Betriebsmetadaten bleiben für die berechtigte Instanz und den konfigurierten Speicheranbieter sichtbar"
+        }
+      },
+      "providers": {
+        "heading": "5. Optionale externe Anbieter",
+        "body": "Kein optionaler Anbieter ist für das Basispanel erforderlich. Aktiviert der Betreiber einen Anbieter, erhält er die für diese Integration erforderlichen Daten.",
+        "items": {
+          "email": "E-Mail-Versand: Empfängeradresse und Zustelldaten",
+          "captcha": "CAPTCHA: Browser-, Netzwerk- und Challenge-Daten nach den Regeln des Anbieters",
+          "oauth": "OAuth: Account-Kennung, vom Anbieter freigegebene Profildaten und Anmeldemetadaten",
+          "support": "Support-Widget: Verbindungsmetadaten und vom Nutzer eingegebene Inhalte; das Widget wartet auf die Bestätigung dieses Hinweises",
+          "s3": "S3-kompatibler Speicher: verschlüsselte Backup-Objekte sowie technische Objekt-, Account-, Zeit- und Übertragungsmetadaten"
+        }
+      },
+      "storage": {
+        "heading": "6. Cookies und lokale Browser-Speicherung",
+        "body": "Das Panel nutzt Browser-Speicherung, die für den sicheren Betrieb und gewählte Einstellungen benötigt wird.",
+        "items": {
+          "session": "Session- oder Auth-Cookies, um Nutzer angemeldet zu halten",
+          "csrf": "CSRF-Schutzwerte zum Schutz zustandsändernder Anfragen",
+          "preferences": "Sprache und Bestätigung des Datenschutzhinweises im lokalen Browser-Speicher"
+        }
+      },
+      "retention": {
+        "heading": "7. Aufbewahrung und Account-Löschung",
+        "body": "Die Aufbewahrung hängt von Betreiberkonfiguration, Infrastruktur, Backups und rechtlichen Pflichten ab.",
+        "items": {
+          "operator": "Der Betreiber muss geeignete Fristen festlegen, dokumentieren und nicht mehr benötigte Daten löschen",
+          "deletion": "Die Account-Löschung entfernt accountbezogene personenbezogene Daten nach dem implementierten Löschablauf aus dem aktiven Panel; Kopien können vorübergehend in geschützten Backups verbleiben",
+          "audit": "Sicherheits-Audit-Ereignisse können anonymisiert aufbewahrt werden, damit Angriffe und privilegierte Änderungen nachvollziehbar bleiben, ohne die gelöschte Account-Identität zu erhalten"
+        }
+      },
+      "responsibility": { "heading": "8. Verantwortung des Betreibers und Anfragen", "body": "Nutzer richten Auskunfts-, Berichtigungs-, Lösch-, Widerspruchs- und Anbieterfragen an den Betreiber dieser MSM-Instanz. Der Betreiber ist für Veröffentlichung seiner Identität, Kontaktmöglichkeit, Rechtsgrundlage, Anbieterliste und instanzspezifischen Aufbewahrungsinformationen verantwortlich." }
+    }
+  },
+  "blueprintBuilder": {
+    "studio": "Blueprint Studio",
+    "draft": "Entwurf",
+    "close": "Blueprint-Editor schließen",
+    "loading": "Blueprint wird geladen …",
+    "loadFailed": "Blueprint konnte nicht für die Bearbeitung geladen werden.",
+    "cloneName": "{{name}} – Kopie",
+    "sectionNavigation": "Blueprint-Abschnitte",
+    "fieldsArea": "Blueprint-Felder",
+    "step": "Schritt {{current}} von {{total}}",
+    "downloadJson": "JSON laden",
+    "saving": "Wird gespeichert …",
+    "saveChanges": "Änderungen speichern",
+    "addDirectly": "Direkt hinzufügen",
+    "saved": "Blueprint gespeichert.",
+    "added": "Blueprint hinzugefügt.",
+    "saveFailed": "Blueprint konnte nicht gespeichert werden.",
+    "title": { "create": "Blueprint erstellen", "edit": "Community-Blueprint bearbeiten", "clone": "Native Blueprint klonen" },
+    "description": {
+      "create": "Erstelle eine neue Community-Blueprint. Bestehende IDs werden niemals stillschweigend ersetzt.",
+      "edit": "Die Community-ID bleibt gesperrt. Speichern ersetzt ausschließlich diese Community-Blueprint nach Backend-Prüfung.",
+      "clone": "Native Blueprints bleiben unverändert. Für die eigene Community-Kopie ist eine neue ID erforderlich."
+    },
+    "sections": { "basics": "Grundlagen", "runtime": "Laufzeit", "ports": "Ports", "source": "Quelle", "mods": "Mods & Workshop", "backup": "Backup", "review": "Prüfen" },
+    "collision": { "native": "Native Blueprint-IDs können nicht überschrieben werden. Wähle eine neue ID.", "title": "Community-Blueprint ersetzen?", "message": "Die ID „{{id}}“ existiert bereits. Beim Speichern wird diese Community-Blueprint ausdrücklich ersetzt.", "confirm": "Bewusst ersetzen" },
+    "exec": { "title": "Exec-Konsole freigeben", "help": "Erweitert die möglichen Container-Aktionen. Backend-RBAC bleibt maßgeblich." },
+    "ports": { "roleLabel": "Port {{index}} Rolle", "protocolLabel": "Port {{index}} Protokoll", "removeLabel": "Port {{index}} entfernen", "add": "Port hinzufügen" },
+    "steam": { "requiresLogin": "Steam-Anmeldung erforderlich", "validate": "SteamCMD-Dateien validieren" },
+    "mods": { "supportsMods": "Mods unterstützen", "supportsWorkshop": "Steam Workshop unterstützen" },
+    "review": { "issueCount": "{{count}} Angaben prüfen", "issueCount_one": "{{count}} Angabe prüfen", "issueCount_other": "{{count}} Angaben prüfen", "ready": "Der Entwurf ist bereit für die autoritative Backend-Validierung.", "backend": "Das Panel prüft häufige Eingabefehler. Beim Speichern validiert das Backend das vollständige Schema autoritativ.", "json": "JSON-Vorschau" },
+    "environment": { "title": "Umgebungswerte", "add": "Eintrag hinzufügen", "help": "Nur nicht-geheime Konfiguration. Zugangsdaten gehören nicht in Blueprints.", "nameLabel": "Umgebungsname {{index}}", "valueLabel": "Umgebungswert {{index}}", "removeLabel": "Umgebungswert {{index}} entfernen" },
+    "setup": { "title": "Setup-Argumente", "help": "Strukturierte argv-Befehle; Argumente mit Leerzeichen bleiben ein Argument.", "addCommand": "Befehl hinzufügen", "command": "Befehl {{index}}", "argumentLabel": "Befehl {{command}}, Argument {{argument}}", "removeArgument": "Argument {{index}} entfernen", "addArgument": "Argument hinzufügen", "removeCommand": "Befehl entfernen", "notice": "Setup-Befehle sind begrenzte Argumentlisten, keine frei ausführbaren Shell-Hooks. Komplexe Installationsskripte gehören nicht in ein Blueprint." },
+    "profiles": { "title": "Alternative Starts", "help": "Maximal 8, aktiviert wenn die Marker-Datei existiert.", "add": "Profil hinzufügen", "markerLabel": "Marker-Datei {{index}}", "startupLabel": "Startbefehl {{index}}", "removeLabel": "Startprofil {{index}} entfernen" },
+    "patches": { "title": "Konfigurations-Patches", "help": "Explizite INI- oder Regex-Patches, maximal 32.", "add": "Patch hinzufügen", "typeLabel": "Patch-Typ {{index}}", "fileLabel": "Patch-Datei {{index}}", "sectionLabel": "INI-Sektion {{index}}", "keyLabel": "INI-Schlüssel {{index}}", "regexLabel": "Regex {{index}}", "valueLabel": "Patch-Wert {{index}}" },
+    "postInstall": { "title": "Post-Install-Dateien", "add": "Aktion hinzufügen", "operationLabel": "Dateiaktion {{index}}", "copy": "Kopieren", "symlink": "Symlink", "sourceLabel": "Quelle {{index}}", "targetLabel": "Ziel {{index}}", "removeLabel": "Dateiaktion {{index}} entfernen", "required": "Fehler blockiert die Installation" },
+    "fields": {
+      "id": { "label": "Eindeutige ID", "help": "Kleinbuchstaben, Ziffern und Unterstriche; bei Bearbeitung gesperrt." },
+      "name": { "label": "Anzeigename", "help": "Der verständliche Name in der Serverauswahl." },
+      "category": { "label": "Kategorie", "help": "Ordnet das Blueprint in der Serverauswahl ein." },
+      "author": { "label": "Autor (optional)", "help": "Name oder Organisation, niemals Zugangsdaten." },
+      "description": { "label": "Beschreibung (optional)", "help": "Kurz erklären, was installiert wird und wofür es gedacht ist." },
+      "image": { "label": "Docker Image", "help": "Registry/Image:Tag; keine Shell-Syntax." },
+      "workdir": { "label": "Arbeitsordner (optional)", "help": "Absoluter Container-Pfad, zum Beispiel /server." },
+      "user": { "label": "Container-Nutzer (optional)", "help": "Nicht-root UID:GID, zum Beispiel 1000:1000." },
+      "startup": { "label": "Startbefehl", "help": "Wird als Befehl ausgeführt; Shell-Verkettungen und Substitution sind gesperrt." },
+      "stopGrace": { "label": "Stop-Zeitfenster", "help": "5–600 Sekunden für einen sauberen Stopp." },
+      "startCheck": { "label": "Startprüfung", "help": "0–300 Sekunden bis zur ersten Zustandsprüfung." },
+      "execTimeout": { "label": "Exec-Zeitlimit", "help": "1–600 Sekunden; gilt nur wenn Exec freigegeben ist." },
+      "dirs": { "label": "Benötigte Ordner", "help": "Ein sicherer relativer Pfad pro Zeile; maximal 16." },
+      "files": { "label": "Benötigte Dateien", "help": "Ein sicherer relativer Pfad pro Zeile; maximal 16." },
+      "source": { "label": "Quelle", "help": "Nur Felder der gewählten Quelle werden serialisiert." },
+      "update": { "label": "Update-Strategie", "help": "Prüfbasiert ist der sichere Standard für Steam, HTTP und GitHub." },
+      "appId": { "label": "Steam App-ID", "help": "Numerische Dedicated-Server-App-ID." },
+      "platform": { "label": "Plattform", "help": "Windows benötigt Wine oder Proton." },
+      "compatibility": { "label": "Kompatibilität", "help": "Linux ist nativ; Windows nutzt Wine oder Proton." },
+      "steamBranch": { "label": "Steam Branch (optional)", "help": "Leer verwendet den öffentlichen Standard-Branch." },
+      "url": { "label": "HTTPS-Download-URL", "help": "Direkte Archiv-URL; HTTPS ist Pflicht." },
+      "archive": { "label": "Archivformat (optional)", "help": "Leer lassen, wenn es aus der URL erkannt werden kann." },
+      "extract": { "label": "Entpacken nach (optional)", "help": "Sicherer relativer Unterordner." },
+      "sha": { "label": "SHA-256 (optional)", "help": "64 Kleinbuchstaben-Hexzeichen zur Archivprüfung." },
+      "repo": { "label": "GitHub Repository", "help": "Nur github.com, im Format owner/repo." },
+      "branch": { "label": "Branch", "help": "Ein Branchname ohne Pfadtrenner." },
+      "subPath": { "label": "Unterordner (optional)", "help": "Sicherer relativer Pfad innerhalb des Repositories." },
+      "manualFiles": { "label": "Pflichtdateien", "help": "Mindestens ein und maximal 16 sichere relative Pfade." },
+      "instructions": { "label": "Upload-Anleitung", "help": "Verständlich erklären, welche Dateien wohin gehören." },
+      "instructionsUrl": { "label": "Anleitungs-URL (optional)", "help": "Nur HTTPS-Dokumentation." },
+      "workshopId": { "label": "Workshop App-ID", "help": "Numerische App-ID des Workshop-Bereichs." },
+      "filterTags": { "label": "Workshop-Filter", "help": "Maximal 10 Tags, einer pro Zeile." },
+      "injection": { "label": "Mod-Einbindung", "help": "Keine, Startargument oder verwaltete Datei." },
+      "modFormat": { "label": "Argumentformat", "help": "Muss den Platzhalter {mods} enthalten." },
+      "modFile": { "label": "Mod-Listenpfad", "help": "Sicherer relativer Pfad." },
+      "modContent": { "label": "Listeninhalt", "help": "Workshop-IDs oder Ziel-Dateinamen der Dateiaktionen." },
+      "backup": { "label": "Zu sichernde Pfade", "help": "Ein relativer Pfad oder Glob pro Zeile; leer bedeutet vollständiges Server-Backup." }
+    },
+    "options": {
+      "category": { "steamGame": "Steam-Spiel", "nonSteamGame": "Nicht-Steam-Spiel", "voiceServer": "Voice-Server", "bot": "Bot" },
+      "port": { "game": "Game", "query": "Query", "rcon": "RCon", "voice": "Voice", "web": "Web", "custom": "Benutzerdefiniert" },
+      "source": { "http": "HTTPS-Archiv", "dockerOnly": "Nur Docker Image", "custom": "Benutzerdefiniert", "manualUpload": "Manueller Upload" },
+      "update": { "checkBased": "Nur bei erkanntem Update", "alwaysValidate": "Bei jedem Start validieren", "none": "Keine automatischen Updates" },
+      "platform": { "linux": "Linux (nativ)", "windows": "Windows (Kompatibilitätsschicht)" },
+      "compatibility": { "native": "Nativ" },
+      "archiveAuto": "Automatisch erkennen",
+      "injection": { "none": "Keine", "startupArg": "Startargument", "file": "Mod-Liste als Datei" },
+      "modContent": { "workshopIds": "Workshop-IDs", "targetNames": "Ziel-Dateinamen" }
+    },
+    "validation": {
+      "metaId": "1–64 Kleinbuchstaben, Ziffern oder Unterstriche verwenden.", "metaName": "Einen Namen mit maximal 128 Zeichen angeben.", "image": "Einen gültigen Docker-Image-Namen angeben.", "startup": "Einen Startbefehl mit maximal 2048 Zeichen angeben.", "shellSyntax": "Shell-Substitutionen und logische Verkettungen sind nicht erlaubt.", "workdir": "Der Arbeitsordner muss ein sicherer absoluter Container-Pfad sein.", "user": "UID:GID numerisch und ohne Root angeben.", "stopGrace": "Wert zwischen 5 und 600 verwenden.", "startCheck": "Wert zwischen 0 und 300 verwenden.", "execTimeout": "Wert zwischen 1 und 600 verwenden.", "envName": "Ungültiger Umgebungsname: {{name}}", "envValue": "Unsicherer Umgebungswert bei {{name}}", "envEmpty": "Umgebungszeile {{row}} benötigt einen Namen.", "envDuplicate": "Der Umgebungsname {{name}} ist doppelt.", "maxLines": "Maximal {{count}} Zeilen verwenden.", "maxProfiles": "Maximal 8 Startprofile verwenden.", "markerFile": "Eine sichere Marker-Datei angeben.", "profileStartup": "Einen sicheren Startbefehl angeben.", "patchFile": "Eine sichere Konfigurationsdatei angeben.", "patchValue": "Ein Patch-Wert ist erforderlich.", "patchIni": "INI benötigt Sektion und Schlüssel.", "patchRegex": "Regex benötigt einen Ausdruck.", "maxPorts": "Maximal 32 Port-Einträge verwenden.", "duplicatePort": "Diese Port-Rolle und dieses Protokoll sind bereits vorhanden.", "steamAppId": "Eine numerische Steam App-ID angeben.", "windowsCompatibility": "Windows benötigt Wine oder Proton.", "httpsUrl": "Nur HTTPS-Download-URLs sind erlaubt.", "githubRepo": "Repository als owner/repo angeben.", "sha256": "SHA-256 muss aus 64 Kleinbuchstaben-Hexzeichen bestehen.", "relativePath": "Einen sicheren relativen Unterordner angeben.", "maxSetupCommands": "Maximal 8 Setup-Befehle verwenden.", "setupCommand": "Jeder Setup-Befehl benötigt 1–32 nicht-leere Argumente.", "manualInstructions": "Installationshinweise angeben.", "manualFiles": "Mindestens eine benötigte Datei angeben.", "unsafePath": "Unsicherer relativer Pfad: {{path}}", "workshopAppId": "Für Workshop-Unterstützung ist eine numerische App-ID erforderlich.", "modArgument": "Das Startargument muss {mods} enthalten.", "modListPath": "Einen sicheren relativen Listenpfad angeben.", "postInstall": "Für Ziel-Dateinamen ist mindestens eine Dateiaktion nötig."
+    }
   },
   "server": {
     "authSetup": {
