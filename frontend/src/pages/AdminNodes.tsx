@@ -295,7 +295,7 @@ export function AdminNodes() {
             value={searchVal}
             onChange={(e) => setSearchVal(e.target.value)}
             placeholder={t('nodes.searchPlaceholder', { defaultValue: 'Nodes filtern...' })}
-            className="w-full bg-surface border border-surface-variant-outline rounded-lg py-2 px-3 pl-9 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            className="msm-input pl-9"
           />
           <svg
             className="absolute left-3 top-2.5 h-4 w-4 text-on-surface-variant"
