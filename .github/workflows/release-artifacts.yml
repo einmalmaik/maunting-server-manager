@@ -53,12 +53,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          if [ -f dev-requirements.txt ]; then
+            pip install -r dev-requirements.txt
+          fi
+          pip install pytest 2>/dev/null || true
           python -m pytest tests -q
 
       - name: Test agent
         working-directory: msm-agent
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pytest 2>/dev/null || true
           python -m pytest tests -q
 
       - name: Build and test frontend
