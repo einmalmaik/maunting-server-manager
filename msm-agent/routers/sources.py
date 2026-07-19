@@ -6,12 +6,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from services.source_service import SourceInstallError, install_github, install_http
+from services.guardian_service import planned_operation
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
 
 class HttpSourceBody(BaseModel):
-    server_id: str
+    server_id: str = Field(..., min_length=1, max_length=19, pattern=r"^[1-9]\d*$")
     url: str
     sha256: str | None = None
     archive_type: str
@@ -19,7 +20,7 @@ class HttpSourceBody(BaseModel):
 
 
 class GithubSourceBody(BaseModel):
-    server_id: str
+    server_id: str = Field(..., min_length=1, max_length=19, pattern=r"^[1-9]\d*$")
     repo: str
     branch: str = "main"
     token: str | None = None
@@ -39,23 +40,25 @@ def _run(operation) -> dict[str, Any]:
 
 @router.post("/http")
 def install_http_source(body: HttpSourceBody) -> dict[str, Any]:
-    return _run(lambda: install_http(
-        body.server_id,
-        url=body.url,
-        sha256=body.sha256,
-        archive_type=body.archive_type,
-        extract_to=body.extract_to,
-    ))
+    with planned_operation(int(body.server_id), "source_install", lease_seconds=4 * 60 * 60):
+        return _run(lambda: install_http(
+            body.server_id,
+            url=body.url,
+            sha256=body.sha256,
+            archive_type=body.archive_type,
+            extract_to=body.extract_to,
+        ))
 
 
 @router.post("/github")
 def install_github_source(body: GithubSourceBody) -> dict[str, Any]:
-    return _run(lambda: install_github(
-        body.server_id,
-        repo=body.repo,
-        branch=body.branch,
-        token=body.token,
-        setup_commands=body.setup_commands,
-        sub_path=body.sub_path,
-        runtime_image=body.runtime_image,
-    ))
+    with planned_operation(int(body.server_id), "source_install", lease_seconds=4 * 60 * 60):
+        return _run(lambda: install_github(
+            body.server_id,
+            repo=body.repo,
+            branch=body.branch,
+            token=body.token,
+            setup_commands=body.setup_commands,
+            sub_path=body.sub_path,
+            runtime_image=body.runtime_image,
+        ))

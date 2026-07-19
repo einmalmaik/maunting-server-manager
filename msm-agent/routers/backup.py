@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from services.s3_backup_service import AgentBackupError, create_encrypted_s3_backup, restore_encrypted_s3_backup
+from services.guardian_service import planned_operation
 
 router = APIRouter(prefix="/backup", tags=["backup"])
 
@@ -25,7 +26,7 @@ class S3ConfigIn(BaseModel):
 
 
 class BackupCreateIn(BaseModel):
-    server_id: str = Field(..., min_length=1, max_length=64)
+    server_id: str = Field(..., min_length=1, max_length=19, pattern=r"^[1-9]\d*$")
     s3_config: S3ConfigIn
     encryption_key: str = Field(..., min_length=16, description="base64 AES-256 key")
     s3_key: str = Field(..., min_length=1, max_length=512)
@@ -33,7 +34,7 @@ class BackupCreateIn(BaseModel):
 
 
 class BackupRestoreIn(BaseModel):
-    server_id: str = Field(..., min_length=1, max_length=64)
+    server_id: str = Field(..., min_length=1, max_length=19, pattern=r"^[1-9]\d*$")
     s3_config: S3ConfigIn
     encryption_key: str = Field(..., min_length=16)
     s3_key: str = Field(..., min_length=1, max_length=512)
@@ -53,13 +54,14 @@ def _s3_dict(cfg: S3ConfigIn) -> dict[str, Any]:
 @router.post("/create")
 def backup_create(body: BackupCreateIn) -> dict[str, Any]:
     try:
-        return create_encrypted_s3_backup(
-            body.server_id,
-            s3=_s3_dict(body.s3_config),
-            encryption_key_b64=body.encryption_key,
-            s3_object_key=body.s3_key,
-            postgres=body.postgres,
-        )
+        with planned_operation(int(body.server_id), "server_backup", lease_seconds=4 * 60 * 60):
+            return create_encrypted_s3_backup(
+                body.server_id,
+                s3=_s3_dict(body.s3_config),
+                encryption_key_b64=body.encryption_key,
+                s3_object_key=body.s3_key,
+                postgres=body.postgres,
+            )
     except AgentBackupError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
@@ -67,12 +69,13 @@ def backup_create(body: BackupCreateIn) -> dict[str, Any]:
 @router.post("/restore")
 def backup_restore(body: BackupRestoreIn) -> dict[str, Any]:
     try:
-        return restore_encrypted_s3_backup(
-            body.server_id,
-            s3=_s3_dict(body.s3_config),
-            encryption_key_b64=body.encryption_key,
-            s3_object_key=body.s3_key,
-            postgres=body.postgres,
-        )
+        with planned_operation(int(body.server_id), "server_restore", lease_seconds=4 * 60 * 60):
+            return restore_encrypted_s3_backup(
+                body.server_id,
+                s3=_s3_dict(body.s3_config),
+                encryption_key_b64=body.encryption_key,
+                s3_object_key=body.s3_key,
+                postgres=body.postgres,
+            )
     except AgentBackupError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from config import settings
 from services import file_service
 from services.file_service import PathEscapeError, PathValidationError
+from services.guardian_service import planned_operation
 
 router = APIRouter(prefix="/files", tags=["files"])
 MAX_SINGLE_UPLOAD_SIZE = 100 * 1024 * 1024
@@ -430,7 +431,8 @@ def archive_server_with_context(body: ArchiveBody, server_id: str = Query(...)):
 @router.post("/restore-archive")
 def restore_archive(server_id: str = Query(...), archive: UploadFile = File(...)) -> dict[str, bool]:
     try:
-        file_service.restore_backup_archive(server_id, archive.file)
+        with planned_operation(int(server_id), "server_restore", lease_seconds=4 * 60 * 60):
+            file_service.restore_backup_archive(server_id, archive.file)
         return {"ok": True}
     except Exception as exc:
         raise _map_path_errors(exc) from exc
@@ -439,7 +441,8 @@ def restore_archive(server_id: str = Query(...), archive: UploadFile = File(...)
 @router.post("/restore-archive/finalize")
 def finalize_restore(server_id: str = Query(...)) -> dict[str, bool]:
     try:
-        file_service.finalize_backup_restore(server_id)
+        with planned_operation(int(server_id), "server_restore", lease_seconds=3600):
+            file_service.finalize_backup_restore(server_id)
         return {"ok": True}
     except Exception as exc:
         raise _map_path_errors(exc) from exc
@@ -448,7 +451,8 @@ def finalize_restore(server_id: str = Query(...)) -> dict[str, bool]:
 @router.post("/restore-archive/rollback")
 def rollback_restore(server_id: str = Query(...)) -> dict[str, bool]:
     try:
-        file_service.rollback_backup_restore(server_id)
+        with planned_operation(int(server_id), "server_restore_rollback", lease_seconds=3600):
+            file_service.rollback_backup_restore(server_id)
         return {"ok": True}
     except Exception as exc:
         raise _map_path_errors(exc) from exc
