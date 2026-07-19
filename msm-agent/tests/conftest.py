@@ -23,6 +23,7 @@ def servers_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from config import settings
 
     monkeypatch.setattr(settings, "servers_dir", str(root))
+    monkeypatch.setattr(settings, "guardian_state_dir", str(tmp_path / "guardian"))
     monkeypatch.setattr(settings, "agent_token", "test-agent-token-not-a-real-secret")
     return root
 
