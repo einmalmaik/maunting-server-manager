@@ -80,7 +80,7 @@ def trigger_panel_update(db: Session) -> dict:
 
     logger.info("Starte Panel-Update mit %s...", update_script)
     try:
-        subprocess.Popen(["sudo", "bash", update_script, "--force"])
+        subprocess.Popen(["sudo", "-n", update_script, "--force"])
     except Exception as e:
         logger.error("Fehler beim Starten des Update-Scripts: %s", e)
         raise RuntimeError(f"Update-Script konnte nicht gestartet werden: {str(e)}")

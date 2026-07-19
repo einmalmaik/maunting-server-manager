@@ -210,3 +210,15 @@ def test_external_frontend_uses_exact_origin_and_api_only_caddy() -> None:
     assert 'CORS_ALLOWED_ORIGINS="$EXTERNAL_FRONTEND_ORIGIN"' in installer
     assert "Das Frontend wird extern ausgeliefert; diese Site veröffentlicht nur API/WS." in installer
     assert 'respond "Not Found" 404' in installer
+
+
+def test_sudoers_policy_is_consistent_across_ssot_installer_and_updater() -> None:
+    ssot = (ROOT / "backend" / "scripts" / "msm-panel.sudoers").read_text(encoding="utf-8")
+    installer = _installer()
+    updater = (ROOT / "update.sh").read_text(encoding="utf-8")
+
+    expected_rule = "msm ALL=(root) NOPASSWD: /opt/msm/update.sh"
+    assert expected_rule in ssot
+    assert expected_rule in installer
+    assert expected_rule in updater
+

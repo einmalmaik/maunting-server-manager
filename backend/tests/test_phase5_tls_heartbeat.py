@@ -89,6 +89,11 @@ def test_offline_guard():
     assert effective_server_runtime_status(server, SimpleNamespace(status="online")) == "running"
 
 
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
+
+
 @pytest.mark.anyio
 async def test_heartbeat_marks_offline(db):
     from models import Node

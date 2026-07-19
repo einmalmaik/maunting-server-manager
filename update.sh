@@ -493,6 +493,7 @@ msm ALL=(root) NOPASSWD: /usr/sbin/ufw status numbered
 
 # iptables ONLY via vetted wrapper
 msm ALL=(root) NOPASSWD: /usr/local/sbin/msm-iptables
+msm ALL=(root) NOPASSWD: /opt/msm/update.sh
 SUDOEOF
     chmod 440 /etc/sudoers.d/msm-panel
     ok "sudoers aktualisiert (direkt als root + Wrapper, ohne Container-systemctl)"

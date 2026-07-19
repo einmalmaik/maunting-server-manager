@@ -1846,6 +1846,7 @@ msm ALL=(root) NOPASSWD: /usr/sbin/ufw status numbered
 
 # iptables ONLY via vetted wrapper (enforces DOCKER-USER only for variable long args)
 msm ALL=(root) NOPASSWD: /usr/local/sbin/msm-iptables
+msm ALL=(root) NOPASSWD: /opt/msm/update.sh
 SUDOEOF
             chmod 440 /etc/sudoers.d/msm-panel
             ok "sudoers + iptables-Wrapper für Firewall-Regeln eingerichtet (direkt als root, ohne Container-systemctl)"

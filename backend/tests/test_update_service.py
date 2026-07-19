@@ -43,7 +43,8 @@ def test_trigger_panel_update(mock_popen, mock_backup, db):
     res = trigger_panel_update(db)
     assert res["ok"] is True
     mock_backup.assert_called_once_with(db, name="Pre-Update Auto-Backup")
-    mock_popen.assert_called_once()
+    assert mock_popen.call_args[0][0][:2] == ["sudo", "-n"]
+    assert mock_popen.call_args[0][0][-1] == "--force"
 
 
 def test_trigger_node_updates_uses_host_and_isolates_each_node_failure(db):
