@@ -274,13 +274,9 @@ def queue_lifecycle_operation(
     dann pro Server, setzt sofort einen sichtbaren Queue-Status und startet den
     Worker mit frischer DB-Session.
 
-    Besonderheit "kill": Kill ist ein harter Force-Stop. Wir fuehren das
-    Container-Remove (force) SOFORT aus (auch wenn ein Start/Restart-Job
-    gerade laeuft), loeschen den aktiven Job-Flag und setzen "stopped".
-    Der ggf. laufende Lifecycle-Thread wird durch das Entfernen des Containers
-    in einen Fehlerzustand laufen und gibt den Lock frei.
-    Damit reagiert der Kill-Button sofort -- auch bei "In Warteschlange"
-    oder "starting" (generisch fuer alle Blueprint-Spiele).
+    Auch Kill läuft durch denselben per-Server Lock. Ein harter Bypass waere
+    zwar schneller, koennte aber parallel zu Backup, Restore, Update oder
+    Guardian-Recovery den falschen Container-/Dateizustand zerstoeren.
     """
     if operation not in {"start", "stop", "restart", "kill"}:
         raise ValueError(f"Unbekannte Lifecycle-Operation: {operation}")
@@ -288,6 +284,11 @@ def queue_lifecycle_operation(
     if operation == "kill":
         # HARD KILL PATH: Sofort, unabhaengig von aktivem Job.
         # Das loest das User-Problem "Kill bringt den Server nicht aus der Warteschlange".
+        from services.guardian_state_service import set_desired_power_state
+
+        set_desired_power_state(db, server, "stopped")
+        sync_desired_state_to_agent(db, server)
+
         container = container_name_for(server.id)
         try:
             docker_service.remove(container, force=True, node=server.node)
@@ -299,6 +300,9 @@ def queue_lifecycle_operation(
         server.status_message = "Erzwungen beendet (Kill)"
         server.last_started_at = None
         db.commit()
+
+        from services.change_timeline_service import log_change_event
+        log_change_event(db, server.id, "stop", "Server erzwungen beendet.")
 
         ports_list = _ports(server)
         try:
@@ -325,8 +329,16 @@ def queue_lifecycle_operation(
             },
         )
 
-    _set_status(db, server, "queued", f"{operation} queued")
     try:
+        if operation in {"start", "stop", "kill"}:
+            from services.guardian_state_service import set_desired_power_state
+
+            desired = "running" if operation == "start" else "stopped"
+            set_desired_power_state(db, server, desired)
+            # Commit happened inside set_desired_power_state. Sync is best
+            # effort; periodic reconciliation retries network failures.
+            sync_desired_state_to_agent(db, server)
+        _set_status(db, server, "queued", f"{operation} queued")
         _start_lifecycle_thread(server.id, operation, notification or LifecycleNotification())
     except Exception as exc:
         _mark_job_done(server.id)
@@ -714,7 +726,6 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     server.status_message = None
     server.last_started_at = _utcnow()
     db.commit()
-    sync_desired_state_to_agent(server, "running")
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "start", "Server gestartet.")
 
@@ -727,7 +738,6 @@ def _run_stop(db: Session, server: Server, plugin) -> None:
     server.status_message = None
     server.last_started_at = None
     db.commit()
-    sync_desired_state_to_agent(server, "stopped")
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "stop", "Server gestoppt.")
     ports_list = _ports(server)
@@ -745,7 +755,6 @@ def _run_kill(db: Session, server: Server) -> None:
     server.status_message = "Erzwungen beendet"
     server.last_started_at = None
     db.commit()
-    sync_desired_state_to_agent(server, "stopped")
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "stop", "Server erzwungen beendet.")
     ports_list = _ports(server)
@@ -841,7 +850,6 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     server.status_message = None
     server.last_started_at = _utcnow()
     db.commit()
-    sync_desired_state_to_agent(server, "running")
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "restart", "Server neugestartet.")
 
@@ -904,30 +912,21 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
         _mark_job_done(server.id)
 
 
-def sync_desired_state_to_agent(server: Server, desired_status: str) -> None:
-    """Helper to update the desired state of a server container on its node agent."""
+def sync_desired_state_to_agent(db: Session, server: Server) -> bool:
+    """Compile, capability-check and immediately sync durable desired state."""
     node = server.node
     if not node or node.status != "online":
-        return
+        return False
+    try:
+        from services.guardian_sync_service import compile_and_sync_desired_state
 
-    from services.node_client import NodeClient
-
-    plugin = get_plugin(server.game_type)
-    bp = plugin.get_blueprint() if plugin else None
-
-    if bp:
-        desired_state_payload = {
-            "server_id": server.id,
-            "status": desired_status,
-            "health": bp.health.model_dump() if bp.health else {},
-            "logs": bp.logs.model_dump() if bp.logs else {},
-            "diagnostics": bp.diagnostics.model_dump() if bp.diagnostics else {},
-            "recovery": bp.recovery.model_dump() if bp.recovery else {},
-            "updates": bp.updates.model_dump() if bp.updates else {},
-            "backups": bp.backups.model_dump() if bp.backups else {}
-        }
-        try:
-            container_name = f"msm-srv-{server.id}"
-            NodeClient.from_node(node).set_desired_state(container_name, desired_state_payload)
-        except Exception as e:
-            logger.warning("Failed to sync desired state to agent for server %s: %s", server.id, e)
+        compile_and_sync_desired_state(db, server)
+        return True
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            "Guardian desired-state sync failed for server_id=%s code=%s",
+            server.id,
+            getattr(exc, "code", type(exc).__name__),
+        )
+        return False

@@ -61,7 +61,12 @@ def test_queue_lifecycle_operation_returns_before_worker_runs():
     fake_server = Server(id=10, game_type="dayz", status="running")
     fake_db = MagicMock(spec=Session)
 
-    with patch("services.server_lifecycle_service._start_lifecycle_thread") as start_thread:
+    with patch("services.server_lifecycle_service._start_lifecycle_thread") as start_thread, patch(
+        "services.guardian_state_service.set_desired_power_state"
+    ) as set_desired, patch(
+        "services.server_lifecycle_service.sync_desired_state_to_agent",
+        return_value=True,
+    ) as sync_desired:
         result = queue_lifecycle_operation(fake_db, fake_server, "stop")
 
     assert result == {
@@ -71,6 +76,8 @@ def test_queue_lifecycle_operation_returns_before_worker_runs():
     }
     assert fake_server.status == "queued"
     fake_db.commit.assert_called_once()
+    set_desired.assert_called_once_with(fake_db, fake_server, "stopped")
+    sync_desired.assert_called_once_with(fake_db, fake_server)
     start_thread.assert_called_once()
     reset_lifecycle_jobs_for_tests()
 
