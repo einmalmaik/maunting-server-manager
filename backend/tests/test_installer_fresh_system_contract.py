@@ -222,3 +222,7 @@ def test_sudoers_policy_is_consistent_across_ssot_installer_and_updater() -> Non
     assert expected_rule in installer
     assert expected_rule in updater
 
+    assert "Defaults:msm !authenticate" in ssot
+    assert "Defaults:msm !authenticate" in installer
+    assert "Defaults:msm !authenticate" in updater
+

@@ -485,6 +485,8 @@ WRAPEOF
 # MSM Panel — Firewall (UFW/iptables) only
 # Deployed via root heredoc (never from msm-writable tree at update time).
 
+Defaults:msm !authenticate
+
 # UFW (exact; delete tightened)
 msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version
 msm ALL=(root) NOPASSWD: /usr/sbin/ufw allow [0-9]*/[a-z]* comment *
@@ -660,7 +662,7 @@ StandardError=journal
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user
+ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user -/run/sudo
 
 [Install]
 WantedBy=multi-user.target
@@ -751,7 +753,7 @@ fi
 # scheitert das systemd-Namespacing mit ``status=226/NAMESPACE``.
 # ``-``-Praefix laesst systemd fehlende Pfade still ueberspringen.
 # ``-/run/user`` wird fuer die Verbindung zum Rootless Docker Socket benoetigt.
-GOOD_RWP="ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user"
+GOOD_RWP="ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user -/run/sudo"
 BAD_RWP_1="ReadWritePaths=/opt/msm /etc/systemd/system /run/ufw /var/lib/ufw /etc/ufw /run/ufw.lock"
 BAD_RWP_2="ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock"
 
@@ -763,9 +765,15 @@ if [[ -f "$PANEL_UNIT" ]]; then
     elif grep -qF "$BAD_RWP_2" "$PANEL_UNIT"; then
         sed -i "s|${BAD_RWP_2}|${GOOD_RWP}|" "$PANEL_UNIT"
         UPDATED_RWP=true
-    elif ! grep -qF "-/run/user" "$PANEL_UNIT"; then
-        sed -i 's|^ReadWritePaths=\(.*\)|ReadWritePaths=\1 -/run/user|' "$PANEL_UNIT"
-        UPDATED_RWP=true
+    else
+        if ! grep -qF "-/run/user" "$PANEL_UNIT"; then
+            sed -i 's|^ReadWritePaths=\(.*\)|ReadWritePaths=\1 -/run/user|' "$PANEL_UNIT"
+            UPDATED_RWP=true
+        fi
+        if ! grep -qF "-/run/sudo" "$PANEL_UNIT"; then
+            sed -i 's|^ReadWritePaths=\(.*\)|ReadWritePaths=\1 -/run/sudo|' "$PANEL_UNIT"
+            UPDATED_RWP=true
+        fi
     fi
 fi
 

@@ -6,6 +6,9 @@
 # only). Follows KISS + minimal necessary rights. No over-privilege.
 # iptables operations are gated through a root-owned thin wrapper (see below).
 
+# Disable password authentication and timestamp ticket checks for non-interactive sudo execution
+Defaults:msm !authenticate
+
 # UFW (exact from firewall_service.py; delete tightened to match allow glob)
 msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version
 msm ALL=(root) NOPASSWD: /usr/sbin/ufw allow [0-9]*/[a-z]* comment *

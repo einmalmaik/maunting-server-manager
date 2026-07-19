@@ -1728,7 +1728,7 @@ ProtectHome=false
 # scheitert ``sudo ufw ...`` aus dem Backend. ``-``-Praefix => systemd
 # ueberspringt nicht existierende Pfade (z.B. ``/run/ufw.lock`` vor dem
 # ersten ufw-Aufruf) statt mit ``status=226/NAMESPACE`` zu crashen.
-ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user
+ReadWritePaths=/opt/msm -/etc/ufw -/var/lib/ufw -/run/ufw -/run/ufw.lock -/run/user -/run/sudo
 
 [Install]
 WantedBy=multi-user.target
@@ -1837,6 +1837,8 @@ WRAPEOF
             cat > /etc/sudoers.d/msm-panel <<'SUDOEOF'
 # MSM Panel — Firewall (UFW/iptables) only
 # Deployed via root heredoc in install.sh/update.sh (never read from msm-writable tree).
+
+Defaults:msm !authenticate
 
 # UFW (exact from firewall_service.py; delete tightened to match allow glob)
 msm ALL=(root) NOPASSWD: /usr/sbin/ufw --version
