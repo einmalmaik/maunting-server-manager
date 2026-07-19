@@ -1,3 +1,5 @@
+import { apiUrl } from '@/config/api'
+
 /**
  * Loads / refreshes the support widget from GET /api/system/support-widget.
  * Call after saving widget settings (dispatch msm:support-widget-updated).
@@ -71,7 +73,7 @@ function injectCustom(snippet: string) {
 
 export async function loadSupportWidget(): Promise<void> {
   try {
-    const res = await fetch('/api/system/support-widget', { cache: 'no-store' })
+    const res = await fetch(apiUrl('/system/support-widget'), { cache: 'no-store' })
     const cfg: PublicSupportWidget | null = res.ok ? await res.json() : null
     if (!cfg?.enabled) {
       removeWidgetArtifacts()
