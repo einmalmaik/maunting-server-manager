@@ -1717,13 +1717,29 @@
       "edit": "Die Community-ID bleibt gesperrt. Speichern ersetzt ausschließlich diese Community-Blueprint nach Backend-Prüfung.",
       "clone": "Native Blueprints bleiben unverändert. Für die eigene Community-Kopie ist eine neue ID erforderlich."
     },
-    "sections": { "basics": "Grundlagen", "runtime": "Laufzeit", "ports": "Ports", "source": "Quelle", "mods": "Mods & Workshop", "backup": "Backup", "review": "Prüfen" },
+    "sections": { "basics": "Grundlagen", "runtime": "Laufzeit", "ports": "Ports", "source": "Quelle", "mods": "Mods & Workshop", "backup": "Backup", "guardian": "Autopilot", "review": "Prüfen" },
     "collision": { "native": "Native Blueprint-IDs können nicht überschrieben werden. Wähle eine neue ID.", "title": "Community-Blueprint ersetzen?", "message": "Die ID „{{id}}“ existiert bereits. Beim Speichern wird diese Community-Blueprint ausdrücklich ersetzt.", "confirm": "Bewusst ersetzen" },
     "exec": { "title": "Exec-Konsole freigeben", "help": "Erweitert die möglichen Container-Aktionen. Backend-RBAC bleibt maßgeblich." },
     "ports": { "roleLabel": "Port {{index}} Rolle", "protocolLabel": "Port {{index}} Protokoll", "removeLabel": "Port {{index}} entfernen", "add": "Port hinzufügen" },
     "steam": { "requiresLogin": "Steam-Anmeldung erforderlich", "validate": "SteamCMD-Dateien validieren" },
     "mods": { "supportsMods": "Mods unterstützen", "supportsWorkshop": "Steam Workshop unterstützen" },
     "review": { "issueCount": "{{count}} Angaben prüfen", "issueCount_one": "{{count}} Angabe prüfen", "issueCount_other": "{{count}} Angaben prüfen", "ready": "Der Entwurf ist bereit für die autoritative Backend-Validierung.", "backend": "Das Panel prüft häufige Eingabefehler. Beim Speichern validiert das Backend das vollständige Schema autoritativ.", "json": "JSON-Vorschau" },
+    "guardian": {
+      "healthTitle": "Gesundheits-Prüfungen (Health Checks)",
+      "processRequired": "Hauptprozess-Liveness erzwingen",
+      "logsTitle": "Logs & Diagnostik",
+      "recoveryTitle": "Autonome Reparaturen (Recovery)",
+      "updatesTitle": "Updates & Datensicherung",
+      "rollbackOnFailure": "Bei Update-Fehlstart automatisch zurückrollen",
+      "beforeRiskyAction": "Snapshot vor Reparaturen/Updates erstellen"
+    },
+    "recovery": {
+      "policiesTitle": "Reparatur-Policies",
+      "addPolicy": "Policy hinzufügen",
+      "matchLabel": "Fehlermuster (Match) {{index}}",
+      "actionLabel": "Reparatur-Aktion (Action) {{index}}",
+      "removeLabel": "Policy {{index}} entfernen"
+    },
     "environment": { "title": "Umgebungswerte", "add": "Eintrag hinzufügen", "help": "Nur nicht-geheime Konfiguration. Zugangsdaten gehören nicht in Blueprints.", "nameLabel": "Umgebungsname {{index}}", "valueLabel": "Umgebungswert {{index}}", "removeLabel": "Umgebungswert {{index}} entfernen" },
     "setup": { "title": "Setup-Argumente", "help": "Strukturierte argv-Befehle; Argumente mit Leerzeichen bleiben ein Argument.", "addCommand": "Befehl hinzufügen", "command": "Befehl {{index}}", "argumentLabel": "Befehl {{command}}, Argument {{argument}}", "removeArgument": "Argument {{index}} entfernen", "addArgument": "Argument hinzufügen", "removeCommand": "Befehl entfernen", "notice": "Setup-Befehle sind begrenzte Argumentlisten, keine frei ausführbaren Shell-Hooks. Komplexe Installationsskripte gehören nicht in ein Blueprint." },
     "profiles": { "title": "Alternative Starts", "help": "Maximal 8, aktiviert wenn die Marker-Datei existiert.", "add": "Profil hinzufügen", "markerLabel": "Marker-Datei {{index}}", "startupLabel": "Startbefehl {{index}}", "removeLabel": "Startprofil {{index}} entfernen" },
@@ -1766,7 +1782,21 @@
       "modFormat": { "label": "Argumentformat", "help": "Muss den Platzhalter {mods} enthalten." },
       "modFile": { "label": "Mod-Listenpfad", "help": "Sicherer relativer Pfad." },
       "modContent": { "label": "Listeninhalt", "help": "Workshop-IDs oder Ziel-Dateinamen der Dateiaktionen." },
-      "backup": { "label": "Zu sichernde Pfade", "help": "Ein relativer Pfad oder Glob pro Zeile; leer bedeutet vollständiges Server-Backup." }
+      "backup": { "label": "Zu sichernde Pfade", "help": "Ein relativer Pfad oder Glob pro Zeile; leer bedeutet vollständiges Server-Backup." },
+      "healthPortProto": { "label": "Liveness-Port Protokoll", "help": "Protokoll für den Gesundheitstest." },
+      "healthPort": { "label": "Liveness-Port", "help": "Port oder Platzhalter, z.B. {{SERVER_PORT}}." },
+      "healthPortTimeout": { "label": "Timeout (Liveness-Port)", "help": "z.B. 3s oder 5s." },
+      "healthAppType": { "label": "Abfrage-Typ", "help": "z.B. minecraft-query." },
+      "healthAppInterval": { "label": "Query-Intervall", "help": "z.B. 30s." },
+      "healthAppThreshold": { "label": "Fehler-Schwellenwert", "help": "Ab wie vielen Fehlversuchen ungesund." },
+      "healthSuccessPatterns": { "label": "Start-Erfolgsmuster", "help": "Logmuster bei erfolgreichem Start." },
+      "healthFailurePatterns": { "label": "Start-Fehlermuster", "help": "Logmuster bei Startfehlern." },
+      "logsSources": { "label": "Logdateien", "help": "Zusätzliche relative Log-Pfade (z.B. logs/latest.log)." },
+      "logsRedact": { "label": "Log-Schwärzung", "help": "Sensible Schlüssel, die in den Logs zensiert werden." },
+      "diagnosticsParsers": { "label": "Fehler-Parser", "help": "Aktivierte Diagnose-Parser (z.B. java-stacktrace)." },
+      "updatesStrategy": { "label": "Update-Transaktion", "help": "z.B. snapshot-then-update." },
+      "updatesVerification": { "label": "Update-Prüfung", "help": "z.B. required." },
+      "backupsProtected": { "label": "Geschützte Pfade", "help": "Relative Pfade, die nicht bereinigt werden dürfen." }
     },
     "options": {
       "category": { "steamGame": "Steam-Spiel", "nonSteamGame": "Nicht-Steam-Spiel", "voiceServer": "Voice-Server", "bot": "Bot" },
@@ -1780,7 +1810,12 @@
       "modContent": { "workshopIds": "Workshop-IDs", "targetNames": "Ziel-Dateinamen" }
     },
     "validation": {
-      "metaId": "1–64 Kleinbuchstaben, Ziffern oder Unterstriche verwenden.", "metaName": "Einen Namen mit maximal 128 Zeichen angeben.", "image": "Einen gültigen Docker-Image-Namen angeben.", "startup": "Einen Startbefehl mit maximal 2048 Zeichen angeben.", "shellSyntax": "Shell-Substitutionen und logische Verkettungen sind nicht erlaubt.", "workdir": "Der Arbeitsordner muss ein sicherer absoluter Container-Pfad sein.", "user": "UID:GID numerisch und ohne Root angeben.", "stopGrace": "Wert zwischen 5 und 600 verwenden.", "startCheck": "Wert zwischen 0 und 300 verwenden.", "execTimeout": "Wert zwischen 1 und 600 verwenden.", "envName": "Ungültiger Umgebungsname: {{name}}", "envValue": "Unsicherer Umgebungswert bei {{name}}", "envEmpty": "Umgebungszeile {{row}} benötigt einen Namen.", "envDuplicate": "Der Umgebungsname {{name}} ist doppelt.", "maxLines": "Maximal {{count}} Zeilen verwenden.", "maxProfiles": "Maximal 8 Startprofile verwenden.", "markerFile": "Eine sichere Marker-Datei angeben.", "profileStartup": "Einen sicheren Startbefehl angeben.", "patchFile": "Eine sichere Konfigurationsdatei angeben.", "patchValue": "Ein Patch-Wert ist erforderlich.", "patchIni": "INI benötigt Sektion und Schlüssel.", "patchRegex": "Regex benötigt einen Ausdruck.", "maxPorts": "Maximal 32 Port-Einträge verwenden.", "duplicatePort": "Diese Port-Rolle und dieses Protokoll sind bereits vorhanden.", "steamAppId": "Eine numerische Steam App-ID angeben.", "windowsCompatibility": "Windows benötigt Wine oder Proton.", "httpsUrl": "Nur HTTPS-Download-URLs sind erlaubt.", "githubRepo": "Repository als owner/repo angeben.", "sha256": "SHA-256 muss aus 64 Kleinbuchstaben-Hexzeichen bestehen.", "relativePath": "Einen sicheren relativen Unterordner angeben.", "maxSetupCommands": "Maximal 8 Setup-Befehle verwenden.", "setupCommand": "Jeder Setup-Befehl benötigt 1–32 nicht-leere Argumente.", "manualInstructions": "Installationshinweise angeben.", "manualFiles": "Mindestens eine benötigte Datei angeben.", "unsafePath": "Unsicherer relativer Pfad: {{path}}", "workshopAppId": "Für Workshop-Unterstützung ist eine numerische App-ID erforderlich.", "modArgument": "Das Startargument muss {mods} enthalten.", "modListPath": "Einen sicheren relativen Listenpfad angeben.", "postInstall": "Für Ziel-Dateinamen ist mindestens eine Dateiaktion nötig."
+      "metaId": "1–64 Kleinbuchstaben, Ziffern oder Unterstriche verwenden.", "metaName": "Einen Namen mit maximal 128 Zeichen angeben.", "image": "Einen gültigen Docker-Image-Namen angeben.", "startup": "Einen Startbefehl mit maximal 2048 Zeichen angeben.", "shellSyntax": "Shell-Substitutionen und logische Verkettungen sind nicht erlaubt.", "workdir": "Der Arbeitsordner muss ein sicherer absoluter Container-Pfad sein.", "user": "UID:GID numerisch und ohne Root angeben.", "stopGrace": "Wert zwischen 5 und 600 verwenden.", "startCheck": "Wert zwischen 0 und 300 verwenden.", "execTimeout": "Wert zwischen 1 und 600 verwenden.", "envName": "Ungültiger Umgebungsname: {{name}}", "envValue": "Unsicherer Umgebungswert bei {{name}}", "envEmpty": "Umgebungszeile {{row}} benötigt einen Namen.", "envDuplicate": "Der Umgebungsname {{name}} ist doppelt.", "maxLines": "Maximal {{count}} Zeilen verwenden.", "maxProfiles": "Maximal 8 Startprofile verwenden.", "markerFile": "Eine sichere Marker-Datei angeben.", "profileStartup": "Einen sicheren Startbefehl angeben.", "patchFile": "Eine sichere Konfigurationsdatei angeben.", "patchValue": "Ein Patch-Wert ist erforderlich.", "patchIni": "INI benötigt Sektion und Schlüssel.", "patchRegex": "Regex benötigt einen Ausdruck.", "maxPorts": "Maximal 32 Port-Einträge verwenden.", "duplicatePort": "Diese Port-Rolle und dieses Protokoll sind bereits vorhanden.", "steamAppId": "Eine numerische Steam App-ID angeben.", "windowsCompatibility": "Windows benötigt Wine oder Proton.", "httpsUrl": "Nur HTTPS-Download-URLs sind erlaubt.", "githubRepo": "Repository als owner/repo angeben.", "sha256": "SHA-256 muss aus 64 Kleinbuchstaben-Hexzeichen bestehen.", "relativePath": "Einen sicheren relativen Unterordner angeben.", "maxSetupCommands": "Maximal 8 Setup-Befehle verwenden.", "setupCommand": "Jeder Setup-Befehl benötigt 1–32 nicht-leere Argumente.", "manualInstructions": "Installationshinweise angeben.", "manualFiles": "Mindestens eine benötigte Datei angeben.", "unsafePath": "Unsicherer relativer Pfad: {{path}}", "workshopAppId": "Für Workshop-Unterstützung ist eine numerische App-ID erforderlich.", "modArgument": "Das Startargument muss {mods} enthalten.", "modListPath": "Einen sicheren relativen Listenpfad angeben.", "postInstall": "Für Ziel-Dateinamen ist mindestens eine Dateiaktion nötig.",
+      "healthPortEmpty": "Port darf nicht leer sein.",
+      "healthTimeoutEmpty": "Timeout darf nicht leer sein.",
+      "healthAppTypeEmpty": "Abfrage-Typ darf nicht leer sein.",
+      "recoveryMatchEmpty": "Fehlermuster (Match) {{row}} darf nicht leer sein.",
+      "recoveryActionEmpty": "Reparatur-Aktion (Action) {{row}} darf nicht leer sein."
     }
   },
   "server": {

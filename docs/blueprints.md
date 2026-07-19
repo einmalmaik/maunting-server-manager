@@ -571,3 +571,51 @@ Status/Console-Log sind bewusst als mögliche Ursachen markiert und nicht als
 bewiesen: ohne Host-Metriken und vollständige SteamCMD-/Docker-Runtime kann MSM
 nicht sicher unterscheiden, ob App-Metadaten, Account/Lizenz, Plattform,
 Plattenplatz/Quota, Berechtigungen oder paralleler Zugriff die Ursache waren.
+
+## Guardian Autonomous Engine (Autopilot)
+
+Der Blueprint beschreibt über die Autopilot-Konfiguration, wie ein gesunder Serverlauf aussieht, welche Logdateien überwacht werden, welche Fehler klassifiziert werden können und welche automatischen Heilungsmaßnahmen zulässig sind.
+
+Das System gliedert sich in folgende optionale Blöcke:
+
+### 1. `health` (Gesundheitsprüfungen)
+Steuert das Monitoring des Servers:
+* `process.required` (Boolean, Default `true`): Ob der Hauptprozess laufen muss.
+* `port` (Objekt): Verbindungsprüfung für einen Port.
+  * `protocol`: `"tcp"` oder `"udp"`
+  * `port`: Der zu prüfende Port (z. B. `"{GAME_PORT}"` oder `"{{SERVER_PORT}}"`).
+  * `timeout`: Wartezeit bis zum Timeout (z. B. `"3s"`).
+* `application` (Objekt): Anwendungsspezifische Abfragen (Liveness Probes).
+  * `type`: Der Query-Typ (z. B. `"minecraft-query"`).
+  * `interval`: Intervall zwischen Abfragen (z. B. `"30s"`).
+  * `failure_threshold`: Anzahl Fehlversuche vor Einstufung als ungesund.
+* `startup` (Objekt): Log-Mustererkennung beim Serverstart.
+  * `success_patterns`: Logzeilen, die einen erfolgreichen Start markieren.
+  * `failure_patterns`: Logzeilen, die auf einen direkten Startabbruch hindeuten.
+
+### 2. `logs` (Protokollierung & Schwärzung)
+* `sources`: Relative Dateipfade oder Globs (z. B. `["stdout", "logs/latest.log"]`) der zu sammelnden Logs.
+* `redact`: Liste von Keys, die vor Speicherung und Übertragung geschwärzt werden sollen (z. B. `["discord_token", "api_key"]`).
+
+### 3. `diagnostics` (Fehleranalyse)
+* `parsers`: Liste aktivierter Parser zur Incident-Klassifizierung (z. B. `["java-stacktrace", "linux-oom", "network-bind-error"]`).
+
+### 4. `recovery` (Selbstheilungs-Richtlinien)
+Definiert automatisierte Reaktionen auf bestimmte Vorfälle (Eskalationsleiter):
+* `policies`: Liste von Regeln, bestehend aus `match` (Fehlerklassifikation) und `action` (Reparaturmaßnahme).
+  ```json
+  "policies": [
+    { "match": "port_conflict", "action": "resolve_managed_port_conflict" },
+    { "match": "corrupted_config", "action": "restore_last_known_good_config" }
+  ]
+  ```
+
+### 5. `updates` (Update-Transaktionen)
+* `strategy`: Update-Strategie (z. B. `"snapshot-then-update"`).
+* `health_verification`: Ob nach einem Update zwingend eine Liveness-Prüfung erfolgen muss (`"required"`).
+* `rollback_on_failure` (Boolean): Ob bei fehlgeschlagener Prüfung das Update automatisch zurückgerollt wird.
+
+### 6. `backups` (Daten- und Snapshot-Schutz)
+* `before_risky_action` (Boolean): Ob vor automatischen Reparaturen/Updates Snapshots erstellt werden sollen.
+* `protected_paths`: Ordner und Dateien, die niemals automatisch bereinigt oder gelöscht werden dürfen (z. B. `["world/", "config/"]`). Trailing-Slashes werden bei Pfadprüfungen automatisch bereinigt.
+

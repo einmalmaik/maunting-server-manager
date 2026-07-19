@@ -1001,6 +1001,133 @@ class BlueprintConfigPatch(BaseModel):
         return self
 
 
+class BlueprintHealthProcess(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    required: bool = True
+
+
+class BlueprintHealthPort(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    protocol: str = "tcp"
+    port: str
+    timeout: str = "3s"
+
+    @field_validator("port")
+    @classmethod
+    def _check_port(cls, v: str) -> str:
+        if not v or "\x00" in v:
+            raise ValueError("Port-Wert darf nicht leer sein.")
+        return v
+
+    @field_validator("timeout")
+    @classmethod
+    def _check_timeout(cls, v: str) -> str:
+        if not v or "\x00" in v or len(v) > 32:
+            raise ValueError("Timeout-Wert ist ungueltig.")
+        return v
+
+
+class BlueprintHealthApplication(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    type: str
+    interval: str = "30s"
+    failure_threshold: int = 3
+
+    @field_validator("type")
+    @classmethod
+    def _check_type(cls, v: str) -> str:
+        if not v or "\x00" in v:
+            raise ValueError("Typ darf nicht leer sein.")
+        return v
+
+
+class BlueprintHealthStartup(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    success_patterns: list[str] = Field(default_factory=list)
+    failure_patterns: list[str] = Field(default_factory=list)
+
+
+class BlueprintHealth(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    process: BlueprintHealthProcess | None = None
+    port: BlueprintHealthPort | None = None
+    application: BlueprintHealthApplication | None = None
+    startup: BlueprintHealthStartup | None = None
+
+
+class BlueprintLogs(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    sources: list[str] = Field(default_factory=list)
+    redact: list[str] = Field(default_factory=list)
+
+
+class BlueprintDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    parsers: list[str] = Field(default_factory=list)
+
+
+class BlueprintRecoveryPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    match: str
+    action: str
+
+    @field_validator("match", "action")
+    @classmethod
+    def _check_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Wert darf nicht leer sein.")
+        return v.strip()
+
+
+class BlueprintRecovery(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    policies: list[BlueprintRecoveryPolicy] = Field(default_factory=list)
+
+
+class BlueprintUpdates(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    strategy: str = "snapshot-then-update"
+    health_verification: str = "required"
+    rollback_on_failure: bool = True
+
+
+class BlueprintBackups(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    before_risky_action: bool = True
+    protected_paths: list[str] = Field(default_factory=list)
+
+    @field_validator("protected_paths")
+    @classmethod
+    def _check_protected_paths(cls, paths: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for raw in paths:
+            p = str(raw).strip()
+            if not p:
+                raise ValueError("backups.protected_paths: leere Eintraege sind nicht erlaubt.")
+            p_val = p.rstrip("/")
+            if not _is_safe_relative_template(
+                p_val,
+                allowed_tokens=frozenset(),
+                allow_glob=True,
+            ):
+                raise ValueError(
+                    f"backups.protected_paths: unsicherer Pfad '{p}'."
+                )
+            cleaned.append(p)
+        return cleaned
+
+
 class Blueprint(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -1011,6 +1138,13 @@ class Blueprint(BaseModel):
     source: BlueprintSource
     mods: BlueprintMods | None = None
     backup: BlueprintBackup | None = None
+    health: BlueprintHealth | None = None
+    logs: BlueprintLogs | None = None
+    diagnostics: BlueprintDiagnostics | None = None
+    recovery: BlueprintRecovery | None = None
+    updates: BlueprintUpdates | None = None
+    backups: BlueprintBackups | None = None
+
 
     @field_validator("version")
     @classmethod
@@ -1185,6 +1319,52 @@ COMMENTED_TEMPLATE_DE: str = """{
       "Saved/Config",
       "Saved/SaveGames"
     ]
+  },
+  "health": {
+    // Autopilot-Gesundheitsprüfungen
+    "process": {
+      "required": true
+    },
+    "port": {
+      "protocol": "tcp",
+      "port": "{{SERVER_PORT}}",
+      "timeout": "3s"
+    },
+    "application": {
+      "type": "minecraft-query",
+      "interval": "30s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "success_patterns": ["Done ("],
+      "failure_patterns": ["Unable to access jarfile", "Failed to bind to port"]
+    }
+  },
+  "logs": {
+    // Zu scannende Logquellen und zu schwaerzende Secrets
+    "sources": ["stdout", "logs/latest.log"],
+    "redact": ["discord_token", "api_key"]
+  },
+  "diagnostics": {
+    // Aktivierte Fehler-Parser
+    "parsers": ["java-stacktrace", "linux-oom"]
+  },
+  "recovery": {
+    // Automatisierte Reparaturregeln
+    "policies": [
+      { "match": "port_conflict", "action": "resolve_managed_port_conflict" }
+    ]
+  },
+  "updates": {
+    // Update-Strategie und Rollback-Verhalten
+    "strategy": "snapshot-then-update",
+    "health_verification": "required",
+    "rollback_on_failure": true
+  },
+  "backups": {
+    // Backup-Verhalten vor riskanter Aktion und geschuetzte Pfade
+    "before_risky_action": true,
+    "protected_paths": ["world/", "config/"]
   }
 }
 """
@@ -1285,6 +1465,54 @@ COMMENTED_TEMPLATE_EN: str = """{
       "Saved/Config",
       "Saved/SaveGames"
     ]
+  },
+  "health": {
+    // Autopilot health checks
+    "process": {
+      "required": true
+    },
+    "port": {
+      "protocol": "tcp",
+      "port": "{{SERVER_PORT}}",
+      "timeout": "3s"
+    },
+    "application": {
+      "type": "minecraft-query",
+      "interval": "30s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "success_patterns": ["Done ("],
+      "failure_patterns": ["Unable to access jarfile", "Failed to bind to port"]
+    }
+  },
+  "logs": {
+    // Log sources to monitor and secrets to redact
+    "sources": ["stdout", "logs/latest.log"],
+    "redact": ["discord_token", "api_key"]
+  },
+  "diagnostics": {
+    // Enabled diagnostics log/stacktrace parsers
+    "parsers": ["java-stacktrace", "linux-oom"]
+  },
+  "recovery": {
+    // Automated recovery policies
+    "policies": [
+      { "match": "port_conflict", "action": "resolve_managed_port_conflict" }
+    ]
+  },
+  "updates": {
+    // Update strategy and rollback behavior
+    "strategy": "snapshot-then-update",
+    "health_verification": "required",
+    "rollback_on_failure": true
+  },
+  "backups": {
+    // Backups settings before risky action and protected paths
+    "before_risky_action": true,
+    "protected_paths": ["world/", "config/"]
   }
 }
 """
+
+

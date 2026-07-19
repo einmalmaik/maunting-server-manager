@@ -27,6 +27,31 @@ export interface BlueprintDraft {
     postInstall: Array<{ operation: 'copy' | 'symlink'; source: string; target: string; required: boolean }>
   }
   backup?: { includePaths: string[] }
+  health?: {
+    process?: { required: boolean }
+    port?: { protocol: 'tcp' | 'udp'; port: string; timeout: string }
+    application?: { type: string; interval: string; failure_threshold: number }
+    startup?: { success_patterns: string[]; failure_patterns: string[] }
+  }
+  logs?: {
+    sources: string[]
+    redact: string[]
+  }
+  diagnostics?: {
+    parsers: string[]
+  }
+  recovery?: {
+    policies: Array<{ match: string; action: string }>
+  }
+  updates?: {
+    strategy: string
+    health_verification: string
+    rollback_on_failure: boolean
+  }
+  backups?: {
+    before_risky_action: boolean
+    protected_paths: string[]
+  }
 }
 
 export interface BlueprintValidationIssue {
@@ -59,6 +84,31 @@ export function createBlueprintDraft(): BlueprintDraft {
       steam: { appId: '', platform: 'linux', compatibility: 'native', requiresLogin: false, validate: true },
     },
     mods: { supportsMods: false, supportsSteamWorkshop: false, filterTags: [], modInjection: 'none', modListContent: 'workshopIds', postInstall: [] },
+    health: {
+      process: { required: true },
+      port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
+      application: { type: '', interval: '30s', failure_threshold: 3 },
+      startup: { success_patterns: [], failure_patterns: [] },
+    },
+    logs: {
+      sources: [],
+      redact: [],
+    },
+    diagnostics: {
+      parsers: [],
+    },
+    recovery: {
+      policies: [],
+    },
+    updates: {
+      strategy: 'snapshot-then-update',
+      health_verification: 'required',
+      rollback_on_failure: true,
+    },
+    backups: {
+      before_risky_action: true,
+      protected_paths: [],
+    },
   }
 }
 
@@ -134,6 +184,24 @@ export function validateBlueprintDraft(draft: BlueprintDraft): BlueprintValidati
   if (draft.mods?.modInjection === 'startupArg' && !(draft.mods.modStartupArgumentFormat ?? '').includes('{mods}')) add('mods.modStartupArgumentFormat', 'blueprintBuilder.validation.modArgument')
   if (draft.mods?.modInjection === 'file' && !safeRelativePath(draft.mods.modListFilePath ?? '')) add('mods.modListFilePath', 'blueprintBuilder.validation.modListPath')
   if (draft.mods?.modListContent === 'postInstallTargetBasenames' && !draft.mods.postInstall.length) add('mods.postInstall', 'blueprintBuilder.validation.postInstall')
+
+  // Autopilot/Guardian Validation
+  if (draft.health?.port?.port && !draft.health.port.port.trim()) add('health.port.port', 'blueprintBuilder.validation.healthPortEmpty')
+  if (draft.health?.port?.timeout && !draft.health.port.timeout.trim()) add('health.port.timeout', 'blueprintBuilder.validation.healthTimeoutEmpty')
+  if (draft.health?.application?.type && !draft.health.application.type.trim()) add('health.application.type', 'blueprintBuilder.validation.healthAppTypeEmpty')
+  if (draft.recovery?.policies) {
+    draft.recovery.policies.forEach((policy, index) => {
+      if (!policy.match.trim()) add(`recovery.policies.${index}`, 'blueprintBuilder.validation.recoveryMatchEmpty')
+      if (!policy.action.trim()) add(`recovery.policies.${index}`, 'blueprintBuilder.validation.recoveryActionEmpty')
+    })
+  }
+  if (draft.backups?.protected_paths) {
+    draft.backups.protected_paths.forEach((path) => {
+      const strippedPath = path.endsWith('/') ? path.slice(0, -1) : path
+      if (strippedPath && !safeRelativePath(strippedPath)) add('paths', 'blueprintBuilder.validation.unsafePath', { path: path || '—' })
+    })
+  }
+
   return issues
 }
 
@@ -173,5 +241,64 @@ export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
   }
   if (clean.backup) clean.backup.includePaths = normalizeLines(clean.backup.includePaths)
   if (!clean.backup?.includePaths.length) delete clean.backup
+
+  // Autopilot/Guardian normalization
+  if (clean.health) {
+    if (clean.health.startup) {
+      clean.health.startup.success_patterns = normalizeLines(clean.health.startup.success_patterns)
+      clean.health.startup.failure_patterns = normalizeLines(clean.health.startup.failure_patterns)
+    }
+    const hasProcess = Boolean(clean.health.process)
+    const hasPort = Boolean(clean.health.port?.port?.trim())
+    const hasApp = Boolean(clean.health.application?.type?.trim())
+    const hasStartup = Boolean(clean.health.startup?.success_patterns?.length || clean.health.startup?.failure_patterns?.length)
+
+    if (!hasProcess) delete clean.health.process
+    if (!hasPort) delete clean.health.port
+    if (!hasApp) delete clean.health.application
+    if (!hasStartup) delete clean.health.startup
+
+    if (!hasProcess && !hasPort && !hasApp && !hasStartup) {
+      delete clean.health
+    }
+  }
+
+  if (clean.logs) {
+    clean.logs.sources = normalizeLines(clean.logs.sources)
+    clean.logs.redact = normalizeLines(clean.logs.redact)
+    if (clean.logs.sources.length === 0 && clean.logs.redact.length === 0) {
+      delete clean.logs
+    }
+  }
+
+  if (clean.diagnostics) {
+    clean.diagnostics.parsers = normalizeLines(clean.diagnostics.parsers)
+    if (clean.diagnostics.parsers.length === 0) {
+      delete clean.diagnostics
+    }
+  }
+
+  if (clean.recovery) {
+    clean.recovery.policies = clean.recovery.policies
+      .map(p => ({ match: p.match.trim(), action: p.action.trim() }))
+      .filter(p => p.match && p.action)
+    if (clean.recovery.policies.length === 0) {
+      delete clean.recovery
+    }
+  }
+
+  if (clean.updates) {
+    if (!clean.updates.strategy.trim() && !clean.updates.health_verification.trim()) {
+      delete clean.updates
+    }
+  }
+
+  if (clean.backups) {
+    clean.backups.protected_paths = normalizeLines(clean.backups.protected_paths)
+    if (clean.backups.protected_paths.length === 0 && clean.backups.before_risky_action) {
+      delete clean.backups
+    }
+  }
+
   return clean
 }

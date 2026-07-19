@@ -23,6 +23,7 @@ import {
   Field,
   LinesField,
   PostInstallEditor,
+  RecoveryPoliciesEditor,
   SetupCommandsEditor,
   StartupProfilesEditor,
 } from './BlueprintBuilderEditors'
@@ -37,7 +38,7 @@ interface BlueprintBuilderProps {
   onSaved: () => Promise<void>
 }
 
-const sectionIds = ['basics', 'runtime', 'ports', 'source', 'mods', 'backup', 'review'] as const
+const sectionIds = ['basics', 'runtime', 'ports', 'source', 'mods', 'backup', 'guardian', 'review'] as const
 type SectionId = (typeof sectionIds)[number]
 
 function sectionForIssue(path: string): SectionId {
@@ -46,6 +47,17 @@ function sectionForIssue(path: string): SectionId {
   if (path.startsWith('ports')) return 'ports'
   if (path.startsWith('source.')) return 'source'
   if (path.startsWith('mods.')) return 'mods'
+  if (path.startsWith('backup.')) return 'backup'
+  if (
+    path.startsWith('health') ||
+    path.startsWith('logs') ||
+    path.startsWith('diagnostics') ||
+    path.startsWith('recovery') ||
+    path.startsWith('updates') ||
+    path.startsWith('backups')
+  ) {
+    return 'guardian'
+  }
   return 'backup'
 }
 
@@ -341,6 +353,182 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
     )
   }
 
+  const renderGuardian = () => {
+    const health = draft.health ?? {
+      process: { required: true },
+      port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
+      application: { type: '', interval: '30s', failure_threshold: 3 },
+      startup: { success_patterns: [], failure_patterns: [] },
+    }
+    const logs = draft.logs ?? { sources: [], redact: [] }
+    const diagnostics = draft.diagnostics ?? { parsers: [] }
+    const recovery = draft.recovery ?? { policies: [] }
+    const updates = draft.updates ?? { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true }
+    const backups = draft.backups ?? { before_risky_action: true, protected_paths: [] }
+
+    const updateHealth = (next: Partial<typeof health>) => {
+      setDraft(current => ({ ...current, health: { ...health, ...next } }))
+    }
+
+    return (
+      <div className="space-y-6">
+        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
+          <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.healthTitle')}</h4>
+          <label className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              checked={health.process?.required ?? true}
+              onChange={event => updateHealth({ process: { required: event.target.checked } })}
+            />
+            {t('blueprintBuilder.guardian.processRequired')}
+          </label>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field id="bp-health-port-proto" label={t('blueprintBuilder.fields.healthPortProto.label')} help={t('blueprintBuilder.fields.healthPortProto.help')}>
+              <Dropdown
+                value={health.port?.protocol ?? 'tcp'}
+                onChange={value => updateHealth({ port: { ...health.port, protocol: value as 'tcp' | 'udp', port: health.port?.port ?? '', timeout: health.port?.timeout ?? '' } })}
+                options={[{ value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' }]}
+              />
+            </Field>
+            <Field id="bp-health-port" label={t('blueprintBuilder.fields.healthPort.label')} help={t('blueprintBuilder.fields.healthPort.help')} error={issueFor('health.port.port')}>
+              <input
+                className="msm-input font-mono"
+                value={health.port?.port ?? ''}
+                onChange={event => updateHealth({ port: { ...health.port, protocol: health.port?.protocol ?? 'tcp', port: event.target.value, timeout: health.port?.timeout ?? '' } })}
+              />
+            </Field>
+            <Field id="bp-health-port-timeout" label={t('blueprintBuilder.fields.healthPortTimeout.label')} help={t('blueprintBuilder.fields.healthPortTimeout.help')} error={issueFor('health.port.timeout')}>
+              <input
+                className="msm-input font-mono"
+                value={health.port?.timeout ?? ''}
+                onChange={event => updateHealth({ port: { ...health.port, protocol: health.port?.protocol ?? 'tcp', port: health.port?.port ?? '', timeout: event.target.value } })}
+              />
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field id="bp-health-app-type" label={t('blueprintBuilder.fields.healthAppType.label')} help={t('blueprintBuilder.fields.healthAppType.help')} error={issueFor('health.application.type')}>
+              <input
+                className="msm-input font-mono"
+                value={health.application?.type ?? ''}
+                onChange={event => updateHealth({ application: { ...health.application, type: event.target.value, interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3 } })}
+              />
+            </Field>
+            <Field id="bp-health-app-interval" label={t('blueprintBuilder.fields.healthAppInterval.label')} help={t('blueprintBuilder.fields.healthAppInterval.help')} error={issueFor('health.application.interval')}>
+              <input
+                className="msm-input font-mono"
+                value={health.application?.interval ?? ''}
+                onChange={event => updateHealth({ application: { ...health.application, type: health.application?.type ?? '', interval: event.target.value, failure_threshold: health.application?.failure_threshold ?? 3 } })}
+              />
+            </Field>
+            <Field id="bp-health-app-threshold" label={t('blueprintBuilder.fields.healthAppThreshold.label')} help={t('blueprintBuilder.fields.healthAppThreshold.help')} error={issueFor('health.application.failure_threshold')}>
+              <NumberStepper
+                min={1}
+                max={20}
+                value={health.application?.failure_threshold ?? 3}
+                onValueChange={value => updateHealth({ application: { ...health.application, type: health.application?.type ?? '', interval: health.application?.interval ?? '', failure_threshold: Number(value) } })}
+              />
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <LinesField
+              id="bp-health-success-patterns"
+              label={t('blueprintBuilder.fields.healthSuccessPatterns.label')}
+              help={t('blueprintBuilder.fields.healthSuccessPatterns.help')}
+              value={health.startup?.success_patterns ?? []}
+              onChange={success_patterns => updateHealth({ startup: { ...health.startup, success_patterns, failure_patterns: health.startup?.failure_patterns ?? [] } })}
+            />
+            <LinesField
+              id="bp-health-failure-patterns"
+              label={t('blueprintBuilder.fields.healthFailurePatterns.label')}
+              help={t('blueprintBuilder.fields.healthFailurePatterns.help')}
+              value={health.startup?.failure_patterns ?? []}
+              onChange={failure_patterns => updateHealth({ startup: { ...health.startup, success_patterns: health.startup?.success_patterns ?? [], failure_patterns } })}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
+          <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.logsTitle')}</h4>
+          <div className="grid gap-4 md:grid-cols-2">
+            <LinesField
+              id="bp-logs-sources"
+              label={t('blueprintBuilder.fields.logsSources.label')}
+              help={t('blueprintBuilder.fields.logsSources.help')}
+              value={logs.sources}
+              onChange={sources => setDraft(current => ({ ...current, logs: { ...logs, sources } }))}
+            />
+            <LinesField
+              id="bp-logs-redact"
+              label={t('blueprintBuilder.fields.logsRedact.label')}
+              help={t('blueprintBuilder.fields.logsRedact.help')}
+              value={logs.redact}
+              onChange={redact => setDraft(current => ({ ...current, logs: { ...logs, redact } }))}
+            />
+          </div>
+          <LinesField
+            id="bp-diagnostics-parsers"
+            label={t('blueprintBuilder.fields.diagnosticsParsers.label')}
+            help={t('blueprintBuilder.fields.diagnosticsParsers.help')}
+            value={diagnostics.parsers}
+            onChange={parsers => setDraft(current => ({ ...current, diagnostics: { parsers } }))}
+          />
+        </div>
+
+        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
+          <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.recoveryTitle')}</h4>
+          <RecoveryPoliciesEditor
+            value={recovery.policies}
+            onChange={policies => setDraft(current => ({ ...current, recovery: { policies } }))}
+          />
+        </div>
+
+        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
+          <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.updatesTitle')}</h4>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field id="bp-updates-strategy" label={t('blueprintBuilder.fields.updatesStrategy.label')} help={t('blueprintBuilder.fields.updatesStrategy.help')}>
+              <input
+                className="msm-input font-mono"
+                value={updates.strategy}
+                onChange={event => setDraft(current => ({ ...current, updates: { ...updates, strategy: event.target.value } }))}
+              />
+            </Field>
+            <Field id="bp-updates-verification" label={t('blueprintBuilder.fields.updatesVerification.label')} help={t('blueprintBuilder.fields.updatesVerification.help')}>
+              <input
+                className="msm-input font-mono"
+                value={updates.health_verification}
+                onChange={event => setDraft(current => ({ ...current, updates: { ...updates, health_verification: event.target.value } }))}
+              />
+            </Field>
+          </div>
+          <label className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              checked={updates.rollback_on_failure}
+              onChange={event => setDraft(current => ({ ...current, updates: { ...updates, rollback_on_failure: event.target.checked } }))}
+            />
+            {t('blueprintBuilder.guardian.rollbackOnFailure')}
+          </label>
+          <hr className="border-outline-variant/40" />
+          <label className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              checked={backups.before_risky_action}
+              onChange={event => setDraft(current => ({ ...current, backups: { ...backups, before_risky_action: event.target.checked } }))}
+            />
+            {t('blueprintBuilder.guardian.beforeRiskyAction')}
+          </label>
+          <LinesField
+            id="bp-backups-protected"
+            label={t('blueprintBuilder.fields.backupsProtected.label')}
+            help={t('blueprintBuilder.fields.backupsProtected.help')}
+            value={backups.protected_paths}
+            onChange={protected_paths => setDraft(current => ({ ...current, backups: { ...backups, protected_paths } }))}
+          />
+        </div>
+      </div>
+    )
+  }
+
   const renderReview = () => (
     <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
       <div>
@@ -393,6 +581,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
                 {section === 'source' && renderSource()}
                 {section === 'mods' && renderMods()}
                 {section === 'backup' && <LinesField id="bp-backup" label={t('blueprintBuilder.fields.backup.label')} help={t('blueprintBuilder.fields.backup.help')} value={draft.backup?.includePaths ?? []} onChange={includePaths => setDraft({ ...draft, backup: { includePaths } })} />}
+                {section === 'guardian' && renderGuardian()}
                 {section === 'review' && renderReview()}
               </form>
             </div>

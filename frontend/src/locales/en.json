@@ -1717,13 +1717,29 @@
       "edit": "The community ID stays locked. Saving replaces only this community blueprint after backend validation.",
       "clone": "Native blueprints stay unchanged. The community copy requires a new ID."
     },
-    "sections": { "basics": "Basics", "runtime": "Runtime", "ports": "Ports", "source": "Source", "mods": "Mods & Workshop", "backup": "Backup", "review": "Review" },
+    "sections": { "basics": "Basics", "runtime": "Runtime", "ports": "Ports", "source": "Source", "mods": "Mods & Workshop", "backup": "Backup", "guardian": "Autopilot", "review": "Review" },
     "collision": { "native": "Native blueprint IDs cannot be overwritten. Choose a new ID.", "title": "Replace community blueprint?", "message": "ID “{{id}}” already exists. Saving explicitly replaces this community blueprint.", "confirm": "Replace intentionally" },
     "exec": { "title": "Enable exec console", "help": "Extends available container actions. Backend RBAC remains authoritative." },
     "ports": { "roleLabel": "Port {{index}} role", "protocolLabel": "Port {{index}} protocol", "removeLabel": "Remove port {{index}}", "add": "Add port" },
     "steam": { "requiresLogin": "Steam sign-in required", "validate": "Validate SteamCMD files" },
     "mods": { "supportsMods": "Support mods", "supportsWorkshop": "Support Steam Workshop" },
     "review": { "issueCount": "Review {{count}} fields", "issueCount_one": "Review {{count}} field", "issueCount_other": "Review {{count}} fields", "ready": "The draft is ready for authoritative backend validation.", "backend": "The panel catches common input errors. On save, the backend validates the complete schema authoritatively.", "json": "JSON preview" },
+    "guardian": {
+      "healthTitle": "Health Checks",
+      "processRequired": "Enforce main process liveness",
+      "logsTitle": "Logs & Diagnostics",
+      "recoveryTitle": "Autonomous Recovery",
+      "updatesTitle": "Updates & Databackups",
+      "rollbackOnFailure": "Roll back automatically on update failure",
+      "beforeRiskyAction": "Create snapshot before recovery or updates"
+    },
+    "recovery": {
+      "policiesTitle": "Recovery Policies",
+      "addPolicy": "Add policy",
+      "matchLabel": "Error match pattern {{index}}",
+      "actionLabel": "Recovery action {{index}}",
+      "removeLabel": "Remove policy {{index}}"
+    },
     "environment": { "title": "Environment values", "add": "Add entry", "help": "Non-secret configuration only. Credentials do not belong in blueprints.", "nameLabel": "Environment name {{index}}", "valueLabel": "Environment value {{index}}", "removeLabel": "Remove environment value {{index}}" },
     "setup": { "title": "Setup arguments", "help": "Structured argv commands; arguments containing spaces remain one argument.", "addCommand": "Add command", "command": "Command {{index}}", "argumentLabel": "Command {{command}}, argument {{argument}}", "removeArgument": "Remove argument {{index}}", "addArgument": "Add argument", "removeCommand": "Remove command", "notice": "Setup commands are bounded argument lists, not free-form shell hooks. Complex installation scripts do not belong in a blueprint." },
     "profiles": { "title": "Alternative starts", "help": "Up to 8, activated when the marker file exists.", "add": "Add profile", "markerLabel": "Marker file {{index}}", "startupLabel": "Startup command {{index}}", "removeLabel": "Remove startup profile {{index}}" },
@@ -1766,7 +1782,21 @@
       "modFormat": { "label": "Argument format", "help": "Must contain the {mods} placeholder." },
       "modFile": { "label": "Mod list path", "help": "Safe relative path." },
       "modContent": { "label": "List content", "help": "Workshop IDs or target filenames from file actions." },
-      "backup": { "label": "Paths to back up", "help": "One relative path or glob per line; empty means a full server backup." }
+      "backup": { "label": "Paths to back up", "help": "One relative path or glob per line; empty means a full server backup." },
+      "healthPortProto": { "label": "Liveness Port Protocol", "help": "Protocol for the liveness check." },
+      "healthPort": { "label": "Liveness Port", "help": "Port or placeholder, e.g. {{SERVER_PORT}}." },
+      "healthPortTimeout": { "label": "Timeout (Liveness Port)", "help": "e.g. 3s or 5s." },
+      "healthAppType": { "label": "Query Type", "help": "e.g. minecraft-query." },
+      "healthAppInterval": { "label": "Query Interval", "help": "e.g. 30s." },
+      "healthAppThreshold": { "label": "Failure Threshold", "help": "Number of failed checks before marked unhealthy." },
+      "healthSuccessPatterns": { "label": "Startup Success Patterns", "help": "Log pattern for successful start." },
+      "healthFailurePatterns": { "label": "Startup Failure Patterns", "help": "Log pattern for startup errors." },
+      "logsSources": { "label": "Log files", "help": "Additional relative log paths (e.g. logs/latest.log)." },
+      "logsRedact": { "label": "Log redaction", "help": "Sensitive keys to censor in server logs." },
+      "diagnosticsParsers": { "label": "Error Parsers", "help": "Enabled diagnostic parsers (e.g. java-stacktrace)." },
+      "updatesStrategy": { "label": "Update Transaction", "help": "e.g. snapshot-then-update." },
+      "updatesVerification": { "label": "Update Verification", "help": "e.g. required." },
+      "backupsProtected": { "label": "Protected Paths", "help": "Relative paths that should not be cleaned up." }
     },
     "options": {
       "category": { "steamGame": "Steam game", "nonSteamGame": "Non-Steam game", "voiceServer": "Voice server", "bot": "Bot" },
@@ -1780,7 +1810,12 @@
       "modContent": { "workshopIds": "Workshop IDs", "targetNames": "Target filenames" }
     },
     "validation": {
-      "metaId": "Use 1–64 lowercase letters, digits, or underscores.", "metaName": "Enter a name with up to 128 characters.", "image": "Enter a valid Docker image name.", "startup": "Enter a startup command with up to 2048 characters.", "shellSyntax": "Shell substitutions and logical chaining are not allowed.", "workdir": "The working directory must be a safe absolute container path.", "user": "Enter a numeric non-root UID:GID.", "stopGrace": "Use a value from 5 to 600.", "startCheck": "Use a value from 0 to 300.", "execTimeout": "Use a value from 1 to 600.", "envName": "Invalid environment name: {{name}}", "envValue": "Unsafe environment value for {{name}}", "envEmpty": "Environment row {{row}} needs a name.", "envDuplicate": "Environment name {{name}} is duplicated.", "maxLines": "Use at most {{count}} lines.", "maxProfiles": "Use at most 8 startup profiles.", "markerFile": "Enter a safe marker file.", "profileStartup": "Enter a safe startup command.", "patchFile": "Enter a safe configuration file.", "patchValue": "A patch value is required.", "patchIni": "INI requires a section and key.", "patchRegex": "Regex requires an expression.", "maxPorts": "Use at most 32 port entries.", "duplicatePort": "This port role and protocol already exist.", "steamAppId": "Enter a numeric Steam App ID.", "windowsCompatibility": "Windows requires Wine or Proton.", "httpsUrl": "Only HTTPS download URLs are allowed.", "githubRepo": "Enter the repository as owner/repo.", "sha256": "SHA-256 must contain 64 lowercase hexadecimal characters.", "relativePath": "Enter a safe relative subdirectory.", "maxSetupCommands": "Use at most 8 setup commands.", "setupCommand": "Each setup command needs 1–32 non-empty arguments.", "manualInstructions": "Enter installation instructions.", "manualFiles": "Enter at least one required file.", "unsafePath": "Unsafe relative path: {{path}}", "workshopAppId": "Workshop support requires a numeric App ID.", "modArgument": "The startup argument must contain {mods}.", "modListPath": "Enter a safe relative list path.", "postInstall": "Target filenames require at least one file action."
+      "metaId": "Use 1–64 lowercase letters, digits, or underscores.", "metaName": "Enter a name with up to 128 characters.", "image": "Enter a valid Docker image name.", "startup": "Enter a startup command with up to 2048 characters.", "shellSyntax": "Shell substitutions and logical chaining are not allowed.", "workdir": "The working directory must be a safe absolute container path.", "user": "Enter a numeric non-root UID:GID.", "stopGrace": "Use a value from 5 to 600.", "startCheck": "Use a value from 0 to 300.", "execTimeout": "Use a value from 1 to 600.", "envName": "Invalid environment name: {{name}}", "envValue": "Unsafe environment value for {{name}}", "envEmpty": "Environment row {{row}} needs a name.", "envDuplicate": "Environment name {{name}} is duplicated.", "maxLines": "Use at most {{count}} lines.", "maxProfiles": "Use at most 8 startup profiles.", "markerFile": "Enter a safe marker file.", "profileStartup": "Enter a safe startup command.", "patchFile": "Enter a safe configuration file.", "patchValue": "A patch value is required.", "patchIni": "INI requires a section and key.", "patchRegex": "Regex requires an expression.", "maxPorts": "Use at most 32 port entries.", "duplicatePort": "This port role and protocol already exist.", "steamAppId": "Enter a numeric Steam App ID.", "windowsCompatibility": "Windows requires Wine or Proton.", "httpsUrl": "Only HTTPS download URLs are allowed.", "githubRepo": "Enter the repository as owner/repo.", "sha256": "SHA-256 must contain 64 lowercase hexadecimal characters.", "relativePath": "Enter a safe relative subdirectory.", "maxSetupCommands": "Use at most 8 setup commands.", "setupCommand": "Each setup command needs 1–32 non-empty arguments.", "manualInstructions": "Enter installation instructions.", "manualFiles": "Enter at least one required file.", "unsafePath": "Unsafe relative path: {{path}}", "workshopAppId": "Workshop support requires a numeric App ID.", "modArgument": "The startup argument must contain {mods}.", "modListPath": "Enter a safe relative list path.", "postInstall": "Target filenames require at least one file action.",
+      "healthPortEmpty": "Port cannot be empty.",
+      "healthTimeoutEmpty": "Timeout cannot be empty.",
+      "healthAppTypeEmpty": "Query type cannot be empty.",
+      "recoveryMatchEmpty": "Error match pattern {{row}} cannot be empty.",
+      "recoveryActionEmpty": "Recovery action {{row}} cannot be empty."
     }
   },
   "server": {

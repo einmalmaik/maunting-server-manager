@@ -37,5 +37,35 @@
   "mods": {
     "supportsMods": false,
     "supportsSteamWorkshop": false
+  },
+  "health": {
+    "process": {
+      "required": true
+    },
+    "startup": {
+      "success_patterns": ["Listening on port"],
+      "failure_patterns": ["Error: Bind failed"]
+    }
+  },
+  "logs": {
+    "sources": ["stdout", "logs/bot.log"],
+    "redact": ["discord_token", "api_key"]
+  },
+  "diagnostics": {
+    "parsers": ["linux-oom"]
+  },
+  "recovery": {
+    "policies": [
+      { "match": "port_conflict", "action": "resolve_managed_port_conflict" }
+    ]
+  },
+  "updates": {
+    "strategy": "snapshot-then-update",
+    "health_verification": "required",
+    "rollback_on_failure": true
+  },
+  "backups": {
+    "before_risky_action": true,
+    "protected_paths": ["config/"]
   }
 }

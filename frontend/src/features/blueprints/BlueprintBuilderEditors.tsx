@@ -359,3 +359,54 @@ export function PostInstallEditor({
     </div>
   )
 }
+
+export function RecoveryPoliciesEditor({
+  value,
+  onChange,
+}: {
+  value: Array<{ match: string; action: string }>
+  onChange: (value: Array<{ match: string; action: string }>) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="font-semibold text-sm text-on-surface-variant">{t('blueprintBuilder.recovery.policiesTitle')}</h4>
+        <Button
+          variant="secondary"
+          disabled={value.length >= 16}
+          onClick={() => onChange([...value, { match: '', action: '' }])}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {t('blueprintBuilder.recovery.addPolicy')}
+        </Button>
+      </div>
+      {value.map((row, index) => (
+        <div key={index} className="grid gap-2 rounded-xl border border-outline-variant/50 p-3 sm:grid-cols-[1fr_1fr_auto]">
+          <input
+            aria-label={t('blueprintBuilder.recovery.matchLabel', { index: index + 1 })}
+            placeholder="e.g. port_conflict"
+            className="msm-input font-mono"
+            value={row.match}
+            onChange={event => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, match: event.target.value } : item))}
+          />
+          <input
+            aria-label={t('blueprintBuilder.recovery.actionLabel', { index: index + 1 })}
+            placeholder="e.g. resolve_managed_port_conflict"
+            className="msm-input font-mono"
+            value={row.action}
+            onChange={event => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, action: event.target.value } : item))}
+          />
+          <Button
+            variant="ghost"
+            aria-label={t('blueprintBuilder.recovery.removeLabel', { index: index + 1 })}
+            onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))}
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
