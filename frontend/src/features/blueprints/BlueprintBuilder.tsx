@@ -370,8 +370,141 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
       setDraft(current => ({ ...current, health: { ...health, ...next } }))
     }
 
+    const applyPreset = (presetId: string) => {
+      if (presetId === 'minecraft') {
+        setDraft(current => ({
+          ...current,
+          health: {
+            process: { required: true },
+            port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
+            application: { type: 'minecraft-query', interval: '30s', failure_threshold: 3 },
+            startup: { success_patterns: ['Done ('], failure_patterns: ['Unable to access jarfile', 'Failed to bind to port'] }
+          },
+          logs: { sources: ['logs/latest.log'], redact: ['password', 'discord_token', 'api_key'] },
+          diagnostics: { parsers: ['java-stacktrace', 'minecraft-crash-report', 'linux-oom', 'network-bind-error'] },
+          recovery: {
+            policies: [
+              { match: 'port_conflict', action: 'resolve_managed_port_conflict' },
+              { match: 'out_of_memory', action: 'controlled_memory_recovery' },
+              { match: 'corrupted_config', action: 'restore_last_known_good_config' }
+            ]
+          },
+          updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
+          backups: { before_risky_action: true, protected_paths: ['world/', 'plugins/', 'config/'] }
+        }))
+      } else if (presetId === 'steamcmd') {
+        setDraft(current => ({
+          ...current,
+          health: {
+            process: { required: true },
+            port: { protocol: 'udp', port: '{{SERVER_PORT}}', timeout: '5s' },
+            application: { type: 'source-query', interval: '60s', failure_threshold: 3 },
+            startup: { success_patterns: ['Connection to Steam servers successful', 'GC Connection established'], failure_patterns: ['Error checking out release', 'Failed to initialize network'] }
+          },
+          logs: { sources: ['logs/latest.log', 'stdout'], redact: ['steam_password', 'rcon_password', 'api_key'] },
+          diagnostics: { parsers: ['linux-oom', 'network-bind-error', 'steamcmd-error'] },
+          recovery: {
+            policies: [
+              { match: 'port_conflict', action: 'resolve_managed_port_conflict' },
+              { match: 'broken_update', action: 'rollback_release' },
+              { match: 'missing_runtime', action: 'repair_runtime' }
+            ]
+          },
+          updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
+          backups: { before_risky_action: true, protected_paths: ['save/', 'config/'] }
+        }))
+      } else if (presetId === 'nodejs') {
+        setDraft(current => ({
+          ...current,
+          health: {
+            process: { required: true },
+            port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
+            application: { type: 'http-ping', interval: '30s', failure_threshold: 3 },
+            startup: { success_patterns: ['App listening on port', 'Server started'], failure_patterns: ['npm ERR!', 'UnhandledPromiseRejectionWarning'] }
+          },
+          logs: { sources: ['stdout', 'stderr'], redact: ['discord_token', 'api_key', 'database_url'] },
+          diagnostics: { parsers: ['linux-oom', 'network-bind-error'] },
+          recovery: {
+            policies: [
+              { match: 'port_conflict', action: 'resolve_managed_port_conflict' },
+              { match: 'out_of_memory', action: 'controlled_memory_recovery' }
+            ]
+          },
+          updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
+          backups: { before_risky_action: true, protected_paths: ['data/'] }
+        }))
+      } else if (presetId === 'generic') {
+        setDraft(current => ({
+          ...current,
+          health: {
+            process: { required: true },
+            port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
+            application: { type: '', interval: '30s', failure_threshold: 3 },
+            startup: { success_patterns: [], failure_patterns: [] }
+          },
+          logs: { sources: [], redact: [] },
+          diagnostics: { parsers: [] },
+          recovery: { policies: [] },
+          updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
+          backups: { before_risky_action: true, protected_paths: [] }
+        }))
+      }
+    }
+
+    const appQueryOptions = [
+      { value: '', label: t('blueprintBuilder.guardian.appQueryNone') },
+      { value: 'minecraft-query', label: 'Minecraft Query (minecraft-query)' },
+      { value: 'source-query', label: 'Steam/Source Query (source-query)' },
+      { value: 'http-ping', label: 'HTTP Ping / Health Check (http-ping)' },
+      { value: 'custom', label: t('blueprintBuilder.recovery.customValue') }
+    ]
+
+    const selectedAppQuery = appQueryOptions.some(o => o.value === health.application?.type) ? health.application?.type ?? '' : 'custom'
+
     return (
       <div className="space-y-6">
+        {/* Preset Loader */}
+        <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+            <h4 className="font-bold text-primary text-sm uppercase tracking-wider">{t('blueprintBuilder.guardian.presetsTitle')}</h4>
+          </div>
+          <p className="text-xs text-on-surface-variant leading-relaxed">
+            {t('blueprintBuilder.guardian.presetsHelp')}
+          </p>
+          <div className="max-w-md">
+            <Dropdown
+              value={null}
+              onChange={applyPreset}
+              placeholder={t('blueprintBuilder.guardian.presetsSelect')}
+              options={[
+                { value: 'minecraft', label: 'Minecraft (Paper, Fabric, Forge)' },
+                { value: 'steamcmd', label: 'SteamCMD Server (Palworld, Rust, Zomboid)' },
+                { value: 'nodejs', label: 'Node.js (Discord Bots, Web Apps)' },
+                { value: 'generic', label: t('blueprintBuilder.guardian.presetGeneric') }
+              ]}
+            />
+          </div>
+        </div>
+
+        {/* Recovery Ladder Visualization */}
+        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-3">
+          <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.ladderTitle')}</h4>
+          <p className="text-xs text-on-surface-variant leading-relaxed">
+            {t('blueprintBuilder.guardian.ladderDescription')}
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 pt-2">
+            {[1, 2, 3, 4, 5, 6, 7].map((num) => (
+              <div key={num} className="rounded-lg p-2.5 bg-surface-container-lowest border border-outline-variant/30 text-center space-y-1">
+                <div className="text-xs font-bold text-primary">{t('blueprintBuilder.guardian.ladderStepNum', { num })}</div>
+                <div className="font-semibold text-[11px] text-on-surface leading-tight">{t(`blueprintBuilder.guardian.ladderStepName.${num}`)}</div>
+                <div className="text-[10px] text-on-surface-variant leading-normal">{t(`blueprintBuilder.guardian.ladderStepDesc.${num}`)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Health Probe Configuration */}
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
           <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.healthTitle')}</h4>
           <label className="flex items-center gap-3">
@@ -406,13 +539,19 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
             </Field>
           </div>
           <div className="grid gap-4 md:grid-cols-3">
-            <Field id="bp-health-app-type" label={t('blueprintBuilder.fields.healthAppType.label')} help={t('blueprintBuilder.fields.healthAppType.help')} error={issueFor('health.application.type')}>
-              <input
-                className="msm-input font-mono"
-                value={health.application?.type ?? ''}
-                onChange={event => updateHealth({ application: { ...health.application, type: event.target.value, interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3 } })}
+            <div className="space-y-1">
+              <label className="mb-1.5 block font-label-md text-sm font-semibold text-on-surface">
+                {t('blueprintBuilder.fields.healthAppType.label')}
+              </label>
+              <Dropdown
+                value={selectedAppQuery}
+                options={appQueryOptions}
+                onChange={next => {
+                  const val = next === 'custom' ? '' : next
+                  updateHealth({ application: { ...health.application, type: val, interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3 } })
+                }}
               />
-            </Field>
+            </div>
             <Field id="bp-health-app-interval" label={t('blueprintBuilder.fields.healthAppInterval.label')} help={t('blueprintBuilder.fields.healthAppInterval.help')} error={issueFor('health.application.interval')}>
               <input
                 className="msm-input font-mono"
@@ -429,6 +568,20 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
               />
             </Field>
           </div>
+
+          {selectedAppQuery === 'custom' && (
+            <div className="pt-2 border-t border-outline-variant/30">
+              <Field id="bp-health-app-type-custom" label={t('blueprintBuilder.fields.healthAppTypeCustom.label')} help={t('blueprintBuilder.fields.healthAppTypeCustom.help')} error={issueFor('health.application.type')}>
+                <input
+                  className="msm-input font-mono"
+                  placeholder="e.g. valve-query-protocol"
+                  value={health.application?.type ?? ''}
+                  onChange={event => updateHealth({ application: { ...health.application, type: event.target.value, interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3 } })}
+                />
+              </Field>
+            </div>
+          )}
+
           <div className="grid gap-4 md:grid-cols-2">
             <LinesField
               id="bp-health-success-patterns"
@@ -447,6 +600,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
           </div>
         </div>
 
+        {/* Logs & Diagnostics Configuration */}
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
           <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.logsTitle')}</h4>
           <div className="grid gap-4 md:grid-cols-2">
@@ -474,6 +628,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
           />
         </div>
 
+        {/* Recovery policies config */}
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
           <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.recoveryTitle')}</h4>
           <RecoveryPoliciesEditor
@@ -482,6 +637,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
           />
         </div>
 
+        {/* Updates and backups */}
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
           <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.updatesTitle')}</h4>
           <div className="grid gap-4 md:grid-cols-2">

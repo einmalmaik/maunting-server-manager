@@ -1725,20 +1725,66 @@
     "mods": { "supportsMods": "Mods unterstützen", "supportsWorkshop": "Steam Workshop unterstützen" },
     "review": { "issueCount": "{{count}} Angaben prüfen", "issueCount_one": "{{count}} Angabe prüfen", "issueCount_other": "{{count}} Angaben prüfen", "ready": "Der Entwurf ist bereit für die autoritative Backend-Validierung.", "backend": "Das Panel prüft häufige Eingabefehler. Beim Speichern validiert das Backend das vollständige Schema autoritativ.", "json": "JSON-Vorschau" },
     "guardian": {
-      "healthTitle": "Gesundheits-Prüfungen (Health Checks)",
+      "healthTitle": "Gesundheits-Prüfungen (Health Probes)",
       "processRequired": "Hauptprozess-Liveness erzwingen",
       "logsTitle": "Logs & Diagnostik",
-      "recoveryTitle": "Autonome Reparaturen (Recovery)",
+      "recoveryTitle": "Autonome Reparaturen (Recovery Policies)",
       "updatesTitle": "Updates & Datensicherung",
       "rollbackOnFailure": "Bei Update-Fehlstart automatisch zurückrollen",
-      "beforeRiskyAction": "Snapshot vor Reparaturen/Updates erstellen"
+      "beforeRiskyAction": "Snapshot vor Reparaturen/Updates erstellen",
+      "presetsTitle": "Autopilot-Vorlagen (Presets)",
+      "presetsHelp": "Wähle eine Vorlage, um bewährte Standardeinstellungen für typische Anwendungen automatisch einzutragen. Du kannst danach alle Felder beliebig anpassen.",
+      "presetsSelect": "Vorlage laden...",
+      "presetGeneric": "Generischer Server (Leer)",
+      "appQueryNone": "Keine Abfrage (nur Port-Bind)",
+      "ladderTitle": "Guardian Eskalationsleiter (Recovery Ladder)",
+      "ladderDescription": "Der Autopilot reagiert auf Fehler schrittweise anhand einer 7-stufigen Eskalationsleiter. Erst wenn die unteren Stufen fehlschlagen, eskaliert das System zu schwerwiegenderen Maßnahmen.",
+      "ladderStepNum": "Stufe {{num}}",
+      "ladderStepName": {
+        "1": "Prüfung",
+        "2": "Restart",
+        "3": "Reparatur",
+        "4": "Rollback",
+        "5": "Snapshot",
+        "6": "Migration",
+        "7": "Quarantäne"
+      },
+      "ladderStepDesc": {
+        "1": "Retries & Check",
+        "2": "Sauberer Reboot",
+        "3": "Locks & Runtime",
+        "4": "Config/Plugin",
+        "5": "Letzter Backup",
+        "6": "Node-Wechsel",
+        "7": "Admin-Alarm"
+      }
     },
     "recovery": {
       "policiesTitle": "Reparatur-Policies",
       "addPolicy": "Policy hinzufügen",
       "matchLabel": "Fehlermuster (Match) {{index}}",
       "actionLabel": "Reparatur-Aktion (Action) {{index}}",
-      "removeLabel": "Policy {{index}} entfernen"
+      "removeLabel": "Policy {{index}} entfernen",
+      "customValue": "Eigener Wert / Freitext...",
+      "matchSelect": "Auslöser (Match)",
+      "actionSelect": "Reparaturaktion (Action)",
+      "customMatchLabel": "Benutzerdefiniertes Fehlermuster (Match)",
+      "customActionLabel": "Benutzerdefinierte Reparaturaktion (Action)",
+      "matches": {
+        "port_conflict": "Port belegt (port_conflict)",
+        "out_of_memory": "Speicher voll (out_of_memory)",
+        "corrupted_config": "Fehlerhafte Konfig (corrupted_config)",
+        "broken_update": "Fehlgeschlagenes Update (broken_update)",
+        "missing_runtime": "Fehlende Laufzeit (missing_runtime)"
+      },
+      "actions": {
+        "resolve_managed_port_conflict": "Port freigeben (resolve_managed_port_conflict)",
+        "controlled_memory_recovery": "Speicher anpassen (controlled_memory_recovery)",
+        "restore_last_known_good_config": "Konfig zurücksetzen (restore_last_known_good_config)",
+        "rollback_release": "Update zurückrollen (rollback_release)",
+        "repair_runtime": "Laufzeit reparieren (repair_runtime)",
+        "restart": "Server neu starten (restart)"
+      }
     },
     "environment": { "title": "Umgebungswerte", "add": "Eintrag hinzufügen", "help": "Nur nicht-geheime Konfiguration. Zugangsdaten gehören nicht in Blueprints.", "nameLabel": "Umgebungsname {{index}}", "valueLabel": "Umgebungswert {{index}}", "removeLabel": "Umgebungswert {{index}} entfernen" },
     "setup": { "title": "Setup-Argumente", "help": "Strukturierte argv-Befehle; Argumente mit Leerzeichen bleiben ein Argument.", "addCommand": "Befehl hinzufügen", "command": "Befehl {{index}}", "argumentLabel": "Befehl {{command}}, Argument {{argument}}", "removeArgument": "Argument {{index}} entfernen", "addArgument": "Argument hinzufügen", "removeCommand": "Befehl entfernen", "notice": "Setup-Befehle sind begrenzte Argumentlisten, keine frei ausführbaren Shell-Hooks. Komplexe Installationsskripte gehören nicht in ein Blueprint." },
@@ -1787,6 +1833,7 @@
       "healthPort": { "label": "Liveness-Port", "help": "Port oder Platzhalter, z.B. {{SERVER_PORT}}." },
       "healthPortTimeout": { "label": "Timeout (Liveness-Port)", "help": "z.B. 3s oder 5s." },
       "healthAppType": { "label": "Abfrage-Typ", "help": "z.B. minecraft-query." },
+      "healthAppTypeCustom": { "label": "Eigener Abfrage-Typ", "help": "Protokollbezeichner für den anwendungsspezifischen Query-Liveness-Check." },
       "healthAppInterval": { "label": "Query-Intervall", "help": "z.B. 30s." },
       "healthAppThreshold": { "label": "Fehler-Schwellenwert", "help": "Ab wie vielen Fehlversuchen ungesund." },
       "healthSuccessPatterns": { "label": "Start-Erfolgsmuster", "help": "Logmuster bei erfolgreichem Start." },

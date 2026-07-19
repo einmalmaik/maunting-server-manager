@@ -359,7 +359,6 @@ export function PostInstallEditor({
     </div>
   )
 }
-
 export function RecoveryPoliciesEditor({
   value,
   onChange,
@@ -368,45 +367,113 @@ export function RecoveryPoliciesEditor({
   onChange: (value: Array<{ match: string; action: string }>) => void
 }) {
   const { t } = useTranslation()
+
+  const commonMatches = [
+    { value: 'port_conflict', label: t('blueprintBuilder.recovery.matches.port_conflict') },
+    { value: 'out_of_memory', label: t('blueprintBuilder.recovery.matches.out_of_memory') },
+    { value: 'corrupted_config', label: t('blueprintBuilder.recovery.matches.corrupted_config') },
+    { value: 'broken_update', label: t('blueprintBuilder.recovery.matches.broken_update') },
+    { value: 'missing_runtime', label: t('blueprintBuilder.recovery.matches.missing_runtime') },
+    { value: 'custom', label: t('blueprintBuilder.recovery.customValue') }
+  ]
+
+  const commonActions = [
+    { value: 'resolve_managed_port_conflict', label: t('blueprintBuilder.recovery.actions.resolve_managed_port_conflict') },
+    { value: 'controlled_memory_recovery', label: t('blueprintBuilder.recovery.actions.controlled_memory_recovery') },
+    { value: 'restore_last_known_good_config', label: t('blueprintBuilder.recovery.actions.restore_last_known_good_config') },
+    { value: 'rollback_release', label: t('blueprintBuilder.recovery.actions.rollback_release') },
+    { value: 'repair_runtime', label: t('blueprintBuilder.recovery.actions.repair_runtime') },
+    { value: 'restart', label: t('blueprintBuilder.recovery.actions.restart') },
+    { value: 'custom', label: t('blueprintBuilder.recovery.customValue') }
+  ]
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h4 className="font-semibold text-sm text-on-surface-variant">{t('blueprintBuilder.recovery.policiesTitle')}</h4>
         <Button
           variant="secondary"
           disabled={value.length >= 16}
-          onClick={() => onChange([...value, { match: '', action: '' }])}
+          onClick={() => onChange([...value, { match: 'port_conflict', action: 'restart' }])}
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t('blueprintBuilder.recovery.addPolicy')}
         </Button>
       </div>
-      {value.map((row, index) => (
-        <div key={index} className="grid gap-2 rounded-xl border border-outline-variant/50 p-3 sm:grid-cols-[1fr_1fr_auto]">
-          <input
-            aria-label={t('blueprintBuilder.recovery.matchLabel', { index: index + 1 })}
-            placeholder="e.g. port_conflict"
-            className="msm-input font-mono"
-            value={row.match}
-            onChange={event => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, match: event.target.value } : item))}
-          />
-          <input
-            aria-label={t('blueprintBuilder.recovery.actionLabel', { index: index + 1 })}
-            placeholder="e.g. resolve_managed_port_conflict"
-            className="msm-input font-mono"
-            value={row.action}
-            onChange={event => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, action: event.target.value } : item))}
-          />
-          <Button
-            variant="ghost"
-            aria-label={t('blueprintBuilder.recovery.removeLabel', { index: index + 1 })}
-            onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))}
-          >
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </div>
-      ))}
+      {value.map((row, index) => {
+        const isPresetMatch = commonMatches.some(m => m.value === row.match && m.value !== 'custom')
+        const selectMatchValue = isPresetMatch ? row.match : 'custom'
+
+        const isPresetAction = commonActions.some(a => a.value === row.action && a.value !== 'custom')
+        const selectActionValue = isPresetAction ? row.action : 'custom'
+
+        return (
+          <div key={index} className="grid gap-3 rounded-xl border border-outline-variant/50 p-4 bg-surface-container-lowest">
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-on-surface-variant">{t('blueprintBuilder.recovery.matchSelect')}</label>
+                <Dropdown
+                  aria-label={t('blueprintBuilder.recovery.matchLabel', { index: index + 1 })}
+                  value={selectMatchValue}
+                  options={commonMatches}
+                  onChange={next => {
+                    const newValue = next === 'custom' ? '' : next
+                    onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, match: newValue } : item))
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-on-surface-variant">{t('blueprintBuilder.recovery.actionSelect')}</label>
+                <Dropdown
+                  aria-label={t('blueprintBuilder.recovery.actionLabel', { index: index + 1 })}
+                  value={selectActionValue}
+                  options={commonActions}
+                  onChange={next => {
+                    const newValue = next === 'custom' ? '' : next
+                    onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, action: newValue } : item))
+                  }}
+                />
+              </div>
+              <Button
+                variant="ghost"
+                aria-label={t('blueprintBuilder.recovery.removeLabel', { index: index + 1 })}
+                onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))}
+                className="self-end"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+            
+            {/* Custom fields when selected */}
+            {(selectMatchValue === 'custom' || selectActionValue === 'custom') && (
+              <div className="grid gap-3 sm:grid-cols-2 pt-2 border-t border-outline-variant/30">
+                {selectMatchValue === 'custom' && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-on-surface-variant">{t('blueprintBuilder.recovery.customMatchLabel')}</label>
+                    <input
+                      placeholder="e.g. my_custom_error_signal"
+                      className="msm-input font-mono text-sm"
+                      value={row.match}
+                      onChange={event => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, match: event.target.value } : item))}
+                    />
+                  </div>
+                )}
+                {selectActionValue === 'custom' && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-on-surface-variant">{t('blueprintBuilder.recovery.customActionLabel')}</label>
+                    <input
+                      placeholder="e.g. my_custom_recovery_script"
+                      className="msm-input font-mono text-sm"
+                      value={row.action}
+                      onChange={event => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, action: event.target.value } : item))}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
-

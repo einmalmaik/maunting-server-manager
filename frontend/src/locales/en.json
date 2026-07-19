@@ -1725,20 +1725,66 @@
     "mods": { "supportsMods": "Support mods", "supportsWorkshop": "Support Steam Workshop" },
     "review": { "issueCount": "Review {{count}} fields", "issueCount_one": "Review {{count}} field", "issueCount_other": "Review {{count}} fields", "ready": "The draft is ready for authoritative backend validation.", "backend": "The panel catches common input errors. On save, the backend validates the complete schema authoritatively.", "json": "JSON preview" },
     "guardian": {
-      "healthTitle": "Health Checks",
+      "healthTitle": "Health Probes",
       "processRequired": "Enforce main process liveness",
       "logsTitle": "Logs & Diagnostics",
-      "recoveryTitle": "Autonomous Recovery",
+      "recoveryTitle": "Autonomous Recovery Policies",
       "updatesTitle": "Updates & Databackups",
       "rollbackOnFailure": "Roll back automatically on update failure",
-      "beforeRiskyAction": "Create snapshot before recovery or updates"
+      "beforeRiskyAction": "Create snapshot before recovery or updates",
+      "presetsTitle": "Autopilot Presets",
+      "presetsHelp": "Select a template to automatically fill best-practice configurations for typical servers. You can customize any field afterwards.",
+      "presetsSelect": "Load template...",
+      "presetGeneric": "Generic Server (Empty)",
+      "appQueryNone": "No query (only port-bind)",
+      "ladderTitle": "Guardian Recovery Ladder",
+      "ladderDescription": "The autopilot responds to issues step-by-step using a 7-stage escalation ladder. The system only escalates to more intrusive recovery actions if lower stages fail.",
+      "ladderStepNum": "Stage {{num}}",
+      "ladderStepName": {
+        "1": "Verify",
+        "2": "Restart",
+        "3": "Repair",
+        "4": "Rollback",
+        "5": "Snapshot",
+        "6": "Migration",
+        "7": "Quarantine"
+      },
+      "ladderStepDesc": {
+        "1": "Retries & probes",
+        "2": "Clean reboot",
+        "3": "Locks & runtime",
+        "4": "Config/plugin Revert",
+        "5": "Latest snapshot",
+        "6": "Node relocation",
+        "7": "Alert administrator"
+      }
     },
     "recovery": {
       "policiesTitle": "Recovery Policies",
       "addPolicy": "Add policy",
       "matchLabel": "Error match pattern {{index}}",
       "actionLabel": "Recovery action {{index}}",
-      "removeLabel": "Remove policy {{index}}"
+      "removeLabel": "Remove policy {{index}}",
+      "customValue": "Custom value / Free-form text...",
+      "matchSelect": "Trigger (Match)",
+      "actionSelect": "Recovery Action (Action)",
+      "customMatchLabel": "Custom Error Match (Match)",
+      "customActionLabel": "Custom Recovery Action (Action)",
+      "matches": {
+        "port_conflict": "Port occupied (port_conflict)",
+        "out_of_memory": "Memory full (out_of_memory)",
+        "corrupted_config": "Broken config file (corrupted_config)",
+        "broken_update": "Failed update (broken_update)",
+        "missing_runtime": "Missing runtime dependency (missing_runtime)"
+      },
+      "actions": {
+        "resolve_managed_port_conflict": "Free port (resolve_managed_port_conflict)",
+        "controlled_memory_recovery": "Adjust memory limits (controlled_memory_recovery)",
+        "restore_last_known_good_config": "Revert configuration (restore_last_known_good_config)",
+        "rollback_release": "Roll back update (rollback_release)",
+        "repair_runtime": "Repair runtime (repair_runtime)",
+        "restart": "Restart server (restart)"
+      }
     },
     "environment": { "title": "Environment values", "add": "Add entry", "help": "Non-secret configuration only. Credentials do not belong in blueprints.", "nameLabel": "Environment name {{index}}", "valueLabel": "Environment value {{index}}", "removeLabel": "Remove environment value {{index}}" },
     "setup": { "title": "Setup arguments", "help": "Structured argv commands; arguments containing spaces remain one argument.", "addCommand": "Add command", "command": "Command {{index}}", "argumentLabel": "Command {{command}}, argument {{argument}}", "removeArgument": "Remove argument {{index}}", "addArgument": "Add argument", "removeCommand": "Remove command", "notice": "Setup commands are bounded argument lists, not free-form shell hooks. Complex installation scripts do not belong in a blueprint." },
@@ -1787,6 +1833,7 @@
       "healthPort": { "label": "Liveness Port", "help": "Port or placeholder, e.g. {{SERVER_PORT}}." },
       "healthPortTimeout": { "label": "Timeout (Liveness Port)", "help": "e.g. 3s or 5s." },
       "healthAppType": { "label": "Query Type", "help": "e.g. minecraft-query." },
+      "healthAppTypeCustom": { "label": "Custom Query Type", "help": "Protocol identifier for the application-specific query check." },
       "healthAppInterval": { "label": "Query Interval", "help": "e.g. 30s." },
       "healthAppThreshold": { "label": "Failure Threshold", "help": "Number of failed checks before marked unhealthy." },
       "healthSuccessPatterns": { "label": "Startup Success Patterns", "help": "Log pattern for successful start." },
