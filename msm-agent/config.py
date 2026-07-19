@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # Filesystem root for all server data (path-traversal boundary)
     servers_dir: str = "/opt/msm/servers"
 
+    # Guardian operational metadata is deliberately outside workload mounts.
+    guardian_state_dir: str = "/var/lib/msm-agent/guardian"
+    guardian_loop_interval_seconds: float = 5.0
+
     # Docker — empty means rootless default unix:///run/user/UID/docker.sock
     docker_host: str = ""
 
@@ -69,6 +73,9 @@ class Settings(BaseSettings):
 
     def servers_path(self) -> Path:
         return Path(self.servers_dir).resolve(strict=False)
+
+    def guardian_path(self) -> Path:
+        return Path(self.guardian_state_dir).resolve(strict=False)
 
     def trusted_extensions_set(self) -> set[str]:
         return {

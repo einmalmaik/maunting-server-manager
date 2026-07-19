@@ -15,10 +15,15 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
 from config import settings
+from services.agent_operation_coordinator import (
+    operation,
+    server_id_from_container_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +130,22 @@ def assert_msm_container_name(name: str) -> str:
     return name
 
 
+def _coordinated_container_mutation(function):
+    """Apply the shared per-server lock at the lowest Docker mutation layer."""
+
+    @wraps(function)
+    def wrapped(*args: Any, **kwargs: Any):
+        name = kwargs.get("name")
+        if name is None and args:
+            name = args[0]
+        assert_msm_container_name(name)
+        server_id = server_id_from_container_name(name, settings.container_name_prefix)
+        with operation(server_id):
+            return function(*args, **kwargs)
+
+    return wrapped
+
+
 def list_containers() -> list[dict[str, Any]]:
     client = _get_client()
     prefix = settings.container_name_prefix
@@ -179,6 +200,7 @@ def _validated_volumes(volumes: dict[str, dict[str, str]] | None) -> dict[str, d
     return validated
 
 
+@_coordinated_container_mutation
 def create_container(
     *,
     name: str,
@@ -395,6 +417,7 @@ def run_ephemeral(
                 logger.warning("ephemeral container cleanup failed")
 
 
+@_coordinated_container_mutation
 def start_container(name: str) -> dict[str, Any]:
     container = _get_container(name)
     try:
@@ -404,6 +427,7 @@ def start_container(name: str) -> dict[str, Any]:
         raise DockerUnavailableError(_safe_error(exc)) from exc
 
 
+@_coordinated_container_mutation
 def stop_container(name: str, timeout: int | None = None) -> dict[str, Any]:
     container = _get_container(name)
     grace = timeout if timeout is not None else settings.default_stop_timeout
@@ -414,6 +438,7 @@ def stop_container(name: str, timeout: int | None = None) -> dict[str, Any]:
         raise DockerUnavailableError(_safe_error(exc)) from exc
 
 
+@_coordinated_container_mutation
 def restart_container(name: str, timeout: int | None = None) -> dict[str, Any]:
     container = _get_container(name)
     grace = timeout if timeout is not None else settings.default_stop_timeout
@@ -424,6 +449,7 @@ def restart_container(name: str, timeout: int | None = None) -> dict[str, Any]:
         raise DockerUnavailableError(_safe_error(exc)) from exc
 
 
+@_coordinated_container_mutation
 def remove_container(name: str) -> dict[str, Any]:
     container = _get_container(name)
     try:
@@ -476,6 +502,7 @@ def container_stats(name: str) -> dict[str, Any]:
     }
 
 
+@_coordinated_container_mutation
 def update_container_resources(name: str, updates: dict[str, int | None]) -> dict[str, Any]:
     container = _get_container(name)
     container.reload()
@@ -530,6 +557,47 @@ def _cpu_percent(raw: dict) -> float | None:
         return round((cpu_delta / system_delta) * online_cpus * 100.0, 2)
     except (KeyError, TypeError, ZeroDivisionError):
         return None
+
+
+def inspect_container_state(name: str) -> dict[str, Any] | None:
+    """Return non-secret runtime and published-port state for one game container."""
+    assert_msm_container_name(name)
+    client = _get_client()
+    try:
+        container = client.containers.get(name)
+        container.reload()
+        attrs = container.attrs or {}
+        state = attrs.get("State") or {}
+        raw_ports = (attrs.get("NetworkSettings") or {}).get("Ports") or {}
+        port_bindings: dict[str, list[dict[str, Any]]] = {}
+        for key, bindings in raw_ports.items():
+            safe_bindings: list[dict[str, Any]] = []
+            for binding in bindings or []:
+                try:
+                    host_port = int(binding.get("HostPort"))
+                except (TypeError, ValueError):
+                    continue
+                safe_bindings.append(
+                    {
+                        "host_ip": str(binding.get("HostIp") or ""),
+                        "host_port": host_port,
+                    }
+                )
+            port_bindings[str(key)] = safe_bindings
+        return {
+            "name": name,
+            "status": str(state.get("Status") or container.status or "unknown"),
+            "running": bool(state.get("Running")),
+            "oom_killed": bool(state.get("OOMKilled")),
+            "exit_code": state.get("ExitCode"),
+            "started_at": state.get("StartedAt"),
+            "finished_at": state.get("FinishedAt"),
+            "port_bindings": port_bindings,
+        }
+    except NotFound:
+        return None
+    except (DockerException, OSError) as exc:
+        raise DockerUnavailableError(_safe_error(exc)) from exc
 
 
 # ── Managed Postgres container (fixed name, not msm-srv-*) ─────────────────
@@ -784,6 +852,7 @@ def exec_in_managed_stdin(
         return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
 
 
+@_coordinated_container_mutation
 def exec_in_container(name: str, command: list[str]) -> dict[str, Any]:
     if not command:
         raise ValueError("command is required")
@@ -810,6 +879,7 @@ def exec_in_container(name: str, command: list[str]) -> dict[str, Any]:
         return {"ok": False, "error": _safe_error(exc), "stdout": "", "stderr": ""}
 
 
+@_coordinated_container_mutation
 def send_stdin(name: str, data: str) -> dict[str, Any]:
     """Inject text into container PID 1 stdin (console input)."""
     container = _get_container(name)

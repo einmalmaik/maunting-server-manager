@@ -1,6 +1,6 @@
 """MSM Agent — lightweight FastAPI app for remote node operations.
 
-Stateless: no local DB for game servers. Docker + filesystem only.
+Guardian persists only operational metadata under /var/lib/msm-agent/guardian.
 Auth: static Bearer token (MSM_AGENT_TOKEN) for all routes except GET /health.
 No DIS/crypto — secrets stay on the panel.
 """
@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from config import settings
-from routers import backup, console, containers, files, health, metrics, postgres, runtime, sources
+from routers import backup, console, containers, files, guardian, health, metrics, postgres, runtime, sources
 from services import file_service
 
 # ── Logging (never log Authorization / tokens / env secrets) ──
@@ -111,7 +111,8 @@ class BearerAuthMiddleware:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
-    from services.guardian_service import start_guardian_loop, stop_guardian_loop
+    from services.guardian_service import get_state_store, start_guardian_loop, stop_guardian_loop
+    from services.guardian_state_store import GuardianProcessLock
     file_service.ensure_servers_dir()
     if not (settings.agent_token or "").strip():
         logger.warning(
@@ -123,6 +124,8 @@ async def lifespan(app: FastAPI):
         settings.agent_host,
         settings.agent_port,
     )
+    guardian_process_lock = GuardianProcessLock(get_state_store())
+    guardian_process_lock.acquire()
     guardian_task = asyncio.create_task(start_guardian_loop())
     try:
         yield
@@ -133,6 +136,7 @@ async def lifespan(app: FastAPI):
             await guardian_task
         except asyncio.CancelledError:
             pass
+        guardian_process_lock.release()
 
 
 app = FastAPI(
@@ -148,6 +152,7 @@ app.add_middleware(BearerAuthMiddleware)
 
 app.include_router(health.router)
 app.include_router(containers.router)
+app.include_router(guardian.router)
 app.include_router(files.router)
 app.include_router(metrics.router)
 app.include_router(console.router)
