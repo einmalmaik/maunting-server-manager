@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid as uuid_module
 
 from sqlalchemy import Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -10,6 +11,13 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    uuid: Mapped[str] = mapped_column(
+        String(36),
+        default=lambda: str(uuid_module.uuid4()),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
     server_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
     )

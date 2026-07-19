@@ -30,6 +30,23 @@ class Server(Base):
     status: Mapped[str] = mapped_column(String(32), default="stopped")
     status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Durable user intent is independent from transient lifecycle/container
+    # status. Guardian never derives this field from observations.
+    desired_power_state: Mapped[str] = mapped_column(
+        String(16), default="stopped", nullable=False
+    )
+    guardian_observed_state: Mapped[str] = mapped_column(
+        String(32), default="unknown", nullable=False
+    )
+    desired_state_generation: Mapped[int] = mapped_column(
+        Integer, default=1, nullable=False
+    )
+    # Internal compiler fingerprint. It detects effective Blueprint/port/bind
+    # changes without conflating them with transient observed state.
+    guardian_config_hash: Mapped[str | None] = mapped_column(String(71), nullable=True)
+    guardian_recovery_suspension: Mapped[str | None] = mapped_column(Text, nullable=True)
+    guardian_quarantine_control: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Auto-Restart
     # WICHTIG: Nur EIN Modus aktiv (Intervall oder feste Zeiten).
     # Die _normalize_server_restart_mode im Router stellt Exklusivitaet sicher.
