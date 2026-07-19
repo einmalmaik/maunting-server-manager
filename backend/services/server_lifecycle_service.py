@@ -714,6 +714,9 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     server.status_message = None
     server.last_started_at = _utcnow()
     db.commit()
+    sync_desired_state_to_agent(server, "running")
+    from services.change_timeline_service import log_change_event
+    log_change_event(db, server.id, "start", "Server gestartet.")
 
 
 def _run_stop(db: Session, server: Server, plugin) -> None:
@@ -724,6 +727,9 @@ def _run_stop(db: Session, server: Server, plugin) -> None:
     server.status_message = None
     server.last_started_at = None
     db.commit()
+    sync_desired_state_to_agent(server, "stopped")
+    from services.change_timeline_service import log_change_event
+    log_change_event(db, server.id, "stop", "Server gestoppt.")
     ports_list = _ports(server)
     close_ports(ports_list, node=server.node, name=server.name)
     if server.node is None or server.node.is_local:
@@ -739,6 +745,9 @@ def _run_kill(db: Session, server: Server) -> None:
     server.status_message = "Erzwungen beendet"
     server.last_started_at = None
     db.commit()
+    sync_desired_state_to_agent(server, "stopped")
+    from services.change_timeline_service import log_change_event
+    log_change_event(db, server.id, "stop", "Server erzwungen beendet.")
     ports_list = _ports(server)
     close_ports(ports_list, node=server.node, name=server.name)
     if server.node is None or server.node.is_local:
@@ -832,6 +841,9 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     server.status_message = None
     server.last_started_at = _utcnow()
     db.commit()
+    sync_desired_state_to_agent(server, "running")
+    from services.change_timeline_service import log_change_event
+    log_change_event(db, server.id, "restart", "Server neugestartet.")
 
 
 def _restart_server_sync(server_id: int) -> dict:
@@ -890,3 +902,32 @@ async def restart_server_with_updates(db: Session, server: Server) -> dict:
         return await asyncio.to_thread(_restart_server_sync, server.id)
     finally:
         _mark_job_done(server.id)
+
+
+def sync_desired_state_to_agent(server: Server, desired_status: str) -> None:
+    """Helper to update the desired state of a server container on its node agent."""
+    node = server.node
+    if not node or node.status != "online":
+        return
+
+    from services.node_client import NodeClient
+
+    plugin = get_plugin(server.game_type)
+    bp = plugin.get_blueprint() if plugin else None
+
+    if bp:
+        desired_state_payload = {
+            "server_id": server.id,
+            "status": desired_status,
+            "health": bp.health.model_dump() if bp.health else {},
+            "logs": bp.logs.model_dump() if bp.logs else {},
+            "diagnostics": bp.diagnostics.model_dump() if bp.diagnostics else {},
+            "recovery": bp.recovery.model_dump() if bp.recovery else {},
+            "updates": bp.updates.model_dump() if bp.updates else {},
+            "backups": bp.backups.model_dump() if bp.backups else {}
+        }
+        try:
+            container_name = f"msm-srv-{server.id}"
+            NodeClient.from_node(node).set_desired_state(container_name, desired_state_payload)
+        except Exception as e:
+            logger.warning("Failed to sync desired state to agent for server %s: %s", server.id, e)

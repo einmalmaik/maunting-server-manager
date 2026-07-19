@@ -867,6 +867,114 @@ def _ensure_git_update_check_job() -> None:
     )
 
 
+async def _guardian_reconciliation_task() -> None:
+    """Periodically reconciles running servers with their agent's Guardian Engine state."""
+    import json
+    from models import Server, Incident, ChangeEvent
+    from services.node_client import NodeClient
+    from games import get_plugin
+
+    db = SessionLocal()
+    try:
+        # Reconcile all running servers
+        servers = db.query(Server).filter(Server.status == "running").all()
+        for server in servers:
+            node = server.node
+            if not node or node.status != "online":
+                continue
+            
+            container_name = f"msm-srv-{server.id}"
+            try:
+                node_client = NodeClient.from_node(node, timeout=5.0)
+                
+                # 1. Fetch and process local incidents from the agent
+                try:
+                    incidents_data = node_client.get_incidents(container_name)
+                except Exception:
+                    incidents_data = []
+
+                if incidents_data:
+                    for inc in incidents_data:
+                        # Add Incident record to panel DB
+                        db_inc = Incident(
+                            server_id=server.id,
+                            title=f"Autopilot: {inc.get('type', 'Unerwartetes Ereignis')}",
+                            description=inc.get("message") or f"Guardian hat eine Reparaturmaßnahme eingeleitet: {inc.get('recovery_action')}",
+                            type=inc.get("type", "unknown"),
+                            status="resolved" if inc.get("result") == "success" else "open",
+                            fingerprint=f"GUARDIAN_{server.id}_{inc.get('type')}",
+                            attempts=json.dumps([inc])
+                        )
+                        db.add(db_inc)
+                        
+                        # Add a correlated timeline change event
+                        evt = ChangeEvent(
+                            server_id=server.id,
+                            event_type="recovery",
+                            description=f"Autopilot Recovery Stage {inc.get('stage')}: {inc.get('recovery_action')} ({inc.get('result')})",
+                            details=json.dumps(inc)
+                        )
+                        db.add(evt)
+
+                        if inc.get("result") == "quarantined":
+                            server.status = "error"
+                            server.status_message = "Server wurde vom Autopiloten unter Quarantäne gestellt"
+                            db.commit()
+
+                    # Clear local incidents on the agent
+                    try:
+                        node_client.clear_incidents(container_name)
+                    except Exception:
+                        pass
+                    
+                    db.commit()
+
+                # 2. Check if desired state needs synchronization
+                plugin = get_plugin(server.game_type)
+                bp = plugin.get_blueprint() if plugin else None
+                if bp:
+                    desired_state_payload = {
+                        "server_id": server.id,
+                        "status": "running",
+                        "health": bp.health.model_dump() if bp.health else {},
+                        "logs": bp.logs.model_dump() if bp.logs else {},
+                        "diagnostics": bp.diagnostics.model_dump() if bp.diagnostics else {},
+                        "recovery": bp.recovery.model_dump() if bp.recovery else {},
+                        "updates": bp.updates.model_dump() if bp.updates else {},
+                        "backups": bp.backups.model_dump() if bp.backups else {}
+                    }
+                    try:
+                        node_client.set_desired_state(container_name, desired_state_payload)
+                    except Exception:
+                        pass
+
+            except Exception as srv_err:
+                logger.warning("Failed to reconcile server %s: %s", server.id, srv_err)
+    except Exception as exc:
+        logger.warning("Guardian reconciliation task failed: %s", exc)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _ensure_guardian_reconciliation_job() -> None:
+    scheduler = get_scheduler()
+    job_id = "global_guardian_reconciliation"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_guardian_reconciliation_task,
+        trigger=IntervalTrigger(seconds=30),
+        id=job_id,
+        name="Guardian Autopilot Reconciliation",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def init_server_schedules(db):
     """Initialize schedules for all servers on startup."""
     from models import Server
@@ -875,6 +983,7 @@ def init_server_schedules(db):
     _ensure_background_update_check_job()
     _ensure_git_update_check_job()
     _ensure_node_heartbeat_job()
+    _ensure_guardian_reconciliation_job()
 
     servers = db.query(Server).all()
     for server in servers:

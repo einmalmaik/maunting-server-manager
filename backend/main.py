@@ -36,6 +36,8 @@ from routers import (
     panel_backups_router,
     panel_database_router,
     nodes_router,
+    incidents_router,
+    change_timeline_router,
 )
 from middleware.rate_limit import limiter
 from services.steam_service import close_steam_service
@@ -597,6 +599,8 @@ app.include_router(oauth_router)
 app.include_router(backup_config_router)
 app.include_router(panel_backups_router)
 app.include_router(panel_database_router)
+app.include_router(incidents_router)
+app.include_router(change_timeline_router)
 
 
 

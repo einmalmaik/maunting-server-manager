@@ -378,6 +378,15 @@ class NodeClient:
     def update_container_resources(self, name: str, updates: dict[str, int | None]) -> dict[str, Any]:
         return self._request("PATCH", f"/containers/{quote(name, safe='')}/resources", json=updates)
 
+    def set_desired_state(self, name: str, payload: dict) -> dict[str, Any]:
+        return self._request("POST", f"/containers/{quote(name, safe='')}/desired-state", json=payload)
+
+    def get_incidents(self, name: str) -> list[dict[str, Any]]:
+        return self._request("GET", f"/containers/{quote(name, safe='')}/incidents")
+
+    def clear_incidents(self, name: str) -> dict[str, Any]:
+        return self._request("POST", f"/containers/{quote(name, safe='')}/incidents/clear")
+
     def send_container_stdin(self, name: str, data: str) -> dict[str, Any]:
         return self._request("POST", f"/containers/{quote(name, safe='')}/stdin", json={"data": data})
 

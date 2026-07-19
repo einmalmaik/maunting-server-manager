@@ -140,6 +140,12 @@ class Server(Base):
     postgres_users: Mapped[list["PostgresUser"]] = relationship(
         "PostgresUser", back_populates="server", cascade="all, delete-orphan"
     )
+    incidents: Mapped[list["Incident"]] = relationship(
+        "Incident", back_populates="server", cascade="all, delete-orphan"
+    )
+    change_events: Mapped[list["ChangeEvent"]] = relationship(
+        "ChangeEvent", back_populates="server", cascade="all, delete-orphan"
+    )
 
     @property
     def started_at(self) -> datetime | None:

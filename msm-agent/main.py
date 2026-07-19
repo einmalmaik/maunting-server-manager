@@ -110,6 +110,8 @@ class BearerAuthMiddleware:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+    from services.guardian_service import start_guardian_loop, stop_guardian_loop
     file_service.ensure_servers_dir()
     if not (settings.agent_token or "").strip():
         logger.warning(
@@ -121,7 +123,16 @@ async def lifespan(app: FastAPI):
         settings.agent_host,
         settings.agent_port,
     )
-    yield
+    guardian_task = asyncio.create_task(start_guardian_loop())
+    try:
+        yield
+    finally:
+        await stop_guardian_loop()
+        guardian_task.cancel()
+        try:
+            await guardian_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(

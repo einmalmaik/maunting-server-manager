@@ -7,12 +7,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from services import docker_service
+from services import docker_service, file_service
 from services.docker_service import (
     ContainerNameError,
     DockerUnavailableError,
     HardeningError,
 )
+from config import settings
+import json
 
 router = APIRouter(prefix="/containers", tags=["containers"])
 
@@ -213,3 +215,70 @@ def send_stdin(name: str, body: StdinRequest) -> dict[str, Any]:
         return docker_service.send_stdin(name, body.data)
     except Exception as exc:
         raise _map_docker_errors(exc) from exc
+
+
+class DesiredStatePayload(BaseModel):
+    server_id: int
+    status: str
+    health: dict | None = None
+    logs: dict | None = None
+    diagnostics: dict | None = None
+    recovery: dict | None = None
+    updates: dict | None = None
+    backups: dict | None = None
+
+
+@router.post("/{name}/desired-state")
+def set_desired_state(name: str, body: DesiredStatePayload) -> dict[str, Any]:
+    prefix = settings.container_name_prefix
+    if not name.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid container name prefix")
+    server_id_str = name[len(prefix):]
+    if not server_id_str.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid container name suffix")
+    server_id = int(server_id_str)
+    
+    from services.guardian_service import _write_desired_state
+    _write_desired_state(server_id, body.model_dump())
+    return {"ok": True}
+
+
+@router.get("/{name}/incidents")
+def get_incidents(name: str) -> list[dict[str, Any]]:
+    prefix = settings.container_name_prefix
+    if not name.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid container name prefix")
+    server_id_str = name[len(prefix):]
+    if not server_id_str.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid container name suffix")
+    server_id = int(server_id_str)
+    
+    root = file_service.server_root(server_id)
+    incidents_file = root / ".msm_incidents.json"
+    if incidents_file.is_file():
+        try:
+            with open(incidents_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+
+@router.post("/{name}/incidents/clear")
+def clear_incidents(name: str) -> dict[str, Any]:
+    prefix = settings.container_name_prefix
+    if not name.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid container name prefix")
+    server_id_str = name[len(prefix):]
+    if not server_id_str.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid container name suffix")
+    server_id = int(server_id_str)
+    
+    root = file_service.server_root(server_id)
+    incidents_file = root / ".msm_incidents.json"
+    if incidents_file.is_file():
+        try:
+            incidents_file.unlink(missing_ok=True)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True}

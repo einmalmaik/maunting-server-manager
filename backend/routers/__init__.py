@@ -18,6 +18,8 @@ from .backup_config import router as backup_config_router
 from .panel_backups import router as panel_backups_router
 from .panel_database import router as panel_database_router
 from .nodes import router as nodes_router
+from .incidents import router as incidents_router
+from .change_timeline import router as change_timeline_router
 
 __all__ = [
     "auth_router",
@@ -40,4 +42,6 @@ __all__ = [
     "panel_backups_router",
     "panel_database_router",
     "nodes_router",
+    "incidents_router",
+    "change_timeline_router",
 ]  # noqa: E501
