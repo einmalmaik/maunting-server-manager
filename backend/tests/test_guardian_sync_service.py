@@ -566,3 +566,60 @@ def test_node_unreachable_stored_as_sync_error(db: Session) -> None:
     err_stats = json.loads(server.guardian_sync_error_statistics)
     assert err_stats["last_error"] == "NodeClientError"
     assert err_stats["last_error_message"] == "Node Unreachable"
+
+
+def test_reconcile_continues_monitoring_when_desired_state_compilation_fails(db: Session) -> None:
+    from services.guardian_sync_service import reconcile_guardian_server
+    
+    node = Node(id=1, name="node-1", host="http://127.0.0.1", status="online", auth_token_enc="enc")
+    server = _server()
+    server.node = node
+    server.id = None
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    plugin = MagicMock()
+    plugin.get_blueprint.return_value = None  # Blueprint unavailable -> raises GuardianCompileError
+    
+    client = MagicMock()
+    client.get_guardian_capabilities.return_value = {
+        "guardian_schema_versions": [1],
+        "probe_types": ["process"],
+        "diagnostic_parsers": [],
+        "recovery_actions": [],
+    }
+    client.get_guardian_state.return_value = {
+        "schema_version": 1,
+        "server_id": server.id,
+        "accepted_generation": 1,
+        "payload_hash": "sha256:" + "a" * 64,
+        "guardian_observed_state": "degraded",
+        "observed_runtime_state": "degraded",
+        "container_state": "running",
+        "active_incident_uuid": "incident-123",
+        "last_probe_at": "2026-07-21T00:00:00Z",
+        "last_transition_at": "2026-07-21T00:00:00Z",
+        "quarantine": None,
+        "recovery_suspension": None,
+        "supported_schema_version": 1,
+    }
+    client.get_incidents.return_value = []
+
+    with patch("services.guardian_sync_service.get_plugin", return_value=plugin):
+        res = reconcile_guardian_server(db, server, node_client=client)
+
+    db.refresh(server)
+    # Observed state and container status MUST be updated despite desired state compilation failure
+    assert server.guardian_observed_state == "degraded"
+    assert server.guardian_container_status == "running"
+    assert server.guardian_active_incident_uuid == "incident-123"
+    assert res["observed_state"] == "degraded"
+    assert res["payload_hash"] is None
+    assert res["generation"] is None
+
+    # Error statistics MUST record the blueprint/compilation failure
+    assert server.guardian_sync_error_statistics is not None
+    err_stats = json.loads(server.guardian_sync_error_statistics)
+    assert err_stats["code"] == "blueprint_unavailable"
+

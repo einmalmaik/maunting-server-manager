@@ -186,9 +186,9 @@ async def test_each_worker_uses_separate_database_session(db: Session) -> None:
             q = MagicMock()
             if model is Server:
                 q.filter.return_value.all.return_value = [s1, s2]
-                q.filter.return_value.first.side_effect = lambda: s1
+                q.filter.return_value.first.side_effect = lambda: MagicMock(spec=Server, id=10)
             elif model is Node:
-                q.filter.return_value.first.side_effect = lambda: n1
+                q.filter.return_value.first.side_effect = lambda: MagicMock(spec=Node, id=1, status="online")
             return q
         s.query.side_effect = mock_query
         return s
@@ -200,7 +200,6 @@ async def test_each_worker_uses_separate_database_session(db: Session) -> None:
         await reconcile_guardian_servers()
         
     # Ensure that each worker thread received a distinct database session instance
-    assert len(sessions_used) == 2
     assert len(sessions_used) == 2
 
 

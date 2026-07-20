@@ -135,10 +135,34 @@ def reconcile_guardian_server(
         
         # 1. Capabilities check, compilation and synchronization
         capabilities = client.get_guardian_capabilities()
-        payload = compile_desired_state(db, server, capabilities=capabilities)
-        server.guardian_last_payload_hash = payload.get("payload_hash")
-        client.set_desired_state(f"msm-srv-{server.id}", payload)
-        
+        payload = None
+        try:
+            payload = compile_desired_state(db, server, capabilities=capabilities)
+            server.guardian_last_payload_hash = payload.get("payload_hash")
+            client.set_desired_state(f"msm-srv-{server.id}", payload)
+        except Exception as compile_exc:
+            logger.warning(
+                "Guardian desired state compilation/sync failed for server %s: %s",
+                server.id,
+                compile_exc,
+            )
+            if isinstance(compile_exc, GuardianCompileError):
+                err_data = {
+                    "code": compile_exc.code,
+                    "message": compile_exc.message,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            else:
+                err_data = {
+                    "last_error": type(compile_exc).__name__,
+                    "last_error_message": str(compile_exc),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            server.guardian_sync_error_statistics = json.dumps(
+                err_data, sort_keys=True, separators=(",", ":")
+            )
+            db.commit()
+
         # 2. Retrieve observed state
         container_name = f"msm-srv-{server.id}"
         observed = client.get_guardian_state(container_name)
@@ -227,39 +251,41 @@ def reconcile_guardian_server(
         server.guardian_accepted_generation = accepted_generation
         server.guardian_accepted_payload_hash = accepted_payload_hash
 
-        # Sync verification rules
-        expected_generation = payload.get("generation")
-        expected_payload_hash = payload.get("payload_hash")
+        # Sync verification rules (only if desired state was compiled and sent)
+        if payload is not None:
+            expected_generation = payload.get("generation")
+            expected_payload_hash = payload.get("payload_hash")
 
-        # Check generation mismatch
-        if accepted_generation != expected_generation:
-            err_data = {
-                "code": "guardian_generation_mismatch",
-                "expected_generation": expected_generation,
-                "accepted_generation": accepted_generation,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            server.guardian_sync_error_statistics = json.dumps(err_data, sort_keys=True, separators=(",", ":"))
-            db.commit()
-            db.refresh(server)
-            raise GuardianSyncMismatchError("guardian_generation_mismatch", f"Generation mismatch: expected {expected_generation}, accepted {accepted_generation}")
+            # Check generation mismatch
+            if accepted_generation != expected_generation:
+                err_data = {
+                    "code": "guardian_generation_mismatch",
+                    "expected_generation": expected_generation,
+                    "accepted_generation": accepted_generation,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                server.guardian_sync_error_statistics = json.dumps(err_data, sort_keys=True, separators=(",", ":"))
+                db.commit()
+                db.refresh(server)
+                raise GuardianSyncMismatchError("guardian_generation_mismatch", f"Generation mismatch: expected {expected_generation}, accepted {accepted_generation}")
 
-        # Check hash mismatch
-        if accepted_payload_hash != expected_payload_hash:
-            err_data = {
-                "code": "guardian_payload_hash_mismatch",
-                "expected_payload_hash": expected_payload_hash,
-                "accepted_payload_hash": accepted_payload_hash,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            server.guardian_sync_error_statistics = json.dumps(err_data, sort_keys=True, separators=(",", ":"))
-            db.commit()
-            db.refresh(server)
-            raise GuardianSyncMismatchError("guardian_payload_hash_mismatch", f"Payload hash mismatch: expected {expected_payload_hash}, accepted {accepted_payload_hash}")
+            # Check hash mismatch
+            if accepted_payload_hash != expected_payload_hash:
+                err_data = {
+                    "code": "guardian_payload_hash_mismatch",
+                    "expected_payload_hash": expected_payload_hash,
+                    "accepted_payload_hash": accepted_payload_hash,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                server.guardian_sync_error_statistics = json.dumps(err_data, sort_keys=True, separators=(",", ":"))
+                db.commit()
+                db.refresh(server)
+                raise GuardianSyncMismatchError("guardian_payload_hash_mismatch", f"Payload hash mismatch: expected {expected_payload_hash}, accepted {accepted_payload_hash}")
 
-        # Clear sync error and set success timestamp
-        server.guardian_last_sync_at = datetime.now(timezone.utc)
-        server.guardian_sync_error_statistics = None
+            # Clear sync error and set success timestamp
+            server.guardian_last_sync_at = datetime.now(timezone.utc)
+            server.guardian_sync_error_statistics = None
+
         db.commit()
 
     except GuardianSyncMismatchError:
@@ -334,12 +360,13 @@ def reconcile_guardian_server(
     db.commit()
     db.refresh(server)
     
-    from services.guardian_restart_service import _trigger_guardian_auto_restart
-    _trigger_guardian_auto_restart(db, server.id)
+    if payload is not None:
+        from services.guardian_restart_service import _trigger_guardian_auto_restart
+        _trigger_guardian_auto_restart(db, server.id)
     
     return {
-        "payload_hash": payload["payload_hash"],
-        "generation": payload["generation"],
+        "payload_hash": payload.get("payload_hash") if payload else None,
+        "generation": payload.get("generation") if payload else None,
         "observed_state": observed_state,
         "acknowledged_incidents": acknowledged,
     }
