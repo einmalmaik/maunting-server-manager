@@ -312,10 +312,11 @@ def test_stopped_desired_state_is_sent_and_observation_does_not_change_intent(
     client.get_guardian_capabilities.return_value = _capabilities()
     client.get_guardian_state.return_value = {
         "schema_version": 1,
-        "server_id": 42,
+        "server_id": server.id,
         "accepted_generation": 7,
         "payload_hash": None,  # will set dynamically
         "guardian_observed_state": "healthy",
+        "observed_runtime_state": "healthy",
         "container_state": "running",
         "active_incident_uuid": None,
         "last_probe_at": "2026-07-20T12:00:00Z",

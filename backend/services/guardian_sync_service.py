@@ -75,7 +75,7 @@ _ALLOWED_CONTAINER_STATES = frozenset(
 def _parse_datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
+            raise GuardianContractError("guardian_invalid_observed_timestamp", "Naive datetime objects are not allowed")
         return value.astimezone(timezone.utc)
     if not value:
         raise GuardianContractError("guardian_invalid_observed_timestamp", "Timestamp is empty")
@@ -87,7 +87,7 @@ def _parse_datetime(value: Any) -> datetime:
     except (TypeError, ValueError) as exc:
         raise GuardianContractError("guardian_invalid_observed_timestamp", f"Invalid timestamp: {value}") from exc
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        raise GuardianContractError("guardian_invalid_observed_timestamp", f"Naive timestamp strings are not allowed: {value}")
     return parsed.astimezone(timezone.utc)
 
 
@@ -136,22 +136,54 @@ def reconcile_guardian_server(
         # 1. Capabilities check, compilation and synchronization
         capabilities = client.get_guardian_capabilities()
         payload = compile_desired_state(db, server, capabilities=capabilities)
+        server.guardian_last_payload_hash = payload.get("payload_hash")
         client.set_desired_state(f"msm-srv-{server.id}", payload)
         
         # 2. Retrieve observed state
         container_name = f"msm-srv-{server.id}"
         observed = client.get_guardian_state(container_name)
-        observed_state = str(
-            observed.get("guardian_observed_state")
-            or observed.get("observed_runtime_state")
-            or "unknown"
-        )
+        
+        if observed.get("schema_version") != 1:
+            raise GuardianContractError("guardian_schema_version_mismatch", "Schema version mismatch")
+        if observed.get("supported_schema_version") != 1:
+            raise GuardianContractError("guardian_schema_version_mismatch", "Supported schema version mismatch")
+        if observed.get("server_id") != server.id:
+            raise GuardianContractError("guardian_server_id_mismatch", "Server ID mismatch")
+            
+        accepted_generation = observed.get("accepted_generation")
+        if type(accepted_generation) is not int:
+            raise GuardianContractError("guardian_invalid_observed_field", "accepted_generation must be an integer")
+            
+        accepted_payload_hash = observed.get("payload_hash")
+        import re
+        if not accepted_payload_hash or type(accepted_payload_hash) is not str or not re.match(r'^sha256:[a-f0-9]{64}$', accepted_payload_hash):
+            raise GuardianContractError("guardian_invalid_observed_field", "Invalid payload_hash format")
+            
+        if "guardian_observed_state" not in observed:
+            raise GuardianContractError("guardian_missing_observed_field", "Missing guardian_observed_state")
+            
+        observed_state = observed.get("guardian_observed_state")
+        observed_runtime_state = observed.get("observed_runtime_state")
+        if observed_state != observed_runtime_state:
+            raise GuardianContractError("guardian_observed_state_mismatch", "Observed states do not match")
+            
         if observed_state not in _OBSERVED_STATES:
-            raise ValueError("Agent returned an invalid Guardian observed state")
+            raise GuardianContractError("guardian_invalid_observed_field", "Agent returned an invalid Guardian observed state")
 
-        container_state = observed.get("container_state") or "unknown"
+        if "container_state" not in observed:
+            raise GuardianContractError("guardian_missing_observed_field", "Missing container_state")
+            
+        container_state = observed.get("container_state")
         if container_state not in _ALLOWED_CONTAINER_STATES:
-            raise ValueError(f"Agent returned an invalid container state: {container_state}")
+            raise GuardianContractError("guardian_invalid_observed_field", f"Agent returned an invalid container state: {container_state}")
+
+        q_data = observed.get("quarantine")
+        if q_data is not None and not isinstance(q_data, dict):
+            raise GuardianContractError("guardian_invalid_observed_field", "quarantine must be null or an object")
+            
+        rs_data = observed.get("recovery_suspension")
+        if rs_data is not None and not isinstance(rs_data, dict):
+            raise GuardianContractError("guardian_invalid_observed_field", "recovery_suspension must be null or an object")
 
         # Extract timestamps
         probe_ts = observed.get("last_probe_at")
@@ -161,22 +193,15 @@ def reconcile_guardian_server(
         trans_dt = _parse_datetime(trans_ts) if trans_ts else None
 
         # Extract quarantine and recovery_suspension
-        q_data = observed.get("quarantine")
         if q_data is not None:
             q_json = json.dumps(q_data, sort_keys=True, separators=(",", ":"))
         else:
             q_json = None
 
-        rs_data = observed.get("recovery_suspension")
         if rs_data is not None:
             rs_json = json.dumps(rs_data, sort_keys=True, separators=(",", ":"))
         else:
             rs_json = None
-
-        accepted_generation = observed.get("accepted_generation")
-        if accepted_generation is not None:
-            accepted_generation = int(accepted_generation)
-        accepted_payload_hash = observed.get("payload_hash")
 
         # Save observed fields to database
         server.guardian_observed_state = observed_state
@@ -187,7 +212,7 @@ def reconcile_guardian_server(
         server.guardian_agent_quarantine_json = q_json
         server.guardian_agent_recovery_suspension_json = rs_json
         server.guardian_accepted_generation = accepted_generation
-        server.guardian_last_payload_hash = accepted_payload_hash
+        server.guardian_accepted_payload_hash = accepted_payload_hash
 
         # Sync verification rules
         expected_generation = payload.get("generation")
@@ -222,6 +247,7 @@ def reconcile_guardian_server(
         # Clear sync error and set success timestamp
         server.guardian_last_sync_at = datetime.now(timezone.utc)
         server.guardian_sync_error_statistics = None
+        db.commit()
 
         # 3. Handle incidents ingestion
         incidents = client.get_incidents(container_name)

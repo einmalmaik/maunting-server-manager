@@ -88,6 +88,11 @@ def test_observed_state_contract_vectors(db: Session) -> None:
         db.commit()
         db.refresh(server)
 
+        observed["server_id"] = server.id
+        observed["supported_schema_version"] = 1
+        if "observed_runtime_state" not in observed:
+            observed["observed_runtime_state"] = observed["guardian_observed_state"]
+
         # Set mock return for this vector
         client.get_guardian_state.return_value = observed
 
@@ -178,10 +183,12 @@ def test_invalid_guardian_state_rejected(db: Session) -> None:
     # invalid observed state
     client.get_guardian_state.return_value = {
         "schema_version": 1,
-        "server_id": 42,
+        "supported_schema_version": 1,
+        "server_id": server.id,
         "accepted_generation": 7,
         "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
         "guardian_observed_state": "invalid_state_here",
+        "observed_runtime_state": "invalid_state_here",
         "container_state": "running",
         "last_probe_at": "2026-07-20T12:00:00Z",
         "last_transition_at": "2026-07-20T11:59:00Z",
@@ -227,10 +234,12 @@ def test_invalid_date_rejected(db: Session) -> None:
     # invalid date format
     client.get_guardian_state.return_value = {
         "schema_version": 1,
-        "server_id": 42,
+        "supported_schema_version": 1,
+        "server_id": server.id,
         "accepted_generation": 7,
         "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
         "guardian_observed_state": "healthy",
+        "observed_runtime_state": "healthy",
         "container_state": "running",
         "last_probe_at": "not-a-date",
         "last_transition_at": "2026-07-20T11:59:00Z",
@@ -290,7 +299,8 @@ def test_idempotency_and_no_generation_change(db: Session) -> None:
         
         observed = {
             "schema_version": 1,
-            "server_id": 42,
+            "supported_schema_version": 1,
+            "server_id": server.id,
             "accepted_generation": 7,
             "payload_hash": payload["payload_hash"],
             "guardian_observed_state": "healthy",
@@ -355,10 +365,12 @@ def test_previous_sync_error_cleared_on_success(db: Session) -> None:
         payload = compile_desired_state(db, server)
         observed = {
             "schema_version": 1,
-            "server_id": 42,
+            "supported_schema_version": 1,
+            "server_id": server.id,
             "accepted_generation": 7,
             "payload_hash": payload["payload_hash"],
             "guardian_observed_state": "healthy",
+            "observed_runtime_state": "healthy",
             "container_state": "running",
             "last_probe_at": "2026-07-20T12:00:00Z",
             "last_transition_at": "2026-07-20T11:59:00Z",
@@ -374,3 +386,158 @@ def test_previous_sync_error_cleared_on_success(db: Session) -> None:
     db.delete(server)
     db.delete(node)
     db.commit()
+
+
+def test_hash_mismatch_does_not_overwrite_desired_payload_hash(db: Session) -> None:
+    node = Node(id=1, name="node-1", host="http://127.0.0.1", status="online", auth_token_enc="enc")
+    server = _server()
+    server.node = node
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    client = MagicMock()
+    client.get_guardian_capabilities.return_value = {
+        "guardian_schema_versions": [1],
+        "probe_types": ["process"],
+        "diagnostic_parsers": [],
+        "recovery_actions": [],
+    }
+    client.get_incidents.return_value = []
+    
+    plugin = MagicMock()
+    from blueprints.schema import load_blueprint_dict
+    plugin.get_blueprint.return_value = load_blueprint_dict({
+        "version": 1,
+        "meta": {"id": "minecraft", "name": "Minecraft", "category": "steam_game", "description": "desc"},
+        "runtime": {"image": "ubuntu:latest", "startup": "echo"},
+        "ports": [],
+        "source": {"type": "dockerOnly", "updateStrategy": "none"},
+        "health": {},
+    })
+
+    with patch("services.guardian_sync_service.get_plugin", return_value=plugin):
+        payload = compile_desired_state(db, server)
+        server.guardian_last_payload_hash = payload["payload_hash"]
+        db.commit()
+
+        observed = {
+            "schema_version": 1,
+            "supported_schema_version": 1,
+            "server_id": server.id,
+            "accepted_generation": 7,
+            "payload_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "guardian_observed_state": "healthy",
+            "observed_runtime_state": "healthy",
+            "container_state": "running",
+            "active_incident_uuid": None,
+            "last_probe_at": "2026-07-20T12:00:00Z",
+            "last_transition_at": "2026-07-20T11:59:00Z",
+        }
+        client.get_guardian_state.return_value = observed
+
+        with pytest.raises(Exception):
+            reconcile_guardian_server(db, server, node_client=client)
+
+        db.refresh(server)
+        
+        # Original desired hash stays in last_payload_hash
+        assert server.guardian_last_payload_hash == payload["payload_hash"]
+        # Mismatched hash is stored in accepted_payload_hash
+        assert server.guardian_accepted_payload_hash == "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+    db.delete(server)
+    db.delete(node)
+    db.commit()
+
+
+def _run_validation_test(db: Session, observed_override: dict, expected_error_code: str) -> None:
+    node = Node(id=1, name="node-1", host="http://127.0.0.1", status="online", auth_token_enc="enc")
+    server = _server()
+    server.node = node
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    client = MagicMock()
+    client.get_guardian_capabilities.return_value = {
+        "guardian_schema_versions": [1],
+        "probe_types": ["process"],
+        "diagnostic_parsers": [],
+        "recovery_actions": [],
+    }
+    client.get_incidents.return_value = []
+    
+    plugin = MagicMock()
+    from blueprints.schema import load_blueprint_dict
+    plugin.get_blueprint.return_value = load_blueprint_dict({
+        "version": 1,
+        "meta": {"id": "minecraft", "name": "Minecraft", "category": "steam_game", "description": "desc"},
+        "runtime": {"image": "ubuntu:latest", "startup": "echo"},
+        "ports": [],
+        "source": {"type": "dockerOnly", "updateStrategy": "none"},
+        "health": {},
+    })
+
+    with patch("services.guardian_sync_service.get_plugin", return_value=plugin):
+        payload = compile_desired_state(db, server)
+        server.guardian_last_payload_hash = payload["payload_hash"]
+        db.commit()
+
+        observed = {
+            "schema_version": 1,
+            "supported_schema_version": 1,
+            "server_id": server.id,
+            "accepted_generation": 7,
+            "payload_hash": payload["payload_hash"],
+            "guardian_observed_state": "healthy",
+            "observed_runtime_state": "healthy",
+            "container_state": "running",
+            "active_incident_uuid": None,
+            "last_probe_at": "2026-07-20T12:00:00Z",
+            "last_transition_at": "2026-07-20T11:59:00Z",
+            "quarantine": None,
+            "recovery_suspension": None,
+        }
+        observed.update(observed_override)
+        
+        # Remove keys if their override is explicitly set to a special token
+        for k, v in list(observed.items()):
+            if v == "__DELETE__":
+                del observed[k]
+
+        client.get_guardian_state.return_value = observed
+
+        with pytest.raises(GuardianContractError) as excinfo:
+            reconcile_guardian_server(db, server, node_client=client)
+        assert excinfo.value.code == expected_error_code
+
+    db.delete(server)
+    db.delete(node)
+    db.commit()
+
+
+def test_wrong_server_id_is_rejected(db: Session) -> None:
+    _run_validation_test(db, {"server_id": 999}, "guardian_server_id_mismatch")
+
+def test_wrong_schema_version_is_rejected(db: Session) -> None:
+    _run_validation_test(db, {"schema_version": 99}, "guardian_schema_version_mismatch")
+
+def test_wrong_supported_schema_version_is_rejected(db: Session) -> None:
+    _run_validation_test(db, {"supported_schema_version": 99}, "guardian_schema_version_mismatch")
+
+def test_missing_guardian_observed_state_is_rejected(db: Session) -> None:
+    _run_validation_test(db, {"guardian_observed_state": "__DELETE__"}, "guardian_missing_observed_field")
+
+def test_missing_container_state_is_rejected(db: Session) -> None:
+    _run_validation_test(db, {"container_state": "__DELETE__"}, "guardian_missing_observed_field")
+
+def test_conflicting_observed_states_are_rejected(db: Session) -> None:
+    _run_validation_test(db, {"guardian_observed_state": "healthy", "observed_runtime_state": "degraded"}, "guardian_observed_state_mismatch")
+
+def test_invalid_payload_hash_format_is_rejected(db: Session) -> None:
+    _run_validation_test(db, {"payload_hash": "invalid_hash"}, "guardian_invalid_observed_field")
+    _run_validation_test(db, {"payload_hash": "sha256:SHORT"}, "guardian_invalid_observed_field")
+
+def test_naive_timestamp_is_rejected(db: Session) -> None:
+    _run_validation_test(db, {"last_transition_at": "2026-07-20T12:00:00"}, "guardian_invalid_observed_timestamp")

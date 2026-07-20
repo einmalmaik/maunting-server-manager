@@ -276,13 +276,18 @@ class TestSchedulerS3FailureResilience:
 
         from services.scheduler_service import _backup_server_task
 
-        with patch("services.scheduler_service.SessionLocal") as sl, \
-             patch("services.backup_service.run_backup", side_effect=_fake_run_backup):
-            sl.return_value = db
-            # Erster Tick: S3-Fehler wird intern abgefangen, kein Crash
-            asyncio.run(_backup_server_task(test_server.id))
-            # Zweiter Tick: Scheduler feuert erneut (Beweis: Scheduler laeuft weiter)
-            asyncio.run(_backup_server_task(test_server.id))
+        original_close = db.close
+        db.close = lambda: None  # type: ignore
+        try:
+            with patch("services.scheduler_service.SessionLocal") as sl, \
+                 patch("services.backup_service.run_backup", side_effect=_fake_run_backup):
+                sl.return_value = db
+                # Erster Tick: S3-Fehler wird intern abgefangen, kein Crash
+                asyncio.run(_backup_server_task(test_server.id))
+                # Zweiter Tick: Scheduler feuert erneut (Beweis: Scheduler laeuft weiter)
+                asyncio.run(_backup_server_task(test_server.id))
+        finally:
+            db.close = original_close  # type: ignore
 
         # Beide Ticks liefen durch, lokales Backup existiert weiterhin
         assert os.path.exists(backup_pre.filename)

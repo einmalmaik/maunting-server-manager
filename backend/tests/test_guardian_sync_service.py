@@ -478,6 +478,7 @@ def test_reconcile_saves_observed_state_fields(db: Session) -> None:
         "accepted_generation": 1,
         "payload_hash": None,  # will be set dynamically
         "guardian_observed_state": "healthy",
+        "observed_runtime_state": "healthy",
         "container_state": "running",
         "active_incident_uuid": "some-uuid",
         "last_probe_at": "2026-07-20T12:00:00Z",

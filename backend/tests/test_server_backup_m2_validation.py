@@ -360,27 +360,34 @@ class TestCrossConcurrentBackups:
                 backup = _make_real_tar(sess, test_server, tmp_path / f"parallel{i}")
                 with _patch_run_backup(backup):
                     b = create_server_backup(test_server.id, sess)
-                results.append(b)
+                # Ensure we have the latest attributes and avoid DetachedInstanceError
+                sess.refresh(b)
+                results.append({
+                    "id": b.id,
+                    "s3_key": b.s3_key,
+                    "filename": b.filename,
+                    "encrypted": b.encrypted
+                })
             finally:
                 sess.close()
 
         s3_client = boto3.client("s3", region_name="us-east-1")
         # 2 distinct Backups
         assert len(results) == 2
-        assert results[0].id != results[1].id
+        assert results[0]["id"] != results[1]["id"]
         # Distinct s3_keys (kein Collision)
-        assert results[0].s3_key is not None
-        assert results[1].s3_key is not None
-        assert results[0].s3_key != results[1].s3_key, \
-            f"s3_keys identisch: {results[0].s3_key}"
+        assert results[0]["s3_key"] is not None
+        assert results[1]["s3_key"] is not None
+        assert results[0]["s3_key"] != results[1]["s3_key"], \
+            f"s3_keys identisch: {results[0]['s3_key']}"
         # Distinct filenames
-        assert results[0].filename != results[1].filename
+        assert results[0]["filename"] != results[1]["filename"]
         # Beide encrypted=True
-        assert results[0].encrypted is True
-        assert results[1].encrypted is True
+        assert results[0]["encrypted"] is True
+        assert results[1]["encrypted"] is True
         # Beide S3-Objekte existieren
-        s3_client.head_object(Bucket=TEST_BUCKET, Key=results[0].s3_key)
-        s3_client.head_object(Bucket=TEST_BUCKET, Key=results[1].s3_key)
+        s3_client.head_object(Bucket=TEST_BUCKET, Key=results[0]["s3_key"])
+        s3_client.head_object(Bucket=TEST_BUCKET, Key=results[1]["s3_key"])
 
 
 # ───────────────────────────────────────────────────────────────────────────
