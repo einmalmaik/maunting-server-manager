@@ -26,7 +26,7 @@ def test_auto_restart_triggers_on_failed_observed_state(db: Session) -> None:
 
     with patch("services.guardian_restart_service.queue_lifecycle_operation") as mock_queue:
         _trigger_guardian_auto_restart(db, server.id)
-        mock_queue.assert_called_once_with(server.id, "start")
+        mock_queue.assert_called_once_with(db, server, "start")
 
 
 def test_auto_restart_blocked_if_generation_mismatch(db: Session) -> None:

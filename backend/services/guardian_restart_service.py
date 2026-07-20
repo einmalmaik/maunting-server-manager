@@ -31,6 +31,6 @@ def _trigger_guardian_auto_restart(db: Session, server_id: int) -> None:
         logger.info("Guardian auto-restart triggered for server %s", server_id)
         # Using "start" as the lifecycle operation to initiate the auto-restart, 
         # as defined by P3.1
-        queue_lifecycle_operation(server_id, "start")
+        queue_lifecycle_operation(db, server, "start")
     except Exception as e:
         logger.error("Error in _trigger_guardian_auto_restart for server %s: %s", server_id, e)
