@@ -220,3 +220,97 @@ def test_allocate_ports_same_port_different_nodes(db):
             check_host=False,
         )
     assert game == 27050
+
+def test_sync_invalid_json_raises_node_client_error():
+    client = NodeClient(host="http://127.0.0.1:9000", token="synthetic")
+    with patch("services.node_client.get_shared_sync_client") as mock_get:
+        mock = MagicMock()
+        mock.__enter__.return_value = mock
+        mock.__aenter__.return_value = mock
+        mock_get.return_value = mock
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"not json"
+        mock_resp.json.side_effect = Exception("decode error")
+        mock.request.return_value = mock_resp
+        
+        with pytest.raises(NodeClientError) as exc_info:
+            client.list_containers()
+        
+        assert exc_info.value.code == "node_invalid_json_response"
+        assert exc_info.value.data["status_code"] == 200
+        assert exc_info.value.data["response_snippet"] == "not json"
+
+@pytest.mark.asyncio
+async def test_async_invalid_json_raises_node_client_error():
+    client = NodeClient(host="http://127.0.0.1:9000", token="synthetic")
+    with patch("services.node_client.get_shared_async_client") as mock_get:
+        from unittest.mock import AsyncMock
+        mock = MagicMock()
+        mock.__enter__.return_value = mock
+        mock.__aenter__.return_value = mock
+        mock_get.return_value = mock
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"broken async json"
+        mock_resp.json.side_effect = Exception("decode error")
+        mock.request = AsyncMock(return_value=mock_resp)
+        
+        with pytest.raises(NodeClientError) as exc_info:
+            await client.metrics_async()
+        
+        assert exc_info.value.code == "node_invalid_json_response"
+        assert exc_info.value.data["response_snippet"] == "broken async json"
+
+def test_204_response_is_allowed():
+    client = NodeClient(host="http://127.0.0.1:9000", token="synthetic")
+    with patch("services.node_client.get_shared_sync_client") as mock_get:
+        mock = MagicMock()
+        mock.__enter__.return_value = mock
+        mock_get.return_value = mock
+        mock_resp = MagicMock()
+        mock_resp.status_code = 204
+        mock_resp.content = b""
+        mock.request.return_value = mock_resp
+        
+        # 204 should return {} without raising JSON error
+        assert client.metrics() == {}
+
+def test_empty_json_response_is_rejected_when_body_required():
+    client = NodeClient(host="http://127.0.0.1:9000", token="synthetic")
+    with patch("services.node_client.get_shared_sync_client") as mock_get:
+        mock = MagicMock()
+        mock.__enter__.return_value = mock
+        mock.__aenter__.return_value = mock
+        mock_get.return_value = mock
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b""
+        mock.request.return_value = mock_resp
+        
+        with pytest.raises(NodeClientError) as exc_info:
+            client.list_containers()
+            
+        assert exc_info.value.code == "node_invalid_json_response"
+        assert exc_info.value.message == "Agent returned empty response when JSON was expected"
+
+def test_invalid_json_error_does_not_expose_auth_token():
+    client = NodeClient(host="http://127.0.0.1:9000", token="super-secret-token-123")
+    with patch("services.node_client.get_shared_sync_client") as mock_get:
+        mock = MagicMock()
+        mock.__enter__.return_value = mock
+        mock.__aenter__.return_value = mock
+        mock_get.return_value = mock
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"invalid payload data"
+        mock_resp.json.side_effect = Exception("decode error")
+        mock.request.return_value = mock_resp
+        
+        with pytest.raises(NodeClientError) as exc_info:
+            client.list_containers()
+            
+        err_str = str(exc_info.value)
+        data_str = str(exc_info.value.data)
+        assert "super-secret-token" not in err_str
+        assert "super-secret-token" not in data_str

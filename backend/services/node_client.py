@@ -62,10 +62,12 @@ def get_shared_sync_client(
 class NodeClientError(Exception):
     """Agent unreachable or returned an error."""
 
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    def __init__(self, message: str, status_code: int | None = None, code: str | None = None, data: dict | None = None) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+        self.code = code
+        self.data = data or {}
 
 
 class NodeClient:
@@ -238,12 +240,38 @@ class NodeClient:
 
         if not expect_json:
             return resp.content
-        if resp.status_code == 204 or not resp.content:
+        if resp.status_code == 204:
             return {}
+        if not resp.content:
+            raise NodeClientError(
+                "Agent returned empty response when JSON was expected",
+                status_code=resp.status_code,
+                code="node_invalid_json_response",
+                data={
+                    "method": method,
+                    "endpoint": path,
+                    "status_code": resp.status_code,
+                    "response_snippet": "",
+                }
+            )
         try:
             return resp.json()
         except Exception:
-            return {}
+            try:
+                snippet = resp.content.decode("utf-8", errors="replace")[:200]
+            except Exception:
+                snippet = ""
+            raise NodeClientError(
+                "Agent returned invalid JSON",
+                status_code=resp.status_code,
+                code="node_invalid_json_response",
+                data={
+                    "method": method,
+                    "endpoint": path,
+                    "status_code": resp.status_code,
+                    "response_snippet": snippet,
+                }
+            )
 
     async def _request_async(
         self,
@@ -297,12 +325,38 @@ class NodeClient:
 
         if not expect_json:
             return resp.content
-        if resp.status_code == 204 or not resp.content:
+        if resp.status_code == 204:
             return {}
+        if not resp.content:
+            raise NodeClientError(
+                "Agent returned empty response when JSON was expected",
+                status_code=resp.status_code,
+                code="node_invalid_json_response",
+                data={
+                    "method": method,
+                    "endpoint": path,
+                    "status_code": resp.status_code,
+                    "response_snippet": "",
+                }
+            )
         try:
             return resp.json()
         except Exception:
-            return {}
+            try:
+                snippet = resp.content.decode("utf-8", errors="replace")[:200]
+            except Exception:
+                snippet = ""
+            raise NodeClientError(
+                "Agent returned invalid JSON",
+                status_code=resp.status_code,
+                code="node_invalid_json_response",
+                data={
+                    "method": method,
+                    "endpoint": path,
+                    "status_code": resp.status_code,
+                    "response_snippet": snippet,
+                }
+            )
 
     # ── Health / metrics ─────────────────────────────────────────────────
 
