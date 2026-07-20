@@ -318,6 +318,9 @@ def reconcile_guardian_server(
     db.commit()
     db.refresh(server)
     
+    from services.guardian_restart_service import _trigger_guardian_auto_restart
+    _trigger_guardian_auto_restart(db, server.id)
+    
     return {
         "payload_hash": payload["payload_hash"],
         "generation": payload["generation"],
