@@ -575,6 +575,9 @@ def test_missing_last_probe_at_is_rejected(db: Session) -> None:
 def test_missing_last_transition_at_is_rejected(db: Session) -> None:
     _run_validation_test(db, {"last_transition_at": "__DELETE__"}, "guardian_missing_observed_field")
 
+def test_null_last_transition_at_is_rejected(db: Session) -> None:
+    _run_validation_test(db, {"last_transition_at": None}, "guardian_missing_observed_field")
+
 def test_conflicting_observed_states_are_rejected(db: Session) -> None:
     _run_validation_test(db, {"guardian_observed_state": "healthy", "observed_runtime_state": "degraded"}, "guardian_observed_state_mismatch")
 

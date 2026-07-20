@@ -201,7 +201,9 @@ def reconcile_guardian_server(
         trans_ts = observed.get("last_transition_at")
         
         probe_dt = _parse_datetime(probe_ts) if probe_ts else None
-        trans_dt = _parse_datetime(trans_ts) if trans_ts else None
+        if trans_ts is None:
+            raise GuardianContractError("guardian_missing_observed_field", "Missing last_transition_at")
+        trans_dt = _parse_datetime(trans_ts)
 
         # Extract quarantine and recovery_suspension
         if q_data is not None:

@@ -145,6 +145,8 @@ def _load_runtime(server_id: int, desired: DesiredState) -> dict[str, Any]:
     raw.setdefault("transition_history", [])
     raw.setdefault("recovery_stage", 0)
     raw.setdefault("verification_successes", 0)
+    if not raw.get("state_entered_at"):
+        raw["state_entered_at"] = _iso()
     return raw
 
 
@@ -187,7 +189,7 @@ def _write_observed(
         "container_state": (container_state or {}).get("status", "missing"),
         "active_incident_uuid": runtime.get("active_incident_uuid"),
         "last_probe_at": runtime.get("last_probe_at"),
-        "last_transition_at": runtime.get("state_entered_at"),
+        "last_transition_at": runtime.get("state_entered_at") or _iso(),
         "quarantine": runtime.get("quarantine"),
         "recovery_suspension": (
             suspension.model_dump(mode="json") if suspension is not None else local_suspension
