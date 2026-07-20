@@ -65,11 +65,10 @@ def test_reconcile_guardian_servers_caches_clients(db: Session) -> None:
 
 @pytest.mark.asyncio
 async def test_slow_node_does_not_block_other_servers(db: Session) -> None:
-    # Set up two nodes with one server each
     n1 = Node(id=1, name="n1", host="http://1", auth_token_enc="tok", status="online")
     n2 = Node(id=2, name="n2", host="http://2", auth_token_enc="tok", status="online")
-    s1 = Server(id=10, name="s1", game_type="mc", install_dir="/1", status="stopped", node=n1)
-    s2 = Server(id=20, name="s2", game_type="mc", install_dir="/2", status="stopped", node=n2)
+    s1 = Server(id=10, name="s1", game_type="mc", install_dir="/1", status="stopped", node=n1, node_id=1)
+    s2 = Server(id=20, name="s2", game_type="mc", install_dir="/2", status="stopped", node=n2, node_id=2)
     db.add_all([n1, n2, s1, s2])
     db.commit()
     
@@ -85,13 +84,38 @@ async def test_slow_node_does_not_block_other_servers(db: Session) -> None:
             events.append("s2_start")
             events.append("s2_end")
 
+    node_map = {1: n1, 2: n2}
+    server_map = {10: s1, 20: s2}
+
+    def session_factory():
+        s = MagicMock(spec=Session)
+        def mock_query(model):
+            q = MagicMock()
+            if model is Server:
+                def filter_server(*args, **kwargs):
+                    fq = MagicMock()
+                    fq.all.return_value = [s1, s2]
+                    val = getattr(getattr(args[0], "right", None), "value", None) if args else None
+                    fq.first.return_value = server_map.get(val, s1)
+                    return fq
+                q.filter.side_effect = filter_server
+            elif model is Node:
+                def filter_node(*args, **kwargs):
+                    fq = MagicMock()
+                    val = getattr(getattr(args[0], "right", None), "value", None) if args else None
+                    fq.first.return_value = node_map.get(val, n1)
+                    return fq
+                q.filter.side_effect = filter_node
+            return q
+        s.query.side_effect = mock_query
+        return s
+
     with patch("services.guardian_reconciliation_service.NodeClient.from_node"), \
+         patch("services.guardian_reconciliation_service.SessionLocal", side_effect=session_factory), \
          patch("services.guardian_reconciliation_service.reconcile_guardian_server", side_effect=mock_reconcile):
          
         await reconcile_guardian_servers()
         
-    # Since they run in parallel threads, s2 should finish before s1 finishes its sleep
-    # Events should look like: ["s1_start", "s2_start", "s2_end", "s1_end"] or ["s2_start", "s2_end", "s1_start", "s1_end"]
     assert "s2_end" in events
     assert events.index("s2_end") < events.index("s1_end")
 
@@ -102,7 +126,7 @@ async def test_reconciliation_concurrency_is_bounded(db: Session) -> None:
     servers = []
     for i in range(15):
         n = Node(id=i+1, name=f"n{i}", host=f"http://{i}", auth_token_enc="tok", status="online")
-        s = Server(id=i+100, name=f"s{i}", game_type="mc", install_dir=f"/{i}", status="stopped", node=n)
+        s = Server(id=i+100, name=f"s{i}", game_type="mc", install_dir=f"/{i}", status="stopped", node=n, node_id=i+1)
         nodes.append(n)
         servers.append(s)
         
@@ -120,7 +144,21 @@ async def test_reconciliation_concurrency_is_bounded(db: Session) -> None:
         time.sleep(0.02)
         active_threads -= 1
 
+    def session_factory():
+        s = MagicMock(spec=Session)
+        def mock_query(model):
+            q = MagicMock()
+            if model is Server:
+                q.filter.return_value.all.return_value = servers
+                q.filter.return_value.first.side_effect = lambda: servers[0]
+            elif model is Node:
+                q.filter.return_value.first.side_effect = lambda: nodes[0]
+            return q
+        s.query.side_effect = mock_query
+        return s
+
     with patch("services.guardian_reconciliation_service.NodeClient.from_node"), \
+         patch("services.guardian_reconciliation_service.SessionLocal", side_effect=session_factory), \
          patch("services.guardian_reconciliation_service.reconcile_guardian_server", side_effect=mock_reconcile), \
          patch("services.guardian_reconciliation_service._MAX_CONCURRENCY", 5):
          
@@ -132,8 +170,8 @@ async def test_reconciliation_concurrency_is_bounded(db: Session) -> None:
 async def test_each_worker_uses_separate_database_session(db: Session) -> None:
     n1 = Node(id=1, name="n1", host="http://1", auth_token_enc="tok", status="online")
     n2 = Node(id=2, name="n2", host="http://2", auth_token_enc="tok", status="online")
-    s1 = Server(id=10, name="s1", game_type="mc", install_dir="/1", status="stopped", node=n1)
-    s2 = Server(id=20, name="s2", game_type="mc", install_dir="/2", status="stopped", node=n2)
+    s1 = Server(id=10, name="s1", game_type="mc", install_dir="/1", status="stopped", node=n1, node_id=1)
+    s2 = Server(id=20, name="s2", game_type="mc", install_dir="/2", status="stopped", node=n2, node_id=2)
     db.add_all([n1, n2, s1, s2])
     db.commit()
     
@@ -142,8 +180,21 @@ async def test_each_worker_uses_separate_database_session(db: Session) -> None:
     def mock_reconcile(session, server, node_client):
         sessions_used.add(id(session))
 
+    def session_factory():
+        s = MagicMock(spec=Session)
+        def mock_query(model):
+            q = MagicMock()
+            if model is Server:
+                q.filter.return_value.all.return_value = [s1, s2]
+                q.filter.return_value.first.side_effect = lambda: s1
+            elif model is Node:
+                q.filter.return_value.first.side_effect = lambda: n1
+            return q
+        s.query.side_effect = mock_query
+        return s
 
     with patch("services.guardian_reconciliation_service.NodeClient.from_node"), \
+         patch("services.guardian_reconciliation_service.SessionLocal", side_effect=session_factory), \
          patch("services.guardian_reconciliation_service.reconcile_guardian_server", side_effect=mock_reconcile):
          
         await reconcile_guardian_servers()
@@ -171,6 +222,7 @@ async def test_one_server_failure_does_not_abort_other_servers(db: Session) -> N
             success_called = True
 
     with patch("services.guardian_reconciliation_service.NodeClient.from_node"), \
+         patch("services.guardian_reconciliation_service.SessionLocal", side_effect=lambda: Session(db.get_bind())), \
          patch("services.guardian_reconciliation_service.reconcile_guardian_server", side_effect=mock_reconcile):
          
         await reconcile_guardian_servers()

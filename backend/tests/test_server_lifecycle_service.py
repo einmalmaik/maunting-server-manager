@@ -493,19 +493,107 @@ def test_lifecycle_job_applies_recovery_suspension(db: Session) -> None:
 
 
 def test_lifecycle_does_not_start_before_agent_accepts_lease(db: Session) -> None:
-    # This is effectively tested by `test_failed_lease_sync_aborts_lifecycle_operation`
-    # and the order of operations in `guardian_recovery_suspension_lease`.
-    pass
+    from services.server_lifecycle_service import _run_lifecycle_job
+    from models import Server, Node
+    node = Node(id=102, name="node-102", host="http://127.0.0.1", status="online", auth_token_enc="test-enc-v1:00:00")
+    server = Server(
+        id=90,
+        name="LeaseAcceptTest",
+        game_type="minecraft",
+        install_dir="/tmp/test",
+        status="stopped",
+        desired_power_state="stopped",
+        desired_state_generation=1,
+        guardian_observed_state="unknown",
+        public_bind_ip="127.0.0.1",
+        node=node,
+    )
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    plugin = MagicMock()
+    plugin.start.return_value = {"ok": True}
+
+    with patch("services.guardian_state_service.set_recovery_suspension"), \
+         patch("services.guardian_state_service.clear_recovery_suspension"), \
+         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=RuntimeError("Lease sync failed")), \
+         patch("services.server_lifecycle_service.get_plugin", return_value=plugin):
+
+        with pytest.raises(RuntimeError, match="Lease sync failed"):
+            _run_lifecycle_job(server.id, "start")
+
+        # Crucial check: plugin start must NOT execute if lease sync failed
+        plugin.start.assert_not_called()
 
 
 def test_lease_is_immediately_synchronized(db: Session) -> None:
-    # Covered by assert mock_reconcile.call_count == 2 in test_lifecycle_job_applies_recovery_suspension
-    pass
+    from services.server_lifecycle_service import guardian_recovery_suspension_lease
+    from models import Server, Node
+    node = Node(id=103, name="node-103", host="http://127.0.0.1", status="online", auth_token_enc="test-enc-v1:00:00")
+    server = Server(
+        id=91,
+        name="ImmediateLeaseSyncTest",
+        game_type="minecraft",
+        install_dir="/tmp/test",
+        status="stopped",
+        desired_power_state="stopped",
+        desired_state_generation=1,
+        guardian_observed_state="unknown",
+        public_bind_ip="127.0.0.1",
+        node=node,
+    )
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    reconcile_calls = []
+
+    def fake_reconcile(_db, _server):
+        reconcile_calls.append(_server.guardian_recovery_suspension)
+
+    with patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
+        with guardian_recovery_suspension_lease(db, server, "unit-test-lease"):
+            # Verify that reconcile was invoked immediately upon entering the context manager
+            assert len(reconcile_calls) == 1
+            assert reconcile_calls[0] is not None
+            assert "unit-test-lease" in reconcile_calls[0]
 
 
 def test_lease_clear_is_immediately_synchronized(db: Session) -> None:
-    # Covered by assert mock_reconcile.call_count == 2 in test_lifecycle_job_applies_recovery_suspension
-    pass
+    from services.server_lifecycle_service import guardian_recovery_suspension_lease
+    from models import Server, Node
+    node = Node(id=104, name="node-104", host="http://127.0.0.1", status="online", auth_token_enc="test-enc-v1:00:00")
+    server = Server(
+        id=92,
+        name="ImmediateLeaseClearSyncTest",
+        game_type="minecraft",
+        install_dir="/tmp/test",
+        status="stopped",
+        desired_power_state="stopped",
+        desired_state_generation=1,
+        guardian_observed_state="unknown",
+        public_bind_ip="127.0.0.1",
+        node=node,
+    )
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    reconcile_calls = []
+
+    def fake_reconcile(_db, _server):
+        reconcile_calls.append(_server.guardian_recovery_suspension)
+
+    with patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
+        with guardian_recovery_suspension_lease(db, server, "unit-test-clear-lease"):
+            pass
+
+    # Reconcile called twice: 1st on set (suspension active), 2nd on clear (suspension cleared)
+    assert len(reconcile_calls) == 2
+    assert reconcile_calls[0] is not None
+    assert "unit-test-clear-lease" in reconcile_calls[0]
+    assert reconcile_calls[1] is None
 
 
 def test_failed_lease_sync_aborts_lifecycle_operation(db: Session) -> None:

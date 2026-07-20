@@ -259,9 +259,38 @@ def test_grouped_incident_uuid_retry_does_not_increment_occurrence(db: Session) 
 
 
 def test_duplicate_incident_uuid_is_idempotent(db: Session) -> None:
-    # We already have `test_idempotent_ingestion_duplicate_uuids` covering this,
-    # but we will add this alias test to strictly satisfy the P1.1 requirement name.
-    test_idempotent_ingestion_duplicate_uuids(db)
+    server = _server()
+    server.id = None
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    client = MagicMock()
+    inc_uuid = str(uuid.uuid4())
+    inc = {
+        "uuid": inc_uuid,
+        "server_id": server.id,
+        "type": "process_not_running",
+        "status": "open",
+        "fingerprint": "process-error-idempotency",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "payload": {
+            "schema_version": 1,
+            "message": "Process went offline",
+            "attempts": [{"attempt_number": 1, "timestamp": "2026-07-20T12:00:00Z"}],
+        },
+    }
+
+    ack1 = ingest_incidents_and_ack(db, server, client, "srv-42", [inc])
+    assert ack1 == [inc_uuid]
+
+    # Re-ingest the exact same UUID (retry delivery)
+    ack2 = ingest_incidents_and_ack(db, server, client, "srv-42", [inc])
+    assert ack2 == [inc_uuid]
+
+    db_inc = db.query(Incident).filter(Incident.uuid == inc_uuid).one()
+    assert db_inc.occurrences == 1
+    assert len(json.loads(db_inc.attempts)) == 1
 
 
 def test_ack_failure_preserves_delivery_record(db: Session) -> None:
@@ -291,12 +320,11 @@ def test_ack_failure_preserves_delivery_record(db: Session) -> None:
         },
     }
 
-    # Should not raise exception
-    ack = ingest_incidents_and_ack(db, server, client, "srv-42", [inc])
-    assert ack == [inc_uuid]
-
+    # ACK failure re-raises exception after local delivery commit
+    with pytest.raises(RuntimeError, match="Network partition"):
+        ingest_incidents_and_ack(db, server, client, "srv-42", [inc])
 
     delivery = db.query(GuardianIncidentDelivery).filter(GuardianIncidentDelivery.incident_uuid == inc_uuid).first()
     assert delivery is not None
-    # Delivery record is preserved, even if acknowledge_at might be None due to exception
+    # Delivery record is preserved, even if network partition prevented ACK callback
     assert delivery.incident_uuid == inc_uuid

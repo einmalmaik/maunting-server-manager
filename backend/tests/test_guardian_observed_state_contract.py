@@ -679,5 +679,7 @@ def test_sync_success_commits_before_incident_failure(db: Session) -> None:
     # The observed state should still be stored!
     assert server.guardian_observed_state == "healthy"
     assert server.guardian_last_sync_at is not None
-    # No sync error should be recorded for incident failures!
-    assert server.guardian_sync_error_statistics is None
+    # Incident sync error is recorded in sync_error_statistics
+    assert server.guardian_sync_error_statistics is not None
+    stats = json.loads(server.guardian_sync_error_statistics)
+    assert stats["last_error_message"] == "Incident API Error"
