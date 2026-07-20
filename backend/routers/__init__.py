@@ -20,6 +20,7 @@ from .panel_database import router as panel_database_router
 from .nodes import router as nodes_router
 from .incidents import router as incidents_router
 from .change_timeline import router as change_timeline_router
+from .guardian import router as guardian_router
 
 __all__ = [
     "auth_router",
@@ -44,4 +45,5 @@ __all__ = [
     "nodes_router",
     "incidents_router",
     "change_timeline_router",
+    "guardian_router",
 ]  # noqa: E501

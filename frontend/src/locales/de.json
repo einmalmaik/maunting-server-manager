@@ -1771,19 +1771,19 @@
       "customMatchLabel": "Benutzerdefiniertes Fehlermuster (Match)",
       "customActionLabel": "Benutzerdefinierte Reparaturaktion (Action)",
       "matches": {
-        "port_conflict": "Port belegt (port_conflict)",
-        "out_of_memory": "Speicher voll (out_of_memory)",
-        "corrupted_config": "Fehlerhafte Konfig (corrupted_config)",
-        "broken_update": "Fehlgeschlagenes Update (broken_update)",
-        "missing_runtime": "Fehlende Laufzeit (missing_runtime)"
+        "port-conflict": "Port-Konflikt (port-conflict)",
+        "linux-oom": "Linux Out-of-Memory (linux-oom)",
+        "java-stacktrace": "Java Stacktrace (java-stacktrace)",
+        "nodejs-stacktrace": "Node.js Stacktrace (nodejs-stacktrace)",
+        "missing-runtime": "Fehlende Laufzeitumgebung (missing-runtime)",
+        "corrupted-config": "Beschädigte Konfiguration (corrupted-config)",
+        "startup-pattern": "Startup-Pattern-Fehler (startup-pattern)"
       },
       "actions": {
-        "resolve_managed_port_conflict": "Port freigeben (resolve_managed_port_conflict)",
-        "controlled_memory_recovery": "Speicher anpassen (controlled_memory_recovery)",
-        "restore_last_known_good_config": "Konfig zurücksetzen (restore_last_known_good_config)",
-        "rollback_release": "Update zurückrollen (rollback_release)",
-        "repair_runtime": "Laufzeit reparieren (repair_runtime)",
-        "restart": "Server neu starten (restart)"
+        "restart": "Server hart neu starten (restart)",
+        "graceful_restart": "Server geordnet neu starten (graceful_restart)",
+        "clear_declared_lock_files": "Sperrdateien (Locks) löschen (clear_declared_lock_files)",
+        "quarantine": "Server in Quarantäne verschieben (quarantine)"
       }
     },
     "environment": { "title": "Umgebungswerte", "add": "Eintrag hinzufügen", "help": "Nur nicht-geheime Konfiguration. Zugangsdaten gehören nicht in Blueprints.", "nameLabel": "Umgebungsname {{index}}", "valueLabel": "Umgebungswert {{index}}", "removeLabel": "Umgebungswert {{index}} entfernen" },

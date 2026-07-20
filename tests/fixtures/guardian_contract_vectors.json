@@ -1,0 +1,58 @@
+[
+  {
+    "payload": {
+      "schema_version": 1,
+      "server_id": 42,
+      "generation": 1,
+      "desired_power_state": "running",
+      "recovery_suspension": null,
+      "quarantine_control": null,
+      "guardian": {
+        "health_checks": [
+          {
+            "check_id": "process",
+            "type": "process",
+            "interval_seconds": 10.0,
+            "timeout_seconds": 1.0,
+            "failure_threshold": 3,
+            "success_threshold": 1,
+            "required_for_startup": true,
+            "required_for_verification": true
+          }
+        ],
+        "startup": {
+          "grace_period_seconds": 30,
+          "timeout_seconds": 300,
+          "success_patterns": [],
+          "failure_patterns": []
+        },
+        "verification": {
+          "minimum_healthy_duration_seconds": 30,
+          "required_consecutive_successes": 3,
+          "verification_timeout_seconds": 180
+        },
+        "logs": {
+          "sources": [],
+          "redact": [],
+          "max_tail_bytes": 65536
+        },
+        "diagnostics": {
+          "parsers": []
+        },
+        "recovery": {
+          "policies": [],
+          "safe_lock_files": [],
+          "max_attempts": 3,
+          "attempt_window_seconds": 1800,
+          "cooldown_seconds": 300
+        },
+        "backups": {
+          "before_risky_action": true,
+          "protected_paths": []
+        }
+      },
+      "payload_hash": "sha256:4798ed7c98735fdc99821f0018b70acc0dfcd57799eaaad79aabfb5d7c85c406"
+    },
+    "payload_hash": "sha256:4798ed7c98735fdc99821f0018b70acc0dfcd57799eaaad79aabfb5d7c85c406"
+  }
+]

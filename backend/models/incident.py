@@ -31,5 +31,6 @@ class Incident(Base):
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON string representation
+    occurrences: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     server: Mapped["Server"] = relationship("Server", back_populates="incidents")

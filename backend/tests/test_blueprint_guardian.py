@@ -45,11 +45,17 @@ def test_valid_blueprint_with_guardian_sections() -> None:
         },
         "application": {
             "type": "minecraft-query",
+            "id": "game-query",
+            "port": "{{PORT:query}}",
             "interval": "45s",
+            "timeout": "5s",
             "failure_threshold": 5,
+            "success_threshold": 2,
         },
         "startup": {
-            "success_patterns": ["Done ("],
+            "grace_period_seconds": 20,
+            "timeout_seconds": 240,
+            "success_patterns": [r"Done \("],
             "failure_patterns": ["Failed to bind to port"],
         },
     }
@@ -62,9 +68,20 @@ def test_valid_blueprint_with_guardian_sections() -> None:
     }
     data["recovery"] = {
         "policies": [
-            {"match": "port_conflict", "action": "resolve_managed_port_conflict"},
-            {"match": "broken_update", "action": "rollback_release"},
-        ]
+            {"match": "port-conflict", "action": "clear_declared_lock_files"},
+            {"match": "linux-oom", "action": "graceful_restart"},
+        ],
+        "safe_lock_files": [
+            {"path": "runtime/server.lock", "reason": "Known stale application lock"}
+        ],
+        "max_attempts": 3,
+        "attempt_window_seconds": 1800,
+        "cooldown_seconds": 300,
+        "verification": {
+            "minimum_healthy_duration_seconds": 30,
+            "required_consecutive_successes": 3,
+            "verification_timeout_seconds": 180,
+        },
     }
     data["updates"] = {
         "strategy": "snapshot-then-update",
@@ -86,14 +103,16 @@ def test_valid_blueprint_with_guardian_sections() -> None:
     assert bp.health.application.type == "minecraft-query"
     assert bp.health.application.interval == "45s"
     assert bp.health.application.failure_threshold == 5
-    assert bp.health.startup.success_patterns == ["Done ("]
+    assert bp.health.startup.success_patterns == [r"Done \("]
     assert bp.health.startup.failure_patterns == ["Failed to bind to port"]
     assert bp.logs.sources == ["stdout", "logs/*.log"]
     assert bp.logs.redact == ["discord_token"]
     assert bp.diagnostics.parsers == ["java-stacktrace", "linux-oom"]
     assert len(bp.recovery.policies) == 2
-    assert bp.recovery.policies[0].match == "port_conflict"
-    assert bp.recovery.policies[0].action == "resolve_managed_port_conflict"
+    assert bp.recovery.policies[0].match == "port-conflict"
+    assert bp.recovery.policies[0].action == "clear_declared_lock_files"
+    assert bp.recovery.safe_lock_files[0].path == "runtime/server.lock"
+    assert bp.recovery.verification.required_consecutive_successes == 3
     assert bp.updates.strategy == "snapshot-then-update"
     assert bp.updates.health_verification == "required"
     assert bp.updates.rollback_on_failure is True
@@ -107,6 +126,42 @@ def test_invalid_recovery_policy_throws() -> None:
         "policies": [
             {"match": "   ", "action": "resolve_managed_port_conflict"},  # Empty match after strip
         ]
+    }
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(data)
+
+
+@pytest.mark.parametrize(
+    "action",
+    ["resolve_managed_port_conflict", "rollback_release", "arbitrary_shell"],
+)
+def test_unsupported_recovery_actions_are_rejected(action: str) -> None:
+    data = _base_valid_dict()
+    data["recovery"] = {"policies": [{"match": "port-conflict", "action": action}]}
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(data)
+
+
+def test_unknown_probe_and_diagnostic_parser_are_rejected() -> None:
+    data = _base_valid_dict()
+    data["health"] = {"application": {"type": "custom-script"}}
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(data)
+
+    data = _base_valid_dict()
+    data["diagnostics"] = {"parsers": ["run-any-command"]}
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(data)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["*.lock", "runtime/**/*.lock", "../server.lock", "/tmp/server.lock", "runtime\\server.lock"],
+)
+def test_unsafe_lock_file_declarations_are_rejected(path: str) -> None:
+    data = _base_valid_dict()
+    data["recovery"] = {
+        "safe_lock_files": [{"path": path, "reason": "synthetic"}],
     }
     with pytest.raises(BlueprintValidationError):
         load_blueprint_dict(data)

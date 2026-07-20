@@ -378,15 +378,14 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
             process: { required: true },
             port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
             application: { type: 'minecraft-query', interval: '30s', failure_threshold: 3 },
-            startup: { success_patterns: ['Done ('], failure_patterns: ['Unable to access jarfile', 'Failed to bind to port'] }
+            startup: { success_patterns: ['Done'], failure_patterns: ['Unable to access jarfile', 'Failed to bind to port'] }
           },
           logs: { sources: ['logs/latest.log'], redact: ['password', 'discord_token', 'api_key'] },
-          diagnostics: { parsers: ['java-stacktrace', 'minecraft-crash-report', 'linux-oom', 'network-bind-error'] },
+          diagnostics: { parsers: ['java-stacktrace', 'linux-oom', 'port-conflict', 'corrupted-config'] },
           recovery: {
             policies: [
-              { match: 'port_conflict', action: 'resolve_managed_port_conflict' },
-              { match: 'out_of_memory', action: 'controlled_memory_recovery' },
-              { match: 'corrupted_config', action: 'restore_last_known_good_config' }
+              { match: 'port-conflict', action: 'clear_declared_lock_files' },
+              { match: 'linux-oom', action: 'graceful_restart' }
             ]
           },
           updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
@@ -402,12 +401,11 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
             startup: { success_patterns: ['Connection to Steam servers successful', 'GC Connection established'], failure_patterns: ['Error checking out release', 'Failed to initialize network'] }
           },
           logs: { sources: ['logs/latest.log', 'stdout'], redact: ['steam_password', 'rcon_password', 'api_key'] },
-          diagnostics: { parsers: ['linux-oom', 'network-bind-error', 'steamcmd-error'] },
+          diagnostics: { parsers: ['linux-oom', 'port-conflict', 'missing-runtime'] },
           recovery: {
             policies: [
-              { match: 'port_conflict', action: 'resolve_managed_port_conflict' },
-              { match: 'broken_update', action: 'rollback_release' },
-              { match: 'missing_runtime', action: 'repair_runtime' }
+              { match: 'port-conflict', action: 'clear_declared_lock_files' },
+              { match: 'linux-oom', action: 'graceful_restart' }
             ]
           },
           updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
@@ -423,11 +421,11 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
             startup: { success_patterns: ['App listening on port', 'Server started'], failure_patterns: ['npm ERR!', 'UnhandledPromiseRejectionWarning'] }
           },
           logs: { sources: ['stdout', 'stderr'], redact: ['discord_token', 'api_key', 'database_url'] },
-          diagnostics: { parsers: ['linux-oom', 'network-bind-error'] },
+          diagnostics: { parsers: ['linux-oom', 'port-conflict', 'nodejs-stacktrace'] },
           recovery: {
             policies: [
-              { match: 'port_conflict', action: 'resolve_managed_port_conflict' },
-              { match: 'out_of_memory', action: 'controlled_memory_recovery' }
+              { match: 'port-conflict', action: 'clear_declared_lock_files' },
+              { match: 'linux-oom', action: 'graceful_restart' }
             ]
           },
           updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },

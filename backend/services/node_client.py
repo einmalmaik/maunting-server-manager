@@ -378,14 +378,37 @@ class NodeClient:
     def update_container_resources(self, name: str, updates: dict[str, int | None]) -> dict[str, Any]:
         return self._request("PATCH", f"/containers/{quote(name, safe='')}/resources", json=updates)
 
-    def set_desired_state(self, name: str, payload: dict) -> dict[str, Any]:
-        return self._request("POST", f"/containers/{quote(name, safe='')}/desired-state", json=payload)
+    def set_desired_state(self, container_name: str, payload: dict) -> dict[str, Any]:
+        return self._request("POST", f"/containers/{quote(container_name, safe='')}/desired-state", json=payload)
 
-    def get_incidents(self, name: str) -> list[dict[str, Any]]:
-        return self._request("GET", f"/containers/{quote(name, safe='')}/incidents")
+    def get_guardian_capabilities(self) -> dict[str, Any]:
+        if getattr(self, "_capabilities_cache", None) is not None:
+            return self._capabilities_cache
+        data = self._request("GET", "/guardian/capabilities")
+        self._capabilities_cache = data if isinstance(data, dict) else {}
+        return self._capabilities_cache
 
-    def clear_incidents(self, name: str) -> dict[str, Any]:
-        return self._request("POST", f"/containers/{quote(name, safe='')}/incidents/clear")
+    def get_guardian_state(self, container_name: str) -> dict[str, Any]:
+        data = self._request("GET", f"/containers/{quote(container_name, safe='')}/guardian-state")
+        return data if isinstance(data, dict) else {}
+
+    def get_incidents(self, container_name: str) -> list[dict[str, Any]]:
+        data = self._request("GET", f"/containers/{quote(container_name, safe='')}/incidents")
+        return data if isinstance(data, list) else []
+
+    def acknowledge_incidents(self, container_name: str, uuids: list[str]) -> dict[str, Any]:
+        if not uuids:
+            return {}
+        
+        last_result = {}
+        for i in range(0, len(uuids), 1000):
+            batch = uuids[i : i + 1000]
+            last_result = self._request(
+                "POST",
+                f"/containers/{quote(container_name, safe='')}/incidents/acknowledge",
+                json={"uuids": batch},
+            )
+        return last_result
 
     def send_container_stdin(self, name: str, data: str) -> dict[str, Any]:
         return self._request("POST", f"/containers/{quote(name, safe='')}/stdin", json={"data": data})

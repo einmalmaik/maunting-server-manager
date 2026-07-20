@@ -1005,6 +1005,20 @@ class BlueprintHealthProcess(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     required: bool = True
+    id: str = Field(default="process", pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    interval: str = "15s"
+    failure_threshold: int = Field(default=1, ge=1, le=20)
+    success_threshold: int = Field(default=1, ge=1, le=20)
+    required_for_startup: bool = True
+    required_for_verification: bool = True
+
+    @field_validator("interval")
+    @classmethod
+    def _interval(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not re.fullmatch(r"\d+(?:\.\d+)?(?:ms|s|m)", cleaned):
+            raise ValueError("Guardian-Dauer muss z. B. 500ms, 5s oder 2m sein.")
+        return cleaned
 
 
 class BlueprintHealthPort(BaseModel):
@@ -1013,6 +1027,20 @@ class BlueprintHealthPort(BaseModel):
     protocol: str = "tcp"
     port: str
     timeout: str = "3s"
+    id: str = Field(default="port", pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    interval: str = "30s"
+    failure_threshold: int = Field(default=3, ge=1, le=20)
+    success_threshold: int = Field(default=1, ge=1, le=20)
+    required_for_startup: bool = False
+    required_for_verification: bool = True
+
+    @field_validator("protocol")
+    @classmethod
+    def _check_protocol(cls, v: str) -> str:
+        value = v.strip().lower()
+        if value not in {"tcp", "udp"}:
+            raise ValueError("health.port.protocol muss tcp oder udp sein.")
+        return value
 
     @field_validator("port")
     @classmethod
@@ -1021,12 +1049,13 @@ class BlueprintHealthPort(BaseModel):
             raise ValueError("Port-Wert darf nicht leer sein.")
         return v
 
-    @field_validator("timeout")
+    @field_validator("timeout", "interval")
     @classmethod
     def _check_timeout(cls, v: str) -> str:
-        if not v or "\x00" in v or len(v) > 32:
+        value = v.strip()
+        if not re.fullmatch(r"\d+(?:\.\d+)?(?:ms|s|m)", value):
             raise ValueError("Timeout-Wert ist ungueltig.")
-        return v
+        return value
 
 
 class BlueprintHealthApplication(BaseModel):
@@ -1034,21 +1063,96 @@ class BlueprintHealthApplication(BaseModel):
 
     type: str
     interval: str = "30s"
-    failure_threshold: int = 3
+    timeout: str = "3s"
+    failure_threshold: int = Field(default=3, ge=1, le=20)
+    success_threshold: int = Field(default=1, ge=1, le=20)
+    id: str = Field(default="application", pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    port: str | None = None
+    path: str | None = Field(default=None, max_length=512)
+    expected_statuses: list[int] = Field(default_factory=lambda: [200], min_length=1, max_length=16)
+    follow_redirects: bool = False
+    max_response_bytes: int = Field(default=4096, ge=1, le=1_048_576)
+    required_for_startup: bool = False
+    required_for_verification: bool = True
 
     @field_validator("type")
     @classmethod
     def _check_type(cls, v: str) -> str:
-        if not v or "\x00" in v:
-            raise ValueError("Typ darf nicht leer sein.")
-        return v
+        value = v.strip()
+        if value not in {"tcp", "http-ping", "minecraft-status", "minecraft-query", "source-query"}:
+            raise ValueError(f"Nicht unterstuetzter Guardian-Probe-Typ: {value}")
+        return value
+
+    @field_validator("interval", "timeout")
+    @classmethod
+    def _duration(cls, v: str) -> str:
+        value = v.strip()
+        if not re.fullmatch(r"\d+(?:\.\d+)?(?:ms|s|m)", value):
+            raise ValueError("Guardian-Dauer muss z. B. 500ms, 5s oder 2m sein.")
+        return value
+
+    @field_validator("port")
+    @classmethod
+    def _port(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        value = v.strip()
+        if not value or "\x00" in value:
+            raise ValueError("Guardian-Anwendungsport ist ungueltig.")
+        return value
+
+    @field_validator("expected_statuses")
+    @classmethod
+    def _statuses(cls, values: list[int]) -> list[int]:
+        if any(value < 100 or value > 599 for value in values):
+            raise ValueError("HTTP-Statuscodes muessen zwischen 100 und 599 liegen.")
+        return list(dict.fromkeys(values))
+
+    @model_validator(mode="after")
+    def _http_fields(self) -> "BlueprintHealthApplication":
+        if self.type == "http-ping":
+            if not self.path or not self.path.startswith("/") or self.path.startswith("//"):
+                raise ValueError("health.application.path muss ein relativer HTTP-Pfad sein.")
+            if "://" in self.path or "#" in self.path:
+                raise ValueError("health.application.path darf keine URL oder Fragment enthalten.")
+            if self.follow_redirects:
+                raise ValueError("Guardian folgt aus Sicherheitsgruenden keinen HTTP-Redirects.")
+        elif self.path is not None:
+            raise ValueError("health.application.path ist nur fuer http-ping erlaubt.")
+        return self
+
+
+def _validate_guardian_regex(value: str) -> str:
+    if not value or len(value) > 256 or any(ch in value for ch in ("\x00", "\n", "\r")):
+        raise ValueError("Guardian-Regex ist leer oder zu lang.")
+    if re.search(r"\\[1-9]|\(\?[=!<]|\(\?P|\(\?>|\(\?\(", value):
+        raise ValueError("Guardian-Regex nutzt nicht unterstuetzte Konstrukte.")
+    if re.search(r"(?:\*|\+|\{\d+(?:,\d*)?\})\s*(?:\*|\+|\{)", value):
+        raise ValueError("Guardian-Regex enthaelt verschachtelte Quantifizierer.")
+    if re.search(r"\([^)]*(?:\*|\+|\{\d+(?:,\d*)?\})[^)]*\)(?:\*|\+|\{)", value):
+        raise ValueError("Guardian-Regex enthaelt eine riskante quantifizierte Gruppe.")
+    re.compile(value)
+    return value
 
 
 class BlueprintHealthStartup(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    success_patterns: list[str] = Field(default_factory=list)
-    failure_patterns: list[str] = Field(default_factory=list)
+    grace_period_seconds: int = Field(default=30, ge=0, le=600)
+    timeout_seconds: int = Field(default=300, ge=1, le=3600)
+    success_patterns: list[str] = Field(default_factory=list, max_length=16)
+    failure_patterns: list[str] = Field(default_factory=list, max_length=16)
+
+    @field_validator("success_patterns", "failure_patterns")
+    @classmethod
+    def _patterns(cls, values: list[str]) -> list[str]:
+        return [_validate_guardian_regex(value) for value in values]
+
+    @model_validator(mode="after")
+    def _timeout_after_grace(self) -> "BlueprintHealthStartup":
+        if self.timeout_seconds <= self.grace_period_seconds:
+            raise ValueError("Guardian-Startup-Timeout muss groesser als die Grace Period sein.")
+        return self
 
 
 class BlueprintHealth(BaseModel):
@@ -1059,18 +1163,77 @@ class BlueprintHealth(BaseModel):
     application: BlueprintHealthApplication | None = None
     startup: BlueprintHealthStartup | None = None
 
+    @model_validator(mode="after")
+    def _unique_check_ids(self) -> "BlueprintHealth":
+        check_ids = [
+            item.id for item in (self.process, self.port, self.application) if item is not None
+        ]
+        if len(check_ids) != len(set(check_ids)):
+            raise ValueError("Guardian-Health-Check-IDs muessen eindeutig sein.")
+        return self
+
 
 class BlueprintLogs(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    sources: list[str] = Field(default_factory=list)
-    redact: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list, max_length=16)
+    redact: list[str] = Field(default_factory=list, max_length=32)
+    max_tail_bytes: int = Field(default=65_536, ge=1024, le=1_048_576)
+
+    @field_validator("sources")
+    @classmethod
+    def _sources(cls, values: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for raw in values:
+            value = raw.strip()
+            if value == "stdout":
+                cleaned.append(value)
+                continue
+            if not value or value.startswith("/") or "\\" in value or "\x00" in value or "**" in value:
+                raise ValueError("logs.sources enthaelt einen unsicheren Pfad.")
+            parts = value.split("/")
+            if any(part in {"", ".", ".."} for part in parts):
+                raise ValueError("logs.sources enthaelt Path Traversal.")
+            for index, part in enumerate(parts):
+                if any(char in part for char in ("?", "[")):
+                    raise ValueError("logs.sources erlaubt nur einen einfachen Dateinamen-Wildcard.")
+                if "*" in part and (index != len(parts) - 1 or part.count("*") > 1):
+                    raise ValueError("logs.sources erlaubt nur einen einfachen Dateinamen-Wildcard.")
+            cleaned.append(value)
+        return cleaned
+
+    @field_validator("redact")
+    @classmethod
+    def _redactors(cls, values: list[str]) -> list[str]:
+        builtins = {"discord_token", "api_key", "authorization_header", "database_url", "jwt"}
+        cleaned: list[str] = []
+        for raw in values:
+            value = raw.strip()
+            if value in builtins:
+                cleaned.append(value)
+            elif value.startswith("regex:"):
+                cleaned.append(f"regex:{_validate_guardian_regex(value[6:])}")
+            else:
+                raise ValueError(f"Nicht unterstuetzter Guardian-Redactor: {value}")
+        return list(dict.fromkeys(cleaned))
 
 
 class BlueprintDiagnostics(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    parsers: list[str] = Field(default_factory=list)
+    parsers: list[str] = Field(default_factory=list, max_length=16)
+
+    @field_validator("parsers")
+    @classmethod
+    def _parsers(cls, values: list[str]) -> list[str]:
+        supported = {
+            "linux-oom", "java-stacktrace", "nodejs-stacktrace", "port-conflict",
+            "missing-runtime", "corrupted-config", "startup-pattern",
+        }
+        unsupported = sorted(set(values) - supported)
+        if unsupported:
+            raise ValueError(f"Nicht unterstuetzte Guardian-Diagnoseparser: {', '.join(unsupported)}")
+        return list(dict.fromkeys(values))
 
 
 class BlueprintRecoveryPolicy(BaseModel):
@@ -1082,15 +1245,65 @@ class BlueprintRecoveryPolicy(BaseModel):
     @field_validator("match", "action")
     @classmethod
     def _check_non_empty(cls, v: str) -> str:
-        if not v.strip():
+        value = v.strip()
+        if not value:
             raise ValueError("Wert darf nicht leer sein.")
-        return v.strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", value):
+            raise ValueError("Recovery-Wert hat ein ungueltiges Format.")
+        return value
+
+    @field_validator("action")
+    @classmethod
+    def _supported_action(cls, value: str) -> str:
+        supported = {"restart", "graceful_restart", "clear_declared_lock_files", "quarantine"}
+        if value not in supported:
+            raise ValueError(f"Nicht unterstuetzte Guardian-Recovery-Aktion: {value}")
+        return value
+
+
+class BlueprintSafeLockFile(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    path: str = Field(min_length=1, max_length=256)
+    reason: str = Field(min_length=1, max_length=256)
+
+    @field_validator("path")
+    @classmethod
+    def _path(cls, value: str) -> str:
+        raw = value.strip()
+        if (
+            not raw or raw.startswith("/") or "\\" in raw or "\x00" in raw
+            or any(char in raw for char in ("*", "?", "["))
+            or any(part in {"", ".", ".."} for part in raw.split("/"))
+        ):
+            raise ValueError("safe_lock_files.path muss ein expliziter sicherer relativer Pfad sein.")
+        return raw
+
+
+class BlueprintVerification(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    minimum_healthy_duration_seconds: int = Field(default=30, ge=0, le=600)
+    required_consecutive_successes: int = Field(default=3, ge=1, le=20)
+    verification_timeout_seconds: int = Field(default=180, ge=5, le=3600)
 
 
 class BlueprintRecovery(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    policies: list[BlueprintRecoveryPolicy] = Field(default_factory=list)
+    policies: list[BlueprintRecoveryPolicy] = Field(default_factory=list, max_length=16)
+    safe_lock_files: list[BlueprintSafeLockFile] = Field(default_factory=list, max_length=32)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    attempt_window_seconds: int = Field(default=1800, ge=60, le=86_400)
+    cooldown_seconds: int = Field(default=300, ge=1, le=3600)
+    verification: BlueprintVerification = Field(default_factory=BlueprintVerification)
+
+    @model_validator(mode="after")
+    def _unique_lock_paths(self) -> "BlueprintRecovery":
+        paths = [entry.path for entry in self.safe_lock_files]
+        if len(paths) != len(set(paths)):
+            raise ValueError("safe_lock_files.path muss eindeutig sein.")
+        return self
 
 
 class BlueprintUpdates(BaseModel):
@@ -1119,7 +1332,7 @@ class BlueprintBackups(BaseModel):
             if not _is_safe_relative_template(
                 p_val,
                 allowed_tokens=frozenset(),
-                allow_glob=True,
+                allow_glob=False,
             ):
                 raise ValueError(
                     f"backups.protected_paths: unsicherer Pfad '{p}'."
@@ -1336,7 +1549,7 @@ COMMENTED_TEMPLATE_DE: str = """{
       "failure_threshold": 3
     },
     "startup": {
-      "success_patterns": ["Done ("],
+      "success_patterns": ["Done"],
       "failure_patterns": ["Unable to access jarfile", "Failed to bind to port"]
     }
   },
@@ -1352,7 +1565,7 @@ COMMENTED_TEMPLATE_DE: str = """{
   "recovery": {
     // Automatisierte Reparaturregeln
     "policies": [
-      { "match": "port_conflict", "action": "resolve_managed_port_conflict" }
+      { "match": "port-conflict", "action": "restart" }
     ]
   },
   "updates": {
@@ -1482,7 +1695,7 @@ COMMENTED_TEMPLATE_EN: str = """{
       "failure_threshold": 3
     },
     "startup": {
-      "success_patterns": ["Done ("],
+      "success_patterns": ["Done"],
       "failure_patterns": ["Unable to access jarfile", "Failed to bind to port"]
     }
   },
@@ -1498,7 +1711,7 @@ COMMENTED_TEMPLATE_EN: str = """{
   "recovery": {
     // Automated recovery policies
     "policies": [
-      { "match": "port_conflict", "action": "resolve_managed_port_conflict" }
+      { "match": "port-conflict", "action": "restart" }
     ]
   },
   "updates": {
@@ -1514,5 +1727,3 @@ COMMENTED_TEMPLATE_EN: str = """{
   }
 }
 """
-
-

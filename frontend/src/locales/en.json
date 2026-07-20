@@ -1771,19 +1771,19 @@
       "customMatchLabel": "Custom Error Match (Match)",
       "customActionLabel": "Custom Recovery Action (Action)",
       "matches": {
-        "port_conflict": "Port occupied (port_conflict)",
-        "out_of_memory": "Memory full (out_of_memory)",
-        "corrupted_config": "Broken config file (corrupted_config)",
-        "broken_update": "Failed update (broken_update)",
-        "missing_runtime": "Missing runtime dependency (missing_runtime)"
+        "port-conflict": "Port Conflict (port-conflict)",
+        "linux-oom": "Linux Out-of-Memory (linux-oom)",
+        "java-stacktrace": "Java Stacktrace (java-stacktrace)",
+        "nodejs-stacktrace": "Node.js Stacktrace (nodejs-stacktrace)",
+        "missing-runtime": "Missing Runtime (missing-runtime)",
+        "corrupted-config": "Corrupted Configuration (corrupted-config)",
+        "startup-pattern": "Startup Pattern Error (startup-pattern)"
       },
       "actions": {
-        "resolve_managed_port_conflict": "Free port (resolve_managed_port_conflict)",
-        "controlled_memory_recovery": "Adjust memory limits (controlled_memory_recovery)",
-        "restore_last_known_good_config": "Revert configuration (restore_last_known_good_config)",
-        "rollback_release": "Roll back update (rollback_release)",
-        "repair_runtime": "Repair runtime (repair_runtime)",
-        "restart": "Restart server (restart)"
+        "restart": "Force Restart Server (restart)",
+        "graceful_restart": "Graceful Restart Server (graceful_restart)",
+        "clear_declared_lock_files": "Clear Stale Lock Files (clear_declared_lock_files)",
+        "quarantine": "Move to Quarantine (quarantine)"
       }
     },
     "environment": { "title": "Environment values", "add": "Add entry", "help": "Non-secret configuration only. Credentials do not belong in blueprints.", "nameLabel": "Environment name {{index}}", "valueLabel": "Environment value {{index}}", "removeLabel": "Remove environment value {{index}}" },

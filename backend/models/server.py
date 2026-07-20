@@ -46,6 +46,13 @@ class Server(Base):
     guardian_config_hash: Mapped[str | None] = mapped_column(String(71), nullable=True)
     guardian_recovery_suspension: Mapped[str | None] = mapped_column(Text, nullable=True)
     guardian_quarantine_control: Mapped[str | None] = mapped_column(Text, nullable=True)
+    guardian_last_payload_hash: Mapped[str | None] = mapped_column(String(71), nullable=True)
+    guardian_container_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    guardian_active_incident_uuid: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    guardian_probe_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    guardian_transition_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    guardian_quarantine_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    guardian_sync_error_statistics: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Auto-Restart
     # WICHTIG: Nur EIN Modus aktiv (Intervall oder feste Zeiten).

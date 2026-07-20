@@ -42,6 +42,15 @@ export interface BlueprintDraft {
   }
   recovery?: {
     policies: Array<{ match: string; action: string }>
+    safe_lock_files?: Array<{ path: string; reason: string }>
+    max_attempts?: number
+    attempt_window_seconds?: number
+    cooldown_seconds?: number
+    verification?: {
+      minimum_healthy_duration_seconds?: number
+      required_consecutive_successes?: number
+      verification_timeout_seconds?: number
+    }
   }
   updates?: {
     strategy: string
@@ -282,7 +291,21 @@ export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
     clean.recovery.policies = clean.recovery.policies
       .map(p => ({ match: p.match.trim(), action: p.action.trim() }))
       .filter(p => p.match && p.action)
-    if (clean.recovery.policies.length === 0) {
+    if (clean.recovery.safe_lock_files) {
+      clean.recovery.safe_lock_files = clean.recovery.safe_lock_files
+        .map(entry => ({ path: entry.path.trim(), reason: entry.reason.trim() }))
+        .filter(entry => entry.path)
+      if (clean.recovery.safe_lock_files.length === 0) {
+        delete clean.recovery.safe_lock_files
+      }
+    }
+    const hasPolicies = clean.recovery.policies.length > 0
+    const hasLockFiles = clean.recovery.safe_lock_files && clean.recovery.safe_lock_files.length > 0
+    const hasOtherKeys = clean.recovery.max_attempts !== undefined ||
+                         clean.recovery.attempt_window_seconds !== undefined ||
+                         clean.recovery.cooldown_seconds !== undefined ||
+                         clean.recovery.verification !== undefined
+    if (!hasPolicies && !hasLockFiles && !hasOtherKeys) {
       delete clean.recovery
     }
   }

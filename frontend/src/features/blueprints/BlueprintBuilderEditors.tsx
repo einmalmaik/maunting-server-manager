@@ -369,21 +369,21 @@ export function RecoveryPoliciesEditor({
   const { t } = useTranslation()
 
   const commonMatches = [
-    { value: 'port_conflict', label: t('blueprintBuilder.recovery.matches.port_conflict') },
-    { value: 'out_of_memory', label: t('blueprintBuilder.recovery.matches.out_of_memory') },
-    { value: 'corrupted_config', label: t('blueprintBuilder.recovery.matches.corrupted_config') },
-    { value: 'broken_update', label: t('blueprintBuilder.recovery.matches.broken_update') },
-    { value: 'missing_runtime', label: t('blueprintBuilder.recovery.matches.missing_runtime') },
+    { value: 'port-conflict', label: t('blueprintBuilder.recovery.matches.port-conflict') },
+    { value: 'linux-oom', label: t('blueprintBuilder.recovery.matches.linux-oom') },
+    { value: 'java-stacktrace', label: t('blueprintBuilder.recovery.matches.java-stacktrace') },
+    { value: 'nodejs-stacktrace', label: t('blueprintBuilder.recovery.matches.nodejs-stacktrace') },
+    { value: 'missing-runtime', label: t('blueprintBuilder.recovery.matches.missing-runtime') },
+    { value: 'corrupted-config', label: t('blueprintBuilder.recovery.matches.corrupted-config') },
+    { value: 'startup-pattern', label: t('blueprintBuilder.recovery.matches.startup-pattern') },
     { value: 'custom', label: t('blueprintBuilder.recovery.customValue') }
   ]
 
   const commonActions = [
-    { value: 'resolve_managed_port_conflict', label: t('blueprintBuilder.recovery.actions.resolve_managed_port_conflict') },
-    { value: 'controlled_memory_recovery', label: t('blueprintBuilder.recovery.actions.controlled_memory_recovery') },
-    { value: 'restore_last_known_good_config', label: t('blueprintBuilder.recovery.actions.restore_last_known_good_config') },
-    { value: 'rollback_release', label: t('blueprintBuilder.recovery.actions.rollback_release') },
-    { value: 'repair_runtime', label: t('blueprintBuilder.recovery.actions.repair_runtime') },
     { value: 'restart', label: t('blueprintBuilder.recovery.actions.restart') },
+    { value: 'graceful_restart', label: t('blueprintBuilder.recovery.actions.graceful_restart') },
+    { value: 'clear_declared_lock_files', label: t('blueprintBuilder.recovery.actions.clear_declared_lock_files') },
+    { value: 'quarantine', label: t('blueprintBuilder.recovery.actions.quarantine') },
     { value: 'custom', label: t('blueprintBuilder.recovery.customValue') }
   ]
 
@@ -394,7 +394,7 @@ export function RecoveryPoliciesEditor({
         <Button
           variant="secondary"
           disabled={value.length >= 16}
-          onClick={() => onChange([...value, { match: 'port_conflict', action: 'restart' }])}
+          onClick={() => onChange([...value, { match: 'port-conflict', action: 'restart' }])}
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t('blueprintBuilder.recovery.addPolicy')}

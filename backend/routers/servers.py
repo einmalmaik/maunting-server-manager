@@ -455,6 +455,7 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     # (firewall, iptables, plugin stop/start). Value-based so same-value
     # fields are no-ops and don't trigger unnecessary recreation.
     network_change = bool(changed_ports) or bind_ip_changed
+    guardian_network_changed = bind_ip_changed
     has_resource = bool(resource_fields & set(payload.keys()))
     has_config = bool(config_fields & set(payload.keys()))
 
@@ -555,6 +556,19 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                     ("rcon", allocated[2], "tcp"),
                 ]
             _assert_remote_ports_available(node, allocated, bind_ip_for_check)
+
+            normalized_old_ports = sorted(
+                (int(port), str(protocol).lower(), str(role))
+                for port, protocol, role in old_ports
+            )
+            normalized_new_ports = sorted(
+                (int(port_val), str(proto).lower(), str(role))
+                for role, port_val, proto in allocated
+            )
+            guardian_network_changed = (
+                guardian_network_changed
+                or normalized_new_ports != normalized_old_ports
+            )
 
             from models.server_port import ServerPort
             db.query(ServerPort).filter(ServerPort.server_id == server.id).delete()
@@ -697,6 +711,11 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         if {"auto_restart", "restart_interval_hours", "restart_time_utc", "restart_times_utc"} & set(payload.keys()):
             sync_server_restart_schedule(server)
 
+        if guardian_network_changed:
+            from services.guardian_state_service import mark_guardian_configuration_changed
+
+            mark_guardian_configuration_changed(server)
+
         db.commit()
         db.refresh(server)
     except HTTPException:
@@ -731,6 +750,11 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             if server.node is None or server.node.is_local:
                 iptables_accept_server(server.name, server.public_bind_ip or "", new_ports)
             plugin.start(server)
+
+    if guardian_network_changed:
+        from services.server_lifecycle_service import sync_desired_state_to_agent
+
+        sync_desired_state_to_agent(db, server)
 
     return _server_response(server)
 
