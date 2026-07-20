@@ -263,6 +263,20 @@ def reconcile_guardian_server(
     except GuardianSyncMismatchError:
         # Re-raise directly to bypass generic error storage
         raise
+    except GuardianContractError as exc:
+        db.rollback()
+        err_data = {
+            "code": exc.code,
+            "message": exc.message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            server.guardian_sync_error_statistics = json.dumps(err_data, sort_keys=True, separators=(",", ":"))
+            db.commit()
+            db.refresh(server)
+        except Exception:
+            db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         # Save last known state on network/API failure

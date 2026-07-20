@@ -521,6 +521,13 @@ def _run_validation_test(db: Session, observed_override: dict, expected_error_co
             reconcile_guardian_server(db, server, node_client=client)
         assert excinfo.value.code == expected_error_code
 
+        db.refresh(server)
+        assert server.guardian_sync_error_statistics is not None
+        stats = json.loads(server.guardian_sync_error_statistics)
+        assert stats["code"] == expected_error_code
+        assert stats["message"] == excinfo.value.message
+        assert "timestamp" in stats
+
     db.delete(server)
     db.delete(node)
     db.commit()
@@ -576,6 +583,10 @@ def test_invalid_payload_hash_format_is_rejected(db: Session) -> None:
     _run_validation_test(db, {"payload_hash": "sha256:SHORT"}, "guardian_invalid_observed_field")
 
 def test_naive_timestamp_is_rejected(db: Session) -> None:
+    _run_validation_test(db, {"last_transition_at": "2026-07-20T12:00:00"}, "guardian_invalid_observed_timestamp")
+
+def test_contract_error_persists_stable_error_code(db: Session) -> None:
+    _run_validation_test(db, {"server_id": 999}, "guardian_server_id_mismatch")
     _run_validation_test(db, {"last_transition_at": "2026-07-20T12:00:00"}, "guardian_invalid_observed_timestamp")
 
 def test_sync_error_preserves_running_incidents_and_is_structured(db: Session) -> None:
@@ -683,3 +694,76 @@ def test_sync_success_commits_before_incident_failure(db: Session) -> None:
     assert server.guardian_sync_error_statistics is not None
     stats = json.loads(server.guardian_sync_error_statistics)
     assert stats["last_error_message"] == "Incident API Error"
+
+
+def test_contract_error_persists_stable_error_code(db: Session) -> None:
+    """
+    P0.4: Bei einem GuardianContractError muss guardian_sync_error_statistics
+    den tatsächlichen stabilen Fehlercode enthalten (z.B. guardian_server_id_mismatch).
+    """
+    node = Node(id=1, name="node-1", host="http://127.0.0.1", status="online", auth_token_enc="enc")
+    server = _server()
+    server.node = node
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    client = MagicMock()
+    client.get_guardian_capabilities.return_value = {
+        "guardian_schema_versions": [1],
+        "probe_types": ["process"],
+        "diagnostic_parsers": [],
+        "recovery_actions": [],
+    }
+
+    plugin = MagicMock()
+    from blueprints.schema import load_blueprint_dict
+    plugin.get_blueprint.return_value = load_blueprint_dict({
+        "version": 1,
+        "meta": {"id": "minecraft", "name": "Minecraft", "category": "steam_game", "description": "desc"},
+        "runtime": {"image": "ubuntu:latest", "startup": "echo"},
+        "ports": [],
+        "source": {"type": "dockerOnly", "updateStrategy": "none"},
+        "health": {},
+    })
+
+    with patch("services.guardian_sync_service.get_plugin", return_value=plugin):
+        payload = compile_desired_state(db, server)
+
+        # Return observed state with mismatched server_id
+        observed = {
+            "schema_version": 1,
+            "supported_schema_version": 1,
+            "server_id": 99999,  # Mismatch!
+            "accepted_generation": payload["generation"],
+            "payload_hash": payload["payload_hash"],
+            "guardian_observed_state": "healthy",
+            "observed_runtime_state": "healthy",
+            "container_state": "running",
+            "active_incident_uuid": None,
+            "last_probe_at": "2026-07-20T12:00:00Z",
+            "last_transition_at": "2026-07-20T11:59:00Z",
+            "quarantine": None,
+            "recovery_suspension": None,
+        }
+        client.get_guardian_state.return_value = observed
+
+        with pytest.raises(GuardianContractError) as excinfo:
+            reconcile_guardian_server(db, server, node_client=client)
+
+        assert excinfo.value.code == "guardian_server_id_mismatch"
+
+    db.refresh(server)
+
+    # Ensure stable error code is saved in guardian_sync_error_statistics
+    assert server.guardian_sync_error_statistics is not None
+    stats = json.loads(server.guardian_sync_error_statistics)
+    assert stats["code"] == "guardian_server_id_mismatch"
+    assert stats["message"] == "Server ID mismatch"
+    assert "timestamp" in stats
+    assert "last_error" not in stats
+
+    db.delete(server)
+    db.delete(node)
+    db.commit()
+
