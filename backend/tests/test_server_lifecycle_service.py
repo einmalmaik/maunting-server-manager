@@ -764,3 +764,109 @@ def test_lifecycle_aborts_if_agent_does_not_confirm_lease_removal(db: Session) -
             with guardian_recovery_suspension_lease(db, server, "unit-test-removal"):
                 pass
 
+
+def test_restart_server_sync_success(db: Session) -> None:
+    """Tests the success path of _restart_server_sync: no exception is raised and status is running."""
+    from services.server_lifecycle_service import _restart_server_sync
+    from models import Server, Node
+
+    node = Node(id=201, name="node-201", host="http://127.0.0.1", status="online", auth_token_enc="test-enc-v1:00:00")
+    server = Server(
+        id=201,
+        name="RestartSuccessTest",
+        game_type="minecraft",
+        install_dir="/tmp/test",
+        status="stopped",
+        desired_power_state="stopped",
+        desired_state_generation=1,
+        guardian_observed_state="unknown",
+        public_bind_ip="127.0.0.1",
+        node=node,
+    )
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    saved_json = [None]
+
+    def fake_reconcile(_db, _server):
+        if _server.guardian_recovery_suspension:
+            saved_json[0] = _server.guardian_recovery_suspension
+        else:
+            saved_json[0] = None
+        _server.guardian_agent_recovery_suspension_json = saved_json[0]
+        return {"payload_hash": "sha256:dummy"}
+
+    # Mock _run_restart to simulate success (which sets status to running)
+    def fake_run_restart(_db, _server, _plugin):
+        _server.status = "running"
+        _db.commit()
+
+    with patch("services.server_lifecycle_service.SessionLocal", return_value=db), \
+         patch.object(db, "close", return_value=None), \
+         patch("services.server_lifecycle_service.get_plugin", return_value=MagicMock()), \
+         patch("services.server_lifecycle_service._run_restart", side_effect=fake_run_restart), \
+         patch("services.server_lifecycle_service._append_console_log") as mock_log, \
+         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
+
+        result = _restart_server_sync(server.id)
+
+        assert result == {
+            "message": "Restart-Befehl gesendet",
+            "status": "running",
+        }
+        db.refresh(server)
+        assert server.status == "running"
+
+
+def test_restart_server_sync_failure_reraises_original_exception(db: Session) -> None:
+    """Tests the failure path of _restart_server_sync: status is set to failed and the original exception is re-raised."""
+    from services.server_lifecycle_service import _restart_server_sync
+    from models import Server, Node
+
+    node = Node(id=202, name="node-202", host="http://127.0.0.1", status="online", auth_token_enc="test-enc-v1:00:00")
+    server = Server(
+        id=202,
+        name="RestartFailureTest",
+        game_type="minecraft",
+        install_dir="/tmp/test",
+        status="stopped",
+        desired_power_state="stopped",
+        desired_state_generation=1,
+        guardian_observed_state="unknown",
+        public_bind_ip="127.0.0.1",
+        node=node,
+    )
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    saved_json = [None]
+
+    def fake_reconcile(_db, _server):
+        if _server.guardian_recovery_suspension:
+            saved_json[0] = _server.guardian_recovery_suspension
+        else:
+            saved_json[0] = None
+        _server.guardian_agent_recovery_suspension_json = saved_json[0]
+        return {"payload_hash": "sha256:dummy"}
+
+    # Mock _run_restart to raise a specific exception
+    original_error = ValueError("Simulation of restart failure")
+
+    with patch("services.server_lifecycle_service.SessionLocal", return_value=db), \
+         patch.object(db, "close", return_value=None), \
+         patch("services.server_lifecycle_service.get_plugin", return_value=MagicMock()), \
+         patch("services.server_lifecycle_service._run_restart", side_effect=original_error), \
+         patch("services.server_lifecycle_service._append_console_log") as mock_log, \
+         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
+
+        with pytest.raises(ValueError) as exc_info:
+            _restart_server_sync(server.id)
+
+        assert exc_info.value is original_error
+        db.refresh(server)
+        assert server.status == "failed"
+        assert "Simulation of restart failure" in server.status_message
+
+

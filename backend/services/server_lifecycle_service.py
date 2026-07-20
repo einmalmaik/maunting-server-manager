@@ -942,7 +942,7 @@ def _restart_server_sync(server_id: int) -> dict:
                     server.status_message = message
                     db.commit()
                     _append_console_log(server_id, f"[MSM] Lifecycle-restart fehlgeschlagen: {message}\n")
-                raise
+                    raise
 
         return {
             "message": "Restart-Befehl gesendet",
