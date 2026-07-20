@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from models import ChangeEvent, Incident, Server
+from models import ChangeEvent, Incident, Server, GuardianIncidentDelivery
 from services.node_client import NodeClient
 
 
@@ -117,7 +117,23 @@ def ingest_incidents_and_ack(
             limit=2000,
         )
 
-        # 1. Check for exact UUID match (Idempotency / Unique constraint)
+        # 1. Check if this exact UUID was already delivered (Idempotency)
+        delivery = db.query(GuardianIncidentDelivery).filter(GuardianIncidentDelivery.incident_uuid == incident_uuid).first()
+        if delivery is not None:
+            # We already processed this incident UUID. 
+            # If the status changed, update it.
+            existing_inc = db.query(Incident).filter(Incident.uuid == incident_uuid).first()
+            if existing_inc and existing_inc.status != item["status"]:
+                existing_inc.status = item["status"]
+                if existing_inc.status == "resolved":
+                    existing_inc.resolved_at = datetime.now(timezone.utc)
+            
+            acknowledged.append(incident_uuid)
+            continue
+
+        target_incident = None
+
+        # 2. Check for exact UUID match in Incidents (should not happen if deliveries are tracked properly, but fallback)
         existing = db.query(Incident).filter(Incident.uuid == incident_uuid).first()
         if existing is not None:
             # Update existing exact UUID entry
@@ -129,8 +145,9 @@ def ingest_incidents_and_ack(
                 existing.resolved_at = datetime.now(timezone.utc)
             elif existing.resolved_at is not None and item["status"] != "resolved":
                 existing.resolved_at = None
+            target_incident = existing
         else:
-            # 2. Check for active (unresolved) incident with the same fingerprint (Grouping)
+            # 3. Check for active (unresolved) incident with the same fingerprint (Grouping)
             group_parent = (
                 db.query(Incident)
                 .filter(
@@ -145,25 +162,18 @@ def ingest_incidents_and_ack(
                 group_parent.occurrences += 1
                 merged_att = _merge_attempts(group_parent.attempts, item["attempts"])
                 
-                # Enforce attempt limits: "Das Limit der Versuche (z.B. max 3 Versuche) erzwingen."
-                # If attempts count >= 3, set status to quarantined
-                if len(merged_att) >= 3:
-                    group_parent.status = "quarantined"
-                    server.guardian_quarantine_status = "quarantined"
-                else:
-                    group_parent.status = item["status"]
+                # Trust the agent for status. Backend does not force quarantine.
+                group_parent.status = item["status"]
 
                 group_parent.attempts = json.dumps(merged_att, sort_keys=True, separators=(",", ":"))
                 group_parent.description = message
                 if group_parent.status == "resolved":
                     group_parent.resolved_at = datetime.now(timezone.utc)
+                target_incident = group_parent
             else:
-                # 3. Create a brand new incident
+                # 4. Create a brand new incident
                 merged_att = item["attempts"]
                 status = item["status"]
-                if len(merged_att) >= 3:
-                    status = "quarantined"
-                    server.guardian_quarantine_status = "quarantined"
 
                 new_inc = Incident(
                     uuid=incident_uuid,
@@ -180,6 +190,17 @@ def ingest_incidents_and_ack(
                 if status == "resolved":
                     new_inc.resolved_at = datetime.now(timezone.utc)
                 db.add(new_inc)
+                db.flush() # flush to get the id for the delivery record
+                target_incident = new_inc
+
+        # Record delivery to prevent future duplicate processing
+        if target_incident:
+            db.add(GuardianIncidentDelivery(
+                incident_uuid=incident_uuid,
+                incident_id=target_incident.id,
+                server_id=server.id,
+                received_at=datetime.now(timezone.utc)
+            ))
 
         acknowledged.append(incident_uuid)
 
@@ -192,5 +213,16 @@ def ingest_incidents_and_ack(
         raise
 
     # ACK payload to node
-    node_client.acknowledge_incidents(container_name, acknowledged)
+    try:
+        node_client.acknowledge_incidents(container_name, acknowledged)
+        # Optional: Mark as acknowledged in DB
+        now = datetime.now(timezone.utc)
+        db.query(GuardianIncidentDelivery).filter(
+            GuardianIncidentDelivery.incident_uuid.in_(acknowledged)
+        ).update({"acknowledged_at": now}, synchronize_session=False)
+        db.commit()
+    except Exception as exc:
+        logger.error("Failed to ACK incidents for %s: %s", container_name, exc)
+        raise
+
     return acknowledged

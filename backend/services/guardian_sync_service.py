@@ -260,23 +260,6 @@ def reconcile_guardian_server(
         server.guardian_sync_error_statistics = None
         db.commit()
 
-        # 3. Handle incidents ingestion
-        incidents = client.get_incidents(container_name)
-        acknowledged = ingest_incidents_and_ack(
-            db,
-            server,
-            client,
-            container_name,
-            incidents,
-        )
-        db.commit()
-        db.refresh(server)
-        return {
-            "payload_hash": payload["payload_hash"],
-            "generation": payload["generation"],
-            "observed_state": observed_state,
-            "acknowledged_incidents": acknowledged,
-        }
     except GuardianSyncMismatchError:
         # Re-raise directly to bypass generic error storage
         raise
@@ -307,3 +290,37 @@ def reconcile_guardian_server(
             }
             
         raise
+
+    # 3. Handle incidents ingestion outside the main sync try/except
+    # so that incident failures don't overwrite successful sync status.
+    try:
+        incidents = client.get_incidents(container_name)
+        acknowledged = ingest_incidents_and_ack(
+            db,
+            server,
+            client,
+            container_name,
+            incidents,
+        )
+    except Exception as exc:
+        error_info = {
+            "last_error": type(exc).__name__,
+            "last_error_message": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "context": "incident_sync"
+        }
+        try:
+            server.guardian_sync_error_statistics = json.dumps(error_info)
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise
+    db.commit()
+    db.refresh(server)
+    
+    return {
+        "payload_hash": payload["payload_hash"],
+        "generation": payload["generation"],
+        "observed_state": observed_state,
+        "acknowledged_incidents": acknowledged,
+    }

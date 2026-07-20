@@ -24,7 +24,7 @@ from .postgres_grant import PostgresGrant
 from .webhook_subscription import WebhookSubscription
 from .webhook_delivery import WebhookDelivery
 from .singra_webhook_event import SingraWebhookEvent
-from .incident import Incident
+from .incident import Incident, GuardianIncidentDelivery
 from .change_event import ChangeEvent
 
 __all__ = [
@@ -34,5 +34,5 @@ __all__ = [
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",
     "PostgresDatabase", "PostgresUser", "PostgresGrant",
     "WebhookSubscription", "WebhookDelivery", "SingraWebhookEvent",
-    "Incident", "ChangeEvent",
+    "Incident", "GuardianIncidentDelivery", "ChangeEvent",
 ]  # noqa: E501
