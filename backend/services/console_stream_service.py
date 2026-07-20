@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -63,21 +64,36 @@ class _ServerState:
     websockets: set[WebSocket] = field(default_factory=set)
     tasks: list[asyncio.Task] = field(default_factory=list)
     agent_ws: Any = None
+    file_pos: int = 0
+    last_disconnected_at: float | None = None
 
 
 _STATES: dict[int, _ServerState] = {}
+_NEXT_IDS: dict[int, int] = {}
 _STATES_LOCK = asyncio.Lock()
 _SYNC_STATES_LOCK = threading.Lock()
+
+
+def cleanup_inactive_states(max_age_seconds: float = 300.0) -> int:
+    """Entfernt ServerStates ohne aktive Websockets, die aelter als max_age_seconds sind."""
+    now = time.monotonic()
+    removed = 0
+    with _SYNC_STATES_LOCK:
+        to_remove = []
+        for s_id, st in list(_STATES.items()):
+            if len(st.websockets) == 0 and st.last_disconnected_at is not None:
+                if (now - st.last_disconnected_at) >= max_age_seconds:
+                    to_remove.append(s_id)
+        for s_id in to_remove:
+            _STATES.pop(s_id, None)
+            removed += 1
+    return removed
 
 
 def append_msm_log_to_memory(server_id: int, text: str, timestamp: str) -> None:
     """Synchronous, thread-safe function to append an MSM log line to the in-memory
     state of a server, if it is currently loaded.
     """
-    # Legacy function - not strictly needed for live updates anymore because file tail
-    # handles everything and ingest_line unifies it. But for backwards compatibility
-    # and testing, we can keep it as a no-op or just append.
-    # To prevent duplicates, we leave it as a no-op because the file tail reads it anyway.
     pass
 
 
@@ -99,6 +115,7 @@ async def ingest_line(server_id: int, text: str, source: str, timestamp: str | N
                 timestamp=ts,
             )
             state.next_id += 1
+            _NEXT_IDS[server_id] = state.next_id
             state.lines.append(line)
             payload = _serialize(line)
             
@@ -118,9 +135,11 @@ def _utc_iso() -> str:
 
 def _get_state(server_id: int) -> _ServerState:
     """Liefert (oder erstellt) den Per-Server State."""
+    cleanup_inactive_states(max_age_seconds=300.0)
     state = _STATES.get(server_id)
     if state is None:
-        state = _ServerState()
+        next_id = _NEXT_IDS.get(server_id, 1)
+        state = _ServerState(next_id=next_id)
         _STATES[server_id] = state
     return state
 
@@ -138,11 +157,14 @@ def _serialize(line: _Line) -> str:
     )
 
 
-async def _read_initial_backlog(log_path: str, state: _ServerState) -> None:
+async def _read_initial_backlog(log_path: str, state: _ServerState, server_id: int | None = None) -> None:
     """Liest die MSM-Console-Logdatei in den Ring-Buffer."""
     if not os.path.exists(log_path):
+        state.file_pos = 0
         return
     try:
+        size = os.path.getsize(log_path)
+        state.file_pos = size
         with open(log_path, "rb") as f:
             while True:
                 chunk = f.read(64 * 1024)
@@ -175,16 +197,19 @@ async def _read_initial_backlog(log_path: str, state: _ServerState) -> None:
                             )
                         )
                         state.next_id += 1
+                        if server_id is not None:
+                            _NEXT_IDS[server_id] = state.next_id
     except OSError as exc:
         logger.warning("ws backlog read failed for %s: %s", log_path, exc)
 
 
 async def _tail_file_loop(log_path: str, state: _ServerState, on_line) -> None:
     """Tail-Loop fuer die MSM-Lifecycle-Logdatei."""
-    pos = 0
-    if os.path.exists(log_path):
+    pos = state.file_pos
+    if pos == 0 and os.path.exists(log_path):
         try:
             pos = os.path.getsize(log_path)
+            state.file_pos = pos
         except OSError:
             pos = 0
     while True:
@@ -202,6 +227,7 @@ async def _tail_file_loop(log_path: str, state: _ServerState, on_line) -> None:
                 f.seek(pos)
                 chunk = f.read(size - pos)
             pos = size
+            state.file_pos = pos
         except OSError:
             continue
         for raw_line in chunk.splitlines(keepends=False):
@@ -329,6 +355,7 @@ async def connect(
             return
             
         state.websockets.add(ws)
+        state.last_disconnected_at = None
         is_first = len(state.websockets) == 1
 
     try:
@@ -343,7 +370,7 @@ async def connect(
         if is_first:
             if not state.lines:
                 try:
-                    await _read_initial_backlog(log_path, state)
+                    await _read_initial_backlog(log_path, state, server_id=server_id)
                 except Exception:
                     pass
                     
@@ -425,11 +452,10 @@ async def connect(
                         pass
                     state.agent_ws = None
                     
-                with state.lock:
-                    state.lines.clear()
-                    state.next_id = 1
+                state.last_disconnected_at = time.monotonic()
 
 
 def reset_state_for_tests() -> None:
     """Loescht allen In-Memory-State. Nur fuer Tests."""
     _STATES.clear()
+    _NEXT_IDS.clear()
