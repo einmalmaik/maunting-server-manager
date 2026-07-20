@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import threading
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+import uuid
+from contextlib import asynccontextmanager, contextmanager
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 from typing import AsyncIterator
 
@@ -38,6 +39,31 @@ _ACTIVE_JOBS: set[int] = set()
 _ACTIVE_JOBS_LOCK = threading.Lock()
 
 LifecycleOperation = str
+
+
+@contextmanager
+def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str):
+    op_id = str(uuid.uuid4())
+    try:
+        from services.guardian_state_service import set_recovery_suspension
+        set_recovery_suspension(
+            db,
+            server,
+            operation_id=op_id,
+            reason=reason,
+            suspend_until=datetime.now(timezone.utc) + timedelta(minutes=15),
+        )
+    except Exception as exc:
+        logger.warning("Failed to set guardian recovery lease suspension: %s", exc)
+        
+    try:
+        yield
+    finally:
+        try:
+            from services.guardian_state_service import clear_recovery_suspension
+            clear_recovery_suspension(db, server, operation_id=op_id)
+        except Exception as exc:
+            logger.warning("Failed to clear guardian recovery lease suspension: %s", exc)
 _TRANSIENT_STATUSES = {"queued", "starting", "stopping", "restarting"}
 
 
@@ -286,20 +312,21 @@ def queue_lifecycle_operation(
         # Das loest das User-Problem "Kill bringt den Server nicht aus der Warteschlange".
         from services.guardian_state_service import set_desired_power_state
 
-        set_desired_power_state(db, server, "stopped")
-        sync_desired_state_to_agent(db, server)
+        with guardian_recovery_suspension_lease(db, server, "lifecycle-kill"):
+            set_desired_power_state(db, server, "stopped")
+            sync_desired_state_to_agent(db, server)
 
-        container = container_name_for(server.id)
-        try:
-            docker_service.remove(container, force=True, node=server.node)
-        except Exception:
-            pass
+            container = container_name_for(server.id)
+            try:
+                docker_service.remove(container, force=True, node=server.node)
+            except Exception:
+                pass
 
-        _mark_job_done(server.id)
-        server.status = "stopped"
-        server.status_message = "Erzwungen beendet (Kill)"
-        server.last_started_at = None
-        db.commit()
+            _mark_job_done(server.id)
+            server.status = "stopped"
+            server.status_message = "Erzwungen beendet (Kill)"
+            server.last_started_at = None
+            db.commit()
 
         from services.change_timeline_service import log_change_event
         log_change_event(db, server.id, "stop", "Server erzwungen beendet.")
@@ -384,27 +411,28 @@ def _run_lifecycle_job(
                 return
 
             _set_status(db, server, _operation_status(operation), None)
-            try:
-                if operation == "start":
-                    _run_start(db, server, plugin)
-                elif operation == "stop":
-                    _run_stop(db, server, plugin)
-                elif operation == "restart":
-                    _run_restart(db, server, plugin)
-                elif operation == "kill":
-                    _run_kill(db, server)
-                if notification and notification.enabled:
-                    _send_lifecycle_notification(notification, server.name, _operation_done_text(operation))
-            except Exception as exc:
-                db.rollback()
-                server = db.query(Server).filter(Server.id == server_id).first()
-                if server:
-                    message = _safe_error_message(getattr(exc, "detail", exc))
-                    server.status = "failed"
-                    server.status_message = message
-                    db.commit()
-                    _append_console_log(server.id, f"[MSM] Lifecycle-{operation} fehlgeschlagen: {message}\n")
-                logger.warning("Lifecycle-%s fuer Server %s fehlgeschlagen: %s", operation, server_id, exc)
+            with guardian_recovery_suspension_lease(db, server, f"lifecycle-{operation}"):
+                try:
+                    if operation == "start":
+                        _run_start(db, server, plugin)
+                    elif operation == "stop":
+                        _run_stop(db, server, plugin)
+                    elif operation == "restart":
+                        _run_restart(db, server, plugin)
+                    elif operation == "kill":
+                        _run_kill(db, server)
+                    if notification and notification.enabled:
+                        _send_lifecycle_notification(notification, server.name, _operation_done_text(operation))
+                except Exception as exc:
+                    db.rollback()
+                    server = db.query(Server).filter(Server.id == server_id).first()
+                    if server:
+                        message = _safe_error_message(getattr(exc, "detail", exc))
+                        server.status = "failed"
+                        server.status_message = message
+                        db.commit()
+                        _append_console_log(server.id, f"[MSM] Lifecycle-{operation} fehlgeschlagen: {message}\n")
+                    logger.warning("Lifecycle-%s fuer Server %s fehlgeschlagen: %s", operation, server_id, exc)
     finally:
         _mark_job_done(server_id)
         db.close()
@@ -869,15 +897,16 @@ def _restart_server_sync(server_id: int) -> dict:
         lock = get_server_lifecycle_lock(server_id)
         with lock:
             _set_status(db, server, "restarting", None)
-            try:
-                _run_restart(db, server, plugin)
-            except Exception as exc:
-                db.rollback()
-                message = _safe_error_message(getattr(exc, "detail", exc))
-                server.status = "failed"
-                server.status_message = message
-                db.commit()
-                _append_console_log(server_id, f"[MSM] Lifecycle-restart fehlgeschlagen: {message}\n")
+            with guardian_recovery_suspension_lease(db, server, "lifecycle-restart"):
+                try:
+                    _run_restart(db, server, plugin)
+                except Exception as exc:
+                    db.rollback()
+                    message = _safe_error_message(getattr(exc, "detail", exc))
+                    server.status = "failed"
+                    server.status_message = message
+                    db.commit()
+                    _append_console_log(server_id, f"[MSM] Lifecycle-restart fehlgeschlagen: {message}\n")
                 raise
 
         return {

@@ -56,53 +56,59 @@ def create_server_backup(
     from models import Server
     from services.backup_config_service import BackupConfigService
     from services.backup_service import run_backup
-
-    # Lokale Verschluesselung wenn Passwort gesetzt (unabhaengig von S3-Config).
-    password_set = BackupConfigService.is_backup_password_set()
-    s3_configured = BackupConfigService.is_s3_configured()
-    s3_eligible = s3_configured and password_set
-    encrypt_local = password_set  # VAL-FIX-001: local .enc when password set
+    from services.server_lifecycle_service import guardian_recovery_suspension_lease
 
     server = db.query(Server).filter(Server.id == server_id).first()
-    node = getattr(server, "node", None) if server else None
-    is_remote = bool(node is not None and not getattr(node, "is_local", False))
+    if not server:
+        raise ValueError("Server nicht gefunden")
 
-    # Phase 6: remote + S3 + password → agent-direct (no panel data plane)
-    if is_remote and s3_eligible:
-        return _create_remote_agent_s3_backup(
-            server_id, db, node, name=name, timeout_seconds=timeout_seconds
-        )
+    with guardian_recovery_suspension_lease(db, server, "lifecycle-backup"):
+        # Lokale Verschluesselung wenn Passwort gesetzt (unabhaengig von S3-Config).
+        password_set = BackupConfigService.is_backup_password_set()
+        s3_configured = BackupConfigService.is_s3_configured()
+        s3_eligible = s3_configured and password_set
+        encrypt_local = password_set  # VAL-FIX-001: local .enc when password set
 
-    if s3_configured and not password_set:
-        logger.warning(
-            "S3 konfiguriert aber kein Backup-Passwort gesetzt — Server %s: nur lokales Backup",
+        node = getattr(server, "node", None) if server else None
+        is_remote = bool(node is not None and not getattr(node, "is_local", False))
+
+        # Phase 6: remote + S3 + password → agent-direct (no panel data plane)
+        if is_remote and s3_eligible:
+            return _create_remote_agent_s3_backup(
+                server_id, db, node, name=name, timeout_seconds=timeout_seconds
+            )
+
+        if s3_configured and not password_set:
+            logger.warning(
+                "S3 konfiguriert aber kein Backup-Passwort gesetzt — Server %s: nur lokales Backup",
+                server_id,
+            )
+        if not password_set:
+            logger.warning(
+                "Kein Backup-Passwort gesetzt — Server %s: lokales Backup als plaintext (backward compat)",
+                server_id,
+            )
+
+        # 1. Lokales Backup erstellen (tar.gz oder .enc wenn encrypt_local).
+        # encrypted-Flag steuert das Manifest im tar.gz (true wenn verschluesselt).
+        # Remote without S3 eligibility still streams archive via agent (Phase 2 path).
+        backup = run_backup(
             server_id,
-        )
-    if not password_set:
-        logger.warning(
-            "Kein Backup-Passwort gesetzt — Server %s: lokales Backup als plaintext (backward compat)",
-            server_id,
+            db,
+            name=name,
+            timeout_seconds=timeout_seconds,
+            encrypted=encrypt_local,
+            encryption_algorithm=_ENCRYPTION_ALGORITHM if encrypt_local else None,
+            encrypt_local=encrypt_local,
         )
 
-    # 1. Lokales Backup erstellen (tar.gz oder .enc wenn encrypt_local).
-    # encrypted-Flag steuert das Manifest im tar.gz (true wenn verschluesselt).
-    # Remote without S3 eligibility still streams archive via agent (Phase 2 path).
-    backup = run_backup(
-        server_id,
-        db,
-        name=name,
-        timeout_seconds=timeout_seconds,
-        encrypted=encrypt_local,
-        encryption_algorithm=_ENCRYPTION_ALGORITHM if encrypt_local else None,
-        encrypt_local=encrypt_local,
-    )
+        # 2. S3-Upload (Best-Effort) — local/panel path.
+        if not s3_eligible:
+            return backup
 
-    # 2. S3-Upload (Best-Effort) — local/panel path.
-    if not s3_eligible:
+        _upload_to_s3(backup, db, server_id)
         return backup
 
-    _upload_to_s3(backup, db, server_id)
-    return backup
 
 
 def _create_remote_agent_s3_backup(

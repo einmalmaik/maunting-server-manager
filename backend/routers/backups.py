@@ -220,7 +220,7 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
     is_remote = bool(node is not None and not getattr(node, "is_local", False))
     use_agent_s3_restore = is_remote and bool(backup.s3_key)
 
-    from services.server_lifecycle_service import get_server_lifecycle_lock
+    from services.server_lifecycle_service import get_server_lifecycle_lock, guardian_recovery_suspension_lease
 
     lock = get_server_lifecycle_lock(server.id)
     # Non-blocking acquire: concurrent Restore / Lifecycle-Op → 409.
@@ -235,241 +235,242 @@ async def restore_backup(server_id: int, backup_id: int, db: Session = Depends(g
     decrypt_tmp_dir: str | None = None
 
     try:
-        db.refresh(server)
+        with guardian_recovery_suspension_lease(db, server, "lifecycle-restore"):
+            db.refresh(server)
 
-        if use_agent_s3_restore:
+            if use_agent_s3_restore:
+                from games.base import container_name_for
+                from services import docker_service
+                from services.backup_orchestrator import restore_via_agent_s3
+                from services.backup_crypto_service import BackupDecryptionError, BackupCryptoError
+                from services.backup_service import set_active_backup_status, clear_active_backup_status
+                from services.node_client import NodeClientError
+                from services.s3_service import S3NotConfiguredError, S3OperationError
+
+                # Stop container on the remote node before agent extracts
+                container = container_name_for(server.id)
+                try:
+                    if docker_service.is_running(container, node=node):
+                        docker_service.stop(container, timeout=30, node=node)
+                    docker_service.remove(container, force=True, node=node)
+                except Exception:
+                    logger.warning(
+                        "Container-Stop vor Agent-Restore (Server %s) fehlgeschlagen — fortsetzen",
+                        server_id,
+                    )
+
+                set_active_backup_status(server_id, "restoring", backup.size_mb)
+                try:
+                    restore_via_agent_s3(server, backup, db)
+                except BackupDecryptionError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Entschlüsselung fehlgeschlagen: falsches Passwort oder manipuliertes Backup",
+                    )
+                except (S3NotConfiguredError, S3OperationError, NodeClientError, BackupCryptoError):
+                    raise HTTPException(status_code=502, detail="Cloud-Backup nicht verfügbar")
+                except Exception:
+                    logger.warning(
+                        "Agent-S3-Restore fehlgeschlagen (Server %s, Backup %s)",
+                        server_id, backup_id,
+                    )
+                    raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
+                finally:
+                    clear_active_backup_status(server_id)
+
+                server.status = "stopped"
+                server.status_message = "Wiederhergestellt (Remote-Node)"
+                db.commit()
+                return {"message": "Backup wiederhergestellt", "server_id": server_id, "backup_id": backup_id}
+
+            # S3-Restore: Download (+ ggf. Decrypt) VOR Container-Stop.
+            # Bei Fehlern bleibt install_dir unveraendert und der Container laeuft weiter.
+            if not local_exists:
+                from services.backup_orchestrator import fetch_backup_from_s3
+                from services.s3_service import S3NotConfiguredError, S3OperationError
+                from services.backup_crypto_service import BackupDecryptionError, BackupCryptoError
+                try:
+                    fetch_backup_from_s3(backup, db)
+                except BackupDecryptionError:
+                    # Falsches Passwort oder manipulierter Stream — klare User-Meldung.
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Entschlüsselung fehlgeschlagen: falsches Passwort oder manipuliertes Backup",
+                    )
+                except (S3NotConfiguredError, S3OperationError):
+                    # S3 nicht erreichbar / Objekt fehlt — klarer Fehler.
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Cloud-Backup nicht verfügbar",
+                    )
+                except BackupCryptoError:
+                    # DIS nicht erreichbar oder anderer DIS-Fehler.
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Cloud-Backup nicht verfügbar",
+                    )
+                except Exception:
+                    logger.warning(
+                        "S3-Restore fehlgeschlagen (Server %s, Backup %s)",
+                        server_id, backup_id,
+                    )
+                    raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
+
+            # Lokale .enc-Entschluesselung VOR Container-Stop (VAL-FIX-004).
+            # Bei falschem Passwort / DIS-Fehler bleibt der Server unberuehrt.
+            if backup.filename.endswith(".enc"):
+                from services.backup_orchestrator import decrypt_local_backup_for_restore
+                from services.backup_crypto_service import BackupDecryptionError, BackupCryptoError
+                try:
+                    tar_path = decrypt_local_backup_for_restore(backup.filename)
+                    decrypt_tmp_dir = os.path.dirname(tar_path)
+                except BackupDecryptionError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Entschlüsselung fehlgeschlagen: falsches Passwort oder manipuliertes Backup",
+                    )
+                except BackupCryptoError:
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Verschlüsselungs-Service nicht verfügbar",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Lokale .enc-Entschluesselung fehlgeschlagen (Server %s, Backup %s)",
+                        server_id, backup_id,
+                    )
+                    raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
+
+            # Container stoppen, falls er läuft — Bind-Mount-Konsistenz
             from games.base import container_name_for
             from services import docker_service
-            from services.backup_orchestrator import restore_via_agent_s3
-            from services.backup_crypto_service import BackupDecryptionError, BackupCryptoError
-            from services.backup_service import set_active_backup_status, clear_active_backup_status
-            from services.node_client import NodeClientError
-            from services.s3_service import S3NotConfiguredError, S3OperationError
-
-            # Stop container on the remote node before agent extracts
             container = container_name_for(server.id)
-            try:
-                if docker_service.is_running(container, node=node):
-                    docker_service.stop(container, timeout=30, node=node)
-                docker_service.remove(container, force=True, node=node)
-            except Exception:
-                logger.warning(
-                    "Container-Stop vor Agent-Restore (Server %s) fehlgeschlagen — fortsetzen",
-                    server_id,
-                )
+            if docker_service.is_running(container, node=node):
+                docker_service.stop(container, timeout=30, node=node)
+            # Force-Remove, damit das install_dir nicht von einem (gestoppten) Container
+            # beansprucht bleibt und der Container beim nächsten Start frisch kommt
+            remove_result = docker_service.remove(container, force=True, node=node)
+            if not remove_result.get("ok"):
+                raise HTTPException(status_code=503, detail="Container konnte vor Restore nicht entfernt werden")
 
+            # Live-Status für Restore (Estimate = Größe des zu restore-nden Backups)
+            from services.backup_service import set_active_backup_status, clear_active_backup_status
             set_active_backup_status(server_id, "restoring", backup.size_mb)
+
+            old_backup: str | None = None
+            remote_restore_pending = False
             try:
-                restore_via_agent_s3(server, backup, db)
-            except BackupDecryptionError:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Entschlüsselung fehlgeschlagen: falsches Passwort oder manipuliertes Backup",
-                )
-            except (S3NotConfiguredError, S3OperationError, NodeClientError, BackupCryptoError):
-                raise HTTPException(status_code=502, detail="Cloud-Backup nicht verfügbar")
+                from services.backup_paths import read_backup_scope_from_archive
+
+                scope, _manifest = read_backup_scope_from_archive(tar_path)
+                if is_remote:
+                    from services.node_client import NodeClient
+
+                    NodeClient.from_node(node).files_restore_archive(server.id, tar_path)
+                    remote_restore_pending = True
+                elif scope == "selective":
+                    os.makedirs(server.install_dir, exist_ok=True)
+                    _safe_extract_backup_tar(tar_path, server.install_dir)
+                else:
+                    if os.path.exists(server.install_dir):
+                        old_backup = f"{server.install_dir}_pre_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+                        shutil.move(server.install_dir, old_backup)
+                    os.makedirs(server.install_dir, exist_ok=True)
+                    _safe_extract_backup_tar(tar_path, server.install_dir)
             except Exception:
-                logger.warning(
-                    "Agent-S3-Restore fehlgeschlagen (Server %s, Backup %s)",
-                    server_id, backup_id,
-                )
+                # Best-effort Rollback: Der Server bleibt danach stopped/error statt
+                # mit halb extrahierten Dateien als running markiert zu werden.
+                if old_backup and os.path.exists(old_backup):
+                    try:
+                        if os.path.exists(server.install_dir):
+                            shutil.rmtree(server.install_dir)
+                        shutil.move(old_backup, server.install_dir)
+                    except OSError:
+                        pass
+                server.status = "error"
+                server.status_message = "Wiederherstellung fehlgeschlagen"
+                db.commit()
+                clear_active_backup_status(server_id)
                 raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
             finally:
                 clear_active_backup_status(server_id)
 
-            server.status = "stopped"
-            server.status_message = "Wiederhergestellt (Remote-Node)"
-            db.commit()
-            return {"message": "Backup wiederhergestellt", "server_id": server_id, "backup_id": backup_id}
-
-        # S3-Restore: Download (+ ggf. Decrypt) VOR Container-Stop.
-        # Bei Fehlern bleibt install_dir unveraendert und der Container laeuft weiter.
-        if not local_exists:
-            from services.backup_orchestrator import fetch_backup_from_s3
-            from services.s3_service import S3NotConfiguredError, S3OperationError
-            from services.backup_crypto_service import BackupDecryptionError, BackupCryptoError
+            # Postgres-Restore (v1.4.4 / M5-Fix): wenn das Backup Postgres-Dumps
+            # enthaelt (.msm/postgres/<db_name>.sql pro DB oder Legacy .msm/postgres.sql),
+            # wird jeder Dump in seine zugehoerige DB eingespielt.
+            # VAL-FIX-008: DB-Restore-Fehler werden an die API gemeldet (nicht nur
+            # geloggt) — der Server wird NICHT als erfolgreich restored markiert.
+            # VAL-FIX-009: Jeder Dump wird nur in seine zugehoerige DB restored.
             try:
-                fetch_backup_from_s3(backup, db)
-            except BackupDecryptionError:
-                # Falsches Passwort oder manipulierter Stream — klare User-Meldung.
-                raise HTTPException(
-                    status_code=400,
-                    detail="Entschlüsselung fehlgeschlagen: falsches Passwort oder manipuliertes Backup",
-                )
-            except (S3NotConfiguredError, S3OperationError):
-                # S3 nicht erreichbar / Objekt fehlt — klarer Fehler.
-                raise HTTPException(
-                    status_code=502,
-                    detail="Cloud-Backup nicht verfügbar",
-                )
-            except BackupCryptoError:
-                # DIS nicht erreichbar oder anderer DIS-Fehler.
-                raise HTTPException(
-                    status_code=502,
-                    detail="Cloud-Backup nicht verfügbar",
-                )
-            except Exception:
+                from services.backup_paths import read_pg_dump_from_archive
+
+                pg_dumps = read_pg_dump_from_archive(tar_path)
+                if pg_dumps:
+                    from services import postgres_service as _pg
+
+                    result = _pg.restore_pg_dump_from_archive(db, server.id, pg_dumps)
+                    if result.get("ok") and not result.get("skipped"):
+                        logger.info(
+                            "Postgres-Restore fuer Server %s: %s DBs in %sms",
+                            server.id,
+                            len(result.get("databases", [])),
+                            result.get("duration_ms"),
+                        )
+                        if is_remote:
+                            try:
+                                from services.node_client import NodeClient
+
+                                NodeClient.from_node(node).files_delete(server.id, ".msm/postgres")
+                            except Exception:
+                                logger.warning("Remote Postgres-Dump-Cleanup fuer Server %s fehlgeschlagen", server.id)
+                    elif result.get("skipped"):
+                        logger.debug(
+                            "Postgres-Restore skipped: %s",
+                            result.get("reason", "unbekannt"),
+                        )
+            except Exception as exc:
+                # VAL-FIX-008: DB-Restore-Fehler blockiert den erfolgreichen
+                # Restore-Status. Der Server wird als error markiert, und der
+                # API-Fehler wird an den User gemeldet (kein stillschweigendes
+                # "stopped" mehr).
                 logger.warning(
-                    "S3-Restore fehlgeschlagen (Server %s, Backup %s)",
-                    server_id, backup_id,
+                    "Postgres-Restore fuer Server %s fehlgeschlagen: %s",
+                    server.id, exc,
                 )
-                raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
+                if remote_restore_pending:
+                    try:
+                        from services.node_client import NodeClient
 
-        # Lokale .enc-Entschluesselung VOR Container-Stop (VAL-FIX-004).
-        # Bei falschem Passwort / DIS-Fehler bleibt der Server unberuehrt.
-        if backup.filename.endswith(".enc"):
-            from services.backup_orchestrator import decrypt_local_backup_for_restore
-            from services.backup_crypto_service import BackupDecryptionError, BackupCryptoError
-            try:
-                tar_path = decrypt_local_backup_for_restore(backup.filename)
-                decrypt_tmp_dir = os.path.dirname(tar_path)
-            except BackupDecryptionError:
+                        NodeClient.from_node(node).files_rollback_restore(server.id)
+                    except Exception:
+                        logger.error("Remote Datei-Rollback fuer Server %s fehlgeschlagen", server.id)
+                elif old_backup and os.path.exists(old_backup):
+                    try:
+                        if os.path.exists(server.install_dir):
+                            shutil.rmtree(server.install_dir)
+                        shutil.move(old_backup, server.install_dir)
+                    except OSError:
+                        logger.error("Lokaler Datei-Rollback fuer Server %s fehlgeschlagen", server.id)
+                server.status = "error"
+                server.status_message = "Datenbank-Wiederherstellung fehlgeschlagen"
+                db.commit()
+                clear_active_backup_status(server_id)
                 raise HTTPException(
-                    status_code=400,
-                    detail="Entschlüsselung fehlgeschlagen: falsches Passwort oder manipuliertes Backup",
+                    status_code=500,
+                    detail="Wiederherstellung fehlgeschlagen: Datenbank-Restore fehlerhaft",
                 )
-            except BackupCryptoError:
-                raise HTTPException(
-                    status_code=502,
-                    detail="Verschlüsselungs-Service nicht verfügbar",
-                )
-            except Exception:
-                logger.warning(
-                    "Lokale .enc-Entschluesselung fehlgeschlagen (Server %s, Backup %s)",
-                    server_id, backup_id,
-                )
-                raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
 
-        # Container stoppen, falls er läuft — Bind-Mount-Konsistenz
-        from games.base import container_name_for
-        from services import docker_service
-        container = container_name_for(server.id)
-        if docker_service.is_running(container, node=node):
-            docker_service.stop(container, timeout=30, node=node)
-        # Force-Remove, damit das install_dir nicht von einem (gestoppten) Container
-        # beansprucht bleibt und der Container beim nächsten Start frisch kommt
-        remove_result = docker_service.remove(container, force=True, node=node)
-        if not remove_result.get("ok"):
-            raise HTTPException(status_code=503, detail="Container konnte vor Restore nicht entfernt werden")
-
-        # Live-Status für Restore (Estimate = Größe des zu restore-nden Backups)
-        from services.backup_service import set_active_backup_status, clear_active_backup_status
-        set_active_backup_status(server_id, "restoring", backup.size_mb)
-
-        old_backup: str | None = None
-        remote_restore_pending = False
-        try:
-            from services.backup_paths import read_backup_scope_from_archive
-
-            scope, _manifest = read_backup_scope_from_archive(tar_path)
-            if is_remote:
+            if remote_restore_pending:
                 from services.node_client import NodeClient
 
-                NodeClient.from_node(node).files_restore_archive(server.id, tar_path)
-                remote_restore_pending = True
-            elif scope == "selective":
-                os.makedirs(server.install_dir, exist_ok=True)
-                _safe_extract_backup_tar(tar_path, server.install_dir)
-            else:
-                if os.path.exists(server.install_dir):
-                    old_backup = f"{server.install_dir}_pre_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-                    shutil.move(server.install_dir, old_backup)
-                os.makedirs(server.install_dir, exist_ok=True)
-                _safe_extract_backup_tar(tar_path, server.install_dir)
-        except Exception:
-            # Best-effort Rollback: Der Server bleibt danach stopped/error statt
-            # mit halb extrahierten Dateien als running markiert zu werden.
-            if old_backup and os.path.exists(old_backup):
-                try:
-                    if os.path.exists(server.install_dir):
-                        shutil.rmtree(server.install_dir)
-                    shutil.move(old_backup, server.install_dir)
-                except OSError:
-                    pass
-            server.status = "error"
-            server.status_message = "Wiederherstellung fehlgeschlagen"
-            db.commit()
-            clear_active_backup_status(server_id)
-            raise HTTPException(status_code=500, detail="Wiederherstellung fehlgeschlagen")
-        finally:
-            clear_active_backup_status(server_id)
-
-        # Postgres-Restore (v1.4.4 / M5-Fix): wenn das Backup Postgres-Dumps
-        # enthaelt (.msm/postgres/<db_name>.sql pro DB oder Legacy .msm/postgres.sql),
-        # wird jeder Dump in seine zugehoerige DB eingespielt.
-        # VAL-FIX-008: DB-Restore-Fehler werden an die API gemeldet (nicht nur
-        # geloggt) — der Server wird NICHT als erfolgreich restored markiert.
-        # VAL-FIX-009: Jeder Dump wird nur in seine zugehoerige DB restored.
-        try:
-            from services.backup_paths import read_pg_dump_from_archive
-
-            pg_dumps = read_pg_dump_from_archive(tar_path)
-            if pg_dumps:
-                from services import postgres_service as _pg
-
-                result = _pg.restore_pg_dump_from_archive(db, server.id, pg_dumps)
-                if result.get("ok") and not result.get("skipped"):
-                    logger.info(
-                        "Postgres-Restore fuer Server %s: %s DBs in %sms",
-                        server.id,
-                        len(result.get("databases", [])),
-                        result.get("duration_ms"),
-                    )
-                    if is_remote:
-                        try:
-                            from services.node_client import NodeClient
-
-                            NodeClient.from_node(node).files_delete(server.id, ".msm/postgres")
-                        except Exception:
-                            logger.warning("Remote Postgres-Dump-Cleanup fuer Server %s fehlgeschlagen", server.id)
-                elif result.get("skipped"):
-                    logger.debug(
-                        "Postgres-Restore skipped: %s",
-                        result.get("reason", "unbekannt"),
-                    )
-        except Exception as exc:
-            # VAL-FIX-008: DB-Restore-Fehler blockiert den erfolgreichen
-            # Restore-Status. Der Server wird als error markiert, und der
-            # API-Fehler wird an den User gemeldet (kein stillschweigendes
-            # "stopped" mehr).
-            logger.warning(
-                "Postgres-Restore fuer Server %s fehlgeschlagen: %s",
-                server.id, exc,
-            )
-            if remote_restore_pending:
-                try:
-                    from services.node_client import NodeClient
-
-                    NodeClient.from_node(node).files_rollback_restore(server.id)
-                except Exception:
-                    logger.error("Remote Datei-Rollback fuer Server %s fehlgeschlagen", server.id)
+                NodeClient.from_node(node).files_finalize_restore(server.id)
             elif old_backup and os.path.exists(old_backup):
-                try:
-                    if os.path.exists(server.install_dir):
-                        shutil.rmtree(server.install_dir)
-                    shutil.move(old_backup, server.install_dir)
-                except OSError:
-                    logger.error("Lokaler Datei-Rollback fuer Server %s fehlgeschlagen", server.id)
-            server.status = "error"
-            server.status_message = "Datenbank-Wiederherstellung fehlgeschlagen"
+                shutil.rmtree(old_backup, ignore_errors=True)
+
+            # Status zuruecksetzen -- Server ist jetzt installiert/stopped, nicht running
+            server.status = "stopped"
+            server.status_message = None
             db.commit()
-            clear_active_backup_status(server_id)
-            raise HTTPException(
-                status_code=500,
-                detail="Wiederherstellung fehlgeschlagen: Datenbank-Restore fehlerhaft",
-            )
-
-        if remote_restore_pending:
-            from services.node_client import NodeClient
-
-            NodeClient.from_node(node).files_finalize_restore(server.id)
-        elif old_backup and os.path.exists(old_backup):
-            shutil.rmtree(old_backup, ignore_errors=True)
-
-        # Status zuruecksetzen -- Server ist jetzt installiert/stopped, nicht running
-        server.status = "stopped"
-        server.status_message = None
-        db.commit()
     finally:
         # Lock IMMER freigeben (Erfolg, Fehler, HTTPException) — kein Deadlock.
         lock.release()

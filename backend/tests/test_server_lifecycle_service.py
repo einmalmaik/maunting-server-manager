@@ -450,3 +450,44 @@ def test_start_respects_explicit_always_validate_for_http_source():
 
     assert plugin.update_calls == 1
     assert server.status == "running"
+
+
+def test_lifecycle_job_applies_recovery_suspension(db: Session) -> None:
+    """Verify that starting a server lifecycle job sets and clears the recovery lease suspension."""
+    from services.server_lifecycle_service import _run_lifecycle_job
+    from models import Server, Node
+
+    node = Node(id=99, name="node-99", host="http://127.0.0.1", status="online", auth_token_enc="enc")
+    server = Server(
+        id=88,
+        name="SuspensionTest",
+        game_type="minecraft",
+        install_dir="/tmp/test",
+        status="stopped",
+        desired_power_state="stopped",
+        desired_state_generation=1,
+        guardian_observed_state="unknown",
+        public_bind_ip="127.0.0.1",
+        node=node,
+    )
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    # Mock plugin start
+    plugin = MagicMock()
+    plugin.start.return_value = {"ok": True}
+
+    with patch("services.guardian_state_service.set_recovery_suspension") as mock_set, \
+         patch("services.guardian_state_service.clear_recovery_suspension") as mock_clear, \
+         patch("services.server_lifecycle_service.get_plugin", return_value=plugin), \
+         patch("services.server_lifecycle_service.open_ports"), \
+         patch("services.server_lifecycle_service.iptables_accept_server"):
+
+        _run_lifecycle_job(server.id, "start")
+
+        # Verify set_recovery_suspension was called
+        mock_set.assert_called_once()
+        # Verify clear_recovery_suspension was called
+        mock_clear.assert_called_once()
+
