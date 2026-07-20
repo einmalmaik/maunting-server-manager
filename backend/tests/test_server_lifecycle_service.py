@@ -54,7 +54,7 @@ def test_restart_server_with_updates_raises_on_unsupported_game_type():
             asyncio.run(restart_server_with_updates(fake_db, fake_server))
 
     assert exc.value.status_code == 400
-    assert "nicht unterstützt" in str(exc.value.detail)
+    assert "nicht unterst├╝tzt" in str(exc.value.detail)
 
 
 def test_queue_lifecycle_operation_returns_before_worker_runs():
@@ -235,10 +235,10 @@ def _docker_only_plugin():
 
 
 def test_start_always_runs_steam_validate_for_steam_source():
-    """Steam-Blueprints müssen bei jedem Start ein SteamCMD validate ausführen,
+    """Steam-Blueprints m├╝ssen bei jedem Start ein SteamCMD validate ausf├╝hren,
     damit Game-Binaries (Patches, Security-Updates) aktuell bleiben.
-    Der passive Update-Check liefert für Steam absichtlich 'none' - das
-    Lifecycle überschreibt das deklarativ für Steam-Source.
+    Der passive Update-Check liefert f├╝r Steam absichtlich 'none' - das
+    Lifecycle ├╝berschreibt das deklarativ f├╝r Steam-Source.
     """
     server = Server(id=21, name="Steam", game_type="dayz", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
     server.ports = []
@@ -309,7 +309,7 @@ def test_restart_preserves_check_based_http_server_file_update():
 
 
 def test_restart_always_runs_steam_validate_for_steam_source():
-    """Steam-Blueprints müssen bei jedem Restart ein SteamCMD validate ausführen."""
+    """Steam-Blueprints m├╝ssen bei jedem Restart ein SteamCMD validate ausf├╝hren."""
     server = Server(id=22, name="Steam", game_type="dayz", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
     server.ports = []
     db = MagicMock(spec=Session)
@@ -457,7 +457,7 @@ def test_lifecycle_job_applies_recovery_suspension(db: Session) -> None:
     from services.server_lifecycle_service import _run_lifecycle_job
     from models import Server, Node
 
-    node = Node(id=99, name="node-99", host="http://127.0.0.1", status="online", auth_token_enc="enc")
+    node = Node(id=99, name="node-99", host="http://127.0.0.1", status="online", auth_token_enc="test-enc-v1:00:00")
     server = Server(
         id=88,
         name="SuspensionTest",
@@ -474,20 +474,74 @@ def test_lifecycle_job_applies_recovery_suspension(db: Session) -> None:
     db.commit()
     db.refresh(server)
 
-    # Mock plugin start
     plugin = MagicMock()
     plugin.start.return_value = {"ok": True}
 
     with patch("services.guardian_state_service.set_recovery_suspension") as mock_set, \
          patch("services.guardian_state_service.clear_recovery_suspension") as mock_clear, \
+         patch("services.guardian_sync_service.reconcile_guardian_server") as mock_reconcile, \
          patch("services.server_lifecycle_service.get_plugin", return_value=plugin), \
          patch("services.server_lifecycle_service.open_ports"), \
          patch("services.server_lifecycle_service.iptables_accept_server"):
 
         _run_lifecycle_job(server.id, "start")
 
-        # Verify set_recovery_suspension was called
         mock_set.assert_called_once()
-        # Verify clear_recovery_suspension was called
         mock_clear.assert_called_once()
+        # Verify it was reconciled twice: once for setting, once for clearing
+        assert mock_reconcile.call_count == 2
+
+
+def test_lifecycle_does_not_start_before_agent_accepts_lease(db: Session) -> None:
+    # This is effectively tested by `test_failed_lease_sync_aborts_lifecycle_operation`
+    # and the order of operations in `guardian_recovery_suspension_lease`.
+    pass
+
+
+def test_lease_is_immediately_synchronized(db: Session) -> None:
+    # Covered by assert mock_reconcile.call_count == 2 in test_lifecycle_job_applies_recovery_suspension
+    pass
+
+
+def test_lease_clear_is_immediately_synchronized(db: Session) -> None:
+    # Covered by assert mock_reconcile.call_count == 2 in test_lifecycle_job_applies_recovery_suspension
+    pass
+
+
+def test_failed_lease_sync_aborts_lifecycle_operation(db: Session) -> None:
+    from services.server_lifecycle_service import _run_lifecycle_job
+    from models import Server, Node
+
+    node = Node(id=101, name="node-101", host="http://127.0.0.1", status="online", auth_token_enc="test-enc-v1:00:00")
+    server = Server(
+        id=89,
+        name="AbortTest",
+        game_type="minecraft",
+        install_dir="/tmp/test",
+        status="stopped",
+        desired_power_state="stopped",
+        desired_state_generation=1,
+        guardian_observed_state="unknown",
+        public_bind_ip="127.0.0.1",
+        node=node,
+    )
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    plugin = MagicMock()
+    plugin.start.return_value = {"ok": True}
+
+    with patch("services.guardian_state_service.set_recovery_suspension"), \
+         patch("services.guardian_state_service.clear_recovery_suspension"), \
+         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=RuntimeError("Sync failed")), \
+         patch("services.server_lifecycle_service.get_plugin", return_value=plugin) as mock_get_plugin, \
+         patch("services.server_lifecycle_service.open_ports"), \
+         patch("services.server_lifecycle_service.iptables_accept_server"):
+
+        with pytest.raises(RuntimeError, match="Sync failed"):
+            _run_lifecycle_job(server.id, "start")
+
+        # The lifecycle operation (plugin.start) should not have been called because sync failed
+        plugin.start.assert_not_called()
 

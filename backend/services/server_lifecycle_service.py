@@ -44,26 +44,27 @@ LifecycleOperation = str
 @contextmanager
 def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str):
     op_id = str(uuid.uuid4())
-    try:
-        from services.guardian_state_service import set_recovery_suspension
-        set_recovery_suspension(
-            db,
-            server,
-            operation_id=op_id,
-            reason=reason,
-            suspend_until=datetime.now(timezone.utc) + timedelta(minutes=15),
-        )
-    except Exception as exc:
-        logger.warning("Failed to set guardian recovery lease suspension: %s", exc)
-        
+    from services.guardian_state_service import set_recovery_suspension, clear_recovery_suspension
+    from services.guardian_sync_service import reconcile_guardian_server
+    
+    set_recovery_suspension(
+        db,
+        server,
+        operation_id=op_id,
+        reason=reason,
+        suspend_until=datetime.now(timezone.utc) + timedelta(minutes=15),
+    )
+    # Sync immediately after setting the lease
+    if server.node and server.node.status == "online":
+        reconcile_guardian_server(db, server)
+
     try:
         yield
     finally:
-        try:
-            from services.guardian_state_service import clear_recovery_suspension
-            clear_recovery_suspension(db, server, operation_id=op_id)
-        except Exception as exc:
-            logger.warning("Failed to clear guardian recovery lease suspension: %s", exc)
+        clear_recovery_suspension(db, server, operation_id=op_id)
+        # Sync immediately after clearing the lease
+        if server.node and server.node.status == "online":
+            reconcile_guardian_server(db, server)
 _TRANSIENT_STATUSES = {"queued", "starting", "stopping", "restarting"}
 
 
@@ -124,8 +125,8 @@ def should_preserve_lifecycle_status(server_id: int, status: str) -> bool:
 
 def reconcile_orphaned_lifecycle_statuses(db: Session) -> int:
     """Nach Prozess-Neustart: DB kann noch ``starting``/``stopping`` zeigen, obwohl der
-    In-Memory-Job weg ist. Status an Docker-Realität anbinden, damit das Panel nicht
-    ewig „Startet…“ anzeigt und WebSockets sinnlos offen bleiben."""
+    In-Memory-Job weg ist. Status an Docker-Realit├ñt anbinden, damit das Panel nicht
+    ewig ÔÇ×StartetÔÇªÔÇ£ anzeigt und WebSockets sinnlos offen bleiben."""
     servers = db.query(Server).filter(Server.status.in_(_TRANSIENT_STATUSES)).all()
     changed = 0
     for server in servers:
@@ -134,7 +135,7 @@ def reconcile_orphaned_lifecycle_statuses(db: Session) -> int:
         plugin = get_plugin(server.game_type)
         if not plugin:
             server.status = "failed"
-            server.status_message = "Spiel-Typ nicht unterstützt"
+            server.status_message = "Spiel-Typ nicht unterst├╝tzt"
             changed += 1
             continue
         plugin_status = plugin.get_status(server)
@@ -150,8 +151,8 @@ def reconcile_orphaned_lifecycle_statuses(db: Session) -> int:
     return changed
 
 
-# Frisches Backup vor erneutem Start überspringen (verhindert doppelte 10GB+ tar.gz
-# innerhalb kurzer Zeit und verkürzt „hängendes“ Starting bei backup_on_start).
+# Frisches Backup vor erneutem Start ├╝berspringen (verhindert doppelte 10GB+ tar.gz
+# innerhalb kurzer Zeit und verk├╝rzt ÔÇ×h├ñngendesÔÇ£ Starting bei backup_on_start).
 _PRE_START_BACKUP_SKIP_MINUTES = 30
 
 
@@ -175,14 +176,14 @@ def _run_pre_start_backup_if_enabled(db: Session, server: Server, *, context: st
         if age_min < _PRE_START_BACKUP_SKIP_MINUTES:
             _append_console_log(
                 server.id,
-                f"[MSM] Backup vor {context} übersprungen: vor {int(age_min)} Min. bereits ein Backup "
+                f"[MSM] Backup vor {context} ├╝bersprungen: vor {int(age_min)} Min. bereits ein Backup "
                 f"(Schwelle {_PRE_START_BACKUP_SKIP_MINUTES} Min.).\n",
             )
             return
 
     _append_console_log(
         server.id,
-        f"[MSM] Backup vor {context} läuft (große Server-Verzeichnisse können mehrere Minuten "
+        f"[MSM] Backup vor {context} l├ñuft (gro├ƒe Server-Verzeichnisse k├Ânnen mehrere Minuten "
         f"dauern, Timeout 300s). Panel bleibt erreichbar, Konsole aktualisiert sich danach.\n",
     )
     try:
@@ -196,7 +197,7 @@ def _run_pre_start_backup_if_enabled(db: Session, server: Server, *, context: st
             f"{context} wird fortgesetzt.\n",
         )
         logger.warning(
-            "Pre-Start-Backup fehlgeschlagen für Server %s (details redacted for security)",
+            "Pre-Start-Backup fehlgeschlagen f├╝r Server %s (details redacted for security)",
             server.id,
         )
 
@@ -264,7 +265,7 @@ def _set_status(db: Session, server: Server, status: str, message: str | None = 
         )
         try:
             new_payload = build_status_payload(server)
-            # Sync dispatch (Fire-and-forget) — verfuegbare Subs
+            # Sync dispatch (Fire-and-forget) ÔÇö verfuegbare Subs
             # werden in einem Background-Task rausgeschickt.
             import asyncio as _asyncio
             try:
@@ -280,7 +281,7 @@ def _set_status(db: Session, server: Server, status: str, message: str | None = 
                     ),
                     name=f"webhook-status-{server.id}",
                 )
-        except Exception as _exc:  # pragma: no cover — defensive
+        except Exception as _exc:  # pragma: no cover ÔÇö defensive
             import logging as _logging
             _logging.getLogger(__name__).warning(
                 "outbound-webhook: dispatch failed for server_id=%s (%s)",
@@ -300,7 +301,7 @@ def queue_lifecycle_operation(
     dann pro Server, setzt sofort einen sichtbaren Queue-Status und startet den
     Worker mit frischer DB-Session.
 
-    Auch Kill läuft durch denselben per-Server Lock. Ein harter Bypass waere
+    Auch Kill l├ñuft durch denselben per-Server Lock. Ein harter Bypass waere
     zwar schneller, koennte aber parallel zu Backup, Restore, Update oder
     Guardian-Recovery den falschen Container-/Dateizustand zerstoeren.
     """
@@ -407,7 +408,7 @@ def _run_lifecycle_job(
                 return
             plugin = get_plugin(server.game_type)
             if not plugin:
-                _set_status(db, server, "failed", "Spiel-Typ nicht unterstützt")
+                _set_status(db, server, "failed", "Spiel-Typ nicht unterst├╝tzt")
                 return
 
             _set_status(db, server, _operation_status(operation), None)
@@ -492,10 +493,10 @@ def _check_server_file_update(server: Server, plugin, operation: str) -> dict:
     except Exception as exc:
         _append_console_log(
             server.id,
-            f"[MSM] Server-Datei-Update-Check während {operation} fehlgeschlagen "
+            f"[MSM] Server-Datei-Update-Check w├ñhrend {operation} fehlgeschlagen "
             f"(nicht kritisch): {exc}\n",
         )
-        logger.warning("Server-Datei-Update-Check für Server %s fehlgeschlagen: %s", server.id, exc)
+        logger.warning("Server-Datei-Update-Check f├╝r Server %s fehlgeschlagen: %s", server.id, exc)
         return {"action": "none", "reason": "error"}
 
 
@@ -540,7 +541,7 @@ def _run_server_file_update_if_needed(
         return
     _append_console_log(
         server.id,
-        f"[MSM] Server-Datei-Update wird durchgeführt (Strategie: {strategy.value})...\n",
+        f"[MSM] Server-Datei-Update wird durchgef├╝hrt (Strategie: {strategy.value})...\n",
     )
     result = plugin.perform_server_file_update(server)
     if result.get("ok", False):
@@ -548,7 +549,7 @@ def _run_server_file_update_if_needed(
         return
     _append_console_log(
         server.id,
-        f"[MSM] Server-Datei-Update hatte Probleme während {operation}; Start wird fortgesetzt: "
+        f"[MSM] Server-Datei-Update hatte Probleme w├ñhrend {operation}; Start wird fortgesetzt: "
         f"{result.get('error') or result}\n",
     )
 
@@ -705,7 +706,7 @@ def _run_start(db: Session, server: Server, plugin) -> None:
             _append_console_log(
                 server.id,
                 f"[MSM] {len(mod_updates)} Workshop-Mod(s) beim Start erkannt - "
-                "führe gebündelten Workshop-Download aus...\n",
+                "f├╝hre geb├╝ndelten Workshop-Download aus...\n",
             )
             mod_res = plugin.perform_workshop_mod_updates(server, only_auto_update=False)
             if not mod_res.get("ok", False):
@@ -729,9 +730,9 @@ def _run_start(db: Session, server: Server, plugin) -> None:
     open_ports(server.name, ports_list, node=server.node)
     if server.node is None or server.node.is_local:
         iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
-    _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
-    _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start möglich (Image-Pull/Steam-Update).\n")
-    _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
+    _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei gro├ƒen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container l├ñuft.\n")
+    _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start m├Âglich (Image-Pull/Steam-Update).\n")
+    _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei gro├ƒen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         result = plugin.start(server)
     except Exception:
@@ -806,7 +807,7 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     except Exception as exc:
         _append_console_log(
             server.id,
-            f"[MSM] Updater-Check während Restart fehlgeschlagen (nicht kritisch): {exc}\n",
+            f"[MSM] Updater-Check w├ñhrend Restart fehlgeschlagen (nicht kritisch): {exc}\n",
         )
         logger.warning("Updater-Check beim Restart von Server %s fehlgeschlagen: %s", server.id, exc)
 
@@ -837,8 +838,8 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
         if mod_updates:
             _append_console_log(
                 server.id,
-                f"[MSM] {len(mod_updates)} Workshop-Mod(s) benötigen Update/Installation. "
-                "Download läuft vor dem Container-Start.\n",
+                f"[MSM] {len(mod_updates)} Workshop-Mod(s) ben├Âtigen Update/Installation. "
+                "Download l├ñuft vor dem Container-Start.\n",
             )
             mod_res = plugin.perform_workshop_mod_updates(server, only_auto_update=False)
             if not mod_res.get("ok", False):
@@ -858,9 +859,9 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
     open_ports(server.name, ports_list, node=server.node)
     if server.node is None or server.node.is_local:
         iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
-    _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
-    _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start möglich (Image-Pull/Steam-Update).\n")
-    _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei großen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
+    _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei gro├ƒen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container l├ñuft.\n")
+    _append_console_log(server.id, "[MSM] Server-Restart: gleiche Wartezeit wie Start m├Âglich (Image-Pull/Steam-Update).\n")
+    _append_console_log(server.id, "[MSM] Starte den eigentlichen Game-Container (kann bei gro├ƒen Images wie Wine/Proton oder erstem Start lange dauern wegen Pull/Setup)...\n")
     try:
         start_result = plugin.start(server)
     except Exception:
@@ -883,7 +884,7 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
 
 
 def _restart_server_sync(server_id: int) -> dict:
-    """Synchroner Restart-Pfad für Auto-Restart (läuft in separatem Thread)."""
+    """Synchroner Restart-Pfad f├╝r Auto-Restart (l├ñuft in separatem Thread)."""
     db = SessionLocal()
     try:
         server = db.query(Server).filter(Server.id == server_id).first()
@@ -892,7 +893,7 @@ def _restart_server_sync(server_id: int) -> dict:
 
         plugin = get_plugin(server.game_type)
         if not plugin:
-            raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+            raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterst├╝tzt")
 
         lock = get_server_lifecycle_lock(server_id)
         with lock:
@@ -918,7 +919,7 @@ def _restart_server_sync(server_id: int) -> dict:
 
 
 async def restart_server_with_updates(db: Session, server: Server) -> dict:
-    """Restartet einen Server über den zentralen Lifecycle-Pfad.
+    """Restartet einen Server ├╝ber den zentralen Lifecycle-Pfad.
 
     Der Pfad ist absichtlich klein und wird von manuellem Restart und
     Auto-Restart genutzt, damit Server-Datei-Updates, Mod-Updates, Firewall und
