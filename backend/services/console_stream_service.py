@@ -2,14 +2,13 @@
 
 Stellt den einzigen Stream-Pfad fuer die MSM-Server-Konsole bereit: ein
 bidirektionaler WebSocket-Endpoint mit In-Memory-Ring-Buffer pro Server.
-Reconnects nutzen ``?last_id=`` um nur verpasste Zeilen nachzuliefern (kein
-kompletter Backlog-Repetition wie frueher beim SSE-Pfad).
+Reconnects nutzen ``?last_id=`` um nur verpasste Zeilen nachzuliefern.
 
 KISS:
 - Eine In-Memory-State-Klasse, eine ``connect()``-Coroutine.
 - File-Tail- und Docker-Stream-Loops sind hier unabhaengig vom ehemaligen
   SSE-Service implementiert (kein gemeinsamer Code). Geteilt wird nur
-  ``docker_service`` fuer ``stream_logs`` / ``is_running`` — alles andere
+  ``docker_service`` fuer ``stream_logs`` / ``is_running`` ÔÇö alles andere
   hier ist WS-spezifisch.
 - Keine externen State-Stores (Redis/DB). Verloren beim Restart = akzeptabel,
   da der File-Backlog dann ohnehin wieder eingelesen wird.
@@ -25,7 +24,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Deque  # noqa: F401 — Any used by node proxy path
+from typing import Any, Deque  # noqa: F401 ÔÇö Any used by node proxy path
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect, WebSocketState
@@ -35,10 +34,8 @@ from games.base import _console_log_path
 
 logger = logging.getLogger(__name__)
 
-# Groesse des In-Memory-Ring-Buffers pro Server. Reicht fuer ~500 Zeilen
-# Reconnect-Resume. Mehr waere Memory-Verschwendung; weniger fuehlt sich
-# bei kurzen Netzwerk-Hickups schon „verloren" an.
-RING_BUFFER_SIZE = 500
+# Groesse des In-Memory-Ring-Buffers pro Server.
+RING_BUFFER_SIZE = 1000
 
 # Maximale Anzahl gleichzeitiger WS-Verbindungen pro Server. Verhindert
 # Memory-DoS durch hunderte Tabs.
@@ -63,6 +60,9 @@ class _ServerState:
     next_id: int = 1
     active_connections: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock)
+    websockets: set[WebSocket] = field(default_factory=set)
+    tasks: list[asyncio.Task] = field(default_factory=list)
+    agent_ws: Any = None
 
 
 _STATES: dict[int, _ServerState] = {}
@@ -74,19 +74,42 @@ def append_msm_log_to_memory(server_id: int, text: str, timestamp: str) -> None:
     """Synchronous, thread-safe function to append an MSM log line to the in-memory
     state of a server, if it is currently loaded.
     """
-    with _SYNC_STATES_LOCK:
+    # Legacy function - not strictly needed for live updates anymore because file tail
+    # handles everything and ingest_line unifies it. But for backwards compatibility
+    # and testing, we can keep it as a no-op or just append.
+    # To prevent duplicates, we leave it as a no-op because the file tail reads it anyway.
+    pass
+
+
+async def ingest_line(server_id: int, text: str, source: str, timestamp: str | None = None) -> None:
+    """Einheitliche Log-Ingestion-Methode, die eingehende Zeilen an alle Clients broadcastet."""
+    ts = timestamp or _utc_iso()
+    payload = None
+    
+    async with _STATES_LOCK:
         state = _STATES.get(server_id)
-    if state is not None:
+        if not state:
+            return
+            
         with state.lock:
-            clean_text = text.rstrip("\r\n")
             line = _Line(
                 id=state.next_id,
-                text=clean_text,
-                source="msm",
-                timestamp=timestamp,
+                text=text.rstrip("\r\n"),
+                source=source,
+                timestamp=ts,
             )
             state.next_id += 1
             state.lines.append(line)
+            payload = _serialize(line)
+            
+        # Copy websockets set to iterate safely
+        targets = list(state.websockets)
+        
+    for ws in targets:
+        try:
+            await ws.send_text(payload)
+        except Exception as exc:
+            logger.debug("Broadcast to ws failed: %s", exc)
 
 
 def _utc_iso() -> str:
@@ -94,13 +117,7 @@ def _utc_iso() -> str:
 
 
 def _get_state(server_id: int) -> _ServerState:
-    """Liefert (oder erstellt) den Per-Server State.
-
-    MUSS unter ``_STATES_LOCK`` aufgerufen werden — der get-then-create
-    auf ``_STATES`` ist nicht atomar, sodass zwei parallele Erstverbindungen
-    sonst jeweils ein eigenes ``_ServerState`` erzeugen und einander
-    ueberschreiben wuerden. Alle aktuellen Aufrufer halten den Lock bereits.
-    """
+    """Liefert (oder erstellt) den Per-Server State."""
     state = _STATES.get(server_id)
     if state is None:
         state = _ServerState()
@@ -109,11 +126,7 @@ def _get_state(server_id: int) -> _ServerState:
 
 
 def _serialize(line: _Line) -> str:
-    """JSON-Frame fuer eine Zeile. Stellt sicher, dass der Client parsen kann.
-
-    Format: ``{"id": int, "timestamp": iso, "source": "msm"|"docker", "text": str}``.
-    Die monotone ``id`` ermoeglicht Reconnect-Resume via ``?last_id=``.
-    """
+    """JSON-Frame fuer eine Zeile. Stellt sicher, dass der Client parsen kann."""
     return json.dumps(
         {
             "id": line.id,
@@ -126,15 +139,7 @@ def _serialize(line: _Line) -> str:
 
 
 async def _read_initial_backlog(log_path: str, state: _ServerState) -> None:
-    """Liest die MSM-Console-Logdatei in den Ring-Buffer (beim ersten Connect
-    pro Server, oder nach Reconnect-Bedarf).
-
-    Lines in the file may be prefixed with "iso-timestamp\\t" (post append
-    change). We parse the original write-timestamp so that historical MSM
-    messages show the time they *actually appeared/were appended*, not the
-    time the user opened the console panel (which produced the reported
-    frontend timestamp bug).
-    """
+    """Liest die MSM-Console-Logdatei in den Ring-Buffer."""
     if not os.path.exists(log_path):
         return
     try:
@@ -154,13 +159,12 @@ async def _read_initial_backlog(log_path: str, state: _ServerState) -> None:
                         if len(parts) == 2:
                             cand, rest = parts
                             try:
-                                # tolerate Z-suffix or full offset
                                 cand_norm = cand.replace("Z", "+00:00")
                                 datetime.fromisoformat(cand_norm)
                                 ts = cand
                                 text = rest
                             except Exception:
-                                pass  # old line without ts prefix -> fallback now (will be rare after rollout)
+                                pass
                     with state.lock:
                         state.lines.append(
                             _Line(
@@ -176,7 +180,7 @@ async def _read_initial_backlog(log_path: str, state: _ServerState) -> None:
 
 
 async def _tail_file_loop(log_path: str, state: _ServerState, on_line) -> None:
-    """Tail-Loop fuer die MSM-Lifecycle-Logdatei. Push jede neue Zeile via on_line."""
+    """Tail-Loop fuer die MSM-Lifecycle-Logdatei."""
     pos = 0
     if os.path.exists(log_path):
         try:
@@ -221,18 +225,7 @@ async def _tail_file_loop(log_path: str, state: _ServerState, on_line) -> None:
 
 
 async def _tail_docker_loop(container: str, on_line) -> None:
-    """Tail-Loop fuer `docker logs --follow` mit Polling auf Container-Readiness.
-
-    Wenn der Container beim WS-Connect noch nicht laeuft (typischer Fall:
-    User klickt Start und oeffnet die Konsole sofort), wartet die Loop
-    mit Backoff, bis der Container ready ist. Wenn `stream_logs` endet
-    (Container gestoppt, rootless-Daemon kurz weg, Recreate), pollt die
-    Loop ebenfalls neu, statt stillschweigend zu enden — sonst sieht der
-    User nach einem Restart keine Game-Logs mehr, obwohl der WS lebt.
-
-    Backoff: 0.5s -> 1.5s -> 5s (cap), damit ein abwesender Docker-Daemon
-    nicht in einer heissen Spin-Loop landet.
-    """
+    """Tail-Loop fuer `docker logs --follow` mit Polling auf Container-Readiness."""
     backoff = 0.5
     while True:
         try:
@@ -241,12 +234,7 @@ async def _tail_docker_loop(container: str, on_line) -> None:
                 backoff = min(backoff * 1.5, 5.0)
                 continue
             backoff = 0.5
-            # stream_logs iteriert bis der Subprozess endet (Container stoppt,
-            # Daemon weg, Pipe kaputt). Danach zurueck zum Readiness-Check.
             async for raw_line in docker_service.stream_logs(container, tail=200):
-                # Docker with --timestamps prefixes each line with "RFC3339 ts<space>line".
-                # Parse it out so the stored "text" stays clean (game output only)
-                # and we can use the real log time instead of receive time.
                 text = raw_line
                 ts = None
                 if raw_line and " " in raw_line:
@@ -269,50 +257,25 @@ async def _tail_docker_loop(container: str, on_line) -> None:
 
 
 async def _close_safely(ws: WebSocket, code: int = 1000) -> None:
-    """Schliesst den WS falls noch offen. Schluckt Exceptions (idempotent)."""
+    """Schliesst den WS falls noch offen."""
     try:
         await ws.close(code=code)
     except Exception:
         pass
 
 
-async def _proxy_agent_console(
-    ws: WebSocket,
-    server_id: int,
-    container: str,
-    node: Any,
-    last_id: int | None = None,
-) -> None:
-    """Bidirectional WebSocket proxy: browser ↔ panel ↔ agent console.
-
-    Token is used only for the agent upgrade Authorization header and is never
-    logged or sent to the browser.
-    """
+async def _agent_proxy_loop(server_id: int, container: str, node: Any) -> None:
     import websockets
     from websockets.exceptions import ConnectionClosed
-
     from services.node_client import NodeClient, NodeClientError
-
-    async with _STATES_LOCK:
-        state = _get_state(server_id)
-        if state.active_connections >= MAX_CONCURRENT_WS_PER_SERVER:
-            await ws.accept()
-            await _close_safely(ws, code=1013)
-            return
-        state.active_connections += 1
-
-    agent_ws = None
-    try:
-        await ws.accept()
+    
+    backoff = 0.5
+    while True:
         try:
             client = NodeClient.from_node(node)
             agent_url = client.console_ws_url(container)
             token = client.bearer_token
-        except NodeClientError:
-            await _close_safely(ws, code=1011)
-            return
-
-        try:
+            
             import ssl as ssl_mod
             ssl_context = client._verify()
             ssl_param = None
@@ -321,113 +284,32 @@ async def _proxy_agent_console(
                     ssl_param = ssl_context
                 else:
                     ssl_param = ssl_mod.create_default_context()
-
-            agent_ws = await websockets.connect(
+                    
+            async with websockets.connect(
                 agent_url,
                 additional_headers={"Authorization": f"Bearer {token}"},
                 open_timeout=10,
                 max_size=2 * 1024 * 1024,
                 ssl=ssl_param,
-            )
-        except Exception as exc:
-            logger.warning("agent console ws connect failed for server_id=%s: %s", server_id, exc)
-            await _close_safely(ws, code=1011)
-            return
-
-        log_path = _console_log_path(server_id)
-        if not state.lines:
-            # Ring-buffer initialisieren
-            try:
-                await _read_initial_backlog(log_path, state)
-            except Exception as exc:
-                logger.warning("ws remote backlog read failed: %s", exc)
-
-        # Optional local ring-buffer replay (MSM messages) before agent stream
-        async with _STATES_LOCK:
-            if last_id is None:
-                replay = list(state.lines)
-            else:
-                replay = [l for l in state.lines if l.id > last_id]
-        for line in replay:
-            await ws.send_text(_serialize(line))
-
-        async def _on_line(text: str, source: str, provided_ts: str | None = None) -> None:
-            ts = provided_ts or _utc_iso()
-            async with _STATES_LOCK:
-                line = _Line(
-                    id=state.next_id,
-                    text=text,
-                    source=source,
-                    timestamp=ts,
-                )
-                state.next_id += 1
-                state.lines.append(line)
-                payload = _serialize(line)
-            try:
-                await ws.send_text(payload)
-            except Exception:
-                pass
-
-        async def _agent_to_browser() -> None:
-            try:
+            ) as agent_ws:
+                async with _STATES_LOCK:
+                    state = _get_state(server_id)
+                    state.agent_ws = agent_ws
+                
+                backoff = 0.5
                 async for message in agent_ws:
                     text = message if isinstance(message, str) else message.decode("utf-8", errors="replace")
-                    await _on_line(text, "docker")
-            except ConnectionClosed:
-                pass
-            except Exception as exc:
-                logger.warning("agent→browser console proxy failed: %s", exc)
-
-        pump = asyncio.create_task(_agent_to_browser())
-        file_task = asyncio.create_task(_tail_file_loop(log_path, state, _on_line))
-        try:
-            while True:
-                if ws.client_state != WebSocketState.CONNECTED:
-                    break
-                try:
-                    msg = await ws.receive_text()
-                except WebSocketDisconnect:
-                    break
-                try:
-                    payload = json.loads(msg)
-                except json.JSONDecodeError:
-                    # Raw text → agent stdin
-                    try:
-                        await agent_ws.send(msg)
-                    except Exception:
-                        break
-                    continue
-                action = payload.get("action") if isinstance(payload, dict) else None
-                if action == "ping":
-                    await ws.send_text(json.dumps({"action": "pong"}))
-                elif action == "input" and isinstance(payload.get("data"), str):
-                    # Never log stdin (may contain secrets)
-                    try:
-                        await agent_ws.send(payload["data"])
-                    except Exception:
-                        break
-                elif isinstance(payload.get("line"), str):
-                    try:
-                        await agent_ws.send(payload["line"])
-                    except Exception:
-                        break
-        finally:
-            pump.cancel()
-            file_task.cancel()
-            try:
-                await asyncio.gather(pump, file_task, return_exceptions=True)
-            except Exception:
-                pass
-    finally:
-        if agent_ws is not None:
-            try:
-                await agent_ws.close()
-            except Exception:
-                pass
-        async with _STATES_LOCK:
-            state.active_connections -= 1
-            if state.active_connections < 0:
-                state.active_connections = 0
+                    await ingest_line(server_id, text, "docker")
+                    
+        except asyncio.CancelledError:
+            raise
+        except ConnectionClosed:
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 1.5, 5.0)
+        except Exception as exc:
+            logger.warning("agent proxy loop failed for server_id=%s: %s", server_id, exc)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 1.5, 5.0)
 
 
 async def connect(
@@ -438,124 +320,114 @@ async def connect(
     last_id: int | None = None,
     node: Any | None = None,
 ) -> None:
-    """Hauptcoroutine: akzeptiert die WS-Verbindung, spult Replay ab, streamed live.
-
-    Parameter:
-    - ws: FastAPI WebSocket
-    - server_id, container, log_path: bereits aufgeloeste Identifiers
-    - last_id: Wenn gesetzt, werden Zeilen mit id > last_id aus dem Ring-Buffer
-      zuerst repliziert, dann live gestreamt. None = voller Backlog + live.
-    - node: wenn gesetzt und nicht lokal mit install_dir-Fallback, Proxy zum Agent.
-    """
-    # Remote node → always agent proxy. Local node with agent token → proxy when
-    # is_local but we still prefer local docker when no remote separation.
-    if node is not None and not getattr(node, "is_local", False):
-        await _proxy_agent_console(ws, server_id, container, node, last_id=last_id)
-        return
-    # Local node: try agent proxy first if token works and env wants it; default
-    # keep local docker stream for single-host stability.
-    if node is not None and getattr(node, "is_local", False):
-        # Prefer agent for local when docker unavailable (panel without docker)
-        if not docker_service.is_available():
-            await _proxy_agent_console(ws, server_id, container, node, last_id=last_id)
-            return
-
+    """Hauptcoroutine: akzeptiert die WS-Verbindung, spult Replay ab, streamed live."""
     async with _STATES_LOCK:
         state = _get_state(server_id)
-        if state.active_connections >= MAX_CONCURRENT_WS_PER_SERVER:
+        if len(state.websockets) >= MAX_CONCURRENT_WS_PER_SERVER:
             await ws.accept()
-            await _close_safely(ws, code=1013)  # "try again later"
+            await _close_safely(ws, code=1013)
             return
-        state.active_connections += 1
+            
+        state.websockets.add(ws)
+        is_first = len(state.websockets) == 1
 
     try:
         await ws.accept()
-
-        # Backlog nur lesen, wenn der Ring-Buffer leer ist (cold start / restart).
-        # Ansonsten halten wir die letzten 500 Zeilen im Speicher und koennen
-        # bei Reconnect punktuell replayen.
-        async with _STATES_LOCK:
-            is_cold = len(state.lines) == 0
-
-        if is_cold:
-            await _read_initial_backlog(log_path, state)
-
-        # Replay-Phase: alle Zeilen aus dem Buffer senden.
-        # - last_id=None (Cold-Connect): voller Backlog.
-        # - last_id=N (Reconnect): nur Zeilen mit id > N.
+        
+        use_agent = False
+        if node is not None and not getattr(node, "is_local", False):
+            use_agent = True
+        if node is not None and getattr(node, "is_local", False) and not docker_service.is_available():
+            use_agent = True
+            
+        if is_first:
+            if not state.lines:
+                try:
+                    await _read_initial_backlog(log_path, state)
+                except Exception:
+                    pass
+                    
+            state.tasks.append(asyncio.create_task(
+                _tail_file_loop(log_path, state, lambda txt, src, ts: ingest_line(server_id, txt, src, ts))
+            ))
+            
+            if use_agent:
+                state.tasks.append(asyncio.create_task(
+                    _agent_proxy_loop(server_id, container, node)
+                ))
+            else:
+                state.tasks.append(asyncio.create_task(
+                    _tail_docker_loop(container, lambda txt, src, ts: ingest_line(server_id, txt, src, ts))
+                ))
+                
+        # Send replay to THIS client only
         async with _STATES_LOCK:
             with state.lock:
                 if last_id is None:
                     replay = list(state.lines)
                 else:
                     replay = [l for l in state.lines if l.id > last_id]
+        
         for line in replay:
             await ws.send_text(_serialize(line))
-
-        async def _on_line(text: str, source: str, provided_ts: str | None = None) -> None:
-            """Speichert die Zeile im Ring-Buffer (unter Lock) und schickt sie an den Client.
-
-            Wird von zwei parallelen Tasks (_tail_file_loop + _tail_docker_loop)
-            aufgerufen. Der Lock schuetzt next_id und das deque.append, damit
-            bei reconnect-resume via ?last_id= keine Luecken entstehen.
-            """
-            ts = provided_ts or _utc_iso()
-            async with _STATES_LOCK:
-                with state.lock:
-                    line = _Line(
-                        id=state.next_id,
-                        text=text,
-                        source=source,
-                        timestamp=ts,
-                    )
-                    state.next_id += 1
-                    state.lines.append(line)
-                    payload = _serialize(line)
-            await _safe_send(ws, payload)
-
-        async def _safe_send(ws_: WebSocket, payload: str) -> None:
+            
+        # Loop for client inputs
+        while True:
+            if ws.client_state != WebSocketState.CONNECTED:
+                break
             try:
-                await ws_.send_text(payload)
-            except Exception as exc:
-                logger.debug("ws send failed (client disconnected?): %s", exc)
-
-        # Live-Phasen als parallele Tasks. Beide laufen so lange, bis der
-        # Client disconnectet. _tail_docker_loop pollt selbst auf Container-
-        # Readiness, falls der Container beim Connect noch nicht laeuft.
-        file_task = asyncio.create_task(_tail_file_loop(log_path, state, _on_line))
-        docker_task = asyncio.create_task(_tail_docker_loop(container, _on_line))
-
-        try:
-            # Lese Client-Frames (vorerst nur Heartbeat-Handling).
-            # Bricht automatisch ab, wenn der Client die Verbindung schliesst.
-            while True:
-                if ws.client_state != WebSocketState.CONNECTED:
-                    break
-                try:
-                    msg = await ws.receive_text()
-                except WebSocketDisconnect:
-                    # Normaler Disconnect vom Client. Tasks werden im finally gecancelt.
-                    break
-                try:
-                    payload = json.loads(msg)
-                except json.JSONDecodeError:
-                    continue
-                action = payload.get("action") if isinstance(payload, dict) else None
-                if action == "ping":
-                    await ws.send_text(json.dumps({"action": "pong"}))
-        finally:
-            file_task.cancel()
-            docker_task.cancel()
-            for t in (file_task, docker_task):
-                try:
-                    await t
-                except (asyncio.CancelledError, Exception):
-                    pass
+                msg = await ws.receive_text()
+            except WebSocketDisconnect:
+                break
+            try:
+                payload = json.loads(msg)
+            except json.JSONDecodeError:
+                async with _STATES_LOCK:
+                    agent_ws = state.agent_ws
+                if agent_ws:
+                    try:
+                        await agent_ws.send(msg)
+                    except Exception:
+                        pass
+                continue
+                
+            action = payload.get("action") if isinstance(payload, dict) else None
+            if action == "ping":
+                await ws.send_text(json.dumps({"action": "pong"}))
+            elif action == "input" and isinstance(payload.get("data"), str):
+                async with _STATES_LOCK:
+                    agent_ws = state.agent_ws
+                if agent_ws:
+                    try:
+                        await agent_ws.send(payload["data"])
+                    except Exception:
+                        pass
+            elif isinstance(payload.get("line"), str):
+                async with _STATES_LOCK:
+                    agent_ws = state.agent_ws
+                if agent_ws:
+                    try:
+                        await agent_ws.send(payload["line"])
+                    except Exception:
+                        pass
     finally:
         async with _STATES_LOCK:
-            state.active_connections -= 1
-            if state.active_connections < 0:
-                state.active_connections = 0
+            state.websockets.discard(ws)
+            if len(state.websockets) == 0:
+                for t in state.tasks:
+                    t.cancel()
+                state.tasks.clear()
+                
+                if state.agent_ws:
+                    try:
+                        asyncio.create_task(state.agent_ws.close())
+                    except Exception:
+                        pass
+                    state.agent_ws = None
+                    
+                with state.lock:
+                    state.lines.clear()
+                    state.next_id = 1
 
 
 def reset_state_for_tests() -> None:
