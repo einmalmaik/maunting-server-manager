@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 NODE_TOKEN_AAD = "msm:node:auth_token"
 
-# Default timeouts — agent ops can include image pull / large uploads
+# Default timeouts ÔÇö agent ops can include image pull / large uploads
 _DEFAULT_TIMEOUT = 30.0
 _LONG_TIMEOUT = 600.0
 
@@ -62,10 +62,12 @@ def get_shared_sync_client(
 class NodeClientError(Exception):
     """Agent unreachable or returned an error."""
 
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    def __init__(self, message: str, status_code: int | None = None, code: str | None = None, data: dict | None = None) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+        self.code = code
+        self.data = data or {}
 
 
 class NodeClient:
@@ -135,7 +137,7 @@ class NodeClient:
         self._ssl_context = True
         return self._ssl_context
 
-    # ── Factory ──────────────────────────────────────────────────────────
+    # ÔöÇÔöÇ Factory ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     @classmethod
     def from_node(cls, node: Any, *, timeout: float = _DEFAULT_TIMEOUT) -> "NodeClient":
@@ -168,7 +170,7 @@ class NodeClient:
             require_tls_pin=require_pin,
         )
 
-    # ── Internals ────────────────────────────────────────────────────────
+    # ÔöÇÔöÇ Internals ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}
@@ -238,12 +240,38 @@ class NodeClient:
 
         if not expect_json:
             return resp.content
-        if resp.status_code == 204 or not resp.content:
+        if resp.status_code == 204:
             return {}
+        if not resp.content:
+            raise NodeClientError(
+                "Agent returned empty response when JSON was expected",
+                status_code=resp.status_code,
+                code="node_invalid_json_response",
+                data={
+                    "method": method,
+                    "endpoint": path,
+                    "status_code": resp.status_code,
+                    "response_snippet": "",
+                }
+            )
         try:
             return resp.json()
         except Exception:
-            return {}
+            try:
+                snippet = resp.content.decode("utf-8", errors="replace")[:200]
+            except Exception:
+                snippet = ""
+            raise NodeClientError(
+                "Agent returned invalid JSON",
+                status_code=resp.status_code,
+                code="node_invalid_json_response",
+                data={
+                    "method": method,
+                    "endpoint": path,
+                    "status_code": resp.status_code,
+                    "response_snippet": snippet,
+                }
+            )
 
     async def _request_async(
         self,
@@ -297,17 +325,43 @@ class NodeClient:
 
         if not expect_json:
             return resp.content
-        if resp.status_code == 204 or not resp.content:
+        if resp.status_code == 204:
             return {}
+        if not resp.content:
+            raise NodeClientError(
+                "Agent returned empty response when JSON was expected",
+                status_code=resp.status_code,
+                code="node_invalid_json_response",
+                data={
+                    "method": method,
+                    "endpoint": path,
+                    "status_code": resp.status_code,
+                    "response_snippet": "",
+                }
+            )
         try:
             return resp.json()
         except Exception:
-            return {}
+            try:
+                snippet = resp.content.decode("utf-8", errors="replace")[:200]
+            except Exception:
+                snippet = ""
+            raise NodeClientError(
+                "Agent returned invalid JSON",
+                status_code=resp.status_code,
+                code="node_invalid_json_response",
+                data={
+                    "method": method,
+                    "endpoint": path,
+                    "status_code": resp.status_code,
+                    "response_snippet": snippet,
+                }
+            )
 
-    # ── Health / metrics ─────────────────────────────────────────────────
+    # ÔöÇÔöÇ Health / metrics ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     def health(self) -> dict[str, Any]:
-        """Unauthenticated health — does not send bearer token."""
+        """Unauthenticated health ÔÇö does not send bearer token."""
         try:
             with self._httpx_client(5.0) as client:
                 resp = client.get(self._url("/health"))
@@ -328,7 +382,7 @@ class NodeClient:
     async def metrics_async(self, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
         return await self._request_async("GET", "/metrics", client=client)
 
-    # ── Containers ───────────────────────────────────────────────────────
+    # ÔöÇÔöÇ Containers ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     def list_containers(self) -> list[dict[str, Any]]:
         data = self._request("GET", "/containers")
@@ -413,7 +467,7 @@ class NodeClient:
     def send_container_stdin(self, name: str, data: str) -> dict[str, Any]:
         return self._request("POST", f"/containers/{quote(name, safe='')}/stdin", json={"data": data})
 
-    # ── Files ────────────────────────────────────────────────────────────
+    # ÔöÇÔöÇ Files ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     def files_list(self, server_id: int | str, path: str = "") -> list[dict[str, Any]]:
         data = self._request(
@@ -638,7 +692,7 @@ class NodeClient:
     def console_ws_url(self, container_name: str) -> str:
         return self._ws_url(f"/console/{quote(container_name, safe='')}/ws")
 
-    # ── Phase 6: agent-direct S3 backup/restore ───────────────────────────
+    # ÔöÇÔöÇ Phase 6: agent-direct S3 backup/restore ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     def backup_create_s3(
         self,
@@ -650,7 +704,7 @@ class NodeClient:
         timeout: float = _LONG_TIMEOUT,
         postgres: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Trigger encrypted backup on agent → direct S3 upload (no panel data path)."""
+        """Trigger encrypted backup on agent ÔåÆ direct S3 upload (no panel data path)."""
         return self._request(
             "POST",
             "/backup/create",
@@ -688,7 +742,7 @@ class NodeClient:
             timeout=timeout,
         )
 
-    # ── Phase 7: managed Postgres on the node ─────────────────────────────
+    # ÔöÇÔöÇ Phase 7: managed Postgres on the node ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     # Passwords only in request body (TLS to agent). Never log payloads.
 
     def postgres_ensure(self, *, admin_password: str) -> dict[str, Any]:
@@ -759,7 +813,7 @@ class NodeClient:
 
     @property
     def bearer_token(self) -> str:
-        """In-memory token for WS upgrade only — caller must not log/store."""
+        """In-memory token for WS upgrade only ÔÇö caller must not log/store."""
         return self._token
 
 
