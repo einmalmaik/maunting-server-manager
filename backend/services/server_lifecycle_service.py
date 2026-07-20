@@ -44,26 +44,27 @@ LifecycleOperation = str
 @contextmanager
 def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str):
     op_id = str(uuid.uuid4())
-    try:
-        from services.guardian_state_service import set_recovery_suspension
-        set_recovery_suspension(
-            db,
-            server,
-            operation_id=op_id,
-            reason=reason,
-            suspend_until=datetime.now(timezone.utc) + timedelta(minutes=15),
-        )
-    except Exception as exc:
-        logger.warning("Failed to set guardian recovery lease suspension: %s", exc)
-        
+    from services.guardian_state_service import set_recovery_suspension, clear_recovery_suspension
+    from services.guardian_sync_service import reconcile_guardian_server
+    
+    set_recovery_suspension(
+        db,
+        server,
+        operation_id=op_id,
+        reason=reason,
+        suspend_until=datetime.now(timezone.utc) + timedelta(minutes=15),
+    )
+    # Sync immediately after setting the lease
+    if server.node and server.node.status == "online":
+        reconcile_guardian_server(db, server)
+
     try:
         yield
     finally:
-        try:
-            from services.guardian_state_service import clear_recovery_suspension
-            clear_recovery_suspension(db, server, operation_id=op_id)
-        except Exception as exc:
-            logger.warning("Failed to clear guardian recovery lease suspension: %s", exc)
+        clear_recovery_suspension(db, server, operation_id=op_id)
+        # Sync immediately after clearing the lease
+        if server.node and server.node.status == "online":
+            reconcile_guardian_server(db, server)
 _TRANSIENT_STATUSES = {"queued", "starting", "stopping", "restarting"}
 
 

@@ -130,9 +130,9 @@ def reconcile_guardian_server(
     node = server.node
     if node is None or node.status != "online":
         raise RuntimeError("Guardian node is not online")
-    client = node_client or NodeClient.from_node(node, timeout=5.0)
-    
     try:
+        client = node_client or NodeClient.from_node(node, timeout=5.0)
+        
         # 1. Capabilities check, compilation and synchronization
         capabilities = client.get_guardian_capabilities()
         payload = compile_desired_state(db, server, capabilities=capabilities)
@@ -142,6 +142,23 @@ def reconcile_guardian_server(
         # 2. Retrieve observed state
         container_name = f"msm-srv-{server.id}"
         observed = client.get_guardian_state(container_name)
+        
+        required_fields = [
+            "schema_version",
+            "supported_schema_version",
+            "server_id",
+            "accepted_generation",
+            "payload_hash",
+            "guardian_observed_state",
+            "observed_runtime_state",
+            "container_state",
+            "active_incident_uuid",
+            "last_probe_at",
+            "last_transition_at",
+        ]
+        for field in required_fields:
+            if field not in observed:
+                raise GuardianContractError("guardian_missing_observed_field", f"Missing {field}")
         
         if observed.get("schema_version") != 1:
             raise GuardianContractError("guardian_schema_version_mismatch", "Schema version mismatch")
@@ -159,9 +176,6 @@ def reconcile_guardian_server(
         if not accepted_payload_hash or type(accepted_payload_hash) is not str or not re.match(r'^sha256:[a-f0-9]{64}$', accepted_payload_hash):
             raise GuardianContractError("guardian_invalid_observed_field", "Invalid payload_hash format")
             
-        if "guardian_observed_state" not in observed:
-            raise GuardianContractError("guardian_missing_observed_field", "Missing guardian_observed_state")
-            
         observed_state = observed.get("guardian_observed_state")
         observed_runtime_state = observed.get("observed_runtime_state")
         if observed_state != observed_runtime_state:
@@ -170,9 +184,6 @@ def reconcile_guardian_server(
         if observed_state not in _OBSERVED_STATES:
             raise GuardianContractError("guardian_invalid_observed_field", "Agent returned an invalid Guardian observed state")
 
-        if "container_state" not in observed:
-            raise GuardianContractError("guardian_missing_observed_field", "Missing container_state")
-            
         container_state = observed.get("container_state")
         if container_state not in _ALLOWED_CONTAINER_STATES:
             raise GuardianContractError("guardian_invalid_observed_field", f"Agent returned an invalid container state: {container_state}")
@@ -249,23 +260,6 @@ def reconcile_guardian_server(
         server.guardian_sync_error_statistics = None
         db.commit()
 
-        # 3. Handle incidents ingestion
-        incidents = client.get_incidents(container_name)
-        acknowledged = ingest_incidents_and_ack(
-            db,
-            server,
-            client,
-            container_name,
-            incidents,
-        )
-        db.commit()
-        db.refresh(server)
-        return {
-            "payload_hash": payload["payload_hash"],
-            "generation": payload["generation"],
-            "observed_state": observed_state,
-            "acknowledged_incidents": acknowledged,
-        }
     except GuardianSyncMismatchError:
         # Re-raise directly to bypass generic error storage
         raise
@@ -283,4 +277,53 @@ def reconcile_guardian_server(
             db.refresh(server)
         except Exception:
             db.rollback()
+            
+        import requests
+        from services.node_client import NodeClientError
+        if isinstance(exc, (NodeClientError, requests.exceptions.RequestException, ConnectionError)):
+            logger.warning("Transient Guardian sync error for server %s: %s", server.id, exc)
+            return {
+                "payload_hash": None,
+                "generation": None,
+                "observed_state": "unknown",
+                "acknowledged_incidents": [],
+            }
+            
         raise
+
+    # 3. Handle incidents ingestion outside the main sync try/except
+    # so that incident failures don't overwrite successful sync status.
+    try:
+        incidents = client.get_incidents(container_name)
+        acknowledged = ingest_incidents_and_ack(
+            db,
+            server,
+            client,
+            container_name,
+            incidents,
+        )
+    except Exception as exc:
+        error_info = {
+            "last_error": type(exc).__name__,
+            "last_error_message": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "context": "incident_sync"
+        }
+        try:
+            server.guardian_sync_error_statistics = json.dumps(error_info)
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise
+    db.commit()
+    db.refresh(server)
+    
+    from services.guardian_restart_service import _trigger_guardian_auto_restart
+    _trigger_guardian_auto_restart(db, server.id)
+    
+    return {
+        "payload_hash": payload["payload_hash"],
+        "generation": payload["generation"],
+        "observed_state": observed_state,
+        "acknowledged_incidents": acknowledged,
+    }

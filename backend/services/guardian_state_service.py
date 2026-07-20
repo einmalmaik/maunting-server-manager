@@ -130,10 +130,12 @@ def set_recovery_suspension(
         "reason": reason,
         "suspend_until": suspend_until.isoformat().replace("+00:00", "Z"),
     }
+    encoded_value = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    if server.guardian_recovery_suspension == encoded_value:
+        return
+
     try:
-        server.guardian_recovery_suspension = json.dumps(
-            value, sort_keys=True, separators=(",", ":")
-        )
+        server.guardian_recovery_suspension = encoded_value
         server.desired_state_generation = int(server.desired_state_generation or 0) + 1
         db.commit()
         db.refresh(server)

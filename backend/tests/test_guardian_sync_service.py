@@ -535,3 +535,34 @@ def test_reconcile_network_failure_keeps_last_state_saves_error_stats(db: Sessio
     err_stats = json.loads(server.guardian_sync_error_statistics)
     assert err_stats["last_error"] == "Exception"
     assert err_stats["last_error_message"] == "network failure"
+
+
+def test_node_unreachable_stored_as_sync_error(db: Session) -> None:
+    from services.guardian_sync_service import reconcile_guardian_server
+    from services.node_client import NodeClientError
+    
+    node = Node(id=1, name="node-1", host="http://127.0.0.1", status="online", auth_token_enc="enc")
+    server = _server()
+    server.node = node
+    server.id = None
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+    
+    client = MagicMock()
+    client.get_guardian_capabilities.side_effect = NodeClientError("Node Unreachable")
+    
+    result = reconcile_guardian_server(db, server, node_client=client)
+    
+    assert result == {
+        "payload_hash": None,
+        "generation": None,
+        "observed_state": "unknown",
+        "acknowledged_incidents": [],
+    }
+    
+    db.refresh(server)
+    assert server.guardian_sync_error_statistics is not None
+    err_stats = json.loads(server.guardian_sync_error_statistics)
+    assert err_stats["last_error"] == "NodeClientError"
+    assert err_stats["last_error_message"] == "Node Unreachable"
