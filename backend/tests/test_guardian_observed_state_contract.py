@@ -580,8 +580,9 @@ def test_naive_timestamp_is_rejected(db: Session) -> None:
 
 def test_sync_error_preserves_running_incidents_and_is_structured(db: Session) -> None:
     """
-    P0.4: Sync-Fehler ├╝berschreiben keine laufenden Incidents.
-    Sie werden ausschlie├ƒlich im Feld `guardian_sync_error_statistics` persistent gemacht,
+    P0.4: Sync-Fehler überschreiben keine laufenden Incidents.
+    Sie werden ausschließlich im Feld `guardian_sync_error_statistics` persistent gemacht,
+
     inklusive Zeitstempel, Typ und Raw-Fehlermeldung.
     """
     node = Node(id=1, name="node-1", host="http://127.0.0.1", status="online", auth_token_enc="enc")
@@ -615,7 +616,8 @@ def test_sync_error_preserves_running_incidents_and_is_structured(db: Session) -
 
 def test_sync_success_commits_before_incident_failure(db: Session) -> None:
     """
-    P0.5: Schl├ñgt die Verarbeitung der Incidents fehl, DARF DAS NICHT den Erfolg des Observed State Syncs r├╝ckg├ñngig machen.
+    P0.5: Schlägt die Verarbeitung der Incidents fehl, DARF DAS NICHT den Erfolg des Observed State Syncs rückgängig machen.
+
     """
     node = Node(id=1, name="node-1", host="http://127.0.0.1", status="online", auth_token_enc="enc")
     server = _server()

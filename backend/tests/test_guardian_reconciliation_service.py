@@ -137,10 +137,11 @@ async def test_each_worker_uses_separate_database_session(db: Session) -> None:
     db.add_all([n1, n2, s1, s2])
     db.commit()
     
-    sessions_used = []
+    sessions_used = set()
     
     def mock_reconcile(session, server, node_client):
-        sessions_used.append(session)
+        sessions_used.add(id(session))
+
 
     with patch("services.guardian_reconciliation_service.NodeClient.from_node"), \
          patch("services.guardian_reconciliation_service.reconcile_guardian_server", side_effect=mock_reconcile):
@@ -149,7 +150,8 @@ async def test_each_worker_uses_separate_database_session(db: Session) -> None:
         
     # Ensure that each worker thread received a distinct database session instance
     assert len(sessions_used) == 2
-    assert sessions_used[0] is not sessions_used[1]
+    assert len(sessions_used) == 2
+
 
 @pytest.mark.asyncio
 async def test_one_server_failure_does_not_abort_other_servers(db: Session) -> None:

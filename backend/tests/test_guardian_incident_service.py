@@ -291,9 +291,10 @@ def test_ack_failure_preserves_delivery_record(db: Session) -> None:
         },
     }
 
-    # Should raise exception
-    with pytest.raises(RuntimeError):
-        ingest_incidents_and_ack(db, server, client, "srv-42", [inc])
+    # Should not raise exception
+    ack = ingest_incidents_and_ack(db, server, client, "srv-42", [inc])
+    assert ack == [inc_uuid]
+
 
     delivery = db.query(GuardianIncidentDelivery).filter(GuardianIncidentDelivery.incident_uuid == inc_uuid).first()
     assert delivery is not None

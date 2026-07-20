@@ -8,7 +8,8 @@ from pathlib import Path
 def test_guardian_accepted_payload_hash_migration(tmp_path):
     """
     Testet das Upgrade von base/head_without_this_migration zu head.
-    Pr├╝ft, ob die Spalte 'guardian_accepted_payload_hash' vor dem Upgrade
+    Prüft, ob die Spalte 'guardian_accepted_payload_hash' vor dem Upgrade
+
     nicht existiert und danach existiert.
     """
     from sqlalchemy import create_engine
