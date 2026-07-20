@@ -135,8 +135,8 @@ def _append_console_log(server_id: int, text: str) -> None:
     """Append a console event line. The line is stored with an embedded UTC ISO
     timestamp so that historical backlog reads can assign the *original* write
     time instead of the time the console panel was opened.
-    Format in file: <iso-timestamp>\\t<raw-text>\\n
-    The \\t + ts prefix is stripped on read (in console_stream_service).
+    Format in file: <iso-timestamp>\t<raw-text>\n
+    The \t + ts prefix is stripped on read (in console_stream_service).
     """
     try:
         log_path = _console_log_path(server_id)
@@ -144,6 +144,11 @@ def _append_console_log(server_id: int, text: str) -> None:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"{ts}\t{text}")
             f.flush()
+        try:
+            from services.console_stream_service import append_msm_log_to_memory
+            append_msm_log_to_memory(server_id, text, ts)
+        except Exception:
+            pass
     except OSError as e:
         logger.warning("Could not write console log for server %s: %s", server_id, e)
 

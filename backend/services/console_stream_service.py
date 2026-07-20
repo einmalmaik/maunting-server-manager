@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -61,10 +62,31 @@ class _ServerState:
     lines: Deque[_Line] = field(default_factory=lambda: deque(maxlen=RING_BUFFER_SIZE))
     next_id: int = 1
     active_connections: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 _STATES: dict[int, _ServerState] = {}
 _STATES_LOCK = asyncio.Lock()
+_SYNC_STATES_LOCK = threading.Lock()
+
+
+def append_msm_log_to_memory(server_id: int, text: str, timestamp: str) -> None:
+    """Synchronous, thread-safe function to append an MSM log line to the in-memory
+    state of a server, if it is currently loaded.
+    """
+    with _SYNC_STATES_LOCK:
+        state = _STATES.get(server_id)
+    if state is not None:
+        with state.lock:
+            clean_text = text.rstrip("\r\n")
+            line = _Line(
+                id=state.next_id,
+                text=clean_text,
+                source="msm",
+                timestamp=timestamp,
+            )
+            state.next_id += 1
+            state.lines.append(line)
 
 
 def _utc_iso() -> str:
@@ -139,15 +161,16 @@ async def _read_initial_backlog(log_path: str, state: _ServerState) -> None:
                                 text = rest
                             except Exception:
                                 pass  # old line without ts prefix -> fallback now (will be rare after rollout)
-                    state.lines.append(
-                        _Line(
-                            id=state.next_id,
-                            text=text,
-                            source="msm",
-                            timestamp=ts,
+                    with state.lock:
+                        state.lines.append(
+                            _Line(
+                                id=state.next_id,
+                                text=text,
+                                source="msm",
+                                timestamp=ts,
+                            )
                         )
-                    )
-                    state.next_id += 1
+                        state.next_id += 1
     except OSError as exc:
         logger.warning("ws backlog read failed for %s: %s", log_path, exc)
 
@@ -461,10 +484,11 @@ async def connect(
         # - last_id=None (Cold-Connect): voller Backlog.
         # - last_id=N (Reconnect): nur Zeilen mit id > N.
         async with _STATES_LOCK:
-            if last_id is None:
-                replay = list(state.lines)
-            else:
-                replay = [l for l in state.lines if l.id > last_id]
+            with state.lock:
+                if last_id is None:
+                    replay = list(state.lines)
+                else:
+                    replay = [l for l in state.lines if l.id > last_id]
         for line in replay:
             await ws.send_text(_serialize(line))
 
@@ -477,15 +501,16 @@ async def connect(
             """
             ts = provided_ts or _utc_iso()
             async with _STATES_LOCK:
-                line = _Line(
-                    id=state.next_id,
-                    text=text,
-                    source=source,
-                    timestamp=ts,
-                )
-                state.next_id += 1
-                state.lines.append(line)
-                payload = _serialize(line)
+                with state.lock:
+                    line = _Line(
+                        id=state.next_id,
+                        text=text,
+                        source=source,
+                        timestamp=ts,
+                    )
+                    state.next_id += 1
+                    state.lines.append(line)
+                    payload = _serialize(line)
             await _safe_send(ws, payload)
 
         async def _safe_send(ws_: WebSocket, payload: str) -> None:
