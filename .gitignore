@@ -78,3 +78,4 @@ node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json
 .factory-test-data/evidence/e2e-safety/VAL-CROSS-004-api-get-after-unlimited.json
 .factory-test-data/evidence/e2e-safety/VAL-CROSS-001-api-get-after-edit.json
 .factory-test-data/evidence/e2e-safety-cross-area-pytest-output.txt
+prompt.txt
