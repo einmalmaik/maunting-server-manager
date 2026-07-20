@@ -41,6 +41,20 @@ _ACTIVE_JOBS_LOCK = threading.Lock()
 LifecycleOperation = str
 
 
+def _extract_agent_recovery_suspension_op_id(server: Server) -> str | None:
+    raw = getattr(server, "guardian_agent_recovery_suspension_json", None)
+    if not raw:
+        return None
+    try:
+        import json
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data.get("operation_id")
+    except Exception:
+        pass
+    return None
+
+
 @contextmanager
 def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str):
     op_id = str(uuid.uuid4())
@@ -54,17 +68,37 @@ def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str)
         reason=reason,
         suspend_until=datetime.now(timezone.utc) + timedelta(minutes=15),
     )
-    # Sync immediately after setting the lease
-    if server.node and server.node.status == "online":
-        reconcile_guardian_server(db, server)
+
+    try:
+        sync_res = reconcile_guardian_server(db, server)
+    except Exception:
+        clear_recovery_suspension(db, server, operation_id=op_id)
+        raise
+
+    if not isinstance(sync_res, dict) or sync_res.get("payload_hash") is None:
+        clear_recovery_suspension(db, server, operation_id=op_id)
+        raise RuntimeError(f"Guardian recovery lease sync failed for server {server.id}")
+
+    confirmed_op_id = _extract_agent_recovery_suspension_op_id(server)
+    if confirmed_op_id != op_id:
+        clear_recovery_suspension(db, server, operation_id=op_id)
+        raise RuntimeError(
+            f"Guardian agent did not confirm recovery lease {op_id} for server {server.id} (got: {confirmed_op_id})"
+        )
 
     try:
         yield
     finally:
         clear_recovery_suspension(db, server, operation_id=op_id)
-        # Sync immediately after clearing the lease
-        if server.node and server.node.status == "online":
-            reconcile_guardian_server(db, server)
+        clear_sync_res = reconcile_guardian_server(db, server)
+        if not isinstance(clear_sync_res, dict) or clear_sync_res.get("payload_hash") is None:
+            raise RuntimeError(f"Guardian recovery lease clear sync failed for server {server.id}")
+
+        clear_confirmed_op_id = _extract_agent_recovery_suspension_op_id(server)
+        if clear_confirmed_op_id == op_id:
+            raise RuntimeError(
+                f"Guardian agent did not confirm removal of recovery lease {op_id} for server {server.id}"
+            )
 _TRANSIENT_STATUSES = {"queued", "starting", "stopping", "restarting"}
 
 
