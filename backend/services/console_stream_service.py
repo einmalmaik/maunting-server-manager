@@ -427,6 +427,7 @@ async def connect(
                     
                 with state.lock:
                     state.lines.clear()
+                    state.next_id = 1
 
 
 def reset_state_for_tests() -> None:

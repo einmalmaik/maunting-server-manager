@@ -227,3 +227,33 @@ def test_database_rollback_on_failure(db: Session) -> None:
             set_desired_power_state(db, server, "running")
         # rollback should revert to previous state
         assert server.desired_power_state == "stopped"
+
+
+def test_identical_recovery_suspension_does_not_increment_generation(db: Session) -> None:
+    server = _server()
+    server.id = None
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    op_id = str(uuid.uuid4())
+    suspend_until = datetime.now(timezone.utc) + timedelta(hours=2)
+
+    set_recovery_suspension(
+        db,
+        server,
+        operation_id=op_id,
+        reason="maintenance",
+        suspend_until=suspend_until,
+    )
+    assert server.desired_state_generation == 2
+
+    # Second identical call should not increment generation
+    set_recovery_suspension(
+        db,
+        server,
+        operation_id=op_id,
+        reason="maintenance",
+        suspend_until=suspend_until,
+    )
+    assert server.desired_state_generation == 2
