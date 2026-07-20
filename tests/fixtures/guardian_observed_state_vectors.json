@@ -1,0 +1,129 @@
+[
+  {
+    "description": "normalen Healthy State",
+    "generation": 7,
+    "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+    "observed": {
+      "schema_version": 1,
+      "server_id": 42,
+      "accepted_generation": 7,
+      "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+      "guardian_observed_state": "healthy",
+      "observed_runtime_state": "healthy",
+      "container_state": "running",
+      "active_incident_uuid": null,
+      "last_probe_at": "2026-07-20T12:00:00Z",
+      "last_transition_at": "2026-07-20T11:59:00Z",
+      "quarantine": null,
+      "recovery_suspension": null,
+      "supported_schema_version": 1
+    }
+  },
+  {
+    "description": "Recovering State mit aktivem Incident",
+    "generation": 7,
+    "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+    "observed": {
+      "schema_version": 1,
+      "server_id": 42,
+      "accepted_generation": 7,
+      "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+      "guardian_observed_state": "recovering",
+      "observed_runtime_state": "recovering",
+      "container_state": "running",
+      "active_incident_uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "last_probe_at": "2026-07-20T12:00:00Z",
+      "last_transition_at": "2026-07-20T11:59:00Z",
+      "quarantine": null,
+      "recovery_suspension": null,
+      "supported_schema_version": 1
+    }
+  },
+  {
+    "description": "Quarantined State",
+    "generation": 7,
+    "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+    "observed": {
+      "schema_version": 1,
+      "server_id": 42,
+      "accepted_generation": 7,
+      "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+      "guardian_observed_state": "quarantined",
+      "observed_runtime_state": "quarantined",
+      "container_state": "stopped",
+      "active_incident_uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "last_probe_at": "2026-07-20T12:00:00Z",
+      "last_transition_at": "2026-07-20T11:59:00Z",
+      "quarantine": {
+        "at": "2026-07-20T11:59:00Z",
+        "reason": "attempt_limit_exceeded"
+      },
+      "recovery_suspension": null,
+      "supported_schema_version": 1
+    }
+  },
+  {
+    "description": "aktive Recovery Suspension",
+    "generation": 7,
+    "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+    "observed": {
+      "schema_version": 1,
+      "server_id": 42,
+      "accepted_generation": 7,
+      "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+      "guardian_observed_state": "healthy",
+      "observed_runtime_state": "healthy",
+      "container_state": "running",
+      "active_incident_uuid": null,
+      "last_probe_at": "2026-07-20T12:00:00Z",
+      "last_transition_at": "2026-07-20T11:59:00Z",
+      "quarantine": null,
+      "recovery_suspension": {
+        "operation_id": "42345678-1234-1234-1234-123456789012",
+        "reason": "maintenance",
+        "suspend_until": "2026-07-20T16:00:00Z"
+      },
+      "supported_schema_version": 1
+    }
+  },
+  {
+    "description": "veraltete akzeptierte Generation",
+    "generation": 7,
+    "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+    "observed": {
+      "schema_version": 1,
+      "server_id": 42,
+      "accepted_generation": 6,
+      "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+      "guardian_observed_state": "healthy",
+      "observed_runtime_state": "healthy",
+      "container_state": "running",
+      "active_incident_uuid": null,
+      "last_probe_at": "2026-07-20T12:00:00Z",
+      "last_transition_at": "2026-07-20T11:59:00Z",
+      "quarantine": null,
+      "recovery_suspension": null,
+      "supported_schema_version": 1
+    }
+  },
+  {
+    "description": "abweichenden Payload-Hash",
+    "generation": 7,
+    "payload_hash": "sha256:de0ecd22bcacf8f5d4bf47bc301d40c1d7b589a6dbee33974a4c6ec530ea321e",
+    "observed": {
+      "schema_version": 1,
+      "server_id": 42,
+      "accepted_generation": 7,
+      "payload_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "guardian_observed_state": "healthy",
+      "observed_runtime_state": "healthy",
+      "container_state": "running",
+      "active_incident_uuid": null,
+      "last_probe_at": "2026-07-20T12:00:00Z",
+      "last_transition_at": "2026-07-20T11:59:00Z",
+      "quarantine": null,
+      "recovery_suspension": null,
+      "supported_schema_version": 1
+    }
+  }
+]

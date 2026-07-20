@@ -10,10 +10,12 @@ import pytest
 from sqlalchemy.orm import Session
 
 # Load validate_desired_state dynamically from the agent module to avoid namespace collision on 'services'
+import sys
 root = Path(__file__).resolve().parents[2]
 contract_path = root / "msm-agent" / "services" / "guardian_contract.py"
 spec = importlib.util.spec_from_file_location("guardian_contract", contract_path)
 guardian_contract = importlib.util.module_from_spec(spec)
+sys.modules["guardian_contract"] = guardian_contract
 spec.loader.exec_module(guardian_contract)
 validate_desired_state = guardian_contract.validate_desired_state
 
@@ -471,16 +473,24 @@ def test_reconcile_saves_observed_state_fields(db: Session) -> None:
         "recovery_actions": [],
     }
     client.get_guardian_state.return_value = {
+        "schema_version": 1,
+        "server_id": server.id,
+        "accepted_generation": 1,
+        "payload_hash": None,  # will be set dynamically
         "guardian_observed_state": "healthy",
-        "container_status": "running",
+        "container_state": "running",
         "active_incident_uuid": "some-uuid",
-        "probe_timestamp": "2026-07-20T12:00:00Z",
-        "transition_timestamp": "2026-07-20T12:01:00Z",
-        "quarantine_status": "none",
+        "last_probe_at": "2026-07-20T12:00:00Z",
+        "last_transition_at": "2026-07-20T12:01:00Z",
+        "quarantine": None,
+        "recovery_suspension": None,
+        "supported_schema_version": 1,
     }
     client.get_incidents.return_value = []
     
     with patch("services.guardian_sync_service.get_plugin", return_value=plugin):
+        payload = compile_desired_state(db, server)
+        client.get_guardian_state.return_value["payload_hash"] = payload["payload_hash"]
         reconcile_guardian_server(db, server, node_client=client)
         
     db.refresh(server)
@@ -489,7 +499,10 @@ def test_reconcile_saves_observed_state_fields(db: Session) -> None:
     assert server.guardian_active_incident_uuid == "some-uuid"
     assert server.guardian_probe_timestamp.replace(tzinfo=timezone.utc) == datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
     assert server.guardian_transition_timestamp.replace(tzinfo=timezone.utc) == datetime(2026, 7, 20, 12, 1, tzinfo=timezone.utc)
-    assert server.guardian_quarantine_status == "none"
+    assert server.guardian_accepted_generation == 1
+    assert server.guardian_last_payload_hash == payload["payload_hash"]
+    assert server.guardian_agent_quarantine_json is None
+    assert server.guardian_agent_recovery_suspension_json is None
     assert server.guardian_sync_error_statistics is None
 
 

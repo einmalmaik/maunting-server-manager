@@ -310,12 +310,28 @@ def test_stopped_desired_state_is_sent_and_observation_does_not_change_intent(
     db.refresh(server)
     client = MagicMock()
     client.get_guardian_capabilities.return_value = _capabilities()
-    client.get_guardian_state.return_value = {"guardian_observed_state": "healthy"}
+    client.get_guardian_state.return_value = {
+        "schema_version": 1,
+        "server_id": 42,
+        "accepted_generation": 7,
+        "payload_hash": None,  # will set dynamically
+        "guardian_observed_state": "healthy",
+        "container_state": "running",
+        "active_incident_uuid": None,
+        "last_probe_at": "2026-07-20T12:00:00Z",
+        "last_transition_at": "2026-07-20T11:59:00Z",
+        "quarantine": None,
+        "recovery_suspension": None,
+        "supported_schema_version": 1,
+    }
     client.get_incidents.return_value = []
     plugin = MagicMock()
     plugin.get_blueprint.return_value = _blueprint()
 
     with patch("services.guardian_sync_service.get_plugin", return_value=plugin):
+        from services.guardian_sync_service import compile_desired_state
+        payload = compile_desired_state(db, server)
+        client.get_guardian_state.return_value["payload_hash"] = payload["payload_hash"]
         result = reconcile_guardian_server(db, server, node_client=client)
 
     sent = client.set_desired_state.call_args.args[1]

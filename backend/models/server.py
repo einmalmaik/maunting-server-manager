@@ -53,6 +53,10 @@ class Server(Base):
     guardian_transition_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     guardian_quarantine_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     guardian_sync_error_statistics: Mapped[str | None] = mapped_column(Text, nullable=True)
+    guardian_accepted_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    guardian_last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    guardian_agent_quarantine_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    guardian_agent_recovery_suspension_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Auto-Restart
     # WICHTIG: Nur EIN Modus aktiv (Intervall oder feste Zeiten).

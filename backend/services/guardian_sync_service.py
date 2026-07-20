@@ -38,11 +38,54 @@ _OBSERVED_STATES = frozenset(
 )
 
 
+class GuardianContractError(ValueError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class GuardianSyncMismatchError(ValueError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+_ALLOWED_CONTAINER_STATES = frozenset(
+    {
+        "created",
+        "restarting",
+        "running",
+        "removing",
+        "paused",
+        "exited",
+        "dead",
+        "missing",
+        "unknown",
+        "stopped",
+        "installing",
+        "updating",
+        "error",
+        "awaiting_files",
+    }
+)
+
+
 def _parse_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if not value:
+        raise GuardianContractError("guardian_invalid_observed_timestamp", "Timestamp is empty")
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return datetime.now(timezone.utc)
+        val_str = str(value)
+        if val_str.endswith("Z"):
+            val_str = val_str[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(val_str)
+    except (TypeError, ValueError) as exc:
+        raise GuardianContractError("guardian_invalid_observed_timestamp", f"Invalid timestamp: {value}") from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
@@ -78,7 +121,6 @@ def compile_and_sync_desired_state(
     client.set_desired_state(f"msm-srv-{server.id}", payload)
     return payload
 
-
 def reconcile_guardian_server(
     db: Session,
     server: Server,
@@ -107,22 +149,79 @@ def reconcile_guardian_server(
         if observed_state not in _OBSERVED_STATES:
             raise ValueError("Agent returned an invalid Guardian observed state")
 
-        # Sync observed fields
-        server.guardian_last_payload_hash = payload["payload_hash"]
-        server.guardian_container_status = observed.get("container_status")
+        container_state = observed.get("container_state") or "unknown"
+        if container_state not in _ALLOWED_CONTAINER_STATES:
+            raise ValueError(f"Agent returned an invalid container state: {container_state}")
+
+        # Extract timestamps
+        probe_ts = observed.get("last_probe_at")
+        trans_ts = observed.get("last_transition_at")
+        
+        probe_dt = _parse_datetime(probe_ts) if probe_ts else None
+        trans_dt = _parse_datetime(trans_ts) if trans_ts else None
+
+        # Extract quarantine and recovery_suspension
+        q_data = observed.get("quarantine")
+        if q_data is not None:
+            q_json = json.dumps(q_data, sort_keys=True, separators=(",", ":"))
+        else:
+            q_json = None
+
+        rs_data = observed.get("recovery_suspension")
+        if rs_data is not None:
+            rs_json = json.dumps(rs_data, sort_keys=True, separators=(",", ":"))
+        else:
+            rs_json = None
+
+        accepted_generation = observed.get("accepted_generation")
+        if accepted_generation is not None:
+            accepted_generation = int(accepted_generation)
+        accepted_payload_hash = observed.get("payload_hash")
+
+        # Save observed fields to database
+        server.guardian_observed_state = observed_state
+        server.guardian_container_status = container_state
         server.guardian_active_incident_uuid = observed.get("active_incident_uuid")
-        
-        probe_ts = observed.get("probe_timestamp")
-        server.guardian_probe_timestamp = _parse_datetime(probe_ts) if probe_ts else None
-        
-        trans_ts = observed.get("transition_timestamp")
-        server.guardian_transition_timestamp = _parse_datetime(trans_ts) if trans_ts else None
-        
-        server.guardian_quarantine_status = observed.get("quarantine_status")
+        server.guardian_probe_timestamp = probe_dt
+        server.guardian_transition_timestamp = trans_dt
+        server.guardian_agent_quarantine_json = q_json
+        server.guardian_agent_recovery_suspension_json = rs_json
+        server.guardian_accepted_generation = accepted_generation
+        server.guardian_last_payload_hash = accepted_payload_hash
+
+        # Sync verification rules
+        expected_generation = payload.get("generation")
+        expected_payload_hash = payload.get("payload_hash")
+
+        # Check generation mismatch
+        if accepted_generation != expected_generation:
+            err_data = {
+                "code": "guardian_generation_mismatch",
+                "expected_generation": expected_generation,
+                "accepted_generation": accepted_generation,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            server.guardian_sync_error_statistics = json.dumps(err_data, sort_keys=True, separators=(",", ":"))
+            db.commit()
+            db.refresh(server)
+            raise GuardianSyncMismatchError("guardian_generation_mismatch", f"Generation mismatch: expected {expected_generation}, accepted {accepted_generation}")
+
+        # Check hash mismatch
+        if accepted_payload_hash != expected_payload_hash:
+            err_data = {
+                "code": "guardian_payload_hash_mismatch",
+                "expected_payload_hash": expected_payload_hash,
+                "accepted_payload_hash": accepted_payload_hash,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            server.guardian_sync_error_statistics = json.dumps(err_data, sort_keys=True, separators=(",", ":"))
+            db.commit()
+            db.refresh(server)
+            raise GuardianSyncMismatchError("guardian_payload_hash_mismatch", f"Payload hash mismatch: expected {expected_payload_hash}, accepted {accepted_payload_hash}")
+
+        # Clear sync error and set success timestamp
+        server.guardian_last_sync_at = datetime.now(timezone.utc)
         server.guardian_sync_error_statistics = None
-        
-        if server.guardian_observed_state != observed_state:
-            server.guardian_observed_state = observed_state
 
         # 3. Handle incidents ingestion
         incidents = client.get_incidents(container_name)
@@ -141,6 +240,9 @@ def reconcile_guardian_server(
             "observed_state": observed_state,
             "acknowledged_incidents": acknowledged,
         }
+    except GuardianSyncMismatchError:
+        # Re-raise directly to bypass generic error storage
+        raise
     except Exception as exc:
         db.rollback()
         # Save last known state on network/API failure
