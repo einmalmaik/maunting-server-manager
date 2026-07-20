@@ -344,10 +344,20 @@ def test_stopped_desired_state_is_sent_and_observation_does_not_change_intent(
 
 def test_scheduler_processes_stopped_servers() -> None:
     node = Node(id=1, name="n", host="http://127.0.0.1", auth_token_enc="x", status="online")
-    server = Server(id=42, name="s", game_type="x", install_dir="/x", status="stopped", node=node)
+    server = Server(id=42, name="s", game_type="x", install_dir="/x", status="stopped", node=node, node_id=1)
     server.node = node
     fake_db = MagicMock(spec=Session)
-    fake_db.query.return_value.filter.return_value.all.return_value = [server]
+    
+    def mock_query(model):
+        q = MagicMock()
+        if model is Server:
+            q.filter.return_value.all.return_value = [server]
+            q.filter.return_value.first.return_value = server
+        elif model is Node:
+            q.filter.return_value.first.return_value = node
+        return q
+        
+    fake_db.query.side_effect = mock_query
     mock_client = MagicMock()
     with patch("services.guardian_reconciliation_service.SessionLocal", return_value=fake_db), patch(
         "services.guardian_reconciliation_service.NodeClient.from_node", return_value=mock_client
