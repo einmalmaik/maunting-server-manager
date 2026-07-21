@@ -1844,6 +1844,8 @@
       "healthPortTimeout": { "label": "Timeout (Liveness Port)", "help": "e.g. 3s or 5s." },
       "healthAppType": { "label": "Query Type", "help": "e.g. minecraft-query." },
       "healthAppTypeCustom": { "label": "Custom Query Type", "help": "Protocol identifier for the application-specific query check." },
+      "healthAppPath": { "label": "HTTP Path", "help": "Relative HTTP path for ping check, e.g. /healthz." },
+      "healthAppPort": { "label": "HTTP Port", "help": "Optional port (defaults to liveness port), e.g. {{SERVER_PORT}}." },
       "healthAppInterval": { "label": "Query Interval", "help": "e.g. 30s." },
       "healthAppThreshold": { "label": "Failure Threshold", "help": "Number of failed checks before marked unhealthy." },
       "healthSuccessPatterns": { "label": "Startup Success Patterns", "help": "Log pattern for successful start." },
@@ -1871,6 +1873,7 @@
       "healthPortEmpty": "Port cannot be empty.",
       "healthTimeoutEmpty": "Timeout cannot be empty.",
       "healthAppTypeEmpty": "Query type cannot be empty.",
+      "healthAppPathInvalid": "The HTTP path must be relative and start with / (e.g. /healthz).",
       "recoveryMatchEmpty": "Error match pattern {{row}} cannot be empty.",
       "recoveryActionEmpty": "Recovery action {{row}} cannot be empty."
     }

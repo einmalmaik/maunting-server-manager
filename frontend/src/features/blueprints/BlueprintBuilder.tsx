@@ -417,7 +417,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
           health: {
             process: { required: true },
             port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
-            application: { type: 'http-ping', interval: '30s', failure_threshold: 3 },
+            application: { type: 'http-ping', path: '/api/healthz', interval: '30s', failure_threshold: 3 },
             startup: { success_patterns: ['App listening on port', 'Server started'], failure_patterns: ['npm ERR!', 'UnhandledPromiseRejectionWarning'] }
           },
           logs: { sources: ['stdout', 'stderr'], redact: ['discord_token', 'api_key', 'database_url'] },
@@ -575,6 +575,27 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
                   placeholder="e.g. valve-query-protocol"
                   value={health.application?.type ?? ''}
                   onChange={event => updateHealth({ application: { ...health.application, type: event.target.value, interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3 } })}
+                />
+              </Field>
+            </div>
+          )}
+
+          {health.application?.type === 'http-ping' && (
+            <div className="grid gap-4 md:grid-cols-2 pt-2 border-t border-outline-variant/30">
+              <Field id="bp-health-app-path" label={t('blueprintBuilder.fields.healthAppPath.label')} help={t('blueprintBuilder.fields.healthAppPath.help')} error={issueFor('health.application.path')}>
+                <input
+                  className="msm-input font-mono"
+                  placeholder="e.g. /healthz"
+                  value={health.application?.path ?? ''}
+                  onChange={event => updateHealth({ application: { ...health.application, type: health.application?.type ?? '', interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3, path: event.target.value } })}
+                />
+              </Field>
+              <Field id="bp-health-app-port" label={t('blueprintBuilder.fields.healthAppPort.label')} help={t('blueprintBuilder.fields.healthAppPort.help')} error={issueFor('health.application.port')}>
+                <input
+                  className="msm-input font-mono"
+                  placeholder="e.g. {{SERVER_PORT}} or 4000"
+                  value={health.application?.port ?? ''}
+                  onChange={event => updateHealth({ application: { ...health.application, type: health.application?.type ?? '', interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3, port: event.target.value } })}
                 />
               </Field>
             </div>

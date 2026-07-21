@@ -1844,6 +1844,8 @@
       "healthPortTimeout": { "label": "Timeout (Liveness-Port)", "help": "z.B. 3s oder 5s." },
       "healthAppType": { "label": "Abfrage-Typ", "help": "z.B. minecraft-query." },
       "healthAppTypeCustom": { "label": "Eigener Abfrage-Typ", "help": "Protokollbezeichner für den anwendungsspezifischen Query-Liveness-Check." },
+      "healthAppPath": { "label": "HTTP-Pfad", "help": "Relativer HTTP-Pfad für den Ping, z.B. /healthz." },
+      "healthAppPort": { "label": "HTTP-Port", "help": "Optionaler Port (Standard: Liveness-Port), z.B. {{SERVER_PORT}}." },
       "healthAppInterval": { "label": "Query-Intervall", "help": "z.B. 30s." },
       "healthAppThreshold": { "label": "Fehler-Schwellenwert", "help": "Ab wie vielen Fehlversuchen ungesund." },
       "healthSuccessPatterns": { "label": "Start-Erfolgsmuster", "help": "Logmuster bei erfolgreichem Start." },
@@ -1871,6 +1873,7 @@
       "healthPortEmpty": "Port darf nicht leer sein.",
       "healthTimeoutEmpty": "Timeout darf nicht leer sein.",
       "healthAppTypeEmpty": "Abfrage-Typ darf nicht leer sein.",
+      "healthAppPathInvalid": "Der HTTP-Pfad muss relativ sein und mit / beginnen (z. B. /healthz).",
       "recoveryMatchEmpty": "Fehlermuster (Match) {{row}} darf nicht leer sein.",
       "recoveryActionEmpty": "Reparatur-Aktion (Action) {{row}} darf nicht leer sein."
     }

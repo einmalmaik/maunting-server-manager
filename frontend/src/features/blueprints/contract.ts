@@ -30,7 +30,7 @@ export interface BlueprintDraft {
   health?: {
     process?: { required: boolean }
     port?: { protocol: 'tcp' | 'udp'; port: string; timeout: string }
-    application?: { type: string; interval: string; failure_threshold: number }
+    application?: { type: string; interval: string; failure_threshold: number; path?: string; port?: string }
     startup?: { success_patterns: string[]; failure_patterns: string[] }
   }
   logs?: {
@@ -197,7 +197,15 @@ export function validateBlueprintDraft(draft: BlueprintDraft): BlueprintValidati
   // Autopilot/Guardian Validation
   if (draft.health?.port?.port && !draft.health.port.port.trim()) add('health.port.port', 'blueprintBuilder.validation.healthPortEmpty')
   if (draft.health?.port?.timeout && !draft.health.port.timeout.trim()) add('health.port.timeout', 'blueprintBuilder.validation.healthTimeoutEmpty')
-  if (draft.health?.application?.type && !draft.health.application.type.trim()) add('health.application.type', 'blueprintBuilder.validation.healthAppTypeEmpty')
+  if (draft.health?.application?.type) {
+    if (!draft.health.application.type.trim()) {
+      add('health.application.type', 'blueprintBuilder.validation.healthAppTypeEmpty')
+    } else if (draft.health.application.type === 'http-ping') {
+      if (!draft.health.application.path || !draft.health.application.path.trim().startsWith('/')) {
+        add('health.application.path', 'blueprintBuilder.validation.healthAppPathInvalid')
+      }
+    }
+  }
   if (draft.recovery?.policies) {
     draft.recovery.policies.forEach((policy, index) => {
       if (!policy.match.trim()) add(`recovery.policies.${index}`, 'blueprintBuilder.validation.recoveryMatchEmpty')
