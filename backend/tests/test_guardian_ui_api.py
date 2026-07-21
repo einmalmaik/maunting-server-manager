@@ -81,9 +81,16 @@ def test_list_and_resolve_incidents(db: Session) -> None:
     assert len(incidents[0]["attempts"]) == 1
 
     # Test resolve_incident
+    server.guardian_observed_state = "quarantined"
+    db.commit()
+
     res = resolve_incident(server_id=server.id, inc_id=inc.id, user=user, db=db)
     assert res == {"ok": True}
 
     db.refresh(inc)
+    db.refresh(server)
     assert inc.status == "resolved"
     assert inc.resolved_at is not None
+    assert server.guardian_observed_state == "healthy"
+    assert server.guardian_quarantine_control is not None
+    assert "clear" in server.guardian_quarantine_control

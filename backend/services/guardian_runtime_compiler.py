@@ -93,6 +93,19 @@ def _port_map(server: Server) -> dict[str, int]:
         port = getattr(item, "port", None)
         if role and isinstance(port, int) and 1 <= port <= 65535:
             result[role] = port
+    # Fallback to server properties if missing from ports relation
+    if "game" not in result:
+        g = getattr(server, "game_port", None)
+        if isinstance(g, int) and 1 <= g <= 65535:
+            result["game"] = g
+    if "query" not in result:
+        q = getattr(server, "query_port", None)
+        if isinstance(q, int) and 1 <= q <= 65535:
+            result["query"] = q
+    if "rcon" not in result:
+        r = getattr(server, "rcon_port", None)
+        if isinstance(r, int) and 1 <= r <= 65535:
+            result["rcon"] = r
     return result
 
 

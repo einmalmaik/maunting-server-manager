@@ -63,8 +63,22 @@ def resolve_incident(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident nicht gefunden")
 
+    import uuid
+    from models import Server
+    from services.guardian_state_service import request_quarantine_clear
+
     incident.status = "resolved"
     incident.resolved_at = datetime.now(timezone.utc)
+
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if server:
+        if server.guardian_observed_state == "quarantined" or incident.status == "quarantined":
+            try:
+                request_quarantine_clear(db, server, operation_id=str(uuid.uuid4()))
+            except Exception:
+                pass
+            server.guardian_observed_state = "healthy"
+        server.guardian_sync_error_statistics = None
 
     log_change_event(
         db,
