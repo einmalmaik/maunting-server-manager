@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "fivem",
+    "name": "FiveM / RedM (FXServer)",
+    "category": "non_steam_game",
+    "author": "Maunting Studios",
+    "description": "FiveM and RedM multiplayer server based on Cfx.re FXServer (dockerOnly). Uses the official parkervcp yolks image."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/yolks:fivem",
+    "workdir": "/home/container",
+    "user": "1000:1000",
+    "env": {
+      "HOME": "/home/container",
+      "TAGS": "msm",
+      "PROJECT_NAME": "My MSM FXServer",
+      "PROJECT_DESC": "FiveM server powered by Maunting Server Manager"
+    },
+    "startup": "/opt/cfx-server/FXServer +localvar serverProfile default +exec server.cfg +set tags {ENV.TAGS} +set sv_projectName {ENV.PROJECT_NAME} +set sv_projectDesc {ENV.PROJECT_DESC}",
+    "ensureDirs": [
+      "resources"
+    ],
+    "requiredFiles": [
+      "server.cfg"
+    ],
+    "configPatches": [
+      {
+        "type": "regex",
+        "file": "server.cfg",
+        "regex": "(endpoint_add_tcp\\s*\"0\\.0\\.0\\.0:)\\d+(\")",
+        "value": "\\g<1>{GAME_PORT}\\g<2>"
+      },
+      {
+        "type": "regex",
+        "file": "server.cfg",
+        "regex": "(endpoint_add_udp\\s*\"0\\.0\\.0\\.0:)\\d+(\")",
+        "value": "\\g<1>{GAME_PORT}\\g<2>"
+      }
+    ],
+    "startupCheckSeconds": 45.0
+  },
+  "ports": [
+    { "name": "game", "protocol": "tcp" },
+    { "name": "game", "protocol": "udp" }
+  ],
+  "source": {
+    "type": "dockerOnly",
+    "steam": null,
+    "http": null
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "http-ping",
+      "port": "game",
+      "path": "/info.json"
+    }
+  },
+  "backup": {
+    "includePaths": [
+      "server.cfg",
+      "resources"
+    ]
+  }
+}

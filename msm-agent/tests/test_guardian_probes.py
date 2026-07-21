@@ -11,7 +11,7 @@ import pytest
 
 from services import docker_service
 from services.guardian_contract import ProbeConfig
-from services.guardian_probe_registry import execute_probe
+from services.guardian_probes import execute_probe
 
 
 def _config(probe_type: str, **overrides) -> ProbeConfig:
@@ -244,4 +244,92 @@ def test_source_query_with_and_without_challenge() -> None:
 def test_unknown_probe_type_is_rejected() -> None:
     with pytest.raises(ValueError):
         _config("unknown")
+
+
+def test_dynamic_probe_loading_and_unloading() -> None:
+    from services.guardian_probes import discover_probes
+    from pathlib import Path
+    
+    # 1. Verify standard probes exist
+    probes = discover_probes()
+    assert "process" in probes
+    assert "tcp" in probes
+    assert "minecraft-status" in probes
+
+    # 2. Dynamically write a custom probe
+    custom_probe_path = Path(__file__).parent.parent / "services" / "guardian_probes" / "dynamic_test_probe.py"
+    try:
+        custom_probe_path.write_text(
+            'PROBE_TYPE = "dynamic-test-probe"\n'
+            'async def execute(config, container_name):\n'
+            '    from services.guardian_probes import _result\n'
+            '    return _result(0.0, True, "dynamic_ok")\n'
+        )
+        
+        # 3. Verify it is detected
+        probes = discover_probes()
+        assert "dynamic-test-probe" in probes
+        
+        # 4. Verify we can execute it
+        config = _config("dynamic-test-probe", target_host="127.0.0.1", target_port=80)
+        result = asyncio.run(execute_probe(config, "msm-srv-1"))
+        assert result.healthy is True
+        assert result.code == "dynamic_ok"
+        
+    finally:
+        # 5. Delete it and verify it's hot-unloaded immediately
+        if custom_probe_path.exists():
+            custom_probe_path.unlink()
+        
+        probes = discover_probes()
+        assert "dynamic-test-probe" not in probes
+
+
+def test_dynamic_probe_broken_syntax_ignored() -> None:
+    from services.guardian_probes import discover_probes
+    from pathlib import Path
+    
+    broken_probe_path = Path(__file__).parent.parent / "services" / "guardian_probes" / "broken_syntax_probe.py"
+    try:
+        # Write broken syntax code
+        broken_probe_path.write_text("PROBE_TYPE = 'broken-probe'\nthis is invalid syntax Python code !!!\n")
+        
+        # Verify discovering probes doesn't raise and skips the broken file
+        probes = discover_probes()
+        assert "broken-probe" not in probes
+    finally:
+        if broken_probe_path.exists():
+            broken_probe_path.unlink()
+
+
+def test_dynamic_probe_runtime_crash_handled() -> None:
+    from services.guardian_probes import discover_probes
+    from pathlib import Path
+    
+    crashing_probe_path = Path(__file__).parent.parent / "services" / "guardian_probes" / "crashing_probe.py"
+    try:
+        crashing_probe_path.write_text(
+            'PROBE_TYPE = "crashing-probe"\n'
+            'async def execute(config, container_name):\n'
+            '    raise ZeroDivisionError("Simulated division by zero")\n'
+        )
+        
+        # Verify it is detected
+        probes = discover_probes()
+        assert "crashing-probe" in probes
+        
+        # Verify calling it yields a structured failed result instead of raising
+        config = _config("crashing-probe", target_host="127.0.0.1", target_port=80)
+        result = asyncio.run(execute_probe(config, "msm-srv-1"))
+        
+        assert result.healthy is False
+        assert result.code == "driver_execution_error"
+        assert result.evidence["error_class"] == "ZeroDivisionError"
+        assert result.evidence["error_message"] == "Simulated division by zero"
+    finally:
+        if crashing_probe_path.exists():
+            crashing_probe_path.unlink()
+        
+        probes = discover_probes()
+        assert "crashing-probe" not in probes
 

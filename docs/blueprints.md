@@ -619,3 +619,40 @@ Definiert automatisierte Reaktionen auf bestimmte Vorfälle (Eskalationsleiter):
 * `before_risky_action` (Boolean): Ob vor automatischen Reparaturen/Updates Snapshots erstellt werden sollen.
 * `protected_paths`: Ordner und Dateien, die niemals automatisch bereinigt oder gelöscht werden dürfen (z. B. `["world/", "config/"]`). Trailing-Slashes werden bei Pfadprüfungen automatisch bereinigt.
 
+### 7. Custom Autopilot Drivers (Eigene Treiber)
+Der Guardian Agent lädt Treiber (Probes) dynamisch zur Laufzeit aus dem Verzeichnis `msm-agent/services/guardian_probes/`. Jeder Treiber ist eine einzelne `.py`-Datei.
+
+#### Entwicklung eines Custom-Treibers:
+1. Erstelle eine neue Python-Datei im Verzeichnis, z. B. `my_custom_probe.py`.
+2. Deklariere den eindeutigen Treiber-Typ als `PROBE_TYPE`.
+3. Implementiere die asynchrone `execute`-Methode.
+
+Beispiel für `services/guardian_probes/my_custom_probe.py`:
+```python
+from __future__ import annotations
+import asyncio
+from services.guardian_contract import ProbeConfig
+from services.guardian_probes import ProbeResult, _result
+
+PROBE_TYPE = "my-custom-probe"
+
+async def execute(config: ProbeConfig, container_name: str) -> ProbeResult:
+    import time
+    started = time.monotonic()
+    
+    # Eigene Abfragelogik (z. B. TCP, UDP oder API-Aufrufe)
+    # Hier simulieren wir eine erfolgreiche Prüfung:
+    healthy = True 
+    
+    return _result(
+        started,
+        healthy,
+        "my_custom_probe_ok" if healthy else "my_custom_probe_failed",
+        details="Zusätzliche Metadaten können hier übergeben werden"
+    )
+```
+
+> [!CAUTION]
+> **Sicherheits-Invariante**: Custom-Treiber laufen direkt im Kontext des Agenten auf dem Host-Betriebssystem. Aus Sicherheitsgründen dürfen Treiber **niemals** über das Web-Dashboard hochgeladen oder editiert werden. Sie können ausschließlich lokal auf dem Node (z. B. via SSH) abgelegt werden, um unberechtigte Remote-Code-Ausführung (RCE) zu verhindern.
+
+

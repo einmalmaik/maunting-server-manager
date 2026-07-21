@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "ark_survival_evolved",
+    "name": "ARK: Survival Evolved (ASE)",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "ARK: Survival Evolved Dedicated Server via SteamCMD (App-ID 376030). Nativer Linux-Support. Mods über Steam Workshop (App-ID 346110)."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
+    "workdir": "/data",
+    "user": "1000:1000",
+    "env": {
+      "HOME": "/data",
+      "LD_LIBRARY_PATH": ".:./linux64:/usr/lib32:/usr/lib/x86_64-linux-gnu",
+      "SERVER_NAME": "My-ASE-Server-by-MSM",
+      "MAX_PLAYERS": "70",
+      "SERVER_PASSWORD": "",
+      "ADMIN_PASSWORD": "",
+      "MAP_NAME": "TheIsland"
+    },
+    "startup": "./ShooterGame/Binaries/Linux/ShooterGameServer {ENV.MAP_NAME}?listen?SessionName={ENV.SERVER_NAME}?ServerPassword={ENV.SERVER_PASSWORD}?ServerAdminPassword={ENV.ADMIN_PASSWORD} -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -MaxPlayers={ENV.MAX_PLAYERS} -game -server -log -NoBattlEye {MOD_ARG}",
+    "ensureDirs": [
+      "ShooterGame/Saved/Config",
+      "ShooterGame/Saved/SavedArks",
+      "ShooterGame/Saved/Logs",
+      "ShooterGame/Content/Mods"
+    ],
+    "requiredFiles": [
+      "ShooterGame/Binaries/Linux/ShooterGameServer"
+    ],
+    "configPatches": [],
+    "startupCheckSeconds": 120.0
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon", "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "376030",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false,
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
+  },
+  "mods": {
+    "supportsMods": true,
+    "supportsSteamWorkshop": true,
+    "workshopAppId": "346110",
+    "filterTags": [],
+    "modInjection": "startupArg",
+    "modStartupArgumentFormat": "-mod={mods}",
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": [
+      {
+        "operation": "symlink",
+        "source": "steamapps/workshop/content/346110/{WORKSHOP_ID}",
+        "target": "ShooterGame/Content/Mods/{WORKSHOP_ID}",
+        "required": true
+      }
+    ]
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
+  },
+  "backup": {
+    "includePaths": [
+      "ShooterGame/Saved/Config",
+      "ShooterGame/Saved/SavedArks",
+      "ShooterGame/Saved/Logs"
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "satisfactory",
+    "name": "Satisfactory",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "Satisfactory Dedicated Server via SteamCMD (App-ID 526870). Nativer Linux-Support."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
+    "workdir": "/data",
+    "user": "1000:1000",
+    "env": {
+      "HOME": "/data",
+      "LD_LIBRARY_PATH": ".:./linux64:/usr/lib32:/usr/lib/x86_64-linux-gnu"
+    },
+    "startup": "./FactoryServer.sh -Port={GAME_PORT}",
+    "ensureDirs": [
+      ".config/Epic/FactoryGame/Saved/SaveGames"
+    ],
+    "requiredFiles": [
+      "FactoryServer.sh"
+    ],
+    "configPatches": [],
+    "startupCheckSeconds": 120.0
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "526870",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false,
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  },
+  "health": {
+    "process": {}
+  },
+  "backup": {
+    "includePaths": [
+      ".config/Epic/FactoryGame/Saved/SaveGames",
+      ".config/Epic/FactoryGame/Saved/Config"
+    ]
+  }
+}

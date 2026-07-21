@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "enshrouded",
+    "name": "Enshrouded",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "Enshrouded Dedicated Server via SteamCMD (App-ID 2278520). Nativer Linux-Support. Konfiguration erfolgt über enshrouded_server.json."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
+    "workdir": "/data",
+    "user": "1000:1000",
+    "env": {
+      "HOME": "/data",
+      "LD_LIBRARY_PATH": ".:./linux64:/usr/lib32:/usr/lib/x86_64-linux-gnu"
+    },
+    "startup": "./enshrouded_server",
+    "ensureDirs": [],
+    "requiredFiles": [
+      "enshrouded_server"
+    ],
+    "configPatches": [
+      {
+        "type": "regex",
+        "file": "enshrouded_server.json",
+        "regex": "(\"gamePort\"\\s*:\\s*)\\d+",
+        "value": "\\g<1>{GAME_PORT}"
+      },
+      {
+        "type": "regex",
+        "file": "enshrouded_server.json",
+        "regex": "(\"queryPort\"\\s*:\\s*)\\d+",
+        "value": "\\g<1>{QUERY_PORT}"
+      }
+    ],
+    "startupCheckSeconds": 60.0
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" },
+    { "name": "query", "protocol": "udp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "2278520",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false,
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
+  },
+  "backup": {
+    "includePaths": [
+      "enshrouded_server.json",
+      "savegame"
+    ]
+  }
+}

@@ -92,5 +92,11 @@
       "ConanSandbox/Saved/SaveGames",
       "ConanSandbox/Saved/game.db"
     ]
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
   }
 }

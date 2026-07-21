@@ -66,5 +66,11 @@
       "Pal/Saved/Config/LinuxServer/PalWorldSettings.ini",
       "Pal/Saved/Config/LinuxServer/PalModSettings.ini"
     ]
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
   }
 }

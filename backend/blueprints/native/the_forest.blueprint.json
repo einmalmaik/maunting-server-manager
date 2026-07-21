@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "the_forest",
+    "name": "The Forest",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "The Forest Dedicated Server via SteamCMD (App-ID 556450). Runs on Windows-binary via GE-Proton/Wine."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/yolks:wine_10",
+    "workdir": "/home/container",
+    "user": "1000:1000",
+    "env": {
+      "WINEDEBUG": "-all",
+      "WINEESYNC": "1",
+      "WINEFSYNC": "1",
+      "SERVER_NAME": "My Forest Server",
+      "RCON_PASSWORD": "adminpassword"
+    },
+    "startup": "./TheForestServer.exe -serverport {GAME_PORT} -serverqueryport {QUERY_PORT} -serverrconport {RCON_PORT} -serversteamport {RCON_PORT} -serverrconpassword {ENV.RCON_PASSWORD} -servername {ENV.SERVER_NAME}",
+    "ensureDirs": [],
+    "requiredFiles": [
+      "TheForestServer.exe"
+    ],
+    "configPatches": [],
+    "startupCheckSeconds": 60.0
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon", "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "556450",
+      "platform": "windows",
+      "compatibility": "proton",
+      "requiresLogin": false,
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
+  },
+  "backup": {
+    "includePaths": [
+      "Saves"
+    ]
+  }
+}

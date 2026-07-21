@@ -33,7 +33,7 @@ from services.guardian_contract import (
     validate_desired_state,
 )
 from services.guardian_incident_store import GuardianIncidentStore
-from services.guardian_probe_registry import ProbeResult, execute_probe
+from services.guardian_probes import ProbeResult, execute_probe
 from services.guardian_state_store import (
     CorruptedGuardianStateError,
     GuardianStateError,

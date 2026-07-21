@@ -57,6 +57,11 @@ def _extract_agent_recovery_suspension_op_id(server: Server) -> str | None:
 
 @contextmanager
 def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str):
+    node = server.node
+    if node is None or node.status != "online":
+        yield
+        return
+
     op_id = str(uuid.uuid4())
     from services.guardian_state_service import set_recovery_suspension, clear_recovery_suspension
     from services.guardian_sync_service import reconcile_guardian_server
@@ -210,14 +215,14 @@ def _run_pre_start_backup_if_enabled(db: Session, server: Server, *, context: st
         if age_min < _PRE_START_BACKUP_SKIP_MINUTES:
             _append_console_log(
                 server.id,
-                f"[MSM] Backup vor {context} ├╝bersprungen: vor {int(age_min)} Min. bereits ein Backup "
+                f"[MSM] Backup vor {context} übersprungen: vor {int(age_min)} Min. bereits ein Backup "
                 f"(Schwelle {_PRE_START_BACKUP_SKIP_MINUTES} Min.).\n",
             )
             return
 
     _append_console_log(
         server.id,
-        f"[MSM] Backup vor {context} l├ñuft (gro├ƒe Server-Verzeichnisse k├Ânnen mehrere Minuten "
+        f"[MSM] Backup vor {context} läuft (große Server-Verzeichnisse können mehrere Minuten "
         f"dauern, Timeout 300s). Panel bleibt erreichbar, Konsole aktualisiert sich danach.\n",
     )
     try:

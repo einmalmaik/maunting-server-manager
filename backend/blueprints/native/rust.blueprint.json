@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "rust",
+    "name": "Rust",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "Rust Dedicated Server via SteamCMD (App-ID 258550). Nativer Linux-Support."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
+    "workdir": "/data",
+    "user": "1000:1000",
+    "env": {
+      "HOME": "/data",
+      "LD_LIBRARY_PATH": ".:./linux64:/usr/lib32:/usr/lib/x86_64-linux-gnu",
+      "SERVER_NAME": "My Rust Server",
+      "RCON_PASSWORD": "adminpassword",
+      "SEED": "123456",
+      "WORLD_SIZE": "3000",
+      "MAX_PLAYERS": "50"
+    },
+    "startup": "./RustDedicated -batchmode +server.ip 0.0.0.0 +server.port {GAME_PORT} +server.queryport {QUERY_PORT} +rcon.port {RCON_PORT} +server.identity \"msm_server\" +server.seed {ENV.SEED} +server.worldsize {ENV.WORLD_SIZE} +server.maxplayers {ENV.MAX_PLAYERS} +server.hostname \"{ENV.SERVER_NAME}\" +rcon.web 1 +rcon.password \"{ENV.RCON_PASSWORD}\"",
+    "ensureDirs": [
+      "msm_server"
+    ],
+    "requiredFiles": [
+      "RustDedicated"
+    ],
+    "configPatches": [],
+    "startupCheckSeconds": 180.0
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" },
+    { "name": "query", "protocol": "udp" },
+    { "name": "rcon", "protocol": "tcp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "258550",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false,
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
+  },
+  "backup": {
+    "includePaths": [
+      "msm_server"
+    ]
+  }
+}

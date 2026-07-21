@@ -45,6 +45,8 @@ export interface Server {
   /** Multi-node: host node id (never contains secrets) */
   node_id?: number | null
   node_name?: string | null
+  guardian_observed_state?: string
+  guardian_sync_error_statistics?: string | null
 }
 
 /** Node registry entry from GET /api/nodes (no auth tokens). */

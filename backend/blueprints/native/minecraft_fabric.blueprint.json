@@ -37,5 +37,11 @@
     "modInjection": "none",
     "modStartupArgumentFormat": null,
     "modListFilePath": null
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "minecraft-status"
+    }
   }
 }

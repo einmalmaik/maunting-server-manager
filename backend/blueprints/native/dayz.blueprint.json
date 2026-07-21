@@ -69,5 +69,11 @@
       "serverDZ.cfg",
       "profiles"
     ]
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
   }
 }

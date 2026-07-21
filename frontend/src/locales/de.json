@@ -457,6 +457,16 @@
       "node_unreachable": "Node offline"
     },
     "nodeUnreachableHint": "Node ist offline — Start/Stopp und Dateioperationen sind deaktiviert, bis der Agent wieder erreichbar ist.",
+    "guardian": {
+      "syncErrorTitle": "Autopilot-Synchronisationsfehler",
+      "errors": {
+        "guardian_capability_mismatch": "Der Agent unterstützt die für diesen Server konfigurierten Autopilot-Treiber nicht. Bitte Treiber auf dem Node prüfen.",
+        "guardian_generation_mismatch": "Zustands-Generationen zwischen Panel und Agent stimmen nicht überein.",
+        "guardian_payload_hash_mismatch": "Die Konfigurationsprüfsumme weicht ab.",
+        "blueprint_unavailable": "Das Server-Blueprint ist aktuell nicht verfügbar.",
+        "probe_port_unavailable": "Der konfigurierte Probe-Port ist nicht zugewiesen."
+      }
+    },
     "kill": "Erzwingen",
     "killConfirm": "Server wirklich erzwungen beenden? Alle ungespeicherten Daten gehen verloren.",
     "killSuccess": "Server wurde erzwungen beendet"

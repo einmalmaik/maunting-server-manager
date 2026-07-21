@@ -176,6 +176,7 @@ class ServerResponse(BaseModel):
     desired_power_state: str = "stopped"
     guardian_observed_state: str = "unknown"
     desired_state_generation: int = 1
+    guardian_sync_error_statistics: str | None = None
     # True waehrend der Server-Container auf einen interaktiven Auth-Flow wartet
     # (z.B. Hytale OAuth-Refresh expired). UI rendert dann einen Warn-Banner.
     # Default False (kein laufender Auth-Flow) ist sicher fuer view-only User.

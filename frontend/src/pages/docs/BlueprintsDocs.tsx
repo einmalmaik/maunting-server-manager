@@ -112,6 +112,7 @@ export function BlueprintsDocs() {
     { key: 'updates', title: t('docs.toc.updates') },
     { key: 'backups', title: t('docs.toc.backups') },
     { key: 'troubleshooting', title: t('docs.toc.troubleshooting') },
+    { key: 'probes', title: t('docs.toc.probes', 'Eigene Autopilot-Treiber') },
   ]
 
   const backupScopeExample = {
@@ -656,6 +657,54 @@ export function BlueprintsDocs() {
               <Alert type="warning" title={t('docs.troubleshooting.err10Title')}>
                 {t('docs.troubleshooting.err10Body')}
               </Alert>
+            </div>
+          </section>
+
+          <section id="docs-probes" className="msm-card p-6 scroll-mt-20">
+            <h2 className="font-headline text-headline-sm font-bold text-on-surface mb-2">
+              {t('docs.toc.probes', 'Eigene Autopilot-Treiber')}
+            </h2>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-4">
+              {t('docs.probes.body', 'Der Guardian Agent kann durch eigene Python-basierte Probe-Treiber erweitert werden. Jeder Treiber wird als einzelne Datei unter services/guardian_probes/ abgelegt und beim Starten oder zur Laufzeit des Agenten dynamisch geladen.')}
+            </p>
+
+            <h3 className="font-bold text-on-surface mt-4">{t('docs.probes.developTitle', 'Entwicklung eines Treibers')}</h3>
+            <ol className="list-decimal ml-6 font-body-md text-body-md text-on-surface-variant mb-3">
+              <li>Erstelle eine Python-Datei unter <code className="font-mono bg-surface-container-lowest px-1 border border-outline rounded">msm-agent/services/guardian_probes/my_probe.py</code>.</li>
+              <li>Definiere die Variable <code className="font-mono bg-surface-container-lowest px-1 border border-outline rounded">PROBE_TYPE = "my-probe"</code>.</li>
+              <li>Implementiere die asynchrone Methode <code className="font-mono bg-surface-container-lowest px-1 border border-outline rounded">execute(config, container_name) {"->"} ProbeResult</code>.</li>
+            </ol>
+
+            <span className="font-semibold text-xs text-on-surface-variant block mb-1">Beispiel für einen Custom-Treiber:</span>
+            <CodeBlock example={`from __future__ import annotations
+import asyncio
+import time
+from services.guardian_contract import ProbeConfig
+from services.guardian_probes import ProbeResult, _result
+
+PROBE_TYPE = "my-custom-probe"
+
+async def execute(config: ProbeConfig, container_name: str) -> ProbeResult:
+    started = time.monotonic()
+    
+    # Eigene Abfragelogik (z. B. Socket-Verbindungen, HTTP-Queries, API-Calls)
+    healthy = True
+    
+    return _result(
+        started,
+        healthy,
+        "my_custom_probe_ok" if healthy else "my_custom_probe_failed",
+        evidence={"status": "online", "players": 0}
+    )`} />
+
+            <div className="p-4 my-4 border rounded-md flex gap-3 bg-status-error/10 text-status-error border-status-error/20">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <div>
+                <h4 className="font-bold mb-1">Sicherheitsgrenze</h4>
+                <div className="text-sm opacity-90">
+                  Custom-Treiber laufen direkt im Betriebssystem-Kontext des Agenten. Aus Sicherheitsgründen dürfen Treiber <strong>niemals über das Web-Dashboard</strong> hochgeladen oder editiert werden. Sie können ausschließlich lokal auf dem Node (z. B. via SSH) abgelegt werden, um unberechtigte Remote-Code-Ausführung (RCE) zu verhindern.
+                </div>
+              </div>
             </div>
           </section>
 

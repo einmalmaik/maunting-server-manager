@@ -66,5 +66,11 @@
     "modListFilePath": null,
     "modListContent": "workshopIds",
     "postInstall": []
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
   }
 }

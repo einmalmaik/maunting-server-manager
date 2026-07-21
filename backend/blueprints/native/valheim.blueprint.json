@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "valheim",
+    "name": "Valheim",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "Valheim Dedicated Server via SteamCMD (App-ID 896660). Nativer Linux-Support."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
+    "workdir": "/data",
+    "user": "1000:1000",
+    "env": {
+      "HOME": "/data",
+      "LD_LIBRARY_PATH": ".:./linux64:/usr/lib32:/usr/lib/x86_64-linux-gnu",
+      "SERVER_NAME": "My Valheim Server",
+      "WORLD_NAME": "DedicatedWorld",
+      "SERVER_PASSWORD": "secretpassword"
+    },
+    "startup": "./valheim_server.x86_64 -name \"{ENV.SERVER_NAME}\" -port {GAME_PORT} -world \"{ENV.WORLD_NAME}\" -password \"{ENV.SERVER_PASSWORD}\" -public 1",
+    "ensureDirs": [
+      ".config/unity3d/IronGate/Valheim"
+    ],
+    "requiredFiles": [
+      "valheim_server.x86_64"
+    ],
+    "configPatches": [],
+    "startupCheckSeconds": 60.0
+  },
+  "ports": [
+    { "name": "game", "protocol": "udp" }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "896660",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false,
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
+  },
+  "backup": {
+    "includePaths": [
+      ".config/unity3d/IronGate/Valheim"
+    ]
+  }
+}

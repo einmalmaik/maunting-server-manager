@@ -66,5 +66,11 @@
       "ShooterGame/Saved/SavedArks",
       "ShooterGame/Saved/Logs"
     ]
+  },
+  "health": {
+    "process": {},
+    "application": {
+      "type": "source-query"
+    }
   }
 }

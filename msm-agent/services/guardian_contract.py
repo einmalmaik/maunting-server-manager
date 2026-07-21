@@ -2,6 +2,22 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Ensure 'services' package path is extended to include the agent's services directory
+# to prevent collision with the backend's services package during integration tests.
+agent_services_dir = str(Path(__file__).resolve().parent)
+if "services" in sys.modules:
+    services_mod = sys.modules["services"]
+    if hasattr(services_mod, "__path__"):
+        if agent_services_dir not in services_mod.__path__:
+            services_mod.__path__.append(agent_services_dir)
+else:
+    agent_dir = str(Path(__file__).resolve().parent.parent)
+    if agent_dir not in sys.path:
+        sys.path.insert(0, agent_dir)
+
 import hashlib
 import ipaddress
 import json
@@ -14,17 +30,20 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 GUARDIAN_SCHEMA_VERSION = 1
-PROBE_TYPES = frozenset(
-    {
-        "process",
-        "tcp",
-        "udp_port_mapping",
-        "http-ping",
-        "minecraft-status",
-        "minecraft-query",
-        "source-query",
-    }
-)
+class DynamicProbeTypes:
+    def __contains__(self, item: Any) -> bool:
+        from services.guardian_probes import discover_probes
+        return item in discover_probes()
+
+    def __sub__(self, other: Any) -> set[str]:
+        from services.guardian_probes import discover_probes
+        return set(discover_probes().keys()) - set(other)
+
+    def __iter__(self):
+        from services.guardian_probes import discover_probes
+        return iter(discover_probes().keys())
+
+PROBE_TYPES = DynamicProbeTypes()
 DIAGNOSTIC_PARSERS = frozenset(
     {
         "linux-oom",
@@ -163,15 +182,7 @@ class QuarantineControl(StrictModel):
 
 class ProbeConfig(StrictModel):
     check_id: str = Field(min_length=1, max_length=64)
-    type: Literal[
-        "process",
-        "tcp",
-        "udp_port_mapping",
-        "http-ping",
-        "minecraft-status",
-        "minecraft-query",
-        "source-query",
-    ]
+    type: str = Field(min_length=1, max_length=64)
     interval_seconds: float = Field(default=30, ge=1, le=3600)
     timeout_seconds: float = Field(default=3, ge=0.1, le=30)
     failure_threshold: int = Field(default=3, ge=1, le=20)
@@ -214,6 +225,8 @@ class ProbeConfig(StrictModel):
 
     @model_validator(mode="after")
     def _type_fields(self) -> "ProbeConfig":
+        if self.type not in PROBE_TYPES:
+            raise ValueError(f"unsupported probe type: {self.type}")
         network_types = PROBE_TYPES - {"process", "udp_port_mapping"}
         if self.type in network_types and (not self.target_host or self.target_port is None):
             raise ValueError(f"{self.type} requires target_host and target_port")

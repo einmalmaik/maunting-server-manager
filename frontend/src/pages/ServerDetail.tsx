@@ -426,6 +426,19 @@ export function ServerDetail() {
   // Phase 5: node heartbeat offline → keep server visible, block actions
   const isNodeUnreachable = effectiveStatus === "node_unreachable";
 
+  let guardianSyncError: { code: string; message: string } | null = null;
+  if (server.guardian_sync_error_statistics) {
+    try {
+      const parsed = JSON.parse(server.guardian_sync_error_statistics);
+      guardianSyncError = {
+        code: parsed.code || parsed.last_error || "unknown_error",
+        message: parsed.message || parsed.last_error_message || "",
+      };
+    } catch {
+      // Ignored
+    }
+  }
+
   // Lifecycle-State: transiente Zustaende blockieren Ressourcen-Editor (VAL-UI-023)
   const isLifecycleBusy = [
     "starting",
@@ -576,6 +589,20 @@ export function ServerDetail() {
           <p className="font-body-md text-sm text-on-surface-variant">
             {t("servers.nodeUnreachableHint")}
           </p>
+        </div>
+      )}
+
+      {guardianSyncError && (
+        <div className="msm-card p-4 border-status-error/40 bg-status-error/5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-status-error flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-headline text-body-md text-on-surface mb-1">
+              {t("servers.guardian.syncErrorTitle")}
+            </p>
+            <p className="font-body-md text-sm text-on-surface-variant">
+              {t(`servers.guardian.errors.${guardianSyncError.code}`, { defaultValue: `${guardianSyncError.code}: ${guardianSyncError.message}` })}
+            </p>
+          </div>
         </div>
       )}
 

@@ -457,6 +457,16 @@
       "node_unreachable": "node offline"
     },
     "nodeUnreachableHint": "Node is offline — start/stop and file operations are disabled until the agent is reachable again.",
+    "guardian": {
+      "syncErrorTitle": "Autopilot Synchronization Error",
+      "errors": {
+        "guardian_capability_mismatch": "The agent does not support the Autopilot drivers configured for this server. Please check the drivers on the node.",
+        "guardian_generation_mismatch": "State generations do not match between panel and agent.",
+        "guardian_payload_hash_mismatch": "Configuration hash mismatch.",
+        "blueprint_unavailable": "Server blueprint is currently unavailable.",
+        "probe_port_unavailable": "The configured probe port is not allocated."
+      }
+    },
     "kill": "Force Kill",
     "killConfirm": "Really force kill the server? All unsaved data will be lost.",
     "killSuccess": "Server was force killed"
