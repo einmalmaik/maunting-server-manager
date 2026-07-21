@@ -294,7 +294,8 @@ StandardError=journal
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths=${AGENT_DIR} ${SERVERS_DIR} -/run/user/${MSM_UID} -/home/${MSM_USER}
+StateDirectory=msm-agent
+ReadWritePaths=${AGENT_DIR} ${SERVERS_DIR} -/run/user/${MSM_UID} -/home/${MSM_USER} -/var/lib/msm-agent
 
 [Install]
 WantedBy=multi-user.target

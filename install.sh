@@ -1757,7 +1757,8 @@ StandardError=journal
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths=$MSM_DIR -/run/user
+StateDirectory=msm-agent
+ReadWritePaths=$MSM_DIR -/run/user -/var/lib/msm-agent
 
 [Install]
 WantedBy=multi-user.target
