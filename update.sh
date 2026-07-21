@@ -188,8 +188,10 @@ if [[ $EUID -ne 0 ]]; then
     err "Bitte als root ausführen: sudo bash update.sh"
 fi
 
-# ── Aktuelle Version ermitteln ──
+# ── Aktuelle Version und Branch ermitteln ──
 CURRENT_VERSION="unknown"
+CURRENT_BRANCH="main"
+IS_DEV_BRANCH=false
 UPDATE_MODE="release"   # "release" oder "git"
 LATEST_TAG=""
 RELEASE_JSON=""
@@ -197,36 +199,46 @@ RELEASE_JSON=""
 if [[ -d "$MSM_DIR/.git" ]]; then
     cd "$MSM_DIR"
     CURRENT_VERSION=$(git describe --tags --always --match "v*" 2>/dev/null || echo "unknown")
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    # Falls der aktuelle Branch nicht main/master/HEAD ist, sind wir im Dev-Modus
+    if [[ "$CURRENT_BRANCH" != "main" && "$CURRENT_BRANCH" != "master" && "$CURRENT_BRANCH" != "HEAD" ]]; then
+        IS_DEV_BRANCH=true
+    fi
 fi
 
 log "Aktuelle Version: $CURRENT_VERSION"
-
-# ═══════════════════════════════════════════════════════════════
-# 1) Zuerst: GitHub Release prüfen
-# ═══════════════════════════════════════════════════════════════
-log "Prüfe GitHub Releases..."
-RELEASE_JSON=$(curl -s -L \
-    -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest" 2>/dev/null) || true
-
-if [[ -n "$RELEASE_JSON" ]] && [[ "$RELEASE_JSON" != *"Not Found"* ]]; then
-    LATEST_TAG=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo "")
+if $IS_DEV_BRANCH; then
+    log "Entwicklungs-Branch aktiv: $CURRENT_BRANCH (überspringe GitHub Release-Check)"
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# 2) Kein Release? → Git main-Branch als Fallback
+# 1) Zuerst: GitHub Release prüfen (nur wenn kein Dev-Branch aktiv ist)
+# ═══════════════════════════════════════════════════════════════
+if ! $IS_DEV_BRANCH; then
+    log "Prüfe GitHub Releases..."
+    RELEASE_JSON=$(curl -s -L \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest" 2>/dev/null) || true
+
+    if [[ -n "$RELEASE_JSON" ]] && [[ "$RELEASE_JSON" != *"Not Found"* ]]; then
+        LATEST_TAG=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo "")
+    fi
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# 2) Kein Release oder Dev-Branch? → Git-Branch als Fallback/Quelle verwenden
 # ═══════════════════════════════════════════════════════════════
 if [[ -z "$LATEST_TAG" ]]; then
     if [[ -d "$MSM_DIR/.git" ]]; then
         UPDATE_MODE="git"
-        log "Kein GitHub-Release gefunden. Prüfe Git main-Branch..."
+        log "Verwende Git-Branch: $CURRENT_BRANCH..."
         cd "$MSM_DIR"
-        git fetch origin main 2>/dev/null || {
-            warn "Konnte origin/main nicht fetchen. Prüfe Internet-Verbindung."
+        git fetch origin "$CURRENT_BRANCH" 2>/dev/null || {
+            warn "Konnte origin/$CURRENT_BRANCH nicht fetchen. Prüfe Internet-Verbindung."
             if ! $FORCE; then exit 0; fi
         }
         LOCAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
-        REMOTE_SHA=$(git rev-parse origin/main 2>/dev/null || echo "")
+        REMOTE_SHA=$(git rev-parse "origin/$CURRENT_BRANCH" 2>/dev/null || echo "")
 
         # Never continue inside a script that is about to overwrite itself.
         # Execute the updater from the target revision in /tmp first.
@@ -248,7 +260,7 @@ if [[ -z "$LATEST_TAG" ]]; then
             if ! $FORCE; then exit 0; fi
             LATEST_TAG="unknown"
         elif [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]] && ! $FORCE; then
-            ok "Panel ist bereits auf dem neuesten Stand (main: ${LOCAL_SHA:0:8})."
+            ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_BRANCH: ${LOCAL_SHA:0:8})."
             # Recovery: ein frueherer Run (z.B. mit der alten update.sh ohne
             # Chown-Fix) kann Dateien als root zurueckgelassen haben. Bevor wir
             # frueh aussteigen, stellen wir Besitz wieder her, damit der
@@ -256,8 +268,8 @@ if [[ -z "$LATEST_TAG" ]]; then
             restore_panel_ownership
             exit 0
         else
-            LATEST_TAG="main-${REMOTE_SHA:0:8}"
-            log "Neuer Commit auf main: ${REMOTE_SHA:0:8}"
+            LATEST_TAG="$CURRENT_BRANCH-${REMOTE_SHA:0:8}"
+            log "Neuer Commit auf $CURRENT_BRANCH: ${REMOTE_SHA:0:8}"
         fi
     else
         warn "Kein GitHub-Release und kein Git-Repo gefunden."
@@ -281,7 +293,7 @@ fi
 if $CHECK_ONLY; then
     echo ""
     if [[ "$UPDATE_MODE" == "git" ]]; then
-        echo -e "${YELLOW}Update verfügbar auf main!${NC}"
+        echo -e "${YELLOW}Update verfügbar auf $CURRENT_BRANCH!${NC}"
         echo -e "  Aktuell: ${CYAN}${LOCAL_SHA:0:8}${NC}"
         echo -e "  Neu:     ${CYAN}${REMOTE_SHA:0:8}${NC}"
     else
@@ -308,7 +320,7 @@ fi
 
 echo ""
 if [[ "$UPDATE_MODE" == "git" ]]; then
-    echo -e "${YELLOW}Update wird installiert:${NC} main ${LOCAL_SHA:0:8} → ${REMOTE_SHA:0:8}"
+    echo -e "${YELLOW}Update wird installiert:${NC} $CURRENT_BRANCH ${LOCAL_SHA:0:8} → ${REMOTE_SHA:0:8}"
 else
     echo -e "${YELLOW}Update wird installiert:${NC} $CURRENT_VERSION → $LATEST_TAG"
 fi
@@ -372,7 +384,7 @@ if [[ "$UPDATE_MODE" == "git" ]]; then
     if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
         err "Lokale Änderungen erkannt. Update sicher abgebrochen; bitte Änderungen zuerst sichern."
     fi
-    git pull --ff-only origin main \
+    git pull --ff-only origin "$CURRENT_BRANCH" \
         || err "Git-Update ist kein sicherer Fast-Forward und wurde abgebrochen."
     # Alte Build-Artefakte entfernen (nur dist/, keine Server-Daten!)
     rm -rf frontend/dist 2>/dev/null || true
