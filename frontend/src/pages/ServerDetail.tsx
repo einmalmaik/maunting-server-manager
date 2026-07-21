@@ -15,6 +15,7 @@ import {
   Play,
   RefreshCw,
   RotateCcw,
+  Shield,
   Square,
   Terminal,
   Trash2,
@@ -36,11 +37,23 @@ import { AuthSetupBanner } from "@/components/server/AuthSetupBanner";
 import { PageHeader } from "@/Singra/UI/PageHeader";
 import { DatabaseManager } from "@/components/server/DatabaseManager";
 import { OutgoingWebhooksPanel } from "@/components/server/OutgoingWebhooksPanel";
+import { GuardianBadge } from "@/features/guardian/GuardianBadge";
+import { GuardianQuarantineBanner } from "@/features/guardian/GuardianQuarantineBanner";
+import { GuardianTab } from "@/features/guardian/GuardianTab";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
 
-type TabKey = "files" | "console" | "exec" | "mods" | "restarts" | "backups" | "databases" | "webhooks";
+type TabKey =
+  | "files"
+  | "console"
+  | "exec"
+  | "mods"
+  | "restarts"
+  | "backups"
+  | "databases" | "webhooks"
+  | "guardian";
+
 const VALID_TABS: TabKey[] = [
   "files",
   "console",
@@ -50,6 +63,7 @@ const VALID_TABS: TabKey[] = [
   "backups",
   "databases",
   "webhooks",
+  "guardian",
 ];
 
 interface ServerStatus {
@@ -246,8 +260,15 @@ export function ServerDetail() {
       label: t("tabs.webhooks", { defaultValue: "Webhooks" }),
       icon: Webhook,
     });
+    if (server?.guardian_enabled) {
+      list.push({
+        key: "guardian",
+        label: t("servers.guardian.tabTitle", { defaultValue: "Autopilot" }),
+        icon: Shield,
+      });
+    }
     return list;
-  }, [t, showModTab, gameInfo?.enable_exec]);
+  }, [t, showModTab, gameInfo?.enable_exec, server?.guardian_enabled]);
 
   const rawTab = (searchParams.get("tab") || "files") as TabKey;
   const activeTab: TabKey =
@@ -530,9 +551,12 @@ export function ServerDetail() {
         title={server.name}
         description={`${gameName(server.game_type)}${server.node_name ? ` · ${t("servers.node")}: ${server.node_name}` : ""}`}
         status={(
-          <span className={`font-mono-sm text-mono-sm px-3 py-1 rounded-full border ${statusClasses(effectiveStatus)}`}>
-            {t(`servers.status.${effectiveStatus}`, { defaultValue: effectiveStatus })}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`font-mono-sm text-mono-sm px-3 py-1 rounded-full border ${statusClasses(effectiveStatus)}`}>
+              {t(`servers.status.${effectiveStatus}`, { defaultValue: effectiveStatus })}
+            </span>
+            <GuardianBadge server={server} />
+          </div>
         )}
         actions={(
           <div className="flex flex-wrap gap-2">
@@ -561,6 +585,9 @@ export function ServerDetail() {
 
       {/* Auth-Setup-Banner: sichtbar waehrend der Container auf interaktiven Auth-Flow wartet */}
       {server.auth_required && <AuthSetupBanner serverId={server.id} />}
+
+      {/* Guardian Quarantine Banner */}
+      <GuardianQuarantineBanner server={server} onRefresh={fetchAll} />
 
       {/* Warnung: keine Bind-IP */}
       {!server.public_bind_ip && effectiveStatus !== "running" && (
@@ -938,6 +965,9 @@ export function ServerDetail() {
         {activeTab === "backups" && <Backups serverId={serverId} />}
         {activeTab === "databases" && <DatabaseManager serverId={serverId} />}
         {activeTab === "webhooks" && <OutgoingWebhooksPanel serverId={serverId} />}
+        {activeTab === "guardian" && (
+          <GuardianTab server={server} onRefreshServer={fetchAll} />
+        )}
       </div>
 
       {/* Edit-Network Modal */}

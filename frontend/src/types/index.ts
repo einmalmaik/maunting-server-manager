@@ -46,7 +46,27 @@ export interface Server {
   node_id?: number | null
   node_name?: string | null
   guardian_observed_state?: string
+  guardian_enabled?: boolean
   guardian_sync_error_statistics?: string | null
+}
+
+export interface GuardianAttempt {
+  attempt: number
+  action: string
+  result: string
+  timestamp?: string
+}
+
+export interface GuardianIncident {
+  id: number
+  title: string
+  description: string
+  type: string
+  status: string
+  fingerprint: string
+  created_at: string
+  resolved_at: string | null
+  attempts: GuardianAttempt[]
 }
 
 /** Node registry entry from GET /api/nodes (no auth tokens). */

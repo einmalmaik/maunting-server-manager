@@ -459,6 +459,36 @@
     "nodeUnreachableHint": "Node is offline — start/stop and file operations are disabled until the agent is reachable again.",
     "guardian": {
       "syncErrorTitle": "Autopilot Synchronization Error",
+      "tabTitle": "Autopilot",
+      "badge": {
+        "active": "Autopilot Active",
+        "recovering": "Autopilot Recovering",
+        "quarantined": "Autopilot Quarantined"
+      },
+      "quarantine": {
+        "title": "Autopilot: Server Placed in Quarantine",
+        "description": "The server failed multiple times and was protected by Autopilot. Automated recovery is paused.",
+        "clearAction": "Clear Quarantine & Resolve Incident",
+        "clearedSuccess": "Quarantine successfully cleared."
+      },
+      "tab": {
+        "overviewTitle": "Autopilot Status",
+        "observedState": "Observed State",
+        "containerStatus": "Container Status",
+        "lastProbe": "Last Health Check",
+        "noProbe": "No check performed",
+        "historyTitle": "Incident & Recovery History",
+        "noIncidents": "No incidents recorded. Autopilot has not detected any issues.",
+        "status": {
+          "open": "Open",
+          "recovering": "Recovering",
+          "resolved": "Resolved",
+          "quarantined": "Quarantined"
+        },
+        "resolveAction": "Mark Incident Resolved",
+        "resolvedSuccess": "Incident marked as resolved.",
+        "attempts": "Recovery Attempts"
+      },
       "errors": {
         "guardian_capability_mismatch": "The agent does not support the Autopilot drivers configured for this server. Please check the drivers on the node.",
         "guardian_generation_mismatch": "State generations do not match between panel and agent.",

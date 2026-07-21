@@ -381,11 +381,32 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     return create_resp
 
 
+def _is_guardian_enabled(server: Server) -> bool:
+    if getattr(server, "guardian_config_hash", None):
+        return True
+    try:
+        plugin = get_plugin(server.game_type)
+        bp = plugin.get_blueprint() if hasattr(plugin, "get_blueprint") else getattr(plugin, "blueprint", None)
+        if bp is not None:
+            recovery = getattr(bp, "recovery", None)
+            if recovery is not None:
+                policies = getattr(recovery, "policies", None)
+                if policies and len(policies) > 0:
+                    return True
+            health = getattr(bp, "health", None)
+            if health is not None:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _server_response(server: Server) -> ServerResponse:
     """Serialize server including safe node label (never auth tokens)."""
     from services.node_service import effective_server_runtime_status, is_node_offline
 
     data = ServerResponse.model_validate(server)
+    data.guardian_enabled = _is_guardian_enabled(server)
     node = getattr(server, "node", None)
     if node is not None:
         data.node_id = node.id

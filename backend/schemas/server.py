@@ -175,6 +175,7 @@ class ServerResponse(BaseModel):
     status_message: str | None
     desired_power_state: str = "stopped"
     guardian_observed_state: str = "unknown"
+    guardian_enabled: bool = False
     desired_state_generation: int = 1
     guardian_sync_error_statistics: str | None = None
     # True waehrend der Server-Container auf einen interaktiven Auth-Flow wartet

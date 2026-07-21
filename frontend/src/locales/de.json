@@ -459,6 +459,36 @@
     "nodeUnreachableHint": "Node ist offline — Start/Stopp und Dateioperationen sind deaktiviert, bis der Agent wieder erreichbar ist.",
     "guardian": {
       "syncErrorTitle": "Autopilot-Synchronisationsfehler",
+      "tabTitle": "Autopilot",
+      "badge": {
+        "active": "Autopilot Aktiv",
+        "recovering": "Autopilot Wiederherstellung",
+        "quarantined": "Autopilot Quarantäne"
+      },
+      "quarantine": {
+        "title": "Autopilot: Server in Quarantäne versetzt",
+        "description": "Der Server schlug mehrfach fehl und wurde vom Autopiloten geschützt. Automatische Wiederherstellung ist pausiert.",
+        "clearAction": "Quarantäne aufheben & Incident lösen",
+        "clearedSuccess": "Quarantäne erfolgreich aufgehoben."
+      },
+      "tab": {
+        "overviewTitle": "Autopilot Status",
+        "observedState": "Beobachteter Zustand",
+        "containerStatus": "Container-Status",
+        "lastProbe": "Letzter Health-Check",
+        "noProbe": "Kein Check durchgeführt",
+        "historyTitle": "Incident- & Wiederherstellungs-Historie",
+        "noIncidents": "Keine Ereignisse vorhanden. Der Autopilot hat bisher keine Störungen verzeichnet.",
+        "status": {
+          "open": "Offen",
+          "recovering": "In Wiederherstellung",
+          "resolved": "Gelöst",
+          "quarantined": "Quarantäne"
+        },
+        "resolveAction": "Incident als gelöst markieren",
+        "resolvedSuccess": "Incident erfolgreich als gelöst markiert.",
+        "attempts": "Wiederherstellungsversuche"
+      },
       "errors": {
         "guardian_capability_mismatch": "Der Agent unterstützt die für diesen Server konfigurierten Autopilot-Treiber nicht. Bitte Treiber auf dem Node prüfen.",
         "guardian_generation_mismatch": "Zustands-Generationen zwischen Panel und Agent stimmen nicht überein.",
