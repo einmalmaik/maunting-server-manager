@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from config import settings
 from services import file_service
-from services.file_service import PathEscapeError, PathValidationError
+from services.file_service import PathEscapeError, PathValidationError, RevisionConflictError
 from services.guardian_service import planned_operation
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -23,6 +23,8 @@ UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 class WriteBody(BaseModel):
     content: str = ""
+    expected_revision: str | None = None
+    create_only: bool = False
 
 
 class RenameBody(BaseModel):
@@ -80,6 +82,14 @@ class ArchiveBody(BaseModel):
 
 
 def _map_path_errors(exc: Exception) -> HTTPException:
+    if isinstance(exc, RevisionConflictError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "FILE_REVISION_CONFLICT",
+                "current_revision": exc.current_revision,
+            },
+        )
     if isinstance(exc, PathValidationError):
         return HTTPException(status_code=400, detail=exc.message)
     if isinstance(exc, PathEscapeError):
@@ -120,10 +130,9 @@ def disk_info(server_id: str = Query(...)) -> dict[str, int]:
 def read_file(
     server_id: str = Query(...),
     path: str = Query(...),
-) -> dict[str, str]:
+) -> dict[str, Any]:
     try:
-        content = file_service.read_text(server_id, path)
-        return {"content": content}
+        return file_service.read_text_with_metadata(server_id, path)
     except Exception as exc:
         raise _map_path_errors(exc) from exc
 
@@ -133,10 +142,18 @@ def write_file(
     body: WriteBody,
     server_id: str = Query(...),
     path: str = Query(...),
-) -> dict[str, bool]:
+) -> dict[str, Any]:
     try:
-        file_service.write_text(server_id, path, body.content)
-        return {"ok": True}
+        return {
+            "ok": True,
+            **file_service.write_text_if_revision(
+                server_id,
+                path,
+                body.content,
+                body.expected_revision,
+                body.create_only,
+            ),
+        }
     except Exception as exc:
         raise _map_path_errors(exc) from exc
 

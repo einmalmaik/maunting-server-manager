@@ -168,6 +168,60 @@ class TestBrowseReadWrite:
         assert res.status_code == 200
         assert res.json()["content"] == '{"port": 1234}'
 
+    def test_create_only_never_overwrites_existing_file(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server
+    ):
+        target = Path(server_with_dir.install_dir) / "existing.ini"
+        target.write_text("keep-me", encoding="utf-8")
+
+        res = client.put(
+            f"/api/files/{server_with_dir.id}/write?path=existing.ini",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"content": "", "create_only": True},
+        )
+
+        assert res.status_code == 409
+        assert target.read_text(encoding="utf-8") == "keep-me"
+
+    def test_read_exposes_revision_and_real_metadata(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server
+    ):
+        target = Path(server_with_dir.install_dir) / "metadata.ini"
+        target.write_text("Port=27015", encoding="utf-8")
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/read?path=metadata.ini",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        payload = res.json()
+        assert payload["revision"].startswith("sha256:")
+        assert payload["size"] == len("Port=27015")
+        assert payload["modified"] > 0
+        assert set(("mode", "owner", "group")).issubset(payload)
+
+    def test_stale_revision_returns_conflict_without_overwriting(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server
+    ):
+        target = Path(server_with_dir.install_dir) / "race.ini"
+        target.write_text("opened", encoding="utf-8")
+        opened = client.get(
+            f"/api/files/{server_with_dir.id}/read?path=race.ini",
+            cookies=owner_cookies,
+        ).json()
+        target.write_text("external-change", encoding="utf-8")
+
+        res = client.put(
+            f"/api/files/{server_with_dir.id}/write?path=race.ini",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+            json={"content": "local-change", "expected_revision": opened["revision"]},
+        )
+
+        assert res.status_code == 409
+        assert res.json()["detail"]["code"] == "FILE_REVISION_CONFLICT"
+        assert target.read_text(encoding="utf-8") == "external-change"
+
     def test_write_nested_scum_ini_path(
         self,
         client: TestClient,
@@ -195,18 +249,20 @@ class TestBrowseReadWrite:
         server_with_dir: Server,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        original_write_text = Path.write_text
+        from services import file_edit_service
+
+        original_write_text = file_edit_service.write_text
         attempts = 0
 
-        def flaky_write_text(self: Path, *args, **kwargs):
+        def flaky_write_text(target: Path, *args, **kwargs):
             nonlocal attempts
-            if self.name == "locked.ini":
+            if target.name == "locked.ini":
                 attempts += 1
                 if attempts == 1:
-                    raise PermissionError(13, "Permission denied", str(self))
-            return original_write_text(self, *args, **kwargs)
+                    raise PermissionError(13, "Permission denied", str(target))
+            return original_write_text(target, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "write_text", flaky_write_text)
+        monkeypatch.setattr(file_edit_service, "write_text", flaky_write_text)
 
         with patch("routers.files._repair_install_permissions", return_value={"ok": True}) as mock_repair:
             res = client.put(
@@ -229,14 +285,12 @@ class TestBrowseReadWrite:
         server_with_dir: Server,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        original_write_text = Path.write_text
+        from services import file_edit_service
 
-        def locked_write_text(self: Path, *args, **kwargs):
-            if self.name == "locked.ini":
-                raise PermissionError(13, "Permission denied", str(self))
-            return original_write_text(self, *args, **kwargs)
+        def locked_write_text(target: Path, *args, **kwargs):
+            raise PermissionError(13, "Permission denied", str(target))
 
-        monkeypatch.setattr(Path, "write_text", locked_write_text)
+        monkeypatch.setattr(file_edit_service, "write_text", locked_write_text)
 
         with patch(
             "routers.files._repair_install_permissions",
@@ -250,11 +304,7 @@ class TestBrowseReadWrite:
             )
 
         assert res.status_code == 500
-        detail = res.json()["detail"]
-        assert "Permission denied" in detail
-        assert "Rechte-Reparatur vor" in detail
-        assert "fehlgeschlagen" in detail
-        assert "repair failed" in detail
+        assert res.json()["detail"] == "Datei konnte nicht gespeichert werden"
 
     def test_read_oversized_file_rejected(
         self, client: TestClient, owner_cookies: dict, server_with_dir: Server
@@ -574,6 +624,60 @@ class TestSearch:
         )
         assert res.status_code == 200
         assert res.json()["results"] == []
+
+
+class TestFileHistoryEndpoints:
+    def test_history_list_requires_read_permission(
+        self,
+        client: TestClient,
+        user_cookies: dict,
+        server_with_dir: Server,
+    ):
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/versions?path=config.ini",
+            cookies=user_cookies,
+        )
+        assert res.status_code == 403
+
+    def test_restore_requires_csrf(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        server_with_dir: Server,
+    ):
+        res = client.post(
+            f"/api/files/{server_with_dir.id}/versions/{'a' * 32}/restore?path=config.ini",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 403
+
+    def test_restore_snapshots_current_content_before_reversible_write(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        server_with_dir: Server,
+    ):
+        target = Path(server_with_dir.install_dir) / "config.ini"
+        target.write_text("current", encoding="utf-8")
+        version_id = "b" * 32
+        with (
+            patch(
+                "routers.files.file_history_service.read_version",
+                return_value={"id": version_id, "content": "historical"},
+            ),
+            patch("routers.files.file_history_service.snapshot", return_value=True) as snapshot,
+        ):
+            res = client.post(
+                f"/api/files/{server_with_dir.id}/versions/{version_id}/restore?path=config.ini",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+
+        assert res.status_code == 200
+        assert snapshot.call_count == 1
+        assert snapshot.call_args.args[:3] == (server_with_dir.id, "config.ini", "current")
+        assert target.read_text(encoding="utf-8") == "historical"
 
 
 # ── Capability-Flag (system games) ────────────────────────────────────────

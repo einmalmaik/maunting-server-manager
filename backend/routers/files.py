@@ -34,6 +34,10 @@ from database import get_db
 from models import Server, User
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from services import docker_service
+from services import file_edit_service
+from services import file_history_service
+from services.file_edit_service import FileRevisionConflict
+from services.dis_client import DisSidecarError
 from services.node_client import NodeClient, NodeClientError
 from services.node_service import resolve_server_node
 
@@ -199,12 +203,27 @@ def _repair_install_permissions(install_dir: str) -> dict:
     return docker_service.repair_bind_mount_permissions(install_dir)
 
 
-def _write_text_with_permission_repair(server: Server, target: Path, content: str) -> None:
+def _write_text_with_permission_repair(
+    server: Server,
+    target: Path,
+    content: str,
+    expected_revision: str | None,
+    create_only: bool = False,
+) -> dict:
+    result: dict = {}
+
     def _write() -> None:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        result.update(
+            file_edit_service.write_text(
+                target,
+                content,
+                expected_revision=expected_revision,
+                create_only=create_only,
+            )
+        )
 
     _run_with_permission_repair(server, "Datei schreiben", _write)
+    return result
 
 
 def _run_with_permission_repair(server: Server, action_name: str, action) -> None:
@@ -245,6 +264,8 @@ def _chunk_tmp_dir(install_dir: str) -> Path:
 
 class FileWriteRequest(BaseModel):
     content: str
+    expected_revision: str | None = None
+    create_only: bool = False
 
 
 class MkdirRequest(BaseModel):
@@ -294,7 +315,10 @@ def browse_directory(
                 "name": e.get("name", ""),
                 "is_dir": bool(e.get("is_dir")),
                 "size": int(e.get("size") or 0),
-                "modified": float(e.get("mtime") or 0),
+                "modified": float(e.get("modified") or e.get("mtime") or 0),
+                "mode": e.get("mode"),
+                "owner": e.get("owner"),
+                "group": e.get("group"),
             }
             for e in raw
             if e.get("name") != CHUNK_TMP_DIRNAME
@@ -315,12 +339,10 @@ def browse_directory(
             if item.name == CHUNK_TMP_DIRNAME and item.parent == Path(server.install_dir).resolve(strict=False):
                 continue
             try:
-                stat = item.stat()
                 entries.append({
                     "name": item.name,
                     "is_dir": item.is_dir(),
-                    "size": stat.st_size if item.is_file() else 0,
-                    "modified": stat.st_mtime,
+                    **file_edit_service.metadata(item),
                 })
             except (PermissionError, OSError):
                 # Einzelne Eintraege ohne Leserechte ueberspringen, Rest anzeigen
@@ -397,11 +419,11 @@ def read_file(
     agent = _agent_client(server, db)
     if agent is not None:
         try:
-            content = agent.files_read(_agent_files_key(server), path)
+            info = agent.files_read_info(_agent_files_key(server), path)
         except NodeClientError as exc:
             raise _map_agent_error(exc) from exc
         name = path.rsplit("/", 1)[-1] if path else ""
-        return {"path": path, "name": name, "content": content, "size": len(content.encode("utf-8"))}
+        return {"path": path, "name": name, **info}
 
     target = _safe_path(server.install_dir, path)
 
@@ -413,11 +435,11 @@ def read_file(
         raise HTTPException(status_code=413, detail="Datei zu gross zum Bearbeiten (max 5 MB)")
 
     try:
-        content = target.read_text(encoding="utf-8", errors="replace")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lesen fehlgeschlagen: {e}")
+        info = file_edit_service.read_text(target)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Datei konnte nicht gelesen werden") from exc
 
-    return {"path": path, "name": target.name, "content": content, "size": target.stat().st_size}
+    return {"path": path, "name": target.name, **info}
 
 
 @router.put("/{server_id}/write")
@@ -435,20 +457,181 @@ def write_file(
     agent = _agent_client(server, db)
     if agent is not None:
         try:
-            agent.files_write(_agent_files_key(server), path, body.content)
+            try:
+                current = agent.files_read_info(_agent_files_key(server), path)
+            except NodeClientError as exc:
+                if exc.status_code != 404:
+                    raise
+                current = None
+            if body.expected_revision is not None and (
+                current is None or current.get("revision") != body.expected_revision
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "FILE_REVISION_CONFLICT"},
+                )
+            if body.create_only and current is not None:
+                raise HTTPException(status_code=409, detail="Zieldatei existiert bereits")
+            if current is not None:
+                file_history_service.snapshot(
+                    server_id,
+                    path,
+                    str(current.get("content", "")),
+                    user.id,
+                )
+            result = agent.files_write(
+                _agent_files_key(server),
+                path,
+                body.content,
+                body.expected_revision,
+                body.create_only,
+            )
         except NodeClientError as exc:
             raise _map_agent_error(exc) from exc
-        return {"message": "Datei gespeichert", "path": path}
+        except DisSidecarError as exc:
+            raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
+        return {"message": "Datei gespeichert", "path": path, **result}
 
     target = _safe_path(server.install_dir, path)
 
     try:
-        _write_text_with_permission_repair(server, target, body.content)
+        current = file_edit_service.read_text(target) if target.is_file() else None
+        if body.expected_revision is not None and (
+            current is None or current.get("revision") != body.expected_revision
+        ):
+            raise FileRevisionConflict(current.get("revision") if current else None)
+        if body.create_only and current is not None:
+            raise FileExistsError("Target file already exists")
+        if current is not None:
+            file_history_service.snapshot(
+                server_id,
+                path,
+                str(current["content"]),
+                user.id,
+            )
+        result = _write_text_with_permission_repair(
+            server,
+            target,
+            body.content,
+            body.expected_revision,
+            body.create_only,
+        )
         _apply_permissions(server.install_dir, target)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Schreiben fehlgeschlagen: {e}")
+        result.update(file_edit_service.metadata(target))
+    except FileRevisionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "FILE_REVISION_CONFLICT",
+                "current_revision": exc.current_revision,
+            },
+        ) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail="Zieldatei existiert bereits") from exc
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Datei konnte nicht gespeichert werden") from exc
 
-    return {"message": "Datei gespeichert", "path": path}
+    return {"message": "Datei gespeichert", "path": path, **result}
+
+
+@router.get("/{server_id}/versions")
+def list_file_versions(
+    server_id: int,
+    path: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """List encrypted history metadata without decrypting file content."""
+    require_server_permission(user, server_id, db, "server.files.read")
+    server = _get_server(server_id, db)
+    _safe_path(server.install_dir, path)
+    try:
+        versions = file_history_service.list_versions(server_id, path)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Versionsverlauf ist nicht verfügbar") from exc
+    return {"path": path, "versions": versions}
+
+
+@router.get("/{server_id}/versions/{version_id}")
+def read_file_version(
+    server_id: int,
+    version_id: str,
+    path: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    require_server_permission(user, server_id, db, "server.files.read")
+    server = _get_server(server_id, db)
+    _safe_path(server.install_dir, path)
+    try:
+        return file_history_service.read_version(server_id, path, version_id)
+    except file_history_service.HistoryNotFound as exc:
+        raise HTTPException(status_code=404, detail="Dateiversion nicht gefunden") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Dateiversion ist nicht verfügbar") from exc
+
+
+@router.post("/{server_id}/versions/{version_id}/restore")
+def restore_file_version(
+    server_id: int,
+    version_id: str,
+    path: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Restore a version after snapshotting the current file for reversibility."""
+    require_server_permission(user, server_id, db, "server.files.write")
+    server = _get_server(server_id, db)
+    target = _safe_path(server.install_dir, path)
+    try:
+        version = file_history_service.read_version(server_id, path, version_id)
+        agent = _agent_client(server, db)
+        if agent is not None:
+            current = agent.files_read_info(_agent_files_key(server), path)
+            current_content = str(current.get("content", ""))
+            if len(current_content.encode("utf-8")) > file_history_service.MAX_HISTORY_EDIT_SIZE:
+                raise HTTPException(status_code=413, detail="Aktuelle Datei ist zu groß für eine reversible Wiederherstellung")
+            file_history_service.snapshot(server_id, path, current_content, user.id)
+            result = agent.files_write(
+                _agent_files_key(server),
+                path,
+                str(version["content"]),
+                str(current.get("revision") or ""),
+            )
+        else:
+            if not target.is_file():
+                raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+            current = file_edit_service.read_text(target)
+            current_content = str(current["content"])
+            if len(current_content.encode("utf-8")) > file_history_service.MAX_HISTORY_EDIT_SIZE:
+                raise HTTPException(status_code=413, detail="Aktuelle Datei ist zu groß für eine reversible Wiederherstellung")
+            file_history_service.snapshot(server_id, path, current_content, user.id)
+            result = _write_text_with_permission_repair(
+                server,
+                target,
+                str(version["content"]),
+                str(current["revision"]),
+            )
+            _apply_permissions(server.install_dir, target)
+            result.update(file_edit_service.metadata(target))
+        return {"message": "Dateiversion wiederhergestellt", "path": path, **result}
+    except file_history_service.HistoryNotFound as exc:
+        raise HTTPException(status_code=404, detail="Dateiversion nicht gefunden") from exc
+    except FileRevisionConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": "FILE_REVISION_CONFLICT"}) from exc
+    except NodeClientError as exc:
+        raise _map_agent_error(exc) from exc
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
 
 
 @router.post("/{server_id}/upload")

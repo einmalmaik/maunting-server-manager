@@ -35,6 +35,7 @@ import { ServerConsolePanel } from "@/components/server/ServerConsolePanel";
 import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
 import { AuthSetupBanner } from "@/components/server/AuthSetupBanner";
 import { PageHeader } from "@/Singra/UI/PageHeader";
+import { ResourceMetricCard } from "@/Singra/UI/ResourceMetricCard";
 import { DatabaseManager } from "@/components/server/DatabaseManager";
 import { OutgoingWebhooksPanel } from "@/components/server/OutgoingWebhooksPanel";
 import { SwitchBlueprintDialog } from "@/components/server/SwitchBlueprintDialog";
@@ -173,6 +174,7 @@ export function ServerDetail() {
   const showResourceEdit = !permissionsLoading && canManageResources;
 
   const [showEditResource, setShowEditResource] = useState(false);
+  const [mobileOverviewOpen, setMobileOverviewOpen] = useState(false);
 
   const fetchAll = async () => {
     if (!serverId) return;
@@ -279,6 +281,7 @@ export function ServerDetail() {
       : "files";
 
   const setActiveTab = (next: TabKey) => {
+    if (next === "files") setMobileOverviewOpen(false);
     const params = new URLSearchParams(searchParams);
     params.set("tab", next);
     setSearchParams(params, { replace: true });
@@ -480,6 +483,15 @@ export function ServerDetail() {
   const configuredCpuLimit = status?.cpu_limit_percent ?? server.cpu_limit_percent ?? null;
   const configuredRamLimit = status?.ram_limit_mb ?? server.ram_limit_mb ?? null;
   const configuredDiskLimit = status?.disk_limit_gb ?? server.disk_limit_gb ?? null;
+  const cpuUsageOfLimit = status?.cpu_percent != null && configuredCpuLimit != null && configuredCpuLimit > 0
+    ? (status.cpu_percent / configuredCpuLimit) * 100
+    : null;
+  const ramUsageOfLimit = status?.ram_mb != null && configuredRamLimit != null && configuredRamLimit > 0
+    ? (status.ram_mb / configuredRamLimit) * 100
+    : null;
+  const diskUsageOfLimit = status?.disk_used_mb != null && configuredDiskLimit != null && configuredDiskLimit > 0
+    ? (status.disk_used_mb / (configuredDiskLimit * 1024)) * 100
+    : null;
 
   const openResourceEditor = () => setShowEditResource(true);
   const closeResourceEditor = () => setShowEditResource(false);
@@ -548,6 +560,7 @@ export function ServerDetail() {
 
   return (
     <div className="msm-page">
+      <div className={activeTab === "files" ? "hidden md:block" : "block"}>
       <PageHeader
         eyebrow={t("pageContext.infrastructure", "Infrastructure")}
         title={server.name}
@@ -584,6 +597,30 @@ export function ServerDetail() {
           </div>
         )}
       />
+      </div>
+
+      {activeTab === "files" && (
+        <section className="rounded-xl border border-outline-variant/80 bg-surface-container-low/75 p-4 md:hidden">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-label-md text-[10px] font-semibold uppercase tracking-[0.12em] text-secondary">{t("pageContext.infrastructure", "Infrastructure")}</p>
+              <h1 className="mt-1 truncate font-headline text-xl font-semibold text-on-surface">{server.name}</h1>
+              <p className="mt-1 truncate text-xs text-on-surface-variant">{gameName(server.game_type)} · {server.node_name || t("servers.nodeUnknown", { defaultValue: "—" })}</p>
+            </div>
+            <span className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-[10px] ${statusClasses(effectiveStatus)}`}>
+              {t(`servers.status.${effectiveStatus}`, { defaultValue: effectiveStatus })}
+            </span>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" onClick={() => navigate("/servers")} className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 text-xs">
+              <ArrowLeft className="h-4 w-4" />{t("common.back", "Back")}
+            </button>
+            <button type="button" onClick={() => setMobileOverviewOpen((value) => !value)} aria-expanded={mobileOverviewOpen} className="msm-btn-secondary inline-flex min-h-11 items-center px-3 text-xs">
+              {mobileOverviewOpen ? t("serverDetail.hideServerOverview") : t("serverDetail.showServerOverview")}
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Auth-Setup-Banner: sichtbar waehrend der Container auf interaktiven Auth-Flow wartet */}
       {server.auth_required && <AuthSetupBanner serverId={server.id} />}
@@ -635,6 +672,7 @@ export function ServerDetail() {
         </div>
       )}
 
+      <div className={`space-y-6 ${activeTab === "files" && !mobileOverviewOpen ? "hidden md:block" : "block"}`}>
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
         {effectiveStatus !== "running" && effectiveStatus !== "installing" && effectiveStatus !== "starting" && effectiveStatus !== "stopping" && effectiveStatus !== "restarting" && effectiveStatus !== "queued" && (
@@ -774,64 +812,39 @@ export function ServerDetail() {
             </div>
           )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="msm-card p-5">
-          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
-            CPU
-          </p>
-          <p className="font-headline text-display-sm text-primary">
-            {status?.cpu_percent != null
-              ? `${status.cpu_percent.toFixed(1)}%`
-              : "-"}
-          </p>
-          <p className="font-body-md text-xs text-on-surface-variant mt-1">
-            {t("serverDetail.limit")}:{" "}
-            {configuredCpuLimit != null
-              ? `${configuredCpuLimit}%`
-              : t("common.unlimited")}
-          </p>
-        </div>
-        <div className="msm-card p-5">
-          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
-            RAM
-          </p>
-          <p className="font-headline text-display-sm text-primary">
-            {status?.ram_mb != null ? formatMb(status.ram_mb) : "-"}
-          </p>
-          <p className="font-body-md text-xs text-on-surface-variant mt-1">
-            {t("serverDetail.limit")}:{" "}
-            {configuredRamLimit != null
-              ? formatMb(configuredRamLimit)
-              : t("common.unlimited")}
-          </p>
-        </div>
-        <div className="msm-card p-5">
-          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2">
-            Disk
-          </p>
-          <p className="font-headline text-display-sm text-primary">
-            {status?.disk_used_mb != null ? formatMb(status.disk_used_mb) : "-"}
-          </p>
-          <p className="font-body-md text-xs text-on-surface-variant mt-1">
-            {configuredDiskLimit != null
-              ? `${t("serverDetail.limit")}: ${configuredDiskLimit} GB`
-              : t("common.unlimited")}
-          </p>
-        </div>
-        <div className="msm-card p-5">
-          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-2 inline-flex items-center gap-2">
-            <Clock className="w-3.5 h-3.5" />
-            {t("serverDetail.uptime", { defaultValue: "Uptime" })}
-          </p>
-          <p className="font-headline text-display-sm text-primary">
-            <UptimeDisplay server={server} label="" />
-          </p>
-          <p className="font-body-md text-xs text-on-surface-variant mt-1">
-            {effectiveStatus === "running"
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <ResourceMetricCard
+            label="CPU"
+            value={status?.cpu_percent != null ? `${status.cpu_percent.toFixed(1)}%` : "—"}
+            hint={`${t("serverDetail.limit")}: ${configuredCpuLimit != null ? `${configuredCpuLimit}%` : t("common.unlimited")}`}
+            icon={<Cpu className="h-4 w-4" />}
+            percent={configuredCpuLimit != null ? cpuUsageOfLimit : undefined}
+            heat
+          />
+          <ResourceMetricCard
+            label="RAM"
+            value={status?.ram_mb != null ? formatMb(status.ram_mb) : "—"}
+            hint={`${t("serverDetail.limit")}: ${configuredRamLimit != null ? formatMb(configuredRamLimit) : t("common.unlimited")}`}
+            icon={<Database className="h-4 w-4" />}
+            percent={configuredRamLimit != null ? ramUsageOfLimit : undefined}
+            heat
+          />
+          <ResourceMetricCard
+            label="Disk"
+            value={status?.disk_used_mb != null ? formatMb(status.disk_used_mb) : "—"}
+            hint={configuredDiskLimit != null ? `${t("serverDetail.limit")}: ${configuredDiskLimit} GB` : t("common.unlimited")}
+            icon={<HardDrive className="h-4 w-4" />}
+            percent={configuredDiskLimit != null ? diskUsageOfLimit : undefined}
+            heat
+          />
+          <ResourceMetricCard
+            label={t("serverDetail.uptime", { defaultValue: "Uptime" })}
+            value={effectiveStatus === "running" ? <UptimeDisplay server={server} label="" compact /> : "—"}
+            hint={effectiveStatus === "running"
               ? t("serverDetail.sinceLastStart", { defaultValue: "Seit letztem Start" })
               : t(`servers.status.${effectiveStatus}`, { defaultValue: effectiveStatus })}
-          </p>
-        </div>
+            icon={<Clock className="h-4 w-4" />}
+          />
       </div>
       </div>
 
@@ -935,9 +948,10 @@ export function ServerDetail() {
           )}
         </div>
       </div>
+      </div>
 
       {/* Tabs */}
-      <div className="border-b border-outline overflow-x-auto -mb-px [&::-webkit-scrollbar]:hidden [scrollbar-width:none]">
+      <div className="sticky top-14 z-20 -mb-px overflow-x-auto border-b border-outline bg-background/95 backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:static md:bg-transparent md:backdrop-blur-none">
         <div className="flex gap-1 min-w-max">
           {tabs.map((tab) => {
             const Icon = tab.icon;

@@ -62,6 +62,54 @@ def test_write_and_read_roundtrip(client: TestClient, auth_headers: dict, server
     )
     assert r.status_code == 200
     assert r.json()["content"] == "hello world"
+    assert r.json()["revision"].startswith("sha256:")
+    assert r.json()["size"] == 11
+    assert set(("modified", "mode", "owner", "group")).issubset(r.json())
+
+
+def test_stale_revision_is_rejected_without_overwrite(
+    client: TestClient, auth_headers: dict, servers_dir: Path
+) -> None:
+    root = servers_dir / "43"
+    root.mkdir()
+    target = root / "server.ini"
+    target.write_text("opened", encoding="utf-8")
+    opened = client.get(
+        "/files/read",
+        params={"server_id": "43", "path": "server.ini"},
+        headers=auth_headers,
+    ).json()
+    target.write_text("external", encoding="utf-8")
+
+    response = client.post(
+        "/files/write",
+        params={"server_id": "43", "path": "server.ini"},
+        headers=auth_headers,
+        json={"content": "local", "expected_revision": opened["revision"]},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "FILE_REVISION_CONFLICT"
+    assert target.read_text(encoding="utf-8") == "external"
+
+
+def test_create_only_is_rejected_without_overwrite(
+    client: TestClient, auth_headers: dict, servers_dir: Path
+) -> None:
+    root = servers_dir / "44"
+    root.mkdir()
+    target = root / "server.ini"
+    target.write_text("keep-me", encoding="utf-8")
+
+    response = client.post(
+        "/files/write",
+        params={"server_id": "44", "path": "server.ini"},
+        headers=auth_headers,
+        json={"content": "", "create_only": True},
+    )
+
+    assert response.status_code == 409
+    assert target.read_text(encoding="utf-8") == "keep-me"
 
 
 def test_list_endpoint(client: TestClient, auth_headers: dict, servers_dir: Path) -> None:

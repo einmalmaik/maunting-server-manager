@@ -24,6 +24,47 @@ Der Maunting Server Manager v3.0.0 führt die **Guardian Autonomous Engine** ein
 
 ---
 
+## 🗂️ Neuer Datei-Arbeitsbereich
+
+Der bisherige Dateimanager wurde in v3.0.0 zu einem vollständigen Arbeitsbereich für die tägliche Serververwaltung ausgebaut. Dateien lassen sich übersichtlich durchsuchen, parallel bearbeiten und sicher auf frühere Stände zurücksetzen — auf großen Bildschirmen ebenso wie auf Smartphone und Tablet.
+
+### Übersichtliche Navigation
+- **Hierarchischer Dateibaum**: Ordner und Unterordner werden in ihrer tatsächlichen Struktur dargestellt und können direkt auf- und zugeklappt werden.
+- **Schnelle Dateisuche**: Dateien und Ordner lassen sich innerhalb des freigegebenen Server-Verzeichnisses über eine zentrale Suche finden.
+- **Verzeichnisübersicht**: Der Arbeitsbereich zeigt auf einen Blick, wie viele Dateien und Ordner enthalten sind und wie viel Speicherplatz die Dateien belegen.
+- **Dateiinformationen in Echtzeit**: Größe, Änderungszeit, Besitzer, Gruppe und Berechtigungen der geöffneten Datei bleiben automatisch aktuell.
+
+### Leistungsfähiger Editor
+- **Mehrere Dateien gleichzeitig**: Geöffnete Dateien bleiben in Tabs verfügbar und können ohne ständiges Neuöffnen gewechselt werden.
+- **CodeMirror-Editor**: Syntaxdarstellung für gängige Konfigurations- und Programmiersprachen, darunter INI, JSON, YAML, XML, Markdown, JavaScript, TypeScript, Python, Shell, SQL, CSS, C/C++, Java, C#, Go, Rust, Lua, TOML und Dockerfiles.
+- **Originalformat bleibt erhalten**: Zeilenenden und einzeilige Konfigurationen — beispielsweise Palworld-Konfigurationen — werden beim Bearbeiten nicht automatisch umformatiert.
+- **Suchen und Ersetzen**: Eigene Bedienelemente für einzelne Treffer, alle Treffer, Ersetzen und „Alle ersetzen“ sind direkt im Editor verfügbar.
+- **Gewohnte Tastenkürzel**: Speichern mit `Strg + S` beziehungsweise `Cmd + S` und Öffnen der Suche mit `Strg + F` beziehungsweise `Cmd + F`.
+
+### Sicheres Speichern und Versionsverlauf
+- **Autosave**: Änderungen werden nach kurzer Pause automatisch gespeichert. Autosave kann jederzeit deaktiviert und durch manuelles Speichern ersetzt werden.
+- **Schutz vor Bearbeitungskonflikten**: Wurde eine Datei zwischenzeitlich an anderer Stelle verändert, überschreibt der Editor diese Änderung nicht stillschweigend. Der lokale Entwurf bleibt erhalten und kann geprüft werden.
+- **Versionsverlauf**: Für bearbeitbare Textdateien bis 512 KiB können frühere Dateistände direkt im Dateimanager ausgewählt und wiederhergestellt werden. Vor einer Wiederherstellung wird auch der aktuelle Stand gesichert.
+- **Speicherschonende Aufbewahrung**: Unveränderte Stände werden nicht doppelt gespeichert; der Verlauf ist auf 20 Versionen pro Datei begrenzt.
+- **Kein versehentliches Überschreiben**: Beim Anlegen einer neuen Datei wird eine bereits vorhandene Datei mit demselben Namen nicht geleert oder ersetzt.
+
+### Dateiaktionen ohne überladene Werkzeugleiste
+- **Intelligente Aktionsmenüs**: Neue Datei, neuer Ordner und Upload sind kompakt gruppiert. Aktionen für ausgewählte Dateien erscheinen nur dann, wenn sie benötigt werden.
+- **Kontextmenü und Drag-and-drop**: Dateien und Ordner können per Rechtsklick umbenannt, verschoben, heruntergeladen oder gelöscht und innerhalb des Dateibaums per Drag-and-drop verschoben werden.
+- **Upload mit Fortschritt**: Dateien können über die Dateiauswahl oder per Drag-and-drop hochgeladen werden; größere Uploads werden fortsetzbar übertragen.
+- **Responsive Bedienung**: Dateibaum und Detailansicht werden auf kleinen Bildschirmen als übersichtliche, touchfreundliche Bereiche eingeblendet.
+
+### Klare Sicherheitsgrenze
+Der Datei-Arbeitsbereich zeigt ausschließlich das für den ausgewählten Gameserver freigegebene Server-Verzeichnis. Er gewährt keinen allgemeinen Root- oder Host-Dateisystemzugriff. Sichtbare Aktionen richten sich nach den zugewiesenen Benutzerrechten; die endgültige Berechtigungsprüfung erfolgt weiterhin auf dem Server.
+
+SQL-Dateien können als Text bearbeitet werden. Binäre SQLite-Datenbanken wie `game.db` werden in v3.0.0 bewusst nicht als Tabelleneditor geöffnet und können bei Bedarf weiterhin heruntergeladen werden.
+
+### Verbesserte Ressourcenübersicht
+- **CPU, RAM, Speicher und Uptime**: Die wichtigsten Serverwerte wurden visuell vereinheitlicht und sind schneller erfassbar.
+- **Klare Grenzwerte**: Auslastung und verfügbare Limits werden kompakt dargestellt, ohne die Serveransicht mit zusätzlichen Diagrammen zu überladen.
+
+---
+
 ## 🚀 Allgemeine Verbesserungen & Bugfixes
 
 Außerhalb der Guardian Engine enthält v3.0.0 folgende Optimierungen und Fehlerbehebungen:

@@ -17,9 +17,14 @@ export { API_BASE, apiUrl } from '@/config/api'
  * must map those to a safe localized fallback instead of raw err.message.
  */
 export class SanitizedApiError extends Error {
-  constructor(message: string) {
+  readonly status: number | null
+  readonly code: string | null
+
+  constructor(message: string, options: { status?: number; code?: string } = {}) {
     super(message)
     this.name = 'SanitizedApiError'
+    this.status = options.status ?? null
+    this.code = options.code ?? null
   }
 }
 
@@ -179,10 +184,15 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     }
     const text = await res.text()
     let message: string | null = null
+    let code: string | null = null
     if (text) {
       try {
         const parsed = JSON.parse(text)
-        message = extractErrorMessage(parsed.detail ?? parsed.message ?? parsed.error ?? parsed)
+        const detail = parsed.detail ?? parsed.message ?? parsed.error ?? parsed
+        message = extractErrorMessage(detail)
+        if (detail && typeof detail === 'object' && typeof detail.code === 'string') {
+          code = detail.code
+        }
       } catch {
         message = text
       }
@@ -190,7 +200,10 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
         message = i18n.t(message)
       }
     }
-    throw new SanitizedApiError(message || res.statusText || `HTTP ${res.status}`)
+    throw new SanitizedApiError(message || res.statusText || `HTTP ${res.status}`, {
+      status: res.status,
+      code: code ?? undefined,
+    })
   }
 
   if (res.status === 204) {

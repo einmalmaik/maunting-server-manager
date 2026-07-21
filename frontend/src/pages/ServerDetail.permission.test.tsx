@@ -199,7 +199,10 @@ function renderServerDetail(serverId = SERVER_ID) {
 /** Waits for the synthetic server name to appear, proving the initial fetch resolved. */
 async function waitForServerToLoad() {
   await waitFor(() => {
-    expect(screen.getByText('synthetic-permission-test-server')).toBeInTheDocument()
+    // Responsive CSS keeps either the desktop PageHeader or the compact mobile
+    // workspace header visible. jsdom has no layout engine, so both variants
+    // remain queryable here even though only one is visible in a real viewport.
+    expect(screen.getAllByText('synthetic-permission-test-server').length).toBeGreaterThan(0)
   })
 }
 
@@ -343,7 +346,7 @@ describe('ServerDetail permission topology — VAL-UI-002 / VAL-UI-018', () => {
 
       // Give React a chance to re-render, then assert button is still absent
       await waitFor(() => {
-        expect(screen.getByText('synthetic-permission-test-server')).toBeInTheDocument()
+        expect(screen.getAllByText('synthetic-permission-test-server').length).toBeGreaterThan(0)
       })
       expect(screen.queryByTestId('resource-edit-btn')).not.toBeInTheDocument()
     })
@@ -360,7 +363,7 @@ describe('ServerDetail permission topology — VAL-UI-002 / VAL-UI-018', () => {
       })
 
       await waitFor(() => {
-        expect(screen.getByText('synthetic-permission-test-server')).toBeInTheDocument()
+        expect(screen.getAllByText('synthetic-permission-test-server').length).toBeGreaterThan(0)
       })
       expect(screen.queryByTestId('resource-edit-btn')).not.toBeInTheDocument()
     })
@@ -395,7 +398,7 @@ describe('ServerDetail permission topology — VAL-UI-002 / VAL-UI-018', () => {
       })
 
       await waitFor(() => {
-        expect(screen.getByText('synthetic-permission-test-server')).toBeInTheDocument()
+        expect(screen.getAllByText('synthetic-permission-test-server').length).toBeGreaterThan(0)
       })
       expect(screen.queryByTestId('resource-edit-btn')).not.toBeInTheDocument()
     })

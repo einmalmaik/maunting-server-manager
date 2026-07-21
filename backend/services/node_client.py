@@ -477,20 +477,35 @@ class NodeClient:
         )
         return data if isinstance(data, list) else []
 
-    def files_read(self, server_id: int | str, path: str) -> str:
+    def files_read_info(self, server_id: int | str, path: str) -> dict[str, Any]:
         data = self._request(
             "GET",
             "/files/read",
             params={"server_id": str(server_id), "path": path},
         )
-        return str(data.get("content", ""))
+        return data if isinstance(data, dict) else {"content": ""}
 
-    def files_write(self, server_id: int | str, path: str, content: str) -> dict[str, Any]:
+    def files_read(self, server_id: int | str, path: str) -> str:
+        return str(self.files_read_info(server_id, path).get("content", ""))
+
+    def files_write(
+        self,
+        server_id: int | str,
+        path: str,
+        content: str,
+        expected_revision: str | None = None,
+        create_only: bool = False,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"content": content}
+        if expected_revision is not None:
+            payload["expected_revision"] = expected_revision
+        if create_only:
+            payload["create_only"] = True
         return self._request(
             "POST",
             "/files/write",
             params={"server_id": str(server_id), "path": path},
-            json={"content": content},
+            json=payload,
         )
 
     def files_delete(self, server_id: int | str, path: str) -> dict[str, Any]:

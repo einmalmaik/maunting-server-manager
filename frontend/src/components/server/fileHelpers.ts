@@ -37,15 +37,70 @@ export function sortEntries<T extends { name: string; is_dir: boolean }>(entries
 /** Mappt eine Datei-Endung auf die CodeMirror-Lang-Extension-Kennung.
  *  Implementierung haelt sich an die im Plugin-Set installierten Sprachen.
  */
-export function detectLanguage(filename: string): 'json' | 'yaml' | 'xml' | 'markdown' | 'ini' | 'properties' | 'plain' {
+export type FileLanguage =
+  | 'json' | 'yaml' | 'xml' | 'markdown' | 'ini' | 'properties'
+  | 'javascript' | 'typescript' | 'python' | 'shell' | 'sql' | 'css'
+  | 'cpp' | 'java' | 'csharp' | 'go' | 'rust' | 'lua' | 'toml'
+  | 'dockerfile' | 'plain'
+
+export function detectLanguage(filename: string): FileLanguage {
   const lower = filename.toLowerCase()
+  const base = lower.split('/').pop() || lower
   if (lower.endsWith('.json')) return 'json'
   if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return 'yaml'
-  if (lower.endsWith('.xml')) return 'xml'
+  if (lower.endsWith('.xml') || lower.endsWith('.html') || lower.endsWith('.htm')) return 'xml'
   if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'markdown'
   if (lower.endsWith('.ini') || lower.endsWith('.cfg') || lower.endsWith('.conf')) return 'ini'
   if (lower.endsWith('.properties')) return 'properties'
+  if (lower.endsWith('.js') || lower.endsWith('.jsx') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) return 'javascript'
+  if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return 'typescript'
+  if (lower.endsWith('.py')) return 'python'
+  if (lower.endsWith('.sh') || lower.endsWith('.bash') || lower.endsWith('.zsh') || lower.endsWith('.ps1')) return 'shell'
+  if (lower.endsWith('.sql')) return 'sql'
+  if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return 'css'
+  if (/\.(c|cc|cpp|cxx|h|hh|hpp)$/.test(lower)) return 'cpp'
+  if (lower.endsWith('.java')) return 'java'
+  if (lower.endsWith('.cs')) return 'csharp'
+  if (lower.endsWith('.go')) return 'go'
+  if (lower.endsWith('.rs')) return 'rust'
+  if (lower.endsWith('.lua')) return 'lua'
+  if (lower.endsWith('.toml')) return 'toml'
+  if (base === 'dockerfile' || base.startsWith('dockerfile.')) return 'dockerfile'
   return 'plain'
+}
+
+export function fileName(path: string): string {
+  return path.split('/').pop() || path
+}
+
+export function detectLineEnding(content: string): '\n' | '\r\n' {
+  return content.includes('\r\n') ? '\r\n' : '\n'
+}
+
+/** CodeMirror normalizes its document to LF; serialize back to the file's original EOL. */
+export function serializeLineEndings(content: string, lineEnding: '\n' | '\r\n'): string {
+  const normalized = content.replace(/\r\n/g, '\n')
+  return lineEnding === '\r\n' ? normalized.replace(/\n/g, '\r\n') : normalized
+}
+
+/** A successful response only covers the text that was actually submitted.
+ * Newer keystrokes must remain dirty so a following autosave can persist them.
+ */
+export function reconcileSavedContent(
+  currentContent: string,
+  submittedContent: string,
+): { savedContent: string; saveState: 'clean' | 'dirty' } {
+  return {
+    savedContent: submittedContent,
+    saveState: currentContent === submittedContent ? 'clean' : 'dirty',
+  }
+}
+
+export function detectIndentation(content: string): string {
+  const indented = content.split(/\r?\n/).find((line) => /^(?:\t+| +)\S/.test(line))
+  if (!indented) return 'Einzug: –'
+  const prefix = indented.match(/^(\t+| +)/)?.[0] ?? ''
+  return prefix.startsWith('\t') ? 'Tabs' : `Leerzeichen: ${prefix.length}`
 }
 
 /** Praezise Anzeige fuer Bytes — KISS ohne Locale. */

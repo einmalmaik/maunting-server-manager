@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
   detectLanguage,
+  detectIndentation,
+  detectLineEnding,
+  fileName,
   formatBytes,
   isWithin,
   joinPath,
   parentPath,
   pathSegments,
+  reconcileSavedContent,
   sortEntries,
+  serializeLineEndings,
   uploadDestinationKey,
 } from './fileHelpers'
 
@@ -61,7 +66,37 @@ describe('detectLanguage', () => {
     expect(detectLanguage('README.md')).toBe('markdown')
     expect(detectLanguage('serverDZ.cfg')).toBe('ini')
     expect(detectLanguage('app.properties')).toBe('properties')
+    expect(detectLanguage('scripts/start.sh')).toBe('shell')
+    expect(detectLanguage('schema.sql')).toBe('sql')
+    expect(detectLanguage('Dockerfile')).toBe('dockerfile')
+    expect(detectLanguage('src/main.ts')).toBe('typescript')
+    expect(detectLanguage('plugin.py')).toBe('python')
     expect(detectLanguage('random.txt')).toBe('plain')
+  })
+})
+
+describe('editor file details', () => {
+  it('preserves the original line ending when CodeMirror returns LF', () => {
+    expect(detectLineEnding('a\r\nb\r\n')).toBe('\r\n')
+    expect(serializeLineEndings('a\nb\n', '\r\n')).toBe('a\r\nb\r\n')
+    expect(serializeLineEndings('single-line', '\r\n')).toBe('single-line')
+  })
+
+  it('reports real indentation and basename', () => {
+    expect(detectIndentation('root\n    child')).toBe('Leerzeichen: 4')
+    expect(detectIndentation('root\n\tchild')).toBe('Tabs')
+    expect(fileName('config/server.ini')).toBe('server.ini')
+  })
+
+  it('keeps newer keystrokes dirty after an older save response', () => {
+    expect(reconcileSavedContent('submitted', 'submitted')).toEqual({
+      savedContent: 'submitted',
+      saveState: 'clean',
+    })
+    expect(reconcileSavedContent('typed while saving', 'submitted')).toEqual({
+      savedContent: 'submitted',
+      saveState: 'dirty',
+    })
   })
 })
 

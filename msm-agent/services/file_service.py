@@ -7,12 +7,16 @@ All paths are resolved with realpath/resolve and must stay inside
 from __future__ import annotations
 
 import logging
+import hashlib
 import json
 import glob
 import os
+import stat as stat_module
 import re
 import shutil
 import tarfile
+import tempfile
+import threading
 import zipfile
 import uuid
 from pathlib import Path
@@ -40,6 +44,56 @@ class PathValidationError(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+class RevisionConflictError(Exception):
+    """Raised when a caller tries to replace a file based on a stale revision."""
+
+    def __init__(self, current_revision: str | None) -> None:
+        super().__init__("File changed since it was opened")
+        self.current_revision = current_revision
+
+
+_write_locks_guard = threading.Lock()
+_write_locks: dict[str, threading.Lock] = {}
+
+
+def _write_lock(target: Path) -> threading.Lock:
+    key = str(target)
+    with _write_locks_guard:
+        return _write_locks.setdefault(key, threading.Lock())
+
+
+def _content_revision(data: bytes) -> str:
+    """Opaque, content-bound revision used for optimistic write protection."""
+    return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
+def _identity_name(value: int, *, group: bool) -> str | None:
+    """Resolve POSIX uid/gid where supported without exposing host paths."""
+    try:
+        if os.name != "posix":
+            return None
+        if group:
+            import grp
+
+            return grp.getgrgid(value).gr_name
+        import pwd
+
+        return pwd.getpwuid(value).pw_name
+    except (KeyError, ImportError, OSError):
+        return None
+
+
+def file_metadata(target: Path) -> dict[str, Any]:
+    info = target.stat(follow_symlinks=False)
+    return {
+        "size": info.st_size if target.is_file() else 0,
+        "modified": info.st_mtime,
+        "mode": format(stat_module.S_IMODE(info.st_mode), "04o"),
+        "owner": _identity_name(info.st_uid, group=False),
+        "group": _identity_name(info.st_gid, group=True),
+    }
 
 
 def server_root(server_id: str | int) -> Path:
@@ -118,34 +172,57 @@ def list_dir(server_id: str | int, rel_path: str = "") -> list[dict[str, Any]]:
         except (ValueError, OSError):
             continue
         try:
-            stat = entry.stat(follow_symlinks=False)
-            size = stat.st_size if entry.is_file() else 0
-            mtime = int(stat.st_mtime)
+            metadata = file_metadata(entry)
         except OSError:
-            size = 0
-            mtime = 0
+            metadata = {
+                "size": 0,
+                "modified": 0,
+                "mode": None,
+                "owner": None,
+                "group": None,
+            }
         entries.append(
             {
                 "name": entry.name,
                 "path": str(entry.relative_to(server_root(server_id))).replace("\\", "/"),
                 "is_dir": entry.is_dir(),
-                "size": size,
-                "mtime": mtime,
+                **metadata,
+                # Backwards-compatible agent contract for older panels.
+                "mtime": metadata["modified"],
             }
         )
     return entries
 
 
 def read_text(server_id: str | int, rel_path: str) -> str:
+    return read_text_with_metadata(server_id, rel_path)["content"]
+
+
+def read_text_with_metadata(server_id: str | int, rel_path: str) -> dict[str, Any]:
     target = safe_path(server_id, rel_path)
     if not target.exists() or not target.is_file():
         raise FileNotFoundError("File not found")
     if target.stat().st_size > settings.max_read_size:
         raise ValueError(f"File exceeds max read size ({settings.max_read_size} bytes)")
-    return target.read_text(encoding="utf-8", errors="replace")
+    data = target.read_bytes()
+    return {
+        "content": data.decode("utf-8", errors="replace"),
+        "revision": _content_revision(data),
+        **file_metadata(target),
+    }
 
 
 def write_text(server_id: str | int, rel_path: str, content: str) -> None:
+    write_text_if_revision(server_id, rel_path, content)
+
+
+def write_text_if_revision(
+    server_id: str | int,
+    rel_path: str,
+    content: str,
+    expected_revision: str | None = None,
+    create_only: bool = False,
+) -> dict[str, Any]:
     target = safe_path(server_id, rel_path)
     parent = target.parent
     # Parent must stay inside server root (mkdir does not re-validate)
@@ -155,7 +232,39 @@ def write_text(server_id: str | int, rel_path: str, content: str) -> None:
     except ValueError as exc:
         raise PathEscapeError() from exc
     parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    encoded = content.encode("utf-8")
+    with _write_lock(target):
+        if create_only and target.exists():
+            raise FileExistsError("Target file already exists")
+        current_revision = _content_revision(target.read_bytes()) if target.is_file() else None
+        if expected_revision is not None and current_revision != expected_revision:
+            raise RevisionConflictError(current_revision)
+
+        previous_mode = stat_module.S_IMODE(target.stat().st_mode) if target.exists() else 0o644
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                delete=False,
+                dir=parent,
+                prefix=".msm-edit-",
+            ) as temp_file:
+                os.fchmod(temp_file.fileno(), 0o600)
+                temp_file.write(encoded)
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+                temp_path = Path(temp_file.name)
+            os.replace(temp_path, target)
+            temp_path = None
+            os.chmod(target, previous_mode)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+    return {
+        "revision": _content_revision(encoded),
+        **file_metadata(target),
+    }
 
 
 def _safe_workshop_pattern(value: str, *, allow_glob: bool) -> str:
