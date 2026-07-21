@@ -127,8 +127,10 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
               {t("servers.guardian.tab.lastProbe")}
             </p>
             <p className="text-sm font-mono-sm text-on-surface font-semibold">
-              {server.created_at
-                ? new Date(server.created_at).toLocaleString()
+              {server.guardian_probe_timestamp || server.guardian_transition_timestamp
+                ? new Date(
+                    (server.guardian_probe_timestamp || server.guardian_transition_timestamp)!
+                  ).toLocaleString()
                 : t("servers.guardian.tab.noProbe")}
             </p>
           </div>

@@ -47,6 +47,8 @@ export interface Server {
   node_name?: string | null
   guardian_observed_state?: string
   guardian_enabled?: boolean
+  guardian_probe_timestamp?: string | null
+  guardian_transition_timestamp?: string | null
   guardian_sync_error_statistics?: string | null
 }
 

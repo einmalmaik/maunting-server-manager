@@ -20,6 +20,7 @@ const mockServerGuardianEnabled: Server = {
   status_message: null,
   guardian_observed_state: "healthy",
   guardian_enabled: true,
+  guardian_probe_timestamp: "2026-07-21T14:00:00Z",
   guardian_sync_error_statistics: null,
   auth_required: false,
   auto_restart: false,
