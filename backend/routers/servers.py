@@ -1509,3 +1509,30 @@ def server_logs(server_id: int, lines: int = 100, db: Session = Depends(get_db),
             except Exception:
                 continue
     return {"logs": "", "path": "none"}
+
+
+class SwitchBlueprintRequest(BaseModel):
+    new_blueprint_id: str
+
+
+@router.post("/{server_id}/switch-blueprint")
+def switch_server_blueprint_endpoint(
+    server_id: int,
+    body: SwitchBlueprintRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Wechselt das Spiel / den Blueprint eines gestoppten Servers.
+    Erzeugt AUSNAHMSLOS ein Pflicht-Pre-Switch-Backup ueber das zentrale Backup-System.
+    """
+    if not permission_service.has_server_permission(db, user, server_id, "servers.edit") and not permission_service.has_global_permission(db, user, "servers.edit"):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+    from services.server_lifecycle_service import switch_server_blueprint
+    return switch_server_blueprint(db, server, body.new_blueprint_id, user_id=user.id)
+

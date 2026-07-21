@@ -50,7 +50,21 @@
   "health": {
     "process": {},
     "application": {
-      "type": "minecraft-status"
+      "type": "minecraft-status",
+      "port": "{{GAME_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 180,
+      "success_patterns": [
+        "Done \\(",
+        "For help, type \"help\""
+      ],
+      "failure_patterns": [
+        "FAILED TO BIND TO PORT",
+        "Perhaps a server is already running on that port?"
+      ]
     }
   },
   "recovery": {
@@ -66,10 +80,33 @@
       {
         "match": "minecraft_query_failed",
         "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,
     "max_attempts": 3,
     "cooldown_seconds": 60
+  },
+  "logs": {
+    "sources": [
+      "logs/latest.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:rcon\\.password"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   }
 }

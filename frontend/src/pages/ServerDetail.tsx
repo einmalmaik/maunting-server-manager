@@ -37,6 +37,7 @@ import { AuthSetupBanner } from "@/components/server/AuthSetupBanner";
 import { PageHeader } from "@/Singra/UI/PageHeader";
 import { DatabaseManager } from "@/components/server/DatabaseManager";
 import { OutgoingWebhooksPanel } from "@/components/server/OutgoingWebhooksPanel";
+import { SwitchBlueprintDialog } from "@/components/server/SwitchBlueprintDialog";
 import { GuardianBadge } from "@/features/guardian/GuardianBadge";
 import { GuardianQuarantineBanner } from "@/features/guardian/GuardianQuarantineBanner";
 import { GuardianTab } from "@/features/guardian/GuardianTab";
@@ -147,6 +148,7 @@ export function ServerDetail() {
   }, [status?.server_file_update_available, status?.server_file_update_reason]);
 
   const [showEditNetwork, setShowEditNetwork] = useState(false);
+  const [showSwitchBlueprint, setShowSwitchBlueprint] = useState(false);
   const [savingNetwork, setSavingNetwork] = useState(false);
   // Optimistic transient status for instant UI feedback (overwritten by next poll/fetch)
   const [optimisticStatus, setOptimisticStatus] = useState<string | null>(null);
@@ -695,6 +697,18 @@ export function ServerDetail() {
           </button>
         )}
 
+        {effectiveStatus !== "installing" && effectiveStatus !== "queued" && (
+          <button
+            onClick={() => setShowSwitchBlueprint(true)}
+            disabled={!!actionLoading || isNodeUnreachable || effectiveStatus !== "stopped"}
+            className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            title={effectiveStatus !== "stopped" ? t("servers.mustStopToSwitch", "Der Server muss gestoppt sein, um das Spiel zu wechseln.") : undefined}
+          >
+            <RefreshCw className="w-4 h-4 text-primary" />
+            {t("servers.switchBlueprintAction", "Spiel / Blueprint wechseln")}
+          </button>
+        )}
+
         {hasServerFiles && showServerFileUpdates && (
           <button
             type="button"
@@ -1133,6 +1147,15 @@ export function ServerDetail() {
           diskLimit={configuredDiskLimit}
           lifecycleBusy={isLifecycleBusy}
           onSaved={onResourceSaved}
+        />
+      )}
+
+      {server && (
+        <SwitchBlueprintDialog
+          open={showSwitchBlueprint}
+          onClose={() => setShowSwitchBlueprint(false)}
+          server={server}
+          onSwitched={fetchAll}
         />
       )}
     </div>

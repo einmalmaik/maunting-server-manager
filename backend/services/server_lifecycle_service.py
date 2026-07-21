@@ -999,3 +999,137 @@ def sync_desired_state_to_agent(db: Session, server: Server) -> bool:
             getattr(exc, "code", type(exc).__name__),
         )
         return False
+
+
+def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, user_id: int | None = None) -> dict:
+    """Wechselt das Spiel / den Blueprint eines gestoppten Servers.
+
+    Sicherheits- & Backup-Invarianten:
+    1. Server MUSS gestoppt sein (status == 'stopped').
+    2. Neuer Blueprint MUSS existieren.
+    3. MANDATORY CENTRAL BACKUP: Erstellt IMMER ein Backup ueber backup_orchestrator.create_server_backup().
+       Schlaegt das Backup fehl, wird abgebrochen.
+    4. Alte Spieldateien in install_dir bereinigen (Clean Wipe).
+    5. Blueprint / game_type in DB aktualisieren & Ports neu zuweisen.
+    6. Re-Installation des neuen Blueprints ausloesen.
+    """
+    if server.status != "stopped":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "server_must_be_stopped",
+                "message": "Der Server muss gestoppt sein, um das Spiel oder den Blueprint zu wechseln.",
+            },
+        )
+
+    from blueprints import get_registry
+    registry = get_registry()
+    entry = registry.get(new_blueprint_id)
+    if not entry:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "blueprint_not_found",
+                "message": f"Blueprint '{new_blueprint_id}' wurde nicht gefunden.",
+            },
+        )
+
+    old_game_type = server.game_type
+
+    # 1. Ausnahmsloses Pflicht-Backup ueber zentrales Backup-System (backup_orchestrator)
+    from services.backup_orchestrator import create_server_backup
+    try:
+        timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        backup_name = f"pre-switch-{new_blueprint_id}-{timestamp_str}"
+        logger.info(
+            "Erstelle Pflicht-Pre-Switch-Backup fuer Server ID=%s (Alt: '%s', Neu: '%s')...",
+            server.id,
+            old_game_type,
+            new_blueprint_id,
+        )
+        backup_record = create_server_backup(server.id, db, name=backup_name, timeout_seconds=600)
+        if not backup_record or getattr(backup_record, "status", None) == "failed":
+            raise RuntimeError("Backup-Status meldet 'failed'.")
+    except Exception as exc:
+        logger.error("Pre-Switch Backup fuer Server ID=%s fehlgeschlagen: %s", server.id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "pre_switch_backup_failed",
+                "message": f"Pre-Switch-Backup ueber das zentrale Backup-System fehlgeschlagen: {exc}. Wechsel abgebrochen, keine Spieldateien geloescht.",
+            },
+        )
+
+    # 2. Alte Spieldateien in install_dir reinigen
+    try:
+        target_node = server.node
+        if target_node is not None and not target_node.is_local:
+            from services.node_client import NodeClient
+            NodeClient.from_node(target_node).files_delete_server_root(server.id)
+        elif server.install_dir and os.path.exists(server.install_dir):
+            for item in os.listdir(server.install_dir):
+                item_path = os.path.join(server.install_dir, item)
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path, ignore_errors=True)
+                else:
+                    try:
+                        os.remove(item_path)
+                    except Exception:
+                        pass
+    except Exception as exc:
+        logger.warning("Datei-Reinigung vor Blueprint-Wechsel fuer Server ID=%s: %s", server.id, exc)
+
+    # 3. Game Type / Blueprint ID im Server Model aktualisieren
+    server.game_type = new_blueprint_id
+    db.commit()
+    db.refresh(server)
+
+    # 4. Ports fuer den neuen Blueprint neu abstimmen
+    try:
+        from services.port_allocation_service import allocate_ports
+        from models.server_port import ServerPort
+
+        blueprint_obj = entry.blueprint
+        port_reqs = [
+            (p.name, p.protocol) for p in getattr(blueprint_obj, "ports", [])
+        ] if getattr(blueprint_obj, "ports", None) else [("game", "udp"), ("query", "udp"), ("rcon", "tcp")]
+
+        check_host = server.node.is_local if server.node else True
+        allocated = allocate_ports(
+            db,
+            exclude_server_id=server.id,
+            port_requirements=port_reqs,
+            node_id=server.node_id,
+            check_host=check_host,
+        )
+
+        db.query(ServerPort).filter(ServerPort.server_id == server.id).delete()
+        if isinstance(allocated, list):
+            for role, port_val, proto in allocated:
+                db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
+        db.commit()
+    except Exception as exc:
+        logger.warning("Port-Synchronisierung nach Blueprint-Wechsel fuer Server ID=%s: %s", server.id, exc)
+
+    # 5. Neu-Installation triggern
+    from games import get_plugin
+    plugin = get_plugin(new_blueprint_id)
+    if plugin:
+        _set_status(db, server, "installing", f"Wechsel zu '{new_blueprint_id}' gestartet")
+        try:
+            plugin.install(server)
+        except Exception as exc:
+            logger.error("Installation nach Blueprint-Wechsel fehlgeschlagen: %s", exc)
+
+    # 6. Desired State an Guardian Agent syncen
+    sync_desired_state_to_agent(db, server)
+
+    return {
+        "message": f"Blueprint erfolgreich zu '{new_blueprint_id}' gewechselt.",
+        "server_id": server.id,
+        "old_blueprint": old_game_type,
+        "new_blueprint": new_blueprint_id,
+        "backup_id": getattr(backup_record, "id", None),
+        "status": server.status,
+    }
+

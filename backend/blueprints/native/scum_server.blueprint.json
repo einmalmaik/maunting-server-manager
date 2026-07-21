@@ -70,8 +70,39 @@
   "health": {
     "process": {},
     "application": {
-      "type": "source-query"
+      "type": "source-query",
+      "port": "{{QUERY_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 180,
+      "success_patterns": [
+        "GameServerSteam: initialized",
+        "Server is successfully initialized",
+        "LogNet: Browse: /Game/Maps/SCUM_Island/SCUM_Island"
+      ],
+      "failure_patterns": [
+        "Address already in use",
+        "Could not bind"
+      ]
     }
+  },
+  "logs": {
+    "sources": [
+      "SCUM/Saved/Logs/SCUM.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:ServerPassword",
+      "regex:AdminPassword"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   },
   "recovery": {
     "policies": [
@@ -82,6 +113,14 @@
       {
         "match": "source_query_failed",
         "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,

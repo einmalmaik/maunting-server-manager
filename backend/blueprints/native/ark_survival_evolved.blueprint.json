@@ -5,7 +5,7 @@
     "name": "ARK: Survival Evolved (ASE)",
     "category": "steam_game",
     "author": "Maunting Studios",
-    "description": "ARK: Survival Evolved Dedicated Server via SteamCMD (App-ID 376030). Nativer Linux-Support. Mods über Steam Workshop (App-ID 346110)."
+    "description": "ARK: Survival Evolved Dedicated Server via SteamCMD (App-ID 376030). Nativer Linux-Support. Mods \u00c3\u00bcber Steam Workshop (App-ID 346110)."
   },
   "runtime": {
     "image": "ghcr.io/parkervcp/steamcmd:debian",
@@ -79,8 +79,38 @@
   "health": {
     "process": {},
     "application": {
-      "type": "source-query"
+      "type": "source-query",
+      "port": "{{QUERY_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 120,
+      "success_patterns": [
+        "Server successfully started"
+      ],
+      "failure_patterns": [
+        "Address already in use",
+        "Could not bind"
+      ]
     }
+  },
+  "logs": {
+    "sources": [
+      "ShooterGame/Saved/Logs/ShooterGame.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:ServerPassword",
+      "regex:ServerAdminPassword",
+      "regex:ADMIN_PASSWORD"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   },
   "recovery": {
     "policies": [
@@ -91,6 +121,14 @@
       {
         "match": "source_query_failed",
         "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,

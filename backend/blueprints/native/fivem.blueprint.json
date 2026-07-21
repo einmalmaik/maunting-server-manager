@@ -70,8 +70,35 @@
     "application": {
       "type": "http-ping",
       "port": "game",
-      "path": "/info.json"
+      "path": "/info.json",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 45,
+      "success_patterns": [
+        "Authenticating with master",
+        "Sending heartbeat"
+      ],
+      "failure_patterns": [
+        "Address already in use",
+        "Could not bind"
+      ]
     }
+  },
+  "logs": {
+    "sources": [
+      "stdout"
+    ],
+    "redact": [
+      "regex:sv_licenseKey"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   },
   "recovery": {
     "policies": [
@@ -86,6 +113,14 @@
       {
         "match": "http_unexpected_status",
         "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,

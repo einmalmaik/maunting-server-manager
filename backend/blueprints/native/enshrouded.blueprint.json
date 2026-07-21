@@ -5,7 +5,7 @@
     "name": "Enshrouded",
     "category": "steam_game",
     "author": "Maunting Studios",
-    "description": "Enshrouded Dedicated Server via SteamCMD (App-ID 2278520). Nativer Linux-Support. Konfiguration erfolgt über enshrouded_server.json."
+    "description": "Enshrouded Dedicated Server via SteamCMD (App-ID 2278520). Nativer Linux-Support. Konfiguration erfolgt \u00c3\u00bcber enshrouded_server.json."
   },
   "runtime": {
     "image": "ghcr.io/parkervcp/steamcmd:debian",
@@ -70,8 +70,37 @@
   "health": {
     "process": {},
     "application": {
-      "type": "source-query"
+      "type": "source-query",
+      "port": "{{QUERY_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 60,
+      "success_patterns": [
+        "HostSessionSuccess",
+        "'HostOnline' (up)!"
+      ],
+      "failure_patterns": [
+        "Address already in use",
+        "Could not bind"
+      ]
     }
+  },
+  "logs": {
+    "sources": [
+      "logs/enshrouded_server.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:password"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   },
   "recovery": {
     "policies": [
@@ -82,6 +111,14 @@
       {
         "match": "source_query_failed",
         "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,

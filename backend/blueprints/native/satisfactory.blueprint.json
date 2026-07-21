@@ -53,13 +53,41 @@
     "postInstall": []
   },
   "health": {
-    "process": {}
+    "process": {},
+    "application": {
+      "type": "source-query",
+      "port": "{{QUERY_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 120,
+      "success_patterns": [
+        "Server startup time elapsed",
+        "auto-pause is allowed to proceed from now on"
+      ],
+      "failure_patterns": [
+        "Address already in use"
+      ]
+    }
   },
   "recovery": {
     "policies": [
       {
         "match": "process_not_running",
         "action": "restart"
+      },
+      {
+        "match": "source_query_failed",
+        "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,
@@ -70,6 +98,21 @@
     "includePaths": [
       ".config/Epic/FactoryGame/Saved/SaveGames",
       ".config/Epic/FactoryGame/Saved/Config"
+    ]
+  },
+  "logs": {
+    "sources": [
+      "FactoryGame/Saved/Logs/FactoryGame.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:ServerPassword"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
     ]
   }
 }

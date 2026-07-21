@@ -72,8 +72,40 @@
   "health": {
     "process": {},
     "application": {
-      "type": "source-query"
+      "type": "source-query",
+      "port": "{{QUERY_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 240,
+      "success_patterns": [
+        "Server successfully started",
+        "Setting breakpad minidump AppID",
+        "wp.Runtime.HLOD"
+      ],
+      "failure_patterns": [
+        "Address already in use",
+        "Could not bind"
+      ]
     }
+  },
+  "logs": {
+    "sources": [
+      "ShooterGame/Saved/Logs/ShooterGame.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:ServerPassword",
+      "regex:ServerAdminPassword",
+      "regex:ADMIN_PASSWORD"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   },
   "recovery": {
     "policies": [
@@ -84,6 +116,14 @@
       {
         "match": "source_query_failed",
         "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,

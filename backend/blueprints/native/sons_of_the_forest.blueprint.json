@@ -64,7 +64,19 @@
   "health": {
     "process": {},
     "application": {
-      "type": "source-query"
+      "type": "source-query",
+      "port": "{{QUERY_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 120,
+      "success_patterns": [
+        "GameServer Started"
+      ],
+      "failure_patterns": [
+        "Address already in use"
+      ]
     }
   },
   "recovery": {
@@ -76,6 +88,14 @@
       {
         "match": "source_query_failed",
         "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,
@@ -85,6 +105,22 @@
   "backup": {
     "includePaths": [
       "userdata"
+    ]
+  },
+  "logs": {
+    "sources": [
+      "SonsOfTheForestDS/Logs/SonsOfTheForestDS.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:ServerPassword",
+      "regex:ServerAdminPassword"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
     ]
   }
 }

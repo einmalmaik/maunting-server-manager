@@ -5,7 +5,7 @@
     "name": "Palworld",
     "category": "steam_game",
     "author": "Maunting Studios",
-    "description": "Palworld Dedicated Server 1.0+ nativ unter Linux (Steam App-ID 2394010). Steam Workshop (App 1623730) über -workshopdir auf den SteamCMD-Cache; Server- und Mod-Updates via MSM checkBased. UE4SS/Lua-Workshop-Mods sind laut Hersteller nur auf der Windows-Server-Edition — dieser Blueprint nutzt bewusst den nativen Linux-Server (.pak/Workshop-Inhalte)."
+    "description": "Palworld Dedicated Server 1.0+ nativ unter Linux (Steam App-ID 2394010). Steam Workshop (App 1623730) \u00c3\u00bcber -workshopdir auf den SteamCMD-Cache; Server- und Mod-Updates via MSM checkBased. UE4SS/Lua-Workshop-Mods sind laut Hersteller nur auf der Windows-Server-Edition \u00e2\u20ac\u201d dieser Blueprint nutzt bewusst den nativen Linux-Server (.pak/Workshop-Inhalte)."
   },
   "runtime": {
     "image": "ghcr.io/parkervcp/steamcmd:debian",
@@ -65,9 +65,32 @@
   },
   "health": {
     "process": {},
-    "application": {
-      "type": "udp_port_mapping"
+    "startup": {
+      "grace_period_seconds": 90,
+      "success_patterns": [
+        "Setting breakpad minidump AppID"
+      ],
+      "failure_patterns": [
+        "Address already in use",
+        "Could not bind"
+      ]
     }
+  },
+  "logs": {
+    "sources": [
+      "Pal/Saved/Logs/Pal.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:AdminPassword",
+      "regex:ServerPassword"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   },
   "recovery": {
     "policies": [
@@ -76,8 +99,12 @@
         "action": "restart"
       },
       {
-        "match": "source_query_failed",
-        "action": "restart"
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,

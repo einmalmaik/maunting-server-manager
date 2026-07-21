@@ -5,7 +5,7 @@
     "name": "Euro Truck Simulator 2 (ETS2)",
     "category": "steam_game",
     "author": "Maunting Studios",
-    "description": "Euro Truck Simulator 2 Dedicated Server via SteamCMD (App-ID 1948160). Nativer Linux-Support. Konfiguration über server_config.sii."
+    "description": "Euro Truck Simulator 2 Dedicated Server via SteamCMD (App-ID 1948160). Nativer Linux-Support. Konfiguration \u00c3\u00bcber server_config.sii."
   },
   "runtime": {
     "image": "ghcr.io/parkervcp/steamcmd:debian",
@@ -72,8 +72,37 @@
   "health": {
     "process": {},
     "application": {
-      "type": "source-query"
+      "type": "source-query",
+      "port": "{{QUERY_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 60,
+      "success_patterns": [
+        "Server has been started",
+        "session successfully created"
+      ],
+      "failure_patterns": [
+        "Address already in use",
+        "Could not bind"
+      ]
     }
+  },
+  "logs": {
+    "sources": [
+      ".local/share/Euro Truck Simulator 2/server.log.txt",
+      "stdout"
+    ],
+    "redact": [
+      "regex:password"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   },
   "recovery": {
     "policies": [
@@ -84,6 +113,14 @@
       {
         "match": "source_query_failed",
         "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,

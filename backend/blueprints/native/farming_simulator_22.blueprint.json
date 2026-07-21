@@ -64,8 +64,36 @@
     "process": {},
     "application": {
       "type": "tcp",
-      "port": "game"
+      "port": "game",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 60,
+      "success_patterns": [
+        "Game server started"
+      ],
+      "failure_patterns": [
+        "Unable to start game server",
+        "Address already in use"
+      ]
     }
+  },
+  "logs": {
+    "sources": [
+      "profile/server.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:password",
+      "regex:adminPassword"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   },
   "recovery": {
     "policies": [
@@ -76,6 +104,14 @@
       {
         "match": "tcp_connect_failed",
         "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,

@@ -5,7 +5,7 @@
     "name": "Hytale (Dedicated)",
     "category": "non_steam_game",
     "author": "Maunting Studios",
-    "description": "Hytale Dedicated Server via offiziellem Hytale Linux-Downloader. Beim ersten Start zeigt die Console den Hytale-OAuth-Link an; danach lädt der Downloader die Serverdateien in das Server-Verzeichnis."
+    "description": "Hytale Dedicated Server via offiziellem Hytale Linux-Downloader. Beim ersten Start zeigt die Console den Hytale-OAuth-Link an; danach l\u00c3\u00a4dt der Downloader die Serverdateien in das Server-Verzeichnis."
   },
   "runtime": {
     "image": "ghcr.io/natroutter/egg-hytale:latest",
@@ -48,17 +48,61 @@
     "modListFilePath": null
   },
   "health": {
-    "process": {}
+    "process": {},
+    "application": {
+      "type": "source-query",
+      "port": "{{QUERY_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 120,
+      "success_patterns": [
+        "Server started",
+        "Done \\("
+      ],
+      "failure_patterns": [
+        "FAILED TO BIND TO PORT"
+      ]
+    }
   },
   "recovery": {
     "policies": [
       {
         "match": "process_not_running",
         "action": "restart"
+      },
+      {
+        "match": "source_query_failed",
+        "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
       }
     ],
     "attempt_window_seconds": 600,
     "max_attempts": 3,
     "cooldown_seconds": 60
+  },
+  "logs": {
+    "sources": [
+      "logs/latest.log",
+      "stdout"
+    ],
+    "redact": [
+      "regex:rcon\\.password",
+      "regex:password"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
   }
 }
