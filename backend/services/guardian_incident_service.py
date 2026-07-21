@@ -94,6 +94,71 @@ def _merge_attempts(existing_json: str | None, new_attempts: list[dict]) -> list
     return merged
 
 
+def _notify_guardian_incident(server_id: int, incident_type: str, status: str, description: str) -> None:
+    import asyncio
+    import threading
+
+    def _bg_notify():
+        from database import SessionLocal
+        from models import Server, ServerPermission, User
+        from services.email_service import EmailService
+        from services.outbound_webhook_service import (
+            dispatch_event,
+            build_guardian_incident_payload,
+            EVENT_GUARDIAN_INCIDENT,
+        )
+
+        db = SessionLocal()
+        try:
+            server = db.get(Server, server_id)
+            if not server:
+                return
+
+            payload = build_guardian_incident_payload(server, incident_type, status, description)
+
+            loop = asyncio.new_event_loop()
+            try:
+                # 1. Outbound Webhook dispatch
+                loop.run_until_complete(
+                    dispatch_event(db, server=server, event_type=EVENT_GUARDIAN_INCIDENT, payload=payload)
+                )
+
+                # 2. Email Notifications to Server Users with email_notifications enabled
+                if EmailService.is_configured():
+                    perms = db.query(ServerPermission).filter(ServerPermission.server_id == server_id).all()
+                    user_ids = {p.user_id for p in perms}
+                    users = db.query(User).filter(User.id.in_(user_ids), User.email_notifications.is_(True)).all() if user_ids else []
+
+                    for u in users:
+                        if u.email:
+                            loop.run_until_complete(
+                                EmailService.send_guardian_incident_notification(
+                                    to=u.email,
+                                    username=u.username,
+                                    server_name=server.name,
+                                    incident_type=incident_type,
+                                    status=status,
+                                    details=description,
+                                )
+                            )
+
+                # Wait for any background tasks (such as HTTP deliveries created by dispatch_event)
+                pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            finally:
+                loop.close()
+        except Exception as exc:
+            logger.warning("Guardian notification bg error for server %s: %s", server_id, exc)
+        finally:
+            db.close()
+
+    t = threading.Thread(target=_bg_notify, daemon=True)
+    t.start()
+
+
+
+
 def ingest_incidents_and_ack(
     db: Session,
     server: Server,
@@ -103,6 +168,8 @@ def ingest_incidents_and_ack(
 ) -> list[str]:
     """Commit all valid incidents before acknowledging any UUID to the Agent."""
     acknowledged: list[str] = []
+    notifications_to_send: list[tuple[str, str, str]] = []
+
     for raw in incidents:
         try:
             incident_uuid, item = _validated_incident(raw, server.id)
@@ -124,27 +191,32 @@ def ingest_incidents_and_ack(
             # If the status changed, update it.
             existing_inc = db.query(Incident).filter(Incident.uuid == incident_uuid).first()
             if existing_inc and existing_inc.status != item["status"]:
+                old_st = existing_inc.status
                 existing_inc.status = item["status"]
                 if existing_inc.status == "resolved":
                     existing_inc.resolved_at = datetime.now(timezone.utc)
+                if old_st != item["status"]:
+                    notifications_to_send.append((item["type"], item["status"], message))
             
             acknowledged.append(incident_uuid)
             continue
 
         target_incident = None
 
-        # 2. Check for exact UUID match in Incidents (should not happen if deliveries are tracked properly, but fallback)
+        # 2. Check for exact UUID match in Incidents
         existing = db.query(Incident).filter(Incident.uuid == incident_uuid).first()
         if existing is not None:
-            # Update existing exact UUID entry
             merged_att = _merge_attempts(existing.attempts, item["attempts"])
             existing.attempts = json.dumps(merged_att, sort_keys=True, separators=(",", ":"))
             existing.description = message
+            old_st = existing.status
             existing.status = item["status"]
             if item["status"] == "resolved":
                 existing.resolved_at = datetime.now(timezone.utc)
             elif existing.resolved_at is not None and item["status"] != "resolved":
                 existing.resolved_at = None
+            if old_st != item["status"]:
+                notifications_to_send.append((item["type"], item["status"], message))
             target_incident = existing
         else:
             # 3. Check for active (unresolved) incident with the same fingerprint (Grouping)
@@ -158,17 +230,16 @@ def ingest_incidents_and_ack(
                 .first()
             )
             if group_parent is not None:
-                # Group with the existing active incident
                 group_parent.occurrences += 1
                 merged_att = _merge_attempts(group_parent.attempts, item["attempts"])
-                
-                # Trust the agent for status. Backend does not force quarantine.
+                old_st = group_parent.status
                 group_parent.status = item["status"]
-
                 group_parent.attempts = json.dumps(merged_att, sort_keys=True, separators=(",", ":"))
                 group_parent.description = message
                 if group_parent.status == "resolved":
                     group_parent.resolved_at = datetime.now(timezone.utc)
+                if old_st != item["status"]:
+                    notifications_to_send.append((item["type"], item["status"], message))
                 target_incident = group_parent
             else:
                 # 4. Create a brand new incident
@@ -190,7 +261,8 @@ def ingest_incidents_and_ack(
                 if status == "resolved":
                     new_inc.resolved_at = datetime.now(timezone.utc)
                 db.add(new_inc)
-                db.flush() # flush to get the id for the delivery record
+                db.flush()
+                notifications_to_send.append((item["type"], status, message))
                 target_incident = new_inc
 
         # Record delivery to prevent future duplicate processing
@@ -212,10 +284,14 @@ def ingest_incidents_and_ack(
         db.rollback()
         raise
 
+    # Dispatch notifications after commit
+    for inc_type, inc_status, inc_desc in notifications_to_send:
+        _notify_guardian_incident(server.id, inc_type, inc_status, inc_desc)
+
+
     # ACK payload to node
     try:
         node_client.acknowledge_incidents(container_name, acknowledged)
-        # Optional: Mark as acknowledged in DB
         now = datetime.now(timezone.utc)
         db.query(GuardianIncidentDelivery).filter(
             GuardianIncidentDelivery.incident_uuid.in_(acknowledged)
@@ -226,3 +302,4 @@ def ingest_incidents_and_ack(
         raise
 
     return acknowledged
+

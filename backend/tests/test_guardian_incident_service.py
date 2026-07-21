@@ -328,3 +328,63 @@ def test_ack_failure_preserves_delivery_record(db: Session) -> None:
     assert delivery is not None
     # Delivery record is preserved, even if network partition prevented ACK callback
     assert delivery.incident_uuid == inc_uuid
+
+
+def test_notify_guardian_incident_triggers_webhook_and_email(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from models import User, ServerPermission
+    from services.guardian_incident_service import _notify_guardian_incident
+
+    server = _server()
+    server.id = None
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    user1 = User(username="admin1", email="admin1@example.com", password_hash="hash", email_notifications=True)
+    user2 = User(username="admin2", email="admin2@example.com", password_hash="hash", email_notifications=False)
+    db.add_all([user1, user2])
+    db.commit()
+    db.refresh(user1)
+    db.refresh(user2)
+
+    perm1 = ServerPermission(server_id=server.id, user_id=user1.id, permission_key="server.view")
+    perm2 = ServerPermission(server_id=server.id, user_id=user2.id, permission_key="server.view")
+    db.add_all([perm1, perm2])
+    db.commit()
+
+    dispatched_events = []
+    sent_emails = []
+
+    async def mock_dispatch(db, *, server, event_type, payload):
+        dispatched_events.append((server.id, event_type, payload))
+        return [1]
+
+    async def mock_send_email(to, username, server_name, incident_type, status, details=""):
+        sent_emails.append((to, username, server_name, incident_type, status, details))
+        return True
+
+    monkeypatch.setattr("services.outbound_webhook_service.dispatch_event", mock_dispatch)
+    monkeypatch.setattr("services.email_service.EmailService.is_configured", lambda: True)
+    monkeypatch.setattr("services.email_service.EmailService.send_guardian_incident_notification", mock_send_email)
+
+    _notify_guardian_incident(server.id, "CrashLoop", "quarantined", "Process crashed 3 times")
+
+    import time
+    time.sleep(0.3)
+
+    assert len(dispatched_events) == 1
+    srv_id, evt_type, payload = dispatched_events[0]
+    assert srv_id == server.id
+    assert evt_type == "guardian_incident"
+    assert payload["incident_type"] == "CrashLoop"
+    assert payload["status"] == "quarantined"
+
+    assert len(sent_emails) == 1
+    to_email, uname, sname, inc_t, st, det = sent_emails[0]
+    assert to_email == "admin1@example.com"
+    assert uname == "admin1"
+    assert sname == server.name
+    assert inc_t == "CrashLoop"
+    assert st == "quarantined"
+    assert "crashed 3 times" in det
+

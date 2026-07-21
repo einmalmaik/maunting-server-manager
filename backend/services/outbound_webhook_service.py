@@ -53,7 +53,9 @@ DELIVERY_RETENTION_PER_SUB = 100
 EVENT_STATUS_CHANGE = "status_change"
 EVENT_PLAYER_UPDATE = "player_update"
 EVENT_ERROR = "error"
-EVENT_KNOWN_TYPES = frozenset({EVENT_STATUS_CHANGE, EVENT_PLAYER_UPDATE, EVENT_ERROR})
+EVENT_GUARDIAN_INCIDENT = "guardian_incident"
+EVENT_KNOWN_TYPES = frozenset({EVENT_STATUS_CHANGE, EVENT_PLAYER_UPDATE, EVENT_ERROR, EVENT_GUARDIAN_INCIDENT})
+
 
 
 # ── Public API: Test-Secret generieren + hashen ─────────────────────────────
@@ -219,6 +221,12 @@ async def _send_with_retry(subscription_id: int, delivery_id: int) -> None:
                 await asyncio.sleep(sleep_seconds)
             delivery.attempt = attempt_index + 1
             delivery.sent_at = datetime.now(timezone.utc)
+            is_discord = "discord.com/api/webhooks" in sub.target_url
+            payload_content = (
+                format_discord_payload(delivery.payload, delivery.event_type).encode("utf-8")
+                if is_discord
+                else delivery.payload.encode("utf-8")
+            )
             try:
                 async with httpx.AsyncClient(
                     timeout=DEFAULT_TIMEOUT_SECONDS,
@@ -226,7 +234,7 @@ async def _send_with_retry(subscription_id: int, delivery_id: int) -> None:
                 ) as client:
                     resp = await client.post(
                         sub.target_url,
-                        content=delivery.payload.encode("utf-8"),
+                        content=payload_content,
                         headers={
                             "Content-Type": "application/json",
                             "X-Webhook-Secret": secret,
@@ -343,6 +351,109 @@ def build_error_payload(server: Server, error: str) -> dict[str, Any]:
         "error": (error or "")[:500],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def build_guardian_incident_payload(
+    server: Server, incident_type: str, status: str, description: str
+) -> dict[str, Any]:
+    """Guardian-Incident-Payload fuer Outbound Webhooks."""
+    return {
+        "event_type": EVENT_GUARDIAN_INCIDENT,
+        "server_id": server.id,
+        "server_name": server.name,
+        "incident_type": incident_type,
+        "status": status,
+        "description": (description or "")[:1000],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def format_discord_payload(raw_payload_str: str, event_type: str) -> str:
+    """Wandelt generische Webhook-Payloads in strukturierte Discord-Embed-JSONs um."""
+    try:
+        data = json.loads(raw_payload_str)
+    except Exception:
+        return raw_payload_str
+
+    server_name = data.get("server_name") or f"Server #{data.get('server_id', '?')}"
+
+    if event_type == EVENT_GUARDIAN_INCIDENT:
+        inc_type = data.get("incident_type", "Incident")
+        status = data.get("status", "unknown")
+        desc = data.get("description", "")
+
+        if status in ("quarantined", "open"):
+            color = 15158332  # Red #E74C3C
+        elif status in ("recovering", "verifying"):
+            color = 15844367  # Yellow #F1C40F
+        elif status == "resolved":
+            color = 3066993  # Green #2ECC71
+        else:
+            color = 3447003  # Blue #3498DB
+
+        embed = {
+            "username": "MSM Guardian Engine",
+            "embeds": [
+                {
+                    "title": f"Guardian Alert: {server_name}",
+                    "description": f"**Vorfall:** {inc_type}\n**Status:** `{status}`\n\n{desc}".strip(),
+                    "color": color,
+                    "fields": [
+                        {"name": "Server", "value": str(server_name), "inline": True},
+                        {"name": "Status", "value": str(status), "inline": True},
+                    ],
+                    "timestamp": data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+                    "footer": {"text": "Maunting Server Manager — Guardian Engine"},
+                }
+            ],
+        }
+        return json.dumps(embed, ensure_ascii=False)
+    elif event_type == EVENT_STATUS_CHANGE:
+        status = data.get("status", "unknown")
+        color = 3066993 if status == "running" else 15158332
+        embed = {
+            "username": "Maunting Server Manager",
+            "embeds": [
+                {
+                    "title": f"Server-Status: {server_name}",
+                    "description": f"Der Status des Servers **{server_name}** hat sich geändert zu: `{status}`",
+                    "color": color,
+                    "timestamp": data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+                    "footer": {"text": "Maunting Server Manager"},
+                }
+            ],
+        }
+        return json.dumps(embed, ensure_ascii=False)
+    elif event_type == EVENT_ERROR:
+        err = data.get("error", "Unbekannter Fehler")
+        embed = {
+            "username": "Maunting Server Manager",
+            "embeds": [
+                {
+                    "title": f"Server-Fehler: {server_name}",
+                    "description": f"```{err}```",
+                    "color": 15158332,
+                    "timestamp": data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+                    "footer": {"text": "Maunting Server Manager"},
+                }
+            ],
+        }
+        return json.dumps(embed, ensure_ascii=False)
+
+    embed = {
+        "username": "Maunting Server Manager",
+        "embeds": [
+            {
+                "title": f"Event: {event_type} ({server_name})",
+                "description": json.dumps(data, indent=2, ensure_ascii=False)[:1900],
+                "color": 3447003,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "footer": {"text": "Maunting Server Manager"},
+            }
+        ],
+    }
+    return json.dumps(embed, ensure_ascii=False)
+
 
 
 def _serialize_payload(payload: dict[str, Any], event_type: str) -> str:

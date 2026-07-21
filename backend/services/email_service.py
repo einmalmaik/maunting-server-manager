@@ -378,6 +378,35 @@ Maunting Server Manager
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
+    async def send_guardian_incident_notification(
+        to: str, username: str, server_name: str, incident_type: str, status: str, details: str = ""
+    ) -> bool:
+        subject = f"Maunting Server Manager — Guardian Alert: {server_name}"
+        body = f"""Hallo {username},
+
+Die Guardian Engine hat ein Ereignis beim Server "{server_name}" registriert.
+
+Vorfall: {incident_type}
+Status: {status}
+Details: {details}
+
+Bitte überprüfe den Server im Dashboard.
+
+Maunting Server Manager — Guardian Engine
+"""
+        html_details = f"<p><strong>Details:</strong> {details}</p>" if details else ""
+        html = EmailService._notification_email_html(
+            username,
+            "Guardian Engine Alert",
+            f'Die Guardian Engine hat ein Ereignis beim Server <strong>"{server_name}"</strong> registriert.<br/><br/>'
+            f'<strong>Vorfall:</strong> {incident_type}<br/>'
+            f'<strong>Status:</strong> {status}<br/>'
+            f'{html_details}'
+        )
+        return await EmailService.send_email(to, subject, body, html)
+
+
+    @staticmethod
     async def send_server_installed_notification(to: str, username: str, server_name: str) -> bool:
         subject = f"Maunting Server Manager — Server installiert: {server_name}"
         body = f"""Hallo {username},

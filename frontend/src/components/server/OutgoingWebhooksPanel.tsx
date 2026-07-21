@@ -50,7 +50,9 @@ const KNOWN_EVENT_TYPES = [
   { value: 'status_change', label: 'Status-Änderung (start/stop)' },
   { value: 'player_update', label: 'Spielerzahl-Update' },
   { value: 'error', label: 'Server-Fehler' },
+  { value: 'guardian_incident', label: 'Guardian Engine Alerts' },
 ];
+
 
 export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
   const { t } = useTranslation();

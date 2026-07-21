@@ -138,3 +138,20 @@ class TestEmailSendingHelpers:
         enc_resend = AuthService.encrypt_secret("secret-resend-key", aad="msm:settings:resend_api_key")
         PanelSettingsService.set("resend_api_key_encrypted", enc_resend)
         assert EmailService._get_setting("resend_api_key") == "secret-resend-key"
+
+    @pytest.mark.anyio
+    @patch("services.email_service.EmailService.send_email", new_callable=AsyncMock)
+    async def test_send_guardian_incident_notification(self, mock_send_email):
+        mock_send_email.return_value = True
+        success = await EmailService.send_guardian_incident_notification(
+            "admin@test.de", "admin", "Palworld Server", "CrashLoop", "quarantined", "Process crashed 3 times"
+        )
+        assert success is True
+        args, _ = mock_send_email.call_args
+        assert args[0] == "admin@test.de"
+        assert "Guardian Alert: Palworld Server" in args[1]
+        body = args[2]
+        assert "CrashLoop" in body
+        assert "quarantined" in body
+        assert "Process crashed 3 times" in body
+

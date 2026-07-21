@@ -262,3 +262,35 @@ def test_plaintext_secret_never_logged_in_app(
     assert secret not in app_log_text
     # kein Header-Leak in Logs
     assert "X-Webhook-Secret" not in app_log_text
+
+
+
+def test_build_guardian_incident_payload_structure(test_server: Server):
+    payload = ow.build_guardian_incident_payload(
+        test_server, "CrashLoop", "quarantined", "Server crashed repeatedly"
+    )
+    assert payload["event_type"] == ow.EVENT_GUARDIAN_INCIDENT
+    assert payload["server_id"] == test_server.id
+    assert payload["incident_type"] == "CrashLoop"
+    assert payload["status"] == "quarantined"
+    assert "crashed" in payload["description"]
+
+
+def test_format_discord_payload_embeds():
+    raw_payload = json.dumps({
+        "server_name": "Palworld Server",
+        "incident_type": "CrashLoop",
+        "status": "quarantined",
+        "description": "Port 27030 unreachable",
+        "timestamp": "2026-07-21T14:00:00Z"
+    })
+    discord_json = ow.format_discord_payload(raw_payload, ow.EVENT_GUARDIAN_INCIDENT)
+    parsed = json.loads(discord_json)
+
+    assert "embeds" in parsed
+    embed = parsed["embeds"][0]
+    assert embed["color"] == 15158332  # Red for quarantined
+    assert "Palworld Server" in embed["title"]
+    assert "CrashLoop" in embed["description"]
+    assert embed["footer"]["text"] == "Maunting Server Manager — Guardian Engine"
+
