@@ -26,7 +26,10 @@
     "startupCheckSeconds": 120.0
   },
   "ports": [
-    { "name": "game", "protocol": "udp" }
+    {
+      "name": "game",
+      "protocol": "udp"
+    }
   ],
   "source": {
     "type": "steam",
@@ -51,6 +54,17 @@
   },
   "health": {
     "process": {}
+  },
+  "recovery": {
+    "policies": [
+      {
+        "match": "process_not_running",
+        "action": "restart"
+      }
+    ],
+    "attempt_window_seconds": 600,
+    "max_attempts": 3,
+    "cooldown_seconds": 60
   },
   "backup": {
     "includePaths": [

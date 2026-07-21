@@ -34,7 +34,10 @@
     "startupCheckSeconds": 90.0
   },
   "ports": [
-    { "name": "game", "protocol": "udp" }
+    {
+      "name": "game",
+      "protocol": "udp"
+    }
   ],
   "source": {
     "type": "steam",
@@ -63,6 +66,21 @@
     "application": {
       "type": "source-query"
     }
+  },
+  "recovery": {
+    "policies": [
+      {
+        "match": "process_not_running",
+        "action": "restart"
+      },
+      {
+        "match": "source_query_failed",
+        "action": "restart"
+      }
+    ],
+    "attempt_window_seconds": 600,
+    "max_attempts": 3,
+    "cooldown_seconds": 60
   },
   "backup": {
     "includePaths": [

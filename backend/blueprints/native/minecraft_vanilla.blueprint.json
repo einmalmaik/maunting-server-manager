@@ -21,9 +21,18 @@
     "startup": "/start"
   },
   "ports": [
-    { "name": "game",  "protocol": "tcp" },
-    { "name": "query", "protocol": "udp" },
-    { "name": "rcon",  "protocol": "tcp" }
+    {
+      "name": "game",
+      "protocol": "tcp"
+    },
+    {
+      "name": "query",
+      "protocol": "udp"
+    },
+    {
+      "name": "rcon",
+      "protocol": "tcp"
+    }
   ],
   "source": {
     "type": "dockerOnly",
@@ -43,5 +52,24 @@
     "application": {
       "type": "minecraft-status"
     }
+  },
+  "recovery": {
+    "policies": [
+      {
+        "match": "process_not_running",
+        "action": "restart"
+      },
+      {
+        "match": "minecraft_status_failed",
+        "action": "restart"
+      },
+      {
+        "match": "minecraft_query_failed",
+        "action": "restart"
+      }
+    ],
+    "attempt_window_seconds": 600,
+    "max_attempts": 3,
+    "cooldown_seconds": 60
   }
 }

@@ -34,7 +34,10 @@
     "startupCheckSeconds": 90.0
   },
   "ports": [
-    { "name": "game", "protocol": "tcp" }
+    {
+      "name": "game",
+      "protocol": "tcp"
+    }
   ],
   "source": {
     "type": "steam",
@@ -63,6 +66,21 @@
       "type": "tcp",
       "port": "game"
     }
+  },
+  "recovery": {
+    "policies": [
+      {
+        "match": "process_not_running",
+        "action": "restart"
+      },
+      {
+        "match": "tcp_connect_failed",
+        "action": "restart"
+      }
+    ],
+    "attempt_window_seconds": 600,
+    "max_attempts": 3,
+    "cooldown_seconds": 60
   },
   "backup": {
     "includePaths": [

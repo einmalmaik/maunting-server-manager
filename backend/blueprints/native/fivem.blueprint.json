@@ -41,8 +41,14 @@
     "startupCheckSeconds": 45.0
   },
   "ports": [
-    { "name": "game", "protocol": "tcp" },
-    { "name": "game", "protocol": "udp" }
+    {
+      "name": "game",
+      "protocol": "tcp"
+    },
+    {
+      "name": "game",
+      "protocol": "udp"
+    }
   ],
   "source": {
     "type": "dockerOnly",
@@ -66,6 +72,25 @@
       "port": "game",
       "path": "/info.json"
     }
+  },
+  "recovery": {
+    "policies": [
+      {
+        "match": "process_not_running",
+        "action": "restart"
+      },
+      {
+        "match": "http_request_failed",
+        "action": "restart"
+      },
+      {
+        "match": "http_unexpected_status",
+        "action": "restart"
+      }
+    ],
+    "attempt_window_seconds": 600,
+    "max_attempts": 3,
+    "cooldown_seconds": 60
   },
   "backup": {
     "includePaths": [
