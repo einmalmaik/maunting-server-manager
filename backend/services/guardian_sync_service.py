@@ -163,6 +163,14 @@ def reconcile_guardian_server(
             )
             db.commit()
 
+        if payload is None:
+            return {
+                "payload_hash": None,
+                "generation": None,
+                "observed_state": "unknown",
+                "acknowledged_incidents": [],
+            }
+
         # 2. Retrieve observed state
         container_name = f"msm-srv-{server.id}"
         observed = client.get_guardian_state(container_name)
