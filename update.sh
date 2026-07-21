@@ -247,7 +247,7 @@ if [[ -z "$LATEST_TAG" ]]; then
             warn "Konnte Git-Commits nicht ermitteln."
             if ! $FORCE; then exit 0; fi
             LATEST_TAG="unknown"
-        elif [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
+        elif [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]] && ! $FORCE; then
             ok "Panel ist bereits auf dem neuesten Stand (main: ${LOCAL_SHA:0:8})."
             # Recovery: ein frueherer Run (z.B. mit der alten update.sh ohne
             # Chown-Fix) kann Dateien als root zurueckgelassen haben. Bevor wir
@@ -269,7 +269,7 @@ else
 fi
 
 # ── Vergleich (nur bei Release-Mode) ──
-if [[ "$UPDATE_MODE" == "release" ]] && [[ "$(normalize_version "$CURRENT_VERSION")" == "$(normalize_version "$LATEST_TAG")" ]]; then
+if [[ "$UPDATE_MODE" == "release" ]] && [[ "$(normalize_version "$CURRENT_VERSION")" == "$(normalize_version "$LATEST_TAG")" ]] && ! $FORCE; then
     ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_VERSION)."
     # Recovery wie im Git-Pfad: Besitz zurueck auf msm, falls ein frueherer
     # Run Dateien als root liegen gelassen hat.
