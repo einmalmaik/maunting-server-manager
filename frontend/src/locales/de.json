@@ -464,7 +464,8 @@
         "guardian_generation_mismatch": "Zustands-Generationen zwischen Panel und Agent stimmen nicht überein.",
         "guardian_payload_hash_mismatch": "Die Konfigurationsprüfsumme weicht ab.",
         "blueprint_unavailable": "Das Server-Blueprint ist aktuell nicht verfügbar.",
-        "probe_port_unavailable": "Der konfigurierte Probe-Port ist nicht zugewiesen."
+        "probe_port_unavailable": "Der konfigurierte Probe-Port ist nicht zugewiesen.",
+        "NodeClientError": "Verbindungsfehler zum Node-Agenten."
       }
     },
     "kill": "Erzwingen",

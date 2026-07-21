@@ -464,7 +464,8 @@
         "guardian_generation_mismatch": "State generations do not match between panel and agent.",
         "guardian_payload_hash_mismatch": "Configuration hash mismatch.",
         "blueprint_unavailable": "Server blueprint is currently unavailable.",
-        "probe_port_unavailable": "The configured probe port is not allocated."
+        "probe_port_unavailable": "The configured probe port is not allocated.",
+        "NodeClientError": "Connection error to the node agent."
       }
     },
     "kill": "Force Kill",
