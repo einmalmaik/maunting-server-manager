@@ -73,7 +73,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
       role={mobile ? 'dialog' : undefined}
       aria-modal={mobile || undefined}
       aria-label={mobile ? t('shell.mainNavigation', 'Main navigation') : undefined}
-      className={`msm-sidebar fixed left-0 top-0 z-40 flex flex-col ${mobile ? 'h-[100dvh] w-full !bg-surface-container-low animate-[slideIn_.18s_ease-out]' : 'hidden h-screen w-64 md:flex'}`}
+      className={`msm-sidebar fixed left-0 top-0 z-40 flex flex-col ${mobile ? 'h-[100dvh] w-full !bg-surface-container-low animate-[slideIn_.18s_ease-out]' : 'hidden h-screen w-64 lg:flex'}`}
     >
       {/* Brand */}
       <div className="px-5 pt-5 pb-6 flex items-center gap-3">

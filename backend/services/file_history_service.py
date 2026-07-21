@@ -24,7 +24,7 @@ from services.dis_client import DisClient
 from services.file_edit_service import content_revision
 
 MAX_HISTORY_EDIT_SIZE = 512 * 1024
-MAX_VERSIONS_PER_FILE = 20
+MAX_VERSIONS_PER_FILE = 3
 _VERSION_ID = re.compile(r"^[0-9a-f]{32}$")
 _locks_guard = threading.Lock()
 _locks: dict[str, threading.Lock] = {}

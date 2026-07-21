@@ -45,7 +45,7 @@ Der bisherige Dateimanager wurde in v3.0.0 zu einem vollständigen Arbeitsbereic
 - **Autosave**: Änderungen werden nach kurzer Pause automatisch gespeichert. Autosave kann jederzeit deaktiviert und durch manuelles Speichern ersetzt werden.
 - **Schutz vor Bearbeitungskonflikten**: Wurde eine Datei zwischenzeitlich an anderer Stelle verändert, überschreibt der Editor diese Änderung nicht stillschweigend. Der lokale Entwurf bleibt erhalten und kann geprüft werden.
 - **Versionsverlauf**: Für bearbeitbare Textdateien bis 512 KiB können frühere Dateistände direkt im Dateimanager ausgewählt und wiederhergestellt werden. Vor einer Wiederherstellung wird auch der aktuelle Stand gesichert.
-- **Speicherschonende Aufbewahrung**: Unveränderte Stände werden nicht doppelt gespeichert; der Verlauf ist auf 20 Versionen pro Datei begrenzt.
+- **Speicherschonende Aufbewahrung**: Unveränderte Stände werden nicht doppelt gespeichert; der Verlauf ist bewusst auf die drei neuesten Versionen pro Datei begrenzt.
 - **Kein versehentliches Überschreiben**: Beim Anlegen einer neuen Datei wird eine bereits vorhandene Datei mit demselben Namen nicht geleert oder ersetzt.
 
 ### Dateiaktionen ohne überladene Werkzeugleiste

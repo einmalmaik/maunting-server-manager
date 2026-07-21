@@ -79,16 +79,16 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
             ref={menuButtonRef}
             type="button"
             onClick={onOpenNavigation}
-            className="md:hidden grid min-h-11 min-w-11 place-items-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors"
+            className="grid min-h-11 min-w-11 place-items-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary lg:hidden"
             aria-label={t('shell.openNavigation', 'Open navigation')}
             aria-haspopup="dialog"
           >
             <Menu className="w-5 h-5" />
           </button>
-          <div className="md:hidden">
+          <div className="lg:hidden">
             <Logo size="sm" />
           </div>
-          <div className="hidden md:flex items-center font-mono-sm text-mono-sm text-on-surface-variant gap-2">
+          <div className="hidden items-center gap-2 font-mono-sm text-mono-sm text-on-surface-variant lg:flex">
             <span className="text-primary font-medium">{t('panel.title')}</span>
           </div>
         </div>

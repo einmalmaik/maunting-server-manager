@@ -581,7 +581,12 @@ export function FileManager({ serverId }: FileManagerProps) {
 
   const downloadEntry = (selection: SelectedEntry) => {
     const path = joinPath(selection.parent, selection.entry.name)
-    window.open(apiUrl(`/files/${serverId}/download?path=${encodeURIComponent(path)}`), '_blank', 'noopener,noreferrer')
+    const link = document.createElement('a')
+    link.href = apiUrl(`/files/${serverId}/download?path=${encodeURIComponent(path)}`)
+    link.download = selection.entry.name
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
 
   const extractEntry = async (selection: SelectedEntry) => {
@@ -689,7 +694,7 @@ export function FileManager({ serverId }: FileManagerProps) {
             <Switch checked={autosave} onCheckedChange={setAutosave} disabled={!canWrite} aria-label={t('files.autosave')} className="before:absolute before:-inset-x-2 before:-inset-y-3" />
           </div>
           <button ref={treeTriggerRef} type="button" onClick={() => { setInspectorOpen(false); setTreeOpen((value) => !value) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs lg:hidden" aria-label={t('files.showTree')} aria-expanded={treeOpen}><Menu className="h-4 w-4" /><span>{t('files.filesDrawer')}</span></button>
-          <button ref={inspectorTriggerRef} type="button" onClick={() => { setTreeOpen(false); setInspectorOpen((value) => !value) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs 2xl:hidden" aria-label={t('files.showInspector')} aria-expanded={inspectorOpen}><Info className="h-4 w-4" /><span>{t('files.detailsDrawer')}</span></button>
+          <button ref={inspectorTriggerRef} type="button" onClick={() => { setTreeOpen(false); setInspectorOpen((value) => !value) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs xl:hidden" aria-label={t('files.showInspector')} aria-expanded={inspectorOpen}><Info className="h-4 w-4" /><span>{t('files.detailsDrawer')}</span></button>
         </div>
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(event) => { enqueueUpload(event.target.files); event.target.value = '' }} />
       </header>
@@ -705,7 +710,7 @@ export function FileManager({ serverId }: FileManagerProps) {
       </div>
 
       <div
-        className="grid min-h-[560px] grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)_260px]"
+        className="grid min-h-[560px] grid-cols-1 lg:h-[clamp(560px,calc(100vh-300px),760px)] lg:min-h-0 lg:grid-cols-[280px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[260px_minmax(0,1fr)_230px]"
         onDragOver={(event) => { if (canWrite) { event.preventDefault(); setDragOver(true) } }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(event) => {
@@ -714,7 +719,7 @@ export function FileManager({ serverId }: FileManagerProps) {
           if (!event.dataTransfer.types.includes('application/x-msm-path')) enqueueUpload(event.dataTransfer.files)
         }}
       >
-        {(treeOpen || inspectorOpen) && <button type="button" aria-label={t('common.close')} onClick={() => { if (treeOpen) { setTreeOpen(false); window.requestAnimationFrame(() => treeTriggerRef.current?.focus()) } else { setInspectorOpen(false); window.requestAnimationFrame(() => inspectorTriggerRef.current?.focus()) } }} className="fixed inset-0 z-30 cursor-default bg-black/55 backdrop-blur-sm 2xl:hidden" />}
+        {(treeOpen || inspectorOpen) && <button type="button" aria-label={t('common.close')} onClick={() => { if (treeOpen) { setTreeOpen(false); window.requestAnimationFrame(() => treeTriggerRef.current?.focus()) } else { setInspectorOpen(false); window.requestAnimationFrame(() => inspectorTriggerRef.current?.focus()) } }} className="fixed inset-0 z-30 cursor-default bg-black/55 backdrop-blur-sm xl:hidden" />}
         <aside ref={treePanelRef} tabIndex={treeOpen ? -1 : undefined} aria-label={t('files.filesDrawer')} className={`${treeOpen ? 'fixed inset-x-3 bottom-3 top-24 z-40 flex shadow-panel-strong' : 'hidden'} min-h-0 flex-col border-r border-outline-variant bg-surface-container-low/95 outline-none lg:static lg:flex lg:shadow-none`}>
           <div className="flex min-h-11 items-center gap-2 border-b border-outline-variant p-2.5">
             <div className="relative min-w-0 flex-1"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" /><input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('files.searchPlaceholder')} className="msm-input h-8 pl-8 text-xs" /></div>
@@ -742,12 +747,12 @@ export function FileManager({ serverId }: FileManagerProps) {
           <footer className="border-t border-outline-variant px-3 py-2 text-[10px] text-on-surface-variant">{directorySummary.files} Dateien · {directorySummary.folders} Ordner · {formatBytes(directorySummary.bytes)}</footer>
         </aside>
 
-        <div className={`min-w-0 ${dragOver ? 'ring-1 ring-inset ring-secondary' : ''}`}>
+        <div className={`min-h-0 min-w-0 lg:flex ${dragOver ? 'ring-1 ring-inset ring-secondary' : ''}`}>
           <FileEditorWorkspace tabs={tabs} activePath={activePath} canWrite={canWrite} tabListLabel={t('files.openFiles')} horizontalScrollHint={t('files.horizontalScrollHint')} onActivate={setActivePath} onChange={updateTabContent} onSave={(path) => void saveTab(path)} onClose={(path) => void closeTab(path)} onReload={(path) => void reloadTab(path)} />
         </div>
 
-        <aside ref={inspectorPanelRef} tabIndex={inspectorOpen ? -1 : undefined} aria-label={t('files.detailsDrawer')} className={`${inspectorOpen ? 'fixed inset-x-3 bottom-3 top-24 z-40 block overflow-y-auto shadow-panel-strong' : 'hidden'} border-l border-outline-variant bg-surface-container-low/95 outline-none lg:col-span-2 lg:border-l-0 lg:border-t lg:border-outline-variant 2xl:static 2xl:col-span-1 2xl:block 2xl:border-l 2xl:border-t-0 2xl:shadow-none`}>
-          <div className="flex min-h-11 items-center justify-between border-b border-outline-variant px-3"><h3 className="text-xs font-semibold text-on-surface">{t('files.details')}</h3>{inspectorOpen && <button type="button" onClick={() => { setInspectorOpen(false); window.requestAnimationFrame(() => inspectorTriggerRef.current?.focus()) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs 2xl:hidden" aria-label={t('common.close')}><X className="h-4 w-4" /><span>{t('common.close')}</span></button>}</div>
+        <aside ref={inspectorPanelRef} tabIndex={inspectorOpen ? -1 : undefined} aria-label={t('files.detailsDrawer')} className={`${inspectorOpen ? 'fixed inset-x-3 bottom-3 top-24 z-40 block overflow-y-auto shadow-panel-strong' : 'hidden'} border-l border-outline-variant bg-surface-container-low/95 outline-none lg:col-span-2 lg:max-h-full lg:overflow-y-auto lg:border-l-0 lg:border-t lg:border-outline-variant xl:static xl:col-span-1 xl:block xl:border-l xl:border-t-0 xl:shadow-none`}>
+          <div className="flex min-h-11 items-center justify-between border-b border-outline-variant px-3"><h3 className="text-xs font-semibold text-on-surface">{t('files.details')}</h3>{inspectorOpen && <button type="button" onClick={() => { setInspectorOpen(false); window.requestAnimationFrame(() => inspectorTriggerRef.current?.focus()) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs xl:hidden" aria-label={t('common.close')}><X className="h-4 w-4" /><span>{t('common.close')}</span></button>}</div>
           {activeTab ? <>
             <div className="border-b border-outline-variant p-3"><div className="flex items-start gap-2"><ArchiveRestore className="mt-0.5 h-4 w-4 text-secondary" /><div className="min-w-0"><p className="truncate text-xs font-semibold text-on-surface">{fileName(activeTab.path)}</p><p className="mt-0.5 truncate font-mono text-[10px] text-on-surface-variant">{activeTab.path}</p></div></div></div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 border-b border-outline-variant p-3 text-[11px]"><dt className="text-on-surface-variant">{t('files.modified')}</dt><dd className="text-right text-on-surface">{formatModified(activeTab.modified)}</dd><dt className="text-on-surface-variant">{t('files.size')}</dt><dd className="text-right font-mono text-on-surface">{formatBytes(activeTab.size)}</dd><dt className="text-on-surface-variant">{t('files.permissions')}</dt><dd className="text-right font-mono text-on-surface">{activeTab.mode ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.owner')}</dt><dd className="truncate text-right text-on-surface">{activeTab.owner ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.group')}</dt><dd className="truncate text-right text-on-surface">{activeTab.group ?? t('files.notAvailable')}</dd></dl>

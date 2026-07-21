@@ -74,10 +74,10 @@ function languageExtension(path: string): LanguageSupport | ReturnType<typeof St
 }
 
 const EDITOR_THEME = EditorView.theme({
-  '&': { backgroundColor: '#071013', color: '#e7f4f7' },
+  '&': { backgroundColor: '#071013', color: '#e7f4f7', fontSize: '13px', height: '100%' },
   '.cm-content': { caretColor: '#67e8f9', fontFamily: 'JetBrains Mono, monospace' },
   '.cm-gutters': { backgroundColor: '#071013', borderRight: '1px solid #203038', color: '#5b737a' },
-  '.cm-scroller': { overflowX: 'auto' },
+  '.cm-scroller': { overflowX: 'auto', lineHeight: '1.55' },
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'rgba(103, 232, 249, 0.045)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(103, 232, 249, 0.22)' },
@@ -144,7 +144,7 @@ export function FileEditorWorkspace({
   }, [activePath])
 
   useEffect(() => {
-    if (searchOpen) window.setTimeout(() => findInputRef.current?.focus(), 0)
+    if (searchOpen) window.setTimeout(() => findInputRef.current?.focus({ preventScroll: true }), 0)
   }, [searchOpen])
 
   const matches = useMemo(
@@ -161,7 +161,6 @@ export function FileEditorWorkspace({
       selection: { anchor: match.from, head: match.to },
       effects: EditorView.scrollIntoView(match.from, { y: 'center' }),
     })
-    editorRef.current.focus()
   }
 
   useEffect(() => {
@@ -232,7 +231,7 @@ export function FileEditorWorkspace({
 
   const focusTab = useCallback((path: string) => {
     onActivate(path)
-    window.requestAnimationFrame(() => tabRefs.current.get(path)?.focus())
+    window.requestAnimationFrame(() => tabRefs.current.get(path)?.focus({ preventScroll: true }))
   }, [onActivate])
 
   const handleTabKeyDown = useCallback((event: React.KeyboardEvent, path: string) => {
@@ -259,7 +258,7 @@ export function FileEditorWorkspace({
           : <><Check className="h-3.5 w-3.5" /> Gespeichert</>
 
   return (
-    <section className="flex min-h-[520px] min-w-0 flex-1 flex-col bg-surface-container-lowest/55">
+    <section className="flex h-full min-h-[520px] min-w-0 flex-1 flex-col bg-surface-container-lowest/55 lg:min-h-0">
       <div role="tablist" aria-label={tabListLabel} className="flex min-h-10 items-end overflow-x-auto border-b border-outline-variant bg-surface-container-low/70 [scrollbar-width:thin]">
         {tabs.length === 0 ? (
           <div className="px-4 py-2.5 text-xs text-on-surface-variant">Keine Datei geöffnet</div>
@@ -356,7 +355,10 @@ export function FileEditorWorkspace({
                   value={query}
                   onChange={(event) => { setQuery(event.target.value); setActiveMatch(0) }}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') selectMatch(event.shiftKey ? activeMatch - 1 : activeMatch + 1)
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      selectMatch(event.shiftKey ? activeMatch - 1 : activeMatch + 1)
+                    }
                     if (event.key === 'Escape') setSearchOpen(false)
                   }}
                   placeholder="Suchen…"
@@ -401,7 +403,7 @@ export function FileEditorWorkspace({
                 editable={canWrite}
                 readOnly={!canWrite}
                 basicSetup={EDITOR_BASIC_SETUP}
-                height="clamp(420px, calc(100vh - 390px), 760px)"
+                height="100%"
               />
             )}
           </div>

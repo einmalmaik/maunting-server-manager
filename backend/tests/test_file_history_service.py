@@ -55,18 +55,20 @@ def test_history_is_encrypted_with_server_version_aad_and_roundtrips(
 def test_history_deduplicates_and_prunes_oldest_deterministically(
     history_root: Path,
     fake_dis: dict[str, tuple[str, str | None]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(file_history_service, "MAX_VERSIONS_PER_FILE", 2)
     assert file_history_service.snapshot(8, "game.cfg", "one", 1)
     assert not file_history_service.snapshot(8, "game.cfg", "one", 1)
     assert file_history_service.snapshot(8, "game.cfg", "two", 1)
     assert file_history_service.snapshot(8, "game.cfg", "three", 1)
+    versions_before_prune = file_history_service.list_versions(8, "game.cfg")
+    oldest_id = versions_before_prune[-1]["id"]
+    assert file_history_service.snapshot(8, "game.cfg", "four", 1)
 
     versions = file_history_service.list_versions(8, "game.cfg")
-    assert len(versions) == 2
-    assert [file_history_service.read_version(8, "game.cfg", item["id"])["content"] for item in versions] == ["three", "two"]
-    assert len(list(history_root.rglob("*.enc"))) == 2
+    assert len(versions) == 3
+    assert [file_history_service.read_version(8, "game.cfg", item["id"])["content"] for item in versions] == ["four", "three", "two"]
+    assert len(list(history_root.rglob("*.enc"))) == 3
+    assert not list(history_root.rglob(f"{oldest_id}.enc"))
 
 
 def test_history_fails_closed_without_plaintext_fallback(

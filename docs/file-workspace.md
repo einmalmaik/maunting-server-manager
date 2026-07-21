@@ -12,7 +12,7 @@ Das Anlegen einer neuen Datei setzt zusätzlich `create_only`. Existiert der Zie
 
 Vor dem Überschreiben einer bestehenden, editierbaren Textdatei sichert das Panel den bisherigen Inhalt. Die Snapshots liegen unter `<panel_config_dir>/.msm-file-history` und damit außerhalb aller sichtbaren Game-Server-Verzeichnisse, Downloads, Archive und Dateizählungen.
 
-- Höchstens 20 Versionen pro relativem Dateipfad.
+- Höchstens 3 Versionen pro relativem Dateipfad; beim vierten Stand wird die älteste Version automatisch entfernt.
 - Versionsfähig sind Inhalte bis einschließlich 512 KiB; größere Editor-Dateien werden nicht versioniert. Eine Wiederherstellung wird abgelehnt, wenn der aktuelle Inhalt nicht vorher reversibel gesichert werden kann.
 - Unveränderte aufeinanderfolgende Inhalte werden nicht doppelt gespeichert.
 - Inhalte werden vor der Verschlüsselung mit `gzip` komprimiert.

@@ -39,7 +39,7 @@ export function Shell() {
       <Sidebar />
 
       {mobileNavigationOpen && (
-        <div className="fixed inset-0 z-50 h-[100dvh] w-screen overflow-hidden md:hidden" role="presentation" data-testid="mobile-navigation-layer">
+        <div className="fixed inset-0 z-50 h-[100dvh] w-screen overflow-hidden lg:hidden" role="presentation" data-testid="mobile-navigation-layer">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
             aria-hidden="true"
@@ -50,7 +50,7 @@ export function Shell() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 md:ml-64 flex flex-col min-w-0 relative z-10">
+      <div className="flex-1 lg:ml-64 flex flex-col min-w-0 relative z-10">
         <Topbar menuButtonRef={mobileNavigationTriggerRef} onOpenNavigation={() => setMobileNavigationOpen(true)} />
         <main className="flex-1 p-margin-mobile md:p-margin-desktop overflow-auto relative flex flex-col">
           <div className="relative z-10 flex-1 w-full">
