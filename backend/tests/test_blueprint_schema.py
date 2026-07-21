@@ -524,3 +524,50 @@ def test_runtime_exec_timeout_rejects_over_600() -> None:
     d["runtime"]["execTimeoutSeconds"] = 9999
     with pytest.raises((BlueprintValidationError, ValueError)):
         load_blueprint_dict(d)
+
+
+# ── Health Application HTTP Ping Validation ───────────────────────────────
+
+
+def test_health_application_http_ping_auto_heals_missing_path() -> None:
+    """Ein http-ping ohne Pfad oder mit leerem Pfad heilt sich selbst zu '/'."""
+    d = _minimal_valid_dict()
+    d["health"] = {
+        "process": {"required": True},
+        "application": {
+            "type": "http-ping",
+            "interval": "30s",
+            "failure_threshold": 3,
+        }
+    }
+    bp = load_blueprint_dict(d)
+    assert bp.health is not None
+    assert bp.health.application is not None
+    assert bp.health.application.type == "http-ping"
+    assert bp.health.application.path == "/"
+
+    # Testen mit leerem String
+    d["health"]["application"]["path"] = "   "
+    bp2 = load_blueprint_dict(d)
+    assert bp2.health.application.path == "/"
+
+
+def test_health_application_http_ping_rejects_invalid_path() -> None:
+    """Pfade ohne führendes '/' oder mit '//' werden abgewiesen."""
+    d = _minimal_valid_dict()
+    d["health"] = {
+        "process": {"required": True},
+        "application": {
+            "type": "http-ping",
+            "path": "healthz",  # Kein führendes '/'
+            "interval": "30s",
+            "failure_threshold": 3,
+        }
+    }
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+    d["health"]["application"]["path"] = "//healthz"  # Doppelter Slash
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+

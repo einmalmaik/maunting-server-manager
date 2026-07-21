@@ -1111,7 +1111,9 @@ class BlueprintHealthApplication(BaseModel):
     @model_validator(mode="after")
     def _http_fields(self) -> "BlueprintHealthApplication":
         if self.type == "http-ping":
-            if not self.path or not self.path.startswith("/") or self.path.startswith("//"):
+            if not self.path or not self.path.strip():
+                self.path = "/"
+            if not self.path.startswith("/") or self.path.startswith("//"):
                 raise ValueError("health.application.path muss ein relativer HTTP-Pfad sein.")
             if "://" in self.path or "#" in self.path:
                 raise ValueError("health.application.path darf keine URL oder Fragment enthalten.")
