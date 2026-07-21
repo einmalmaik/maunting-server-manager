@@ -83,9 +83,24 @@ async def lifespan(app: FastAPI):
             "ohne DIS nicht operieren."
         )
 
-    # Schema changes belong to the installer/update Alembic path. The web
-    # process only synchronizes runtime registration and fails if deployment
-    # skipped the required schema upgrade.
+    # Ensure database schema is up-to-date (automatically apply pending migrations in production)
+    if not is_testing:
+        from services.schema_manager import initialize_or_upgrade_schema
+        try:
+            status = initialize_or_upgrade_schema(engine)
+            import logging
+            logging.getLogger(__name__).info("PostgreSQL-Datenbankschema: %s", status)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).critical(
+                "Datenbankschema-Initialisierung/Upgrade fehlgeschlagen: %s. "
+                "Bitte führe 'install.sh' aus oder führe die Alembic-Migrationen manuell aus.",
+                exc,
+            )
+            raise
+
+    # The web process synchronizes runtime registration and checks that
+    # the schema contains the required tables/columns.
     from database import SessionLocal
     from services.multi_node_migration_service import sync_multi_node_registration
 
