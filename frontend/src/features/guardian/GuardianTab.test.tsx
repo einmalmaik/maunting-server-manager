@@ -194,5 +194,51 @@ describe("Guardian UI Components", () => {
         });
       });
     });
+
+    it("handles null or non-array incidents prop safely in GuardianQuarantineBanner without throwing", () => {
+      const server = {
+        ...mockServerGuardianEnabled,
+        guardian_observed_state: "quarantined",
+      };
+      expect(() => {
+        render(
+          <GuardianQuarantineBanner
+            server={server}
+            incidents={null as any}
+          />
+        );
+      }).not.toThrow();
+      expect(screen.getByText(/Server in Quarantäne versetzt/i)).toBeInTheDocument();
+    });
+
+    it("handles API errors gracefully when fetching incidents in GuardianTab", async () => {
+      vi.mocked(client.api).mockRejectedValue(new Error("503 Service Unavailable"));
+
+      expect(() => {
+        render(
+          <MemoryRouter>
+            <GuardianTab server={mockServerGuardianEnabled} />
+          </MemoryRouter>
+        );
+      }).not.toThrow();
+
+      await waitFor(() => {
+        expect(screen.getByText(/Keine Ereignisse vorhanden/i)).toBeInTheDocument();
+      });
+    });
+
+    it("handles non-array response gracefully in GuardianTab", async () => {
+      vi.mocked(client.api).mockResolvedValue({ error: "Service Unavailable" } as any);
+
+      render(
+        <MemoryRouter>
+          <GuardianTab server={mockServerGuardianEnabled} />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/Keine Ereignisse vorhanden/i)).toBeInTheDocument();
+      });
+    });
   });
 });

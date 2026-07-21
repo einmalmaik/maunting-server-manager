@@ -180,11 +180,11 @@ export function ServerDetail() {
       const [srv, st, gms] = await Promise.all([
         api<Server>(`/servers/${serverId}`),
         api<ServerStatus>(`/servers/${serverId}/status`).catch(() => null),
-        api<GameInfo[]>("/system/games"),
+        api<GameInfo[]>("/system/games").catch(() => []),
       ]);
       setServer(srv);
       setStatus(st);
-      setGames(gms);
+      setGames(Array.isArray(gms) ? gms : []);
     } catch {
       // silent
     } finally {
@@ -226,7 +226,7 @@ export function ServerDetail() {
   // `supports_steam_workshop`. UI-Filter ist NUR Convenience; Backend
   // verweigert /api/mods/* ohnehin, wenn das Plugin keine Mods kann.
   const gameInfo = useMemo(
-    () => games.find((g) => g.id === server?.game_type),
+    () => (Array.isArray(games) ? games : []).find((g) => g.id === server?.game_type),
     [games, server?.game_type],
   );
   const showModTab = !!gameInfo?.supports_steam_workshop;
@@ -418,7 +418,7 @@ export function ServerDetail() {
   };
 
   const gameName = (gameId: string) =>
-    games.find((g) => g.id === gameId)?.name || gameId;
+    (Array.isArray(games) ? games : []).find((g) => g.id === gameId)?.name || gameId;
 
   if (loading) {
     return (

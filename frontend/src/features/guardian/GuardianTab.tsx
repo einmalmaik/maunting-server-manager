@@ -31,7 +31,7 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
       const res = await api<GuardianIncident[]>(
         `/servers/${server.id}/incidents`
       );
-      setIncidents(res || []);
+      setIncidents(Array.isArray(res) ? res : []);
     } catch {
       // Graceful fallback if no incidents router or network error
       setIncidents([]);
@@ -156,72 +156,81 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
           </button>
         </div>
 
-        {incidents.length === 0 ? (
-          <div className="py-8 text-center border border-dashed border-outline-variant/60 rounded-lg bg-surface-container-lowest">
-            <ShieldCheck className="w-8 h-8 text-status-success mx-auto mb-2 opacity-80" />
-            <p className="text-sm text-on-surface-variant max-w-md mx-auto">
-              {t("servers.guardian.tab.noIncidents")}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {incidents.map((inc) => (
-              <div
-                key={inc.id}
-                className="p-4 rounded-lg border border-outline-variant/40 bg-surface-container-lowest hover:border-outline-variant transition-colors"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-headline font-semibold text-sm text-on-surface">
-                      {inc.title}
-                    </span>
-                    {getStatusBadge(inc.status)}
-                  </div>
-                  <span className="text-xs text-on-surface-variant font-mono-sm">
-                    {new Date(inc.created_at).toLocaleString()}
-                  </span>
-                </div>
-
-                <p className="text-xs text-on-surface-variant font-mono-sm bg-surface-container-low p-2 rounded border border-outline-variant/30 mb-3 whitespace-pre-wrap">
-                  {inc.description}
+        {(() => {
+          const safeIncidents = Array.isArray(incidents) ? incidents : [];
+          if (safeIncidents.length === 0) {
+            return (
+              <div className="py-8 text-center border border-dashed border-outline-variant/60 rounded-lg bg-surface-container-lowest">
+                <ShieldCheck className="w-8 h-8 text-status-success mx-auto mb-2 opacity-80" />
+                <p className="text-sm text-on-surface-variant max-w-md mx-auto">
+                  {t("servers.guardian.tab.noIncidents")}
                 </p>
-
-                {inc.attempts && inc.attempts.length > 0 && (
-                  <div className="mb-3 text-xs text-on-surface-variant">
-                    <span className="font-medium text-on-surface">
-                      {t("servers.guardian.tab.attempts")}:{" "}
-                    </span>
-                    {inc.attempts.map((att, idx) => (
-                      <span
-                        key={idx}
-                        className="inline-block mr-2 px-2 py-0.5 rounded bg-surface-container border border-outline-variant/30 font-mono-sm"
-                      >
-                        #{att.attempt} {att.action} ({att.result})
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {inc.status !== "resolved" && (
-                  <div className="flex justify-end pt-2 border-t border-outline-variant/20">
-                    <button
-                      onClick={() => void handleResolveIncident(inc.id)}
-                      disabled={resolvingId === inc.id}
-                      className="msm-btn-primary px-3 py-1.5 text-xs flex items-center gap-1.5"
-                    >
-                      {resolvingId === inc.id ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                      )}
-                      {t("servers.guardian.tab.resolveAction")}
-                    </button>
-                  </div>
-                )}
               </div>
-            ))}
-          </div>
-        )}
+            );
+          }
+          return (
+            <div className="space-y-4">
+              {safeIncidents.map((inc) => {
+                const safeAttempts = Array.isArray(inc?.attempts) ? inc.attempts : [];
+                return (
+                  <div
+                    key={inc.id}
+                    className="p-4 rounded-lg border border-outline-variant/40 bg-surface-container-lowest hover:border-outline-variant transition-colors"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-headline font-semibold text-sm text-on-surface">
+                          {inc.title}
+                        </span>
+                        {getStatusBadge(inc.status)}
+                      </div>
+                      <span className="text-xs text-on-surface-variant font-mono-sm">
+                        {new Date(inc.created_at).toLocaleString()}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-on-surface-variant font-mono-sm bg-surface-container-low p-2 rounded border border-outline-variant/30 mb-3 whitespace-pre-wrap">
+                      {inc.description}
+                    </p>
+
+                    {safeAttempts.length > 0 && (
+                      <div className="mb-3 text-xs text-on-surface-variant">
+                        <span className="font-medium text-on-surface">
+                          {t("servers.guardian.tab.attempts")}:{" "}
+                        </span>
+                        {safeAttempts.map((att, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-block mr-2 px-2 py-0.5 rounded bg-surface-container border border-outline-variant/30 font-mono-sm"
+                          >
+                            #{att.attempt} {att.action} ({att.result})
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {inc.status !== "resolved" && (
+                      <div className="flex justify-end pt-2 border-t border-outline-variant/20">
+                        <button
+                          onClick={() => void handleResolveIncident(inc.id)}
+                          disabled={resolvingId === inc.id}
+                          className="msm-btn-primary px-3 py-1.5 text-xs flex items-center gap-1.5"
+                        >
+                          {resolvingId === inc.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                          {t("servers.guardian.tab.resolveAction")}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

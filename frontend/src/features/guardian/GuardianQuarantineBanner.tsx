@@ -19,16 +19,18 @@ export const GuardianQuarantineBanner: React.FC<GuardianQuarantineBannerProps> =
   const { t } = useTranslation();
   const [resolving, setResolving] = useState(false);
 
-  const isQuarantined =
-    server.guardian_observed_state === "quarantined" ||
-    incidents.some((inc) => inc.status === "quarantined");
+  const safeIncidents = Array.isArray(incidents) ? incidents : [];
 
-  if (!server.guardian_enabled || !isQuarantined) {
+  const isQuarantined =
+    server?.guardian_observed_state === "quarantined" ||
+    safeIncidents.some((inc) => inc?.status === "quarantined");
+
+  if (!server?.guardian_enabled || !isQuarantined) {
     return null;
   }
 
-  const openQuarantineIncident = incidents.find(
-    (inc) => inc.status === "quarantined" || inc.status === "open"
+  const openQuarantineIncident = safeIncidents.find(
+    (inc) => inc?.status === "quarantined" || inc?.status === "open"
   );
 
   const handleResolve = async () => {
