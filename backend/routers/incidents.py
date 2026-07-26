@@ -1,5 +1,8 @@
 import json
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -67,17 +70,22 @@ def resolve_incident(
     from models import Server
     from services.guardian_state_service import request_quarantine_clear
 
+    previous_status = incident.status
     incident.status = "resolved"
     incident.resolved_at = datetime.now(timezone.utc)
 
     server = db.query(Server).filter(Server.id == server_id).first()
     if server:
-        if server.guardian_observed_state == "quarantined" or incident.status == "quarantined":
+        if server.guardian_observed_state == "quarantined" or previous_status == "quarantined":
             try:
                 request_quarantine_clear(db, server, operation_id=str(uuid.uuid4()))
             except Exception:
-                pass
-            server.guardian_observed_state = "healthy"
+                logger.warning(
+                    "Failed to clear Guardian quarantine for server %s during incident resolve",
+                    server_id,
+                )
+            # Let the next Guardian sync update the observed state
+            # instead of forcing it here to avoid Panel/Agent desync.
         server.guardian_sync_error_statistics = None
 
     log_change_event(

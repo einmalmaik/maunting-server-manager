@@ -247,7 +247,7 @@ def test_unknown_probe_type_is_rejected() -> None:
 
 
 def test_dynamic_probe_loading_and_unloading() -> None:
-    from services.guardian_probes import discover_probes
+    from services.guardian_probes import discover_probes, reset_probe_cache_for_tests
     from pathlib import Path
     
     # 1. Verify standard probes exist
@@ -267,6 +267,7 @@ def test_dynamic_probe_loading_and_unloading() -> None:
         )
         
         # 3. Verify it is detected
+        reset_probe_cache_for_tests()
         probes = discover_probes()
         assert "dynamic-test-probe" in probes
         
@@ -281,12 +282,13 @@ def test_dynamic_probe_loading_and_unloading() -> None:
         if custom_probe_path.exists():
             custom_probe_path.unlink()
         
+        reset_probe_cache_for_tests()
         probes = discover_probes()
         assert "dynamic-test-probe" not in probes
 
 
 def test_dynamic_probe_broken_syntax_ignored() -> None:
-    from services.guardian_probes import discover_probes
+    from services.guardian_probes import discover_probes, reset_probe_cache_for_tests
     from pathlib import Path
     
     broken_probe_path = Path(__file__).parent.parent / "services" / "guardian_probes" / "broken_syntax_probe.py"
@@ -295,6 +297,7 @@ def test_dynamic_probe_broken_syntax_ignored() -> None:
         broken_probe_path.write_text("PROBE_TYPE = 'broken-probe'\nthis is invalid syntax Python code !!!\n")
         
         # Verify discovering probes doesn't raise and skips the broken file
+        reset_probe_cache_for_tests()
         probes = discover_probes()
         assert "broken-probe" not in probes
     finally:
@@ -303,7 +306,7 @@ def test_dynamic_probe_broken_syntax_ignored() -> None:
 
 
 def test_dynamic_probe_runtime_crash_handled() -> None:
-    from services.guardian_probes import discover_probes
+    from services.guardian_probes import discover_probes, reset_probe_cache_for_tests
     from pathlib import Path
     
     crashing_probe_path = Path(__file__).parent.parent / "services" / "guardian_probes" / "crashing_probe.py"
@@ -315,6 +318,7 @@ def test_dynamic_probe_runtime_crash_handled() -> None:
         )
         
         # Verify it is detected
+        reset_probe_cache_for_tests()
         probes = discover_probes()
         assert "crashing-probe" in probes
         
@@ -330,6 +334,7 @@ def test_dynamic_probe_runtime_crash_handled() -> None:
         if crashing_probe_path.exists():
             crashing_probe_path.unlink()
         
+        reset_probe_cache_for_tests()
         probes = discover_probes()
         assert "crashing-probe" not in probes
 

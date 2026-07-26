@@ -114,6 +114,7 @@ def decrypt_frames(source: BinaryIO | Iterator[bytes], aesgcm: AESGCM | None = N
             if len(ct) < TAG_LEN:
                 raise StreamCryptoError("ciphertext too short")
             try:
+                # AAD=None: DIS sidecar wire-format compatibility (see _encrypt_frame).
                 yield aesgcm.decrypt(nonce, ct, None)
             except Exception as exc:
                 raise StreamCryptoError("decryption failed") from exc
@@ -123,6 +124,8 @@ def decrypt_frames(source: BinaryIO | Iterator[bytes], aesgcm: AESGCM | None = N
 
 def _encrypt_frame(aesgcm: AESGCM, plaintext: bytes) -> bytes:
     nonce = os.urandom(NONCE_LEN)
+    # AAD is None for wire-compatibility with the DIS sidecar frame format.
+    # Context binding (server ID, backup ID) is handled at a higher layer.
     ct = aesgcm.encrypt(nonce, plaintext, None)  # ciphertext || tag
     frame_len = NONCE_LEN + len(ct)
     return struct.pack(">I", frame_len) + nonce + ct

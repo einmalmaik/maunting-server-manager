@@ -334,7 +334,10 @@ def _redact(text: str, redactors: list[str]) -> str:
         if redactor.startswith("regex:"):
             pattern = re.compile(redactor[6:])
         else:
-            pattern = _BUILTIN_REDACTION_PATTERNS[redactor]
+            pattern = _BUILTIN_REDACTION_PATTERNS.get(redactor)
+            if pattern is None:
+                logger.warning("Skipping unknown built-in redactor: %s", redactor)
+                continue
         result = pattern.sub("[REDACTED]", result)
     return result
 
@@ -342,10 +345,19 @@ def _redact(text: str, redactors: list[str]) -> str:
 def _tail_file(path: Path, max_bytes: int) -> str:
     if path.is_symlink() or not path.is_file():
         return ""
-    with path.open("rb") as stream:
-        size = path.stat().st_size
-        stream.seek(max(0, size - max_bytes))
-        return stream.read(max_bytes).decode("utf-8", errors="replace")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return ""
+    try:
+        size = os.fstat(fd).st_size
+        os.lseek(fd, max(0, size - max_bytes), os.SEEK_SET)
+        return os.read(fd, max_bytes).decode("utf-8", errors="replace")
+    finally:
+        os.close(fd)
 
 
 def _collect_logs(server_id: int, container_name: str, desired: DesiredState) -> str:
@@ -380,7 +392,14 @@ def _collect_logs(server_id: int, container_name: str, desired: DesiredState) ->
             remaining -= len(text.encode("utf-8", errors="replace"))
             if remaining <= 0:
                 break
-    return _redact("\n".join(pieces), logs_config.redact)
+    joined = "\n".join(pieces)
+    # Bound input for regex redactors to prevent excessive backtracking on
+    # very large log buffers.  The tail is kept because recent lines are the
+    # most diagnostically relevant.
+    _REDACT_INPUT_LIMIT = 256 * 1024  # 256 KiB
+    if len(joined) > _REDACT_INPUT_LIMIT:
+        joined = joined[-_REDACT_INPUT_LIMIT:]
+    return _redact(joined, logs_config.redact)
 
 
 def _diagnose(
@@ -827,7 +846,7 @@ async def start_guardian_loop() -> None:
         return
     _running = True
     logger.info("Guardian Verified Recovery loop starting")
-    interval = max(0.25, float(getattr(settings, "guardian_loop_interval_seconds", 5.0)))
+    interval = min(300, max(1, float(getattr(settings, "guardian_loop_interval_seconds", 5.0))))
     while _running:
         try:
             await reconcile_all_servers()

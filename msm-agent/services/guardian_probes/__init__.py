@@ -51,28 +51,38 @@ def _validated_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
     return address
 
 
+_PROBE_CACHE: dict[str, Any] | None = None
+
+
 def discover_probes() -> dict[str, Any]:
-    """Scan the guardian_probes directory, import/reload all *.py files, and return available probes."""
+    """Return the cached probe registry, loading modules once on first call."""
+    global _PROBE_CACHE
+    if _PROBE_CACHE is not None:
+        return _PROBE_CACHE
+
     probes_dir = Path(__file__).parent
     registry = {}
-    
-    for item in probes_dir.iterdir():
+
+    for item in sorted(probes_dir.iterdir()):
         if item.is_file() and item.name.endswith(".py") and item.name != "__init__.py":
             module_name = item.stem
             full_module_name = f"services.guardian_probes.{module_name}"
             try:
-                if full_module_name in sys.modules:
-                    module = importlib.reload(sys.modules[full_module_name])
-                else:
-                    module = importlib.import_module(full_module_name)
-                
+                module = importlib.import_module(full_module_name)
                 probe_type = getattr(module, "PROBE_TYPE", None)
                 if probe_type:
                     registry[probe_type] = module
             except Exception as exc:
-                logger.warning("Failed to load/reload probe driver %s: %s", module_name, exc)
-                
+                logger.warning("Failed to load probe driver %s: %s", module_name, exc)
+
+    _PROBE_CACHE = registry
     return registry
+
+
+def reset_probe_cache_for_tests() -> None:
+    """Clear the probe cache so tests can reload drivers."""
+    global _PROBE_CACHE
+    _PROBE_CACHE = None
 
 
 def get_supported_probe_types() -> list[str]:

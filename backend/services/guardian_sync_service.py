@@ -9,6 +9,19 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+_MAX_ERROR_MESSAGE_LEN = 200
+
+def _sanitize_error_message(exc: Exception) -> str:
+    """Truncate and strip potential secrets from exception messages."""
+    raw = str(exc)
+    # Remove anything that looks like a connection string, URL with credentials,
+    # or absolute filesystem path from error messages before persisting them.
+    import re as _re
+    raw = _re.sub(r'(?i)\b(?:postgres(?:ql)?|mysql|redis)://[^\s]+', '[REDACTED_URL]', raw)
+    raw = _re.sub(r'(?i)bearer\s+\S+', 'Bearer [REDACTED]', raw)
+    raw = _re.sub(r'/(?:opt|var|etc|home|tmp)/[^\s:"]+', '[REDACTED_PATH]', raw)
+    return raw[:_MAX_ERROR_MESSAGE_LEN]
+
 from games import get_plugin
 from models import Server
 from services.guardian_runtime_compiler import (
@@ -155,7 +168,7 @@ def reconcile_guardian_server(
             else:
                 err_data = {
                     "last_error": type(compile_exc).__name__,
-                    "last_error_message": str(compile_exc),
+                    "last_error_message": _sanitize_error_message(compile_exc),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             server.guardian_sync_error_statistics = json.dumps(
@@ -318,7 +331,7 @@ def reconcile_guardian_server(
         # Save last known state on network/API failure
         error_info = {
             "last_error": type(exc).__name__,
-            "last_error_message": str(exc),
+            "last_error_message": _sanitize_error_message(exc),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         try:
@@ -355,7 +368,7 @@ def reconcile_guardian_server(
     except Exception as exc:
         error_info = {
             "last_error": type(exc).__name__,
-            "last_error_message": str(exc),
+            "last_error_message": _sanitize_error_message(exc),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "context": "incident_sync"
         }
