@@ -134,7 +134,8 @@ describe('Blueprints page', () => {
     fireEvent.click(screen.getByTestId('blueprints-create'))
 
     const dialog = screen.getByRole('dialog', { name: i18n.t('blueprintBuilder.title.create') })
-    expect(dialog).toHaveClass('fixed', 'inset-0', 'md:pl-64')
+    expect(dialog).toHaveClass('fixed', 'inset-0', 'lg:pl-64')
+    expect(dialog).not.toHaveClass('md:pl-64')
     expect(screen.getByTestId('blueprint-builder-panel')).toHaveClass('h-[100dvh]', 'max-h-[100dvh]', 'overflow-hidden')
     expect(screen.getByTestId('blueprint-builder-actions')).toHaveClass('shrink-0')
     expect(within(dialog).queryByText(/schema v1/i)).toBeNull()

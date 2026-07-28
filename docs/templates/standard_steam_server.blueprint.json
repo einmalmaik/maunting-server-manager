@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "standard_steam_server",
+    "name": "Standard Steam Server",
+    "category": "steam_game",
+    "author": "MSM",
+    "description": "Konservatives Standardbeispiel mit Prozess- und Portüberwachung, aber ohne autonome Dateieingriffe."
+  },
+  "runtime": {
+    "image": "cm2network/steamcmd:root",
+    "workdir": "/data",
+    "env": {
+      "SERVER_NAME": "My Server"
+    },
+    "startup": "./server -port {GAME_PORT}",
+    "ensureDirs": ["config", "saves"]
+  },
+  "ports": [
+    {
+      "name": "game",
+      "protocol": "udp"
+    }
+  ],
+  "source": {
+    "type": "steam",
+    "updateStrategy": "checkBased",
+    "steam": {
+      "appId": "896660",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false,
+      "validate": true
+    }
+  },
+  "backup": {
+    "includePaths": ["config", "saves"]
+  },
+  "health": {
+    "process": {
+      "required": true
+    },
+    "port": {
+      "protocol": "udp",
+      "port": "{{PORT:game}}",
+      "interval": "30s",
+      "failure_threshold": 3,
+      "required_for_verification": true
+    },
+    "startup": {
+      "grace_period_seconds": 60,
+      "timeout_seconds": 600,
+      "success_patterns": [],
+      "failure_patterns": ["Address already in use"]
+    }
+  },
+  "recovery": {
+    "policies": [
+      {
+        "match": "process_not_running",
+        "action": "restart"
+      }
+    ],
+    "max_attempts": 2,
+    "attempt_window_seconds": 1800,
+    "cooldown_seconds": 300
+  }
+}

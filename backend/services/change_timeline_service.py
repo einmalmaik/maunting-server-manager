@@ -12,6 +12,8 @@ def log_change_event(
     event_type: str,
     description: str,
     details: dict | None = None,
+    *,
+    commit: bool = True,
 ) -> ChangeEvent:
     """Idempotently logs a correlated action/config change event to the server timeline."""
     event = ChangeEvent(
@@ -22,6 +24,8 @@ def log_change_event(
         details=json.dumps(details) if details else None,
     )
     db.add(event)
+    if not commit:
+        return event
     try:
         db.commit()
         db.refresh(event)

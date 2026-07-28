@@ -129,6 +129,12 @@ def is_operation_active(server_id: int | str) -> bool:
     return True
 
 
+def is_operation_held_by_context(server_id: int | str) -> bool:
+    """Return whether this propagated logical context already owns the lock."""
+    sid = _validated_server_id(server_id)
+    return sid in _HELD_BY_CONTEXT.get()
+
+
 def reset_operation_coordinator_for_tests() -> None:
     """Clear idle locks.  Active locks are intentionally never discarded."""
     with _LOCKS_GUARD:
@@ -136,4 +142,3 @@ def reset_operation_coordinator_for_tests() -> None:
         if active:
             raise RuntimeError("cannot reset operation coordinator while locks are active")
         _LOCKS.clear()
-

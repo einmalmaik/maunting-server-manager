@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { GuardianTab } from "./GuardianTab";
-import { GuardianBadge } from "./GuardianBadge";
+import { GuardianBadge, getGuardianDisplayState } from "./GuardianBadge";
 import { GuardianQuarantineBanner } from "./GuardianQuarantineBanner";
 import * as client from "@/api/client";
 import type { Server, GuardianIncident } from "@/types";
@@ -76,6 +76,50 @@ describe("Guardian UI Components", () => {
       render(<GuardianBadge server={server} />);
       expect(screen.getByText(/Autopilot Quarantäne/i)).toBeInTheDocument();
     });
+
+    it("never presents missing or offline observed state as healthy", () => {
+      const missing = { ...mockServerGuardianEnabled, guardian_observed_state: undefined };
+      const { rerender } = render(<GuardianBadge server={missing} />);
+      expect(screen.getByText(/Autopilot unbekannt/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Autopilot Aktiv/i)).toBeNull();
+
+      rerender(<GuardianBadge server={{ ...missing, status: "offline", guardian_observed_state: "healthy" }} />);
+      expect(screen.getByText(/Autopilot offline/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Autopilot Aktiv/i)).toBeNull();
+    });
+
+    it("lets a stopped server override a stale healthy Guardian observation", () => {
+      const stopped = {
+        ...mockServerGuardianEnabled,
+        status: "stopped",
+        guardian_observed_state: "healthy",
+      };
+      render(<GuardianBadge server={stopped} />);
+      expect(getGuardianDisplayState(stopped)).toBe("stopped");
+      expect(screen.getByText(/Autopilot gestoppt/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Autopilot Aktiv/i)).toBeNull();
+    });
+
+    it("classifies every supported observed state without treating it as healthy", () => {
+      const expected = {
+        healthy: "healthy",
+        starting: "activity",
+        recovering: "activity",
+        verifying: "activity",
+        degraded: "warning",
+        unhealthy: "warning",
+        quarantined: "quarantined",
+        stopped: "stopped",
+        unknown: "unknown",
+        disabled: "unknown",
+      } as const;
+
+      for (const [guardian_observed_state, displayState] of Object.entries(expected)) {
+        expect(
+          getGuardianDisplayState({ ...mockServerGuardianEnabled, guardian_observed_state })
+        ).toBe(displayState);
+      }
+    });
   });
 
   describe("GuardianQuarantineBanner", () => {
@@ -111,7 +155,7 @@ describe("Guardian UI Components", () => {
 
       expect(screen.getByText(/Server in Quarantäne versetzt/i)).toBeInTheDocument();
 
-      const button = screen.getByRole("button", { name: /Quarantäne aufheben/i });
+      const button = screen.getByRole("button", { name: /Freigabe anfordern/i });
       fireEvent.click(button);
 
       await waitFor(() => {
@@ -121,6 +165,64 @@ describe("Guardian UI Components", () => {
         );
         expect(onRefresh).toHaveBeenCalled();
       });
+      expect(screen.getByRole("button", { name: /Freigabe ausstehend/i })).toBeDisabled();
+      expect(screen.getByText(/bleibt als quarantiniert markiert/i)).toBeInTheDocument();
+    });
+
+    it("does not resolve an arbitrary open incident when no quarantine incident is associated", () => {
+      const server = { ...mockServerGuardianEnabled, guardian_observed_state: "quarantined" };
+      render(
+        <GuardianQuarantineBanner
+          server={server}
+          incidents={[{
+            id: 99,
+            title: "Other incident",
+            description: "Not quarantine",
+            type: "process_not_running",
+            status: "open",
+            fingerprint: "other",
+            created_at: "2026-07-21T12:00:00Z",
+            resolved_at: null,
+            attempts: [],
+          }]}
+        />,
+      );
+      const button = screen.getByRole("button", { name: /Freigabe anfordern/i });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+      expect(client.api).not.toHaveBeenCalled();
+      expect(screen.getByText(/Keine eindeutig zugeordnete/i)).toBeInTheDocument();
+    });
+
+    it("restores authoritative pending state after remount with resolved incident data", () => {
+      const server = {
+        ...mockServerGuardianEnabled,
+        guardian_observed_state: "quarantined",
+        guardian_quarantine_clear_pending: true,
+      };
+      const resolvedIncident: GuardianIncident = {
+        id: 42,
+        title: "Autopilot: process_not_running",
+        description: "Synthetic incident",
+        type: "process_not_running",
+        status: "resolved",
+        fingerprint: "synthetic-fingerprint",
+        created_at: "2026-07-21T12:00:00Z",
+        resolved_at: "2026-07-21T12:05:00Z",
+        attempts: [],
+      };
+
+      const { unmount } = render(
+        <GuardianQuarantineBanner server={server} incidents={[resolvedIncident]} />,
+      );
+      expect(screen.getByRole("button", { name: /Freigabe ausstehend/i })).toBeDisabled();
+      expect(screen.getByText(/noch nicht vom Agenten bestätigt|bleibt als quarantiniert markiert/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Keine eindeutig zugeordnete/i)).toBeNull();
+      unmount();
+
+      render(<GuardianQuarantineBanner server={server} incidents={[resolvedIncident]} />);
+      expect(screen.getByRole("button", { name: /Freigabe ausstehend/i })).toBeDisabled();
+      expect(client.api).not.toHaveBeenCalled();
     });
   });
 
@@ -223,7 +325,8 @@ describe("Guardian UI Components", () => {
       }).not.toThrow();
 
       await waitFor(() => {
-        expect(screen.getByText(/Keine Ereignisse vorhanden/i)).toBeInTheDocument();
+        expect(screen.getByText(/Incident-Historie nicht verfügbar/i)).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Erneut versuchen/i })).toBeInTheDocument();
       });
     });
 
@@ -237,8 +340,41 @@ describe("Guardian UI Components", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText(/Keine Ereignisse vorhanden/i)).toBeInTheDocument();
+        expect(screen.getByText(/Incident-Historie nicht verfügbar/i)).toBeInTheDocument();
       });
+    });
+
+    it("does not present a resolved quarantine incident as complete while release is pending", async () => {
+      const incident: GuardianIncident = {
+        id: 42,
+        title: "Autopilot: process_not_running",
+        description: "Synthetic quarantine incident",
+        type: "process_not_running",
+        status: "resolved",
+        fingerprint: "synthetic-fingerprint",
+        created_at: "2026-07-21T12:00:00Z",
+        resolved_at: "2026-07-21T12:05:00Z",
+        attempts: [],
+      };
+      vi.mocked(client.api).mockResolvedValue([incident]);
+
+      render(
+        <MemoryRouter>
+          <GuardianTab
+            server={{
+              ...mockServerGuardianEnabled,
+              guardian_observed_state: "quarantined",
+              guardian_quarantine_clear_pending: true,
+            }}
+          />
+        </MemoryRouter>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/noch nicht vom Agenten bestätigt/i)).toBeInTheDocument();
+      });
+      expect(screen.getAllByText(/Freigabe ausstehend/i).length).toBeGreaterThan(0);
+      expect(screen.queryByText("Gelöst")).toBeNull();
     });
   });
 });

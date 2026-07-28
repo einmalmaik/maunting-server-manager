@@ -1254,6 +1254,33 @@ class BlueprintRecoveryPolicy(BaseModel):
             raise ValueError("Recovery-Wert hat ein ungueltiges Format.")
         return value
 
+    @field_validator("match")
+    @classmethod
+    def _supported_match(cls, value: str) -> str:
+        supported = {
+            "process_not_running",
+            "tcp_connect_failed",
+            "udp_mapping_missing",
+            "http_redirect_rejected",
+            "http_response_too_large",
+            "http_unexpected_status",
+            "http_request_failed",
+            "minecraft_query_failed",
+            "minecraft_status_failed",
+            "source_query_failed",
+            "linux-oom",
+            "port-conflict",
+            "java-stacktrace",
+            "nodejs-stacktrace",
+            "missing-runtime",
+            "corrupted-config",
+            "startup-pattern",
+            "probe_failed",
+        }
+        if value not in supported:
+            raise ValueError(f"Nicht unterstuetzter Guardian-Recovery-Ausloeser: {value}")
+        return value
+
     @field_validator("action")
     @classmethod
     def _supported_action(cls, value: str) -> str:
@@ -1308,14 +1335,6 @@ class BlueprintRecovery(BaseModel):
         return self
 
 
-class BlueprintUpdates(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    strategy: str = "snapshot-then-update"
-    health_verification: str = "required"
-    rollback_on_failure: bool = True
-
-
 class BlueprintBackups(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -1357,7 +1376,6 @@ class Blueprint(BaseModel):
     logs: BlueprintLogs | None = None
     diagnostics: BlueprintDiagnostics | None = None
     recovery: BlueprintRecovery | None = None
-    updates: BlueprintUpdates | None = None
     backups: BlueprintBackups | None = None
 
 
@@ -1570,12 +1588,6 @@ COMMENTED_TEMPLATE_DE: str = """{
       { "match": "port-conflict", "action": "restart" }
     ]
   },
-  "updates": {
-    // Update-Strategie und Rollback-Verhalten
-    "strategy": "snapshot-then-update",
-    "health_verification": "required",
-    "rollback_on_failure": true
-  },
   "backups": {
     // Backup-Verhalten vor riskanter Aktion und geschuetzte Pfade
     "before_risky_action": true,
@@ -1715,12 +1727,6 @@ COMMENTED_TEMPLATE_EN: str = """{
     "policies": [
       { "match": "port-conflict", "action": "restart" }
     ]
-  },
-  "updates": {
-    // Update strategy and rollback behavior
-    "strategy": "snapshot-then-update",
-    "health_verification": "required",
-    "rollback_on_failure": true
   },
   "backups": {
     // Backups settings before risky action and protected paths

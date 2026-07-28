@@ -1248,8 +1248,7 @@ class TestLiveResourceUpdate:
              patch("routers.servers.docker_service.stop") as mock_stop, \
              patch("routers.servers.docker_service.remove") as mock_remove, \
              patch("routers.servers.docker_service.start") as mock_start, \
-             patch("routers.servers.is_lifecycle_job_active", return_value=False), \
-             patch("routers.servers.get_plugin") as mock_plugin:
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
             response = client.patch(
                 f"/api/servers/{test_server.id}",
                 json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
@@ -1261,7 +1260,6 @@ class TestLiveResourceUpdate:
         mock_stop.assert_not_called()
         mock_remove.assert_not_called()
         mock_start.assert_not_called()
-        mock_plugin.assert_not_called()
 
     # ── VAL-API-008: Stopped server resource PATCH persists for next start ──
 
@@ -3556,7 +3554,6 @@ class TestNetworkFieldPresenceDetection:
              patch("routers.servers.open_ports") as mock_open, \
              patch("routers.servers.iptables_revoke_server") as mock_revoke, \
              patch("routers.servers.iptables_accept_server") as mock_accept, \
-             patch("routers.servers.get_plugin") as mock_plugin, \
              patch("routers.servers.docker_service.is_running", return_value=False):
             response = client.patch(
                 f"/api/servers/{test_server.id}",
@@ -3570,7 +3567,6 @@ class TestNetworkFieldPresenceDetection:
         mock_open.assert_not_called()
         mock_revoke.assert_not_called()
         mock_accept.assert_not_called()
-        mock_plugin.assert_not_called()
         db.refresh(test_server)
         assert test_server.public_bind_ip == "127.0.0.1"
 

@@ -2,7 +2,7 @@ import asyncio
 import logging
 from unittest.mock import patch
 
-from models import Node
+from models import Node, Server
 from services.node_client import NodeClientError
 from services.scheduler_service import _node_heartbeat_task
 
@@ -37,6 +37,34 @@ def test_expected_heartbeat_error_marks_offline_without_fabricating_docker_state
     assert refreshed.status == "offline"
     assert refreshed.docker_connected is True
     assert "unexpected node heartbeat failure" not in caplog.text
+
+
+def test_offline_heartbeat_invalidates_stale_guardian_healthy_state(db):
+    node = _remote_node(db, "5" * 64)
+    server = Server(
+        name="Stale Guardian observation",
+        game_type="minecraft",
+        install_dir="/tmp/stale-guardian",
+        node_id=node.id,
+        status="running",
+        desired_power_state="running",
+        guardian_observed_state="healthy",
+        guardian_container_status="running",
+    )
+    db.add(server)
+    db.commit()
+
+    with patch(
+        "services.node_client.NodeClient.from_node",
+        side_effect=NodeClientError("synthetic unavailable"),
+    ):
+        asyncio.run(_node_heartbeat_task())
+
+    db.expire_all()
+    refreshed = db.get(Server, server.id)
+    assert refreshed.guardian_observed_state == "unknown"
+    assert refreshed.guardian_container_status == "unknown"
+    assert refreshed.desired_power_state == "running"
 
 
 def test_unexpected_heartbeat_error_is_logged(db, caplog):

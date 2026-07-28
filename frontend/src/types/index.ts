@@ -50,6 +50,7 @@ export interface Server {
   guardian_probe_timestamp?: string | null
   guardian_transition_timestamp?: string | null
   guardian_sync_error_statistics?: string | null
+  guardian_quarantine_clear_pending?: boolean
 }
 
 export interface GuardianAttempt {

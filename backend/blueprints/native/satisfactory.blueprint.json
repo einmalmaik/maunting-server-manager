@@ -54,9 +54,9 @@
   },
   "health": {
     "process": {},
-    "application": {
-      "type": "source-query",
-      "port": "{{QUERY_PORT}}",
+    "port": {
+      "protocol": "udp",
+      "port": "{{SERVER_PORT}}",
       "interval": "60s",
       "failure_threshold": 3
     },
@@ -75,10 +75,6 @@
     "policies": [
       {
         "match": "process_not_running",
-        "action": "restart"
-      },
-      {
-        "match": "source_query_failed",
         "action": "restart"
       },
       {

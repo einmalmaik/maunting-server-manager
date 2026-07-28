@@ -109,6 +109,7 @@ export function SelfHostingDocs() {
           ['topology', t('docsSelfHosting.topology.title')],
           ['component-migration', t('docsSelfHosting.migration.title')],
           ['enrollment', t('docsSelfHosting.enrollment.title')],
+          ['guardian-state', t('docsSelfHosting.guardian.title')],
           ['artifacts', t('docsSelfHosting.artifacts.title')],
         ].map(([id, label]) => (
           <a key={id} href={`#${id}`} className="msm-btn-secondary shrink-0 px-3 py-2 text-xs">{label}</a>
@@ -266,6 +267,24 @@ export function SelfHostingDocs() {
           ))}
         </ol>
         <p className="mt-4 text-sm leading-6 text-on-surface-variant">{t('docsSelfHosting.enrollment.fallback')}</p>
+      </section>
+
+      <section aria-labelledby="guardian-state" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="guardian-state" className="font-headline text-headline-md text-on-surface">{t('docsSelfHosting.guardian.title')}</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsSelfHosting.guardian.intro')}</p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['path', 'environment', 'contents', 'backup', 'restore', 'migration'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.guardian.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.guardian.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       <section aria-labelledby="artifacts" className="mb-10">

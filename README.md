@@ -106,6 +106,14 @@ Der normale Installer generiert alle sicherheitskritischen Werte und verweist
 in den erzeugten `.env`-Dateien auf die jeweilige Vorlage. Manuell angelegte
 Dateien müssen Modus `600` erhalten und dürfen niemals committed werden.
 
+Der Guardian-State jedes Nodes ist persistent und liegt standardmäßig unter
+`/var/lib/msm-agent/guardian`. Er enthält Soll-/Ist-Zustände, Incident-Delivery
+und begrenzte Recovery-Lockfile-Backups und muss bei einer Node-Migration
+zusammen mit den Serverdaten gesichert werden. Pfad, Rechte, Restore-Ablauf und
+die Variablen `MSM_GUARDIAN_STATE_DIR` sowie
+`MSM_GUARDIAN_LOOP_INTERVAL_SECONDS` sind in
+[`docs/self-hosting.md`](docs/self-hosting.md) beschrieben.
+
 Die vollständige Komponenten-, Release- und Node-Anleitung steht in
 [`docs/self-hosting.md`](docs/self-hosting.md) und nach der Anmeldung im Panel
 unter **Dokumentation → Self-Hosting & Nodes**.

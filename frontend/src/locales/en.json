@@ -200,10 +200,24 @@
       "updates": "Steam updates & branches",
       "backups": "Backups (config & saves)",
       "troubleshooting": "Troubleshooting",
-      "exec": "Container Commands (Exec tab)"
+      "exec": "Container Commands (Exec tab)",
+      "guardian": "Configure Guardian"
     },
     "intro": {
       "body": "A blueprint is a pure JSON definition for a server type—e.g., 'DayZ Server' or 'Minecraft Server', not the running server itself. It tells the panel which Docker image to use, what ports are needed, how to start, and where to get the server files (Steam, HTTPS, Image, or manual). Countless server instances can be created from a single blueprint.\n\nBlueprints never contain scripts or hooks. They are strictly validated by the panel before execution, keeping the system fast and secure."
+    },
+    "guardian": {
+      "body": "Guardian is an optional, strictly bounded agent capability. One switch in the web editor removes every Guardian block; when enabled, the editor offers only values supported by both backend and agent.",
+      "probesTitle": "Probes",
+      "probesBody": "Supported probes are process, TCP/UDP port, and the tcp, http-ping, minecraft-status, minecraft-query, and source-query application probes. Custom driver types cannot be configured.",
+      "parsersTitle": "Diagnostic parsers",
+      "parsersBody": "Available parsers are linux-oom, java-stacktrace, nodejs-stacktrace, port-conflict, missing-runtime, corrupted-config, and startup-pattern.",
+      "actionsTitle": "Recovery actions",
+      "actionsBody": "Policies may trigger only restart, graceful_restart, clear_declared_lock_files, or quarantine. Lock files require a pre-approved safe relative path and reason.",
+      "matchesTitle": "Policy triggers",
+      "matchesBody": "The editor offers only exact failure IDs actually emitted by agent probes and parsers. Free-text matches are rejected.",
+      "operationTitle": "Budgets, backups, and quarantine",
+      "operationBody": "Attempt windows, cooldown, and success verification bound autonomous actions. Before clear_declared_lock_files, the agent backs up only explicitly declared lock files up to 1 MiB. protected_paths are exclusion boundaries and are not backed up. A quarantine release remains pending until the agent confirms a new observed state."
     },
     "quickstart": {
       "p1": "How to create your first custom server type (Community Blueprint):",
@@ -473,12 +487,23 @@
       "badge": {
         "active": "Autopilot Active",
         "recovering": "Autopilot Recovering",
-        "quarantined": "Autopilot Quarantined"
+        "activity": "Autopilot active operation",
+        "warning": "Autopilot warning",
+        "stopped": "Autopilot stopped",
+        "quarantined": "Autopilot Quarantined",
+        "unknown": "Autopilot unknown",
+        "offline": "Autopilot offline",
+        "error": "Autopilot error"
       },
       "quarantine": {
         "title": "Autopilot: Server Placed in Quarantine",
         "description": "The server failed multiple times and was protected by Autopilot. Automated recovery is paused.",
-        "clearAction": "Clear Quarantine & Resolve Incident",
+        "clearAction": "Request release",
+        "requestedSuccess": "Release was requested. The agent must confirm the observed state change.",
+        "requestFailed": "The release could not be requested.",
+        "pendingAction": "Release pending",
+        "pendingDescription": "Release has been requested. The server remains quarantined until the agent observes and reports the new state.",
+        "noIncident": "No exactly associated open quarantine incident is available. Release is blocked; refresh incident history.",
         "clearedSuccess": "Quarantine successfully cleared."
       },
       "tab": {
@@ -492,12 +517,23 @@
         "status": {
           "open": "Open",
           "recovering": "Recovering",
+          "activity": "In progress",
+          "warning": "Degraded",
+          "stopped": "Stopped",
           "resolved": "Resolved",
-          "quarantined": "Quarantined"
+          "releasePending": "Release pending",
+          "quarantined": "Quarantined",
+          "healthy": "Healthy",
+          "offline": "Offline",
+          "error": "Error",
+          "unknown": "Unknown"
         },
         "resolveAction": "Mark Incident Resolved",
         "resolvedSuccess": "Incident marked as resolved.",
-        "attempts": "Recovery Attempts"
+        "attempts": "Recovery Attempts",
+        "historyErrorTitle": "Incident history unavailable",
+        "historyErrorBody": "Incidents could not be loaded. This is not evidence of an empty history.",
+        "quarantinePendingNote": "Release was requested but has not been confirmed by the agent. Quarantine remains active until the next confirmed observation."
       },
       "errors": {
         "guardian_capability_mismatch": "The agent does not support the Autopilot drivers configured for this server. Please check the drivers on the node.",
@@ -1393,6 +1429,7 @@
     "confirm": "Confirm",
     "back": "Back",
     "refresh": "Refresh",
+    "retry": "Retry",
     "send": "Send",
     "next": "Next",
     "remove": "Remove",
@@ -1534,6 +1571,16 @@
         }
       },
       "fallback": "Pending enrollments expire after 15 minutes and are rate-limited. Manual host, token and fingerprint entry remains available only as a fallback for agents installed separately or connected through a special network setup."
+    },
+    "guardian": {
+      "title": "Persistent Guardian state",
+      "intro": "Node-local Guardian operational state is persistent operational data, not a cache. It must not be served by the web server or mounted into game-server containers.",
+      "path": { "title": "Default path", "body": "/var/lib/msm-agent/guardian; systemd creates the parent through StateDirectory=msm-agent and assigns it to the agent service." },
+      "environment": { "title": "Environment", "body": "MSM_GUARDIAN_STATE_DIR deliberately changes the path. MSM_GUARDIAN_LOOP_INTERVAL_SECONDS controls reconciliation, default 5.0 seconds; lower values increase Docker and I/O load." },
+      "contents": { "title": "Contents and limits", "body": "It contains accepted and observed states, unconfirmed incidents, and at most ten recovery lock-file backups per server. Individual files are limited to 1 MiB and use mode 0600." },
+      "backup": { "title": "Backup", "body": "Before node reinstall or migration, back up the Guardian path together with server data. Installers and updates preserve this path." },
+      "restore": { "title": "Restore", "body": "Stop the agent, restore the path with unchanged ownership and restrictive permissions, then start the agent and verify heartbeat, state, generation, and hash in the panel." },
+      "migration": { "title": "Migration and split brain", "body": "An old state copy must never be active on two nodes at once. Recovery backups live below recovery-backups/<server-id>/<backup-id>/." }
     },
     "artifacts": {
       "title": "GitHub release artifacts",
@@ -1823,38 +1870,38 @@
     "review": { "issueCount": "Review {{count}} fields", "issueCount_one": "Review {{count}} field", "issueCount_other": "Review {{count}} fields", "ready": "The draft is ready for authoritative backend validation.", "backend": "The panel catches common input errors. On save, the backend validates the complete schema authoritatively.", "json": "JSON preview" },
     "guardian": {
       "healthTitle": "Health Probes",
+      "processEnabled": "Enable process probe",
+      "processEnabledHelp": "Checks whether the main process runs in the container. Disable only when a more suitable application probe is authoritative on its own.",
       "processRequired": "Enforce main process liveness",
+      "processRequiredHelp": "A missing process counts as a failure. Keep enabled for normal game servers.",
       "logsTitle": "Logs & Diagnostics",
       "recoveryTitle": "Autonomous Recovery Policies",
-      "updatesTitle": "Updates & Databackups",
-      "rollbackOnFailure": "Roll back automatically on update failure",
-      "beforeRiskyAction": "Create snapshot before recovery or updates",
+      "backupsTitle": "Backups before recovery",
+      "beforeRiskyAction": "Back up declared lock files before removal",
+      "beforeRiskyActionHelp": "Before clear_declared_lock_files, only explicitly declared lock files up to 1 MiB are backed up. This creates neither a snapshot nor a backup of protected paths.",
+      "advancedHealth": "Advanced probe parameters",
+      "advancedHealthHelp": "These values control detection frequency and stability. The defaults are safe for most servers.",
+      "processProbe": "Process probe",
+      "portProbe": "Port probe",
+      "applicationProbe": "Application probe",
+      "startupWindow": "Startup window",
+      "safeLockFiles": "Approved lock files",
+      "safeLockFilesHelp": "Only explicitly approved relative files may be removed automatically. With backup enabled, each existing file up to 1 MiB is backed up byte-for-byte first. Give a clear reason for every path.",
+      "addSafeLockFile": "Approve lock file",
+      "safeLockPath": "Lock file {{index}} path",
+      "safeLockReason": "Lock file {{index}} reason",
+      "removeSafeLockFile": "Remove lock file {{index}}",
+      "advancedRecovery": "Advanced recovery budgets",
+      "advancedRecoveryHelp": "Limits autonomous attempts and requires stable health before a repair counts as successful.",
       "presetsTitle": "Autopilot Presets",
       "presetsHelp": "Select a template to automatically fill best-practice configurations for typical servers. You can customize any field afterwards.",
       "presetsSelect": "Load template...",
-      "presetGeneric": "Generic Server (Empty)",
+      "presetGeneric": "Disable Guardian (opt out)",
       "appQueryNone": "No query (only port-bind)",
-      "ladderTitle": "Guardian Recovery Ladder",
-      "ladderDescription": "The autopilot responds to issues step-by-step using a 7-stage escalation ladder. The system only escalates to more intrusive recovery actions if lower stages fail.",
-      "ladderStepNum": "Stage {{num}}",
-      "ladderStepName": {
-        "1": "Verify",
-        "2": "Restart",
-        "3": "Repair",
-        "4": "Rollback",
-        "5": "Snapshot",
-        "6": "Migration",
-        "7": "Quarantine"
-      },
-      "ladderStepDesc": {
-        "1": "Retries & probes",
-        "2": "Clean reboot",
-        "3": "Locks & runtime",
-        "4": "Config/plugin Revert",
-        "5": "Latest snapshot",
-        "6": "Node relocation",
-        "7": "Alert administrator"
-      }
+      "enabled": "Enable Guardian for this blueprint",
+      "enabledHelp": "When disabled, health, logs, diagnostics, recovery, and Guardian backups are completely removed from JSON. Enabling adds safe defaults.",
+      "actionsTitle": "Actually supported recovery actions",
+      "actionsHelp": "Policies can trigger only these four agent actions. Rollback, snapshots, and node migration are not Guardian recovery actions."
     },
     "recovery": {
       "policiesTitle": "Recovery Policies",
@@ -1868,13 +1915,24 @@
       "customMatchLabel": "Custom Error Match (Match)",
       "customActionLabel": "Custom Recovery Action (Action)",
       "matches": {
+        "process_not_running": "Main process is not running (process_not_running)",
+        "tcp_connect_failed": "TCP connection failed (tcp_connect_failed)",
+        "udp_mapping_missing": "UDP mapping missing (udp_mapping_missing)",
+        "http_redirect_rejected": "Unsafe HTTP redirect (http_redirect_rejected)",
+        "http_response_too_large": "HTTP response too large (http_response_too_large)",
+        "http_unexpected_status": "Unexpected HTTP status (http_unexpected_status)",
+        "http_request_failed": "HTTP request failed (http_request_failed)",
+        "minecraft_query_failed": "Minecraft query failed (minecraft_query_failed)",
+        "minecraft_status_failed": "Minecraft status failed (minecraft_status_failed)",
+        "source_query_failed": "Source query failed (source_query_failed)",
         "port-conflict": "Port Conflict (port-conflict)",
         "linux-oom": "Linux Out-of-Memory (linux-oom)",
         "java-stacktrace": "Java Stacktrace (java-stacktrace)",
         "nodejs-stacktrace": "Node.js Stacktrace (nodejs-stacktrace)",
         "missing-runtime": "Missing Runtime (missing-runtime)",
         "corrupted-config": "Corrupted Configuration (corrupted-config)",
-        "startup-pattern": "Startup Pattern Error (startup-pattern)"
+        "startup-pattern": "Startup Pattern Error (startup-pattern)",
+        "probe_failed": "Generic health probe failed (probe_failed)"
       },
       "actions": {
         "restart": "Force Restart Server (restart)",
@@ -1935,14 +1993,32 @@
       "healthAppPort": { "label": "HTTP Port", "help": "Optional port (defaults to liveness port), e.g. {{SERVER_PORT}}." },
       "healthAppInterval": { "label": "Query Interval", "help": "e.g. 30s." },
       "healthAppThreshold": { "label": "Failure Threshold", "help": "Number of failed checks before marked unhealthy." },
+      "guardianId": { "label": "Probe ID", "help": "Unique technical ID using lowercase letters, digits, hyphens, or underscores." },
+      "guardianInterval": { "label": "Probe interval", "help": "Time between checks, such as 30s. Beginners should keep the default." },
+      "guardianTimeout": { "label": "Probe timeout", "help": "Maximum wait for one check, such as 3s." },
+      "guardianFailureThreshold": { "label": "Failures until unhealthy", "help": "1–20 consecutive failures. Higher values reduce false alarms." },
+      "guardianSuccessThreshold": { "label": "Successes until healthy", "help": "1–20 consecutive successes before changing status." },
+      "guardianRequiredStartup": { "label": "Required for startup", "help": "The server is not considered started until this probe succeeds." },
+      "guardianRequiredVerification": { "label": "Required for repair verification", "help": "An autonomous repair only completes after this probe succeeds." },
+      "healthExpectedStatuses": { "label": "Allowed HTTP status codes", "help": "Comma-separated, 100–599. A common safe value is 200." },
+      "healthResponseBytes": { "label": "Maximum response size", "help": "1–1,048,576 bytes; limits the HTTP response read." },
+      "healthFollowRedirects": { "label": "Follow HTTP redirects", "help": "Permanently disabled for security." },
+      "healthStartupGrace": { "label": "Startup grace period", "help": "0–600 seconds without escalation immediately after startup." },
+      "healthStartupTimeout": { "label": "Startup timeout", "help": "1–3600 seconds and greater than the grace period." },
       "healthSuccessPatterns": { "label": "Startup Success Patterns", "help": "Log pattern for successful start." },
       "healthFailurePatterns": { "label": "Startup Failure Patterns", "help": "Log pattern for startup errors." },
       "logsSources": { "label": "Log files", "help": "Additional relative log paths (e.g. logs/latest.log)." },
       "logsRedact": { "label": "Log redaction", "help": "Sensitive keys to censor in server logs." },
+      "logsRegexRedact": { "label": "Custom redaction regex", "help": "One safe regex per line, without a prefix; stored with regex:." },
+      "logsMaxTail": { "label": "Maximum log data", "help": "1,024–1,048,576 bytes per analysis; default: 65,536." },
       "diagnosticsParsers": { "label": "Error Parsers", "help": "Enabled diagnostic parsers (e.g. java-stacktrace)." },
-      "updatesStrategy": { "label": "Update Transaction", "help": "e.g. snapshot-then-update." },
-      "updatesVerification": { "label": "Update Verification", "help": "e.g. required." },
-      "backupsProtected": { "label": "Protected Paths", "help": "Relative paths that should not be cleaned up." }
+      "recoveryMaxAttempts": { "label": "Maximum attempts", "help": "1–10 autonomous repairs within the attempt window." },
+      "recoveryAttemptWindow": { "label": "Attempt window", "help": "60–86,400 seconds during which attempts are counted." },
+      "recoveryCooldown": { "label": "Cooldown", "help": "1–3,600 seconds pause after a repair." },
+      "verificationDuration": { "label": "Minimum healthy duration", "help": "0–600 seconds of stable health before reporting success." },
+      "verificationSuccesses": { "label": "Required probe successes", "help": "1–20 consecutive successes to confirm recovery." },
+      "verificationTimeout": { "label": "Verification timeout", "help": "5–3,600 seconds for the complete recovery verification." },
+      "backupsProtected": { "label": "Exclusion boundaries", "help": "Relative paths that clear_declared_lock_files must never touch. These paths are not backed up." }
     },
     "options": {
       "category": { "steamGame": "Steam game", "nonSteamGame": "Non-Steam game", "voiceServer": "Voice server", "bot": "Bot" },
@@ -1960,9 +2036,24 @@
       "healthPortEmpty": "Port cannot be empty.",
       "healthTimeoutEmpty": "Timeout cannot be empty.",
       "healthAppTypeEmpty": "Query type cannot be empty.",
+      "healthAppTypeUnsupported": "Only query types supported by Guardian are allowed.",
       "healthAppPathInvalid": "The HTTP path must be relative and start with / (e.g. /healthz).",
+      "healthAppPathOnlyHttp": "An HTTP path is only allowed for the http-ping type.",
+      "healthAppPathLength": "The HTTP path may contain at most 512 characters.",
+      "guardianArrayLimit": "Too many Guardian entries. Reduce the list to the documented maximum.",
+      "guardianRegex": "At least one regex is invalid, too long, or uses unsafe constructs.",
+      "logsSource": "Log sources must be stdout or safe relative paths with at most one filename wildcard.",
+      "logsRedactor": "Only built-in redactors or regex: entries are allowed.",
+      "diagnosticsParser": "At least one diagnostic parser is not supported by Guardian.",
       "recoveryMatchEmpty": "Error match pattern {{row}} cannot be empty.",
-      "recoveryActionEmpty": "Recovery action {{row}} cannot be empty."
+      "recoveryMatchUnsupported": "The selected trigger is not emitted by the Guardian runtime.",
+      "recoveryActionEmpty": "Recovery action {{row}} cannot be empty.",
+      "recoveryActionUnsupported": "The selected recovery action is not supported by Guardian.",
+      "recoveryLockFilesRequired": "The lock-file action requires at least one explicitly approved lock file.",
+      "recoveryLockPath": "Lock files need an explicit safe relative path without wildcards.",
+      "recoveryLockReason": "Every approved lock file needs a reason.",
+      "recoveryLockDuplicate": "Each lock-file path may only appear once.",
+      "recoveryBounds": "A recovery budget is outside the range allowed by the backend."
     }
   },
   "server": {

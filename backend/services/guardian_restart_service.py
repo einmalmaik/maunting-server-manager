@@ -21,7 +21,10 @@ def _trigger_guardian_auto_restart(db: Session, server_id: int) -> None:
         if server.guardian_observed_state == "unknown":
             return
 
-        if server.guardian_observed_state not in ("failed", "stopped"):
+        # ``stopped`` is the contract state for a missing/non-running
+        # container. ``unhealthy`` is still owned by the Agent's recovery
+        # ladder; starting it here would race that recovery.
+        if server.guardian_observed_state != "stopped":
             return
 
         # Ensure generations match (agent has fully processed the latest intent)

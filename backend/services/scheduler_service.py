@@ -759,7 +759,7 @@ async def _node_heartbeat_task() -> None:
     """
     import httpx
     import asyncio
-    from models import Node
+    from models import Node, Server
     from services.node_client import NodeClient, NodeClientError
     from services.node_service import apply_agent_metrics
 
@@ -772,6 +772,19 @@ async def _node_heartbeat_task() -> None:
         semaphore = asyncio.Semaphore(50)  # max 50 concurrent requests
         limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
 
+        def mark_offline(node: Node) -> None:
+            node.status = "offline"
+            # A node that cannot be observed must never leave a stale green
+            # Guardian state in the panel. Preserve incident history and the
+            # last timestamps, but fail the live observation closed.
+            db.query(Server).filter(Server.node_id == node.id).update(
+                {
+                    "guardian_observed_state": "unknown",
+                    "guardian_container_status": "unknown",
+                },
+                synchronize_session=False,
+            )
+
         async def check_node(client: httpx.AsyncClient, node: Node):
             async with semaphore:
                 try:
@@ -782,11 +795,11 @@ async def _node_heartbeat_task() -> None:
                         node.last_heartbeat = datetime.now(timezone.utc)
                         apply_agent_metrics(node, metrics)
                     else:
-                        node.status = "offline"
+                        mark_offline(node)
                 except NodeClientError:
-                    node.status = "offline"
+                    mark_offline(node)
                 except Exception:
-                    node.status = "offline"
+                    mark_offline(node)
                     logger.exception(
                         "unexpected node heartbeat failure (node_id=%s)", node.id
                     )

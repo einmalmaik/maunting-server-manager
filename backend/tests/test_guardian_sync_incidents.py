@@ -19,6 +19,7 @@ def test_incident_failure_does_not_rollback_successful_observed_sync(db: Session
         desired_power_state="running",
         desired_state_generation=7,
         guardian_observed_state="unknown",
+        guardian_quarantine_control='{"clear":true,"operation_id":"11111111-1111-1111-1111-111111111111"}',
         public_bind_ip="127.0.0.1",
     )
     server.ports = [ServerPort(role="game", port=25565, protocol="tcp")]
@@ -52,7 +53,9 @@ def test_incident_failure_does_not_rollback_successful_observed_sync(db: Session
     plugin = MagicMock()
     plugin.get_blueprint.return_value = blueprint
 
-    with patch("services.guardian_sync_service.get_plugin", return_value=plugin):
+    with patch("services.guardian_sync_service.get_plugin", return_value=plugin), patch(
+        "services.guardian_restart_service._trigger_guardian_auto_restart"
+    ) as auto_restart:
         from services.guardian_sync_service import compile_desired_state
         payload = compile_desired_state(db, server)
         
@@ -74,12 +77,14 @@ def test_incident_failure_does_not_rollback_successful_observed_sync(db: Session
         
         with pytest.raises(Exception, match="API Error fetching incidents"):
             reconcile_guardian_server(db, server, node_client=client)
+        auto_restart.assert_called_once_with(db, server.id)
             
     db.refresh(server)
     
     # 1. Observed State must be saved
     assert server.guardian_observed_state == "healthy"
     assert server.guardian_accepted_generation == 7
+    assert server.guardian_quarantine_control is None
     
     # 2. Last sync time is set
     assert server.guardian_last_sync_at is not None

@@ -68,7 +68,7 @@ def resolve_incident(
 
     import uuid
     from models import Server
-    from services.guardian_state_service import request_quarantine_clear
+    from services.guardian_state_service import prepare_quarantine_clear
 
     previous_status = incident.status
     incident.status = "resolved"
@@ -77,13 +77,7 @@ def resolve_incident(
     server = db.query(Server).filter(Server.id == server_id).first()
     if server:
         if server.guardian_observed_state == "quarantined" or previous_status == "quarantined":
-            try:
-                request_quarantine_clear(db, server, operation_id=str(uuid.uuid4()))
-            except Exception:
-                logger.warning(
-                    "Failed to clear Guardian quarantine for server %s during incident resolve",
-                    server_id,
-                )
+            prepare_quarantine_clear(server, operation_id=str(uuid.uuid4()))
             # Let the next Guardian sync update the observed state
             # instead of forcing it here to avoid Panel/Agent desync.
         server.guardian_sync_error_statistics = None
@@ -93,6 +87,7 @@ def resolve_incident(
         server_id,
         "recovery",
         f"Incident '{incident.title}' manuell als gelöst markiert.",
+        commit=False,
     )
 
     db.commit()

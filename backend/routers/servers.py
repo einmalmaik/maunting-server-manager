@@ -382,20 +382,13 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
 
 
 def _is_guardian_enabled(server: Server) -> bool:
-    if getattr(server, "guardian_config_hash", None):
-        return True
     try:
+        from services.guardian_runtime_compiler import is_guardian_enabled
+
         plugin = get_plugin(server.game_type)
         bp = plugin.get_blueprint() if hasattr(plugin, "get_blueprint") else getattr(plugin, "blueprint", None)
         if bp is not None:
-            recovery = getattr(bp, "recovery", None)
-            if recovery is not None:
-                policies = getattr(recovery, "policies", None)
-                if policies and len(policies) > 0:
-                    return True
-            health = getattr(bp, "health", None)
-            if health is not None:
-                return True
+            return is_guardian_enabled(bp)
     except Exception:
         pass
     return False
@@ -407,6 +400,12 @@ def _server_response(server: Server) -> ServerResponse:
 
     data = ServerResponse.model_validate(server)
     data.guardian_enabled = _is_guardian_enabled(server)
+    # The persisted clear intent remains pending across offline/unknown/stale
+    # observations. Reconciliation removes it only after the Agent accepts the
+    # generation and reports that quarantine is gone.
+    data.guardian_quarantine_clear_pending = bool(
+        server.guardian_quarantine_control
+    )
     node = getattr(server, "node", None)
     if node is not None:
         data.node_id = node.id
@@ -1526,8 +1525,7 @@ def switch_server_blueprint_endpoint(
     """Wechselt das Spiel / den Blueprint eines gestoppten Servers.
     Erzeugt AUSNAHMSLOS ein Pflicht-Pre-Switch-Backup ueber das zentrale Backup-System.
     """
-    if not permission_service.has_server_permission(db, user, server_id, "servers.edit") and not permission_service.has_global_permission(db, user, "servers.edit"):
-        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    require_server_permission(user, server_id, db, "server.config.write")
 
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
@@ -1535,4 +1533,3 @@ def switch_server_blueprint_endpoint(
 
     from services.server_lifecycle_service import switch_server_blueprint
     return switch_server_blueprint(db, server, body.new_blueprint_id, user_id=user.id)
-

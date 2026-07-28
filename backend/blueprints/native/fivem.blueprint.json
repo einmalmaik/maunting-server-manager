@@ -69,7 +69,7 @@
     "process": {},
     "application": {
       "type": "http-ping",
-      "port": "game",
+      "port": "{{PORT:game}}",
       "path": "/info.json",
       "interval": "60s",
       "failure_threshold": 3

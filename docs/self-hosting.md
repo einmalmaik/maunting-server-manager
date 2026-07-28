@@ -245,6 +245,38 @@ bewusste Sicherheitsgrenze.
 Jede Vorlage erklärt Status, Zweck, Herkunft und Format aller Betreiberwerte.
 Automatisch erzeugte `.env`-Dateien dürfen niemals committed werden.
 
+### Persistenter Guardian-State des Agents
+
+Jeder Agent hält seinen node-lokalen Guardian-Betriebszustand standardmäßig
+unter `/var/lib/msm-agent/guardian`. systemd legt den Elternpfad über
+`StateDirectory=msm-agent` an; er gehört dem Agent-Service und darf weder vom
+Webserver ausgeliefert noch in einen Gameserver-Container gemountet werden.
+
+- `MSM_GUARDIAN_STATE_DIR` ändert den Pfad nur für bewusst abweichende
+  Installationen.
+- `MSM_GUARDIAN_LOOP_INTERVAL_SECONDS` bestimmt das Reconcile-Intervall
+  (Default `5.0`). Kleinere Werte erhöhen Docker-/I/O-Last und sind kein
+  Ersatz für sinnvolle Probe-Intervalle.
+- Enthalten sind akzeptierte Sollzustände, beobachtete Zustände, unbestätigte
+  Incidents und die höchstens zehn Recovery-Lockfile-Backups pro Server.
+- JSON-State wird atomar geschrieben. Beschädigte Dateien werden nicht
+  überschrieben, sondern als Corruption-Incident behandelt.
+- Lockfile-Backups liegen unter
+  `recovery-backups/<server-id>/<backup-id>/`; einzelne Dateien sind auf 1 MiB
+  begrenzt und mit Modus `0600` angelegt.
+
+Vor einer Node-Neuinstallation oder Migration muss dieser Pfad zusammen mit den
+Serverdaten gesichert werden. Für eine Wiederherstellung Agent stoppen, den
+Pfad mit unverändertem Eigentümer und restriktiven Rechten zurückspielen und
+erst danach den Agent starten. Eine alte State-Kopie darf nicht parallel auf
+zwei Nodes aktiv sein. Nach dem Start müssen Node-Heartbeat, Guardian-Zustand
+und Generation/Hash im Panel übereinstimmen.
+
+`install.sh`, `update.sh` und `helper-scripts/install-msm-agent.sh` legen den
+State-Pfad an beziehungsweise erhalten ihn. Ein Update darf ihn nicht löschen.
+Bei manueller Paketierung ist `/var/lib/msm-agent` deshalb ein persistentes
+Release-Artefakt, kein Cache.
+
 Bei getrenntem Hosting bezeichnet `MSM_PANEL_URL` die vom Benutzer geöffnete
 Frontend-Origin, während `MSM_API_URL` die öffentliche Backend-Origin bezeichnet.
 Bei einer All-in-one-Installation sind beide identisch. Cookies werden ohne

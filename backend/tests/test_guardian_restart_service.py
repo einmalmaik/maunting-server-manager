@@ -11,14 +11,14 @@ def _server_for_restart() -> Server:
         install_dir="/tmp/test",
         status="stopped",
         desired_power_state="running",
-        guardian_observed_state="failed",
+        guardian_observed_state="stopped",
         desired_state_generation=2,
         guardian_accepted_generation=2,
         public_bind_ip="127.0.0.1",
         auto_restart=True,
     )
 
-def test_auto_restart_triggers_on_failed_observed_state(db: Session) -> None:
+def test_auto_restart_triggers_on_stopped_observed_state(db: Session) -> None:
     server = _server_for_restart()
     db.add(server)
     db.commit()
@@ -27,6 +27,18 @@ def test_auto_restart_triggers_on_failed_observed_state(db: Session) -> None:
     with patch("services.guardian_restart_service.queue_lifecycle_operation") as mock_queue:
         _trigger_guardian_auto_restart(db, server.id)
         mock_queue.assert_called_once_with(db, server, "start")
+
+
+def test_auto_restart_does_not_race_agent_recovery_for_unhealthy_state(db: Session) -> None:
+    server = _server_for_restart()
+    server.guardian_observed_state = "unhealthy"
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    with patch("services.guardian_restart_service.queue_lifecycle_operation") as mock_queue:
+        _trigger_guardian_auto_restart(db, server.id)
+        mock_queue.assert_not_called()
 
 
 def test_auto_restart_blocked_if_generation_mismatch(db: Session) -> None:
@@ -62,4 +74,3 @@ def test_auto_restart_blocked_if_guardian_unknown(db: Session) -> None:
     with patch("services.guardian_restart_service.queue_lifecycle_operation") as mock_queue:
         _trigger_guardian_auto_restart(db, server.id)
         mock_queue.assert_not_called()
-

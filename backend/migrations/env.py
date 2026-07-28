@@ -11,7 +11,9 @@ import models  # noqa: F401 - register all model metadata
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Alembic must not disable application/test loggers merely because the
+    # migration environment was imported in the same process.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Never persist a credential-bearing URL in alembic.ini.
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))

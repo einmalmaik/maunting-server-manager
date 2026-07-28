@@ -22,7 +22,7 @@ from services.guardian_action_registry import (
     RecoveryContext,
     execute_action,
 )
-from services.agent_operation_coordinator import is_operation_active, operation
+from services.agent_operation_coordinator import operation, operation_async
 from services.guardian_contract import (
     DIAGNOSTIC_PARSERS,
     GUARDIAN_SCHEMA_VERSION,
@@ -54,6 +54,7 @@ OBSERVED_STATES = frozenset(
         "recovering",
         "verifying",
         "quarantined",
+        "disabled",
     }
 )
 
@@ -235,6 +236,15 @@ def accept_desired_state(
     except GuardianContractError as exc:
         raise DesiredStateRejected(exc.code, 422, exc.message) from exc
 
+    with operation(server_id):
+        return _accept_desired_state_locked(server_id, payload, desired)
+
+
+def _accept_desired_state_locked(
+    server_id: int,
+    payload: dict[str, Any],
+    desired: DesiredState,
+) -> dict[str, Any]:
     store = get_state_store()
     try:
         current_raw = store.read_json(server_id, "desired-state.json")
@@ -267,6 +277,7 @@ def accept_desired_state(
 
     runtime = _load_runtime(server_id, desired)
     previous_power = current_raw.get("desired_power_state") if current_raw else None
+    previous_enabled = bool(current_raw.get("guardian_enabled", True)) if current_raw else None
     runtime["accepted_generation"] = desired.generation
 
     if desired.quarantine_control is not None:
@@ -283,7 +294,39 @@ def accept_desired_state(
             if target == "starting":
                 runtime["startup_started_at"] = _iso()
 
-    if runtime.get("quarantine") is None and previous_power != desired.desired_power_state:
+    if not desired.guardian_enabled:
+        if runtime.get("active_incident_uuid") is not None:
+            diagnostic = {
+                "type": runtime.get("active_incident_type") or "guardian_disabled",
+                "confidence": "high",
+                "evidence": "Guardian was disabled by the accepted Blueprint",
+            }
+            _upsert_active_incident(
+                desired,
+                runtime,
+                diagnostic["type"],
+                "resolved",
+                diagnostic,
+            )
+        runtime["active_incident_uuid"] = None
+        runtime["active_incident_type"] = None
+        runtime["attempts"] = []
+        runtime["recovery_stage"] = 0
+        runtime["last_recovery_at"] = None
+        runtime["verification_started_at"] = None
+        _transition(runtime, "disabled", "guardian_disabled")
+    elif previous_enabled is False:
+        target = (
+            "quarantined"
+            if runtime.get("quarantine") is not None
+            else "starting"
+            if desired.desired_power_state == "running"
+            else "stopped"
+        )
+        _transition(runtime, target, "guardian_enabled")
+        if target == "starting":
+            runtime["startup_started_at"] = _iso()
+    elif runtime.get("quarantine") is None and previous_power != desired.desired_power_state:
         if desired.desired_power_state == "running":
             runtime["startup_started_at"] = _iso()
             _transition(runtime, "starting", "desired_power_running")
@@ -622,6 +665,22 @@ async def _attempt_recovery(
     diagnostic: dict[str, str],
 ) -> None:
     recovery = desired.guardian.recovery
+    previous_type = runtime.get("active_incident_type")
+    if previous_type and previous_type != diagnostic["type"]:
+        superseded = {
+            "type": previous_type,
+            "confidence": "high",
+            "evidence": "a different failure class replaced this incident",
+        }
+        _upsert_active_incident(desired, runtime, previous_type, "resolved", superseded)
+        runtime["active_incident_uuid"] = None
+        runtime["active_incident_type"] = None
+        runtime["attempts"] = []
+        runtime["recovery_stage"] = 0
+        runtime["last_recovery_at"] = None
+        runtime["verification_started_at"] = None
+        runtime["verification_healthy_since"] = None
+        runtime["verification_successes"] = 0
     attempts = _prune_attempts(runtime, recovery.attempt_window_seconds)
     if len(attempts) >= recovery.max_attempts:
         _quarantine(desired, runtime, diagnostic, "attempt_limit_exceeded")
@@ -734,6 +793,11 @@ async def _handle_verification(
 
 
 async def reconcile_server(server_id: int) -> None:
+    async with operation_async(server_id):
+        await _reconcile_server_locked(server_id)
+
+
+async def _reconcile_server_locked(server_id: int) -> None:
     try:
         desired = _load_desired(server_id)
     except CorruptedGuardianStateError as exc:
@@ -754,14 +818,40 @@ async def reconcile_server(server_id: int) -> None:
         logger.warning("Guardian could not inspect server_id=%s", server_id)
         container = None
 
-    # A planned route owns the same operation lock and has already persisted a
-    # bounded suspension lease.  Observation remains available, but Guardian
-    # must not race the mutation or rewrite its runtime lease.
-    if is_operation_active(server_id):
+    if not desired.guardian_enabled:
+        _transition(runtime, "disabled", "guardian_disabled")
+        _save_runtime(server_id, runtime)
         _write_observed(desired, runtime, container)
         return
 
     if desired.desired_power_state == "stopped":
+        if container and container.get("running"):
+            stop_result = await asyncio.to_thread(
+                docker_service.stop_container,
+                container_name,
+                timeout=30,
+            )
+            if not stop_result.get("ok"):
+                diagnostic = {
+                    "type": "desired_stop_failed",
+                    "confidence": "high",
+                    "evidence": "container remained running after desired stop",
+                }
+                _transition(runtime, "unhealthy", "desired_stop_failed")
+                _upsert_active_incident(
+                    desired,
+                    runtime,
+                    diagnostic["type"],
+                    "open",
+                    diagnostic,
+                )
+                _save_runtime(server_id, runtime)
+                _write_observed(desired, runtime, container)
+                return
+            container = await asyncio.to_thread(
+                docker_service.inspect_container_state,
+                container_name,
+            )
         _transition(runtime, "stopped", "desired_power_stopped")
         _save_runtime(server_id, runtime)
         _write_observed(desired, runtime, container)
@@ -770,6 +860,30 @@ async def reconcile_server(server_id: int) -> None:
     if runtime.get("quarantine") is not None:
         _transition(runtime, "quarantined", "quarantine_persisted")
         await _run_checks(desired, runtime, container_name)
+        _save_runtime(server_id, runtime)
+        _write_observed(desired, runtime, container)
+        return
+
+    container_running = bool(container and container.get("running"))
+    current_started_at = (
+        str(container.get("started_at") or "").strip()
+        if container_running
+        else ""
+    )
+    previous_started_at = str(runtime.get("container_started_at") or "").strip()
+    if (
+        current_started_at
+        and previous_started_at
+        and current_started_at != previous_started_at
+        and runtime.get("state") not in {"starting", "recovering", "verifying"}
+    ):
+        runtime["probe_states"] = {}
+        runtime["startup_started_at"] = _iso()
+        _transition(runtime, "starting", "container_restart_detected")
+    runtime["container_started_at"] = current_started_at or None
+
+    if container is None and runtime.get("state") != "starting":
+        _transition(runtime, "stopped", "container_missing")
         _save_runtime(server_id, runtime)
         _write_observed(desired, runtime, container)
         return
@@ -810,9 +924,33 @@ async def reconcile_server(server_id: int) -> None:
 
     elif runtime.get("state") in {"healthy", "degraded", "unhealthy"}:
         await _run_checks(desired, runtime, container_name)
-        healthy, degraded, failure = _required_check_status(desired, runtime)
+        if not container_running:
+            healthy, degraded, failure = False, False, "process_not_running"
+        else:
+            healthy, degraded, failure = _required_check_status(desired, runtime)
         if healthy:
             _transition(runtime, "healthy", "health_checks_passed")
+            if runtime.get("active_incident_uuid") is not None:
+                diagnostic = {
+                    "type": runtime.get("active_incident_type") or "recovery",
+                    "confidence": "high",
+                    "evidence": "service recovered without further Guardian action",
+                }
+                _upsert_active_incident(
+                    desired,
+                    runtime,
+                    diagnostic["type"],
+                    "resolved",
+                    diagnostic,
+                )
+                runtime["active_incident_uuid"] = None
+                runtime["active_incident_type"] = None
+                runtime["attempts"] = []
+                runtime["recovery_stage"] = 0
+                runtime["last_recovery_at"] = None
+                runtime["verification_started_at"] = None
+                runtime["verification_healthy_since"] = None
+                runtime["verification_successes"] = 0
         elif degraded:
             _transition(runtime, "degraded", "health_threshold_pending")
         else:

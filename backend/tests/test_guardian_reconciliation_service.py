@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, ANY
 
 import pytest
@@ -84,8 +85,17 @@ async def test_slow_node_does_not_block_other_servers(db: Session) -> None:
             events.append("s2_start")
             events.append("s2_end")
 
-    node_map = {1: n1, 2: n2}
-    server_map = {10: s1, 20: s2}
+    # Worker threads must not share ORM-bound objects from the test session.
+    # Detached value objects model what each independent worker session loads.
+    node_map = {
+        1: SimpleNamespace(id=1, status="online"),
+        2: SimpleNamespace(id=2, status="online"),
+    }
+    server_map = {
+        10: SimpleNamespace(id=10, node_id=1),
+        20: SimpleNamespace(id=20, node_id=2),
+    }
+    all_servers = list(server_map.values())
 
     def session_factory():
         s = MagicMock(spec=Session)
@@ -94,7 +104,7 @@ async def test_slow_node_does_not_block_other_servers(db: Session) -> None:
             if model is Server:
                 def filter_server(*args, **kwargs):
                     fq = MagicMock()
-                    fq.all.return_value = [s1, s2]
+                    fq.all.return_value = all_servers
                     val = getattr(getattr(args[0], "right", None), "value", None) if args else None
                     fq.first.return_value = server_map.get(val, s1)
                     return fq

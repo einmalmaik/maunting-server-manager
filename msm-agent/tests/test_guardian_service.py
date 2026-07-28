@@ -18,6 +18,8 @@ def _payload(
     generation: int = 1,
     desired_power_state: str = "running",
     max_attempts: int = 3,
+    startup_grace_seconds: int = 0,
+    guardian_enabled: bool = True,
     quarantine_control: dict | None = None,
     suspension: dict | None = None,
 ) -> dict:
@@ -26,6 +28,7 @@ def _payload(
         "server_id": 42,
         "generation": generation,
         "desired_power_state": desired_power_state,
+        "guardian_enabled": guardian_enabled,
         "recovery_suspension": suspension,
         "quarantine_control": quarantine_control,
         "guardian": {
@@ -42,8 +45,8 @@ def _payload(
                 }
             ],
             "startup": {
-                "grace_period_seconds": 0,
-                "timeout_seconds": 5,
+                "grace_period_seconds": startup_grace_seconds,
+                "timeout_seconds": max(5, startup_grace_seconds + 5),
                 "success_patterns": [],
                 "failure_patterns": [],
             },
@@ -95,6 +98,111 @@ def test_generation_and_hash_acceptance_rules(guardian_paths: Path) -> None:
     with pytest.raises(DesiredStateRejected) as conflict_error:
         guardian_service.accept_desired_state(42, conflict)
     assert conflict_error.value.code == "generation_conflict"
+
+
+def test_disabled_guardian_observes_without_mutating_running_container(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    restart_calls: list[str] = []
+    stop_calls: list[str] = []
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: {
+            "status": "running",
+            "running": True,
+            "oom_killed": False,
+            "started_at": "2026-07-28T12:00:00Z",
+            "port_bindings": {},
+        },
+    )
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "restart_container",
+        lambda name, **_kwargs: restart_calls.append(name) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "stop_container",
+        lambda name, **_kwargs: stop_calls.append(name) or {"ok": True},
+    )
+    guardian_service.accept_desired_state(
+        42,
+        _payload(guardian_enabled=False),
+    )
+
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    observed = guardian_service.observed_state(42)
+    assert observed["guardian_observed_state"] == "disabled"
+    assert observed["container_state"] == "running"
+    assert restart_calls == []
+    assert stop_calls == []
+
+
+def test_new_failure_class_gets_a_fresh_recovery_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    payload = _payload(max_attempts=1)
+    payload["guardian"]["recovery"]["policies"].append(
+        {"match": "linux-oom", "action": "graceful_restart"}
+    )
+    payload["payload_hash"] = canonical_payload_hash(payload)
+    guardian_service.accept_desired_state(42, payload)
+    desired = guardian_service._load_desired(42)
+    assert desired is not None
+    runtime = guardian_service._load_runtime(42, desired)
+    old_diagnostic = {
+        "type": "process_not_running",
+        "confidence": "high",
+        "evidence": "synthetic first failure",
+    }
+    guardian_service._upsert_active_incident(
+        desired,
+        runtime,
+        old_diagnostic["type"],
+        "open",
+        old_diagnostic,
+    )
+    runtime["attempts"] = [
+        {
+            "attempt": 1,
+            "stage": 0,
+            "action": "restart",
+            "at": datetime.now(timezone.utc).isoformat(),
+            "result": "failed",
+        }
+    ]
+    runtime["recovery_stage"] = 1
+    runtime["last_recovery_at"] = datetime.now(timezone.utc).isoformat()
+    executed: list[str] = []
+
+    async def fake_execute(action: str, _context):
+        executed.append(action)
+        return type("Result", (), {"ok": True, "details": {}})()
+
+    monkeypatch.setattr(guardian_service, "execute_action", fake_execute)
+    asyncio.run(
+        guardian_service._attempt_recovery(
+            desired,
+            runtime,
+            "msm-srv-42",
+            {
+                "type": "linux-oom",
+                "confidence": "high",
+                "evidence": "synthetic independent failure",
+            },
+        )
+    )
+
+    assert executed == ["graceful_restart"]
+    assert runtime["quarantine"] is None
+    assert runtime["active_incident_type"] == "linux-oom"
+    assert runtime["attempts"][0]["attempt"] == 1
+    incidents = guardian_service.list_incidents(42)
+    assert {item["status"] for item in incidents} == {"resolved", "verifying"}
 
 
 def test_invalid_hash_and_unresolved_placeholder_are_rejected(guardian_paths: Path) -> None:
@@ -258,3 +366,168 @@ def test_incident_acknowledgement_is_partial_and_idempotent(guardian_paths: Path
     assert guardian_service.acknowledge_incidents(42, [first]) == [first]
     assert [row["uuid"] for row in guardian_service.list_incidents(42)] == [second]
     assert guardian_service.acknowledge_incidents(42, [first]) == [first]
+
+
+def test_desired_stop_converges_a_still_running_container(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    running = {"value": True}
+    stop_calls: list[str] = []
+
+    def inspect(_name: str) -> dict:
+        return {
+            "status": "running" if running["value"] else "exited",
+            "running": running["value"],
+            "oom_killed": False,
+            "started_at": "2026-07-28T12:00:00Z",
+            "port_bindings": {},
+        }
+
+    def stop(name: str, timeout: int | None = None) -> dict:
+        stop_calls.append(name)
+        running["value"] = False
+        return {"ok": True}
+
+    monkeypatch.setattr(guardian_service.docker_service, "inspect_container_state", inspect)
+    monkeypatch.setattr(guardian_service.docker_service, "stop_container", stop)
+    guardian_service.accept_desired_state(42, _payload(desired_power_state="stopped"))
+
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    observed = guardian_service.observed_state(42)
+    assert stop_calls == ["msm-srv-42"]
+    assert observed["guardian_observed_state"] == "stopped"
+    assert observed["container_state"] == "exited"
+
+
+def test_missing_container_is_never_reported_healthy_without_health_checks(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    payload = _payload()
+    payload["guardian"]["health_checks"] = []
+    payload["payload_hash"] = canonical_payload_hash(payload)
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: None,
+    )
+    guardian_service.accept_desired_state(42, payload)
+    desired = guardian_service._load_desired(42)
+    assert desired is not None
+    runtime = guardian_service._load_runtime(42, desired)
+    runtime["state"] = "healthy"
+    guardian_service._save_runtime(42, runtime)
+
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    observed = guardian_service.observed_state(42)
+    assert observed["guardian_observed_state"] == "stopped"
+    assert observed["container_state"] == "missing"
+
+
+def test_docker_autorestart_enters_a_fresh_startup_grace_period(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    started_at = {"value": "2026-07-28T12:00:00Z"}
+    restart_calls: list[str] = []
+
+    def inspect(_name: str) -> dict:
+        return {
+            "status": "running",
+            "running": True,
+            "oom_killed": False,
+            "started_at": started_at["value"],
+            "port_bindings": {},
+        }
+
+    monkeypatch.setattr(guardian_service.docker_service, "inspect_container_state", inspect)
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "restart_container",
+        lambda name, **_kwargs: restart_calls.append(name) or {"ok": True},
+    )
+    guardian_service.accept_desired_state(
+        42,
+        _payload(startup_grace_seconds=30),
+    )
+    asyncio.run(guardian_service.reconcile_server(42))
+    desired = guardian_service._load_desired(42)
+    assert desired is not None
+    runtime = guardian_service._load_runtime(42, desired)
+    runtime["state"] = "healthy"
+    runtime["container_started_at"] = started_at["value"]
+    guardian_service._save_runtime(42, runtime)
+
+    started_at["value"] = "2026-07-28T12:05:00Z"
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    observed = guardian_service.observed_state(42)
+    assert observed["guardian_observed_state"] == "starting"
+    assert restart_calls == []
+    assert guardian_service.list_incidents(42) == []
+
+
+def test_spontaneous_healing_resolves_incident_and_resets_recovery_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: {
+            "status": "running",
+            "running": True,
+            "oom_killed": False,
+            "started_at": "2026-07-28T12:00:00Z",
+            "port_bindings": {},
+        },
+    )
+    guardian_service.accept_desired_state(42, _payload())
+    desired = guardian_service._load_desired(42)
+    assert desired is not None
+    runtime = guardian_service._load_runtime(42, desired)
+    diagnostic = {
+        "type": "process_not_running",
+        "confidence": "high",
+        "evidence": "synthetic transient failure",
+    }
+    guardian_service._upsert_active_incident(
+        desired,
+        runtime,
+        diagnostic["type"],
+        "open",
+        diagnostic,
+    )
+    runtime["state"] = "unhealthy"
+    runtime["recovery_stage"] = 1
+    runtime["attempts"] = [
+        {
+            "attempt": 1,
+            "stage": 0,
+            "action": "restart",
+            "at": datetime.now(timezone.utc).isoformat(),
+            "result": "failed",
+        }
+    ]
+    runtime["probe_states"]["process"] = {
+        "next_run_at": "2000-01-01T00:00:00Z",
+        "consecutive_failures": 1,
+        "consecutive_successes": 0,
+        "last_result": "unhealthy",
+    }
+    guardian_service._save_runtime(42, runtime)
+
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    healed = guardian_service._load_runtime(42, desired)
+    assert healed["state"] == "healthy"
+    assert healed["active_incident_uuid"] is None
+    assert healed["active_incident_type"] is None
+    assert healed["recovery_stage"] == 0
+    assert healed["attempts"] == []
+    incidents = guardian_service.list_incidents(42)
+    assert len(incidents) == 1
+    assert incidents[0]["status"] == "resolved"

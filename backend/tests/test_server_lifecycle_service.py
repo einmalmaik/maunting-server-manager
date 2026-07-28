@@ -9,6 +9,7 @@ are mocked so we test the orchestration and locking logic itself.
 import asyncio
 import json
 import threading
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -102,6 +103,107 @@ def test_queue_lifecycle_operation_kill_overrides_active_job_as_emergency():
         result = queue_lifecycle_operation(fake_db, fake_server, "kill")
         assert "queued" in str(result).lower() or result.get("operation") == "kill"
 
+    reset_lifecycle_jobs_for_tests()
+
+
+def test_kill_reports_docker_remove_failure() -> None:
+    fake_server = Server(
+        id=111,
+        name="KillFailure",
+        game_type="dayz",
+        status="running",
+        desired_power_state="running",
+    )
+    fake_db = MagicMock(spec=Session)
+
+    with patch(
+        "services.guardian_state_service.set_desired_power_state",
+    ), patch(
+        "services.server_lifecycle_service.sync_desired_state_to_agent",
+        return_value=False,
+    ), patch(
+        "services.server_lifecycle_service.docker_service.remove",
+        side_effect=RuntimeError("synthetic docker failure"),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            queue_lifecycle_operation(fake_db, fake_server, "kill")
+
+    assert exc.value.status_code == 500
+    assert fake_server.status != "stopped"
+
+
+def test_kill_cancels_inflight_start_before_container_creation(db: Session) -> None:
+    import services.server_lifecycle_service as lifecycle_service
+
+    server = Server(
+        name="KillDuringStart",
+        game_type="minecraft",
+        install_dir="/tmp/kill-during-start",
+        status="stopped",
+        desired_power_state="stopped",
+        public_bind_ip="127.0.0.1",
+    )
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    preparation_started = threading.Event()
+    release_preparation = threading.Event()
+    worker_finished = threading.Event()
+    plugin = MagicMock()
+    plugin.get_blueprint.return_value = None
+    plugin.check_for_mod_updates.return_value = []
+    plugin.start.return_value = {"ok": True}
+
+    def block_before_container_start(*_args, **_kwargs) -> None:
+        preparation_started.set()
+        release_preparation.wait(3)
+
+    def mark_worker_finished(*_args, **_kwargs) -> None:
+        worker_finished.set()
+
+    original_worker = lifecycle_service._run_lifecycle_job
+
+    def run_worker(*args, **kwargs) -> None:
+        try:
+            original_worker(*args, **kwargs)
+        finally:
+            mark_worker_finished()
+
+    with patch(
+        "services.server_lifecycle_service.get_plugin",
+        return_value=plugin,
+    ), patch(
+        "services.server_lifecycle_service._run_pre_start_backup_if_enabled",
+        side_effect=block_before_container_start,
+    ), patch(
+        "services.server_lifecycle_service.open_ports",
+    ), patch(
+        "services.server_lifecycle_service.iptables_accept_server",
+    ), patch(
+        "services.server_lifecycle_service.close_ports",
+    ), patch(
+        "services.server_lifecycle_service.iptables_revoke_server",
+    ), patch(
+        "services.server_lifecycle_service.docker_service.remove",
+        return_value={"ok": True},
+    ) as remove, patch(
+        "services.server_lifecycle_service._run_lifecycle_job",
+        side_effect=run_worker,
+    ):
+        queue_lifecycle_operation(db, server, "start")
+        assert preparation_started.wait(2)
+        queue_lifecycle_operation(db, server, "kill")
+        release_preparation.set()
+        assert worker_finished.wait(3)
+
+    plugin.start.assert_not_called()
+    assert remove.called
+    db.expire_all()
+    persisted = db.query(Server).filter(Server.id == server.id).first()
+    assert persisted is not None
+    assert persisted.desired_power_state == "stopped"
+    assert persisted.status == "stopped"
     reset_lifecycle_jobs_for_tests()
 
 
@@ -487,6 +589,7 @@ def test_lifecycle_job_applies_recovery_suspension(db: Session) -> None:
     plugin.start.return_value = {"ok": True}
 
     def fake_set(_db, _server, operation_id, reason, suspend_until):
+        assert suspend_until - datetime.now(timezone.utc) > timedelta(hours=3, minutes=59)
         _server.guardian_recovery_suspension = json.dumps({
             "operation_id": operation_id,
             "reason": reason,
@@ -868,5 +971,3 @@ def test_restart_server_sync_failure_reraises_original_exception(db: Session) ->
         db.refresh(server)
         assert server.status == "failed"
         assert "Simulation of restart failure" in server.status_message
-
-

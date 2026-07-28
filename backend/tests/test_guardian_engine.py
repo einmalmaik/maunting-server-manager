@@ -253,6 +253,52 @@ def test_incident_ingestion_is_uuid_idempotent_and_acks_after_commit(db: Session
     assert db.query(Incident).filter(Incident.uuid == incident_uuid).one().status == "resolved"
 
 
+def test_grouped_incident_delivery_updates_parent_status_and_attempts(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Notification delivery is a separate post-commit concern. Keeping its
+    # background DB session out of this StaticPool test makes the grouped
+    # incident transaction deterministic while preserving the real ACK path.
+    monkeypatch.setattr(
+        "services.guardian_incident_service._notify_guardian_incident",
+        lambda *_args, **_kwargs: None,
+    )
+    server = _server()
+    server.id = None
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+    client = MagicMock()
+    first_uuid = str(uuid.uuid4())
+    grouped_uuid = str(uuid.uuid4())
+
+    ingest_incidents_and_ack(
+        db,
+        server,
+        client,
+        "msm-srv-1",
+        [_agent_incident(server.id, first_uuid)],
+    )
+    grouped = _agent_incident(server.id, grouped_uuid)
+    grouped["payload"]["attempts"] = [{"attempt": 2, "result": "failed"}]
+    ingest_incidents_and_ack(db, server, client, "msm-srv-1", [grouped])
+
+    parent = db.query(Incident).filter(Incident.uuid == first_uuid).one()
+    assert parent.occurrences == 2
+    assert [attempt["attempt"] for attempt in json.loads(parent.attempts)] == [1, 2]
+
+    grouped["status"] = "resolved"
+    grouped["payload"]["attempts"] = [{"attempt": 2, "result": "recovered"}]
+    ingest_incidents_and_ack(db, server, client, "msm-srv-1", [grouped])
+    db.refresh(parent)
+
+    assert parent.status == "resolved"
+    assert parent.resolved_at is not None
+    assert parent.occurrences == 2
+    assert json.loads(parent.attempts)[-1]["result"] == "recovered"
+
+
 def test_database_failure_sends_no_incident_ack(db: Session) -> None:
     server = _server()
     server.id = None

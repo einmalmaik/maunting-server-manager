@@ -324,6 +324,33 @@ class RecoveryPolicy(StrictModel):
         "restart", "graceful_restart", "clear_declared_lock_files", "quarantine"
     ]
 
+    @field_validator("match")
+    @classmethod
+    def _supported_match(cls, value: str) -> str:
+        supported = {
+            "process_not_running",
+            "tcp_connect_failed",
+            "udp_mapping_missing",
+            "http_redirect_rejected",
+            "http_response_too_large",
+            "http_unexpected_status",
+            "http_request_failed",
+            "minecraft_query_failed",
+            "minecraft_status_failed",
+            "source_query_failed",
+            "linux-oom",
+            "port-conflict",
+            "java-stacktrace",
+            "nodejs-stacktrace",
+            "missing-runtime",
+            "corrupted-config",
+            "startup-pattern",
+            "probe_failed",
+        }
+        if value not in supported:
+            raise ValueError(f"unsupported recovery match: {value}")
+        return value
+
 
 class RecoveryConfig(StrictModel):
     policies: list[RecoveryPolicy] = Field(default_factory=list, max_length=16)
@@ -373,6 +400,7 @@ class DesiredState(StrictModel):
     generation: int = Field(ge=1, le=9_223_372_036_854_775_807)
     payload_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     desired_power_state: Literal["running", "stopped"]
+    guardian_enabled: bool = True
     recovery_suspension: RecoverySuspension | None = None
     quarantine_control: QuarantineControl | None = None
     guardian: GuardianConfig

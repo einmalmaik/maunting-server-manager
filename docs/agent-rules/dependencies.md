@@ -495,3 +495,36 @@ Entfernbarkeit / Exit-Plan:
 
 Diese Trennung stellt sicher, dass moto niemals in Produktion landet und
 die transitive Flaeche in Prod minimal bleibt.
+
+14. pytest-asyncio==1.4.0 (Test-Only-Dependency, niedriges Risiko)
+
+Problem:
+  Scheduler-, Streaming- und Multi-Node-Tests enthalten echte async Testfälle.
+  Ohne ein registriertes Asyncio-Pytest-Plugin werden diese Tests nicht
+  ausgeführt und können trotz vorhandener Assertions keine Regression erkennen.
+
+Notwendigkeit:
+  Eigene Pytest-Hooks oder wiederholte asyncio.run-Wrapper würden
+  Test-Infrastruktur duplizieren und Fixture-/Cancellation-Verhalten nur
+  unvollständig nachbauen. pytest-asyncio ist die offizielle, fokussierte
+  Pytest-Erweiterung für asyncio-Tests.
+
+Security:
+  Ausschließlich Dev/Test. Kein Import in Produktion, kein Netzwerkzugriff
+  durch das Plugin und kein Zugriff auf Server-Credentials oder Runtime-State.
+
+Wartung und Advisories:
+  Version 1.4.0 wurde am 2026-05-26 veröffentlicht, unterstützt Python
+  3.10-3.14 und ist auf PyPI als Production/Stable klassifiziert. Zum
+  Prüfzeitpunkt 2026-07-28 waren keine offenen Security Advisories bekannt.
+
+Transitive Fläche und Lizenz:
+  Kleine Testfläche auf Basis des bereits genutzten pytest; Apache-2.0.
+
+Kapselung:
+  Ausschließlich pytest-Plugin-Aktivierung über backend/dev-requirements.txt
+  und @pytest.mark.asyncio in backend/tests/. Kein Runtime-Import.
+
+Exit-Plan:
+  Markierte Tests auf explizite asyncio.run-Szenarien umstellen und den einen
+  Eintrag aus dev-requirements.txt entfernen.

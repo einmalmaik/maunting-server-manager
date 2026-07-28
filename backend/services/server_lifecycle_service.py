@@ -26,6 +26,7 @@ from services.install_update_lock_service import (
 )
 
 logger = logging.getLogger(__name__)
+_LIFECYCLE_GUARDIAN_LEASE = timedelta(hours=4)
 
 # Per-Server Serialisierungs-Lock. threading.Lock (nicht reentrant) damit
 # ein Lifecycle-Job sich nicht selbst nochmal greifen kann. Wird sowohl
@@ -37,8 +38,13 @@ _LIFECYCLE_LOCKS: dict[int, threading.Lock] = {}
 _LIFECYCLE_LOCKS_GUARD = threading.Lock()
 _ACTIVE_JOBS: set[int] = set()
 _ACTIVE_JOBS_LOCK = threading.Lock()
+_OPERATION_EPOCHS: dict[int, int] = {}
 
 LifecycleOperation = str
+
+
+class LifecycleOperationCancelled(RuntimeError):
+    """Raised when a newer operation invalidates an in-flight lifecycle job."""
 
 
 def _extract_agent_recovery_suspension_op_id(server: Server) -> str | None:
@@ -71,7 +77,10 @@ def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str)
         server,
         operation_id=op_id,
         reason=reason,
-        suspend_until=datetime.now(timezone.utc) + timedelta(minutes=15),
+        # First installs and large Wine/Proton updates legitimately exceed
+        # fifteen minutes. Use the contract's bounded maximum so Guardian
+        # cannot recover or quarantine during a still-running panel action.
+        suspend_until=datetime.now(timezone.utc) + _LIFECYCLE_GUARDIAN_LEASE,
     )
 
     try:
@@ -244,6 +253,7 @@ def _run_pre_start_backup_if_enabled(db: Session, server: Server, *, context: st
 def reset_lifecycle_jobs_for_tests() -> None:
     with _ACTIVE_JOBS_LOCK:
         _ACTIVE_JOBS.clear()
+        _OPERATION_EPOCHS.clear()
 
 
 def _mark_job_active(server_id: int) -> bool:
@@ -257,6 +267,28 @@ def _mark_job_active(server_id: int) -> bool:
 def _mark_job_done(server_id: int) -> None:
     with _ACTIVE_JOBS_LOCK:
         _ACTIVE_JOBS.discard(server_id)
+
+
+def _advance_operation_epoch(server_id: int) -> int:
+    with _ACTIVE_JOBS_LOCK:
+        epoch = _OPERATION_EPOCHS.get(server_id, 0) + 1
+        _OPERATION_EPOCHS[server_id] = epoch
+        return epoch
+
+
+def _operation_is_current(server_id: int, operation_epoch: int) -> bool:
+    with _ACTIVE_JOBS_LOCK:
+        return _OPERATION_EPOCHS.get(server_id) == operation_epoch
+
+
+def _ensure_operation_current(server_id: int, operation_epoch: int | None) -> None:
+    if operation_epoch is not None and not _operation_is_current(
+        server_id,
+        operation_epoch,
+    ):
+        raise LifecycleOperationCancelled(
+            f"Lifecycle operation for server {server_id} was cancelled"
+        )
 
 
 def _operation_status(operation: LifecycleOperation) -> str:
@@ -352,21 +384,32 @@ def queue_lifecycle_operation(
         # Das loest das User-Problem "Kill bringt den Server nicht aus der Warteschlange".
         from services.guardian_state_service import set_desired_power_state
 
-        with guardian_recovery_suspension_lease(db, server, "lifecycle-kill"):
-            set_desired_power_state(db, server, "stopped")
-            sync_desired_state_to_agent(db, server)
+        _advance_operation_epoch(server.id)
+        set_desired_power_state(db, server, "stopped")
+        sync_desired_state_to_agent(db, server)
 
-            container = container_name_for(server.id)
-            try:
-                docker_service.remove(container, force=True, node=server.node)
-            except Exception:
-                pass
+        container = container_name_for(server.id)
+        try:
+            remove_result = docker_service.remove(
+                container,
+                force=True,
+                node=server.node,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Erzwungenes Beenden fehlgeschlagen",
+            ) from exc
+        if isinstance(remove_result, dict) and remove_result.get("error"):
+            raise HTTPException(
+                status_code=500,
+                detail="Erzwungenes Beenden fehlgeschlagen",
+            )
 
-            _mark_job_done(server.id)
-            server.status = "stopped"
-            server.status_message = "Erzwungen beendet (Kill)"
-            server.last_started_at = None
-            db.commit()
+        server.status = "stopped"
+        server.status_message = "Erzwungen beendet (Kill)"
+        server.last_started_at = None
+        db.commit()
 
         from services.change_timeline_service import log_change_event
         log_change_event(db, server.id, "stop", "Server erzwungen beendet.")
@@ -406,7 +449,13 @@ def queue_lifecycle_operation(
             # effort; periodic reconciliation retries network failures.
             sync_desired_state_to_agent(db, server)
         _set_status(db, server, "queued", f"{operation} queued")
-        _start_lifecycle_thread(server.id, operation, notification or LifecycleNotification())
+        operation_epoch = _advance_operation_epoch(server.id)
+        _start_lifecycle_thread(
+            server.id,
+            operation,
+            notification or LifecycleNotification(),
+            operation_epoch,
+        )
     except Exception as exc:
         _mark_job_done(server.id)
         _set_status(db, server, "failed", "Lifecycle-Worker konnte nicht gestartet werden")
@@ -423,10 +472,11 @@ def _start_lifecycle_thread(
     server_id: int,
     operation: LifecycleOperation,
     notification: LifecycleNotification,
+    operation_epoch: int,
 ) -> None:
     thread = threading.Thread(
         target=_run_lifecycle_job,
-        args=(server_id, operation, notification),
+        args=(server_id, operation, notification, operation_epoch),
         daemon=True,
         name=f"msm-lifecycle-{server_id}-{operation}",
     )
@@ -437,11 +487,15 @@ def _run_lifecycle_job(
     server_id: int,
     operation: LifecycleOperation,
     notification: LifecycleNotification | None = None,
+    operation_epoch: int | None = None,
 ) -> None:
+    if operation_epoch is None:
+        operation_epoch = _advance_operation_epoch(server_id)
     db = SessionLocal()
     lock = get_server_lifecycle_lock(server_id)
     try:
         with lock:
+            _ensure_operation_current(server_id, operation_epoch)
             server = db.query(Server).filter(Server.id == server_id).first()
             if not server:
                 return
@@ -454,15 +508,32 @@ def _run_lifecycle_job(
             with guardian_recovery_suspension_lease(db, server, f"lifecycle-{operation}"):
                 try:
                     if operation == "start":
-                        _run_start(db, server, plugin)
+                        _run_start(
+                            db,
+                            server,
+                            plugin,
+                            operation_epoch=operation_epoch,
+                        )
                     elif operation == "stop":
                         _run_stop(db, server, plugin)
                     elif operation == "restart":
-                        _run_restart(db, server, plugin)
+                        _run_restart(
+                            db,
+                            server,
+                            plugin,
+                            operation_epoch=operation_epoch,
+                        )
                     elif operation == "kill":
                         _run_kill(db, server)
                     if notification and notification.enabled:
                         _send_lifecycle_notification(notification, server.name, _operation_done_text(operation))
+                except LifecycleOperationCancelled:
+                    db.rollback()
+                    logger.info(
+                        "Lifecycle-%s fuer Server %s wurde durch eine neuere Operation abgebrochen",
+                        operation,
+                        server_id,
+                    )
                 except Exception as exc:
                     db.rollback()
                     server = db.query(Server).filter(Server.id == server_id).first()
@@ -707,7 +778,13 @@ def _try_start_auth_setup_recovery(
     return True
 
 
-def _run_start(db: Session, server: Server, plugin) -> None:
+def _run_start(
+    db: Session,
+    server: Server,
+    plugin,
+    *,
+    operation_epoch: int | None = None,
+) -> None:
     from blueprints.schema import BlueprintUpdateStrategy
 
     _ensure_bind_ip(server)
@@ -759,11 +836,13 @@ def _run_start(db: Session, server: Server, plugin) -> None:
             release_install_update_lock(server.id)
 
     db.refresh(server)
+    _ensure_operation_current(server.id, operation_epoch)
     _append_console_log(
         server.id,
         "[MSM] Start-Vorbereitung: Datei-/Mod-Updates abgeschlossen, optional Backup, dann Container.\n",
     )
     _run_pre_start_backup_if_enabled(db, server, context="Start")
+    _ensure_operation_current(server.id, operation_epoch)
 
     ports_list = _ports(server)
     open_ports(server.name, ports_list, node=server.node)
@@ -779,6 +858,18 @@ def _run_start(db: Session, server: Server, plugin) -> None:
         if server.node is None or server.node.is_local:
             iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         raise
+    if operation_epoch is not None and not _operation_is_current(
+        server.id,
+        operation_epoch,
+    ):
+        docker_service.remove(
+            container_name_for(server.id),
+            force=True,
+            node=server.node,
+        )
+        raise LifecycleOperationCancelled(
+            f"Lifecycle start for server {server.id} was cancelled"
+        )
     if "error" in result:
         close_ports(ports_list, node=server.node, name=server.name)
         if server.node is None or server.node.is_local:
@@ -831,7 +922,13 @@ def _run_kill(db: Session, server: Server) -> None:
         iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
 
 
-def _run_restart(db: Session, server: Server, plugin) -> None:
+def _run_restart(
+    db: Session,
+    server: Server,
+    plugin,
+    *,
+    operation_epoch: int | None = None,
+) -> None:
     from blueprints.schema import BlueprintUpdateStrategy
 
     _ensure_bind_ip(server)
@@ -892,7 +989,9 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
             release_install_update_lock(server.id)
 
     db.refresh(server)
+    _ensure_operation_current(server.id, operation_epoch)
     _run_pre_start_backup_if_enabled(db, server, context="Restart")
+    _ensure_operation_current(server.id, operation_epoch)
 
     ports_list = _ports(server)
     open_ports(server.name, ports_list, node=server.node)
@@ -908,6 +1007,18 @@ def _run_restart(db: Session, server: Server, plugin) -> None:
         if server.node is None or server.node.is_local:
             iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         raise
+    if operation_epoch is not None and not _operation_is_current(
+        server.id,
+        operation_epoch,
+    ):
+        docker_service.remove(
+            container_name_for(server.id),
+            force=True,
+            node=server.node,
+        )
+        raise LifecycleOperationCancelled(
+            f"Lifecycle restart for server {server.id} was cancelled"
+        )
     if "error" in start_result:
         close_ports(ports_list, node=server.node, name=server.name)
         if server.node is None or server.node.is_local:
@@ -1132,4 +1243,3 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
         "backup_id": getattr(backup_record, "id", None),
         "status": server.status,
     }
-

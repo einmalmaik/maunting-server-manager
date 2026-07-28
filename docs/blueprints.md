@@ -574,85 +574,147 @@ Plattenplatz/Quota, Berechtigungen oder paralleler Zugriff die Ursache waren.
 
 ## Guardian Autonomous Engine (Autopilot)
 
-Der Blueprint beschreibt über die Autopilot-Konfiguration, wie ein gesunder Serverlauf aussieht, welche Logdateien überwacht werden, welche Fehler klassifiziert werden können und welche automatischen Heilungsmaßnahmen zulässig sind.
+Guardian ist pro Blueprint opt-in. Sobald mindestens einer der Blöcke `health`,
+`logs`, `diagnostics`, `recovery` oder `backups` vorhanden ist, synchronisiert
+das Panel den Guardian-Vertrag zum zuständigen Node. Fehlen alle Blöcke, meldet
+der Agent den Zustand `disabled` und verändert den Container nicht. Das Beispiel
+[`generic_github_bot.blueprint.json`](templates/generic_github_bot.blueprint.json)
+zeigt diesen bewussten Opt-out.
 
-Das System gliedert sich in folgende optionale Blöcke:
+Der Agent erzwingt den im Backend autorisierten Sollzustand, serialisiert
+Lifecycle- und Recovery-Aktionen pro Server und erkennt einen neuen
+Container-Start anhand von Dockers `started_at`. Ein normaler Docker-Autorestart
+beginnt deshalb wieder mit Startup-Grace und verbraucht nicht sofort ein
+Recovery-Budget. Ein `stopped`-Sollzustand stoppt einen trotzdem laufenden
+Container; ein fehlender Container mit `running`-Sollzustand wird durch das Panel
+über den normalen Lifecycle-Pfad neu erstellt.
 
-### 1. `health` (Gesundheitsprüfungen)
-Steuert das Monitoring des Servers:
-* `process.required` (Boolean, Default `true`): Ob der Hauptprozess laufen muss.
-* `port` (Objekt): Verbindungsprüfung für einen Port.
-  * `protocol`: `"tcp"` oder `"udp"`
-  * `port`: Der zu prüfende Port (z. B. `"{GAME_PORT}"` oder `"{{SERVER_PORT}}"`).
-  * `timeout`: Wartezeit bis zum Timeout (z. B. `"3s"`).
-* `application` (Objekt): Anwendungsspezifische Abfragen (Liveness Probes).
-  * `type`: Der Query-Typ (z. B. `"minecraft-query"`).
-  * `interval`: Intervall zwischen Abfragen (z. B. `"30s"`).
-  * `failure_threshold`: Anzahl Fehlversuche vor Einstufung als ungesund.
-* `startup` (Objekt): Log-Mustererkennung beim Serverstart.
-  * `success_patterns`: Logzeilen, die einen erfolgreichen Start markieren.
-  * `failure_patterns`: Logzeilen, die auf einen direkten Startabbruch hindeuten.
+### `health`
 
-### 2. `logs` (Protokollierung & Schwärzung)
-* `sources`: Relative Dateipfade oder Globs (z. B. `["stdout", "logs/latest.log"]`) der zu sammelnden Logs.
-* `redact`: Liste von Keys, die vor Speicherung und Übertragung geschwärzt werden sollen (z. B. `["discord_token", "api_key"]`).
+Es gibt höchstens je einen Prozess-, Port- und Anwendungs-Check. Die IDs aller
+aktivierten Checks müssen eindeutig sein.
 
-### 3. `diagnostics` (Fehleranalyse)
-* `parsers`: Liste aktivierter Parser zur Incident-Klassifizierung (z. B. `["java-stacktrace", "linux-oom", "network-bind-error"]`).
+Gemeinsame Check-Felder:
 
-### 4. `recovery` (Selbstheilungs-Richtlinien)
-Definiert automatisierte Reaktionen auf bestimmte Vorfälle (Eskalationsleiter):
-* `policies`: Liste von Regeln, bestehend aus `match` (Fehlerklassifikation) und `action` (Reparaturmaßnahme).
-  ```json
-  "policies": [
-    { "match": "port_conflict", "action": "resolve_managed_port_conflict" },
-    { "match": "corrupted_config", "action": "restore_last_known_good_config" }
-  ]
-  ```
+- `id`: `^[a-z][a-z0-9_-]{0,63}$`
+- `interval`: Dauer wie `500ms`, `15s` oder `2m`
+- `failure_threshold`: 1–20 aufeinanderfolgende Fehler
+- `success_threshold`: 1–20 aufeinanderfolgende Erfolge
+- `required_for_startup`: muss während der Startphase erfolgreich sein
+- `required_for_verification`: muss nach einer Recovery stabil erfolgreich sein
 
-### 5. `updates` (Update-Transaktionen)
-* `strategy`: Update-Strategie (z. B. `"snapshot-then-update"`).
-* `health_verification`: Ob nach einem Update zwingend eine Liveness-Prüfung erfolgen muss (`"required"`).
-* `rollback_on_failure` (Boolean): Ob bei fehlgeschlagener Prüfung das Update automatisch zurückgerollt wird.
+`process` ergänzt `required` (Default `true`). Der Prozesszustand bleibt auch
+ohne weitere Checks die Container-Basisinvariante.
 
-### 6. `backups` (Daten- und Snapshot-Schutz)
-* `before_risky_action` (Boolean): Ob vor automatischen Reparaturen/Updates Snapshots erstellt werden sollen.
-* `protected_paths`: Ordner und Dateien, die niemals automatisch bereinigt oder gelöscht werden dürfen (z. B. `["world/", "config/"]`). Trailing-Slashes werden bei Pfadprüfungen automatisch bereinigt.
+`port` ergänzt `protocol` (`tcp` oder `udp`), `port` und `timeout`. TCP baut eine
+echte Verbindung auf. UDP kann protokollbedingt nur verifizieren, dass Docker den
+erwarteten Host-Port veröffentlicht. Portwerte verwenden ausschließlich
+`{{SERVER_PORT}}`, `{{GAME_PORT}}`, `{{QUERY_PORT}}`, `{{RCON_PORT}}`,
+`{{VOICE_PORT}}`, `{{WEB_PORT}}` oder `{{PORT:<rolle>}}`.
 
-### 7. Custom Autopilot Drivers (Eigene Treiber)
-Der Guardian Agent lädt Treiber (Probes) dynamisch zur Laufzeit aus dem Verzeichnis `msm-agent/services/guardian_probes/`. Jeder Treiber ist eine einzelne `.py`-Datei.
+`application.type` ist exakt einer der eingebauten Typen:
 
-#### Entwicklung eines Custom-Treibers:
-1. Erstelle eine neue Python-Datei im Verzeichnis, z. B. `my_custom_probe.py`.
-2. Deklariere den eindeutigen Treiber-Typ als `PROBE_TYPE`.
-3. Implementiere die asynchrone `execute`-Methode.
+- `tcp`
+- `http-ping`
+- `minecraft-status`
+- `minecraft-query`
+- `source-query`
 
-Beispiel für `services/guardian_probes/my_custom_probe.py`:
-```python
-from __future__ import annotations
-import asyncio
-from services.guardian_contract import ProbeConfig
-from services.guardian_probes import ProbeResult, _result
+Zusätzliche Felder sind `timeout`, optional `port`, `expected_statuses` (100–599),
+`max_response_bytes` (1–1.048.576) und die gemeinsamen Check-Felder.
+`path` ist nur bei `http-ping` erlaubt und beginnt mit `/`. Redirects werden aus
+SSRF-Sicherheitsgründen nicht verfolgt; `follow_redirects` muss `false` bleiben.
+Freie/custom Probe-Typen sind absichtlich nicht Teil des Blueprint-Vertrags und
+können weder über JSON noch über den Webeditor aktiviert werden.
 
-PROBE_TYPE = "my-custom-probe"
+`startup`:
 
-async def execute(config: ProbeConfig, container_name: str) -> ProbeResult:
-    import time
-    started = time.monotonic()
-    
-    # Eigene Abfragelogik (z. B. TCP, UDP oder API-Aufrufe)
-    # Hier simulieren wir eine erfolgreiche Prüfung:
-    healthy = True 
-    
-    return _result(
-        started,
-        healthy,
-        "my_custom_probe_ok" if healthy else "my_custom_probe_failed",
-        details="Zusätzliche Metadaten können hier übergeben werden"
-    )
-```
+- `grace_period_seconds`: 0–600
+- `timeout_seconds`: 1–3600 und größer als die Grace Period
+- `success_patterns`, `failure_patterns`: je maximal 16 sichere reguläre
+  Ausdrücke; Backreferences, Lookarounds und riskante verschachtelte
+  Quantifizierer werden abgelehnt.
 
-> [!CAUTION]
-> **Sicherheits-Invariante**: Custom-Treiber laufen direkt im Kontext des Agenten auf dem Host-Betriebssystem. Aus Sicherheitsgründen dürfen Treiber **niemals** über das Web-Dashboard hochgeladen oder editiert werden. Sie können ausschließlich lokal auf dem Node (z. B. via SSH) abgelegt werden, um unberechtigte Remote-Code-Ausführung (RCE) zu verhindern.
+### `logs` und `diagnostics`
 
+`logs.sources` enthält maximal 16 Einträge: `stdout` oder sichere relative Pfade
+mit höchstens einem einfachen Dateinamen-Wildcard, beispielsweise
+`logs/*.log`. `max_tail_bytes` liegt zwischen 1.024 und 1.048.576.
+
+Vor Persistierung oder Übertragung werden die in `logs.redact` gewählten
+Redactoren angewendet. Erlaubt sind `discord_token`, `api_key`,
+`authorization_header`, `database_url`, `jwt` sowie geprüfte Einträge mit dem
+Präfix `regex:`.
+
+`diagnostics.parsers` erlaubt ausschließlich `linux-oom`, `java-stacktrace`,
+`nodejs-stacktrace`, `port-conflict`, `missing-runtime`, `corrupted-config` und
+`startup-pattern`.
+
+### `recovery`
+
+Eine Policy verbindet einen exakten `match` mit einer registrierten `action`.
+Freitext ist nicht zulässig, weil ein Tippfehler sonst eine scheinbar
+konfigurierte, aber wirkungslose Recovery erzeugen würde.
+
+Erlaubte Aktionen:
+
+- `restart`: Docker-Restart des vorhandenen Containers
+- `graceful_restart`: Stop mit Grace Period, danach Start
+- `clear_declared_lock_files`: ausschließlich explizit deklarierte reguläre
+  Lockdateien entfernen; Symlinks, Traversal, Globs und geschützte Pfade werden
+  abgelehnt
+- `quarantine`: Autonomie stoppen und eine explizite Admin-Freigabe verlangen
+
+Erlaubte Matches:
+
+`process_not_running`, `tcp_connect_failed`, `udp_mapping_missing`,
+`http_redirect_rejected`, `http_response_too_large`, `http_unexpected_status`,
+`http_request_failed`, `minecraft_query_failed`, `minecraft_status_failed`,
+`source_query_failed`, `linux-oom`, `port-conflict`, `java-stacktrace`,
+`nodejs-stacktrace`, `missing-runtime`, `corrupted-config`, `startup-pattern`
+und `probe_failed`.
+
+Mehrere Policies mit demselben Match bilden dessen kleine Eskalationsleiter.
+`max_attempts` (1–10), `attempt_window_seconds` (60–86.400) und
+`cooldown_seconds` (1–3.600) begrenzen Schleifen. Ein neuer, unabhängiger
+Fehlertyp erhält ein frisches Budget. Nach spontaner Heilung oder erfolgreicher
+Verification werden Incident, Stufe und Budget zurückgesetzt.
+
+`verification` verlangt eine stabile Erholung:
+
+- `minimum_healthy_duration_seconds`: 0–600
+- `required_consecutive_successes`: 1–20
+- `verification_timeout_seconds`: 5–3600
+
+`safe_lock_files` enthält maximal 32 Paare aus sicherem relativen `path` und
+verständlichem `reason`. Nur diese Pfade darf
+`clear_declared_lock_files` anfassen.
+
+### `backups`
+
+`protected_paths` sind sichere relative Pfade, die keine autonome
+Lockfile-Aktion berühren darf. Bei `before_risky_action: true` sichert der Agent
+jede vorhandene deklarierte Lockdatei vor dem Löschen bytegenau unter
+`/var/lib/msm-agent/guardian/recovery-backups/<server-id>/<backup-id>/`. Dateien
+über 1 MiB werden abgelehnt; pro Server bleiben die zehn neuesten Snapshots.
+Die Verzeichnisse sind nur für den Agent-Betreiber lesbar. Wiederherstellung
+erfolgt bewusst manuell nach Prüfung des Incidents.
+
+### Beispiele und Webeditor-Parität
+
+Alle Guardian-Felder sind im Blueprint-Webeditor verfügbar; Änderungen an
+einzelnen Feldern erhalten unbekannte Geschwisterwerte verlustfrei. Die
+gemeinsame Maximal-Fixture wird sowohl vom Backend-Schema als auch vom
+Frontend-Roundtrip-Test geprüft.
+
+- [`guardian_autonomous_bot.blueprint.json`](templates/guardian_autonomous_bot.blueprint.json):
+  vollständige autonome Konfiguration
+- [`generic_github_bot.blueprint.json`](templates/generic_github_bot.blueprint.json):
+  bewusster Betrieb ohne Guardian
+- [`standard_steam_server.blueprint.json`](templates/standard_steam_server.blueprint.json):
+  konservativer Standard mit Prozess-/Portüberwachung und begrenztem Restart
+
+Ein `updates`- oder freier Custom-Treiber-Block wird nicht akzeptiert. MSM
+verspricht damit weder automatische Update-Rollbacks noch hostseitige
+Codeausführung, die in der Runtime nicht sicher implementiert ist.
 

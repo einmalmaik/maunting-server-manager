@@ -75,5 +75,14 @@ describe('SelfHostingDocs', () => {
 
     expect(document.querySelector('a[href="#deployment-units"]')).toBeInTheDocument()
     expect(document.querySelector('a[href="#component-migration"]')).toBeInTheDocument()
+    expect(document.querySelector('a[href="#guardian-state"]')).toBeInTheDocument()
+  })
+
+  it('documents Guardian state backup, restore and split-brain boundaries', () => {
+    renderPage()
+    expect(screen.getByText('/var/lib/msm-agent/guardian', { exact: false })).toBeInTheDocument()
+    expect(screen.getByText(/MSM_GUARDIAN_STATE_DIR/)).toBeInTheDocument()
+    expect(screen.getByText(/must never be active on two nodes at once/i)).toBeInTheDocument()
+    expect(screen.getByText(/Stop the agent, restore the path/i)).toBeInTheDocument()
   })
 })

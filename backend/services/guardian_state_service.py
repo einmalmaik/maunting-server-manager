@@ -181,6 +181,24 @@ def request_quarantine_clear(
     *,
     operation_id: str,
 ) -> None:
+    changed = prepare_quarantine_clear(server, operation_id=operation_id)
+    if not changed:
+        return
+    try:
+        db.commit()
+        db.refresh(server)
+    except Exception:
+        db.rollback()
+        db.refresh(server)
+        raise
+
+
+def prepare_quarantine_clear(
+    server: Server,
+    *,
+    operation_id: str,
+) -> bool:
+    """Apply a quarantine-clear intent without owning the caller transaction."""
     try:
         if str(uuid.UUID(operation_id)) != operation_id.lower():
             raise ValueError("operation_id must be a canonical UUID")
@@ -195,18 +213,12 @@ def request_quarantine_clear(
             pass
 
     if current and current.get("clear") is True and current.get("operation_id") == operation_id.lower():
-        return
+        return False
 
-    try:
-        server.guardian_quarantine_control = json.dumps(
-            {"clear": True, "operation_id": operation_id.lower()},
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        server.desired_state_generation = int(server.desired_state_generation or 0) + 1
-        db.commit()
-        db.refresh(server)
-    except Exception:
-        db.rollback()
-        db.refresh(server)
-        raise
+    server.guardian_quarantine_control = json.dumps(
+        {"clear": True, "operation_id": operation_id.lower()},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    server.desired_state_generation = int(server.desired_state_generation or 0) + 1
+    return True

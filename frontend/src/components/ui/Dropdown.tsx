@@ -101,7 +101,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
     }, [align, open])
 
     return (
-      <div ref={ref} className={cx('relative', className)}>
+      <div ref={ref} className={cx('relative min-w-0 w-full max-w-full', className)}>
         <div ref={rootRef}>
           <button
             id={id}
@@ -116,7 +116,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
             data-testid={testId}
             onClick={() => !disabled && setOpen((current) => !current)}
             className={cx(
-              'msm-input flex h-10 items-center justify-between gap-2 px-3 text-left disabled:cursor-not-allowed disabled:opacity-50',
+              'msm-input flex h-10 min-w-0 max-w-full items-center justify-between gap-2 px-3 text-left disabled:cursor-not-allowed disabled:opacity-50',
               open && 'border-primary ring-2 ring-primary/25',
               buttonClassName,
             )}

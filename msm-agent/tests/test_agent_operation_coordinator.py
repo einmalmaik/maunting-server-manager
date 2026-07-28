@@ -8,6 +8,7 @@ import pytest
 from services.agent_operation_coordinator import (
     InvalidServerOperation,
     is_operation_active,
+    is_operation_held_by_context,
     operation,
     operation_async,
     reset_operation_coordinator_for_tests,
@@ -48,6 +49,14 @@ def test_same_server_operations_are_serialized_across_threads() -> None:
     first_thread.join(2)
     second_thread.join(2)
     assert second_entered.is_set()
+
+
+def test_lock_ownership_propagates_to_an_async_worker_thread() -> None:
+    with operation(42):
+        assert is_operation_held_by_context(42) is True
+        assert asyncio.run(
+            asyncio.to_thread(is_operation_held_by_context, 42)
+        ) is True
 
 
 def test_different_servers_can_run_concurrently() -> None:

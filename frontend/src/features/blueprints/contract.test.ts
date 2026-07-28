@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import maximalGuardianBlueprint from '../../../../tests/fixtures/guardian_blueprint_maximal.json'
+import type { BlueprintDraft } from './contract'
 import { changeBlueprintSource, createBlueprintDraft, getBlueprintCollision, normalizeBlueprintDraft, validateBlueprintDraft } from './contract'
 
 describe('Blueprint builder contract', () => {
@@ -35,5 +37,63 @@ describe('Blueprint builder contract', () => {
     expect(getBlueprintCollision(entries, 'native_bp', false)).toBe('native-blocked')
     expect(getBlueprintCollision(entries, 'community_bp', false)).toBe('community-confirm')
     expect(getBlueprintCollision(entries, 'community_bp', true)).toBe('none')
+  })
+
+  it('round-trips every Guardian field without deleting or rewriting JSON-only settings', () => {
+    const draft = structuredClone(maximalGuardianBlueprint) as BlueprintDraft
+    expect(validateBlueprintDraft(draft)).toEqual([])
+    expect(normalizeBlueprintDraft(draft)).toEqual(maximalGuardianBlueprint)
+  })
+
+  it('keeps startup timing when no log pattern is configured', () => {
+    const draft = createBlueprintDraft()
+    draft.health!.startup = {
+      grace_period_seconds: 75,
+      timeout_seconds: 600,
+      success_patterns: [],
+      failure_patterns: [],
+    }
+    expect(normalizeBlueprintDraft(draft).health?.startup).toEqual(draft.health!.startup)
+  })
+
+  it('rejects Guardian values that the runtime cannot execute', () => {
+    const draft = createBlueprintDraft()
+    ;(draft.health!.application as { type: string }).type = 'custom-probe'
+    draft.diagnostics!.parsers = ['custom-parser' as never]
+    draft.recovery!.policies = [{ match: 'custom-signal', action: 'custom-action' as never }]
+    draft.logs!.redact = ['password']
+
+    expect(validateBlueprintDraft(draft).map(issue => issue.key)).toEqual(expect.arrayContaining([
+      'blueprintBuilder.validation.healthAppTypeUnsupported',
+      'blueprintBuilder.validation.diagnosticsParser',
+      'blueprintBuilder.validation.recoveryMatchUnsupported',
+      'blueprintBuilder.validation.recoveryActionUnsupported',
+      'blueprintBuilder.validation.logsRedactor',
+    ]))
+  })
+
+  it('mirrors backend limits for regexes, log paths, protected paths, startup and recovery budgets', () => {
+    const draft = createBlueprintDraft()
+    draft.health!.startup = {
+      grace_period_seconds: 601,
+      timeout_seconds: 600,
+      success_patterns: ['(a+)+'],
+      failure_patterns: Array.from({ length: 17 }, (_, index) => `failure-${index}`),
+    }
+    draft.logs!.sources = ['../secret.log', 'logs/**/latest.log']
+    draft.logs!.redact = ['regex:(token+)+']
+    draft.backups!.protected_paths = ['world/*']
+    draft.recovery!.max_attempts = 11
+    draft.recovery!.verification = { ...draft.recovery!.verification, verification_timeout_seconds: 4 }
+
+    expect(validateBlueprintDraft(draft).map(issue => issue.key)).toEqual(expect.arrayContaining([
+      'blueprintBuilder.validation.healthStartupTimeout',
+      'blueprintBuilder.validation.guardianArrayLimit',
+      'blueprintBuilder.validation.guardianRegex',
+      'blueprintBuilder.validation.logsSource',
+      'blueprintBuilder.validation.logsRedactor',
+      'blueprintBuilder.validation.unsafePath',
+      'blueprintBuilder.validation.recoveryBounds',
+    ]))
   })
 })

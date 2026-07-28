@@ -11,3 +11,7 @@
 # Dependency-Entscheidung dokumentiert in docs/agent-rules/dependencies.md
 # (Sektion: S3-Backup-Dependencies).
 moto[s3]==5.2.2
+
+# Asyncio-Testausführung für echte Scheduler-, Streaming- und Multi-Node-Tests.
+# Test-only; keine Produktionseinbindung und kein Zugriff auf Runtime-Secrets.
+pytest-asyncio==1.4.0

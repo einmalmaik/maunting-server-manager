@@ -200,8 +200,7 @@ class TestCrossAreaRunningLiveNoRestart:
              patch("routers.servers.docker_service.stop") as mock_stop, \
              patch("routers.servers.docker_service.remove") as mock_remove, \
              patch("routers.servers.docker_service.start") as mock_start, \
-             patch("routers.servers.is_lifecycle_job_active", return_value=False), \
-             patch("routers.servers.get_plugin") as mock_plugin:
+             patch("routers.servers.is_lifecycle_job_active", return_value=False):
             response = client.patch(
                 f"/api/servers/{test_server.id}",
                 json={"cpu_limit_percent": 200, "ram_limit_mb": 4096},
@@ -216,7 +215,6 @@ class TestCrossAreaRunningLiveNoRestart:
         mock_stop.assert_not_called()
         mock_remove.assert_not_called()
         mock_start.assert_not_called()
-        mock_plugin.assert_not_called()
         # Status remains running
         db.refresh(test_server)
         assert test_server.status == original_status

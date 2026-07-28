@@ -14,6 +14,8 @@ import {
   normalizeBlueprintDraft,
   validateBlueprintDraft,
   type BlueprintDraft,
+  type GuardianApplicationProbeType,
+  type GuardianDiagnosticParser,
   type BlueprintSourceType,
   type BlueprintValidationIssue,
 } from './contract'
@@ -53,7 +55,6 @@ function sectionForIssue(path: string): SectionId {
     path.startsWith('logs') ||
     path.startsWith('diagnostics') ||
     path.startsWith('recovery') ||
-    path.startsWith('updates') ||
     path.startsWith('backups')
   ) {
     return 'guardian'
@@ -70,6 +71,14 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
   const [saving, setSaving] = useState(false)
   const closeRef = useRef<HTMLButtonElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null)
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [])
 
   useEffect(() => {
     closeRef.current?.focus()
@@ -354,20 +363,78 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
   }
 
   const renderGuardian = () => {
-    const health = draft.health ?? {
-      process: { required: true },
-      port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
-      application: { type: '', interval: '30s', failure_threshold: 3 },
-      startup: { success_patterns: [], failure_patterns: [] },
-    }
-    const logs = draft.logs ?? { sources: [], redact: [] }
-    const diagnostics = draft.diagnostics ?? { parsers: [] }
-    const recovery = draft.recovery ?? { policies: [] }
-    const updates = draft.updates ?? { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true }
-    const backups = draft.backups ?? { before_risky_action: true, protected_paths: [] }
+    const defaults = createBlueprintDraft()
+    const health = draft.health ?? defaults.health!
+    const logs = draft.logs ?? defaults.logs!
+    const diagnostics = draft.diagnostics ?? defaults.diagnostics!
+    const recovery = draft.recovery ?? defaults.recovery!
+    const backups = draft.backups ?? defaults.backups!
+    const guardianEnabled = Boolean(draft.health || draft.logs || draft.diagnostics || draft.recovery || draft.backups)
 
-    const updateHealth = (next: Partial<typeof health>) => {
-      setDraft(current => ({ ...current, health: { ...health, ...next } }))
+    const setGuardianEnabled = (enabled: boolean) => {
+      setDraft(current => {
+        if (enabled) {
+          return {
+            ...current,
+            health: structuredClone(defaults.health!),
+            logs: structuredClone(defaults.logs!),
+            diagnostics: structuredClone(defaults.diagnostics!),
+            recovery: structuredClone(defaults.recovery!),
+            backups: structuredClone(defaults.backups!),
+          }
+        }
+        const next = { ...current }
+        delete next.health
+        delete next.logs
+        delete next.diagnostics
+        delete next.recovery
+        delete next.backups
+        return next
+      })
+    }
+
+    const updateProcess = (next: Partial<NonNullable<BlueprintDraft['health']>['process']>) => {
+      setDraft(current => ({
+        ...current,
+        health: {
+          ...current.health,
+          process: { ...(current.health?.process ?? defaults.health!.process!), ...next },
+        },
+      }))
+    }
+    const updatePortHealth = (next: Partial<NonNullable<BlueprintDraft['health']>['port']>) => {
+      setDraft(current => ({
+        ...current,
+        health: {
+          ...current.health,
+          port: { ...(current.health?.port ?? defaults.health!.port!), ...next },
+        },
+      }))
+    }
+    const updateApplication = (next: Partial<NonNullable<BlueprintDraft['health']>['application']>) => {
+      setDraft(current => ({
+        ...current,
+        health: {
+          ...current.health,
+          application: { ...(current.health?.application ?? defaults.health!.application!), ...next },
+        },
+      }))
+    }
+    const updateApplicationType = (type: GuardianApplicationProbeType | '') => {
+      setDraft(current => {
+        const application = { ...(current.health?.application ?? defaults.health!.application!), type }
+        if (type !== 'http-ping') delete application.path
+        return { ...current, health: { ...current.health, application } }
+      })
+    }
+    const updateStartup = (next: Partial<NonNullable<BlueprintDraft['health']>['startup']>) => {
+      setDraft(current => ({
+        ...current,
+        health: {
+          ...current.health,
+          startup: { ...(current.health?.startup ?? defaults.health!.startup!), ...next },
+        },
+      }))
     }
 
     const applyPreset = (presetId: string) => {
@@ -375,92 +442,81 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
         setDraft(current => ({
           ...current,
           health: {
-            process: { required: true },
-            port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
-            application: { type: 'minecraft-query', interval: '30s', failure_threshold: 3 },
-            startup: { success_patterns: ['Done'], failure_patterns: ['Unable to access jarfile', 'Failed to bind to port'] }
+            process: { ...defaults.health!.process! },
+            port: { ...defaults.health!.port!, protocol: 'tcp', port: '{{SERVER_PORT}}' },
+            application: { ...defaults.health!.application!, type: 'minecraft-query', port: '{{SERVER_PORT}}' },
+            startup: { ...defaults.health!.startup!, success_patterns: ['Done'], failure_patterns: ['Unable to access jarfile', 'Failed to bind to port'] }
           },
-          logs: { sources: ['logs/latest.log'], redact: ['password', 'discord_token', 'api_key'] },
+          logs: { ...defaults.logs!, sources: ['logs/latest.log'], redact: ['discord_token', 'api_key'] },
           diagnostics: { parsers: ['java-stacktrace', 'linux-oom', 'port-conflict', 'corrupted-config'] },
           recovery: {
-            policies: [
-              { match: 'port-conflict', action: 'clear_declared_lock_files' },
-              { match: 'linux-oom', action: 'graceful_restart' }
-            ]
+            ...defaults.recovery!,
+            policies: [{ match: 'port-conflict', action: 'restart' }, { match: 'linux-oom', action: 'graceful_restart' }],
           },
-          updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
           backups: { before_risky_action: true, protected_paths: ['world/', 'plugins/', 'config/'] }
         }))
       } else if (presetId === 'steamcmd') {
         setDraft(current => ({
           ...current,
           health: {
-            process: { required: true },
-            port: { protocol: 'udp', port: '{{SERVER_PORT}}', timeout: '5s' },
-            application: { type: 'source-query', interval: '60s', failure_threshold: 3 },
-            startup: { success_patterns: ['Connection to Steam servers successful', 'GC Connection established'], failure_patterns: ['Error checking out release', 'Failed to initialize network'] }
+            process: { ...defaults.health!.process! },
+            port: { ...defaults.health!.port!, protocol: 'udp', port: '{{SERVER_PORT}}', timeout: '5s' },
+            application: { ...defaults.health!.application!, type: 'source-query', interval: '60s', port: '{{SERVER_PORT}}' },
+            startup: { ...defaults.health!.startup!, success_patterns: ['Connection to Steam servers successful', 'GC Connection established'], failure_patterns: ['Error checking out release', 'Failed to initialize network'] }
           },
-          logs: { sources: ['logs/latest.log', 'stdout'], redact: ['steam_password', 'rcon_password', 'api_key'] },
+          logs: { ...defaults.logs!, sources: ['logs/latest.log', 'stdout'], redact: ['api_key'] },
           diagnostics: { parsers: ['linux-oom', 'port-conflict', 'missing-runtime'] },
           recovery: {
-            policies: [
-              { match: 'port-conflict', action: 'clear_declared_lock_files' },
-              { match: 'linux-oom', action: 'graceful_restart' }
-            ]
+            ...defaults.recovery!,
+            policies: [{ match: 'port-conflict', action: 'restart' }, { match: 'linux-oom', action: 'graceful_restart' }],
           },
-          updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
           backups: { before_risky_action: true, protected_paths: ['save/', 'config/'] }
         }))
       } else if (presetId === 'nodejs') {
         setDraft(current => ({
           ...current,
           health: {
-            process: { required: true },
-            port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
-            application: { type: 'http-ping', path: '/api/healthz', interval: '30s', failure_threshold: 3 },
-            startup: { success_patterns: ['App listening on port', 'Server started'], failure_patterns: ['npm ERR!', 'UnhandledPromiseRejectionWarning'] }
+            process: { ...defaults.health!.process! },
+            port: { ...defaults.health!.port!, protocol: 'tcp', port: '{{SERVER_PORT}}' },
+            application: { ...defaults.health!.application!, type: 'http-ping', path: '/api/healthz', port: '{{SERVER_PORT}}' },
+            startup: { ...defaults.health!.startup!, success_patterns: ['App listening on port', 'Server started'], failure_patterns: ['npm ERR!', 'UnhandledPromiseRejectionWarning'] }
           },
-          logs: { sources: ['stdout', 'stderr'], redact: ['discord_token', 'api_key', 'database_url'] },
+          logs: { ...defaults.logs!, sources: ['stdout'], redact: ['discord_token', 'api_key', 'database_url'] },
           diagnostics: { parsers: ['linux-oom', 'port-conflict', 'nodejs-stacktrace'] },
           recovery: {
-            policies: [
-              { match: 'port-conflict', action: 'clear_declared_lock_files' },
-              { match: 'linux-oom', action: 'graceful_restart' }
-            ]
+            ...defaults.recovery!,
+            policies: [{ match: 'port-conflict', action: 'restart' }, { match: 'linux-oom', action: 'graceful_restart' }],
           },
-          updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
           backups: { before_risky_action: true, protected_paths: ['data/'] }
         }))
       } else if (presetId === 'generic') {
-        setDraft(current => ({
-          ...current,
-          health: {
-            process: { required: true },
-            port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
-            application: { type: '', interval: '30s', failure_threshold: 3 },
-            startup: { success_patterns: [], failure_patterns: [] }
-          },
-          logs: { sources: [], redact: [] },
-          diagnostics: { parsers: [] },
-          recovery: { policies: [] },
-          updates: { strategy: 'snapshot-then-update', health_verification: 'required', rollback_on_failure: true },
-          backups: { before_risky_action: true, protected_paths: [] }
-        }))
+        setGuardianEnabled(false)
       }
     }
 
     const appQueryOptions = [
       { value: '', label: t('blueprintBuilder.guardian.appQueryNone') },
+      { value: 'tcp', label: 'TCP' },
+      { value: 'minecraft-status', label: 'Minecraft Status (minecraft-status)' },
       { value: 'minecraft-query', label: 'Minecraft Query (minecraft-query)' },
       { value: 'source-query', label: 'Steam/Source Query (source-query)' },
       { value: 'http-ping', label: 'HTTP Ping / Health Check (http-ping)' },
-      { value: 'custom', label: t('blueprintBuilder.recovery.customValue') }
     ]
 
-    const selectedAppQuery = appQueryOptions.some(o => o.value === health.application?.type) ? health.application?.type ?? '' : 'custom'
+    const selectedAppQuery = health.application?.type ?? ''
 
     return (
-      <div className="space-y-6">
+      <div className="min-w-0 max-w-full space-y-6">
+        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4">
+          <label className="flex items-start gap-3">
+            <input className="mt-1" type="checkbox" checked={guardianEnabled} onChange={event => setGuardianEnabled(event.target.checked)} />
+            <span>
+              <strong className="block text-sm">{t('blueprintBuilder.guardian.enabled')}</strong>
+              <small className="msm-field-help block">{t('blueprintBuilder.guardian.enabledHelp')}</small>
+            </span>
+          </label>
+        </div>
+
         {/* Preset Loader */}
         <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-4 space-y-3">
           <div className="flex items-center gap-3">
@@ -472,6 +528,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
           </p>
           <div className="max-w-md">
             <Dropdown
+              aria-label={t('blueprintBuilder.guardian.presetsSelect')}
               value={null}
               onChange={applyPreset}
               placeholder={t('blueprintBuilder.guardian.presetsSelect')}
@@ -485,39 +542,52 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
           </div>
         </div>
 
-        {/* Recovery Ladder Visualization */}
-        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-3">
-          <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.ladderTitle')}</h4>
-          <p className="text-xs text-on-surface-variant leading-relaxed">
-            {t('blueprintBuilder.guardian.ladderDescription')}
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 pt-2">
-            {[1, 2, 3, 4, 5, 6, 7].map((num) => (
-              <div key={num} className="rounded-lg p-2.5 bg-surface-container-lowest border border-outline-variant/30 text-center space-y-1">
-                <div className="text-xs font-bold text-primary">{t('blueprintBuilder.guardian.ladderStepNum', { num })}</div>
-                <div className="font-semibold text-[11px] text-on-surface leading-tight">{t(`blueprintBuilder.guardian.ladderStepName.${num}`)}</div>
-                <div className="text-[10px] text-on-surface-variant leading-normal">{t(`blueprintBuilder.guardian.ladderStepDesc.${num}`)}</div>
+        {guardianEnabled && (
+          <>
+            <div className="min-w-0 max-w-full rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-3">
+              <h4 className="font-semibold text-lg">{t('blueprintBuilder.guardian.actionsTitle')}</h4>
+              <p className="msm-field-help">{t('blueprintBuilder.guardian.actionsHelp')}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(['restart', 'graceful_restart', 'clear_declared_lock_files', 'quarantine'] as const).map(action => (
+                  <code key={action} className="min-w-0 max-w-full break-all rounded-md border border-outline-variant/40 bg-surface-container-lowest px-3 py-2 text-xs text-primary">{action}</code>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
 
         {/* Health Probe Configuration */}
-        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
+        <div className="min-w-0 max-w-full rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
           <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.healthTitle')}</h4>
-          <label className="flex items-center gap-3">
+          <label className="flex items-start gap-3">
             <input
+              className="mt-1"
+              type="checkbox"
+              checked={Boolean(health.process)}
+              onChange={event => setDraft(current => {
+                if (event.target.checked) {
+                  return { ...current, health: { ...current.health, process: structuredClone(defaults.health!.process!) } }
+                }
+                const nextHealth = { ...current.health }
+                delete nextHealth.process
+                return { ...current, health: nextHealth }
+              })}
+            />
+            <span>{t('blueprintBuilder.guardian.processEnabled')}<small className="msm-field-help block">{t('blueprintBuilder.guardian.processEnabledHelp')}</small></span>
+          </label>
+          <label className="flex items-start gap-3">
+            <input
+              className="mt-1"
               type="checkbox"
               checked={health.process?.required ?? true}
-              onChange={event => updateHealth({ process: { required: event.target.checked } })}
+              disabled={!health.process}
+              onChange={event => updateProcess({ required: event.target.checked })}
             />
-            {t('blueprintBuilder.guardian.processRequired')}
+            <span>{t('blueprintBuilder.guardian.processRequired')}<small className="msm-field-help block">{t('blueprintBuilder.guardian.processRequiredHelp')}</small></span>
           </label>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid min-w-0 gap-4 lg:grid-cols-3">
             <Field id="bp-health-port-proto" label={t('blueprintBuilder.fields.healthPortProto.label')} help={t('blueprintBuilder.fields.healthPortProto.help')}>
               <Dropdown
                 value={health.port?.protocol ?? 'tcp'}
-                onChange={value => updateHealth({ port: { ...health.port, protocol: value as 'tcp' | 'udp', port: health.port?.port ?? '', timeout: health.port?.timeout ?? '' } })}
+                onChange={value => updatePortHealth({ protocol: value as 'tcp' | 'udp' })}
                 options={[{ value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' }]}
               />
             </Field>
@@ -525,36 +595,35 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
               <input
                 className="msm-input font-mono"
                 value={health.port?.port ?? ''}
-                onChange={event => updateHealth({ port: { ...health.port, protocol: health.port?.protocol ?? 'tcp', port: event.target.value, timeout: health.port?.timeout ?? '' } })}
+                onChange={event => updatePortHealth({ port: event.target.value })}
               />
             </Field>
             <Field id="bp-health-port-timeout" label={t('blueprintBuilder.fields.healthPortTimeout.label')} help={t('blueprintBuilder.fields.healthPortTimeout.help')} error={issueFor('health.port.timeout')}>
               <input
                 className="msm-input font-mono"
                 value={health.port?.timeout ?? ''}
-                onChange={event => updateHealth({ port: { ...health.port, protocol: health.port?.protocol ?? 'tcp', port: health.port?.port ?? '', timeout: event.target.value } })}
+                onChange={event => updatePortHealth({ timeout: event.target.value })}
               />
             </Field>
           </div>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid min-w-0 gap-4 lg:grid-cols-3">
             <div className="space-y-1">
               <label className="mb-1.5 block font-label-md text-sm font-semibold text-on-surface">
                 {t('blueprintBuilder.fields.healthAppType.label')}
               </label>
               <Dropdown
+                aria-label={t('blueprintBuilder.fields.healthAppType.label')}
                 value={selectedAppQuery}
                 options={appQueryOptions}
-                onChange={next => {
-                  const val = next === 'custom' ? '' : next
-                  updateHealth({ application: { ...health.application, type: val, interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3 } })
-                }}
+                onChange={next => updateApplicationType(next as GuardianApplicationProbeType | '')}
               />
+              <p className="msm-field-help">{t('blueprintBuilder.fields.healthAppType.help')}</p>
             </div>
             <Field id="bp-health-app-interval" label={t('blueprintBuilder.fields.healthAppInterval.label')} help={t('blueprintBuilder.fields.healthAppInterval.help')} error={issueFor('health.application.interval')}>
               <input
                 className="msm-input font-mono"
                 value={health.application?.interval ?? ''}
-                onChange={event => updateHealth({ application: { ...health.application, type: health.application?.type ?? '', interval: event.target.value, failure_threshold: health.application?.failure_threshold ?? 3 } })}
+                onChange={event => updateApplication({ interval: event.target.value })}
               />
             </Field>
             <Field id="bp-health-app-threshold" label={t('blueprintBuilder.fields.healthAppThreshold.label')} help={t('blueprintBuilder.fields.healthAppThreshold.help')} error={issueFor('health.application.failure_threshold')}>
@@ -562,44 +631,89 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
                 min={1}
                 max={20}
                 value={health.application?.failure_threshold ?? 3}
-                onValueChange={value => updateHealth({ application: { ...health.application, type: health.application?.type ?? '', interval: health.application?.interval ?? '', failure_threshold: Number(value) } })}
+                onValueChange={value => updateApplication({ failure_threshold: Number(value) })}
               />
             </Field>
           </div>
 
-          {selectedAppQuery === 'custom' && (
-            <div className="pt-2 border-t border-outline-variant/30">
-              <Field id="bp-health-app-type-custom" label={t('blueprintBuilder.fields.healthAppTypeCustom.label')} help={t('blueprintBuilder.fields.healthAppTypeCustom.help')} error={issueFor('health.application.type')}>
-                <input
-                  className="msm-input font-mono"
-                  placeholder="e.g. valve-query-protocol"
-                  value={health.application?.type ?? ''}
-                  onChange={event => updateHealth({ application: { ...health.application, type: event.target.value, interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3 } })}
-                />
-              </Field>
-            </div>
-          )}
-
           {health.application?.type === 'http-ping' && (
-            <div className="grid gap-4 md:grid-cols-2 pt-2 border-t border-outline-variant/30">
+            <div className="pt-2 border-t border-outline-variant/30">
               <Field id="bp-health-app-path" label={t('blueprintBuilder.fields.healthAppPath.label')} help={t('blueprintBuilder.fields.healthAppPath.help')} error={issueFor('health.application.path')}>
                 <input
                   className="msm-input font-mono"
                   placeholder="e.g. /healthz"
                   value={health.application?.path ?? ''}
-                  onChange={event => updateHealth({ application: { ...health.application, type: health.application?.type ?? '', interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3, path: event.target.value } })}
-                />
-              </Field>
-              <Field id="bp-health-app-port" label={t('blueprintBuilder.fields.healthAppPort.label')} help={t('blueprintBuilder.fields.healthAppPort.help')} error={issueFor('health.application.port')}>
-                <input
-                  className="msm-input font-mono"
-                  placeholder="e.g. {{SERVER_PORT}} or 4000"
-                  value={health.application?.port ?? ''}
-                  onChange={event => updateHealth({ application: { ...health.application, type: health.application?.type ?? '', interval: health.application?.interval ?? '', failure_threshold: health.application?.failure_threshold ?? 3, port: event.target.value } })}
+                  onChange={event => updateApplication({ path: event.target.value })}
                 />
               </Field>
             </div>
           )}
+
+          <details className="min-w-0 max-w-full rounded-lg border border-outline-variant/40 bg-surface-container-lowest/55 p-3">
+            <summary className="break-words cursor-pointer text-sm font-semibold text-primary">{t('blueprintBuilder.guardian.advancedHealth')}</summary>
+            <p className="msm-field-help mt-2">{t('blueprintBuilder.guardian.advancedHealthHelp')}</p>
+
+            <fieldset className="mt-4 min-w-0 max-w-full space-y-3 border-t border-outline-variant/30 pt-4">
+              <legend className="pr-2 text-sm font-semibold">{t('blueprintBuilder.guardian.processProbe')}</legend>
+              <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+                <Field id="bp-process-id" label={t('blueprintBuilder.fields.guardianId.label')} help={t('blueprintBuilder.fields.guardianId.help')}>
+                  <input className="msm-input font-mono" value={health.process?.id ?? defaults.health!.process!.id} onChange={event => updateProcess({ id: event.target.value })} />
+                </Field>
+                <Field id="bp-process-interval" label={t('blueprintBuilder.fields.guardianInterval.label')} help={t('blueprintBuilder.fields.guardianInterval.help')}>
+                  <input className="msm-input font-mono" value={health.process?.interval ?? defaults.health!.process!.interval} onChange={event => updateProcess({ interval: event.target.value })} />
+                </Field>
+                <Field id="bp-process-failure" label={t('blueprintBuilder.fields.guardianFailureThreshold.label')} help={t('blueprintBuilder.fields.guardianFailureThreshold.help')}>
+                  <NumberStepper min={1} max={20} value={health.process?.failure_threshold ?? 1} onValueChange={value => updateProcess({ failure_threshold: Number(value) })} />
+                </Field>
+                <Field id="bp-process-success" label={t('blueprintBuilder.fields.guardianSuccessThreshold.label')} help={t('blueprintBuilder.fields.guardianSuccessThreshold.help')}>
+                  <NumberStepper min={1} max={20} value={health.process?.success_threshold ?? 1} onValueChange={value => updateProcess({ success_threshold: Number(value) })} />
+                </Field>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.process?.required_for_startup ?? true} onChange={event => updateProcess({ required_for_startup: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredStartup.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredStartup.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.process?.required_for_verification ?? true} onChange={event => updateProcess({ required_for_verification: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredVerification.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredVerification.help')}</small></span></label>
+              </div>
+            </fieldset>
+
+            <fieldset className="mt-4 min-w-0 max-w-full space-y-3 border-t border-outline-variant/30 pt-4">
+              <legend className="pr-2 text-sm font-semibold">{t('blueprintBuilder.guardian.portProbe')}</legend>
+              <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+                <Field id="bp-port-id" label={t('blueprintBuilder.fields.guardianId.label')} help={t('blueprintBuilder.fields.guardianId.help')}><input className="msm-input font-mono" value={health.port?.id ?? defaults.health!.port!.id} onChange={event => updatePortHealth({ id: event.target.value })} /></Field>
+                <Field id="bp-port-interval" label={t('blueprintBuilder.fields.guardianInterval.label')} help={t('blueprintBuilder.fields.guardianInterval.help')}><input className="msm-input font-mono" value={health.port?.interval ?? defaults.health!.port!.interval} onChange={event => updatePortHealth({ interval: event.target.value })} /></Field>
+                <Field id="bp-port-failure" label={t('blueprintBuilder.fields.guardianFailureThreshold.label')} help={t('blueprintBuilder.fields.guardianFailureThreshold.help')}><NumberStepper min={1} max={20} value={health.port?.failure_threshold ?? 3} onValueChange={value => updatePortHealth({ failure_threshold: Number(value) })} /></Field>
+                <Field id="bp-port-success" label={t('blueprintBuilder.fields.guardianSuccessThreshold.label')} help={t('blueprintBuilder.fields.guardianSuccessThreshold.help')}><NumberStepper min={1} max={20} value={health.port?.success_threshold ?? 1} onValueChange={value => updatePortHealth({ success_threshold: Number(value) })} /></Field>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.port?.required_for_startup ?? false} onChange={event => updatePortHealth({ required_for_startup: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredStartup.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredStartup.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.port?.required_for_verification ?? true} onChange={event => updatePortHealth({ required_for_verification: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredVerification.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredVerification.help')}</small></span></label>
+              </div>
+            </fieldset>
+
+            <fieldset className="mt-4 min-w-0 max-w-full space-y-3 border-t border-outline-variant/30 pt-4">
+              <legend className="pr-2 text-sm font-semibold">{t('blueprintBuilder.guardian.applicationProbe')}</legend>
+              <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+                <Field id="bp-app-id" label={t('blueprintBuilder.fields.guardianId.label')} help={t('blueprintBuilder.fields.guardianId.help')}><input className="msm-input font-mono" value={health.application?.id ?? defaults.health!.application!.id} onChange={event => updateApplication({ id: event.target.value })} /></Field>
+                <Field id="bp-health-app-port" label={t('blueprintBuilder.fields.healthAppPort.label')} help={t('blueprintBuilder.fields.healthAppPort.help')}><input className="msm-input font-mono" value={health.application?.port ?? ''} onChange={event => updateApplication({ port: event.target.value })} /></Field>
+                <Field id="bp-app-timeout" label={t('blueprintBuilder.fields.guardianTimeout.label')} help={t('blueprintBuilder.fields.guardianTimeout.help')}><input className="msm-input font-mono" value={health.application?.timeout ?? defaults.health!.application!.timeout} onChange={event => updateApplication({ timeout: event.target.value })} /></Field>
+                <Field id="bp-app-success" label={t('blueprintBuilder.fields.guardianSuccessThreshold.label')} help={t('blueprintBuilder.fields.guardianSuccessThreshold.help')}><NumberStepper min={1} max={20} value={health.application?.success_threshold ?? 1} onValueChange={value => updateApplication({ success_threshold: Number(value) })} /></Field>
+                <Field id="bp-app-statuses" label={t('blueprintBuilder.fields.healthExpectedStatuses.label')} help={t('blueprintBuilder.fields.healthExpectedStatuses.help')}><input className="msm-input font-mono" value={(health.application?.expected_statuses ?? [200]).join(', ')} onChange={event => updateApplication({ expected_statuses: event.target.value.split(',').map(value => Number(value.trim())).filter(Number.isFinite) })} /></Field>
+                <Field id="bp-app-response-bytes" label={t('blueprintBuilder.fields.healthResponseBytes.label')} help={t('blueprintBuilder.fields.healthResponseBytes.help')}><NumberStepper min={1} max={1_048_576} value={health.application?.max_response_bytes ?? 4096} onValueChange={value => updateApplication({ max_response_bytes: Number(value) })} /></Field>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.application?.required_for_startup ?? false} onChange={event => updateApplication({ required_for_startup: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredStartup.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredStartup.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.application?.required_for_verification ?? true} onChange={event => updateApplication({ required_for_verification: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredVerification.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredVerification.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm text-on-surface-variant"><input className="mt-1" type="checkbox" checked={false} disabled /><span>{t('blueprintBuilder.fields.healthFollowRedirects.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.healthFollowRedirects.help')}</small></span></label>
+              </div>
+            </fieldset>
+
+            <fieldset className="mt-4 min-w-0 max-w-full space-y-3 border-t border-outline-variant/30 pt-4">
+              <legend className="pr-2 text-sm font-semibold">{t('blueprintBuilder.guardian.startupWindow')}</legend>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field id="bp-startup-grace" label={t('blueprintBuilder.fields.healthStartupGrace.label')} help={t('blueprintBuilder.fields.healthStartupGrace.help')}><NumberStepper min={0} max={600} value={health.startup?.grace_period_seconds ?? 30} onValueChange={value => updateStartup({ grace_period_seconds: Number(value) })} /></Field>
+                <Field id="bp-startup-timeout" label={t('blueprintBuilder.fields.healthStartupTimeout.label')} help={t('blueprintBuilder.fields.healthStartupTimeout.help')} error={issueFor('health.startup.timeout_seconds')}><NumberStepper min={1} max={3600} value={health.startup?.timeout_seconds ?? 300} onValueChange={value => updateStartup({ timeout_seconds: Number(value) })} /></Field>
+              </div>
+            </fieldset>
+          </details>
 
           <div className="grid gap-4 md:grid-cols-2">
             <LinesField
@@ -607,20 +721,20 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
               label={t('blueprintBuilder.fields.healthSuccessPatterns.label')}
               help={t('blueprintBuilder.fields.healthSuccessPatterns.help')}
               value={health.startup?.success_patterns ?? []}
-              onChange={success_patterns => updateHealth({ startup: { ...health.startup, success_patterns, failure_patterns: health.startup?.failure_patterns ?? [] } })}
+              onChange={success_patterns => updateStartup({ success_patterns })}
             />
             <LinesField
               id="bp-health-failure-patterns"
               label={t('blueprintBuilder.fields.healthFailurePatterns.label')}
               help={t('blueprintBuilder.fields.healthFailurePatterns.help')}
               value={health.startup?.failure_patterns ?? []}
-              onChange={failure_patterns => updateHealth({ startup: { ...health.startup, success_patterns: health.startup?.success_patterns ?? [], failure_patterns } })}
+              onChange={failure_patterns => updateStartup({ failure_patterns })}
             />
           </div>
         </div>
 
         {/* Logs & Diagnostics Configuration */}
-        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
+        <div className="min-w-0 max-w-full rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
           <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.logsTitle')}</h4>
           <div className="grid gap-4 md:grid-cols-2">
             <LinesField
@@ -628,78 +742,172 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
               label={t('blueprintBuilder.fields.logsSources.label')}
               help={t('blueprintBuilder.fields.logsSources.help')}
               value={logs.sources}
-              onChange={sources => setDraft(current => ({ ...current, logs: { ...logs, sources } }))}
+              onChange={sources => setDraft(current => ({ ...current, logs: { ...(current.logs ?? defaults.logs!), sources } }))}
             />
             <LinesField
               id="bp-logs-redact"
-              label={t('blueprintBuilder.fields.logsRedact.label')}
-              help={t('blueprintBuilder.fields.logsRedact.help')}
-              value={logs.redact}
-              onChange={redact => setDraft(current => ({ ...current, logs: { ...logs, redact } }))}
+              label={t('blueprintBuilder.fields.logsRegexRedact.label')}
+              help={t('blueprintBuilder.fields.logsRegexRedact.help')}
+              value={logs.redact.filter(value => value.startsWith('regex:')).map(value => value.slice(6))}
+              onChange={patterns => setDraft(current => ({
+                ...current,
+                logs: {
+                  ...(current.logs ?? defaults.logs!),
+                  redact: [
+                    ...(current.logs ?? defaults.logs!).redact.filter(value => !value.startsWith('regex:')),
+                    ...patterns.map(value => `regex:${value}`),
+                  ],
+                },
+              }))}
             />
           </div>
-          <LinesField
-            id="bp-diagnostics-parsers"
-            label={t('blueprintBuilder.fields.diagnosticsParsers.label')}
-            help={t('blueprintBuilder.fields.diagnosticsParsers.help')}
-            value={diagnostics.parsers}
-            onChange={parsers => setDraft(current => ({ ...current, diagnostics: { parsers } }))}
-          />
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-semibold">{t('blueprintBuilder.fields.logsRedact.label')}</legend>
+            <p className="msm-field-help">{t('blueprintBuilder.fields.logsRedact.help')}</p>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {(['discord_token', 'api_key', 'authorization_header', 'database_url', 'jwt'] as const).map(redactor => (
+                <label key={redactor} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={logs.redact.includes(redactor)}
+                    onChange={event => setDraft(current => {
+                      const currentLogs = current.logs ?? defaults.logs!
+                      return {
+                        ...current,
+                        logs: {
+                          ...currentLogs,
+                          redact: event.target.checked
+                            ? [...currentLogs.redact, redactor]
+                            : currentLogs.redact.filter(value => value !== redactor),
+                        },
+                      }
+                    })}
+                  />
+                  <code>{redactor}</code>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <Field id="bp-logs-max-tail" label={t('blueprintBuilder.fields.logsMaxTail.label')} help={t('blueprintBuilder.fields.logsMaxTail.help')} error={issueFor('logs.max_tail_bytes')}>
+            <NumberStepper min={1024} max={1_048_576} value={logs.max_tail_bytes} onValueChange={value => setDraft(current => ({ ...current, logs: { ...(current.logs ?? defaults.logs!), max_tail_bytes: Number(value) } }))} />
+          </Field>
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-semibold">{t('blueprintBuilder.fields.diagnosticsParsers.label')}</legend>
+            <p className="msm-field-help">{t('blueprintBuilder.fields.diagnosticsParsers.help')}</p>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {(['linux-oom', 'java-stacktrace', 'nodejs-stacktrace', 'port-conflict', 'missing-runtime', 'corrupted-config', 'startup-pattern'] as GuardianDiagnosticParser[]).map(parser => (
+                <label key={parser} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={diagnostics.parsers.includes(parser)}
+                    onChange={event => setDraft(current => {
+                      const currentDiagnostics = current.diagnostics ?? defaults.diagnostics!
+                      return {
+                        ...current,
+                        diagnostics: {
+                          ...currentDiagnostics,
+                          parsers: event.target.checked
+                            ? [...currentDiagnostics.parsers, parser]
+                            : currentDiagnostics.parsers.filter(value => value !== parser),
+                        },
+                      }
+                    })}
+                  />
+                  <code>{parser}</code>
+                </label>
+              ))}
+            </div>
+          </fieldset>
         </div>
 
         {/* Recovery policies config */}
-        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
+        <div className="min-w-0 max-w-full rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
           <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.recoveryTitle')}</h4>
           <RecoveryPoliciesEditor
             value={recovery.policies}
-            onChange={policies => setDraft(current => ({ ...current, recovery: { policies } }))}
+            onChange={policies => setDraft(current => ({ ...current, recovery: { ...(current.recovery ?? defaults.recovery!), policies } }))}
           />
+          <div className="min-w-0 max-w-full border-t border-outline-variant/30 pt-4">
+            <div className="flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:justify-between">
+              <div className="min-w-0 max-w-full">
+                <h5 className="text-sm font-semibold">{t('blueprintBuilder.guardian.safeLockFiles')}</h5>
+                <p className="msm-field-help">{t('blueprintBuilder.guardian.safeLockFilesHelp')}</p>
+              </div>
+              <Button
+                variant="secondary"
+                className="h-auto min-h-10 max-w-full whitespace-normal text-left"
+                disabled={(recovery.safe_lock_files?.length ?? 0) >= 32}
+                onClick={() => setDraft(current => {
+                  const currentRecovery = current.recovery ?? defaults.recovery!
+                  return { ...current, recovery: { ...currentRecovery, safe_lock_files: [...(currentRecovery.safe_lock_files ?? []), { path: '', reason: '' }] } }
+                })}
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />{t('blueprintBuilder.guardian.addSafeLockFile')}
+              </Button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {(recovery.safe_lock_files ?? []).map((entry, index) => (
+                <div key={index} className="grid min-w-0 gap-2 rounded-lg border border-outline-variant/40 p-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto]">
+                  <input aria-label={t('blueprintBuilder.guardian.safeLockPath', { index: index + 1 })} className="msm-input font-mono" value={entry.path} onChange={event => setDraft(current => {
+                    const currentRecovery = current.recovery ?? defaults.recovery!
+                    return { ...current, recovery: { ...currentRecovery, safe_lock_files: (currentRecovery.safe_lock_files ?? []).map((item, itemIndex) => itemIndex === index ? { ...item, path: event.target.value } : item) } }
+                  })} />
+                  <input aria-label={t('blueprintBuilder.guardian.safeLockReason', { index: index + 1 })} className="msm-input" value={entry.reason} onChange={event => setDraft(current => {
+                    const currentRecovery = current.recovery ?? defaults.recovery!
+                    return { ...current, recovery: { ...currentRecovery, safe_lock_files: (currentRecovery.safe_lock_files ?? []).map((item, itemIndex) => itemIndex === index ? { ...item, reason: event.target.value } : item) } }
+                  })} />
+                  <Button variant="ghost" aria-label={t('blueprintBuilder.guardian.removeSafeLockFile', { index: index + 1 })} onClick={() => setDraft(current => {
+                    const currentRecovery = current.recovery ?? defaults.recovery!
+                    return { ...current, recovery: { ...currentRecovery, safe_lock_files: (currentRecovery.safe_lock_files ?? []).filter((_, itemIndex) => itemIndex !== index) } }
+                  })}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <details className="min-w-0 max-w-full rounded-lg border border-outline-variant/40 bg-surface-container-lowest/55 p-3">
+            <summary className="break-words cursor-pointer text-sm font-semibold text-primary">{t('blueprintBuilder.guardian.advancedRecovery')}</summary>
+            <p className="msm-field-help mt-2">{t('blueprintBuilder.guardian.advancedRecoveryHelp')}</p>
+            <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-3">
+              <Field id="bp-recovery-max-attempts" label={t('blueprintBuilder.fields.recoveryMaxAttempts.label')} help={t('blueprintBuilder.fields.recoveryMaxAttempts.help')}><NumberStepper min={1} max={10} value={recovery.max_attempts ?? 3} onValueChange={value => setDraft(current => ({ ...current, recovery: { ...(current.recovery ?? defaults.recovery!), max_attempts: Number(value) } }))} /></Field>
+              <Field id="bp-recovery-attempt-window" label={t('blueprintBuilder.fields.recoveryAttemptWindow.label')} help={t('blueprintBuilder.fields.recoveryAttemptWindow.help')}><NumberStepper min={60} max={86_400} value={recovery.attempt_window_seconds ?? 1800} onValueChange={value => setDraft(current => ({ ...current, recovery: { ...(current.recovery ?? defaults.recovery!), attempt_window_seconds: Number(value) } }))} /></Field>
+              <Field id="bp-recovery-cooldown" label={t('blueprintBuilder.fields.recoveryCooldown.label')} help={t('blueprintBuilder.fields.recoveryCooldown.help')}><NumberStepper min={1} max={3600} value={recovery.cooldown_seconds ?? 300} onValueChange={value => setDraft(current => ({ ...current, recovery: { ...(current.recovery ?? defaults.recovery!), cooldown_seconds: Number(value) } }))} /></Field>
+              <Field id="bp-verification-duration" label={t('blueprintBuilder.fields.verificationDuration.label')} help={t('blueprintBuilder.fields.verificationDuration.help')}><NumberStepper min={0} max={600} value={recovery.verification?.minimum_healthy_duration_seconds ?? 30} onValueChange={value => setDraft(current => {
+                const currentRecovery = current.recovery ?? defaults.recovery!
+                return { ...current, recovery: { ...currentRecovery, verification: { ...(currentRecovery.verification ?? defaults.recovery!.verification!), minimum_healthy_duration_seconds: Number(value) } } }
+              })} /></Field>
+              <Field id="bp-verification-successes" label={t('blueprintBuilder.fields.verificationSuccesses.label')} help={t('blueprintBuilder.fields.verificationSuccesses.help')}><NumberStepper min={1} max={20} value={recovery.verification?.required_consecutive_successes ?? 3} onValueChange={value => setDraft(current => {
+                const currentRecovery = current.recovery ?? defaults.recovery!
+                return { ...current, recovery: { ...currentRecovery, verification: { ...(currentRecovery.verification ?? defaults.recovery!.verification!), required_consecutive_successes: Number(value) } } }
+              })} /></Field>
+              <Field id="bp-verification-timeout" label={t('blueprintBuilder.fields.verificationTimeout.label')} help={t('blueprintBuilder.fields.verificationTimeout.help')}><NumberStepper min={5} max={3600} value={recovery.verification?.verification_timeout_seconds ?? 180} onValueChange={value => setDraft(current => {
+                const currentRecovery = current.recovery ?? defaults.recovery!
+                return { ...current, recovery: { ...currentRecovery, verification: { ...(currentRecovery.verification ?? defaults.recovery!.verification!), verification_timeout_seconds: Number(value) } } }
+              })} /></Field>
+            </div>
+          </details>
         </div>
 
-        {/* Updates and backups */}
-        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
-          <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.updatesTitle')}</h4>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field id="bp-updates-strategy" label={t('blueprintBuilder.fields.updatesStrategy.label')} help={t('blueprintBuilder.fields.updatesStrategy.help')}>
-              <input
-                className="msm-input font-mono"
-                value={updates.strategy}
-                onChange={event => setDraft(current => ({ ...current, updates: { ...updates, strategy: event.target.value } }))}
-              />
-            </Field>
-            <Field id="bp-updates-verification" label={t('blueprintBuilder.fields.updatesVerification.label')} help={t('blueprintBuilder.fields.updatesVerification.help')}>
-              <input
-                className="msm-input font-mono"
-                value={updates.health_verification}
-                onChange={event => setDraft(current => ({ ...current, updates: { ...updates, health_verification: event.target.value } }))}
-              />
-            </Field>
-          </div>
-          <label className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              checked={updates.rollback_on_failure}
-              onChange={event => setDraft(current => ({ ...current, updates: { ...updates, rollback_on_failure: event.target.checked } }))}
-            />
-            {t('blueprintBuilder.guardian.rollbackOnFailure')}
-          </label>
-          <hr className="border-outline-variant/40" />
+        {/* Backups */}
+        <div className="min-w-0 max-w-full rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
+          <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.backupsTitle')}</h4>
           <label className="flex items-center gap-3">
             <input
               type="checkbox"
               checked={backups.before_risky_action}
-              onChange={event => setDraft(current => ({ ...current, backups: { ...backups, before_risky_action: event.target.checked } }))}
+              onChange={event => setDraft(current => ({ ...current, backups: { ...(current.backups ?? defaults.backups!), before_risky_action: event.target.checked } }))}
             />
-            {t('blueprintBuilder.guardian.beforeRiskyAction')}
+            <span>{t('blueprintBuilder.guardian.beforeRiskyAction')}<small className="msm-field-help block">{t('blueprintBuilder.guardian.beforeRiskyActionHelp')}</small></span>
           </label>
           <LinesField
             id="bp-backups-protected"
             label={t('blueprintBuilder.fields.backupsProtected.label')}
             help={t('blueprintBuilder.fields.backupsProtected.help')}
             value={backups.protected_paths}
-            onChange={protected_paths => setDraft(current => ({ ...current, backups: { ...backups, protected_paths } }))}
+            onChange={protected_paths => setDraft(current => ({ ...current, backups: { ...(current.backups ?? defaults.backups!), protected_paths } }))}
           />
         </div>
+          </>
+        )}
       </div>
     )
   }
@@ -727,7 +935,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
   )
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex min-h-0 min-w-0 items-stretch bg-black/70 backdrop-blur-sm md:pl-64" role="dialog" aria-modal="true" aria-labelledby="blueprint-builder-title" aria-describedby="blueprint-builder-description" data-testid="blueprint-builder-overlay">
+    <div className="fixed inset-0 z-50 flex min-h-0 min-w-0 items-stretch bg-black/70 backdrop-blur-sm lg:pl-64" role="dialog" aria-modal="true" aria-labelledby="blueprint-builder-title" aria-describedby="blueprint-builder-description" data-testid="blueprint-builder-overlay">
       <div className="flex h-[100dvh] max-h-[100dvh] min-w-0 w-full flex-col overflow-hidden border-l border-outline-variant bg-background shadow-panel-strong" data-testid="blueprint-builder-panel">
         <header className="flex min-w-0 shrink-0 items-start gap-3 border-b border-outline-variant/60 px-4 py-3 md:items-center md:gap-4 md:px-6">
           <div className="min-w-0 flex-1">
@@ -741,14 +949,14 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
         {loading ? (
           <div className="grid min-h-0 flex-1 place-items-center text-on-surface-variant" role="status">{t('blueprintBuilder.loading')}</div>
         ) : (
-          <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-cols-[14rem_minmax(0,1fr)] md:grid-rows-1">
-            <nav className="min-w-0 overflow-x-auto border-b border-outline-variant/50 p-2 md:overflow-y-auto md:border-b-0 md:border-r md:p-3" aria-label={t('blueprintBuilder.sectionNavigation')}>
-              <ol className="flex min-w-max gap-1 md:grid md:min-w-0 md:grid-cols-1">
-                {sectionIds.map((item, index) => <li key={item}><button type="button" onClick={() => setSection(item)} aria-current={section === item ? 'step' : undefined} className={`flex min-h-11 w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 text-left text-sm ${section === item ? 'bg-primary/10 text-primary ring-1 ring-primary/20' : 'text-on-surface-variant hover:bg-surface-container-high'}`}><span className="font-mono text-xs opacity-60">{String(index + 1).padStart(2, '0')}</span>{sectionLabel(item)}</button></li>)}
+          <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden lg:grid-cols-[14rem_minmax(0,1fr)] lg:grid-rows-1">
+            <nav className="min-w-0 overflow-x-auto border-b border-outline-variant/50 p-2 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-3" aria-label={t('blueprintBuilder.sectionNavigation')}>
+              <ol className="grid w-full grid-cols-4 gap-1 lg:grid-cols-1">
+                {sectionIds.map((item, index) => <li key={item} className="min-w-0"><button type="button" onClick={() => setSection(item)} aria-current={section === item ? 'step' : undefined} className={`flex min-h-11 min-w-0 w-full flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-center text-[11px] leading-tight lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-left lg:text-sm ${section === item ? 'bg-primary/10 text-primary ring-1 ring-primary/20' : 'text-on-surface-variant hover:bg-surface-container-high'}`}><span className="font-mono text-[10px] opacity-60 lg:text-xs">{String(index + 1).padStart(2, '0')}</span><span className="min-w-0 break-words">{sectionLabel(item)}</span></button></li>)}
               </ol>
             </nav>
             <div className="min-h-0 min-w-0 overflow-auto" tabIndex={0} aria-label={t('blueprintBuilder.fieldsArea')}>
-              <form className="mx-auto max-w-4xl space-y-6 p-4 md:p-7" onSubmit={event => event.preventDefault()}>
+              <form className="mx-auto min-w-0 max-w-4xl space-y-6 p-4 md:p-7" onSubmit={event => event.preventDefault()}>
                 <div><p className="text-xs font-semibold uppercase tracking-[.14em] text-primary/65">{t('blueprintBuilder.step', { current: currentIndex + 1, total: sectionIds.length })}</p><h3 className="mt-1 font-headline text-2xl font-bold">{sectionLabel(section)}</h3></div>
                 {section === 'basics' && renderBasics()}
                 {section === 'runtime' && renderRuntime()}
@@ -762,14 +970,33 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
             </div>
           </div>
         )}
-        <footer className="grid shrink-0 grid-cols-1 gap-2 border-t border-outline-variant/60 bg-surface-container-low/80 px-4 py-3 sm:grid-cols-[auto_1fr] sm:items-center md:px-6" data-testid="blueprint-builder-actions">
-          <Button variant="secondary" className="w-full sm:w-auto" disabled={currentIndex === 0} onClick={() => setSection(sectionIds[currentIndex - 1])}><ChevronLeft className="h-4 w-4" aria-hidden="true" />{t('common.back')}</Button>
-          <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:flex-wrap sm:justify-end">
-            <Button variant="secondary" className="w-full sm:w-auto" onClick={downloadDraft}><Download className="h-4 w-4" aria-hidden="true" />{t('blueprintBuilder.downloadJson')}</Button>
+        <footer className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 border-t border-outline-variant/60 bg-surface-container-low/80 px-3 py-2 sm:px-4 sm:py-3 md:px-6" data-testid="blueprint-builder-actions">
+          <Button
+            variant="secondary"
+            className="min-h-11 w-11 px-0 sm:w-auto sm:px-4"
+            aria-label={t('common.back')}
+            title={t('common.back')}
+            disabled={currentIndex === 0}
+            onClick={() => setSection(sectionIds[currentIndex - 1])}
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">{t('common.back')}</span>
+          </Button>
+          <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-2 sm:ml-auto sm:flex sm:flex-wrap sm:justify-end">
+            <Button
+              variant="secondary"
+              className="min-h-11 w-11 px-0 sm:w-auto sm:px-4"
+              aria-label={t('blueprintBuilder.downloadJson')}
+              title={t('blueprintBuilder.downloadJson')}
+              onClick={downloadDraft}
+            >
+              <Download className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline">{t('blueprintBuilder.downloadJson')}</span>
+            </Button>
             {currentIndex < sectionIds.length - 1 ? (
-              <Button className="w-full sm:w-auto" onClick={() => setSection(sectionIds[currentIndex + 1])}>{t('common.next')}<ChevronRight className="h-4 w-4" aria-hidden="true" /></Button>
+              <Button className="min-h-11 min-w-0 w-full sm:w-auto" onClick={() => setSection(sectionIds[currentIndex + 1])}><span className="min-w-0 truncate">{t('common.next')}</span><ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" /></Button>
             ) : (
-              <Button className="w-full sm:w-auto" disabled={saving || issues.length > 0} onClick={saveDraft}><Save className="h-4 w-4" aria-hidden="true" />{saving ? t('blueprintBuilder.saving') : mode === 'edit' ? t('blueprintBuilder.saveChanges') : t('blueprintBuilder.addDirectly')}</Button>
+              <Button className="min-h-11 min-w-0 w-full sm:w-auto" disabled={saving || issues.length > 0} onClick={saveDraft}><Save className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="min-w-0 truncate">{saving ? t('blueprintBuilder.saving') : mode === 'edit' ? t('blueprintBuilder.saveChanges') : t('blueprintBuilder.addDirectly')}</span></Button>
             )}
           </div>
         </footer>

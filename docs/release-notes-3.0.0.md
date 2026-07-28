@@ -9,14 +9,15 @@ Der Maunting Server Manager v3.0.0 führt die **Guardian Autonomous Engine** ein
 ### Kernfunktionalitäten der Guardian Engine
 
 #### 1. Autonomes Self-Healing & Recovery Ladder
-- **Echtzeit-Probes**: Überwachung via frei konfigurierbarer Health-Probes (`HTTP`, `TCP`, `UDP`, `RCON`, `Source Query` und `Process Check`).
-- **Recovery Ladder**: Stufenweise Wiederherstellung bei Ausfällen (z. B. Sanfter Neustart -> Hard Reboot -> SIGTERM/Quarantäne).
+- **Echtzeit-Probes**: Überwachung über die eingebauten, vertraglich geprüften Typen `Process`, `TCP`, `UDP-Mapping`, `HTTP`, `Minecraft Status/Query` und `Source Query`.
+- **Begrenzte Recovery Ladder**: Pro Fehlertyp konfigurierbare Stufen aus Container-Restart, sanftem Restart, sicher deklarierter Lockfile-Bereinigung und Quarantäne. Nicht implementierte Host-Reboots, Node-Migrationen oder Update-Rollbacks werden nicht angeboten.
+- **Backup vor Lockfile-Bereinigung**: Deklarierte Lockdateien werden vor einer riskanten Löschaktion begrenzt und mit restriktiven Rechten im persistenten Agent-State gesichert.
 - **Quarantäne-Modus**: Verhindert endlose Neustart-Schleifen (Crash Loops) und Ressourcen-Fresser. Wenn ein Server trotz mehrerer Reparaturversuche nicht stabil läuft, versetzt ihn die Engine automatisch in den Quarantäne-Zustand und benachrichtigt die Administratoren.
 - **1-Click Vorfalls-Auflösung**: Im Dashboard (neuer Tab **Guardian**) sehen Betreiber alle aktiven und vergangenen Vorfälle inkl. Ausführungs-Logs. Ein Klick auf *Quarantäne aufheben / Vorfall beheben* setzt den Server-Status zurück und hebt die Quarantäne auf.
 
 #### 2. Intelligente Recovery Leases (Aussetzung bei Admin-Aktionen)
 - Die Guardian Engine unterscheidet strikt zwischen einem unerwarteten Server-Absturz und beabsichtigten Aktionen des Administrators.
-- Bei manuellen Starts, Stopps, Updates oder Konfigurationsänderungen werden **Recovery Leases** automatisch pausiert, sodass der Guardian niemals störend in administrative Eingriffe eingreift.
+- Bei manuellen Starts, Stopps und Restarts werden **Recovery Leases** innerhalb eines harten Vier-Stunden-Limits automatisch gesetzt, sodass Guardian nicht in laufende administrative Eingriffe eingreift.
 
 #### 3. Vorfalls-Benachrichtigungen (Discord Webhooks & E-Mail Alerts)
 - **E-Mail-Benachrichtigungen**: Automatische Benachrichtigung an alle berechtigten Serverbetreiber bei kritischen Ereignissen oder Quarantäne.

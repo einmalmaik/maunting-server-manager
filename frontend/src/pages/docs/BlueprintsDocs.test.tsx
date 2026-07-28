@@ -43,7 +43,7 @@ describe('BlueprintsDocs page', () => {
 
   it('renders expected new structured sections', async () => {
     const { container } = renderDocs()
-    for (const key of ['intro', 'quickstart', 'minimal', 'reference', 'howto', 'updates', 'troubleshooting']) {
+    for (const key of ['intro', 'quickstart', 'minimal', 'reference', 'howto', 'updates', 'troubleshooting', 'guardian']) {
       expect(container.querySelector(`#docs-${key}`)).toBeInTheDocument()
     }
   })
@@ -104,5 +104,14 @@ describe('BlueprintsDocs page', () => {
     expect(screen.getByText('failed to extract layer ... to overlayfs')).toBeInTheDocument()
     expect(screen.getByText('Docker image unavailable / image or tag not found')).toBeInTheDocument()
     expect(screen.getByText('Rootless Docker Daemon not running for user msm')).toBeInTheDocument()
+  })
+
+  it('documents only the bounded Guardian contract and no custom driver loading', () => {
+    const { container } = renderDocs()
+    const section = container.querySelector('#docs-guardian')
+    expect(section).toHaveTextContent('restart, graceful_restart, clear_declared_lock_files, or quarantine')
+    expect(section).toHaveTextContent('Custom driver types cannot be configured')
+    expect(section).not.toHaveTextContent('PROBE_TYPE')
+    expect(section).not.toHaveTextContent('my-custom-probe')
   })
 })

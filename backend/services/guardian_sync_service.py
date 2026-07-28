@@ -47,6 +47,7 @@ _OBSERVED_STATES = frozenset(
         "recovering",
         "verifying",
         "quarantined",
+        "disabled",
     }
 )
 
@@ -176,14 +177,6 @@ def reconcile_guardian_server(
             )
             db.commit()
 
-        if payload is None:
-            return {
-                "payload_hash": None,
-                "generation": None,
-                "observed_state": "unknown",
-                "acknowledged_incidents": [],
-            }
-
         # 2. Retrieve observed state
         container_name = f"msm-srv-{server.id}"
         observed = client.get_guardian_state(container_name)
@@ -271,6 +264,14 @@ def reconcile_guardian_server(
         server.guardian_agent_recovery_suspension_json = rs_json
         server.guardian_accepted_generation = accepted_generation
         server.guardian_accepted_payload_hash = accepted_payload_hash
+        if (
+            q_data is None
+            and server.guardian_quarantine_control is not None
+            and accepted_generation == server.desired_state_generation
+        ):
+            # The Agent has accepted the clear generation and no longer
+            # reports quarantine. Retire the durable pending intent only now.
+            server.guardian_quarantine_control = None
 
         # Sync verification rules (only if desired state was compiled and sent)
         if payload is not None:
@@ -354,6 +355,13 @@ def reconcile_guardian_server(
             
         raise
 
+    # Missing-container recovery is independent from incident delivery. A
+    # temporary incident API failure must not suppress autonomous recreation.
+    if payload is not None and payload.get("guardian_enabled") is True:
+        from services.guardian_restart_service import _trigger_guardian_auto_restart
+
+        _trigger_guardian_auto_restart(db, server.id)
+
     # 3. Handle incidents ingestion outside the main sync try/except
     # so that incident failures don't overwrite successful sync status.
     try:
@@ -380,10 +388,6 @@ def reconcile_guardian_server(
         raise
     db.commit()
     db.refresh(server)
-    
-    if payload is not None:
-        from services.guardian_restart_service import _trigger_guardian_auto_restart
-        _trigger_guardian_auto_restart(db, server.id)
     
     return {
         "payload_hash": payload.get("payload_hash") if payload else None,

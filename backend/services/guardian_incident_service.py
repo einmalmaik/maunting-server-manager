@@ -187,16 +187,27 @@ def ingest_incidents_and_ack(
         # 1. Check if this exact UUID was already delivered (Idempotency)
         delivery = db.query(GuardianIncidentDelivery).filter(GuardianIncidentDelivery.incident_uuid == incident_uuid).first()
         if delivery is not None:
-            # We already processed this incident UUID. 
-            # If the status changed, update it.
-            existing_inc = db.query(Incident).filter(Incident.uuid == incident_uuid).first()
-            if existing_inc and existing_inc.status != item["status"]:
+            # A grouped Agent UUID points at the panel's group parent, whose
+            # own UUID is intentionally different. Always follow the delivery
+            # relation instead of looking up Incident.uuid again.
+            existing_inc = db.query(Incident).filter(Incident.id == delivery.incident_id).first()
+            if existing_inc:
+                merged_att = _merge_attempts(existing_inc.attempts, item["attempts"])
+                existing_inc.attempts = json.dumps(merged_att, sort_keys=True, separators=(",", ":"))
+                existing_inc.description = message
                 old_st = existing_inc.status
                 existing_inc.status = item["status"]
                 if existing_inc.status == "resolved":
                     existing_inc.resolved_at = datetime.now(timezone.utc)
-                if old_st != item["status"]:
+                elif existing_inc.resolved_at is not None:
+                    existing_inc.resolved_at = None
+                if old_st != existing_inc.status:
                     notifications_to_send.append((item["type"], item["status"], message))
+                # Persist the parent update before the delivery ACK bulk update.
+                # This also makes grouped UUID status changes observable through
+                # the same session immediately and avoids relying on autoflush
+                # ordering around the later delivery timestamp update.
+                db.flush()
             
             acknowledged.append(incident_uuid)
             continue

@@ -64,7 +64,7 @@
     "process": {},
     "application": {
       "type": "tcp",
-      "port": "game",
+      "port": "{{PORT:game}}",
       "interval": "60s",
       "failure_threshold": 3
     },

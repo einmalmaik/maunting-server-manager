@@ -91,6 +91,14 @@ def test_list_and_resolve_incidents(db: Session) -> None:
     db.refresh(server)
     assert inc.status == "resolved"
     assert inc.resolved_at is not None
-    assert server.guardian_observed_state == "healthy"
+    # The Panel must not forge Agent observation. It remains quarantined until
+    # the Agent accepts the new generation and reports the cleared state.
+    assert server.guardian_observed_state == "quarantined"
     assert server.guardian_quarantine_control is not None
     assert "clear" in server.guardian_quarantine_control
+    assert _server_response(server).guardian_quarantine_clear_pending is True
+
+    server.guardian_observed_state = "healthy"
+    assert _server_response(server).guardian_quarantine_clear_pending is True
+    server.guardian_quarantine_control = None
+    assert _server_response(server).guardian_quarantine_clear_pending is False

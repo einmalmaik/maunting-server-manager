@@ -367,9 +367,20 @@ def compile_guardian_config(server: Server, blueprint: Blueprint) -> dict[str, A
     }
 
 
+def is_guardian_enabled(blueprint: Blueprint) -> bool:
+    """Guardian is opt-in through at least one explicit Guardian section."""
+    return any(
+        getattr(blueprint, field) is not None
+        for field in ("health", "logs", "diagnostics", "recovery", "backups")
+    )
+
+
 def guardian_config_hash(server: Server, blueprint: Blueprint) -> str:
     encoded = json.dumps(
-        compile_guardian_config(server, blueprint),
+        {
+            "enabled": is_guardian_enabled(blueprint),
+            "config": compile_guardian_config(server, blueprint),
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -401,6 +412,7 @@ def compile_desired_state(server: Server, blueprint: Blueprint) -> dict[str, Any
         "server_id": int(server.id),
         "generation": generation,
         "desired_power_state": desired_power_state,
+        "guardian_enabled": is_guardian_enabled(blueprint),
         "recovery_suspension": _load_optional_json(
             getattr(server, "guardian_recovery_suspension", None),
             "Guardian recovery suspension",
@@ -461,4 +473,3 @@ def validate_agent_capabilities(payload: dict[str, Any], capabilities: dict[str,
             "Agent does not support the required Guardian capabilities",
             details={"unsupported": missing},
         )
-

@@ -2,6 +2,39 @@ export type BlueprintCategory = 'steam_game' | 'non_steam_game' | 'voice_server'
 export type BlueprintSourceType = 'steam' | 'http' | 'github' | 'dockerOnly' | 'custom' | 'manualUpload'
 export type BlueprintUpdateStrategy = 'alwaysValidate' | 'checkBased' | 'none'
 export type BlueprintPortName = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'custom'
+export type GuardianApplicationProbeType = 'tcp' | 'http-ping' | 'minecraft-status' | 'minecraft-query' | 'source-query'
+export type GuardianRecoveryAction = 'restart' | 'graceful_restart' | 'clear_declared_lock_files' | 'quarantine'
+export type GuardianDiagnosticParser = 'linux-oom' | 'java-stacktrace' | 'nodejs-stacktrace' | 'port-conflict' | 'missing-runtime' | 'corrupted-config' | 'startup-pattern'
+export type GuardianBuiltinRedactor = 'discord_token' | 'api_key' | 'authorization_header' | 'database_url' | 'jwt'
+
+interface GuardianThresholds {
+  id: string
+  interval: string
+  failure_threshold: number
+  success_threshold: number
+  required_for_startup: boolean
+  required_for_verification: boolean
+}
+
+export interface BlueprintHealthProcess extends GuardianThresholds {
+  required: boolean
+}
+
+export interface BlueprintHealthPort extends GuardianThresholds {
+  protocol: 'tcp' | 'udp'
+  port: string
+  timeout: string
+}
+
+export interface BlueprintHealthApplication extends GuardianThresholds {
+  type: GuardianApplicationProbeType | ''
+  timeout: string
+  port?: string
+  path?: string
+  expected_statuses: number[]
+  follow_redirects: boolean
+  max_response_bytes: number
+}
 
 export interface BlueprintDraft {
   version: 1
@@ -28,20 +61,26 @@ export interface BlueprintDraft {
   }
   backup?: { includePaths: string[] }
   health?: {
-    process?: { required: boolean }
-    port?: { protocol: 'tcp' | 'udp'; port: string; timeout: string }
-    application?: { type: string; interval: string; failure_threshold: number; path?: string; port?: string }
-    startup?: { success_patterns: string[]; failure_patterns: string[] }
+    process?: BlueprintHealthProcess
+    port?: BlueprintHealthPort
+    application?: BlueprintHealthApplication
+    startup?: {
+      grace_period_seconds: number
+      timeout_seconds: number
+      success_patterns: string[]
+      failure_patterns: string[]
+    }
   }
   logs?: {
     sources: string[]
     redact: string[]
+    max_tail_bytes: number
   }
   diagnostics?: {
-    parsers: string[]
+    parsers: GuardianDiagnosticParser[]
   }
   recovery?: {
-    policies: Array<{ match: string; action: string }>
+    policies: Array<{ match: string; action: GuardianRecoveryAction | '' }>
     safe_lock_files?: Array<{ path: string; reason: string }>
     max_attempts?: number
     attempt_window_seconds?: number
@@ -51,11 +90,6 @@ export interface BlueprintDraft {
       required_consecutive_successes?: number
       verification_timeout_seconds?: number
     }
-  }
-  updates?: {
-    strategy: string
-    health_verification: string
-    rollback_on_failure: boolean
   }
   backups?: {
     before_risky_action: boolean
@@ -94,25 +128,40 @@ export function createBlueprintDraft(): BlueprintDraft {
     },
     mods: { supportsMods: false, supportsSteamWorkshop: false, filterTags: [], modInjection: 'none', modListContent: 'workshopIds', postInstall: [] },
     health: {
-      process: { required: true },
-      port: { protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s' },
-      application: { type: '', interval: '30s', failure_threshold: 3 },
-      startup: { success_patterns: [], failure_patterns: [] },
+      process: {
+        required: true, id: 'process', interval: '15s', failure_threshold: 1, success_threshold: 1,
+        required_for_startup: true, required_for_verification: true,
+      },
+      port: {
+        protocol: 'tcp', port: '{{SERVER_PORT}}', timeout: '3s', id: 'port', interval: '30s',
+        failure_threshold: 3, success_threshold: 1, required_for_startup: false, required_for_verification: true,
+      },
+      application: {
+        type: '', id: 'application', interval: '30s', timeout: '3s', failure_threshold: 3,
+        success_threshold: 1, expected_statuses: [200], follow_redirects: false, max_response_bytes: 4096,
+        required_for_startup: false, required_for_verification: true,
+      },
+      startup: { grace_period_seconds: 30, timeout_seconds: 300, success_patterns: [], failure_patterns: [] },
     },
     logs: {
       sources: [],
       redact: [],
+      max_tail_bytes: 65_536,
     },
     diagnostics: {
       parsers: [],
     },
     recovery: {
       policies: [],
-    },
-    updates: {
-      strategy: 'snapshot-then-update',
-      health_verification: 'required',
-      rollback_on_failure: true,
+      safe_lock_files: [],
+      max_attempts: 3,
+      attempt_window_seconds: 1800,
+      cooldown_seconds: 300,
+      verification: {
+        minimum_healthy_duration_seconds: 30,
+        required_consecutive_successes: 3,
+        verification_timeout_seconds: 180,
+      },
     },
     backups: {
       before_risky_action: true,
@@ -133,6 +182,19 @@ export function changeBlueprintSource(draft: BlueprintDraft, type: BlueprintSour
 
 function safeRelativePath(value: string): boolean {
   return Boolean(value) && !value.startsWith('/') && !value.startsWith('~') && !value.includes('\\') && value.split('/').every(part => part !== '' && part !== '.' && part !== '..') && !value.includes('\0')
+}
+
+function validGuardianRegex(value: string): boolean {
+  if (!value || value.length > 256 || /[\0\n\r]/.test(value)) return false
+  if (/\\[1-9]|\(\?[=!<]|\(\?P|\(\?>|\(\?\(/.test(value)) return false
+  if (/(?:\*|\+|\{\d+(?:,\d*)?\})\s*(?:\*|\+|\{)/.test(value)) return false
+  if (/\([^)]*(?:\*|\+|\{\d+(?:,\d*)?\})[^)]*\)(?:\*|\+|\{)/.test(value)) return false
+  try {
+    new RegExp(value)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function validateBlueprintDraft(draft: BlueprintDraft): BlueprintValidationIssue[] {
@@ -195,27 +257,119 @@ export function validateBlueprintDraft(draft: BlueprintDraft): BlueprintValidati
   if (draft.mods?.modListContent === 'postInstallTargetBasenames' && !draft.mods.postInstall.length) add('mods.postInstall', 'blueprintBuilder.validation.postInstall')
 
   // Autopilot/Guardian Validation
-  if (draft.health?.port?.port && !draft.health.port.port.trim()) add('health.port.port', 'blueprintBuilder.validation.healthPortEmpty')
-  if (draft.health?.port?.timeout && !draft.health.port.timeout.trim()) add('health.port.timeout', 'blueprintBuilder.validation.healthTimeoutEmpty')
+  if (draft.health?.port && !draft.health.port.port.trim()) add('health.port.port', 'blueprintBuilder.validation.healthPortEmpty')
+  if (draft.health?.port && !draft.health.port.timeout.trim()) add('health.port.timeout', 'blueprintBuilder.validation.healthTimeoutEmpty')
   if (draft.health?.application?.type) {
-    if (!draft.health.application.type.trim()) {
-      add('health.application.type', 'blueprintBuilder.validation.healthAppTypeEmpty')
+    const supportedTypes: GuardianApplicationProbeType[] = ['tcp', 'http-ping', 'minecraft-status', 'minecraft-query', 'source-query']
+    if (!supportedTypes.includes(draft.health.application.type)) {
+      add('health.application.type', 'blueprintBuilder.validation.healthAppTypeUnsupported')
     } else if (draft.health.application.type === 'http-ping') {
-      if (!draft.health.application.path || !draft.health.application.path.trim().startsWith('/')) {
+      const path = draft.health.application.path?.trim() ?? ''
+      if (!path.startsWith('/') || path.startsWith('//') || path.includes('://') || path.includes('#')) {
         add('health.application.path', 'blueprintBuilder.validation.healthAppPathInvalid')
       }
+    } else if (draft.health.application.path !== undefined) {
+      add('health.application.path', 'blueprintBuilder.validation.healthAppPathOnlyHttp')
+    }
+  }
+  const durationPattern = /^\d+(?:\.\d+)?(?:ms|s|m)$/
+  const healthChecks = [draft.health?.process, draft.health?.port, draft.health?.application].filter(Boolean) as GuardianThresholds[]
+  const checkIds = new Set<string>()
+  healthChecks.forEach((check) => {
+    if (!/^[a-z][a-z0-9_-]{0,63}$/.test(check.id)) add('health', 'blueprintBuilder.validation.healthCheckId')
+    if (checkIds.has(check.id)) add('health', 'blueprintBuilder.validation.healthCheckIdDuplicate')
+    checkIds.add(check.id)
+    if (!durationPattern.test(check.interval)) add('health', 'blueprintBuilder.validation.healthDuration')
+    if (check.failure_threshold < 1 || check.failure_threshold > 20 || check.success_threshold < 1 || check.success_threshold > 20) {
+      add('health', 'blueprintBuilder.validation.healthThreshold')
+    }
+  })
+  if (draft.health?.port && !durationPattern.test(draft.health.port.timeout)) add('health.port.timeout', 'blueprintBuilder.validation.healthDuration')
+  if (draft.health?.application) {
+    if (!durationPattern.test(draft.health.application.timeout)) add('health.application.timeout', 'blueprintBuilder.validation.healthDuration')
+    if (draft.health.application.expected_statuses.length < 1 || draft.health.application.expected_statuses.length > 16 || draft.health.application.expected_statuses.some(status => !Number.isInteger(status) || status < 100 || status > 599)) add('health.application.expected_statuses', 'blueprintBuilder.validation.healthStatuses')
+    if (draft.health.application.follow_redirects) add('health.application.follow_redirects', 'blueprintBuilder.validation.healthRedirects')
+    if (draft.health.application.max_response_bytes < 1 || draft.health.application.max_response_bytes > 1_048_576) add('health.application.max_response_bytes', 'blueprintBuilder.validation.healthResponseBytes')
+    if ((draft.health.application.path?.length ?? 0) > 512) add('health.application.path', 'blueprintBuilder.validation.healthAppPathLength')
+    if (draft.health.application.port !== undefined && !draft.health.application.port.trim()) add('health.application.port', 'blueprintBuilder.validation.healthPortEmpty')
+  }
+  if (draft.health?.startup) {
+    if (draft.health.startup.grace_period_seconds < 0 || draft.health.startup.grace_period_seconds > 600 || draft.health.startup.timeout_seconds < 1 || draft.health.startup.timeout_seconds > 3600 || draft.health.startup.timeout_seconds <= draft.health.startup.grace_period_seconds) {
+      add('health.startup.timeout_seconds', 'blueprintBuilder.validation.healthStartupTimeout')
+    }
+    if (draft.health.startup.success_patterns.length > 16 || draft.health.startup.failure_patterns.length > 16) add('health.startup', 'blueprintBuilder.validation.guardianArrayLimit')
+    if ([...draft.health.startup.success_patterns, ...draft.health.startup.failure_patterns].some(pattern => !validGuardianRegex(pattern))) add('health.startup', 'blueprintBuilder.validation.guardianRegex')
+  }
+  if (draft.logs && (draft.logs.max_tail_bytes < 1024 || draft.logs.max_tail_bytes > 1_048_576)) add('logs.max_tail_bytes', 'blueprintBuilder.validation.logsTailBytes')
+  if (draft.logs) {
+    if (draft.logs.sources.length > 16 || draft.logs.redact.length > 32) add('logs', 'blueprintBuilder.validation.guardianArrayLimit')
+    draft.logs.sources.forEach(source => {
+      const parts = source.split('/')
+      const validSource = source === 'stdout' || (
+        safeRelativePath(source)
+        && !source.includes('**')
+        && parts.every((part, index) => !/[?\[]/.test(part) && (!part.includes('*') || (index === parts.length - 1 && part.split('*').length === 2)))
+      )
+      if (!validSource) add('logs.sources', 'blueprintBuilder.validation.logsSource')
+    })
+    const builtinRedactors: GuardianBuiltinRedactor[] = ['discord_token', 'api_key', 'authorization_header', 'database_url', 'jwt']
+    draft.logs.redact.forEach(redactor => {
+      if (!builtinRedactors.includes(redactor as GuardianBuiltinRedactor) && (!redactor.startsWith('regex:') || !validGuardianRegex(redactor.slice(6)))) {
+        add('logs.redact', 'blueprintBuilder.validation.logsRedactor')
+      }
+    })
+  }
+  if (draft.diagnostics) {
+    const supportedParsers: GuardianDiagnosticParser[] = ['linux-oom', 'java-stacktrace', 'nodejs-stacktrace', 'port-conflict', 'missing-runtime', 'corrupted-config', 'startup-pattern']
+    if (draft.diagnostics.parsers.length > 16 || draft.diagnostics.parsers.some(parser => !supportedParsers.includes(parser))) {
+      add('diagnostics.parsers', 'blueprintBuilder.validation.diagnosticsParser')
     }
   }
   if (draft.recovery?.policies) {
+    const supportedActions: GuardianRecoveryAction[] = ['restart', 'graceful_restart', 'clear_declared_lock_files', 'quarantine']
+    const supportedMatches = new Set([
+      'process_not_running', 'tcp_connect_failed', 'udp_mapping_missing', 'http_redirect_rejected',
+      'http_response_too_large', 'http_unexpected_status', 'http_request_failed',
+      'minecraft_query_failed', 'minecraft_status_failed', 'source_query_failed', 'linux-oom',
+      'port-conflict', 'java-stacktrace', 'nodejs-stacktrace', 'missing-runtime',
+      'corrupted-config', 'startup-pattern', 'probe_failed',
+    ])
+    if (draft.recovery.policies.length > 16) add('recovery.policies', 'blueprintBuilder.validation.guardianArrayLimit')
     draft.recovery.policies.forEach((policy, index) => {
-      if (!policy.match.trim()) add(`recovery.policies.${index}`, 'blueprintBuilder.validation.recoveryMatchEmpty')
+      if (!/^[a-z][a-z0-9_-]{0,63}$/.test(policy.match)) add(`recovery.policies.${index}`, 'blueprintBuilder.validation.recoveryMatchEmpty')
+      else if (!supportedMatches.has(policy.match)) add(`recovery.policies.${index}`, 'blueprintBuilder.validation.recoveryMatchUnsupported')
       if (!policy.action.trim()) add(`recovery.policies.${index}`, 'blueprintBuilder.validation.recoveryActionEmpty')
+      else if (!supportedActions.includes(policy.action as GuardianRecoveryAction)) add(`recovery.policies.${index}`, 'blueprintBuilder.validation.recoveryActionUnsupported')
     })
+    if (draft.recovery.policies.some(policy => policy.action === 'clear_declared_lock_files') && !draft.recovery.safe_lock_files?.length) {
+      add('recovery.safe_lock_files', 'blueprintBuilder.validation.recoveryLockFilesRequired')
+    }
+  }
+  if (draft.recovery?.safe_lock_files) {
+    if (draft.recovery.safe_lock_files.length > 32) add('recovery.safe_lock_files', 'blueprintBuilder.validation.guardianArrayLimit')
+    const seenLockPaths = new Set<string>()
+    draft.recovery.safe_lock_files.forEach((entry, index) => {
+      if (!safeRelativePath(entry.path) || /[*?\[]/.test(entry.path)) add(`recovery.safe_lock_files.${index}`, 'blueprintBuilder.validation.recoveryLockPath')
+      if (!entry.reason.trim() || entry.reason.length > 256 || entry.path.length > 256) add(`recovery.safe_lock_files.${index}`, 'blueprintBuilder.validation.recoveryLockReason')
+      if (seenLockPaths.has(entry.path)) add(`recovery.safe_lock_files.${index}`, 'blueprintBuilder.validation.recoveryLockDuplicate')
+      seenLockPaths.add(entry.path)
+    })
+  }
+  if (draft.recovery) {
+    if ((draft.recovery.max_attempts ?? 3) < 1 || (draft.recovery.max_attempts ?? 3) > 10) add('recovery.max_attempts', 'blueprintBuilder.validation.recoveryBounds')
+    if ((draft.recovery.attempt_window_seconds ?? 1800) < 60 || (draft.recovery.attempt_window_seconds ?? 1800) > 86_400) add('recovery.attempt_window_seconds', 'blueprintBuilder.validation.recoveryBounds')
+    if ((draft.recovery.cooldown_seconds ?? 300) < 1 || (draft.recovery.cooldown_seconds ?? 300) > 3600) add('recovery.cooldown_seconds', 'blueprintBuilder.validation.recoveryBounds')
+    const verification = draft.recovery.verification
+    if (verification && (
+      (verification.minimum_healthy_duration_seconds ?? 30) < 0 || (verification.minimum_healthy_duration_seconds ?? 30) > 600
+      || (verification.required_consecutive_successes ?? 3) < 1 || (verification.required_consecutive_successes ?? 3) > 20
+      || (verification.verification_timeout_seconds ?? 180) < 5 || (verification.verification_timeout_seconds ?? 180) > 3600
+    )) add('recovery.verification', 'blueprintBuilder.validation.recoveryBounds')
   }
   if (draft.backups?.protected_paths) {
     draft.backups.protected_paths.forEach((path) => {
       const strippedPath = path.endsWith('/') ? path.slice(0, -1) : path
-      if (strippedPath && !safeRelativePath(strippedPath)) add('paths', 'blueprintBuilder.validation.unsafePath', { path: path || '—' })
+      if (strippedPath && (!safeRelativePath(strippedPath) || /[*?\[]/.test(strippedPath))) add('paths', 'blueprintBuilder.validation.unsafePath', { path: path || '—' })
     })
   }
 
@@ -261,6 +415,10 @@ export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
 
   // Autopilot/Guardian normalization
   if (clean.health) {
+    if (clean.health.application) {
+      if (!clean.health.application.port?.trim()) delete clean.health.application.port
+      if (clean.health.application.type !== 'http-ping') delete clean.health.application.path
+    }
     if (clean.health.startup) {
       clean.health.startup.success_patterns = normalizeLines(clean.health.startup.success_patterns)
       clean.health.startup.failure_patterns = normalizeLines(clean.health.startup.failure_patterns)
@@ -268,7 +426,12 @@ export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
     const hasProcess = Boolean(clean.health.process)
     const hasPort = Boolean(clean.health.port?.port?.trim())
     const hasApp = Boolean(clean.health.application?.type?.trim())
-    const hasStartup = Boolean(clean.health.startup?.success_patterns?.length || clean.health.startup?.failure_patterns?.length)
+    const hasStartup = Boolean(
+      clean.health.startup?.success_patterns?.length
+      || clean.health.startup?.failure_patterns?.length
+      || clean.health.startup?.grace_period_seconds !== 30
+      || clean.health.startup?.timeout_seconds !== 300
+    )
 
     if (!hasProcess) delete clean.health.process
     if (!hasPort) delete clean.health.port
@@ -283,13 +446,13 @@ export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
   if (clean.logs) {
     clean.logs.sources = normalizeLines(clean.logs.sources)
     clean.logs.redact = normalizeLines(clean.logs.redact)
-    if (clean.logs.sources.length === 0 && clean.logs.redact.length === 0) {
+    if (clean.logs.sources.length === 0 && clean.logs.redact.length === 0 && clean.logs.max_tail_bytes === 65_536) {
       delete clean.logs
     }
   }
 
   if (clean.diagnostics) {
-    clean.diagnostics.parsers = normalizeLines(clean.diagnostics.parsers)
+    clean.diagnostics.parsers = clean.diagnostics.parsers.map(value => value.trim() as GuardianDiagnosticParser).filter(Boolean)
     if (clean.diagnostics.parsers.length === 0) {
       delete clean.diagnostics
     }
@@ -297,7 +460,7 @@ export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
 
   if (clean.recovery) {
     clean.recovery.policies = clean.recovery.policies
-      .map(p => ({ match: p.match.trim(), action: p.action.trim() }))
+      .map(p => ({ match: p.match.trim(), action: p.action.trim() as GuardianRecoveryAction | '' }))
       .filter(p => p.match && p.action)
     if (clean.recovery.safe_lock_files) {
       clean.recovery.safe_lock_files = clean.recovery.safe_lock_files
@@ -315,12 +478,6 @@ export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
                          clean.recovery.verification !== undefined
     if (!hasPolicies && !hasLockFiles && !hasOtherKeys) {
       delete clean.recovery
-    }
-  }
-
-  if (clean.updates) {
-    if (!clean.updates.strategy.trim() && !clean.updates.health_verification.trim()) {
-      delete clean.updates
     }
   }
 

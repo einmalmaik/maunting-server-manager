@@ -176,6 +176,7 @@ class ServerResponse(BaseModel):
     desired_power_state: str = "stopped"
     guardian_observed_state: str = "unknown"
     guardian_enabled: bool = False
+    guardian_quarantine_clear_pending: bool = False
     guardian_probe_timestamp: datetime | None = None
     guardian_transition_timestamp: datetime | None = None
     desired_state_generation: int = 1
