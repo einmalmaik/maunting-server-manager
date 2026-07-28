@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -174,11 +175,18 @@ def test_create_server_backup_routes_remote_to_agent(db):
     
     def fake_reconcile(_db, _server):
         _server.guardian_agent_recovery_suspension_json = _server.guardian_recovery_suspension
-        return {"payload_hash": "sha256:dummy"}
+        return {
+            "payload_hash": "sha256:dummy",
+            "recovery_suspension": (
+                json.loads(_server.guardian_recovery_suspension)
+                if _server.guardian_recovery_suspension
+                else None
+            ),
+        }
 
     with patch("services.backup_config_service.BackupConfigService.is_backup_password_set", return_value=True), \
          patch("services.backup_config_service.BackupConfigService.is_s3_configured", return_value=True), \
-         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile), \
+         patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile), \
          patch("services.backup_orchestrator._create_remote_agent_s3_backup", return_value=fake) as remote:
         out = create_server_backup(server.id, db)
     assert out is fake

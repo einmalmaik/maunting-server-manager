@@ -132,8 +132,37 @@ def compile_and_sync_desired_state(
     client = NodeClient.from_node(node, timeout=5.0)
     capabilities = client.get_guardian_capabilities()
     payload = compile_desired_state(db, server, capabilities=capabilities)
-    client.set_desired_state(f"msm-srv-{server.id}", payload)
+    acknowledgement = client.set_desired_state(f"msm-srv-{server.id}", payload)
+    _validate_desired_state_acknowledgement(acknowledgement, payload)
     return payload
+
+
+def _validate_desired_state_acknowledgement(
+    acknowledgement: Any,
+    payload: dict[str, Any],
+) -> None:
+    """Verify the Agent's atomic desired-state persistence acknowledgement."""
+    if not isinstance(acknowledgement, dict):
+        raise GuardianSyncMismatchError(
+            "guardian_desired_state_ack_invalid",
+            "Agent returned an invalid desired-state acknowledgement",
+        )
+
+    expected_generation = payload.get("generation")
+    accepted_generation = acknowledgement.get("generation")
+    if accepted_generation != expected_generation:
+        raise GuardianSyncMismatchError(
+            "guardian_generation_mismatch",
+            f"Generation mismatch: expected {expected_generation}, accepted {accepted_generation}",
+        )
+
+    expected_payload_hash = payload.get("payload_hash")
+    accepted_payload_hash = acknowledgement.get("payload_hash")
+    if accepted_payload_hash != expected_payload_hash:
+        raise GuardianSyncMismatchError(
+            "guardian_payload_hash_mismatch",
+            f"Payload hash mismatch: expected {expected_payload_hash}, accepted {accepted_payload_hash}",
+        )
 
 def reconcile_guardian_server(
     db: Session,
@@ -150,10 +179,26 @@ def reconcile_guardian_server(
         # 1. Capabilities check, compilation and synchronization
         capabilities = client.get_guardian_capabilities()
         payload = None
+        desired_acknowledgement = None
         try:
             payload = compile_desired_state(db, server, capabilities=capabilities)
             server.guardian_last_payload_hash = payload.get("payload_hash")
-            client.set_desired_state(f"msm-srv-{server.id}", payload)
+            raw_acknowledgement = client.set_desired_state(
+                f"msm-srv-{server.id}",
+                payload,
+            )
+            # Older test doubles did not model the response. Real NodeClient
+            # responses are dictionaries; when present, the POST acknowledgement
+            # is the authoritative proof that this exact generation/hash was
+            # persisted by the Agent.
+            if isinstance(raw_acknowledgement, dict):
+                _validate_desired_state_acknowledgement(
+                    raw_acknowledgement,
+                    payload,
+                )
+                desired_acknowledgement = raw_acknowledgement
+        except GuardianSyncMismatchError:
+            raise
         except Exception as compile_exc:
             logger.warning(
                 "Guardian desired state compilation/sync failed for server %s: %s",
@@ -262,8 +307,12 @@ def reconcile_guardian_server(
         server.guardian_transition_timestamp = trans_dt
         server.guardian_agent_quarantine_json = q_json
         server.guardian_agent_recovery_suspension_json = rs_json
-        server.guardian_accepted_generation = accepted_generation
-        server.guardian_accepted_payload_hash = accepted_payload_hash
+        if desired_acknowledgement is not None:
+            server.guardian_accepted_generation = desired_acknowledgement["generation"]
+            server.guardian_accepted_payload_hash = desired_acknowledgement["payload_hash"]
+        else:
+            server.guardian_accepted_generation = accepted_generation
+            server.guardian_accepted_payload_hash = accepted_payload_hash
         if (
             q_data is None
             and server.guardian_quarantine_control is not None
@@ -278,8 +327,10 @@ def reconcile_guardian_server(
             expected_generation = payload.get("generation")
             expected_payload_hash = payload.get("payload_hash")
 
-            # Check generation mismatch
-            if accepted_generation != expected_generation:
+            # A successful POST atomically confirms the desired generation and
+            # hash. The observed projection is written by the independent Agent
+            # loop and may legitimately still describe the previous generation.
+            if desired_acknowledgement is None and accepted_generation != expected_generation:
                 err_data = {
                     "code": "guardian_generation_mismatch",
                     "expected_generation": expected_generation,
@@ -292,7 +343,7 @@ def reconcile_guardian_server(
                 raise GuardianSyncMismatchError("guardian_generation_mismatch", f"Generation mismatch: expected {expected_generation}, accepted {accepted_generation}")
 
             # Check hash mismatch
-            if accepted_payload_hash != expected_payload_hash:
+            if desired_acknowledgement is None and accepted_payload_hash != expected_payload_hash:
                 err_data = {
                     "code": "guardian_payload_hash_mismatch",
                     "expected_payload_hash": expected_payload_hash,
@@ -357,7 +408,12 @@ def reconcile_guardian_server(
 
     # Missing-container recovery is independent from incident delivery. A
     # temporary incident API failure must not suppress autonomous recreation.
-    if payload is not None and payload.get("guardian_enabled") is True:
+    if (
+        payload is not None
+        and payload.get("guardian_enabled") is True
+        and accepted_generation == payload.get("generation")
+        and accepted_payload_hash == payload.get("payload_hash")
+    ):
         from services.guardian_restart_service import _trigger_guardian_auto_restart
 
         _trigger_guardian_auto_restart(db, server.id)

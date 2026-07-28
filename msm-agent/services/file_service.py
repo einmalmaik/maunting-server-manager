@@ -491,6 +491,7 @@ def prepare_runtime(
     ensure_dirs: list[str],
     required_files: list[str],
     patches: list[dict[str, str | None]],
+    executable_files: list[str] | None = None,
 ) -> None:
     """Apply declarative, blueprint-validated runtime file preparation on-node."""
     for rel_path in ensure_dirs:
@@ -517,6 +518,21 @@ def prepare_runtime(
     missing = [rel_path for rel_path in required_files if not safe_path(server_id, rel_path).is_file()]
     if missing:
         raise FileNotFoundError("Required runtime files are missing: " + ", ".join(missing))
+    required = set(required_files)
+    for rel_path in executable_files or []:
+        if rel_path not in required:
+            raise PathValidationError("Executable runtime file must also be required")
+        root = server_root(server_id)
+        unresolved = root / rel_path
+        if unresolved.is_symlink():
+            raise PathValidationError("Executable runtime file cannot be a symlink")
+        target = safe_path(server_id, rel_path)
+        if not target.is_file():
+            raise FileNotFoundError("Executable runtime file is missing")
+        target.chmod(0o750)
+        mode = stat_module.S_IMODE(target.stat(follow_symlinks=False).st_mode)
+        if os.name == "posix" and not mode & stat_module.S_IXUSR:
+            raise PermissionError("Executable runtime file could not be prepared")
 
 
 def search_paths(server_id: str | int, query: str, *, limit: int = 200) -> dict[str, Any]:

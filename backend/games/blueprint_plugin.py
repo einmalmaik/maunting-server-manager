@@ -18,7 +18,9 @@ from __future__ import annotations
 import glob
 import os
 import re
+import shlex
 import shutil
+import stat
 import threading
 from pathlib import Path
 
@@ -443,6 +445,7 @@ class BlueprintPlugin(GamePlugin):
             })
             local_patches.append((patch, value))
 
+        executable_files = self._declared_required_executable_files()
         node = getattr(server, "node", None)
         if node is not None and not getattr(node, "is_local", False):
             from services.node_client import NodeClient
@@ -452,6 +455,7 @@ class BlueprintPlugin(GamePlugin):
                 {
                     "ensure_dirs": self._blueprint.runtime.ensureDirs,
                     "required_files": self._blueprint.runtime.requiredFiles,
+                    "executable_files": executable_files,
                     "patches": resolved_patches,
                 },
             )
@@ -497,6 +501,17 @@ class BlueprintPlugin(GamePlugin):
                 "bitte Server neu installieren und Steam-Account/App-Zugriff pruefen."
             )
 
+        for rel_path in executable_files:
+            unresolved = base / rel_path
+            if unresolved.is_symlink():
+                raise RuntimeError(f"Runtime-Datei darf kein Symlink sein: {rel_path}")
+            target = unresolved.resolve()
+            target.relative_to(base)
+            target.chmod(0o750)
+            mode = stat.S_IMODE(target.stat(follow_symlinks=False).st_mode)
+            if os.name == "posix" and not mode & stat.S_IXUSR:
+                raise RuntimeError(f"Runtime-Datei ist nicht ausführbar: {rel_path}")
+
         try:
             self.update_modlist(server)
         except Exception as exc:
@@ -504,6 +519,25 @@ class BlueprintPlugin(GamePlugin):
                 server.id,
                 f"[MSM] update_modlist vor Start fehlgeschlagen (nicht kritisch): {exc}\n",
             )
+
+    def _declared_required_executable_files(self) -> list[str]:
+        """Derive executable startup files from the existing blueprint contract."""
+        required = set(self._blueprint.runtime.requiredFiles)
+        templates = [self._blueprint.runtime.startup]
+        templates.extend(profile.startup for profile in self._blueprint.runtime.startupProfiles or [])
+        executable_files: list[str] = []
+        for template in templates:
+            argv = shlex.split(template)
+            if not argv:
+                continue
+            declared = argv[0].replace("\\", "/")
+            if declared.startswith("./"):
+                declared = declared[2:]
+            elif declared.startswith("/") or "/" not in declared:
+                continue
+            if declared in required and declared not in executable_files:
+                executable_files.append(declared)
+        return executable_files
 
     def build_port_publishes(self, server) -> list[PortPublish]:
         """Port-Publishes aus der Blueprint statt UDP-Hartkodierung.

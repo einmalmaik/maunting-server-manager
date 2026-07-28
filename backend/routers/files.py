@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import secrets
 import shutil
+import stat
 import time
 from pathlib import Path
 
@@ -161,31 +162,38 @@ def _ensure_allowed_extension(filename: str) -> None:
 
 
 def _apply_permissions(install_dir: str, target: Path) -> None:
-    """Set recursive permissions on target, and ensure all its parent directories
-    up to install_dir are readable/writable/executable by everyone.
-    """
+    """Apply owner-scoped modes without destroying existing execute bits."""
+    def _normalize(path: Path) -> None:
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            return
+        if stat.S_ISDIR(info.st_mode):
+            path.chmod(0o750)
+        elif stat.S_ISREG(info.st_mode):
+            path.chmod(0o750 if stat.S_IMODE(info.st_mode) & 0o111 else 0o640)
+
     try:
         if target.is_dir():
-            os.chmod(target, 0o777)
+            _normalize(target)
             for root, dirs, files in os.walk(target):
                 for d in dirs:
                     try:
-                        os.chmod(os.path.join(root, d), 0o777)
+                        _normalize(Path(root) / d)
                     except OSError:
                         pass
                 for f in files:
                     try:
-                        os.chmod(os.path.join(root, f), 0o666)
+                        _normalize(Path(root) / f)
                     except OSError:
                         pass
         else:
-            os.chmod(target, 0o666)
+            _normalize(target)
 
         base = Path(install_dir).resolve()
         p = target.parent.resolve()
         while p != base and p != p.parent:
             try:
-                os.chmod(p, 0o777)
+                _normalize(p)
             except OSError:
                 pass
             p = p.parent

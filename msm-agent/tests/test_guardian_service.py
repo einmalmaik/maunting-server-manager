@@ -470,6 +470,177 @@ def test_docker_autorestart_enters_a_fresh_startup_grace_period(
     assert guardian_service.list_incidents(42) == []
 
 
+def test_docker_inspection_failure_preserves_state_and_reports_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    guardian_service.accept_desired_state(42, _payload())
+    desired = guardian_service._load_desired(42)
+    assert desired is not None
+    runtime = guardian_service._load_runtime(42, desired)
+    runtime["state"] = "healthy"
+    guardian_service._save_runtime(42, runtime)
+    restart_calls: list[str] = []
+
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: (_ for _ in ()).throw(RuntimeError("docker unavailable")),
+    )
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "restart_container",
+        lambda name, **_kwargs: restart_calls.append(name) or {"ok": True},
+    )
+
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    observed = guardian_service.observed_state(42)
+    assert observed["guardian_observed_state"] == "healthy"
+    assert observed["container_state"] == "unknown"
+    assert restart_calls == []
+    assert guardian_service.list_incidents(42) == []
+
+
+def test_docker_restarting_state_suppresses_guardian_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    guardian_service.accept_desired_state(42, _payload())
+    desired = guardian_service._load_desired(42)
+    assert desired is not None
+    runtime = guardian_service._load_runtime(42, desired)
+    runtime["state"] = "healthy"
+    runtime["container_started_at"] = "2026-07-28T12:00:00Z"
+    guardian_service._save_runtime(42, runtime)
+    restart_calls: list[str] = []
+
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: {
+            "status": "restarting",
+            "running": False,
+            "oom_killed": False,
+            "started_at": "2026-07-28T12:00:00Z",
+            "port_bindings": {},
+        },
+    )
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "restart_container",
+        lambda name, **_kwargs: restart_calls.append(name) or {"ok": True},
+    )
+
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    observed = guardian_service.observed_state(42)
+    assert observed["guardian_observed_state"] == "starting"
+    assert observed["container_state"] == "restarting"
+    assert restart_calls == []
+    assert guardian_service.list_incidents(42) == []
+
+
+def test_docker_restarting_timeout_opens_incident_without_competing_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    guardian_service.accept_desired_state(42, _payload())
+    desired = guardian_service._load_desired(42)
+    assert desired is not None
+    runtime = guardian_service._load_runtime(42, desired)
+    runtime["state"] = "starting"
+    runtime["docker_restarting_since"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=1)
+    ).isoformat()
+    guardian_service._save_runtime(42, runtime)
+    restart_calls: list[str] = []
+
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: {
+            "status": "restarting",
+            "running": False,
+            "oom_killed": False,
+            "started_at": "2026-07-28T12:00:00Z",
+            "port_bindings": {},
+        },
+    )
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "restart_container",
+        lambda name, **_kwargs: restart_calls.append(name) or {"ok": True},
+    )
+
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    observed = guardian_service.observed_state(42)
+    assert observed["guardian_observed_state"] == "unhealthy"
+    assert restart_calls == []
+    incidents = guardian_service.list_incidents(42)
+    assert len(incidents) == 1
+    assert incidents[0]["status"] == "open"
+
+
+def test_autorestart_ignores_historical_failure_log_when_live_probes_are_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    payload = _payload(startup_grace_seconds=0)
+    payload["guardian"]["startup"]["failure_patterns"] = ["Address already in use"]
+    payload["guardian"]["logs"]["sources"] = ["stdout"]
+    payload["payload_hash"] = canonical_payload_hash(payload)
+    guardian_service.accept_desired_state(42, payload)
+    desired = guardian_service._load_desired(42)
+    assert desired is not None
+    runtime = guardian_service._load_runtime(42, desired)
+    runtime["state"] = "healthy"
+    runtime["container_started_at"] = "2026-07-28T12:00:00Z"
+    guardian_service._save_runtime(42, runtime)
+    current = {
+        "status": "restarting",
+        "running": False,
+        "oom_killed": False,
+        "started_at": "2026-07-28T12:00:00Z",
+        "port_bindings": {},
+    }
+    restart_calls: list[str] = []
+
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: dict(current),
+    )
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "container_logs",
+        lambda *_args, **_kwargs: "Address already in use",
+    )
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "restart_container",
+        lambda name, **_kwargs: restart_calls.append(name) or {"ok": True},
+    )
+
+    asyncio.run(guardian_service.reconcile_server(42))
+    assert guardian_service.observed_state(42)["guardian_observed_state"] == "starting"
+
+    current.update(
+        {
+            "status": "running",
+            "running": True,
+            "started_at": "2026-07-28T12:05:00Z",
+        }
+    )
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    observed = guardian_service.observed_state(42)
+    assert observed["guardian_observed_state"] == "healthy"
+    assert restart_calls == []
+    assert guardian_service.list_incidents(42) == []
+
+
 def test_spontaneous_healing_resolves_incident_and_resets_recovery_budget(
     monkeypatch: pytest.MonkeyPatch,
     guardian_paths: Path,

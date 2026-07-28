@@ -350,7 +350,13 @@ def observed_state(server_id: int) -> dict[str, Any]:
     if desired is None:
         raise FileNotFoundError("Guardian desired state not found")
     runtime = _load_runtime(server_id, desired)
-    container = docker_service.inspect_container_state(f"{settings.container_name_prefix}{server_id}")
+    try:
+        container = docker_service.inspect_container_state(
+            f"{settings.container_name_prefix}{server_id}"
+        )
+    except Exception:
+        logger.warning("Guardian could not inspect server_id=%s", server_id)
+        container = {"status": "unknown"}
     return _write_observed(desired, runtime, container)
 
 
@@ -744,16 +750,13 @@ async def _handle_verification(
     desired: DesiredState,
     runtime: dict[str, Any],
     container_name: str,
-    logs: str,
 ) -> None:
     await _run_checks(desired, runtime, container_name, force=True, verification_only=True)
     healthy, degraded, failure = _required_check_status(desired, runtime, verification=True)
-    failure_pattern = next(
-        (pattern for pattern in desired.guardian.startup.failure_patterns if re.search(pattern, logs)),
-        None,
-    )
     now = _utcnow()
-    if healthy and failure_pattern is None:
+    # Required live probes are stronger evidence than an undated historical
+    # log tail, which can contain failure text from an earlier container run.
+    if healthy:
         runtime["verification_successes"] = int(runtime.get("verification_successes") or 0) + 1
         if runtime.get("verification_healthy_since") is None:
             runtime["verification_healthy_since"] = _iso(now)
@@ -812,14 +815,24 @@ async def _reconcile_server_locked(server_id: int) -> None:
         return
     runtime["accepted_generation"] = desired.generation
     container_name = f"{settings.container_name_prefix}{server_id}"
+    inspection_failed = False
     try:
         container = await asyncio.to_thread(docker_service.inspect_container_state, container_name)
     except Exception:
         logger.warning("Guardian could not inspect server_id=%s", server_id)
-        container = None
+        container = {"status": "unknown"}
+        inspection_failed = True
 
     if not desired.guardian_enabled:
         _transition(runtime, "disabled", "guardian_disabled")
+        _save_runtime(server_id, runtime)
+        _write_observed(desired, runtime, container)
+        return
+
+    # An unavailable Docker API is not evidence that a container is missing.
+    # Preserve the last confirmed Guardian state and suppress every mutation
+    # until inspection succeeds again.
+    if inspection_failed:
         _save_runtime(server_id, runtime)
         _write_observed(desired, runtime, container)
         return
@@ -864,6 +877,39 @@ async def _reconcile_server_locked(server_id: int) -> None:
         _write_observed(desired, runtime, container)
         return
 
+    container_status = str((container or {}).get("status") or "unknown")
+    if container_status == "restarting":
+        now = _utcnow()
+        restarting_since = _parse_time(runtime.get("docker_restarting_since"))
+        if restarting_since is None:
+            restarting_since = now
+            runtime["docker_restarting_since"] = _iso(now)
+            runtime["probe_states"] = {}
+            runtime["startup_started_at"] = _iso(now)
+            _transition(runtime, "starting", "container_restarting")
+        if (
+            now - restarting_since
+        ).total_seconds() >= desired.guardian.startup.timeout_seconds:
+            diagnostic = {
+                "type": "process_not_running",
+                "confidence": "high",
+                "evidence": "Docker restart did not complete within the startup timeout",
+            }
+            _transition(runtime, "unhealthy", "container_restart_timeout")
+            _upsert_active_incident(
+                desired,
+                runtime,
+                diagnostic["type"],
+                "open",
+                diagnostic,
+            )
+        # Docker already owns this restart. Never race it with another recovery
+        # action or quarantine while its state is still ``restarting``.
+        _save_runtime(server_id, runtime)
+        _write_observed(desired, runtime, container)
+        return
+    runtime["docker_restarting_since"] = None
+
     container_running = bool(container and container.get("running"))
     current_started_at = (
         str(container.get("started_at") or "").strip()
@@ -880,7 +926,8 @@ async def _reconcile_server_locked(server_id: int) -> None:
         runtime["probe_states"] = {}
         runtime["startup_started_at"] = _iso()
         _transition(runtime, "starting", "container_restart_detected")
-    runtime["container_started_at"] = current_started_at or None
+    if current_started_at:
+        runtime["container_started_at"] = current_started_at
 
     if container is None and runtime.get("state") != "starting":
         _transition(runtime, "stopped", "container_missing")
@@ -899,11 +946,7 @@ async def _reconcile_server_locked(server_id: int) -> None:
         started = _parse_time(runtime.get("startup_started_at")) or now
         startup = desired.guardian.startup
         failure_pattern = next((p for p in startup.failure_patterns if re.search(p, logs)), None)
-        if failure_pattern is not None:
-            diagnostic = {"type": "startup-pattern", "confidence": "high", "evidence": "startup failure pattern"}
-            _transition(runtime, "unhealthy", "startup_failure_pattern")
-            _upsert_active_incident(desired, runtime, diagnostic["type"], "open", diagnostic)
-        elif (now - started).total_seconds() < startup.grace_period_seconds:
+        if (now - started).total_seconds() < startup.grace_period_seconds:
             pass
         else:
             await _run_checks(desired, runtime, container_name, force=True, startup_only=True)
@@ -914,13 +957,29 @@ async def _reconcile_server_locked(server_id: int) -> None:
             process_running = bool(container and container.get("running"))
             if process_running and probes_healthy and pattern_ready:
                 _transition(runtime, "healthy", "startup_ready")
+            elif failure_pattern is not None and (
+                not process_running or not probes_healthy
+            ):
+                diagnostic = {
+                    "type": "startup-pattern",
+                    "confidence": "high",
+                    "evidence": "startup failure pattern",
+                }
+                _transition(runtime, "unhealthy", "startup_failure_pattern")
+                _upsert_active_incident(
+                    desired,
+                    runtime,
+                    diagnostic["type"],
+                    "open",
+                    diagnostic,
+                )
             elif (now - started).total_seconds() >= startup.timeout_seconds:
                 diagnostic = _diagnose(desired, container, logs, "startup_timeout")
                 _transition(runtime, "unhealthy", "startup_timeout")
                 _upsert_active_incident(desired, runtime, diagnostic["type"], "open", diagnostic)
 
     elif runtime.get("state") == "verifying":
-        await _handle_verification(desired, runtime, container_name, logs)
+        await _handle_verification(desired, runtime, container_name)
 
     elif runtime.get("state") in {"healthy", "degraded", "unhealthy"}:
         await _run_checks(desired, runtime, container_name)

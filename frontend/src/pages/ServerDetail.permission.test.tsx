@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ServerDetail } from './ServerDetail'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
+import { useToastStore } from '@/stores/toastStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import type { MePermissions } from '@/types/permissions'
 import type { Server, GameInfo } from '@/types'
@@ -61,7 +62,7 @@ const mockApi = vi.mocked(client.api)
 // Synthetic fixtures — no real credentials, IPs, tokens, or server metadata.
 // ---------------------------------------------------------------------------
 
-const SERVER_ID = 42
+const SERVER_ID = 84
 const OTHER_SERVER_ID = 99
 
 const SYNTHETIC_SERVER: Server = {
@@ -216,6 +217,11 @@ describe('ServerDetail permission topology — VAL-UI-002 / VAL-UI-018', () => {
     mockApiImplementation()
     await i18n.changeLanguage('en')
     usePermissionsStore.setState({ me: null, isLoading: false, error: null })
+    useToastStore.setState({ toasts: [] })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    })
   })
 
   afterEach(() => {
@@ -226,6 +232,33 @@ describe('ServerDetail permission topology — VAL-UI-002 / VAL-UI-018', () => {
   // -------------------------------------------------------------------------
   // Allowed cases: exactly one resource edit action is rendered
   // -------------------------------------------------------------------------
+
+  it('labels and copies the canonical Docker container name without implying an install directory', async () => {
+    setPermissions(VIEW_ONLY_ME)
+    renderServerDetail()
+    await waitForServerToLoad()
+
+    const copyButton = screen.getByRole('button', {
+      name: i18n.t('servers.copyDockerContainerName'),
+    })
+    expect(copyButton).toHaveTextContent(i18n.t('servers.dockerContainerLabel'))
+    expect(copyButton).toHaveTextContent('msm-srv-84')
+    expect(copyButton).toHaveAttribute(
+      'title',
+      expect.stringContaining('palworld_84'),
+    )
+
+    fireEvent.click(copyButton)
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('msm-srv-84')
+    expect(
+      useToastStore.getState().toasts.some(
+        (item) =>
+          item.type === 'success' &&
+          item.message === i18n.t('servers.dockerContainerNameCopied'),
+      ),
+    ).toBe(true)
+  })
 
   describe('allowed cases render exactly one resource edit action', () => {
     it('owner sees exactly one resource edit action', async () => {

@@ -585,14 +585,18 @@ export function ServerDetail() {
           </button>
           <button
             type="button"
-            className="msm-btn-secondary inline-flex min-h-11 items-center px-3 py-2 font-mono text-xs"
-            title={t("servers.copyContainerId", "Copy container ID")}
+            className="msm-btn-secondary inline-flex min-h-11 max-w-full items-center gap-2 px-3 py-2 text-left"
+            aria-label={t("servers.copyDockerContainerName")}
+            title={t("servers.dockerContainerInstallDirHint")}
             onClick={() => {
               void navigator.clipboard.writeText(`msm-srv-${server.id}`);
-              toast.success(t("servers.containerIdCopied", "Container ID copied"));
+              toast.success(t("servers.dockerContainerNameCopied"));
             }}
           >
-            msm-srv-{server.id}
+            <span className="font-label-md text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t("servers.dockerContainerLabel")}
+            </span>
+            <span className="font-mono text-xs">msm-srv-{server.id}</span>
           </button>
           </div>
         )}

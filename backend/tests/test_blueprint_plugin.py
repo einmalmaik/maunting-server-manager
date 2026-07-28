@@ -13,10 +13,11 @@ Schwerpunkt:
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from blueprints.schema import load_blueprint_dict, load_blueprint_file
 from games.blueprint_plugin import BlueprintPlugin
@@ -597,6 +598,34 @@ def test_dayz_blueprint_runtime_preflight_rejects_missing_required_files(tmp_pat
     assert "DayZServer" in message
     assert "serverDZ.cfg" in message
     assert str(tmp_path) not in message
+
+
+def test_palworld_runtime_preflight_repairs_declared_startup_executable(tmp_path) -> None:
+    plugin = _native_plugin("palworld")
+    server = _FakeServer(id=84, install_dir=str(tmp_path), game_port=8211)
+    startup = tmp_path / "PalServer.sh"
+    startup.write_text("#!/bin/sh\n", encoding="utf-8")
+    startup.chmod(0o640)
+
+    with patch.object(plugin, "update_modlist"):
+        plugin.prepare_runtime(server)
+
+    if os.name == "posix":
+        assert stat.S_IMODE(startup.stat().st_mode) == 0o750
+
+
+def test_palworld_remote_preflight_sends_derived_executable_file(tmp_path) -> None:
+    plugin = _native_plugin("palworld")
+    server = _FakeServer(id=84, install_dir=str(tmp_path), game_port=8211)
+    server.node = SimpleNamespace(is_local=False)
+    client = MagicMock()
+
+    with patch("services.node_client.NodeClient.from_node", return_value=client):
+        plugin.prepare_runtime(server)
+
+    body = client.files_prepare_runtime.call_args.args[1]
+    assert body["required_files"] == ["PalServer.sh"]
+    assert body["executable_files"] == ["PalServer.sh"]
 
 
 def test_dayz_start_does_not_run_container_when_required_files_missing(tmp_path) -> None:

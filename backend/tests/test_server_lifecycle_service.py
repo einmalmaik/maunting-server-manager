@@ -84,6 +84,22 @@ def test_queue_lifecycle_operation_returns_before_worker_runs():
     reset_lifecycle_jobs_for_tests()
 
 
+def test_queue_restart_sets_desired_power_state_to_running():
+    fake_server = Server(id=1010, game_type="dayz", status="running")
+    fake_db = MagicMock(spec=Session)
+
+    with patch("services.server_lifecycle_service._start_lifecycle_thread"), patch(
+        "services.guardian_state_service.set_desired_power_state"
+    ) as set_desired, patch(
+        "services.server_lifecycle_service.sync_desired_state_to_agent",
+        return_value=True,
+    ):
+        queue_lifecycle_operation(fake_db, fake_server, "restart")
+
+    set_desired.assert_called_once_with(fake_db, fake_server, "running")
+    reset_lifecycle_jobs_for_tests()
+
+
 def test_queue_lifecycle_operation_kill_overrides_active_job_as_emergency():
     """Kill als Notfall-Button soll auch bei laufendem Start/Restart/Stop funktionieren (override)."""
     fake_server = Server(id=11, game_type="dayz", status="running")
@@ -94,7 +110,14 @@ def test_queue_lifecycle_operation_kill_overrides_active_job_as_emergency():
             _server.guardian_agent_recovery_suspension_json = _server.guardian_recovery_suspension
         else:
             _server.guardian_agent_recovery_suspension_json = None
-        return {"payload_hash": "sha256:dummy"}
+        return {
+            "payload_hash": "sha256:dummy",
+            "recovery_suspension": (
+                json.loads(_server.guardian_recovery_suspension)
+                if _server.guardian_recovery_suspension
+                else None
+            ),
+        }
 
     with patch("services.server_lifecycle_service._start_lifecycle_thread"), \
          patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
@@ -118,7 +141,7 @@ def test_kill_reports_docker_remove_failure() -> None:
 
     with patch(
         "services.guardian_state_service.set_desired_power_state",
-    ), patch(
+    ) as set_desired, patch(
         "services.server_lifecycle_service.sync_desired_state_to_agent",
         return_value=False,
     ), patch(
@@ -130,6 +153,7 @@ def test_kill_reports_docker_remove_failure() -> None:
 
     assert exc.value.status_code == 500
     assert fake_server.status != "stopped"
+    set_desired.assert_called_once_with(fake_db, fake_server, "stopped")
 
 
 def test_kill_cancels_inflight_start_before_container_creation(db: Session) -> None:
@@ -604,11 +628,18 @@ def test_lifecycle_job_applies_recovery_suspension(db: Session) -> None:
             _server.guardian_agent_recovery_suspension_json = _server.guardian_recovery_suspension
         else:
             _server.guardian_agent_recovery_suspension_json = None
-        return {"payload_hash": "sha256:dummy"}
+        return {
+            "payload_hash": "sha256:dummy",
+            "recovery_suspension": (
+                json.loads(_server.guardian_recovery_suspension)
+                if _server.guardian_recovery_suspension
+                else None
+            ),
+        }
 
     with patch("services.guardian_state_service.set_recovery_suspension", side_effect=fake_set) as mock_set, \
          patch("services.guardian_state_service.clear_recovery_suspension", side_effect=fake_clear) as mock_clear, \
-         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile) as mock_reconcile, \
+         patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile) as mock_reconcile, \
          patch("services.server_lifecycle_service.get_plugin", return_value=plugin), \
          patch("services.server_lifecycle_service.open_ports"), \
          patch("services.server_lifecycle_service.iptables_accept_server"):
@@ -645,7 +676,7 @@ def test_lifecycle_does_not_start_before_agent_accepts_lease(db: Session) -> Non
 
     with patch("services.guardian_state_service.set_recovery_suspension"), \
          patch("services.guardian_state_service.clear_recovery_suspension"), \
-         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=RuntimeError("Lease sync failed")), \
+         patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=RuntimeError("Lease sync failed")), \
          patch("services.server_lifecycle_service.get_plugin", return_value=plugin):
 
         with pytest.raises(RuntimeError, match="Lease sync failed"):
@@ -680,9 +711,16 @@ def test_lease_is_immediately_synchronized(db: Session) -> None:
     def fake_reconcile(_db, _server):
         reconcile_calls.append(_server.guardian_recovery_suspension)
         _server.guardian_agent_recovery_suspension_json = _server.guardian_recovery_suspension
-        return {"payload_hash": "sha256:dummy"}
+        return {
+            "payload_hash": "sha256:dummy",
+            "recovery_suspension": (
+                json.loads(_server.guardian_recovery_suspension)
+                if _server.guardian_recovery_suspension
+                else None
+            ),
+        }
 
-    with patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
+    with patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile):
         with guardian_recovery_suspension_lease(db, server, "unit-test-lease"):
             # Verify that reconcile was invoked immediately upon entering the context manager
             assert len(reconcile_calls) == 1
@@ -718,9 +756,16 @@ def test_lease_clear_is_immediately_synchronized(db: Session) -> None:
             _server.guardian_agent_recovery_suspension_json = _server.guardian_recovery_suspension
         else:
             _server.guardian_agent_recovery_suspension_json = None
-        return {"payload_hash": "sha256:dummy"}
+        return {
+            "payload_hash": "sha256:dummy",
+            "recovery_suspension": (
+                json.loads(_server.guardian_recovery_suspension)
+                if _server.guardian_recovery_suspension
+                else None
+            ),
+        }
 
-    with patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
+    with patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile):
         with guardian_recovery_suspension_lease(db, server, "unit-test-clear-lease"):
             pass
 
@@ -757,7 +802,7 @@ def test_failed_lease_sync_aborts_lifecycle_operation(db: Session) -> None:
 
     with patch("services.guardian_state_service.set_recovery_suspension"), \
          patch("services.guardian_state_service.clear_recovery_suspension"), \
-         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=RuntimeError("Sync failed")), \
+         patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=RuntimeError("Sync failed")), \
          patch("services.server_lifecycle_service.get_plugin", return_value=plugin) as mock_get_plugin, \
          patch("services.server_lifecycle_service.open_ports"), \
          patch("services.server_lifecycle_service.iptables_accept_server"):
@@ -795,8 +840,8 @@ def test_lifecycle_aborts_if_agent_does_not_confirm_lease(db: Session) -> None:
     def fake_reconcile(_db, _server):
         return {"payload_hash": "sha256:dummy"}
 
-    with patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
-        with pytest.raises(RuntimeError, match="did not confirm recovery lease"):
+    with patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile):
+        with pytest.raises(RuntimeError, match="lease sync failed"):
             with guardian_recovery_suspension_lease(db, server, "unit-test-unconfirmed"):
                 pass
 
@@ -826,14 +871,14 @@ def test_lifecycle_aborts_if_transient_sync_error_returns_none_hash(db: Session)
     def fake_reconcile(_db, _server):
         return {"payload_hash": None, "observed_state": "unknown"}
 
-    with patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
+    with patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile):
         with pytest.raises(RuntimeError, match="lease sync failed"):
             with guardian_recovery_suspension_lease(db, server, "unit-test-transient"):
                 pass
 
 
-def test_lifecycle_aborts_if_agent_does_not_confirm_lease_removal(db: Session) -> None:
-    """If lease removal is not confirmed by agent on exit, an error is raised."""
+def test_lease_cleanup_failure_does_not_fail_completed_operation(db: Session) -> None:
+    """Cleanup is retried by reconciliation and must not mask completed work."""
     from services.server_lifecycle_service import guardian_recovery_suspension_lease
     from models import Server, Node
 
@@ -860,12 +905,16 @@ def test_lifecycle_aborts_if_agent_does_not_confirm_lease_removal(db: Session) -
         if _server.guardian_recovery_suspension:
             saved_json[0] = _server.guardian_recovery_suspension
         _server.guardian_agent_recovery_suspension_json = saved_json[0]
-        return {"payload_hash": "sha256:dummy"}
+        return {
+            "payload_hash": "sha256:dummy",
+            "recovery_suspension": (
+                json.loads(saved_json[0]) if saved_json[0] else None
+            ),
+        }
 
-    with patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
-        with pytest.raises(RuntimeError, match="did not confirm removal of recovery lease"):
-            with guardian_recovery_suspension_lease(db, server, "unit-test-removal"):
-                pass
+    with patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile):
+        with guardian_recovery_suspension_lease(db, server, "unit-test-removal"):
+            pass
 
 
 def test_restart_server_sync_success(db: Session) -> None:
@@ -898,7 +947,14 @@ def test_restart_server_sync_success(db: Session) -> None:
         else:
             saved_json[0] = None
         _server.guardian_agent_recovery_suspension_json = saved_json[0]
-        return {"payload_hash": "sha256:dummy"}
+        return {
+            "payload_hash": "sha256:dummy",
+            "recovery_suspension": (
+                json.loads(_server.guardian_recovery_suspension)
+                if _server.guardian_recovery_suspension
+                else None
+            ),
+        }
 
     # Mock _run_restart to simulate success (which sets status to running)
     def fake_run_restart(_db, _server, _plugin):
@@ -910,7 +966,7 @@ def test_restart_server_sync_success(db: Session) -> None:
          patch("services.server_lifecycle_service.get_plugin", return_value=MagicMock()), \
          patch("services.server_lifecycle_service._run_restart", side_effect=fake_run_restart), \
          patch("services.server_lifecycle_service._append_console_log") as mock_log, \
-         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
+         patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile):
 
         result = _restart_server_sync(server.id)
 
@@ -952,7 +1008,14 @@ def test_restart_server_sync_failure_reraises_original_exception(db: Session) ->
         else:
             saved_json[0] = None
         _server.guardian_agent_recovery_suspension_json = saved_json[0]
-        return {"payload_hash": "sha256:dummy"}
+        return {
+            "payload_hash": "sha256:dummy",
+            "recovery_suspension": (
+                json.loads(_server.guardian_recovery_suspension)
+                if _server.guardian_recovery_suspension
+                else None
+            ),
+        }
 
     # Mock _run_restart to raise a specific exception
     original_error = ValueError("Simulation of restart failure")
@@ -962,7 +1025,7 @@ def test_restart_server_sync_failure_reraises_original_exception(db: Session) ->
          patch("services.server_lifecycle_service.get_plugin", return_value=MagicMock()), \
          patch("services.server_lifecycle_service._run_restart", side_effect=original_error), \
          patch("services.server_lifecycle_service._append_console_log") as mock_log, \
-         patch("services.guardian_sync_service.reconcile_guardian_server", side_effect=fake_reconcile):
+         patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile):
 
         with pytest.raises(ValueError) as exc_info:
             _restart_server_sync(server.id)

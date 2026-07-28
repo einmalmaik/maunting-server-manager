@@ -507,6 +507,94 @@ def test_reconcile_saves_observed_state_fields(db: Session) -> None:
     assert server.guardian_sync_error_statistics is None
 
 
+def test_reconcile_accepts_atomic_post_ack_while_observed_projection_is_stale(
+    db: Session,
+) -> None:
+    from services.guardian_sync_service import reconcile_guardian_server
+
+    blueprint = load_blueprint_dict(_base_blueprint_dict())
+    plugin = MagicMock()
+    plugin.get_blueprint.return_value = blueprint
+
+    node = Node(
+        id=101,
+        name="node-101",
+        host="http://127.0.0.1",
+        status="online",
+        auth_token_enc="enc",
+    )
+    server = _server()
+    server.node = node
+    server.id = None
+    db.add_all([node, server])
+    db.commit()
+    db.refresh(server)
+
+    stale_hash = "sha256:" + ("0" * 64)
+    client = MagicMock()
+    client.get_guardian_capabilities.return_value = {
+        "guardian_schema_versions": [1],
+        "probe_types": ["process"],
+        "diagnostic_parsers": [],
+        "recovery_actions": [],
+    }
+    client.set_desired_state.side_effect = lambda _name, payload: {
+        "ok": True,
+        "generation": payload["generation"],
+        "payload_hash": payload["payload_hash"],
+    }
+    client.get_guardian_state.return_value = {
+        "schema_version": 1,
+        "supported_schema_version": 1,
+        "server_id": server.id,
+        "accepted_generation": 0,
+        "payload_hash": stale_hash,
+        "guardian_observed_state": "starting",
+        "observed_runtime_state": "starting",
+        "container_state": "created",
+        "active_incident_uuid": None,
+        "last_probe_at": None,
+        "last_transition_at": "2026-07-20T12:01:00Z",
+        "quarantine": None,
+        "recovery_suspension": None,
+    }
+    client.get_incidents.return_value = []
+
+    with patch("services.guardian_sync_service.get_plugin", return_value=plugin):
+        result = reconcile_guardian_server(db, server, node_client=client)
+
+    sent_payload = client.set_desired_state.call_args.args[1]
+    db.refresh(server)
+    assert result["generation"] == sent_payload["generation"]
+    assert result["payload_hash"] == sent_payload["payload_hash"]
+    assert server.guardian_accepted_generation == sent_payload["generation"]
+    assert server.guardian_accepted_payload_hash == sent_payload["payload_hash"]
+    assert server.guardian_observed_state == "starting"
+    assert server.guardian_sync_error_statistics is None
+
+
+def test_atomic_desired_state_ack_rejects_wrong_generation() -> None:
+    from services.guardian_sync_service import (
+        GuardianSyncMismatchError,
+        _validate_desired_state_acknowledgement,
+    )
+
+    payload = {
+        "generation": 7,
+        "payload_hash": "sha256:" + ("a" * 64),
+    }
+    with pytest.raises(GuardianSyncMismatchError) as exc:
+        _validate_desired_state_acknowledgement(
+            {
+                "generation": 6,
+                "payload_hash": payload["payload_hash"],
+            },
+            payload,
+        )
+
+    assert exc.value.code == "guardian_generation_mismatch"
+
+
 def test_reconcile_network_failure_keeps_last_state_saves_error_stats(db: Session) -> None:
     from services.guardian_sync_service import reconcile_guardian_server
     

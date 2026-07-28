@@ -47,20 +47,6 @@ class LifecycleOperationCancelled(RuntimeError):
     """Raised when a newer operation invalidates an in-flight lifecycle job."""
 
 
-def _extract_agent_recovery_suspension_op_id(server: Server) -> str | None:
-    raw = getattr(server, "guardian_agent_recovery_suspension_json", None)
-    if not raw:
-        return None
-    try:
-        import json
-        data = json.loads(raw)
-        if isinstance(data, dict):
-            return data.get("operation_id")
-    except Exception:
-        pass
-    return None
-
-
 @contextmanager
 def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str):
     node = server.node
@@ -70,7 +56,7 @@ def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str)
 
     op_id = str(uuid.uuid4())
     from services.guardian_state_service import set_recovery_suspension, clear_recovery_suspension
-    from services.guardian_sync_service import reconcile_guardian_server
+    from services.guardian_sync_service import compile_and_sync_desired_state
     
     set_recovery_suspension(
         db,
@@ -84,34 +70,45 @@ def guardian_recovery_suspension_lease(db: Session, server: Server, reason: str)
     )
 
     try:
-        sync_res = reconcile_guardian_server(db, server)
+        sync_res = compile_and_sync_desired_state(db, server)
     except Exception:
         clear_recovery_suspension(db, server, operation_id=op_id)
         raise
 
-    if not isinstance(sync_res, dict) or sync_res.get("payload_hash") is None:
+    confirmed_lease = (
+        sync_res.get("recovery_suspension")
+        if isinstance(sync_res, dict)
+        else None
+    )
+    if (
+        not isinstance(confirmed_lease, dict)
+        or confirmed_lease.get("operation_id") != op_id
+    ):
         clear_recovery_suspension(db, server, operation_id=op_id)
         raise RuntimeError(f"Guardian recovery lease sync failed for server {server.id}")
-
-    confirmed_op_id = _extract_agent_recovery_suspension_op_id(server)
-    if confirmed_op_id != op_id:
-        clear_recovery_suspension(db, server, operation_id=op_id)
-        raise RuntimeError(
-            f"Guardian agent did not confirm recovery lease {op_id} for server {server.id} (got: {confirmed_op_id})"
-        )
 
     try:
         yield
     finally:
         clear_recovery_suspension(db, server, operation_id=op_id)
-        clear_sync_res = reconcile_guardian_server(db, server)
-        if not isinstance(clear_sync_res, dict) or clear_sync_res.get("payload_hash") is None:
-            raise RuntimeError(f"Guardian recovery lease clear sync failed for server {server.id}")
-
-        clear_confirmed_op_id = _extract_agent_recovery_suspension_op_id(server)
-        if clear_confirmed_op_id == op_id:
-            raise RuntimeError(
-                f"Guardian agent did not confirm removal of recovery lease {op_id} for server {server.id}"
+        try:
+            clear_sync_res = compile_and_sync_desired_state(db, server)
+            if (
+                not isinstance(clear_sync_res, dict)
+                or clear_sync_res.get("recovery_suspension") is not None
+            ):
+                logger.warning(
+                    "Guardian recovery lease removal was not acknowledged for server %s",
+                    server.id,
+                )
+        except Exception as exc:
+            # The durable panel intent is already cleared and periodic
+            # reconciliation retries delivery. A cleanup transport failure must
+            # not turn an otherwise successful start/restart into `failed`.
+            logger.warning(
+                "Guardian recovery lease cleanup sync failed for server %s: %s",
+                server.id,
+                type(exc).__name__,
             )
 _TRANSIENT_STATUSES = {"queued", "starting", "stopping", "restarting"}
 
@@ -440,10 +437,10 @@ def queue_lifecycle_operation(
         )
 
     try:
-        if operation in {"start", "stop", "kill"}:
+        if operation in {"start", "stop", "restart", "kill"}:
             from services.guardian_state_service import set_desired_power_state
 
-            desired = "running" if operation == "start" else "stopped"
+            desired = "running" if operation in {"start", "restart"} else "stopped"
             set_desired_power_state(db, server, desired)
             # Commit happened inside set_desired_power_state. Sync is best
             # effort; periodic reconciliation retries network failures.

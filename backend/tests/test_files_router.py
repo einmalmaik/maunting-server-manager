@@ -355,6 +355,30 @@ class TestBrowseReadWrite:
         assert "chmod a+rwX" in script
         assert "chown" not in script
 
+    def test_apply_permissions_uses_owner_scoped_modes_and_preserves_execute_bit(
+        self,
+        server_with_dir: Server,
+    ):
+        if os.name != "posix":
+            pytest.skip("POSIX permission modes are not represented on Windows")
+        from routers.files import _apply_permissions
+
+        root = Path(server_with_dir.install_dir)
+        target = root / "runtime"
+        target.mkdir()
+        executable = target / "PalServer.sh"
+        executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        executable.chmod(0o711)
+        config = target / "PalWorldSettings.ini"
+        config.write_text("setting=value\n", encoding="utf-8")
+        config.chmod(0o666)
+
+        _apply_permissions(server_with_dir.install_dir, target)
+
+        assert target.stat().st_mode & 0o777 == 0o750
+        assert executable.stat().st_mode & 0o777 == 0o750
+        assert config.stat().st_mode & 0o777 == 0o640
+
 
 # ── Upload (Single-Shot) + Blocked Extensions ─────────────────────────────
 

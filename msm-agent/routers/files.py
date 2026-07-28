@@ -44,6 +44,7 @@ class RuntimePatch(BaseModel):
 class PrepareRuntimeBody(BaseModel):
     ensure_dirs: list[str] = Field(default_factory=list, max_length=128)
     required_files: list[str] = Field(default_factory=list, max_length=128)
+    executable_files: list[str] = Field(default_factory=list, max_length=128)
     patches: list[RuntimePatch] = Field(default_factory=list, max_length=128)
 
 
@@ -279,6 +280,7 @@ def prepare_runtime(body: PrepareRuntimeBody, server_id: str = Query(...)) -> di
             server_id,
             ensure_dirs=body.ensure_dirs,
             required_files=body.required_files,
+            executable_files=body.executable_files,
             patches=[patch.model_dump() for patch in body.patches],
         )
         return {"ok": True}
