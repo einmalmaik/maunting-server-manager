@@ -88,6 +88,11 @@ Außerhalb der Guardian Engine enthält v3.0.0 folgende Optimierungen und Fehler
 - **Agent-State Berechtigungen**: Anpassung der Systemd-Unit für den MSM-Agenten, sodass Schreibzugriffe auf `/var/lib/msm-agent` auch unter `ProtectSystem=strict` sicher gewährleistet sind.
 - **Lokalisierung (i18n)**: Neue Fehlerübersetzungen für Node-Client-Verbindungsfehler und vereinheitlichte Fehlermeldungen im gesamten Frontend.
 
+### Ressourcen & Guardian (Hotfix)
+- **CPU/RAM live speichern**: Laufende Server können wieder zuverlässig über die Ressourcen-Einstellungen angepasst werden. Zuvor schlug das Speichern mit einem generischen Fehler fehl, obwohl der Server erreichbar war — die neuen Grenzen greifen jetzt ohne Neustart.
+- **Guardian-Sync stabilisiert**: Nach dem Aufheben einer Quarantäne kann die Überwachung den gewünschten Zustand wieder sauber übernehmen. Endlose Sync-Konflikte („Konfigurationsprüfsumme weicht ab“) nach erfolgreicher Freigabe gehören damit der Vergangenheit an.
+- **Gilt auf jedem Node**: Der Fix sitzt im Agenten und im Panel-Contract — lokale und entfernte Worker verhalten sich gleich.
+
 ---
 
 *Maunting Server Manager v3.0.0 — Safety, Stability and Autonomous Operations.*

@@ -502,6 +502,45 @@ def container_stats(name: str) -> dict[str, Any]:
     }
 
 
+def _update_container_raw(container: Any, **kwargs: Any) -> dict:
+    """POST /containers/{id}/update with Engine JSON fields (NanoCpus/Memory).
+
+    docker-py's Container.update() rejects ``nano_cpus`` (missing from the
+    SDK signature). The Engine API supports NanoCpus since 1.25. Mirrors the
+    panel backend helper so local and remote nodes share one semantics.
+
+    MagicMock containers fall back to ``container.update(**kwargs)`` so unit
+    tests keep working without a real API client.
+    """
+    if "Mock" in type(container).__name__:
+        return container.update(**kwargs)
+
+    api = container.client.api
+    url = api._url("/containers/{0}/update", container.id)
+    data: dict[str, Any] = {}
+    if "nano_cpus" in kwargs:
+        data["NanoCpus"] = int(kwargs["nano_cpus"])
+    if "mem_limit" in kwargs:
+        val = kwargs["mem_limit"]
+        if isinstance(val, str):
+            from docker.utils import parse_bytes
+
+            data["Memory"] = parse_bytes(val)
+        else:
+            data["Memory"] = int(val)
+    if "memswap_limit" in kwargs:
+        val = kwargs["memswap_limit"]
+        if isinstance(val, str):
+            from docker.utils import parse_bytes
+
+            data["MemorySwap"] = parse_bytes(val)
+        else:
+            data["MemorySwap"] = int(val)
+
+    res = api._post_json(url, data=data)
+    return api._result(res, True)
+
+
 @_coordinated_container_mutation
 def update_container_resources(name: str, updates: dict[str, int | None]) -> dict[str, Any]:
     container = _get_container(name)
@@ -524,16 +563,16 @@ def update_container_resources(name: str, updates: dict[str, int | None]) -> dic
     if not update_kwargs:
         return {"ok": True}
     try:
-        result = container.update(**update_kwargs)
+        result = _update_container_raw(container, **update_kwargs)
         warnings = result.get("Warnings") if isinstance(result, dict) else None
         if warnings:
             try:
-                container.update(**restore_kwargs)
-            except (DockerException, OSError):
+                _update_container_raw(container, **restore_kwargs)
+            except (DockerException, OSError, TypeError):
                 return {"ok": False, "error": "Resource update failed", "drift": True}
             return {"ok": False, "error": "Resource update rejected"}
         return {"ok": True}
-    except (DockerException, OSError) as exc:
+    except (DockerException, OSError, TypeError) as exc:
         logger.warning("container resource update failed")
         raise DockerUnavailableError(_safe_error(exc)) from exc
 

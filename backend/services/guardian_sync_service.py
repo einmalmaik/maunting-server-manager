@@ -320,7 +320,11 @@ def reconcile_guardian_server(
         ):
             # The Agent has accepted the clear generation and no longer
             # reports quarantine. Retire the durable pending intent only now.
+            # Bump generation: dropping quarantine_control changes the next
+            # compiled payload_hash. Same generation + different hash is
+            # rejected by the Agent with HTTP 409 generation_conflict.
             server.guardian_quarantine_control = None
+            server.desired_state_generation = int(server.desired_state_generation or 0) + 1
 
         # Sync verification rules (only if desired state was compiled and sent)
         if payload is not None:
