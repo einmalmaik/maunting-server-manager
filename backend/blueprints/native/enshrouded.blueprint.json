@@ -24,6 +24,12 @@
     "requiredFiles": [
       "enshrouded_server.exe"
     ],
+    "seedFiles": [
+      {
+        "file": "enshrouded_server.json",
+        "content": "{\n  \"name\": \"Enshrouded Server\",\n  \"password\": \"\",\n  \"saveDirectory\": \"./savegame\",\n  \"logDirectory\": \"./logs\",\n  \"ip\": \"0.0.0.0\",\n  \"queryPort\": {QUERY_PORT},\n  \"slotCount\": 16\n}\n"
+      }
+    ],
     "configPatches": [
       {
         "type": "regex",

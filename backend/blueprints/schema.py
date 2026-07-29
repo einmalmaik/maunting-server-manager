@@ -307,6 +307,8 @@ class BlueprintRuntime(BaseModel):
     startupProfiles: list["BlueprintStartupProfile"] = Field(default_factory=list, max_length=8)
     ensureDirs: list[str] = Field(default_factory=list, max_length=16)
     requiredFiles: list[str] = Field(default_factory=list, max_length=16)
+    # Seed-once: schreibt Datei nur wenn sie fehlt (z.B. Default-JSON vor configPatches).
+    seedFiles: list["BlueprintSeedFile"] = Field(default_factory=list, max_length=16)
     configPatches: list["BlueprintConfigPatch"] = Field(default_factory=list, max_length=32)
     stopGracePeriodSeconds: int = Field(default=30, ge=5, le=600)
     # Generische Einstellung für lange Starts (Wine/Proton/erste Pulls, SCUM etc.)
@@ -455,6 +457,16 @@ class BlueprintRuntime(BaseModel):
             if path in seen:
                 raise ValueError(f"runtime.requiredFiles: Duplikat '{path}'.")
             seen.add(path)
+        return v
+
+    @field_validator("seedFiles")
+    @classmethod
+    def _check_seed_files(cls, v: list["BlueprintSeedFile"]) -> list["BlueprintSeedFile"]:
+        seen: set[str] = set()
+        for seed in v:
+            if seed.file in seen:
+                raise ValueError(f"runtime.seedFiles: Duplikat '{seed.file}'.")
+            seen.add(seed.file)
         return v
 
     @field_validator("startupProfiles")
@@ -928,6 +940,41 @@ class BlueprintBackup(BaseModel):
                 )
             cleaned.append(p)
         return cleaned
+
+
+class BlueprintSeedFile(BaseModel):
+    """Deklarative Default-Datei, die nur geschrieben wird wenn sie fehlt.
+
+    Use-Case: Spiele ohne ausgelieferte Config (z.B. Enshrouded) brauchen
+    beim ersten Start eine Seed-Datei, damit ``configPatches`` greifen und
+    MSM-Ports nicht mit den Spiel-Defaults kollidieren. Bestehende User-Dateien
+    werden nie überschrieben.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    file: str = Field(min_length=1, max_length=512)
+    content: str = Field(min_length=1, max_length=65536)
+
+    @field_validator("file")
+    @classmethod
+    def _check_file(cls, v: str) -> str:
+        if not _is_safe_relative_path(v):
+            raise ValueError("runtime.seedFiles.file muss ein sicherer relativer Pfad sein.")
+        return v
+
+    @field_validator("content")
+    @classmethod
+    def _check_content(cls, v: str) -> str:
+        if "\x00" in v:
+            raise ValueError("runtime.seedFiles.content enthaelt verbotene NUL-Bytes.")
+        for match in _TOKEN_FIND_RE.finditer(v):
+            token = match.group(1)
+            if not _is_allowed_port_token(token, _ALLOWED_CONFIG_VALUE_TOKENS):
+                raise ValueError(
+                    f"runtime.seedFiles.content: Token '{{{token}}}' nicht erlaubt."
+                )
+        return v
 
 
 class BlueprintConfigPatch(BaseModel):
@@ -1487,6 +1534,8 @@ COMMENTED_TEMPLATE_DE: str = """{
     "ensureDirs": [],
     // Relative Dateien, die nach Installation vor einem Container-Start vorhanden sein muessen
     "requiredFiles": [],
+    // Seed-once: Default-Dateien nur anlegen wenn sie fehlen (vor configPatches)
+    "seedFiles": [],
     // Grace-Period für docker stop (SIGTERM dann SIGKILL). Default 30s, 5..600 erlaubt.
     // Höher bei persistenter Welt (Save/Snapshot), damit keine Daten verloren gehen.
     "stopGracePeriodSeconds": 30,
@@ -1627,6 +1676,8 @@ COMMENTED_TEMPLATE_EN: str = """{
     "ensureDirs": [],
     // Relative files that must exist after installation before the container can start
     "requiredFiles": [],
+    // Seed-once: create default files only when missing (before configPatches)
+    "seedFiles": [],
     // Grace-Period for docker stop (SIGTERM then SIGKILL). Default 30s, range 5..600.
     // Raise for persistent-world servers (save/snapshot) to avoid data loss.
     "stopGracePeriodSeconds": 30,

@@ -431,6 +431,15 @@ Werkzeug: `games.ini_utils.set_ini_value(path, section, key, value)`. KISS, zeil
 
 KEIN `configparser`, weil UE-INIs Duplikat-Keys und multi-line-Werte erlauben, die `configparser` zerstören würde.
 
+Blueprint-Reihenfolge in `BlueprintPlugin.prepare_runtime` (lokal und remote via Agent):
+
+1. `runtime.ensureDirs` — Ordner anlegen
+2. `runtime.seedFiles` — Default-Dateien **nur wenn fehlend** (seed-once; Port-Tokens)
+3. `runtime.configPatches` — INI/Regex-Patches (idempotent, Port-Tokens)
+4. `runtime.requiredFiles` / executable Mode-Repair
+
+Game-spezifische Hardcodes im Plugin sind verboten; Defaults gehören in die Blueprint.
+
 ### 12.7 Server-Delete (Cleanup-Reihenfolge)
 
 `DELETE /api/servers/{id}` ist die zentrale, vollständige Lösch-Funktion. Reihenfolge ist verbindlich:

@@ -100,6 +100,56 @@ def test_prepare_runtime_tolerates_chmod_eperm_when_already_executable(
         assert stat.S_IMODE(startup.stat().st_mode) & stat.S_IXOTH
 
 
+def test_prepare_runtime_seeds_file_once_when_missing(
+    client: TestClient,
+    auth_headers: dict,
+    servers_dir: Path,
+) -> None:
+    root = servers_dir / "88"
+    root.mkdir()
+
+    response = client.post(
+        "/files/prepare-runtime",
+        params={"server_id": "88"},
+        headers=auth_headers,
+        json={
+            "ensure_dirs": ["cfg"],
+            "required_files": [],
+            "patches": [],
+            "seed_files": [
+                {
+                    "file": "cfg/server.json",
+                    "content": '{\n  "queryPort": 27015\n}\n',
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    seeded = root / "cfg" / "server.json"
+    assert seeded.is_file()
+    assert "27015" in seeded.read_text(encoding="utf-8")
+
+    seeded.write_text('{"queryPort": 1}\n', encoding="utf-8")
+    response = client.post(
+        "/files/prepare-runtime",
+        params={"server_id": "88"},
+        headers=auth_headers,
+        json={
+            "ensure_dirs": ["cfg"],
+            "required_files": [],
+            "patches": [],
+            "seed_files": [
+                {
+                    "file": "cfg/server.json",
+                    "content": '{\n  "queryPort": 27015\n}\n',
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert seeded.read_text(encoding="utf-8") == '{"queryPort": 1}\n'
+
+
 def test_prepare_runtime_accepts_readable_exe_without_execute_bit(
     client: TestClient,
     auth_headers: dict,

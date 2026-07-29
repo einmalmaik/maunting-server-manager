@@ -26,6 +26,7 @@ import {
   LinesField,
   PostInstallEditor,
   RecoveryPoliciesEditor,
+  SeedFileEditor,
   SetupCommandsEditor,
   StartupProfilesEditor,
 } from './BlueprintBuilderEditors'
@@ -115,6 +116,8 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
       .then(value => {
         if (!active) return
         const next = structuredClone(value)
+        next.runtime.seedFiles = next.runtime.seedFiles ?? []
+        next.runtime.configPatches = next.runtime.configPatches ?? []
         if (mode === 'clone') {
           next.meta.id = ''
           next.meta.name = t('blueprintBuilder.cloneName', { name: next.meta.name })
@@ -258,6 +261,9 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
       </div>
       <div className="md:col-span-2">
         <StartupProfilesEditor value={draft.runtime.startupProfiles} onChange={startupProfiles => setDraft({ ...draft, runtime: { ...draft.runtime, startupProfiles } })} />
+      </div>
+      <div className="md:col-span-2">
+        <SeedFileEditor value={draft.runtime.seedFiles ?? []} onChange={seedFiles => setDraft({ ...draft, runtime: { ...draft.runtime, seedFiles } })} />
       </div>
       <div className="md:col-span-2">
         <ConfigPatchEditor value={draft.runtime.configPatches} onChange={configPatches => setDraft({ ...draft, runtime: { ...draft.runtime, configPatches } })} />

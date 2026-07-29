@@ -336,6 +336,27 @@ Cache- oder Runtime-Verzeichnisse per Startargument erwarten, aber nicht immer
 selbst zuverlässig anlegen. Pfade sind strikt relativ, absolute Pfade und `..`
 werden abgelehnt.
 
+`runtime.seedFiles` legt Default-Dateien **nur dann** an, wenn sie im
+Server-Verzeichnis noch fehlen (seed-once). Das ist für Spiele gedacht, die
+keine Default-Config ausliefern (z. B. Enshrouded ohne `enshrouded_server.json`).
+Ohne Seed würde der erste Start oft mit Spiel-Default-Ports laufen, während MSM
+andere Ports published. Bestehende User-Dateien werden **nie** überschrieben.
+`seedFiles` laufen nach `ensureDirs` und vor `configPatches`, damit Patches
+sofort greifen können.
+
+Jedes Element braucht `file` (sicherer relativer Pfad) und `content` (Text,
+max. 64 KiB). In `content` sind dieselben Port-Tokens wie in Config-Patches
+erlaubt (`{GAME_PORT}`, `{QUERY_PORT}`, …). Fehlt ein benötigter Port, wird
+dieser Seed übersprungen.
+
+Beispiel:
+```json
+{
+  "file": "enshrouded_server.json",
+  "content": "{\n  \"name\": \"Enshrouded Server\",\n  \"queryPort\": {QUERY_PORT},\n  \"slotCount\": 16\n}\n"
+}
+```
+
 `runtime.configPatches` patcht Dateien vor jedem Containerstart. Es unterstützt zwei Typen:
 
 ### 1. Sektion-basiert (`type=ini`)

@@ -18,6 +18,7 @@
     "startupProfiles": [],
     "ensureDirs": [],
     "requiredFiles": [],
+    "seedFiles": [],
     "configPatches": [],
     "stopGracePeriodSeconds": 30,
     "startupCheckSeconds": 5,

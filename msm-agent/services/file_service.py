@@ -492,10 +492,22 @@ def prepare_runtime(
     required_files: list[str],
     patches: list[dict[str, str | None]],
     executable_files: list[str] | None = None,
+    seed_files: list[dict[str, str]] | None = None,
 ) -> None:
     """Apply declarative, blueprint-validated runtime file preparation on-node."""
     for rel_path in ensure_dirs:
         safe_path(server_id, rel_path).mkdir(parents=True, exist_ok=True)
+    # Seed-once before patches so first-start defaults exist to patch.
+    for seed in seed_files or []:
+        rel_path = str(seed.get("file") or "")
+        content = str(seed.get("content") or "")
+        if not rel_path or not content:
+            raise PathValidationError("Invalid runtime seed file")
+        target = safe_path(server_id, rel_path)
+        if target.is_file():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
     for patch in patches:
         target = safe_path(server_id, str(patch.get("file") or ""))
         patch_type = patch.get("type")

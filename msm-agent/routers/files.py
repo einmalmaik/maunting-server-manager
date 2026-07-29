@@ -41,10 +41,16 @@ class RuntimePatch(BaseModel):
     value: str = ""
 
 
+class RuntimeSeedFile(BaseModel):
+    file: str = Field(..., min_length=1, max_length=512)
+    content: str = Field(..., min_length=1, max_length=65536)
+
+
 class PrepareRuntimeBody(BaseModel):
     ensure_dirs: list[str] = Field(default_factory=list, max_length=128)
     required_files: list[str] = Field(default_factory=list, max_length=128)
     executable_files: list[str] = Field(default_factory=list, max_length=128)
+    seed_files: list[RuntimeSeedFile] = Field(default_factory=list, max_length=16)
     patches: list[RuntimePatch] = Field(default_factory=list, max_length=128)
 
 
@@ -281,6 +287,7 @@ def prepare_runtime(body: PrepareRuntimeBody, server_id: str = Query(...)) -> di
             ensure_dirs=body.ensure_dirs,
             required_files=body.required_files,
             executable_files=body.executable_files,
+            seed_files=[seed.model_dump() for seed in body.seed_files],
             patches=[patch.model_dump() for patch in body.patches],
         )
         return {"ok": True}

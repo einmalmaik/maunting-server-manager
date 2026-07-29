@@ -42,6 +42,7 @@ export interface BlueprintDraft {
   runtime: {
     image: string; workdir?: string; user?: string; env: Record<string, string>; startup: string
     startupProfiles: Array<{ whenFile: string; startup: string }>; ensureDirs: string[]; requiredFiles: string[]
+    seedFiles: Array<{ file: string; content: string }>
     configPatches: Array<{ type: 'ini' | 'regex'; file: string; section?: string; key?: string; regex?: string; value: string }>
     stopGracePeriodSeconds: number; startupCheckSeconds: number; enableExec: boolean; execTimeoutSeconds: number
   }
@@ -118,7 +119,7 @@ export function createBlueprintDraft(): BlueprintDraft {
     meta: { id: '', name: '', category: 'steam_game', description: '' },
     runtime: {
       image: 'debian:bookworm-slim', startup: './start-server', env: {}, startupProfiles: [], ensureDirs: [],
-      requiredFiles: [], configPatches: [], stopGracePeriodSeconds: 30, startupCheckSeconds: 5,
+      requiredFiles: [], seedFiles: [], configPatches: [], stopGracePeriodSeconds: 30, startupCheckSeconds: 5,
       enableExec: false, execTimeoutSeconds: 60,
     },
     ports: [{ name: 'game', protocol: 'udp' }],
@@ -220,6 +221,14 @@ export function validateBlueprintDraft(draft: BlueprintDraft): BlueprintValidati
   draft.runtime.startupProfiles.forEach((profile, index) => {
     if (!safeRelativePath(profile.whenFile)) add(`runtime.startupProfiles.${index}`, 'blueprintBuilder.validation.markerFile')
     if (!profile.startup.trim() || /[$`\n\r]/.test(profile.startup)) add(`runtime.startupProfiles.${index}`, 'blueprintBuilder.validation.profileStartup')
+  })
+  const seedFilePaths = new Set<string>()
+  ;(draft.runtime.seedFiles ?? []).forEach((seed, index) => {
+    if (!safeRelativePath(seed.file)) add(`runtime.seedFiles.${index}`, 'blueprintBuilder.validation.seedFile')
+    if (!seed.content.trim()) add(`runtime.seedFiles.${index}`, 'blueprintBuilder.validation.seedContent')
+    if (seed.content.length > 65536) add(`runtime.seedFiles.${index}`, 'blueprintBuilder.validation.seedContent')
+    if (seedFilePaths.has(seed.file)) add(`runtime.seedFiles.${index}`, 'blueprintBuilder.validation.seedDuplicate')
+    seedFilePaths.add(seed.file)
   })
   draft.runtime.configPatches.forEach((patch, index) => {
     if (!safeRelativePath(patch.file)) add(`runtime.configPatches.${index}`, 'blueprintBuilder.validation.patchFile')
@@ -381,6 +390,9 @@ export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
   const normalizeLines = (values: string[]) => values.map(value => value.trim()).filter(Boolean)
   clean.runtime.ensureDirs = normalizeLines(clean.runtime.ensureDirs)
   clean.runtime.requiredFiles = normalizeLines(clean.runtime.requiredFiles)
+  clean.runtime.seedFiles = (clean.runtime.seedFiles ?? [])
+    .map(seed => ({ file: seed.file.trim(), content: seed.content }))
+    .filter(seed => seed.file || seed.content.trim())
   clean.runtime.env = Object.fromEntries(Object.entries(clean.runtime.env).map(([key, value]) => [key.trim(), value]))
   if (!clean.meta.author) delete clean.meta.author
   if (!clean.meta.description) delete clean.meta.description

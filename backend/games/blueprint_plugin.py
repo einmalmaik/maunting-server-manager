@@ -10,13 +10,13 @@ alle Server-Typen dieselbe.
 - Source ``dockerOnly`` / ``custom`` → kein Install (UI markiert ``stopped``)
 - Workshop-Mods via ``modInjection=startupArg|file``
 - deklarative Workshop-Dateiaktionen (copy/symlink) via ``mods.postInstall``
-- deklarative INI-Patches vor dem Start via ``runtime.configPatches``
+- deklarative Seed-Dateien (nur wenn fehlend) via ``runtime.seedFiles``
+- deklarative INI-/Regex-Patches vor dem Start via ``runtime.configPatches``
 """
 
 from __future__ import annotations
 
 import glob
-import json
 import os
 import re
 import shlex
@@ -421,19 +421,18 @@ class BlueprintPlugin(GamePlugin):
                 else:
                     values[f"{k.upper()}_PORT"] = v
 
+        resolved_seeds: list[dict[str, str]] = []
+        for seed in self._blueprint.runtime.seedFiles:
+            content = self._substitute_port_tokens(seed.content, values)
+            if content is None:
+                continue
+            resolved_seeds.append({"file": seed.file, "content": content})
+
         resolved_patches: list[dict[str, str | None]] = []
         local_patches: list[tuple[object, str]] = []
         for patch in self._blueprint.runtime.configPatches:
-            value = patch.value
-            skip = False
-            for token, port in values.items():
-                placeholder = "{" + token + "}"
-                if placeholder in value:
-                    if not port:
-                        skip = True
-                        break
-                    value = value.replace(placeholder, str(port))
-            if skip:
+            value = self._substitute_port_tokens(patch.value, values)
+            if value is None:
                 continue
 
             resolved_patches.append({
@@ -457,6 +456,7 @@ class BlueprintPlugin(GamePlugin):
                     "ensure_dirs": self._blueprint.runtime.ensureDirs,
                     "required_files": self._blueprint.runtime.requiredFiles,
                     "executable_files": executable_files,
+                    "seed_files": resolved_seeds,
                     "patches": resolved_patches,
                 },
             )
@@ -468,29 +468,14 @@ class BlueprintPlugin(GamePlugin):
             target.relative_to(base)
             target.mkdir(parents=True, exist_ok=True)
 
-        # Enshrouded ships no default JSON; first run would bind queryPort 15637
-        # while MSM publishes the allocated port. Seed once so patches can apply.
-        if self._blueprint.meta.id == "enshrouded":
-            cfg = (base / "enshrouded_server.json").resolve()
-            cfg.relative_to(base)
-            if not cfg.is_file():
-                query_port = values.get("QUERY_PORT") or 15637
-                cfg.write_text(
-                    json.dumps(
-                        {
-                            "name": "Enshrouded Server",
-                            "password": "",
-                            "saveDirectory": "./savegame",
-                            "logDirectory": "./logs",
-                            "ip": "0.0.0.0",
-                            "queryPort": int(query_port),
-                            "slotCount": 16,
-                        },
-                        indent=2,
-                    )
-                    + "\n",
-                    encoding="utf-8",
-                )
+        # Seed-once before patches so first-start defaults exist to patch.
+        for seed in resolved_seeds:
+            target = (base / seed["file"]).resolve()
+            target.relative_to(base)
+            if target.is_file():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(seed["content"], encoding="utf-8")
 
         for patch, value in local_patches:
             target = (base / patch.file).resolve()
@@ -541,6 +526,19 @@ class BlueprintPlugin(GamePlugin):
                 server.id,
                 f"[MSM] update_modlist vor Start fehlgeschlagen (nicht kritisch): {exc}\n",
             )
+
+    @staticmethod
+    def _substitute_port_tokens(template: str, values: dict) -> str | None:
+        """Replace ``{GAME_PORT}`` etc. Skip the whole template if a needed port is unset."""
+        result = template
+        for token, port in values.items():
+            placeholder = "{" + token + "}"
+            if placeholder not in result:
+                continue
+            if not port:
+                return None
+            result = result.replace(placeholder, str(port))
+        return result
 
     def _declared_required_executable_files(self) -> list[str]:
         """Derive executable startup files from the existing blueprint contract."""

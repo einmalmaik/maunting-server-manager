@@ -103,6 +103,9 @@ def test_native_enshrouded_uses_windows_server_via_wine() -> None:
     assert blueprint.source.steam.compatibility.value == "proton"
     assert blueprint.source.steam.requiresLogin is False
     assert blueprint.source.steam.validate_ is False
+    assert len(blueprint.runtime.seedFiles) == 1
+    assert blueprint.runtime.seedFiles[0].file == "enshrouded_server.json"
+    assert "{QUERY_PORT}" in blueprint.runtime.seedFiles[0].content
     assert len(blueprint.runtime.configPatches) == 1
     assert blueprint.runtime.configPatches[0].file == "enshrouded_server.json"
     assert blueprint.runtime.configPatches[0].value == r"\g<1>{QUERY_PORT}"
@@ -126,6 +129,43 @@ def test_runtime_ensure_dirs_accepts_safe_relative_paths() -> None:
     d["runtime"]["ensureDirs"] = ["profiles", "logs/runtime"]
     bp = load_blueprint_dict(d)
     assert bp.runtime.ensureDirs == ["profiles", "logs/runtime"]
+
+
+def test_runtime_seed_files_accepts_port_tokens_and_newlines() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["seedFiles"] = [
+        {
+            "file": "server.json",
+            "content": '{\n  "queryPort": {QUERY_PORT}\n}\n',
+        }
+    ]
+    bp = load_blueprint_dict(d)
+    assert bp.runtime.seedFiles[0].file == "server.json"
+    assert "{QUERY_PORT}" in bp.runtime.seedFiles[0].content
+
+
+def test_runtime_seed_files_rejects_unsafe_path_and_unknown_token() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["seedFiles"] = [{"file": "../escape.json", "content": "{}"}]
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+    d = _minimal_valid_dict()
+    d["runtime"]["seedFiles"] = [
+        {"file": "server.json", "content": "path={INSTALL_DIR}"}
+    ]
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
+def test_runtime_seed_files_rejects_duplicate_file() -> None:
+    d = _minimal_valid_dict()
+    d["runtime"]["seedFiles"] = [
+        {"file": "a.json", "content": "{}"},
+        {"file": "a.json", "content": "{}"},
+    ]
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
 
 
 @pytest.mark.parametrize("path", ["/profiles", "../profiles", "profiles/../x", "profiles\\x", "", "~/.dayz"])

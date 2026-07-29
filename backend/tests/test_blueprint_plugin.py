@@ -307,6 +307,50 @@ def test_native_enshrouded_seeds_default_config_when_missing(tmp_path) -> None:
     assert cfg["logDirectory"] == "./logs"
 
 
+def test_seed_files_do_not_overwrite_existing_file(tmp_path) -> None:
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    blueprint = load_blueprint_file(native_dir / "enshrouded.blueprint.json")
+    plugin = BlueprintPlugin(blueprint)
+    server = _FakeServer(install_dir=str(tmp_path), query_port=27035)
+    (tmp_path / "enshrouded_server.exe").write_bytes(b"synthetic-test-binary")
+    existing = tmp_path / "enshrouded_server.json"
+    existing.write_text(
+        json.dumps({"name": "User Server", "queryPort": 15637, "slotCount": 8}),
+        encoding="utf-8",
+    )
+
+    with patch.object(plugin, "update_modlist"):
+        plugin.prepare_runtime(server)
+
+    cfg = json.loads(existing.read_text(encoding="utf-8"))
+    assert cfg["name"] == "User Server"
+    assert cfg["slotCount"] == 8
+    # Port still patched by configPatches
+    assert cfg["queryPort"] == 27035
+
+
+def test_prepare_runtime_applies_generic_seed_files(tmp_path) -> None:
+    bp_dict = _mc_paper_blueprint()
+    bp_dict["runtime"]["seedFiles"] = [
+        {
+            "file": "config/defaults.properties",
+            "content": "server-port={GAME_PORT}\n",
+        }
+    ]
+    bp_dict["runtime"]["ensureDirs"] = ["config"]
+    plugin = BlueprintPlugin(load_blueprint_dict(bp_dict))
+    server = _FakeServer(id=91, install_dir=str(tmp_path), game_port=25570)
+
+    plugin.prepare_runtime(server)
+
+    content = (tmp_path / "config" / "defaults.properties").read_text(encoding="utf-8")
+    assert content == "server-port=25570\n"
+    # second run must not overwrite
+    (tmp_path / "config" / "defaults.properties").write_text("server-port=1\n", encoding="utf-8")
+    plugin.prepare_runtime(server)
+    assert (tmp_path / "config" / "defaults.properties").read_text(encoding="utf-8") == "server-port=1\n"
+
+
 def test_wine_blueprint_start_repairs_home_container_for_runtime_user(tmp_path) -> None:
     bp_dict = {
         "version": 1,
@@ -745,6 +789,24 @@ def test_palworld_remote_preflight_sends_derived_executable_file(tmp_path) -> No
     body = client.files_prepare_runtime.call_args.args[1]
     assert body["required_files"] == ["PalServer.sh"]
     assert body["executable_files"] == ["PalServer.sh"]
+    assert body.get("seed_files") == []
+
+
+def test_enshrouded_remote_preflight_sends_seed_files(tmp_path) -> None:
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    plugin = BlueprintPlugin(load_blueprint_file(native_dir / "enshrouded.blueprint.json"))
+    server = _FakeServer(id=88, install_dir=str(tmp_path), query_port=28099)
+    server.node = SimpleNamespace(is_local=False)
+    client = MagicMock()
+
+    with patch("services.node_client.NodeClient.from_node", return_value=client):
+        plugin.prepare_runtime(server)
+
+    body = client.files_prepare_runtime.call_args.args[1]
+    assert len(body["seed_files"]) == 1
+    assert body["seed_files"][0]["file"] == "enshrouded_server.json"
+    assert '"queryPort": 28099' in body["seed_files"][0]["content"]
+    assert body["seed_files"][0]["content"].count("{QUERY_PORT}") == 0
 
 
 def test_dayz_start_does_not_run_container_when_required_files_missing(tmp_path) -> None:

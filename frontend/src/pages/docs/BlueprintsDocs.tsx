@@ -407,6 +407,9 @@ export function BlueprintsDocs() {
               <FieldRow field="runtime.ensureDirs" type="list" required={false}>
                 {t('docs.reference.runtimeEnsureDirs', 'Relative directories created inside the server directory before each start. Useful for profile, log, cache, or runtime folders expected by startup arguments.')}
               </FieldRow>
+              <FieldRow field="runtime.seedFiles" type="list" required={false}>
+                {t('docs.reference.runtimeSeedFiles', 'Default files written only when missing (seed-once). Each entry needs file + content. Port tokens allowed. Runs before configPatches.')}
+              </FieldRow>
               <FieldRow field="runtime.configPatches" type="list" required={false}>{t('docs.reference.runtimeConfigPatches')}</FieldRow>
               {/* v1.4.7+: Exec-Tab-Opt-in. Default false. Erlaubt authentifizierten
                   Usern mit Permission ``server.console.exec``, One-Shot-Befehle

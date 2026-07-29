@@ -279,7 +279,8 @@
       "modsModListFilePath": "Dateipfad der Modliste (z. B. ConanSandbox/Mods/modlist.txt).",
       "modsModListContent": "Format der Einträge in der Modliste (workshopIds, postInstallTargetBasenames).",
       "modsPostInstall": "Liste von Dateioperationen, die nach Mod-Downloads ausgeführt werden.",
-      "backupIncludePaths": "Optional. Relative Pfade/Globs unter install_dir für Backups (Config, Savegames, DB). Ohne backup-Block: volles Server-Verzeichnis. Restore überschreibt nur diese Pfade."
+      "backupIncludePaths": "Optional. Relative Pfade/Globs unter install_dir für Backups (Config, Savegames, DB). Ohne backup-Block: volles Server-Verzeichnis. Restore überschreibt nur diese Pfade.",
+      "runtimeSeedFiles": "Liste von Default-Dateien, die nur geschrieben werden wenn sie fehlen (seed-once). Jeder Eintrag: file + content. Port-Tokens erlaubt. Läuft vor configPatches."
     },
     "howto": {
       "h1": "Wie aktiviere ich Steam Workshop?",
@@ -1577,12 +1578,30 @@
     "guardian": {
       "title": "Persistenter Guardian-State",
       "intro": "Der node-lokale Guardian-Betriebszustand ist persistente Betriebsdata, kein Cache. Er darf weder ausgeliefert noch in Gameserver-Container gemountet werden.",
-      "path": { "title": "Standardpfad", "body": "/var/lib/msm-agent/guardian; systemd legt den Elternpfad über StateDirectory=msm-agent mit Eigentum des Agent-Service an." },
-      "environment": { "title": "Environment", "body": "MSM_GUARDIAN_STATE_DIR ändert den Pfad bewusst. MSM_GUARDIAN_LOOP_INTERVAL_SECONDS setzt das Reconcile-Intervall, Standard 5.0 Sekunden; kleinere Werte erhöhen Docker- und I/O-Last." },
-      "contents": { "title": "Inhalt und Grenzen", "body": "Enthalten sind akzeptierte und beobachtete Zustände, unbestätigte Incidents sowie höchstens zehn Recovery-Lockfile-Backups pro Server. Einzeldateien sind auf 1 MiB begrenzt und Modus 0600." },
-      "backup": { "title": "Sichern", "body": "Vor Node-Neuinstallation oder Migration den Guardian-Pfad zusammen mit den Serverdaten sichern. Installer und Updates erhalten diesen Pfad." },
-      "restore": { "title": "Wiederherstellen", "body": "Agent stoppen, Pfad mit unverändertem Eigentümer und restriktiven Rechten zurückspielen, dann Agent starten und Heartbeat, Zustand, Generation und Hash im Panel prüfen." },
-      "migration": { "title": "Migration und Split-Brain", "body": "Eine alte State-Kopie darf nie parallel auf zwei Nodes aktiv sein. Recovery-Backups liegen unter recovery-backups/<server-id>/<backup-id>/." }
+      "path": {
+        "title": "Standardpfad",
+        "body": "/var/lib/msm-agent/guardian; systemd legt den Elternpfad über StateDirectory=msm-agent mit Eigentum des Agent-Service an."
+      },
+      "environment": {
+        "title": "Environment",
+        "body": "MSM_GUARDIAN_STATE_DIR ändert den Pfad bewusst. MSM_GUARDIAN_LOOP_INTERVAL_SECONDS setzt das Reconcile-Intervall, Standard 5.0 Sekunden; kleinere Werte erhöhen Docker- und I/O-Last."
+      },
+      "contents": {
+        "title": "Inhalt und Grenzen",
+        "body": "Enthalten sind akzeptierte und beobachtete Zustände, unbestätigte Incidents sowie höchstens zehn Recovery-Lockfile-Backups pro Server. Einzeldateien sind auf 1 MiB begrenzt und Modus 0600."
+      },
+      "backup": {
+        "title": "Sichern",
+        "body": "Vor Node-Neuinstallation oder Migration den Guardian-Pfad zusammen mit den Serverdaten sichern. Installer und Updates erhalten diesen Pfad."
+      },
+      "restore": {
+        "title": "Wiederherstellen",
+        "body": "Agent stoppen, Pfad mit unverändertem Eigentümer und restriktiven Rechten zurückspielen, dann Agent starten und Heartbeat, Zustand, Generation und Hash im Panel prüfen."
+      },
+      "migration": {
+        "title": "Migration und Split-Brain",
+        "body": "Eine alte State-Kopie darf nie parallel auf zwei Nodes aktiv sein. Recovery-Backups liegen unter recovery-backups/<server-id>/<backup-id>/."
+      }
     },
     "artifacts": {
       "title": "GitHub-Release-Artefakte",
@@ -1779,7 +1798,10 @@
     "versionLabel": "Version",
     "updatedLabel": "Aktualisiert",
     "sections": {
-      "scope": { "heading": "1. Geltungsbereich und Betreiber", "body": "MSM wird selbst gehostet. MauntingStudios stellt die Software bereit; die Organisation, die diese Instanz betreibt, bestimmt Zwecke, optionale Integrationen, Zugriffsregeln und Aufbewahrung ihrer Installation." },
+      "scope": {
+        "heading": "1. Geltungsbereich und Betreiber",
+        "body": "MSM wird selbst gehostet. MauntingStudios stellt die Software bereit; die Organisation, die diese Instanz betreibt, bestimmt Zwecke, optionale Integrationen, Zugriffsregeln und Aufbewahrung ihrer Installation."
+      },
       "accounts": {
         "heading": "2. Accounts, Anmeldung und Berechtigungen",
         "body": "Das Panel verarbeitet die Account- und Sicherheitsdaten, die zur Anmeldung, Durchsetzung von Berechtigungen und Untersuchung sicherheitsrelevanter Aktivitäten erforderlich sind.",
@@ -1837,7 +1859,10 @@
           "audit": "Sicherheits-Audit-Ereignisse können anonymisiert aufbewahrt werden, damit Angriffe und privilegierte Änderungen nachvollziehbar bleiben, ohne die gelöschte Account-Identität zu erhalten"
         }
       },
-      "responsibility": { "heading": "8. Verantwortung des Betreibers und Anfragen", "body": "Nutzer richten Auskunfts-, Berichtigungs-, Lösch-, Widerspruchs- und Anbieterfragen an den Betreiber dieser MSM-Instanz. Der Betreiber ist für Veröffentlichung seiner Identität, Kontaktmöglichkeit, Rechtsgrundlage, Anbieterliste und instanzspezifischen Aufbewahrungsinformationen verantwortlich." }
+      "responsibility": {
+        "heading": "8. Verantwortung des Betreibers und Anfragen",
+        "body": "Nutzer richten Auskunfts-, Berichtigungs-, Lösch-, Widerspruchs- und Anbieterfragen an den Betreiber dieser MSM-Instanz. Der Betreiber ist für Veröffentlichung seiner Identität, Kontaktmöglichkeit, Rechtsgrundlage, Anbieterliste und instanzspezifischen Aufbewahrungsinformationen verantwortlich."
+      }
     }
   },
   "blueprintBuilder": {
@@ -1857,19 +1882,58 @@
     "saved": "Blueprint gespeichert.",
     "added": "Blueprint hinzugefügt.",
     "saveFailed": "Blueprint konnte nicht gespeichert werden.",
-    "title": { "create": "Blueprint erstellen", "edit": "Community-Blueprint bearbeiten", "clone": "Native Blueprint klonen" },
+    "title": {
+      "create": "Blueprint erstellen",
+      "edit": "Community-Blueprint bearbeiten",
+      "clone": "Native Blueprint klonen"
+    },
     "description": {
       "create": "Erstelle eine neue Community-Blueprint. Bestehende IDs werden niemals stillschweigend ersetzt.",
       "edit": "Die Community-ID bleibt gesperrt. Speichern ersetzt ausschließlich diese Community-Blueprint nach Backend-Prüfung.",
       "clone": "Native Blueprints bleiben unverändert. Für die eigene Community-Kopie ist eine neue ID erforderlich."
     },
-    "sections": { "basics": "Grundlagen", "runtime": "Laufzeit", "ports": "Ports", "source": "Quelle", "mods": "Mods & Workshop", "backup": "Backup", "guardian": "Autopilot", "review": "Prüfen" },
-    "collision": { "native": "Native Blueprint-IDs können nicht überschrieben werden. Wähle eine neue ID.", "title": "Community-Blueprint ersetzen?", "message": "Die ID „{{id}}“ existiert bereits. Beim Speichern wird diese Community-Blueprint ausdrücklich ersetzt.", "confirm": "Bewusst ersetzen" },
-    "exec": { "title": "Exec-Konsole freigeben", "help": "Erweitert die möglichen Container-Aktionen. Backend-RBAC bleibt maßgeblich." },
-    "ports": { "roleLabel": "Port {{index}} Rolle", "protocolLabel": "Port {{index}} Protokoll", "removeLabel": "Port {{index}} entfernen", "add": "Port hinzufügen" },
-    "steam": { "requiresLogin": "Steam-Anmeldung erforderlich", "validate": "SteamCMD-Dateien validieren" },
-    "mods": { "supportsMods": "Mods unterstützen", "supportsWorkshop": "Steam Workshop unterstützen" },
-    "review": { "issueCount": "{{count}} Angaben prüfen", "issueCount_one": "{{count}} Angabe prüfen", "issueCount_other": "{{count}} Angaben prüfen", "ready": "Der Entwurf ist bereit für die autoritative Backend-Validierung.", "backend": "Das Panel prüft häufige Eingabefehler. Beim Speichern validiert das Backend das vollständige Schema autoritativ.", "json": "JSON-Vorschau" },
+    "sections": {
+      "basics": "Grundlagen",
+      "runtime": "Laufzeit",
+      "ports": "Ports",
+      "source": "Quelle",
+      "mods": "Mods & Workshop",
+      "backup": "Backup",
+      "guardian": "Autopilot",
+      "review": "Prüfen"
+    },
+    "collision": {
+      "native": "Native Blueprint-IDs können nicht überschrieben werden. Wähle eine neue ID.",
+      "title": "Community-Blueprint ersetzen?",
+      "message": "Die ID „{{id}}“ existiert bereits. Beim Speichern wird diese Community-Blueprint ausdrücklich ersetzt.",
+      "confirm": "Bewusst ersetzen"
+    },
+    "exec": {
+      "title": "Exec-Konsole freigeben",
+      "help": "Erweitert die möglichen Container-Aktionen. Backend-RBAC bleibt maßgeblich."
+    },
+    "ports": {
+      "roleLabel": "Port {{index}} Rolle",
+      "protocolLabel": "Port {{index}} Protokoll",
+      "removeLabel": "Port {{index}} entfernen",
+      "add": "Port hinzufügen"
+    },
+    "steam": {
+      "requiresLogin": "Steam-Anmeldung erforderlich",
+      "validate": "SteamCMD-Dateien validieren"
+    },
+    "mods": {
+      "supportsMods": "Mods unterstützen",
+      "supportsWorkshop": "Steam Workshop unterstützen"
+    },
+    "review": {
+      "issueCount": "{{count}} Angaben prüfen",
+      "issueCount_one": "{{count}} Angabe prüfen",
+      "issueCount_other": "{{count}} Angaben prüfen",
+      "ready": "Der Entwurf ist bereit für die autoritative Backend-Validierung.",
+      "backend": "Das Panel prüft häufige Eingabefehler. Beim Speichern validiert das Backend das vollständige Schema autoritativ.",
+      "json": "JSON-Vorschau"
+    },
     "guardian": {
       "healthTitle": "Gesundheits-Prüfungen (Health Probes)",
       "processEnabled": "Prozessprüfung aktivieren",
@@ -1943,98 +2007,429 @@
         "quarantine": "Server in Quarantäne verschieben (quarantine)"
       }
     },
-    "environment": { "title": "Umgebungswerte", "add": "Eintrag hinzufügen", "help": "Nur nicht-geheime Konfiguration. Zugangsdaten gehören nicht in Blueprints.", "nameLabel": "Umgebungsname {{index}}", "valueLabel": "Umgebungswert {{index}}", "removeLabel": "Umgebungswert {{index}} entfernen" },
-    "setup": { "title": "Setup-Argumente", "help": "Strukturierte argv-Befehle; Argumente mit Leerzeichen bleiben ein Argument.", "addCommand": "Befehl hinzufügen", "command": "Befehl {{index}}", "argumentLabel": "Befehl {{command}}, Argument {{argument}}", "removeArgument": "Argument {{index}} entfernen", "addArgument": "Argument hinzufügen", "removeCommand": "Befehl entfernen", "notice": "Setup-Befehle sind begrenzte Argumentlisten, keine frei ausführbaren Shell-Hooks. Komplexe Installationsskripte gehören nicht in ein Blueprint." },
-    "profiles": { "title": "Alternative Starts", "help": "Maximal 8, aktiviert wenn die Marker-Datei existiert.", "add": "Profil hinzufügen", "markerLabel": "Marker-Datei {{index}}", "startupLabel": "Startbefehl {{index}}", "removeLabel": "Startprofil {{index}} entfernen" },
-    "patches": { "title": "Konfigurations-Patches", "help": "Explizite INI- oder Regex-Patches, maximal 32.", "add": "Patch hinzufügen", "typeLabel": "Patch-Typ {{index}}", "fileLabel": "Patch-Datei {{index}}", "sectionLabel": "INI-Sektion {{index}}", "keyLabel": "INI-Schlüssel {{index}}", "regexLabel": "Regex {{index}}", "valueLabel": "Patch-Wert {{index}}" },
-    "postInstall": { "title": "Post-Install-Dateien", "add": "Aktion hinzufügen", "operationLabel": "Dateiaktion {{index}}", "copy": "Kopieren", "symlink": "Symlink", "sourceLabel": "Quelle {{index}}", "targetLabel": "Ziel {{index}}", "removeLabel": "Dateiaktion {{index}} entfernen", "required": "Fehler blockiert die Installation" },
+    "environment": {
+      "title": "Umgebungswerte",
+      "add": "Eintrag hinzufügen",
+      "help": "Nur nicht-geheime Konfiguration. Zugangsdaten gehören nicht in Blueprints.",
+      "nameLabel": "Umgebungsname {{index}}",
+      "valueLabel": "Umgebungswert {{index}}",
+      "removeLabel": "Umgebungswert {{index}} entfernen"
+    },
+    "setup": {
+      "title": "Setup-Argumente",
+      "help": "Strukturierte argv-Befehle; Argumente mit Leerzeichen bleiben ein Argument.",
+      "addCommand": "Befehl hinzufügen",
+      "command": "Befehl {{index}}",
+      "argumentLabel": "Befehl {{command}}, Argument {{argument}}",
+      "removeArgument": "Argument {{index}} entfernen",
+      "addArgument": "Argument hinzufügen",
+      "removeCommand": "Befehl entfernen",
+      "notice": "Setup-Befehle sind begrenzte Argumentlisten, keine frei ausführbaren Shell-Hooks. Komplexe Installationsskripte gehören nicht in ein Blueprint."
+    },
+    "profiles": {
+      "title": "Alternative Starts",
+      "help": "Maximal 8, aktiviert wenn die Marker-Datei existiert.",
+      "add": "Profil hinzufügen",
+      "markerLabel": "Marker-Datei {{index}}",
+      "startupLabel": "Startbefehl {{index}}",
+      "removeLabel": "Startprofil {{index}} entfernen"
+    },
+    "patches": {
+      "title": "Konfigurations-Patches",
+      "help": "Explizite INI- oder Regex-Patches, maximal 32.",
+      "add": "Patch hinzufügen",
+      "typeLabel": "Patch-Typ {{index}}",
+      "fileLabel": "Patch-Datei {{index}}",
+      "sectionLabel": "INI-Sektion {{index}}",
+      "keyLabel": "INI-Schlüssel {{index}}",
+      "regexLabel": "Regex {{index}}",
+      "valueLabel": "Patch-Wert {{index}}"
+    },
+    "postInstall": {
+      "title": "Post-Install-Dateien",
+      "add": "Aktion hinzufügen",
+      "operationLabel": "Dateiaktion {{index}}",
+      "copy": "Kopieren",
+      "symlink": "Symlink",
+      "sourceLabel": "Quelle {{index}}",
+      "targetLabel": "Ziel {{index}}",
+      "removeLabel": "Dateiaktion {{index}} entfernen",
+      "required": "Fehler blockiert die Installation"
+    },
     "fields": {
-      "id": { "label": "Eindeutige ID", "help": "Kleinbuchstaben, Ziffern und Unterstriche; bei Bearbeitung gesperrt." },
-      "name": { "label": "Anzeigename", "help": "Der verständliche Name in der Serverauswahl." },
-      "category": { "label": "Kategorie", "help": "Ordnet das Blueprint in der Serverauswahl ein." },
-      "author": { "label": "Autor (optional)", "help": "Name oder Organisation, niemals Zugangsdaten." },
-      "description": { "label": "Beschreibung (optional)", "help": "Kurz erklären, was installiert wird und wofür es gedacht ist." },
-      "image": { "label": "Docker Image", "help": "Registry/Image:Tag; keine Shell-Syntax." },
-      "workdir": { "label": "Arbeitsordner (optional)", "help": "Absoluter Container-Pfad, zum Beispiel /server." },
-      "user": { "label": "Container-Nutzer (optional)", "help": "Nicht-root UID:GID, zum Beispiel 1000:1000." },
-      "startup": { "label": "Startbefehl", "help": "Wird als Befehl ausgeführt; Shell-Verkettungen und Substitution sind gesperrt." },
-      "stopGrace": { "label": "Stop-Zeitfenster", "help": "5–600 Sekunden für einen sauberen Stopp." },
-      "startCheck": { "label": "Startprüfung", "help": "0–300 Sekunden bis zur ersten Zustandsprüfung." },
-      "execTimeout": { "label": "Exec-Zeitlimit", "help": "1–600 Sekunden; gilt nur wenn Exec freigegeben ist." },
-      "dirs": { "label": "Benötigte Ordner", "help": "Ein sicherer relativer Pfad pro Zeile; maximal 16." },
-      "files": { "label": "Benötigte Dateien", "help": "Ein sicherer relativer Pfad pro Zeile; maximal 16." },
-      "source": { "label": "Quelle", "help": "Nur Felder der gewählten Quelle werden serialisiert." },
-      "update": { "label": "Update-Strategie", "help": "Prüfbasiert ist der sichere Standard für Steam, HTTP und GitHub." },
-      "appId": { "label": "Steam App-ID", "help": "Numerische Dedicated-Server-App-ID." },
-      "platform": { "label": "Plattform", "help": "Windows benötigt Wine oder Proton." },
-      "compatibility": { "label": "Kompatibilität", "help": "Linux ist nativ; Windows nutzt Wine oder Proton." },
-      "steamBranch": { "label": "Steam Branch (optional)", "help": "Leer verwendet den öffentlichen Standard-Branch." },
-      "url": { "label": "HTTPS-Download-URL", "help": "Direkte Archiv-URL; HTTPS ist Pflicht." },
-      "archive": { "label": "Archivformat (optional)", "help": "Leer lassen, wenn es aus der URL erkannt werden kann." },
-      "extract": { "label": "Entpacken nach (optional)", "help": "Sicherer relativer Unterordner." },
-      "sha": { "label": "SHA-256 (optional)", "help": "64 Kleinbuchstaben-Hexzeichen zur Archivprüfung." },
-      "repo": { "label": "GitHub Repository", "help": "Nur github.com, im Format owner/repo." },
-      "branch": { "label": "Branch", "help": "Ein Branchname ohne Pfadtrenner." },
-      "subPath": { "label": "Unterordner (optional)", "help": "Sicherer relativer Pfad innerhalb des Repositories." },
-      "manualFiles": { "label": "Pflichtdateien", "help": "Mindestens ein und maximal 16 sichere relative Pfade." },
-      "instructions": { "label": "Upload-Anleitung", "help": "Verständlich erklären, welche Dateien wohin gehören." },
-      "instructionsUrl": { "label": "Anleitungs-URL (optional)", "help": "Nur HTTPS-Dokumentation." },
-      "workshopId": { "label": "Workshop App-ID", "help": "Numerische App-ID des Workshop-Bereichs." },
-      "filterTags": { "label": "Workshop-Filter", "help": "Maximal 10 Tags, einer pro Zeile." },
-      "injection": { "label": "Mod-Einbindung", "help": "Keine, Startargument oder verwaltete Datei." },
-      "modFormat": { "label": "Argumentformat", "help": "Muss den Platzhalter {mods} enthalten." },
-      "modFile": { "label": "Mod-Listenpfad", "help": "Sicherer relativer Pfad." },
-      "modContent": { "label": "Listeninhalt", "help": "Workshop-IDs oder Ziel-Dateinamen der Dateiaktionen." },
-      "backup": { "label": "Zu sichernde Pfade", "help": "Ein relativer Pfad oder Glob pro Zeile; leer bedeutet vollständiges Server-Backup." },
-      "healthPortProto": { "label": "Liveness-Port Protokoll", "help": "Protokoll für den Gesundheitstest." },
-      "healthPort": { "label": "Liveness-Port", "help": "Port oder Platzhalter, z.B. {{SERVER_PORT}}." },
-      "healthPortTimeout": { "label": "Timeout (Liveness-Port)", "help": "z.B. 3s oder 5s." },
-      "healthAppType": { "label": "Abfrage-Typ", "help": "z.B. minecraft-query." },
-      "healthAppTypeCustom": { "label": "Eigener Abfrage-Typ", "help": "Protokollbezeichner für den anwendungsspezifischen Query-Liveness-Check." },
-      "healthAppPath": { "label": "HTTP-Pfad", "help": "Relativer HTTP-Pfad für den Ping, z.B. /healthz." },
-      "healthAppPort": { "label": "HTTP-Port", "help": "Optionaler Port (Standard: Liveness-Port), z.B. {{SERVER_PORT}}." },
-      "healthAppInterval": { "label": "Query-Intervall", "help": "z.B. 30s." },
-      "healthAppThreshold": { "label": "Fehler-Schwellenwert", "help": "Ab wie vielen Fehlversuchen ungesund." },
-      "guardianId": { "label": "Prüf-ID", "help": "Eindeutige technische ID: Kleinbuchstaben, Ziffern, Bindestrich oder Unterstrich." },
-      "guardianInterval": { "label": "Prüfintervall", "help": "Abstand zwischen Prüfungen, z. B. 30s. Für Anfänger ist der Standard passend." },
-      "guardianTimeout": { "label": "Prüf-Timeout", "help": "Maximale Wartezeit pro Prüfung, z. B. 3s." },
-      "guardianFailureThreshold": { "label": "Fehler bis ungesund", "help": "1–20 aufeinanderfolgende Fehler. Höhere Werte vermeiden Fehlalarme." },
-      "guardianSuccessThreshold": { "label": "Erfolge bis gesund", "help": "1–20 aufeinanderfolgende Erfolge vor dem Statuswechsel." },
-      "guardianRequiredStartup": { "label": "Für Start erforderlich", "help": "Der Server gilt erst als gestartet, wenn diese Prüfung erfolgreich ist." },
-      "guardianRequiredVerification": { "label": "Für Reparaturprüfung erforderlich", "help": "Eine autonome Reparatur gilt nur mit erfolgreicher Prüfung als abgeschlossen." },
-      "healthExpectedStatuses": { "label": "Erlaubte HTTP-Statuscodes", "help": "Kommagetrennt, 100–599. Üblicher sicherer Wert: 200." },
-      "healthResponseBytes": { "label": "Maximale Antwortgröße", "help": "1–1.048.576 Bytes; begrenzt die gelesene HTTP-Antwort." },
-      "healthFollowRedirects": { "label": "HTTP-Weiterleitungen folgen", "help": "Aus Sicherheitsgründen fest deaktiviert." },
-      "healthStartupGrace": { "label": "Start-Schonfrist", "help": "0–600 Sekunden ohne Eskalation direkt nach dem Start." },
-      "healthStartupTimeout": { "label": "Start-Timeout", "help": "1–3600 Sekunden und größer als die Schonfrist." },
-      "healthSuccessPatterns": { "label": "Start-Erfolgsmuster", "help": "Logmuster bei erfolgreichem Start." },
-      "healthFailurePatterns": { "label": "Start-Fehlermuster", "help": "Logmuster bei Startfehlern." },
-      "logsSources": { "label": "Logdateien", "help": "Zusätzliche relative Log-Pfade (z.B. logs/latest.log)." },
-      "logsRedact": { "label": "Log-Schwärzung", "help": "Sensible Schlüssel, die in den Logs zensiert werden." },
-      "logsRegexRedact": { "label": "Eigene Schwärzungs-Regex", "help": "Eine sichere Regex pro Zeile, ohne Präfix; wird als regex: gespeichert." },
-      "logsMaxTail": { "label": "Maximale Log-Daten", "help": "1.024–1.048.576 Bytes pro Auswertung; Standard: 65.536." },
-      "diagnosticsParsers": { "label": "Fehler-Parser", "help": "Aktivierte Diagnose-Parser (z.B. java-stacktrace)." },
-      "recoveryMaxAttempts": { "label": "Maximale Versuche", "help": "1–10 autonome Reparaturen innerhalb des Zeitfensters." },
-      "recoveryAttemptWindow": { "label": "Versuchsfenster", "help": "60–86.400 Sekunden, in denen Versuche gezählt werden." },
-      "recoveryCooldown": { "label": "Abkühlzeit", "help": "1–3.600 Sekunden Pause nach einer Reparatur." },
-      "verificationDuration": { "label": "Gesunde Mindestdauer", "help": "0–600 Sekunden stabil gesund, bevor Erfolg gemeldet wird." },
-      "verificationSuccesses": { "label": "Nötige Prüferfolge", "help": "1–20 aufeinanderfolgende Erfolge zur Bestätigung." },
-      "verificationTimeout": { "label": "Prüfzeitlimit", "help": "5–3.600 Sekunden für die gesamte Reparaturprüfung." },
-      "backupsProtected": { "label": "Ausschlussgrenzen", "help": "Relative Pfade, die clear_declared_lock_files niemals berühren darf. Diese Pfade werden nicht gesichert." }
+      "id": {
+        "label": "Eindeutige ID",
+        "help": "Kleinbuchstaben, Ziffern und Unterstriche; bei Bearbeitung gesperrt."
+      },
+      "name": {
+        "label": "Anzeigename",
+        "help": "Der verständliche Name in der Serverauswahl."
+      },
+      "category": {
+        "label": "Kategorie",
+        "help": "Ordnet das Blueprint in der Serverauswahl ein."
+      },
+      "author": {
+        "label": "Autor (optional)",
+        "help": "Name oder Organisation, niemals Zugangsdaten."
+      },
+      "description": {
+        "label": "Beschreibung (optional)",
+        "help": "Kurz erklären, was installiert wird und wofür es gedacht ist."
+      },
+      "image": {
+        "label": "Docker Image",
+        "help": "Registry/Image:Tag; keine Shell-Syntax."
+      },
+      "workdir": {
+        "label": "Arbeitsordner (optional)",
+        "help": "Absoluter Container-Pfad, zum Beispiel /server."
+      },
+      "user": {
+        "label": "Container-Nutzer (optional)",
+        "help": "Nicht-root UID:GID, zum Beispiel 1000:1000."
+      },
+      "startup": {
+        "label": "Startbefehl",
+        "help": "Wird als Befehl ausgeführt; Shell-Verkettungen und Substitution sind gesperrt."
+      },
+      "stopGrace": {
+        "label": "Stop-Zeitfenster",
+        "help": "5–600 Sekunden für einen sauberen Stopp."
+      },
+      "startCheck": {
+        "label": "Startprüfung",
+        "help": "0–300 Sekunden bis zur ersten Zustandsprüfung."
+      },
+      "execTimeout": {
+        "label": "Exec-Zeitlimit",
+        "help": "1–600 Sekunden; gilt nur wenn Exec freigegeben ist."
+      },
+      "dirs": {
+        "label": "Benötigte Ordner",
+        "help": "Ein sicherer relativer Pfad pro Zeile; maximal 16."
+      },
+      "files": {
+        "label": "Benötigte Dateien",
+        "help": "Ein sicherer relativer Pfad pro Zeile; maximal 16."
+      },
+      "source": {
+        "label": "Quelle",
+        "help": "Nur Felder der gewählten Quelle werden serialisiert."
+      },
+      "update": {
+        "label": "Update-Strategie",
+        "help": "Prüfbasiert ist der sichere Standard für Steam, HTTP und GitHub."
+      },
+      "appId": {
+        "label": "Steam App-ID",
+        "help": "Numerische Dedicated-Server-App-ID."
+      },
+      "platform": {
+        "label": "Plattform",
+        "help": "Windows benötigt Wine oder Proton."
+      },
+      "compatibility": {
+        "label": "Kompatibilität",
+        "help": "Linux ist nativ; Windows nutzt Wine oder Proton."
+      },
+      "steamBranch": {
+        "label": "Steam Branch (optional)",
+        "help": "Leer verwendet den öffentlichen Standard-Branch."
+      },
+      "url": {
+        "label": "HTTPS-Download-URL",
+        "help": "Direkte Archiv-URL; HTTPS ist Pflicht."
+      },
+      "archive": {
+        "label": "Archivformat (optional)",
+        "help": "Leer lassen, wenn es aus der URL erkannt werden kann."
+      },
+      "extract": {
+        "label": "Entpacken nach (optional)",
+        "help": "Sicherer relativer Unterordner."
+      },
+      "sha": {
+        "label": "SHA-256 (optional)",
+        "help": "64 Kleinbuchstaben-Hexzeichen zur Archivprüfung."
+      },
+      "repo": {
+        "label": "GitHub Repository",
+        "help": "Nur github.com, im Format owner/repo."
+      },
+      "branch": {
+        "label": "Branch",
+        "help": "Ein Branchname ohne Pfadtrenner."
+      },
+      "subPath": {
+        "label": "Unterordner (optional)",
+        "help": "Sicherer relativer Pfad innerhalb des Repositories."
+      },
+      "manualFiles": {
+        "label": "Pflichtdateien",
+        "help": "Mindestens ein und maximal 16 sichere relative Pfade."
+      },
+      "instructions": {
+        "label": "Upload-Anleitung",
+        "help": "Verständlich erklären, welche Dateien wohin gehören."
+      },
+      "instructionsUrl": {
+        "label": "Anleitungs-URL (optional)",
+        "help": "Nur HTTPS-Dokumentation."
+      },
+      "workshopId": {
+        "label": "Workshop App-ID",
+        "help": "Numerische App-ID des Workshop-Bereichs."
+      },
+      "filterTags": {
+        "label": "Workshop-Filter",
+        "help": "Maximal 10 Tags, einer pro Zeile."
+      },
+      "injection": {
+        "label": "Mod-Einbindung",
+        "help": "Keine, Startargument oder verwaltete Datei."
+      },
+      "modFormat": {
+        "label": "Argumentformat",
+        "help": "Muss den Platzhalter {mods} enthalten."
+      },
+      "modFile": {
+        "label": "Mod-Listenpfad",
+        "help": "Sicherer relativer Pfad."
+      },
+      "modContent": {
+        "label": "Listeninhalt",
+        "help": "Workshop-IDs oder Ziel-Dateinamen der Dateiaktionen."
+      },
+      "backup": {
+        "label": "Zu sichernde Pfade",
+        "help": "Ein relativer Pfad oder Glob pro Zeile; leer bedeutet vollständiges Server-Backup."
+      },
+      "healthPortProto": {
+        "label": "Liveness-Port Protokoll",
+        "help": "Protokoll für den Gesundheitstest."
+      },
+      "healthPort": {
+        "label": "Liveness-Port",
+        "help": "Port oder Platzhalter, z.B. {{SERVER_PORT}}."
+      },
+      "healthPortTimeout": {
+        "label": "Timeout (Liveness-Port)",
+        "help": "z.B. 3s oder 5s."
+      },
+      "healthAppType": {
+        "label": "Abfrage-Typ",
+        "help": "z.B. minecraft-query."
+      },
+      "healthAppTypeCustom": {
+        "label": "Eigener Abfrage-Typ",
+        "help": "Protokollbezeichner für den anwendungsspezifischen Query-Liveness-Check."
+      },
+      "healthAppPath": {
+        "label": "HTTP-Pfad",
+        "help": "Relativer HTTP-Pfad für den Ping, z.B. /healthz."
+      },
+      "healthAppPort": {
+        "label": "HTTP-Port",
+        "help": "Optionaler Port (Standard: Liveness-Port), z.B. {{SERVER_PORT}}."
+      },
+      "healthAppInterval": {
+        "label": "Query-Intervall",
+        "help": "z.B. 30s."
+      },
+      "healthAppThreshold": {
+        "label": "Fehler-Schwellenwert",
+        "help": "Ab wie vielen Fehlversuchen ungesund."
+      },
+      "guardianId": {
+        "label": "Prüf-ID",
+        "help": "Eindeutige technische ID: Kleinbuchstaben, Ziffern, Bindestrich oder Unterstrich."
+      },
+      "guardianInterval": {
+        "label": "Prüfintervall",
+        "help": "Abstand zwischen Prüfungen, z. B. 30s. Für Anfänger ist der Standard passend."
+      },
+      "guardianTimeout": {
+        "label": "Prüf-Timeout",
+        "help": "Maximale Wartezeit pro Prüfung, z. B. 3s."
+      },
+      "guardianFailureThreshold": {
+        "label": "Fehler bis ungesund",
+        "help": "1–20 aufeinanderfolgende Fehler. Höhere Werte vermeiden Fehlalarme."
+      },
+      "guardianSuccessThreshold": {
+        "label": "Erfolge bis gesund",
+        "help": "1–20 aufeinanderfolgende Erfolge vor dem Statuswechsel."
+      },
+      "guardianRequiredStartup": {
+        "label": "Für Start erforderlich",
+        "help": "Der Server gilt erst als gestartet, wenn diese Prüfung erfolgreich ist."
+      },
+      "guardianRequiredVerification": {
+        "label": "Für Reparaturprüfung erforderlich",
+        "help": "Eine autonome Reparatur gilt nur mit erfolgreicher Prüfung als abgeschlossen."
+      },
+      "healthExpectedStatuses": {
+        "label": "Erlaubte HTTP-Statuscodes",
+        "help": "Kommagetrennt, 100–599. Üblicher sicherer Wert: 200."
+      },
+      "healthResponseBytes": {
+        "label": "Maximale Antwortgröße",
+        "help": "1–1.048.576 Bytes; begrenzt die gelesene HTTP-Antwort."
+      },
+      "healthFollowRedirects": {
+        "label": "HTTP-Weiterleitungen folgen",
+        "help": "Aus Sicherheitsgründen fest deaktiviert."
+      },
+      "healthStartupGrace": {
+        "label": "Start-Schonfrist",
+        "help": "0–600 Sekunden ohne Eskalation direkt nach dem Start."
+      },
+      "healthStartupTimeout": {
+        "label": "Start-Timeout",
+        "help": "1–3600 Sekunden und größer als die Schonfrist."
+      },
+      "healthSuccessPatterns": {
+        "label": "Start-Erfolgsmuster",
+        "help": "Logmuster bei erfolgreichem Start."
+      },
+      "healthFailurePatterns": {
+        "label": "Start-Fehlermuster",
+        "help": "Logmuster bei Startfehlern."
+      },
+      "logsSources": {
+        "label": "Logdateien",
+        "help": "Zusätzliche relative Log-Pfade (z.B. logs/latest.log)."
+      },
+      "logsRedact": {
+        "label": "Log-Schwärzung",
+        "help": "Sensible Schlüssel, die in den Logs zensiert werden."
+      },
+      "logsRegexRedact": {
+        "label": "Eigene Schwärzungs-Regex",
+        "help": "Eine sichere Regex pro Zeile, ohne Präfix; wird als regex: gespeichert."
+      },
+      "logsMaxTail": {
+        "label": "Maximale Log-Daten",
+        "help": "1.024–1.048.576 Bytes pro Auswertung; Standard: 65.536."
+      },
+      "diagnosticsParsers": {
+        "label": "Fehler-Parser",
+        "help": "Aktivierte Diagnose-Parser (z.B. java-stacktrace)."
+      },
+      "recoveryMaxAttempts": {
+        "label": "Maximale Versuche",
+        "help": "1–10 autonome Reparaturen innerhalb des Zeitfensters."
+      },
+      "recoveryAttemptWindow": {
+        "label": "Versuchsfenster",
+        "help": "60–86.400 Sekunden, in denen Versuche gezählt werden."
+      },
+      "recoveryCooldown": {
+        "label": "Abkühlzeit",
+        "help": "1–3.600 Sekunden Pause nach einer Reparatur."
+      },
+      "verificationDuration": {
+        "label": "Gesunde Mindestdauer",
+        "help": "0–600 Sekunden stabil gesund, bevor Erfolg gemeldet wird."
+      },
+      "verificationSuccesses": {
+        "label": "Nötige Prüferfolge",
+        "help": "1–20 aufeinanderfolgende Erfolge zur Bestätigung."
+      },
+      "verificationTimeout": {
+        "label": "Prüfzeitlimit",
+        "help": "5–3.600 Sekunden für die gesamte Reparaturprüfung."
+      },
+      "backupsProtected": {
+        "label": "Ausschlussgrenzen",
+        "help": "Relative Pfade, die clear_declared_lock_files niemals berühren darf. Diese Pfade werden nicht gesichert."
+      }
     },
     "options": {
-      "category": { "steamGame": "Steam-Spiel", "nonSteamGame": "Nicht-Steam-Spiel", "voiceServer": "Voice-Server", "bot": "Bot" },
-      "port": { "game": "Game", "query": "Query", "rcon": "RCon", "voice": "Voice", "web": "Web", "custom": "Benutzerdefiniert" },
-      "source": { "http": "HTTPS-Archiv", "dockerOnly": "Nur Docker Image", "custom": "Benutzerdefiniert", "manualUpload": "Manueller Upload" },
-      "update": { "checkBased": "Nur bei erkanntem Update", "alwaysValidate": "Bei jedem Start validieren", "none": "Keine automatischen Updates" },
-      "platform": { "linux": "Linux (nativ)", "windows": "Windows (Kompatibilitätsschicht)" },
-      "compatibility": { "native": "Nativ" },
+      "category": {
+        "steamGame": "Steam-Spiel",
+        "nonSteamGame": "Nicht-Steam-Spiel",
+        "voiceServer": "Voice-Server",
+        "bot": "Bot"
+      },
+      "port": {
+        "game": "Game",
+        "query": "Query",
+        "rcon": "RCon",
+        "voice": "Voice",
+        "web": "Web",
+        "custom": "Benutzerdefiniert"
+      },
+      "source": {
+        "http": "HTTPS-Archiv",
+        "dockerOnly": "Nur Docker Image",
+        "custom": "Benutzerdefiniert",
+        "manualUpload": "Manueller Upload"
+      },
+      "update": {
+        "checkBased": "Nur bei erkanntem Update",
+        "alwaysValidate": "Bei jedem Start validieren",
+        "none": "Keine automatischen Updates"
+      },
+      "platform": {
+        "linux": "Linux (nativ)",
+        "windows": "Windows (Kompatibilitätsschicht)"
+      },
+      "compatibility": {
+        "native": "Nativ"
+      },
       "archiveAuto": "Automatisch erkennen",
-      "injection": { "none": "Keine", "startupArg": "Startargument", "file": "Mod-Liste als Datei" },
-      "modContent": { "workshopIds": "Workshop-IDs", "targetNames": "Ziel-Dateinamen" }
+      "injection": {
+        "none": "Keine",
+        "startupArg": "Startargument",
+        "file": "Mod-Liste als Datei"
+      },
+      "modContent": {
+        "workshopIds": "Workshop-IDs",
+        "targetNames": "Ziel-Dateinamen"
+      }
     },
     "validation": {
-      "metaId": "1–64 Kleinbuchstaben, Ziffern oder Unterstriche verwenden.", "metaName": "Einen Namen mit maximal 128 Zeichen angeben.", "image": "Einen gültigen Docker-Image-Namen angeben.", "startup": "Einen Startbefehl mit maximal 2048 Zeichen angeben.", "shellSyntax": "Shell-Substitutionen und logische Verkettungen sind nicht erlaubt.", "workdir": "Der Arbeitsordner muss ein sicherer absoluter Container-Pfad sein.", "user": "UID:GID numerisch und ohne Root angeben.", "stopGrace": "Wert zwischen 5 und 600 verwenden.", "startCheck": "Wert zwischen 0 und 300 verwenden.", "execTimeout": "Wert zwischen 1 und 600 verwenden.", "envName": "Ungültiger Umgebungsname: {{name}}", "envValue": "Unsicherer Umgebungswert bei {{name}}", "envEmpty": "Umgebungszeile {{row}} benötigt einen Namen.", "envDuplicate": "Der Umgebungsname {{name}} ist doppelt.", "maxLines": "Maximal {{count}} Zeilen verwenden.", "maxProfiles": "Maximal 8 Startprofile verwenden.", "markerFile": "Eine sichere Marker-Datei angeben.", "profileStartup": "Einen sicheren Startbefehl angeben.", "patchFile": "Eine sichere Konfigurationsdatei angeben.", "patchValue": "Ein Patch-Wert ist erforderlich.", "patchIni": "INI benötigt Sektion und Schlüssel.", "patchRegex": "Regex benötigt einen Ausdruck.", "maxPorts": "Maximal 32 Port-Einträge verwenden.", "duplicatePort": "Diese Port-Rolle und dieses Protokoll sind bereits vorhanden.", "steamAppId": "Eine numerische Steam App-ID angeben.", "windowsCompatibility": "Windows benötigt Wine oder Proton.", "httpsUrl": "Nur HTTPS-Download-URLs sind erlaubt.", "githubRepo": "Repository als owner/repo angeben.", "sha256": "SHA-256 muss aus 64 Kleinbuchstaben-Hexzeichen bestehen.", "relativePath": "Einen sicheren relativen Unterordner angeben.", "maxSetupCommands": "Maximal 8 Setup-Befehle verwenden.", "setupCommand": "Jeder Setup-Befehl benötigt 1–32 nicht-leere Argumente.", "manualInstructions": "Installationshinweise angeben.", "manualFiles": "Mindestens eine benötigte Datei angeben.", "unsafePath": "Unsicherer relativer Pfad: {{path}}", "workshopAppId": "Für Workshop-Unterstützung ist eine numerische App-ID erforderlich.", "modArgument": "Das Startargument muss {mods} enthalten.", "modListPath": "Einen sicheren relativen Listenpfad angeben.", "postInstall": "Für Ziel-Dateinamen ist mindestens eine Dateiaktion nötig.",
+      "metaId": "1–64 Kleinbuchstaben, Ziffern oder Unterstriche verwenden.",
+      "metaName": "Einen Namen mit maximal 128 Zeichen angeben.",
+      "image": "Einen gültigen Docker-Image-Namen angeben.",
+      "startup": "Einen Startbefehl mit maximal 2048 Zeichen angeben.",
+      "shellSyntax": "Shell-Substitutionen und logische Verkettungen sind nicht erlaubt.",
+      "workdir": "Der Arbeitsordner muss ein sicherer absoluter Container-Pfad sein.",
+      "user": "UID:GID numerisch und ohne Root angeben.",
+      "stopGrace": "Wert zwischen 5 und 600 verwenden.",
+      "startCheck": "Wert zwischen 0 und 300 verwenden.",
+      "execTimeout": "Wert zwischen 1 und 600 verwenden.",
+      "envName": "Ungültiger Umgebungsname: {{name}}",
+      "envValue": "Unsicherer Umgebungswert bei {{name}}",
+      "envEmpty": "Umgebungszeile {{row}} benötigt einen Namen.",
+      "envDuplicate": "Der Umgebungsname {{name}} ist doppelt.",
+      "maxLines": "Maximal {{count}} Zeilen verwenden.",
+      "maxProfiles": "Maximal 8 Startprofile verwenden.",
+      "markerFile": "Eine sichere Marker-Datei angeben.",
+      "profileStartup": "Einen sicheren Startbefehl angeben.",
+      "patchFile": "Eine sichere Konfigurationsdatei angeben.",
+      "patchValue": "Ein Patch-Wert ist erforderlich.",
+      "patchIni": "INI benötigt Sektion und Schlüssel.",
+      "patchRegex": "Regex benötigt einen Ausdruck.",
+      "maxPorts": "Maximal 32 Port-Einträge verwenden.",
+      "duplicatePort": "Diese Port-Rolle und dieses Protokoll sind bereits vorhanden.",
+      "steamAppId": "Eine numerische Steam App-ID angeben.",
+      "windowsCompatibility": "Windows benötigt Wine oder Proton.",
+      "httpsUrl": "Nur HTTPS-Download-URLs sind erlaubt.",
+      "githubRepo": "Repository als owner/repo angeben.",
+      "sha256": "SHA-256 muss aus 64 Kleinbuchstaben-Hexzeichen bestehen.",
+      "relativePath": "Einen sicheren relativen Unterordner angeben.",
+      "maxSetupCommands": "Maximal 8 Setup-Befehle verwenden.",
+      "setupCommand": "Jeder Setup-Befehl benötigt 1–32 nicht-leere Argumente.",
+      "manualInstructions": "Installationshinweise angeben.",
+      "manualFiles": "Mindestens eine benötigte Datei angeben.",
+      "unsafePath": "Unsicherer relativer Pfad: {{path}}",
+      "workshopAppId": "Für Workshop-Unterstützung ist eine numerische App-ID erforderlich.",
+      "modArgument": "Das Startargument muss {mods} enthalten.",
+      "modListPath": "Einen sicheren relativen Listenpfad angeben.",
+      "postInstall": "Für Ziel-Dateinamen ist mindestens eine Dateiaktion nötig.",
       "healthPortEmpty": "Port darf nicht leer sein.",
       "healthTimeoutEmpty": "Timeout darf nicht leer sein.",
       "healthAppTypeEmpty": "Abfrage-Typ darf nicht leer sein.",
@@ -2055,7 +2450,17 @@
       "recoveryLockPath": "Sperrdateien benötigen einen expliziten sicheren relativen Pfad ohne Wildcards.",
       "recoveryLockReason": "Für jede freigegebene Sperrdatei ist eine Begründung erforderlich.",
       "recoveryLockDuplicate": "Jeder Sperrdateipfad darf nur einmal vorkommen.",
-      "recoveryBounds": "Ein Recovery-Budget liegt außerhalb des vom Backend erlaubten Bereichs."
+      "recoveryBounds": "Ein Recovery-Budget liegt außerhalb des vom Backend erlaubten Bereichs.",
+      "seedFile": "Eine sichere relative Seed-Datei angeben.",
+      "seedContent": "Seed-Inhalt ist erforderlich und maximal 64 KiB.",
+      "seedDuplicate": "Dieselbe Seed-Datei ist doppelt."
+    },
+    "seedFiles": {
+      "title": "Seed-Dateien (einmalig)",
+      "help": "Default-Dateien nur anlegen, wenn sie fehlen. Port-Tokens wie {QUERY_PORT} sind erlaubt. Bestehende Dateien werden nie überschrieben.",
+      "add": "Seed hinzufügen",
+      "fileLabel": "Seed-Datei {{index}}",
+      "contentLabel": "Seed-Inhalt {{index}}"
     }
   },
   "server": {

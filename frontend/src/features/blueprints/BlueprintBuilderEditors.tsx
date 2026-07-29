@@ -282,6 +282,52 @@ export function StartupProfilesEditor({
   )
 }
 
+export function SeedFileEditor({
+  value,
+  onChange,
+}: {
+  value: BlueprintDraft['runtime']['seedFiles']
+  onChange: (value: BlueprintDraft['runtime']['seedFiles']) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h4 className="font-semibold">{t('blueprintBuilder.seedFiles.title')}</h4>
+          <p className="msm-field-help">{t('blueprintBuilder.seedFiles.help')}</p>
+        </div>
+        <Button variant="secondary" disabled={value.length >= 16} onClick={() => onChange([...value, { file: '', content: '' }])}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {t('blueprintBuilder.seedFiles.add')}
+        </Button>
+      </div>
+      {value.map((row, index) => (
+        <div key={index} className="grid gap-2 rounded-xl border border-outline-variant/50 p-3">
+          <input
+            aria-label={t('blueprintBuilder.seedFiles.fileLabel', { index: index + 1 })}
+            placeholder="server.json"
+            className="msm-input font-mono"
+            value={row.file}
+            onChange={event => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, file: event.target.value } : item))}
+          />
+          <textarea
+            aria-label={t('blueprintBuilder.seedFiles.contentLabel', { index: index + 1 })}
+            placeholder={'{\n  "queryPort": {QUERY_PORT}\n}\n'}
+            className="msm-input min-h-28 font-mono text-xs"
+            value={row.content}
+            onChange={event => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, content: event.target.value } : item))}
+          />
+          <Button variant="destructive" onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))}>
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            {t('common.remove')}
+          </Button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function ConfigPatchEditor({
   value,
   onChange,
