@@ -77,6 +77,13 @@ Außerhalb der Guardian Engine enthält v3.0.0 folgende Optimierungen und Fehler
 ### Console & Live-Stream
 - **Monotoner Puffer & Reconnect-Stabilität**: Live-Konsolen-Logs nutzen nun synchrone Monotonic Line IDs und Puffer-Garantien. Trennungen der WebSocket-Verbindung führen nicht mehr zum Verlust von Konsolenzeilen; Offline- und Hintergrund-Events werden nahtlos nachgeladen.
 
+### Benutzer- & Serverberechtigungen
+- **Neue Berechtigungsübersicht**: Benutzerkonten, Status, E-Mail-Verifizierung und zugewiesene Rollen sind in einer ruhigen, übersichtlichen Oberfläche auf einen Blick erfassbar. Das eigene Konto wird eindeutig gekennzeichnet.
+- **Schnellere Serverauswahl**: Serverberechtigungen werden über eine durchsuchbare Serverliste verwaltet. Auch sehr lange Servernamen bleiben vollständig lesbar und werden nicht mehr im Auswahlfeld abgeschnitten.
+- **Klarer Serverkontext**: Der aktuell ausgewählte Server wird während der Berechtigungsverwaltung dauerhaft und gut sichtbar angezeigt. Dadurch lassen sich Zugriffsrechte sicherer dem richtigen Server zuordnen.
+- **Kompakte Zugriffsverwaltung**: Bereits berechtigte Benutzer und der Umfang ihrer Serverrechte werden übersichtlich zusammengefasst. Die bekannte Detailansicht zum Bearbeiten bleibt direkt erreichbar.
+- **Für alle Bildschirmgrößen optimiert**: Benutzer- und Berechtigungsverwaltung passen sich an Desktop, Tablet und Smartphone an, ohne wichtige Informationen oder Aktionen abzuschneiden.
+
 ### Systemd & Sicherheit
 - **Agent-State Berechtigungen**: Anpassung der Systemd-Unit für den MSM-Agenten, sodass Schreibzugriffe auf `/var/lib/msm-agent` auch unter `ProtectSystem=strict` sicher gewährleistet sind.
 - **Lokalisierung (i18n)**: Neue Fehlerübersetzungen für Node-Client-Verbindungsfehler und vereinheitlichte Fehlermeldungen im gesamten Frontend.
