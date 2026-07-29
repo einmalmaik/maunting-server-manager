@@ -566,7 +566,10 @@
     "role": "Role",
     "noRole": "No role",
     "assignRole": "Assign role",
-    "roleSaved": "Role updated."
+    "roleSaved": "Role updated.",
+    "registeredTitle": "Registered users",
+    "registeredSubtitle": "Identities, status, and global panel roles at a glance.",
+    "currentUser": "You"
   },
   "roles": {
     "title": "Roles",
@@ -644,7 +647,13 @@
     "adminTitle": "Manage server permissions",
     "adminSubtitle": "Delegate server permissions to individual sub-users. Pick a server first.",
     "selectServer": "Server",
-    "selectServerPlaceholder": "-- choose server --"
+    "selectServerPlaceholder": "-- choose server --",
+    "searchServer": "Search servers…",
+    "noServersFound": "No matching servers found.",
+    "selectedServer": "Selected server",
+    "permissionCount": "{{count}} permissions",
+    "permissionCount_one": "{{count}} permission",
+    "permissionCount_other": "{{count}} permissions"
   },
   "dashboard": {
     "title": "Dashboard",

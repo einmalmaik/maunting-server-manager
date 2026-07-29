@@ -130,32 +130,37 @@ export function ServerPermissionsPanel({ serverId }: Props) {
   if (!catalog) return null
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div>
-        <h3 className="font-headline text-body-lg text-primary">{t('serverPermissions.title')}</h3>
-        <p className="font-body-md text-sm text-on-surface-variant mt-1">
+        <h3 className="font-headline text-base text-primary">{t('serverPermissions.title')}</h3>
+        <p className="mt-1 font-body-md text-sm text-on-surface-variant">
           {t('serverPermissions.subtitle')}
         </p>
-        <p className="font-body-md text-xs text-on-surface-variant mt-2">
+        <p className="mt-1.5 font-body-md text-xs text-on-surface-variant">
           {t('serverPermissions.ownerHint')}
         </p>
       </div>
 
       {/* User hinzufuegen */}
-      <div className="flex items-center gap-2">
-        <Dropdown
-          value={addingUserId === '' ? null : String(addingUserId)}
-          onChange={(value) => setAddingUserId(value ? Number(value) : '')}
-          placeholder={t('serverPermissions.selectUser')}
-          options={usersWithoutDelegation.map((u) => ({ value: String(u.id), label: u.username }))}
-          className="flex-1"
-          buttonClassName="text-sm py-2"
-          aria-label={t('serverPermissions.selectUser')}
-        />
+      <div className="flex flex-col gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-3 sm:flex-row sm:items-end">
+        <div className="min-w-0 flex-1">
+          <label className="mb-1.5 block font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant">
+            {t('serverPermissions.selectUser')}
+          </label>
+          <Dropdown
+            value={addingUserId === '' ? null : String(addingUserId)}
+            onChange={(value) => setAddingUserId(value ? Number(value) : '')}
+            placeholder={t('serverPermissions.selectUser')}
+            options={usersWithoutDelegation.map((u) => ({ value: String(u.id), label: u.username }))}
+            buttonClassName="text-sm py-2"
+            aria-label={t('serverPermissions.selectUser')}
+          />
+        </div>
         <button
+          type="button"
           onClick={addUser}
           disabled={!addingUserId}
-          className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+          className="msm-btn-primary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 px-4 py-2 disabled:opacity-50"
         >
           <Plus className="w-4 h-4" />
           {t('serverPermissions.addUser')}
@@ -163,30 +168,62 @@ export function ServerPermissionsPanel({ serverId }: Props) {
       </div>
 
       {rows.length === 0 ? (
-        <div className="msm-card p-6 text-center text-on-surface-variant">
+        <div className="rounded-xl border border-dashed border-outline-variant/50 px-4 py-8 text-center font-body-md text-sm text-on-surface-variant">
           {t('serverPermissions.noUsers')}
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="divide-y divide-outline-variant/30 border-y border-outline-variant/30">
           {rows.map((row) => {
             const isEditing = editing === row.user.id
+            const visiblePermissions = row.permissions.slice(0, 3)
+            const hiddenPermissionCount = row.permissions.length - visiblePermissions.length
             return (
-              <div key={row.user.id} className="msm-card p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-body-md text-on-surface">{row.user.username}</span>
-                  <div className="flex gap-2">
+              <article key={row.user.id} className="py-4">
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 md:grid-cols-[minmax(10rem,1fr)_minmax(12rem,1.4fr)_auto]">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      aria-hidden="true"
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-outline-variant/50 bg-surface-container-high font-label-md text-xs font-semibold text-primary"
+                    >
+                      {row.user.username.slice(0, 2).toLocaleUpperCase()}
+                    </span>
+                    <span className="min-w-0">
+                      <strong className="block break-words font-body-md text-sm font-semibold text-on-surface">
+                        {row.user.username}
+                      </strong>
+                      <span className="mt-0.5 block break-all text-xs text-on-surface-variant">
+                        {row.user.email}
+                      </span>
+                    </span>
+                  </div>
+
+                  {!isEditing && (
+                    <div className="col-span-2 min-w-0 pl-12 md:col-span-1 md:pl-0">
+                      <strong className="block font-label-md text-xs font-medium text-on-surface">
+                        {t('serverPermissions.permissionCount', { count: row.permissions.length })}
+                      </strong>
+                      <p className="mt-1 break-words font-mono text-[10px] leading-4 text-on-surface-variant">
+                        {visiblePermissions.join(' · ')}
+                        {hiddenPermissionCount > 0 ? ` · +${hiddenPermissionCount}` : ''}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 md:col-start-3">
                     {isEditing ? (
                       <>
                         <button
+                          type="button"
                           onClick={() => save(row.user.id)}
-                          className="msm-btn-primary px-3 py-1 text-xs inline-flex items-center gap-1"
+                          className="msm-btn-primary inline-flex min-h-9 items-center gap-1 px-3 py-1 text-xs"
                         >
                           <Save className="w-3.5 h-3.5" />
                           {t('common.save')}
                         </button>
                         <button
+                          type="button"
                           onClick={cancelEdit}
-                          className="msm-btn-secondary px-3 py-1 text-xs inline-flex items-center gap-1"
+                          className="msm-btn-secondary inline-flex min-h-9 items-center gap-1 px-3 py-1 text-xs"
                         >
                           <X className="w-3.5 h-3.5" />
                           {t('common.cancel')}
@@ -194,16 +231,19 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                       </>
                     ) : (
                       <button
+                        type="button"
                         onClick={() => startEdit(row)}
-                        className="msm-btn-secondary px-3 py-1 text-xs"
+                        className="rounded-lg px-3 py-2 font-label-md text-xs text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
                       >
                         {t('common.edit')}
                       </button>
                     )}
                     <button
+                      type="button"
                       onClick={() => revoke(row.user.id)}
-                      className="text-status-error hover:text-status-error/80 transition-colors"
+                      className="grid h-9 w-9 place-items-center rounded-lg text-status-error transition-colors hover:bg-status-error/10 hover:text-status-error/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-error/60"
                       title={t('serverPermissions.revoke')}
+                      aria-label={`${t('serverPermissions.revoke')}: ${row.user.username}`}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -211,30 +251,15 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                 </div>
 
                 {isEditing ? (
-                  <div className="mt-2 border-t border-outline-variant/30 pt-3">
+                  <div className="mt-4 border-t border-outline-variant/30 pt-4">
                     <PermissionEditor
                       permissions={catalog.server_permissions}
                       selected={editSelection}
                       onChange={setEditSelection}
                     />
                   </div>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {row.permissions.length === 0 ? (
-                      <span className="text-xs text-on-surface-variant">{t('roles.noPermissions')}</span>
-                    ) : (
-                      row.permissions.map((k) => (
-                        <span
-                          key={k}
-                          className="font-mono-sm text-mono-sm px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant border border-outline-variant/30"
-                        >
-                          {k}
-                        </span>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
+                ) : null}
+              </article>
             )
           })}
         </div>
