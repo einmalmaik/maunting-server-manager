@@ -303,11 +303,12 @@ def classify_steamcmd_failure(output: str, fallback_error: str = "") -> dict[str
         return {
             "error_code": "steamcmd_missing_configuration",
             "error": (
-                "SteamCMD meldet Missing Configuration. Prüfe bei loginpflichtigen "
-                "Steam-Spielen zuerst, ob im Panel ein Steam-Account hinterlegt ist "
-                "und dieser Account Zugriff auf die Server-App hat. Weitere mögliche "
-                "Ursachen (nicht verifiziert): fehlende/inkompatible App-Metadaten, "
-                "falsche Plattform, Plattenplatz/Quota oder paralleler Zugriff."
+                "SteamCMD meldet auch nach Metadaten-Aktualisierung und einmaligem "
+                "Retry weiterhin Missing Configuration. Bei loginpflichtigen Spielen "
+                "kann ein fehlender Steam-Account oder App-Zugriff die Ursache sein. "
+                "Weitere mögliche Ursachen (nicht verifiziert): vorübergehend "
+                "unvollständige Steam-App-Metadaten, eine falsche Plattform oder eine "
+                "serverseitige Steam-Störung."
             ),
         }
     return None
@@ -436,18 +437,36 @@ def run_steamcmd_install(
         _append_console_log(server_id, safe_line)
 
     image = steamcmd_image or STEAMCMD_IMAGE
-    result = docker_service.run_ephemeral(
-        image=image,
-        command=_build_steamcmd_bash_command(steam_args, chown_uid, chown_gid),
-        volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
-        user="0:0",
-        cap_adds=STEAMCMD_CAPS,
-        entrypoint="bash",
-        env={"HOME": CONTAINER_DATA_DIR},
-        timeout=3600,
-        log_callback=_live_log,
-        node=node,
-    )
+    def _run(args: list[str]) -> dict:
+        return docker_service.run_ephemeral(
+            image=image,
+            command=_build_steamcmd_bash_command(args, chown_uid, chown_gid),
+            volumes=[VolumeBind(install_dir, CONTAINER_DATA_DIR, read_only=False)],
+            user="0:0",
+            cap_adds=STEAMCMD_CAPS,
+            entrypoint="bash",
+            env={"HOME": CONTAINER_DATA_DIR},
+            timeout=3600,
+            log_callback=_live_log,
+            node=node,
+        )
+
+    result = _run(steam_args)
+    first_out = (result.get("stdout") or "") + (result.get("stderr") or "")
+    first_error = str(result.get("error") or "")
+    if not result.get("ok", False) and "missing configuration" in (
+        "".join(live_output) + first_out + first_error
+    ).lower():
+        _append_console_log(
+            server_id,
+            "\n[MSM] SteamCMD Missing Configuration — App-Metadaten werden "
+            "aktualisiert; genau ein automatischer Retry folgt.\n",
+        )
+        refresh_args = list(steam_args)
+        app_update_index = refresh_args.index("+app_update")
+        refresh_args[app_update_index:app_update_index] = ["+app_info_update", "1"]
+        live_output.clear()
+        result = _run(refresh_args)
 
     # Bei Live-Streaming ist out leer (— wurde bereits live geschrieben).
     # Fallback für den Fall, dass der Stream unterbrochen wurde.

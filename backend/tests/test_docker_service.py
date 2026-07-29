@@ -824,6 +824,41 @@ class TestSteamCMDHelpers:
         assert kwargs.get("cap_adds") == STEAMCMD_CAPS
         assert kwargs["env"].get("HOME") == "/data"
 
+    def test_steamcmd_missing_configuration_retries_once_after_app_info_refresh(self, tmp_path):
+        from games.base import run_steamcmd_install
+
+        with patch("games.base.docker_service.run_ephemeral") as mock_eph, \
+             patch("games.base.docker_service.container_runtime_uid_gid", return_value=(1001, 1001)):
+            mock_eph.side_effect = [
+                {
+                    "ok": False,
+                    "error": "Missing Configuration",
+                    "stdout": "ERROR! Failed to install app '2278520' (Missing Configuration)\n",
+                    "stderr": "",
+                },
+                {"ok": True, "error": "", "stdout": "Success! App fully installed.\n", "stderr": ""},
+            ]
+
+            result = run_steamcmd_install(
+                server_id=1,
+                install_dir=str(tmp_path),
+                app_id="2278520",
+                platform="windows",
+            )
+
+        assert result["ok"] is True
+        steamcmd_calls = [
+            call for call in mock_eph.call_args_list
+            if "+app_update" in call.kwargs["command"][1]
+        ]
+        assert len(steamcmd_calls) == 2
+        first_script = steamcmd_calls[0].kwargs["command"][1]
+        retry_script = steamcmd_calls[1].kwargs["command"][1]
+        assert "+app_info_update" not in first_script
+        assert "+@sSteamCmdForcePlatformType windows" in retry_script
+        assert "+app_info_update 1" in retry_script
+        assert retry_script.index("+app_info_update 1") < retry_script.index("+app_update 2278520")
+
     def test_workshop_download_runs_as_root_and_chowns(self, tmp_path):
         from games.base import STEAMCMD_CAPS, run_steamcmd_workshop_download
 

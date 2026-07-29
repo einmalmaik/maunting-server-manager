@@ -506,9 +506,17 @@ class TestSteamCMDFullLogOnFailure:
                 )
 
             assert result["error_code"] == "steamcmd_missing_configuration"
-            assert "Steam-Account" in result["error"]
-            assert "Zugriff auf die Server-App" in result["error"]
+            assert "Metadaten-Aktualisierung" in result["error"]
+            assert "einmaligem Retry" in result["error"]
             assert "nicht verifiziert" in result["error"]
+            steamcmd_calls = [
+                call for call in mock_eph.call_args_list
+                if "+app_update" in call.kwargs["command"][1]
+            ]
+            assert len(steamcmd_calls) == 2
+            retry_script = steamcmd_calls[1].kwargs["command"][1]
+            assert "+app_info_update 1" in retry_script
+            assert retry_script.index("+app_info_update 1") < retry_script.index("+app_update 123")
         finally:
             self._clear_console_log(test_server.id)
 
