@@ -78,6 +78,36 @@ def test_native_conan_validates() -> None:
     assert bp_mods.modListFilePath == "ConanSandbox/Mods/modlist.txt"
 
 
+def test_native_enshrouded_uses_windows_server_via_wine() -> None:
+    blueprint = load_blueprint_file(_NATIVE_DIR / "enshrouded.blueprint.json")
+
+    assert blueprint.meta.id == "enshrouded"
+    assert blueprint.runtime.image == "ghcr.io/parkervcp/yolks:wine_10"
+    assert blueprint.runtime.workdir == "/home/container"
+    assert blueprint.runtime.startup == "./enshrouded_server.exe"
+    assert blueprint.runtime.requiredFiles == ["enshrouded_server.exe"]
+    assert blueprint.runtime.ensureDirs == ["logs", "savegame"]
+    assert blueprint.runtime.stopGracePeriodSeconds == 60
+    assert blueprint.runtime.startupCheckSeconds == 120.0
+    assert blueprint.runtime.env == {
+        "WINEDEBUG": "-all",
+        "WINEESYNC": "1",
+        "WINEFSYNC": "1",
+    }
+    assert [(port.name.value, port.protocol.value) for port in blueprint.ports] == [
+        ("query", "udp"),
+    ]
+    assert blueprint.source.steam is not None
+    assert blueprint.source.steam.appId == "2278520"
+    assert blueprint.source.steam.platform.value == "windows"
+    assert blueprint.source.steam.compatibility.value == "proton"
+    assert blueprint.source.steam.requiresLogin is False
+    assert blueprint.source.steam.validate_ is False
+    assert len(blueprint.runtime.configPatches) == 1
+    assert blueprint.runtime.configPatches[0].file == "enshrouded_server.json"
+    assert blueprint.runtime.configPatches[0].value == r"\g<1>{QUERY_PORT}"
+
+
 def test_minimal_blueprint_is_valid() -> None:
     bp = load_blueprint_dict(_minimal_valid_dict())
     assert isinstance(bp, Blueprint)
@@ -570,4 +600,3 @@ def test_health_application_http_ping_rejects_invalid_path() -> None:
     d["health"]["application"]["path"] = "//healthz"  # Doppelter Slash
     with pytest.raises(BlueprintValidationError):
         load_blueprint_dict(d)
-

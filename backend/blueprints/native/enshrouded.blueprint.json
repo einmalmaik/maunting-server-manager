@@ -5,28 +5,26 @@
     "name": "Enshrouded",
     "category": "steam_game",
     "author": "Maunting Studios",
-    "description": "Enshrouded Dedicated Server via SteamCMD (App-ID 2278520). Nativer Linux-Support. Konfiguration erfolgt \u00c3\u00bcber enshrouded_server.json."
+    "description": "Enshrouded Dedicated Server via SteamCMD (App-ID 2278520). Die Windows-Serverdateien laufen unter Wine; ein Steam-Account ist nicht erforderlich. Konfiguration über enshrouded_server.json."
   },
   "runtime": {
-    "image": "ghcr.io/parkervcp/steamcmd:debian",
-    "workdir": "/data",
+    "image": "ghcr.io/parkervcp/yolks:wine_10",
+    "workdir": "/home/container",
     "user": "1000:1000",
     "env": {
-      "HOME": "/data",
-      "LD_LIBRARY_PATH": ".:./linux64:/usr/lib32:/usr/lib/x86_64-linux-gnu"
+      "WINEDEBUG": "-all",
+      "WINEESYNC": "1",
+      "WINEFSYNC": "1"
     },
-    "startup": "./enshrouded_server",
-    "ensureDirs": [],
+    "startup": "./enshrouded_server.exe",
+    "ensureDirs": [
+      "logs",
+      "savegame"
+    ],
     "requiredFiles": [
-      "enshrouded_server"
+      "enshrouded_server.exe"
     ],
     "configPatches": [
-      {
-        "type": "regex",
-        "file": "enshrouded_server.json",
-        "regex": "(\"gamePort\"\\s*:\\s*)\\d+",
-        "value": "\\g<1>{GAME_PORT}"
-      },
       {
         "type": "regex",
         "file": "enshrouded_server.json",
@@ -34,13 +32,10 @@
         "value": "\\g<1>{QUERY_PORT}"
       }
     ],
-    "startupCheckSeconds": 60.0
+    "stopGracePeriodSeconds": 60,
+    "startupCheckSeconds": 120.0
   },
   "ports": [
-    {
-      "name": "game",
-      "protocol": "udp"
-    },
     {
       "name": "query",
       "protocol": "udp"
@@ -50,8 +45,8 @@
     "type": "steam",
     "steam": {
       "appId": "2278520",
-      "platform": "linux",
-      "compatibility": "native",
+      "platform": "windows",
+      "compatibility": "proton",
       "requiresLogin": false,
       "validate": false
     },

@@ -12,6 +12,7 @@ Schwerpunkt:
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 from dataclasses import dataclass
@@ -242,6 +243,52 @@ def test_windows_steam_compatibility_wraps_exe_with_wine() -> None:
         "-MaxPlayers=64",
     ]
     assert plugin.container_uid_gid(_FakeServer()) == (1000, 1000)
+
+
+def test_native_enshrouded_builds_wine_command_with_query_port_runtime() -> None:
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    blueprint = load_blueprint_file(native_dir / "enshrouded.blueprint.json")
+    plugin = BlueprintPlugin(blueprint)
+    server = _FakeServer(query_port=15637)
+
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        argv = plugin.build_container_command(server)
+
+    assert argv == ["wine", "./enshrouded_server.exe"]
+    assert plugin.container_workdir(server) == "/home/container"
+    assert plugin.container_uid_gid(server) == (1000, 1000)
+    assert plugin.build_container_env(server) == {
+        "WINEDEBUG": "-all",
+        "WINEESYNC": "1",
+        "WINEFSYNC": "1",
+    }
+
+
+def test_native_enshrouded_prepares_query_port_and_runtime_directories(tmp_path) -> None:
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    blueprint = load_blueprint_file(native_dir / "enshrouded.blueprint.json")
+    plugin = BlueprintPlugin(blueprint)
+    server = _FakeServer(install_dir=str(tmp_path), query_port=28015)
+    (tmp_path / "enshrouded_server.exe").write_bytes(b"synthetic-test-binary")
+    config_path = tmp_path / "enshrouded_server.json"
+    config_path.write_text(
+        json.dumps({
+            "name": "Synthetic Test Server",
+            "saveDirectory": "./savegame",
+            "logDirectory": "./logs",
+            "ip": "0.0.0.0",
+            "queryPort": 15637,
+            "slotCount": 16,
+        }),
+        encoding="utf-8",
+    )
+
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        plugin.prepare_runtime(server)
+
+    assert json.loads(config_path.read_text(encoding="utf-8"))["queryPort"] == 28015
+    assert (tmp_path / "logs").is_dir()
+    assert (tmp_path / "savegame").is_dir()
 
 
 def test_wine_blueprint_start_repairs_home_container_for_runtime_user(tmp_path) -> None:
