@@ -189,7 +189,7 @@ def test_db_used_ports_scoped_by_node(db):
     used_n2 = _db_used_ports(db, node_id=n2.id)
     assert (27015, "udp") in used_n1
     assert (27015, "udp") in used_n2
-    # Same port on both nodes is fine ÔÇö each set only has one entry
+    # Same port on both nodes is fine — each set only has one entry
     assert len(used_n1) == 1
     assert len(used_n2) == 1
 

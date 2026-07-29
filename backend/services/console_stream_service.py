@@ -8,7 +8,7 @@ KISS:
 - Eine In-Memory-State-Klasse, eine ``connect()``-Coroutine.
 - File-Tail- und Docker-Stream-Loops sind hier unabhaengig vom ehemaligen
   SSE-Service implementiert (kein gemeinsamer Code). Geteilt wird nur
-  ``docker_service`` fuer ``stream_logs`` / ``is_running`` ÔÇö alles andere
+  ``docker_service`` fuer ``stream_logs`` / ``is_running`` — alles andere
   hier ist WS-spezifisch.
 - Keine externen State-Stores (Redis/DB). Verloren beim Restart = akzeptabel,
   da der File-Backlog dann ohnehin wieder eingelesen wird.
@@ -25,7 +25,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Deque  # noqa: F401 ÔÇö Any used by node proxy path
+from typing import Any, Deque  # noqa: F401 — Any used by node proxy path
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect, WebSocketState

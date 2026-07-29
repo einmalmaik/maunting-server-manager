@@ -136,7 +136,7 @@ def test_observed_state_contract_vectors(db: Session) -> None:
                     reconcile_guardian_server(db, server, node_client=client)
                 
                 db.refresh(server)
-                # Observed-State-Daten d├╝rfen trotzdem gespeichert werden
+                # Observed-State-Daten dürfen trotzdem gespeichert werden
                 assert server.guardian_accepted_generation == 6
                 # Sync darf aber nicht als erfolgreich gelten -> error saved
                 assert server.guardian_sync_error_statistics is not None

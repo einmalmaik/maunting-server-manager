@@ -56,7 +56,7 @@ def test_restart_server_with_updates_raises_on_unsupported_game_type():
             asyncio.run(restart_server_with_updates(fake_db, fake_server))
 
     assert exc.value.status_code == 400
-    assert "nicht unterst├╝tzt" in str(exc.value.detail)
+    assert "nicht unterstützt" in str(exc.value.detail)
 
 
 def test_queue_lifecycle_operation_returns_before_worker_runs():
@@ -370,10 +370,10 @@ def _docker_only_plugin():
 
 
 def test_start_always_runs_steam_validate_for_steam_source():
-    """Steam-Blueprints m├╝ssen bei jedem Start ein SteamCMD validate ausf├╝hren,
+    """Steam-Blueprints müssen bei jedem Start ein SteamCMD validate ausführen,
     damit Game-Binaries (Patches, Security-Updates) aktuell bleiben.
-    Der passive Update-Check liefert f├╝r Steam absichtlich 'none' - das
-    Lifecycle ├╝berschreibt das deklarativ f├╝r Steam-Source.
+    Der passive Update-Check liefert für Steam absichtlich 'none' - das
+    Lifecycle überschreibt das deklarativ für Steam-Source.
     """
     server = Server(id=21, name="Steam", game_type="dayz", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
     server.ports = []
@@ -444,7 +444,7 @@ def test_restart_preserves_check_based_http_server_file_update():
 
 
 def test_restart_always_runs_steam_validate_for_steam_source():
-    """Steam-Blueprints m├╝ssen bei jedem Restart ein SteamCMD validate ausf├╝hren."""
+    """Steam-Blueprints müssen bei jedem Restart ein SteamCMD validate ausführen."""
     server = Server(id=22, name="Steam", game_type="dayz", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
     server.ports = []
     db = MagicMock(spec=Session)

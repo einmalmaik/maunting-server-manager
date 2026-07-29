@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 NODE_TOKEN_AAD = "msm:node:auth_token"
 
-# Default timeouts ÔÇö agent ops can include image pull / large uploads
+# Default timeouts — agent ops can include image pull / large uploads
 _DEFAULT_TIMEOUT = 30.0
 _LONG_TIMEOUT = 600.0
 
@@ -361,7 +361,7 @@ class NodeClient:
     # ÔöÇÔöÇ Health / metrics ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     def health(self) -> dict[str, Any]:
-        """Unauthenticated health ÔÇö does not send bearer token."""
+        """Unauthenticated health — does not send bearer token."""
         try:
             with self._httpx_client(5.0) as client:
                 resp = client.get(self._url("/health"))
@@ -828,7 +828,7 @@ class NodeClient:
 
     @property
     def bearer_token(self) -> str:
-        """In-memory token for WS upgrade only ÔÇö caller must not log/store."""
+        """In-memory token for WS upgrade only — caller must not log/store."""
         return self._token
 
 
