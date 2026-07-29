@@ -4,10 +4,20 @@ import { FileEditorWorkspace } from './FileEditorWorkspace'
 import type { EditorTab } from './fileWorkspaceTypes'
 
 vi.mock('@uiw/react-codemirror', () => ({
-  default: ({ onCreateEditor }: { onCreateEditor: (view: { dispatch: ReturnType<typeof vi.fn>; focus: () => void }) => void }) => (
+  default: ({
+    className,
+    height,
+    onCreateEditor,
+  }: {
+    className?: string
+    height?: string
+    onCreateEditor: (view: { dispatch: ReturnType<typeof vi.fn>; focus: () => void }) => void
+  }) => (
     <button
       type="button"
       data-testid="code-editor"
+      data-height={height}
+      className={className}
       onClick={(event) => {
         const editorElement = event.currentTarget
         onCreateEditor({
@@ -37,6 +47,26 @@ function tab(path: string, content = ''): EditorTab {
 }
 
 describe('FileEditorWorkspace tabs', () => {
+  it('binds the CodeMirror wrapper and editor to the available height', () => {
+    render(
+      <FileEditorWorkspace
+        tabs={[tab('config/server.ini', 'setting=value')]}
+        activePath="config/server.ini"
+        canWrite
+        tabListLabel="Open files"
+        horizontalScrollHint="Scroll horizontally"
+        onActivate={vi.fn()}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('code-editor')).toHaveClass('h-full')
+    expect(screen.getByTestId('code-editor')).toHaveAttribute('data-height', '100%')
+  })
+
   it('uses sibling native controls and supports roving arrow navigation', async () => {
     const onActivate = vi.fn()
     render(

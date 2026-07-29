@@ -394,6 +394,7 @@ export function FileEditorWorkspace({
             ) : (
               <CodeMirror
                 key={activeTab.path}
+                className="h-full"
                 value={activeTab.content}
                 onChange={handleEditorChange}
                 onUpdate={updateCursor}
