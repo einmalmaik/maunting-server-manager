@@ -16,6 +16,7 @@ alle Server-Typen dieselbe.
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 import shlex
@@ -467,6 +468,30 @@ class BlueprintPlugin(GamePlugin):
             target.relative_to(base)
             target.mkdir(parents=True, exist_ok=True)
 
+        # Enshrouded ships no default JSON; first run would bind queryPort 15637
+        # while MSM publishes the allocated port. Seed once so patches can apply.
+        if self._blueprint.meta.id == "enshrouded":
+            cfg = (base / "enshrouded_server.json").resolve()
+            cfg.relative_to(base)
+            if not cfg.is_file():
+                query_port = values.get("QUERY_PORT") or 15637
+                cfg.write_text(
+                    json.dumps(
+                        {
+                            "name": "Enshrouded Server",
+                            "password": "",
+                            "saveDirectory": "./savegame",
+                            "logDirectory": "./logs",
+                            "ip": "0.0.0.0",
+                            "queryPort": int(query_port),
+                            "slotCount": 16,
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
         for patch, value in local_patches:
             target = (base / patch.file).resolve()
             target.relative_to(base)
@@ -507,10 +532,7 @@ class BlueprintPlugin(GamePlugin):
                 raise RuntimeError(f"Runtime-Datei darf kein Symlink sein: {rel_path}")
             target = unresolved.resolve()
             target.relative_to(base)
-            target.chmod(0o750)
-            mode = stat.S_IMODE(target.stat(follow_symlinks=False).st_mode)
-            if os.name == "posix" and not mode & stat.S_IXUSR:
-                raise RuntimeError(f"Runtime-Datei ist nicht ausführbar: {rel_path}")
+            self._ensure_required_executable_mode(target, rel_path)
 
         try:
             self.update_modlist(server)
@@ -538,6 +560,32 @@ class BlueprintPlugin(GamePlugin):
             if declared in required and declared not in executable_files:
                 executable_files.append(declared)
         return executable_files
+
+    def _ensure_required_executable_mode(self, target: Path, rel_path: str) -> None:
+        """Ensure startup files are runnable under rootless Docker ownership.
+
+        SteamCMD/bind-mount files are often owned by a container subuid. The
+        panel user cannot chmod foreign UIDs (EPERM) even after a+rwX repair.
+        Accept any existing execute bit; for Wine/Proton PE binaries, readable
+        is enough because wine opens the file instead of kernel execve.
+        """
+        try:
+            target.chmod(0o750)
+        except OSError:
+            # Rootless: panel is not the file owner — keep going if already usable.
+            pass
+        if os.name != "posix":
+            return
+        mode = stat.S_IMODE(target.stat(follow_symlinks=False).st_mode)
+        if mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
+            return
+        if (
+            self._uses_windows_compat_runtime()
+            and rel_path.lower().endswith((".exe", ".bat", ".cmd"))
+            and mode & (stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+        ):
+            return
+        raise RuntimeError(f"Runtime-Datei ist nicht ausführbar: {rel_path}")
 
     def build_port_publishes(self, server) -> list[PortPublish]:
         """Port-Publishes aus der Blueprint statt UDP-Hartkodierung.

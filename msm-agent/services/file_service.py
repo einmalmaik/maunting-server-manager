@@ -529,10 +529,24 @@ def prepare_runtime(
         target = safe_path(server_id, rel_path)
         if not target.is_file():
             raise FileNotFoundError("Executable runtime file is missing")
-        target.chmod(0o750)
+        # Rootless Docker: SteamCMD files are often owned by a container subuid.
+        # The agent/panel user cannot chmod foreign UIDs (EPERM). Prefer 0750 when
+        # possible; otherwise accept any existing execute bit. Wine PE binaries
+        # only need to be readable on the host.
+        try:
+            target.chmod(0o750)
+        except OSError:
+            pass
         mode = stat_module.S_IMODE(target.stat(follow_symlinks=False).st_mode)
-        if os.name == "posix" and not mode & stat_module.S_IXUSR:
-            raise PermissionError("Executable runtime file could not be prepared")
+        if os.name != "posix":
+            continue
+        if mode & (stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH):
+            continue
+        if rel_path.lower().endswith((".exe", ".bat", ".cmd")) and mode & (
+            stat_module.S_IRUSR | stat_module.S_IRGRP | stat_module.S_IROTH
+        ):
+            continue
+        raise PermissionError("Executable runtime file could not be prepared")
 
 
 def search_paths(server_id: str | int, query: str, *, limit: int = 200) -> dict[str, Any]:

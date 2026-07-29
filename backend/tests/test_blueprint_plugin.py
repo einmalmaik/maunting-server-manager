@@ -291,6 +291,22 @@ def test_native_enshrouded_prepares_query_port_and_runtime_directories(tmp_path)
     assert (tmp_path / "savegame").is_dir()
 
 
+def test_native_enshrouded_seeds_default_config_when_missing(tmp_path) -> None:
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    blueprint = load_blueprint_file(native_dir / "enshrouded.blueprint.json")
+    plugin = BlueprintPlugin(blueprint)
+    server = _FakeServer(install_dir=str(tmp_path), query_port=27035)
+    (tmp_path / "enshrouded_server.exe").write_bytes(b"synthetic-test-binary")
+
+    with patch.object(plugin, "update_modlist"):
+        plugin.prepare_runtime(server)
+
+    cfg = json.loads((tmp_path / "enshrouded_server.json").read_text(encoding="utf-8"))
+    assert cfg["queryPort"] == 27035
+    assert cfg["saveDirectory"] == "./savegame"
+    assert cfg["logDirectory"] == "./logs"
+
+
 def test_wine_blueprint_start_repairs_home_container_for_runtime_user(tmp_path) -> None:
     bp_dict = {
         "version": 1,
@@ -659,6 +675,62 @@ def test_palworld_runtime_preflight_repairs_declared_startup_executable(tmp_path
 
     if os.name == "posix":
         assert stat.S_IMODE(startup.stat().st_mode) == 0o750
+
+
+def test_prepare_runtime_tolerates_rootless_chmod_eperm_when_already_executable(tmp_path) -> None:
+    """SteamCMD files under rootless Docker are owned by a subuid; panel chmod → EPERM."""
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    blueprint = load_blueprint_file(native_dir / "enshrouded.blueprint.json")
+    plugin = BlueprintPlugin(blueprint)
+    server = _FakeServer(install_dir=str(tmp_path), query_port=28015)
+    startup = tmp_path / "enshrouded_server.exe"
+    startup.write_bytes(b"MZ-synthetic-pe")
+    startup.chmod(0o777)
+    (tmp_path / "enshrouded_server.json").write_text(
+        json.dumps({"queryPort": 15637}),
+        encoding="utf-8",
+    )
+
+    real_chmod = Path.chmod
+
+    def _chmod_eperm(self, mode, *args, **kwargs):  # noqa: ANN001
+        if self.name == "enshrouded_server.exe":
+            raise PermissionError(1, "Operation not permitted", str(self))
+        return real_chmod(self, mode, *args, **kwargs)
+
+    with patch.object(plugin, "update_modlist"), patch.object(Path, "chmod", _chmod_eperm):
+        plugin.prepare_runtime(server)
+
+    assert json.loads((tmp_path / "enshrouded_server.json").read_text(encoding="utf-8"))["queryPort"] == 28015
+    if os.name == "posix":
+        assert stat.S_IMODE(startup.stat().st_mode) & stat.S_IXOTH
+
+
+def test_prepare_runtime_accepts_readable_wine_pe_without_execute_bit(tmp_path) -> None:
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    blueprint = load_blueprint_file(native_dir / "enshrouded.blueprint.json")
+    plugin = BlueprintPlugin(blueprint)
+    server = _FakeServer(install_dir=str(tmp_path), query_port=28015)
+    startup = tmp_path / "enshrouded_server.exe"
+    startup.write_bytes(b"MZ-synthetic-pe")
+    startup.chmod(0o644)
+    (tmp_path / "enshrouded_server.json").write_text(
+        json.dumps({"queryPort": 15637}),
+        encoding="utf-8",
+    )
+
+    real_chmod = Path.chmod
+
+    def _chmod_eperm(self, mode, *args, **kwargs):  # noqa: ANN001
+        if self.name == "enshrouded_server.exe":
+            raise PermissionError(1, "Operation not permitted", str(self))
+        return real_chmod(self, mode, *args, **kwargs)
+
+    with patch.object(plugin, "update_modlist"), patch.object(Path, "chmod", _chmod_eperm):
+        plugin.prepare_runtime(server)
+
+    if os.name == "posix":
+        assert not (stat.S_IMODE(startup.stat().st_mode) & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
 
 
 def test_palworld_remote_preflight_sends_derived_executable_file(tmp_path) -> None:
