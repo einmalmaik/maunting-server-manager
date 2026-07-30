@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import platform
+from pathlib import Path
 from typing import Any
 
 import psutil
@@ -11,6 +13,29 @@ from config import settings
 from services import docker_service
 
 router = APIRouter(tags=["metrics"])
+
+
+def _read_cpu_model() -> str | None:
+    """Best-effort CPU model string for inventory UI (no secrets).
+
+    Prefer /proc/cpuinfo on Linux; fall back to platform.processor().
+    """
+    try:
+        cpuinfo = Path("/proc/cpuinfo")
+        if cpuinfo.is_file():
+            for line in cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.lower().startswith("model name"):
+                    _, _, value = line.partition(":")
+                    model = value.strip()
+                    if model:
+                        return model[:256]
+    except OSError:
+        pass
+    try:
+        model = (platform.processor() or "").strip()
+        return model[:256] if model else None
+    except Exception:
+        return None
 
 
 @router.get("/metrics")
@@ -38,6 +63,7 @@ def metrics() -> dict[str, Any]:
     return {
         "cpu_count": cpu_count,
         "cpu_percent": cpu_percent,
+        "cpu_model": _read_cpu_model(),
         "ram_total_bytes": int(mem.total),
         "ram_used_bytes": int(mem.used),
         "ram_percent": float(mem.percent),

@@ -139,6 +139,16 @@
     "freeRam": "frei {{value}}",
     "ramCapacity": "Kapazität {{value}}",
     "freeRamShort": "frei {{value}}",
+    "cpuModelUnknown": "CPU-Modell unbekannt",
+    "ramBooked": "{{used}} / {{total}} gebucht",
+    "ramBookedShort": "gebucht {{value}}",
+    "ramAllocatable": "zuweisbar {{value}}",
+    "ramAllocatableShort": "zuweisbar {{value}}",
+    "capacityTitle": "Node-Kapazität",
+    "capacitySubtitle": "{{online}} / {{total}} online",
+    "viewAllNodes": "Alle Nodes",
+    "capacityEmpty": "Noch keine Nodes mit Kapazitätsdaten",
+    "capacityLoadFailed": "Node-Kapazität konnte nicht geladen werden.",
     "enrollment": {
       "title": "Node verbinden",
       "subtitle": "Führe einen Befehl auf dem neuen Linux-Server aus und bestätige anschließend den passenden Code.",
@@ -722,7 +732,9 @@
     "statusError": "Fehler",
     "noServers": "Keine Server vorhanden",
     "createFirstServer": "Erstelle deinen ersten Server, um loszulegen.",
-    "createServer": "Server erstellen"
+    "createServer": "Server erstellen",
+    "nodeCapacity": "Node-Kapazität",
+    "nodeCapacityHint": "Top Nodes nach Auslastung · max. 5"
   },
   "auth": {
     "login": "Anmelden",

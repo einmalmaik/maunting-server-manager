@@ -1,0 +1,126 @@
+"""Node RAM capacity accounting (booked limits vs host total).
+
+KISS: pure functions + SQL SUM. No manager classes, no agent round-trips.
+CPU overcommit is intentional and not guarded here.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from config import settings
+from models import Node, Server
+
+# Reserved for OS / agent / docker when checking allocatable RAM.
+# Overridable via MSM_NODE_RAM_HEADROOM_MB.
+DEFAULT_RAM_HEADROOM_MB = 1024
+
+
+def ram_headroom_mb() -> int:
+    raw = getattr(settings, "node_ram_headroom_mb", DEFAULT_RAM_HEADROOM_MB)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_RAM_HEADROOM_MB
+    return max(0, value)
+
+
+def sum_allocated_ram_mb(
+    db: Session,
+    node_id: int,
+    *,
+    exclude_server_id: int | None = None,
+) -> int:
+    """Sum of non-null server.ram_limit_mb on the node (booked RAM)."""
+    query = db.query(func.coalesce(func.sum(Server.ram_limit_mb), 0)).filter(
+        Server.node_id == node_id,
+        Server.ram_limit_mb.isnot(None),
+    )
+    if exclude_server_id is not None:
+        query = query.filter(Server.id != exclude_server_id)
+    total = query.scalar()
+    try:
+        return int(total or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def allocated_ram_by_node_ids(db: Session, node_ids: list[int]) -> dict[int, int]:
+    """Batch SUM(ram_limit_mb) grouped by node_id."""
+    if not node_ids:
+        return {}
+    rows = (
+        db.query(Server.node_id, func.coalesce(func.sum(Server.ram_limit_mb), 0))
+        .filter(
+            Server.node_id.in_(node_ids),
+            Server.ram_limit_mb.isnot(None),
+        )
+        .group_by(Server.node_id)
+        .all()
+    )
+    out: dict[int, int] = {nid: 0 for nid in node_ids}
+    for node_id, total in rows:
+        if node_id is None:
+            continue
+        try:
+            out[int(node_id)] = int(total or 0)
+        except (TypeError, ValueError):
+            out[int(node_id)] = 0
+    return out
+
+
+def allocatable_ram_mb(node: Node, allocated_mb: int) -> int | None:
+    """Remaining bookable RAM after headroom, or None if host total unknown."""
+    if node.ram_total is None:
+        return None
+    try:
+        total = int(node.ram_total)
+    except (TypeError, ValueError):
+        return None
+    budget = max(0, total - ram_headroom_mb())
+    return max(0, budget - max(0, int(allocated_mb)))
+
+
+def ensure_ram_limit_fits(
+    db: Session,
+    node: Node | None,
+    *,
+    new_ram_limit_mb: int | None,
+    exclude_server_id: int | None = None,
+) -> None:
+    """Raise HTTPException 400 if the new limit would overbook the node.
+
+    Skip when:
+    - no node
+    - new limit is null (unlimited — not booked)
+    - node.ram_total is unknown (no heartbeat yet)
+    """
+    from fastapi import HTTPException
+
+    if node is None or new_ram_limit_mb is None:
+        return
+    if node.ram_total is None:
+        return
+
+    try:
+        requested = int(new_ram_limit_mb)
+    except (TypeError, ValueError):
+        return
+    if requested <= 0:
+        return
+
+    allocated_others = sum_allocated_ram_mb(
+        db, node.id, exclude_server_id=exclude_server_id
+    )
+    remaining = allocatable_ram_mb(node, allocated_others)
+    if remaining is None:
+        return
+    if requested > remaining:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"RAM-Limit {requested} MB überschreitet den noch zuweisbaren Speicher "
+                f"dieses Nodes ({remaining} MB frei bei gebuchter Kapazität)."
+            ),
+        )

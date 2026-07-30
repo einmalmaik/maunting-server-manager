@@ -82,14 +82,21 @@ export interface Node {
   /** SHA-256 of agent TLS cert (hex). Required for remote HTTPS nodes. */
   tls_fingerprint?: string | null
   cpu_total: number | null
+  /** Host CPU model string from agent inventory (e.g. "AMD EPYC 7763…"). */
+  cpu_model?: string | null
   ram_total: number | null
   disk_total: number | null
   last_heartbeat: string | null
   server_count: number
+  /** Sum of server.ram_limit_mb on this node (null limits excluded). */
+  ram_allocated_mb?: number | null
+  /** Remaining bookable RAM after headroom + booked limits; null if total unknown. */
+  ram_allocatable_mb?: number | null
   /** Live metrics from agent (optional, GET /nodes/{id}) */
   metrics?: {
     cpu_count?: number
     cpu_percent?: number
+    cpu_model?: string | null
     ram_total_bytes?: number
     ram_used_bytes?: number
     ram_percent?: number
@@ -97,6 +104,24 @@ export interface Node {
     disk_used_bytes?: number
     disk_percent?: number
   } | null
+}
+
+/** Dashboard Top-N payload from GET /api/nodes/capacity-summary. */
+export interface NodeCapacitySummary {
+  online: number
+  total: number
+  items: Array<{
+    id: number
+    name: string
+    status: string
+    cpu_model: string | null
+    cpu_total: number | null
+    ram_total_mb: number | null
+    ram_used_mb: number | null
+    ram_allocated_mb: number
+    ram_allocatable_mb: number | null
+    server_count: number
+  }>
 }
 
 export interface PostgresCredential {

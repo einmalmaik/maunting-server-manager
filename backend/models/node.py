@@ -27,6 +27,8 @@ class Node(Base):
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(20), default="unknown")
     cpu_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Human-readable CPU model from agent inventory (e.g. "AMD EPYC 7763…").
+    cpu_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
     ram_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     disk_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     cpu_percent: Mapped[float | None] = mapped_column(Float, nullable=True)

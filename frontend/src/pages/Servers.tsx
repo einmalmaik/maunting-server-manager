@@ -99,21 +99,33 @@ export function Servers() {
   // Bei genau einem Eintrag ist die Wahl trivial, aber sichtbar und explizit.
   const showNodePicker = nodes.length > 1
 
+  const formatRamMbLabel = (mb: number) =>
+    mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`
+
   const nodeOptionLabel = (n: Node) => {
     const localTag = n.is_local ? ` · ${t('nodes.local')}` : ''
-    const cpu =
-      n.metrics?.cpu_percent != null ? `${Math.round(n.metrics.cpu_percent)}%` : '—'
-    let freeRam = '—'
-    if (n.metrics?.ram_total_bytes != null && n.metrics?.ram_used_bytes != null) {
+    const cores =
+      n.cpu_total != null
+        ? t('nodes.cpuCores', { count: n.cpu_total })
+        : n.metrics?.cpu_percent != null
+          ? `CPU ${Math.round(n.metrics.cpu_percent)}%`
+          : 'CPU —'
+    let allocLabel = '—'
+    if (n.ram_allocatable_mb != null) {
+      allocLabel = formatRamMbLabel(Math.max(0, n.ram_allocatable_mb))
+    } else if (n.ram_total != null) {
+      const booked = n.ram_allocated_mb ?? 0
+      const remaining = Math.max(0, Math.round(n.ram_total - booked))
+      allocLabel = formatRamMbLabel(remaining)
+    } else if (n.metrics?.ram_total_bytes != null && n.metrics?.ram_used_bytes != null) {
+      // Fallback: OS free when booking totals unknown (picker without full detail).
       const freeMb = Math.max(
         0,
         Math.round((n.metrics.ram_total_bytes - n.metrics.ram_used_bytes) / (1024 * 1024)),
       )
-      freeRam = freeMb >= 1024 ? `${(freeMb / 1024).toFixed(1)} GB` : `${freeMb} MB`
-    } else if (n.ram_total != null) {
-      freeRam = n.ram_total >= 1024 ? `${(n.ram_total / 1024).toFixed(1)} GB` : `${n.ram_total} MB`
+      allocLabel = formatRamMbLabel(freeMb)
     }
-    return `${n.name}${localTag} (CPU ${cpu}, ${t('nodes.freeRamShort', { value: freeRam })})`
+    return `${n.name}${localTag} (${cores}, ${t('nodes.ramAllocatableShort', { value: allocLabel })})`
   }
 
   const handleCreate = async (e: React.FormEvent) => {

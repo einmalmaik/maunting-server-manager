@@ -2,12 +2,25 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { api } from '@/api/client'
-import { Server, GameInfo } from '@/types'
+import { Server, GameInfo, NodeCapacitySummary } from '@/types'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Server as ServerIcon, Activity, MemoryStick, CheckCircle2, AlertTriangle, XCircle, Loader2, Clock } from 'lucide-react'
+import {
+  Server as ServerIcon,
+  Activity,
+  MemoryStick,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Loader2,
+  Clock,
+  Network,
+  ArrowRight,
+} from 'lucide-react'
 import { UptimeDisplay } from '@/components/server/UptimeDisplay'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { ProgressBar } from '@/Singra/UI/ProgressBar'
+import { Badge } from '@/components/ui/Badge'
 
 interface ServiceStatus {
   status: 'ok' | 'degraded' | 'error'
@@ -28,6 +41,134 @@ function ServiceDot({ status }: { status: 'ok' | 'degraded' | 'error' }) {
   if (status === 'ok') return <span className="inline-block w-2 h-2 rounded-full bg-status-success" />
   if (status === 'degraded') return <span className="inline-block w-2 h-2 rounded-full bg-status-warning" />
   return <span className="inline-block w-2 h-2 rounded-full bg-status-destructive" />
+}
+
+function formatRamMb(mb: number | null | undefined): string {
+  if (mb == null) return '—'
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
+  return `${Math.round(mb)} MB`
+}
+
+function NodeCapacityCard() {
+  const { t } = useTranslation()
+  const canViewNodes = useHasPermission('nodes.read')
+  const [summary, setSummary] = useState<NodeCapacitySummary | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!canViewNodes) return
+    setLoading(true)
+    api<NodeCapacitySummary>('/nodes/capacity-summary?limit=5')
+      .then(setSummary)
+      .catch(() => setSummary(null))
+      .finally(() => setLoading(false))
+  }, [canViewNodes])
+
+  if (!canViewNodes) return null
+
+  return (
+    <div className="msm-card p-5" data-testid="dashboard-node-capacity">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
+            {t('dashboard.nodeCapacity')}
+          </p>
+          <p className="mt-0.5 font-body-md text-xs text-on-surface-variant/80">
+            {summary
+              ? t('nodes.capacitySubtitle', {
+                  online: summary.online,
+                  total: summary.total,
+                })
+              : t('dashboard.nodeCapacityHint')}
+          </p>
+        </div>
+        <Link
+          to="/admin/nodes"
+          className="inline-flex shrink-0 items-center gap-1 font-label-md text-xs text-secondary hover:text-primary"
+        >
+          {t('nodes.viewAllNodes')}
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
+
+      {loading && (
+        <div className="flex items-center gap-2 py-4 text-on-surface-variant">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span className="text-sm">{t('common.loading')}</span>
+        </div>
+      )}
+
+      {!loading && (!summary || summary.items.length === 0) && (
+        <div className="flex items-center gap-2 py-3 text-sm text-on-surface-variant">
+          <Network className="h-4 w-4 shrink-0" />
+          {t('nodes.capacityEmpty')}
+        </div>
+      )}
+
+      {!loading && summary && summary.items.length > 0 && (
+        <ul className="space-y-3">
+          {summary.items.map((item) => {
+            const total = item.ram_total_mb
+            const used = item.ram_used_mb
+            const booked = item.ram_allocated_mb ?? 0
+            const usedPct =
+              total != null && total > 0 && used != null
+                ? Math.min(100, (used / total) * 100)
+                : null
+            const allocatable =
+              item.ram_allocatable_mb != null
+                ? Math.max(0, item.ram_allocatable_mb)
+                : total != null
+                  ? Math.max(0, total - booked)
+                  : null
+            const model = item.cpu_model?.trim() || t('nodes.cpuModelUnknown')
+            return (
+              <li key={item.id} className="min-w-0">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate font-headline text-sm text-on-surface">
+                      {item.name}
+                    </span>
+                    <Badge
+                      variant={
+                        item.status === 'online'
+                          ? 'success'
+                          : item.status === 'offline'
+                            ? 'destructive'
+                            : 'default'
+                      }
+                    >
+                      {t(`nodes.status.${item.status}`, { defaultValue: item.status })}
+                    </Badge>
+                  </div>
+                  {item.cpu_total != null && (
+                    <span className="shrink-0 font-mono-sm text-xs text-on-surface-variant">
+                      {t('nodes.cpuCores', { count: item.cpu_total })}
+                    </span>
+                  )}
+                </div>
+                <p className="mb-1.5 truncate font-mono-sm text-[11px] text-on-surface-variant/80" title={model}>
+                  {model}
+                </p>
+                <ProgressBar
+                  value={usedPct}
+                  label="RAM"
+                  heat
+                  hint={
+                    total != null
+                      ? `${formatRamMb(used)} / ${formatRamMb(total)} · ${t('nodes.ramAllocatableShort', {
+                          value: formatRamMb(allocatable),
+                        })}`
+                      : '—'
+                  }
+                />
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 function SystemStatusCard() {
@@ -193,6 +334,9 @@ export function Dashboard() {
         {/* Echter Systemstatus */}
         <SystemStatusCard />
       </div>
+
+      {/* Node capacity Top-N (nodes.read only) — never the full inventory */}
+      <NodeCapacityCard />
 
       {/* Empty State */}
       {servers.length === 0 && (

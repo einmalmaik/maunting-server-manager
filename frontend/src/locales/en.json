@@ -139,6 +139,16 @@
     "freeRam": "free {{value}}",
     "ramCapacity": "capacity {{value}}",
     "freeRamShort": "free {{value}}",
+    "cpuModelUnknown": "CPU model unknown",
+    "ramBooked": "{{used}} / {{total}} booked",
+    "ramBookedShort": "booked {{value}}",
+    "ramAllocatable": "allocatable {{value}}",
+    "ramAllocatableShort": "allocatable {{value}}",
+    "capacityTitle": "Node capacity",
+    "capacitySubtitle": "{{online}} / {{total}} online",
+    "viewAllNodes": "All nodes",
+    "capacityEmpty": "No nodes with capacity data yet",
+    "capacityLoadFailed": "Could not load node capacity.",
     "enrollment": {
       "title": "Connect node",
       "subtitle": "Run one command on the new Linux server, then approve the matching code.",
@@ -722,7 +732,9 @@
     "statusError": "Error",
     "noServers": "No servers yet",
     "createFirstServer": "Create your first server to get started.",
-    "createServer": "Create Server"
+    "createServer": "Create Server",
+    "nodeCapacity": "Node capacity",
+    "nodeCapacityHint": "Top nodes by load · max 5"
   },
   "auth": {
     "login": "Sign In",

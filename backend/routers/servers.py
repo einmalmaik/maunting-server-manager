@@ -197,6 +197,14 @@ async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: 
     if target_node is not None and not target_node.is_local and req.public_bind_ip is None:
         bind_ip = "0.0.0.0"
     target_node_id = target_node.id if target_node else None
+    from services.node_capacity import ensure_ram_limit_fits
+
+    ensure_ram_limit_fits(
+        db,
+        target_node,
+        new_ram_limit_mb=req.ram_limit_mb,
+        exclude_server_id=None,
+    )
     check_host = True if (target_node is None or target_node.is_local) else False
     try:
         allocated = allocate_ports(
@@ -518,6 +526,22 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         raise HTTPException(
             status_code=409,
             detail="Ressourcen- und Netzwerk-Aenderungen koennen nicht in einem gemeinsamen PATCH durchgefuehrt werden",
+        )
+
+    # RAM booking guard: only when a numeric limit is being set/changed and the
+    # node has a known host total (heartbeat). Unlimited (null) is not booked.
+    if ram_changed and payload.get("ram_limit_mb") is not None:
+        from models import Node as NodeModel
+        from services.node_capacity import ensure_ram_limit_fits
+
+        guard_node = None
+        if server.node_id is not None:
+            guard_node = db.query(NodeModel).filter(NodeModel.id == server.node_id).first()
+        ensure_ram_limit_fits(
+            db,
+            guard_node,
+            new_ram_limit_mb=payload.get("ram_limit_mb"),
+            exclude_server_id=server.id,
         )
 
     # ── DB-Atomaritaet: alle Mutationen in einer Transaktion, ein Commit. ──

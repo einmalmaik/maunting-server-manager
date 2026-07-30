@@ -70,6 +70,20 @@ function freeRamMb(node: Node): number | null {
   return null
 }
 
+function cpuModelLabel(node: Node): string | null {
+  const model = node.cpu_model || node.metrics?.cpu_model
+  if (typeof model === 'string' && model.trim()) return model.trim()
+  return null
+}
+
+/** Prefer API allocatable (includes headroom); fallback to total − booked. */
+function allocatableRamMb(node: Node): number | null {
+  if (node.ram_allocatable_mb != null) return Math.max(0, node.ram_allocatable_mb)
+  if (node.ram_total == null) return null
+  const booked = node.ram_allocated_mb ?? 0
+  return Math.max(0, Math.round(node.ram_total - booked))
+}
+
 export function AdminNodes() {
   const { t } = useTranslation()
   const { nodes, total, loading, fetchNodes, createNode, updateNode, deleteNode, healthCheck } =
@@ -432,6 +446,17 @@ export function AdminNodes() {
                     <p className="mt-1 break-all font-mono-sm text-mono-sm text-on-surface-variant">
                       {node.host}
                     </p>
+                    {(() => {
+                      const model = cpuModelLabel(node)
+                      return (
+                        <p
+                          className="mt-1 truncate font-body-md text-xs text-on-surface-variant/90"
+                          title={model ?? undefined}
+                        >
+                          {model ?? t('nodes.cpuModelUnknown')}
+                        </p>
+                      )
+                    })()}
                   </div>
                   <div className="flex shrink-0 gap-1">
                     <button
@@ -495,6 +520,18 @@ export function AdminNodes() {
                     heat
                     data-testid={`node-ram-${node.id}`}
                   />
+                  {node.ram_total != null && (
+                    <p className="text-xs text-on-surface-variant" data-testid={`node-ram-booked-${node.id}`}>
+                      {t('nodes.ramBooked', {
+                        used: formatRamMb(node.ram_allocated_mb ?? 0),
+                        total: formatRamMb(node.ram_total),
+                      })}
+                      {' · '}
+                      {t('nodes.ramAllocatable', {
+                        value: formatRamMb(allocatableRamMb(node)),
+                      })}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-4 text-xs text-on-surface-variant">

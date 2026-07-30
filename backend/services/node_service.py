@@ -143,6 +143,11 @@ def apply_agent_metrics(node: Node, metrics: dict[str, Any] | None) -> None:
             node.cpu_total = float(metrics["cpu_count"])
         except (TypeError, ValueError):
             pass
+    cpu_model = metrics.get("cpu_model")
+    if isinstance(cpu_model, str):
+        cleaned = cpu_model.strip()
+        if cleaned:
+            node.cpu_model = cleaned[:256]
     if metrics.get("ram_total_bytes") is not None:
         try:
             node.ram_total = int(metrics["ram_total_bytes"]) // (1024 * 1024)
@@ -223,14 +228,20 @@ def node_out_dict(
     server_count: int | None = None,
     *,
     metrics: dict[str, Any] | None = None,
+    ram_allocated_mb: int | None = None,
 ) -> dict[str, Any]:
     """Serialize Node for API without auth_token_enc."""
+    from services.node_capacity import allocatable_ram_mb
+
     count = server_count
     if count is None:
         try:
             count = len(node.servers) if node.servers is not None else 0
         except Exception:
             count = 0
+
+    allocated = 0 if ram_allocated_mb is None else int(ram_allocated_mb)
+    ram_allocatable = allocatable_ram_mb(node, allocated)
 
     cpu_percent = getattr(node, "cpu_percent", None)
     if metrics is None and cpu_percent is not None:
@@ -244,7 +255,9 @@ def node_out_dict(
         ram_used_bytes = (ram_used or 0) * 1024 * 1024
         disk_used_bytes = (disk_used or 0) * 1024 * 1024
         metrics = {
+            "cpu_count": getattr(node, "cpu_total", None),
             "cpu_percent": cpu_percent,
+            "cpu_model": getattr(node, "cpu_model", None),
             "ram_percent": (ram_used_bytes / ram_total_bytes * 100) if ram_total_bytes else 0.0,
             "ram_total_bytes": ram_total_bytes,
             "ram_used_bytes": ram_used_bytes,
@@ -264,11 +277,19 @@ def node_out_dict(
         "status": node.status or "unknown",
         "tls_fingerprint": getattr(node, "tls_fingerprint", None) or None,
         "cpu_total": node.cpu_total,
+        "cpu_model": getattr(node, "cpu_model", None),
         "ram_total": node.ram_total,
         "disk_total": node.disk_total,
         "last_heartbeat": node.last_heartbeat,
         "server_count": int(count or 0),
+        "ram_allocated_mb": ram_allocated_mb if ram_allocated_mb is not None else allocated,
+        "ram_allocatable_mb": ram_allocatable,
     }
     if metrics is not None:
+        # Prefer cached model when live metrics omit the field (older agents).
+        if isinstance(metrics, dict) and not metrics.get("cpu_model"):
+            cached_model = getattr(node, "cpu_model", None)
+            if cached_model:
+                metrics = {**metrics, "cpu_model": cached_model}
         out["metrics"] = metrics
     return out

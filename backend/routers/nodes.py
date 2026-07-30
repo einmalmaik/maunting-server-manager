@@ -28,7 +28,13 @@ from database import get_db
 from config import settings
 from dependencies import get_current_owner, get_current_user, verify_csrf, require_global
 from models import Node, NodeEnrollment, Server, User
-from schemas.node import NodeCreate, NodeOut, NodePickerOut, NodeUpdate
+from schemas.node import (
+    NodeCapacitySummary,
+    NodeCreate,
+    NodeOut,
+    NodePickerOut,
+    NodeUpdate,
+)
 from schemas.node_enrollment import (
     EnrollmentBegin,
     EnrollmentBeginOut,
@@ -37,6 +43,11 @@ from schemas.node_enrollment import (
 )
 from middleware.rate_limit import limiter
 from services import node_enrollment_service
+from services.node_capacity import (
+    allocatable_ram_mb,
+    allocated_ram_by_node_ids,
+    sum_allocated_ram_mb,
+)
 from services.node_client import NodeClient, NodeClientError
 from services.node_service import (
     encrypt_node_token,
@@ -117,12 +128,86 @@ def _can_read_node_details(db: Session, user: User) -> bool:
     return user.is_owner or has_global_permission(db, user, "nodes.read")
 
 
-def _picker_out(node: Node) -> dict[str, Any]:
+def _picker_out(node: Node, *, ram_allocated_mb: int | None = None) -> dict[str, Any]:
+    allocated = 0 if ram_allocated_mb is None else int(ram_allocated_mb)
     return NodePickerOut(
         id=node.id,
         name=node.name,
         status=node.status or "unknown",
+        cpu_total=node.cpu_total,
+        ram_total=node.ram_total,
+        ram_allocated_mb=allocated,
+        ram_allocatable_mb=allocatable_ram_mb(node, allocated),
     ).model_dump()
+
+
+@router.get("/capacity-summary", response_model=NodeCapacitySummary)
+def capacity_summary(
+    limit: int = 5,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Dashboard Top-N node capacity (cached metrics only — no agent fan-out).
+
+    Auth: owner or ``nodes.read``. Never returns tokens or host URLs.
+    """
+    if not _can_read_node_details(db, user):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
+    limit = max(1, min(int(limit or 5), 25))
+    total = db.query(func.count(Node.id)).scalar() or 0
+    online = (
+        db.query(func.count(Node.id)).filter(Node.status == "online").scalar() or 0
+    )
+
+    nodes = db.query(Node).order_by(Node.id.asc()).all()
+    node_ids = [n.id for n in nodes]
+    allocated_map = allocated_ram_by_node_ids(db, node_ids)
+    server_counts_raw = (
+        db.query(Server.node_id, func.count(Server.id))
+        .filter(Server.node_id.in_(node_ids))
+        .group_by(Server.node_id)
+        .all()
+        if node_ids
+        else []
+    )
+    server_counts = {node_id: count for node_id, count in server_counts_raw}
+
+    def _sort_key(node: Node) -> tuple:
+        status = (node.status or "unknown").lower()
+        online_rank = 0 if status == "online" else 1
+        ram_total = int(node.ram_total or 0)
+        ram_used = int(node.ram_used or 0)
+        allocated = int(allocated_map.get(node.id, 0))
+        used_ratio = (ram_used / ram_total) if ram_total > 0 else 0.0
+        alloc_ratio = (allocated / ram_total) if ram_total > 0 else 0.0
+        # Online first, then busiest (max of OS used vs booked), then name.
+        heat = max(used_ratio, alloc_ratio)
+        return (online_rank, -heat, (node.name or "").lower(), node.id)
+
+    ranked = sorted(nodes, key=_sort_key)[:limit]
+    items = []
+    for n in ranked:
+        booked = int(allocated_map.get(n.id, 0))
+        items.append(
+            {
+                "id": n.id,
+                "name": n.name,
+                "status": n.status or "unknown",
+                "cpu_model": getattr(n, "cpu_model", None),
+                "cpu_total": n.cpu_total,
+                "ram_total_mb": n.ram_total,
+                "ram_used_mb": n.ram_used,
+                "ram_allocated_mb": booked,
+                "ram_allocatable_mb": allocatable_ram_mb(n, booked),
+                "server_count": int(server_counts.get(n.id, 0)),
+            }
+        )
+    return {
+        "online": int(online),
+        "total": int(total),
+        "items": items,
+    }
 
 
 @router.get("")
@@ -166,11 +251,15 @@ def list_nodes(
             "page": page,
             "limit": limit,
         }
+        node_ids = [node.id for node in nodes]
+        allocated_map = allocated_ram_by_node_ids(db, node_ids)
         if not can_read_details:
-            result_page["items"] = [_picker_out(node) for node in nodes]
+            result_page["items"] = [
+                _picker_out(node, ram_allocated_mb=allocated_map.get(node.id, 0))
+                for node in nodes
+            ]
             return result_page
 
-        node_ids = [node.id for node in nodes]
         server_counts_raw = (
             db.query(Server.node_id, func.count(Server.id))
             .filter(Server.node_id.in_(node_ids))
@@ -181,15 +270,23 @@ def list_nodes(
         )
         server_counts = {node_id: count for node_id, count in server_counts_raw}
         result_page["items"] = [
-            node_out_dict(node, server_count=server_counts.get(node.id, 0))
+            node_out_dict(
+                node,
+                server_count=server_counts.get(node.id, 0),
+                ram_allocated_mb=allocated_map.get(node.id, 0),
+            )
             for node in nodes
         ]
         return result_page
     else:
         nodes = query.all()
-        if not can_read_details:
-            return [_picker_out(node) for node in nodes]
         node_ids = [node.id for node in nodes]
+        allocated_map = allocated_ram_by_node_ids(db, node_ids)
+        if not can_read_details:
+            return [
+                _picker_out(node, ram_allocated_mb=allocated_map.get(node.id, 0))
+                for node in nodes
+            ]
         server_counts_raw = (
             db.query(Server.node_id, func.count(Server.id))
             .filter(Server.node_id.in_(node_ids))
@@ -199,7 +296,14 @@ def list_nodes(
             else []
         )
         server_counts = {node_id: count for node_id, count in server_counts_raw}
-        return [node_out_dict(n, server_count=server_counts.get(n.id, 0)) for n in nodes]
+        return [
+            node_out_dict(
+                n,
+                server_count=server_counts.get(n.id, 0),
+                ram_allocated_mb=allocated_map.get(n.id, 0),
+            )
+            for n in nodes
+        ]
 
 
 @router.post("", response_model=NodeOut, status_code=201)
@@ -232,7 +336,7 @@ def create_node(
     db.add(node)
     db.commit()
     db.refresh(node)
-    return node_out_dict(node, server_count=0)
+    return node_out_dict(node, server_count=0, ram_allocated_mb=0)
 
 
 @router.get("/install-command")
@@ -421,7 +525,7 @@ def approve_enrollment(
         details={"enrollment_id": enrollment_id, "node_name": node.name},
         commit=True,
     )
-    return node_out_dict(node, server_count=0)
+    return node_out_dict(node, server_count=0, ram_allocated_mb=0)
 
 
 @router.get("/{node_id}", response_model=NodeOut)
@@ -470,8 +574,14 @@ def get_node(
             db_new.refresh(node)
             # Re-read count in the new session to return accurate serializable data
             count = db_new.query(Server).filter(Server.node_id == node.id).count()
+            allocated = sum_allocated_ram_mb(db_new, node.id)
             # Return serialized output
-            return node_out_dict(node, server_count=count, metrics=metrics)
+            return node_out_dict(
+                node,
+                server_count=count,
+                metrics=metrics,
+                ram_allocated_mb=allocated,
+            )
         else:
             raise HTTPException(status_code=404, detail="Node nicht gefunden")
     except Exception as exc:
@@ -532,7 +642,8 @@ def update_node(
             commit=True,
         )
     count = db.query(Server).filter(Server.node_id == node.id).count()
-    return node_out_dict(node, server_count=count)
+    allocated = sum_allocated_ram_mb(db, node.id)
+    return node_out_dict(node, server_count=count, ram_allocated_mb=allocated)
 
 
 @router.delete("/{node_id}")
