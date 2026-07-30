@@ -20,14 +20,14 @@ MSM trennt die Benutzeroberfläche (Control Plane) von den eigentlichen Ausführ
 
 ### Abgrenzung
 - Kein Game-Server-Hosting-Anbieter: MSM setzt eigene Linux-Server voraus (z. B. bei Hetzner, OVH, netcup oder eigener Hardware).
-- Kein Windows-Tool: Die Control Plane und die Nodes setzen ein Linux-Betriebssystem voraus (Ubuntu 22.04 LTS oder Debian 12+).
+- Kein Windows-Tool: Die Control Plane und die Nodes setzen ein Linux-Betriebssystem voraus.
 - Kein Ersatz für Root-Rechte bei der Erstinstallation: Der Bootstrapper benötigt einmalig Root-Rechte zur Systemeinrichtung. Im regulären Betrieb laufen Panel und Container unprivilegiert.
 
 ---
 
 ## Kernfunktionen
 
-### 1. Multinaut System (Multi-Node-Architektur)
+### 1. Multinode System (Multi-Node-Architektur)
 Eine zentrale Control Plane steuert beliebig viele Nodes. Neue Nodes werden über ein mTLS-Verfahren mit HMAC-Challenge und expliziter Bestätigung durch den Administrator eingebunden.
 
 ### 2. Guardian Engine (Autonomes Self-Healing)
@@ -46,7 +46,7 @@ Sämtliche Container laufen über den Rootless-Docker-Daemon des unprivilegierte
 Verschlüsselung von Server- und Datenbank-Backups über den DIS Cryptographic Shield. Daten werden lokal mit AES-256-GCM und Argon2id verschlüsselt, bevor ein Streaming-Upload zu S3-kompatiblem Object Storage erfolgt. Schlüssel und S3-Zugangsdaten liegen niemals im Klartext vor.
 
 ### 7. Komponenten-Migration (`migrate-panel-components.sh`)
-Integreter CLI-Assistent zum Verschieben von Control Plane, externem Frontend oder einzelnen Server-Instanzen zwischen Nodes inklusive atomarem Cutover und Rollback-Schutz.
+Integrierter CLI-Assistent zum Verschieben von Control Plane, externem Frontend oder einzelnen Server-Instanzen zwischen Nodes inklusive atomarem Cutover und Rollback-Schutz.
 
 ---
 
@@ -56,7 +56,7 @@ Die folgende Tabelle vergleicht verifizierte technische Eigenschaften von MSM mi
 
 | Eigenschaft / Funktion | Maunting Server Manager (MSM) | Pelican Panel | Klassische Panels (z. B. Pterodactyl v1, AMP) |
 |---|---|---|---|
-| **Architektur** | Central Control Plane + Multi-Node (Multinaut System) | Panel + Node-Architektur (Wings) | Monolithisch oder Panel + Daemon (Wings/AMP Instance) |
+| **Architektur** | Central Control Plane + Multi-Node (Multinode System) | Panel + Node-Architektur (Wings) | Monolithisch oder Panel + Daemon (Wings/AMP Instance) |
 | **Container-Sicherheit** | Standardmäßig Rootless Docker pro Node-User (`unix:///run/user/...`) | Standardmäßig privilegierter Root-Docker-Daemon | Standardmäßig privilegierter Root-Docker-Daemon |
 | **Autonomes Self-Healing** | **Ja (Guardian Engine)**: Lokale Probes und Recovery auf dem Agenten, voll funktionsfähig auch bei Ausfall der Control Plane | **Nein**: Statusüberwachung hängt an Panel-Verbindung und Daemon-Heartbeats | **Nein**: Daemon führt Befehle der zentralen Steuerung aus |
 | **Anwendungs-Deklaration** | **Blueprints (YAML/JSON)**: Flexible Schemas für Game-Server, Web-Apps, Datenbanken & Custom Guardian Probes | **Egg-System**: JSON-Templates für Pterodactyl/Pelican-Container | **Egg-System / Feste Module**: Spezifische Skripte oder fest verdrahtete Anwendungsmodule |
@@ -67,12 +67,34 @@ Die folgende Tabelle vergleicht verifizierte technische Eigenschaften von MSM mi
 
 ---
 
-## Systemanforderungen
+## Systemanforderungen & Betriebssysteme
 
-1. **Linux-Server**: Ubuntu 22.04 LTS oder Debian 12+ (x86_64).
-2. **Root-Zugang**: SSH-Zugriff mit Root-Rechten für die Erstinstallation.
-3. **Domain**: FQDN (z. B. `panel.example.com`) mit A/AAAA-Record auf die Server-IP für automatische HTTPS-Zertifikate.
-4. **Hardware**: Mindestens 2 CPU-Kerne, 2 GB RAM für die Control Plane. Ressourcen für Game-Server kommen hinzu.
+### Hardware & Netzwerk
+1. **Root-Zugang**: SSH-Zugriff mit Root-Rechten für die Erstinstallation.
+2. **Domain**: FQDN (z. B. `panel.example.com`) mit A/AAAA-Record auf die Server-IP für automatische HTTPS-Zertifikate.
+3. **Hardware**: Mindestens 2 CPU-Kerne, 2 GB RAM für die Control Plane. Ressourcen für Game-Server kommen hinzu.
+
+### Betriebssystem-Kompatibilität
+
+MSM erfordert ein Linux-Betriebssystem mit Systemd und Docker-Unterstützung.
+
+| Betriebssystem / Distribution | Status | Anmerkung |
+|---|---|---|
+| **Ubuntu 24.04.4 LTS** | 🟢 **Offiziell unterstützt** | Haupt-Entwicklungs- und primäres Testsystem |
+| **Ubuntu 22.04 LTS** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
+| **Debian 12 (Bookworm)** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
+| **Debian 11 (Bullseye)** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
+| **AlmaLinux 9** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
+| **Rocky Linux 9** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
+| **Fedora Server (40+)** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
+| **Arch Linux** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
+| **Alpine Linux** | 🔴 Funktioniert nicht | Inkompatibel (kein Standard-Systemd, glibc-Abweichungen) |
+| **Windows / Windows Server** | 🔴 Funktioniert nicht | Inkompatibel (setzt nativen Linux-Kernel & Systemd voraus) |
+
+**Status-Kategorien:**
+- 🟢 **Offiziell unterstützt**: Auf diesem Betriebssystem wird MSM entwickelt, aktiv gepflegt und getestet.
+- 🟡 **Von der Community getestet**: Bereitgestellte Kategorie für Rückmeldungen und Tests aus der Community.
+- 🔴 **Funktioniert nicht**: Aus architektonischen Gründen inkompatibel oder nicht unterstützt.
 
 ---
 
@@ -86,7 +108,7 @@ Verbinde dich per SSH auf deinen Server:
 ssh root@DEINE-SERVER-IP
 ```
 
-Führe den Installationbefehl aus:
+Führe den Installationsbefehl aus:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com
