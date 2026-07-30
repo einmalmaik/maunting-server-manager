@@ -524,7 +524,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     description="Maunting Server Manager — Universeller Game Server Manager",
-    version="2.0.0",
+    version="3.0.0",
     lifespan=lifespan,
 )
 

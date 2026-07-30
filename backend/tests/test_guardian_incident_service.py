@@ -115,6 +115,7 @@ def test_fingerprint_grouping_consolidates_active_incidents(db: Session) -> None
     ingest_incidents_and_ack(db, server, client, "srv-42", [inc1])
     ingest_incidents_and_ack(db, server, client, "srv-42", [inc2])
 
+    db.expire_all()
     # Should only have one incident in DB for this fingerprint, occurrences = 2
     incidents_in_db = db.query(Incident).filter(Incident.server_id == server.id).all()
     assert len(incidents_in_db) == 1
@@ -247,6 +248,7 @@ def test_grouped_incident_uuid_retry_does_not_increment_occurrence(db: Session) 
     ingest_incidents_and_ack(db, server, client, "srv-42", [inc1])
     ingest_incidents_and_ack(db, server, client, "srv-42", [inc2])
 
+    db.expire_all()
     parent = db.query(Incident).filter(Incident.server_id == server.id).first()
     assert parent.occurrences == 2
 

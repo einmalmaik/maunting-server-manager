@@ -247,3 +247,54 @@ def test_phase4_incident_store_enqueue_and_ack_dequeue(guardian_agent_paths: Pat
     # Pending list must no longer contain acknowledged incident
     pending_after_ack = store.list_unacknowledged()
     assert not any(item["uuid"] == inc_uuid for item in pending_after_ack)
+
+
+# ============================================================================
+# EDGE CASES: Resilience Against 1-in-1000 Failure Modes
+# ============================================================================
+
+def test_edge_case_unexpected_recovery_action_exception_tolerated(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_agent_paths: Path,
+) -> None:
+    """Verifies that an unexpected exception inside a recovery action (e.g. Docker daemon connection reset)
+    does not crash the agent reconciliation loop and is safely recorded in runtime state."""
+    payload = _payload(max_attempts=2)
+    guardian_service.accept_desired_state(42, payload)
+
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: {
+            "status": "exited",
+            "running": False,
+            "oom_killed": False,
+            "started_at": "2026-07-30T12:00:00Z",
+            "port_bindings": {},
+        },
+    )
+
+    def _exploding_restart(*_args, **_kwargs):
+        raise RuntimeError("Docker daemon socket unexpectedly closed during restart")
+
+    monkeypatch.setattr(guardian_service.docker_service, "restart_container", _exploding_restart)
+
+    # Reconciliation run MUST not raise an unhandled exception
+    asyncio.run(guardian_service.reconcile_server(42))
+
+    observed = guardian_service.observed_state(42)
+    assert observed is not None
+    assert observed["guardian_observed_state"] in ("starting", "unhealthy", "degraded")
+
+
+def test_edge_case_corrupted_state_json_recovery(guardian_agent_paths: Path) -> None:
+    """Verifies that corrupted desired-state.json or observed-state.json on disk (e.g. due to unclean host reboot)
+    is gracefully isolated without crashing reconcile_all_servers."""
+    # Write invalid JSON to desired-state.json
+    state_file = guardian_agent_paths / "42" / "desired-state.json"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text("{CORRUPTED_JSON_BYTES_NOT_VALID...", encoding="utf-8")
+
+    # Reconciliation of all servers MUST survive corrupted file
+    asyncio.run(guardian_service.reconcile_all_servers())
+
