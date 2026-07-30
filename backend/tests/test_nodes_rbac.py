@@ -55,7 +55,15 @@ def test_servers_create_gets_reduced_node_picker_without_trust_metadata(
 
     assert response.status_code == 200
     picker_node = next(item for item in response.json() if item["id"] == node.id)
-    assert picker_node == {"id": node.id, "name": "Picker Node", "status": "online"}
+    assert picker_node == {
+        "id": node.id,
+        "name": "Picker Node",
+        "status": "online",
+        "ram_total": None,
+        "ram_allocated_mb": 0,
+        "ram_allocatable_mb": None,
+        "cpu_total": None,
+    }
 
 
 def test_pending_enrollments_and_approval_are_owner_only(
