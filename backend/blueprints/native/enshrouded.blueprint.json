@@ -79,12 +79,13 @@
     "startup": {
       "grace_period_seconds": 60,
       "success_patterns": [
-        "HostSessionSuccess",
-        "'HostOnline' (up)!"
+        "Switching state from LoadEcsScene to Run",
+        "-------------- Session ----------------"
       ],
       "failure_patterns": [
         "Address already in use",
-        "Could not bind"
+        "Could not bind",
+        "Parsing .* failed"
       ]
     }
   },

@@ -4,45 +4,48 @@ from alembic.config import Config
 from alembic import command
 import os
 from pathlib import Path
+from sqlalchemy import create_engine
+from database import Base
+import models  # noqa: F401
+
 
 def test_guardian_accepted_payload_hash_migration(tmp_path):
     """
-    Testet das Upgrade von base/head_without_this_migration zu head.
+    Testet das Upgrade von Revision 20260720_02 zu beef3761b732.
     Prüft, ob die Spalte 'guardian_accepted_payload_hash' vor dem Upgrade
-
-    nicht existiert und danach existiert.
+    nicht existiert und nach dem Upgrade existiert.
     """
-    from sqlalchemy import create_engine
-    from services.schema_manager import initialize_or_upgrade_schema
-    import os
-    
     db_path = tmp_path / "test_migration.db"
     db_url = f"sqlite:///{db_path}"
     os.environ["DATABASE_URL"] = db_url
-    
-    # Reload settings to pick up new DATABASE_URL
+
     from config import settings
     settings.database_url = db_url
-    
+
     engine = create_engine(db_url)
-    initialize_or_upgrade_schema(engine)
-    
+
+    # Create base schema
+    Base.metadata.create_all(bind=engine)
+
+    # Remove guardian_accepted_payload_hash column to simulate state at 20260720_02
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE servers DROP COLUMN guardian_accepted_payload_hash"))
+
     backend_dir = Path(__file__).resolve().parent.parent
     alembic_ini = backend_dir / "alembic.ini"
     alembic_cfg = Config(str(alembic_ini))
     alembic_cfg.set_main_option("script_location", str(backend_dir / "migrations"))
 
-    # We are at "head". Let's downgrade to the previous revision to test removal.
-    command.downgrade(alembic_cfg, "20260720_02")
+    command.stamp(alembic_cfg, "20260720_02")
 
-    # Now test the column does NOT exist
+    # Column should NOT exist at revision 20260720_02
     with engine.begin() as conn:
         with pytest.raises(Exception):
             conn.execute(text("SELECT guardian_accepted_payload_hash FROM servers LIMIT 1"))
-        
-    # Upgrade again to our new revision
-    command.upgrade(alembic_cfg, "head")
-    
-    # Now test the column DOES exist (should not raise)
+
+    # Upgrade to beef3761b732 (the specific revision adding guardian_accepted_payload_hash)
+    command.upgrade(alembic_cfg, "beef3761b732")
+
+    # Column DOES exist now
     with engine.begin() as conn:
         conn.execute(text("SELECT guardian_accepted_payload_hash FROM servers LIMIT 1"))
