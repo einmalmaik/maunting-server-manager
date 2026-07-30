@@ -15,7 +15,7 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
+import { NumberStepper } from '@/components/ui/NumberStepper'
 import {
   formatRotateSuccessSummary,
   mapRotateAdminResult,
@@ -255,17 +255,22 @@ export function SecurityTab() {
 
               <div className="grid max-w-2xl grid-cols-1 gap-6 md:grid-cols-2">
                 <div>
-                  <Input
+                  <label
+                    htmlFor="rate-limit-auth"
+                    className="mb-1.5 block font-label-md text-label-md uppercase tracking-wider text-on-surface-variant"
+                  >
+                    {t('security.rateLimitAuthLabel', {
+                      defaultValue: 'Login & Authentifizierung (pro Minute)',
+                    })}
+                  </label>
+                  {/* NumberStepper: Maunting Design-DNA / Singra UI (wie SMTP-Port) */}
+                  <NumberStepper
                     id="rate-limit-auth"
-                    type="number"
+                    value={authLimit}
+                    onValueChange={setAuthLimit}
                     min={RATE_LIMIT_AUTH_MIN}
                     max={RATE_LIMIT_AUTH_MAX}
                     step={1}
-                    label={t('security.rateLimitAuthLabel', {
-                      defaultValue: 'Login & Authentifizierung (pro Minute)',
-                    })}
-                    value={authLimit}
-                    onChange={(event) => setAuthLimit(event.target.value)}
                     disabled={!canWriteSettings}
                     aria-describedby="rate-limit-auth-help"
                   />
@@ -286,17 +291,21 @@ export function SecurityTab() {
                 </div>
 
                 <div>
-                  <Input
+                  <label
+                    htmlFor="rate-limit-global"
+                    className="mb-1.5 block font-label-md text-label-md uppercase tracking-wider text-on-surface-variant"
+                  >
+                    {t('security.rateLimitGlobalLabel', {
+                      defaultValue: 'Globales API-Limit (pro Minute)',
+                    })}
+                  </label>
+                  <NumberStepper
                     id="rate-limit-global"
-                    type="number"
+                    value={globalLimit}
+                    onValueChange={setGlobalLimit}
                     min={RATE_LIMIT_GLOBAL_MIN}
                     max={RATE_LIMIT_GLOBAL_MAX}
                     step={1}
-                    label={t('security.rateLimitGlobalLabel', {
-                      defaultValue: 'Globales API-Limit (pro Minute)',
-                    })}
-                    value={globalLimit}
-                    onChange={(event) => setGlobalLimit(event.target.value)}
                     disabled={!canWriteSettings}
                     aria-describedby="rate-limit-global-help"
                   />

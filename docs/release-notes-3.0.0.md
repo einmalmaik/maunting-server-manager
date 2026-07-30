@@ -110,6 +110,15 @@ Für Betreiber, die **fremde Kunden** auf denselben Nodes hosten, gibt es jetzt 
 - **Im Panel sichtbar**: Unter **Administration → Audit** (`/admin/audit`) für Nutzer mit `system.audit.read`. Andere Benutzer sehen den Menüpunkt nicht und erhalten auf der Route **403**.
 - **Betriebs-Checkliste**: In der Self-Hosting-Doku stehen Node-Härtung, was wann zu rotieren ist und wie man Admin-Aktivität prüft.
 
+### Sicherheit: Konfigurierbare Login- und API-Rate-Limits
+Unter **Einstellungen → Sicherheit** lassen sich zwei zentrale Anfrage-Limits pro IP anpassen — ohne Backend-Neustart und ohne Code-Änderung. Das schützt Login und Panel-API vor Brute-Force und Überlastung und bleibt für Firmen-IPs oder eigene Automationen flexibel.
+
+- **Login- und Authentifizierungs-Limit**: Standard **10** Anfragen pro Minute pro IP (einstellbar **3–50**). Betrifft Login, 2FA, Passwort-Reset und Setup. Hilfreich, wenn sich mehrere Personen über dieselbe Firmen- oder VPN-IP anmelden.
+- **Globales API-Limit**: Standard **100** Anfragen pro Minute pro IP (einstellbar **50–1000**). Gilt als Panel-weites Default für die API. Erhöhen, wenn eigene Skripte oder externe Tools die Steuerung häufiger abfragen.
+- **Persistenz und Rechte**: Werte liegen als Panel-Settings (`rate_limit_auth`, `rate_limit_global`) in der Datenbank. Lesen und Speichern erfordern `panel.settings.read` bzw. `panel.settings.write`. Ungültige Werte werden serverseitig abgelehnt (HTTP 4xx); zur Laufzeit greifen bei fehlenden oder korrupten Werten immer die dokumentierten Defaults — die Limitierung schaltet sich nie „aus“.
+- **Fest bleibende Schutzgrenzen**: Node-Enrollment (Begin/Poll), Singra-Support-Webhook, Zip-/Tar-Bomb-Schutz, Upload-Chunk-Größe und ähnliche technische Limits bleiben bewusst **nicht** im UI konfigurierbar.
+- **Cluster-Admin-Rotation unverändert**: Die bestehende Secret-Rotation unter demselben Sicherheitstab bleibt an `system.secrets.rotate` gebunden und ist von den Rate-Limit-Einstellungen getrennt.
+
 ---
 
 *Maunting Server Manager v3.0.0 — Safety, Stability and Autonomous Operations.*
