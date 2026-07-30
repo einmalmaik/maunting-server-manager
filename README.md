@@ -81,19 +81,19 @@ MSM erfordert ein Linux-Betriebssystem mit Systemd und Docker-Unterstützung.
 | Betriebssystem / Distribution | Status | Anmerkung |
 |---|---|---|
 | **Ubuntu 24.04.4 LTS** | 🟢 **Offiziell unterstützt** | Haupt-Entwicklungs- und primäres Testsystem |
-| **Ubuntu 22.04 LTS** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
-| **Debian 12 (Bookworm)** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
-| **Debian 11 (Bullseye)** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
-| **AlmaLinux 9** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
-| **Rocky Linux 9** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
-| **Fedora Server (40+)** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
-| **Arch Linux** | 🟡 Von der Community getestet | Noch keine Community-Rückmeldung vorliegend |
-| **Alpine Linux** | 🔴 Funktioniert nicht | Inkompatibel (kein Standard-Systemd, glibc-Abweichungen) |
-| **Windows / Windows Server** | 🔴 Funktioniert nicht | Inkompatibel (setzt nativen Linux-Kernel & Systemd voraus) |
+| **Ubuntu 22.04 LTS** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
+| **Debian 12 (Bookworm)** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
+| **Debian 11 (Bullseye)** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
+| **AlmaLinux 9** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
+| **Rocky Linux 9** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
+| **Fedora Server (40+)** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
+| **Arch Linux** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
+| **Alpine Linux** | 🔴 **Funktioniert nicht** | Inkompatibel (kein Standard-Systemd, glibc-Abweichungen) |
+| **Windows / Windows Server** | 🔴 **Funktioniert nicht** | Inkompatibel (setzt nativen Linux-Kernel & Systemd voraus) |
 
 **Status-Kategorien:**
-- 🟢 **Offiziell unterstützt**: Auf diesem Betriebssystem wird MSM entwickelt, aktiv gepflegt und getestet.
-- 🟡 **Von der Community getestet**: Bereitgestellte Kategorie für Rückmeldungen und Tests aus der Community.
+- 🟢 **Offiziell unterstützt**: Auf diesem Betriebssystem (Ubuntu 24.04.4 LTS) wird MSM entwickelt, aktiv gepflegt und getestet.
+- 🟡 **Unsicher**: Noch nicht vom Entwickler oder der Community getestet (Status offen, Rückmeldungen willkommen).
 - 🔴 **Funktioniert nicht**: Aus architektonischen Gründen inkompatibel oder nicht unterstützt.
 
 ---
