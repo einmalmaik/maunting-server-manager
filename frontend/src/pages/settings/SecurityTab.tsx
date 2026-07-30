@@ -253,17 +253,22 @@ export function SecurityTab() {
                 })}
               </p>
 
-              <div className="grid max-w-2xl grid-cols-1 gap-6 md:grid-cols-2">
-                <div>
+              {/*
+                Zwei Spalten mit gleicher Label-Mindesthöhe, damit beide
+                NumberStepper auf einer Linie sitzen (kein Versatz durch
+                unterschiedlich lange Labels). Links Auth (strenger/niedriger),
+                rechts Global (höher) — bewusst so, Login bleibt enger als API.
+              */}
+              <div className="grid max-w-2xl grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
+                <div className="flex flex-col gap-1.5">
                   <label
                     htmlFor="rate-limit-auth"
-                    className="mb-1.5 block font-label-md text-label-md uppercase tracking-wider text-on-surface-variant"
+                    className="flex min-h-[2.75rem] items-end font-label-md text-label-md uppercase tracking-wider text-on-surface-variant"
                   >
                     {t('security.rateLimitAuthLabel', {
                       defaultValue: 'Login & Authentifizierung (pro Minute)',
                     })}
                   </label>
-                  {/* NumberStepper: Maunting Design-DNA / Singra UI (wie SMTP-Port) */}
                   <NumberStepper
                     id="rate-limit-auth"
                     value={authLimit}
@@ -274,26 +279,28 @@ export function SecurityTab() {
                     disabled={!canWriteSettings}
                     aria-describedby="rate-limit-auth-help"
                   />
-                  <p id="rate-limit-auth-help" className="mt-1.5 font-body-md text-xs text-on-surface-variant">
-                    {t('security.rateLimitAuthHelp', {
-                      defaultValue:
-                        'Maximal erlaubte Login- und Passwort-Versuche pro Minute pro IP. Erhöhe diesen Wert, wenn sich mehrere Personen über dieselbe Firmen-IP anmelden.',
-                    })}
-                  </p>
-                  <p className="mt-1 text-xs text-on-surface-variant">
-                    {t('security.rateLimitAuthRange', {
-                      defaultValue: `Bereich: ${RATE_LIMIT_AUTH_MIN}–${RATE_LIMIT_AUTH_MAX} (Standard: ${RATE_LIMIT_AUTH_DEFAULT})`,
-                      min: RATE_LIMIT_AUTH_MIN,
-                      max: RATE_LIMIT_AUTH_MAX,
-                      default: RATE_LIMIT_AUTH_DEFAULT,
-                    })}
-                  </p>
+                  <div id="rate-limit-auth-help" className="space-y-1">
+                    <p className="font-body-md text-xs text-on-surface-variant">
+                      {t('security.rateLimitAuthHelp', {
+                        defaultValue:
+                          'Maximal erlaubte Login- und Passwort-Versuche pro Minute pro IP. Erhöhe diesen Wert, wenn sich mehrere Personen über dieselbe Firmen-IP anmelden.',
+                      })}
+                    </p>
+                    <p className="text-xs text-on-surface-variant">
+                      {t('security.rateLimitAuthRange', {
+                        defaultValue: `Bereich: ${RATE_LIMIT_AUTH_MIN}–${RATE_LIMIT_AUTH_MAX} (Standard: ${RATE_LIMIT_AUTH_DEFAULT})`,
+                        min: RATE_LIMIT_AUTH_MIN,
+                        max: RATE_LIMIT_AUTH_MAX,
+                        default: RATE_LIMIT_AUTH_DEFAULT,
+                      })}
+                    </p>
+                  </div>
                 </div>
 
-                <div>
+                <div className="flex flex-col gap-1.5">
                   <label
                     htmlFor="rate-limit-global"
-                    className="mb-1.5 block font-label-md text-label-md uppercase tracking-wider text-on-surface-variant"
+                    className="flex min-h-[2.75rem] items-end font-label-md text-label-md uppercase tracking-wider text-on-surface-variant"
                   >
                     {t('security.rateLimitGlobalLabel', {
                       defaultValue: 'Globales API-Limit (pro Minute)',
@@ -309,20 +316,22 @@ export function SecurityTab() {
                     disabled={!canWriteSettings}
                     aria-describedby="rate-limit-global-help"
                   />
-                  <p id="rate-limit-global-help" className="mt-1.5 font-body-md text-xs text-on-surface-variant">
-                    {t('security.rateLimitGlobalHelp', {
-                      defaultValue:
-                        'Maximal erlaubte API-Aufrufe pro Minute pro IP. Erhöhe diesen Wert, wenn du eigene Skripte oder externe Tools zur Steuerung nutzt.',
-                    })}
-                  </p>
-                  <p className="mt-1 text-xs text-on-surface-variant">
-                    {t('security.rateLimitGlobalRange', {
-                      defaultValue: `Bereich: ${RATE_LIMIT_GLOBAL_MIN}–${RATE_LIMIT_GLOBAL_MAX} (Standard: ${RATE_LIMIT_GLOBAL_DEFAULT})`,
-                      min: RATE_LIMIT_GLOBAL_MIN,
-                      max: RATE_LIMIT_GLOBAL_MAX,
-                      default: RATE_LIMIT_GLOBAL_DEFAULT,
-                    })}
-                  </p>
+                  <div id="rate-limit-global-help" className="space-y-1">
+                    <p className="font-body-md text-xs text-on-surface-variant">
+                      {t('security.rateLimitGlobalHelp', {
+                        defaultValue:
+                          'Maximal erlaubte API-Aufrufe pro Minute pro IP. Erhöhe diesen Wert, wenn du eigene Skripte oder externe Tools zur Steuerung nutzt.',
+                      })}
+                    </p>
+                    <p className="text-xs text-on-surface-variant">
+                      {t('security.rateLimitGlobalRange', {
+                        defaultValue: `Bereich: ${RATE_LIMIT_GLOBAL_MIN}–${RATE_LIMIT_GLOBAL_MAX} (Standard: ${RATE_LIMIT_GLOBAL_DEFAULT})`,
+                        min: RATE_LIMIT_GLOBAL_MIN,
+                        max: RATE_LIMIT_GLOBAL_MAX,
+                        default: RATE_LIMIT_GLOBAL_DEFAULT,
+                      })}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
