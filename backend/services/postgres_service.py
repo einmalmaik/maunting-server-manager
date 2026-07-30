@@ -18,7 +18,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from config import settings
-from models import PostgresDatabase, PostgresGrant, PostgresUser, Server
+from models import Node, PostgresDatabase, PostgresGrant, PostgresUser, Server
 from services.auth_service import AuthService
 from services.node_client import NodeClient, NodeClientError
 from services.node_service import (
@@ -85,6 +85,172 @@ def _encrypted_admin_password() -> str:
 
 def _admin_password() -> str:
     return AuthService.decrypt_secret(_encrypted_admin_password(), aad="msm:pg:admin")
+
+
+def _store_admin_password(plaintext: str) -> str:
+    """Speichert das Cluster-Admin-Passwort DIS-verschluesselt im Panel-Setting."""
+    if not (plaintext or "").strip():
+        raise ValueError("Admin-Passwort darf nicht leer sein.")
+    encrypted = AuthService.encrypt_secret(plaintext, aad="msm:pg:admin")
+    PanelSettingsService.set(ADMIN_PASSWORD_KEY, encrypted)
+    return encrypted
+
+
+def rotate_cluster_admin_password(db: Session) -> dict[str, Any]:
+    """Rotiert msm_admin auf allen erreichbaren Nodes und speichert das neue Secret.
+
+    Ablauf: neues Passwort erzeugen → Agent-ALTER ROLE pro Node mit Postgres →
+    bei vollem Erfolg Panel-Setting speichern. Antwort enthaelt nie das Passwort.
+
+    Partielle Fehler (Node A ok, Node B hart fehlgeschlagen):
+    1) Rollback der bereits geaenderten Nodes (neues → altes Passwort).
+    2) Wenn Rollback vollstaendig: Panel behält das alte Secret.
+    3) Wenn Rollback unvollständig: Panel speichert das neue Secret, damit es
+       mit den Nodes übereinstimmt, die schon rotiert sind (kein stilles Split-Brain).
+    """
+    try:
+        old_password = _admin_password()
+    except Exception as exc:
+        raise PostgresServiceError(
+            "Aktuelles Managed-Postgres-Admin-Secret konnte nicht gelesen werden."
+        ) from exc
+
+    new_password = _generate_password()
+    nodes = db.query(Node).order_by(Node.id.asc()).all()
+    updated_node_ids: list[int] = []
+    skipped_node_ids: list[int] = []
+    hard_errors: list[str] = []
+    # Clients der erfolgreichen Nodes merken, damit Rollback ohne Re-Lookup geht.
+    updated_clients: dict[int, NodeClient] = {}
+
+    for node in nodes:
+        try:
+            client = client_for_node(node, skip_offline_check=True)
+        except NodeClientError:
+            hard_errors.append(f"node_id={node.id}: offline oder nicht erreichbar")
+            continue
+        if client is None:
+            skipped_node_ids.append(node.id)
+            continue
+        try:
+            client.postgres_rotate_admin(
+                admin_password=old_password,
+                new_admin_password=new_password,
+            )
+            updated_node_ids.append(node.id)
+            updated_clients[node.id] = client
+        except NodeClientError as exc:
+            msg = (exc.message or "").lower()
+            status = getattr(exc, "status_code", None) or 0
+            # 503 = kein Managed Postgres auf dem Node → ueberspringen
+            if status == 503 or "not available" in msg or "not become ready" in msg:
+                skipped_node_ids.append(node.id)
+                continue
+            hard_errors.append(f"node_id={node.id}: Rotation fehlgeschlagen")
+
+    if hard_errors:
+        if not updated_node_ids:
+            raise PostgresServiceError(
+                "Admin-Passwort-Rotation abgebrochen; Panel-Secret unveraendert. "
+                + "; ".join(hard_errors[:5])
+            )
+
+        # Partielle Rotation: zuerst alle erfolgreichen Nodes auf das alte Secret
+        # zuruecksetzen. Gelingt das vollstaendig, bleibt das Panel auf alt.
+        rollback_ok: list[int] = []
+        rollback_failed: list[int] = []
+        for node_id in updated_node_ids:
+            client = updated_clients.get(node_id)
+            if client is None:
+                rollback_failed.append(node_id)
+                continue
+            try:
+                client.postgres_rotate_admin(
+                    admin_password=new_password,
+                    new_admin_password=old_password,
+                )
+                rollback_ok.append(node_id)
+            except NodeClientError:
+                rollback_failed.append(node_id)
+
+        if not rollback_failed:
+            raise PostgresServiceError(
+                "Admin-Passwort-Rotation abgebrochen; bereits geaenderte Nodes "
+                "zurueckgesetzt; Panel-Secret unveraendert. "
+                + "; ".join(hard_errors[:5])
+            )
+
+        # Gemischter Rollback: einige Nodes sind wieder ALT, andere noch NEU.
+        # Ziel: alle vorwaerts-erfolgreichen Nodes wieder auf NEU bringen, dann
+        # Panel = NEU — sonst Split-Brain (Panel/NEU-Nodes vs. ALT-Nodes).
+        reforward_failed: list[int] = []
+        for node_id in rollback_ok:
+            client = updated_clients.get(node_id)
+            if client is None:
+                reforward_failed.append(node_id)
+                continue
+            try:
+                client.postgres_rotate_admin(
+                    admin_password=old_password,
+                    new_admin_password=new_password,
+                )
+            except NodeClientError:
+                reforward_failed.append(node_id)
+
+        try:
+            _store_admin_password(new_password)
+        except Exception as store_exc:
+            raise PostgresServiceError(
+                "Partielle Rotation: Panel-Secret konnte nicht auf das neue Secret "
+                "gesetzt werden. Erwarteter Stand der vorwaerts-rotierten Nodes: NEU. "
+                f"node_ids={updated_node_ids}. "
+                f"Ursprung: {'; '.join(hard_errors[:3])}"
+            ) from store_exc
+
+        if reforward_failed:
+            raise PostgresServiceError(
+                "Partielle Admin-Rotation: Panel-Secret = neu. "
+                f"Vorwaerts-ok node_ids={updated_node_ids}. "
+                f"Re-Apply NEU fehlgeschlagen fuer node_ids={reforward_failed} "
+                "(diese Nodes koennen noch das alte Secret haben). "
+                f"Ursprung: {'; '.join(hard_errors[:5])}"
+            )
+
+        raise PostgresServiceError(
+            "Partielle Admin-Rotation: Panel-Secret = neu; alle vorwaerts "
+            f"erfolgreichen Nodes (node_ids={updated_node_ids}) haben das neue Secret. "
+            f"Fehlgeschlagen: {'; '.join(hard_errors[:5])}."
+        )
+
+    # Voller Erfolg (oder nur Skips): Panel-Secret auf neu setzen.
+    try:
+        _store_admin_password(new_password)
+    except Exception as exc:
+        raise PostgresServiceError(
+            "Neues Admin-Secret konnte nicht im Panel gespeichert werden."
+        ) from exc
+
+    try:
+        current = _admin_password()
+    except Exception as exc:
+        raise PostgresServiceError(
+            "Verifikation des neuen Admin-Secrets fehlgeschlagen."
+        ) from exc
+    if current != new_password:
+        raise PostgresServiceError(
+            "Panel speichert nach Rotation nicht das erwartete Admin-Secret."
+        )
+    if current == old_password:
+        raise PostgresServiceError(
+            "Admin-Secret wurde nicht rotiert (altes und neues Secret identisch)."
+        )
+
+    return {
+        "ok": True,
+        "admin_user": ADMIN_USER,
+        "nodes_updated": updated_node_ids,
+        "nodes_skipped": skipped_node_ids,
+    }
 
 
 def _map_agent_error(exc: Exception) -> Exception:

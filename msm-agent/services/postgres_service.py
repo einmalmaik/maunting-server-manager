@@ -360,6 +360,82 @@ def rotate_role_password(
     }
 
 
+def rotate_admin_password(
+    *, admin_password: str, new_admin_password: str
+) -> dict[str, Any]:
+    """Rotiert das Cluster-Admin-Passwort von msm_admin (ALTER ROLE).
+
+    Verbindet nur mit dem alten Passwort — startet keinen Container neu und
+    legt keine DB an. Bei nicht laufendem Postgres: 503 (Node ohne Managed DB).
+    Gibt niemals Passwoerter zurueck.
+    """
+    if not (admin_password or "").strip():
+        raise PostgresAgentError("admin_password is required", status_code=400)
+    if not (new_admin_password or "").strip():
+        raise PostgresAgentError("new_admin_password is required", status_code=400)
+    if len(new_admin_password) < 16:
+        raise PostgresAgentError("new_admin_password must be at least 16 characters", status_code=400)
+    if admin_password == new_admin_password:
+        raise PostgresAgentError("new_admin_password must differ from current password", status_code=400)
+
+    # Kein ensure_internal_postgres: Rotation darf keinen Bootstrap mit altem Secret ausloesen.
+    last_error: Exception | None = None
+    conn = None
+    for _ in range(10):
+        try:
+            conn = psycopg2.connect(
+                host=_db_host(),
+                port=settings.managed_postgres_port,
+                dbname=CONTROL_DB,
+                user=ADMIN_USER,
+                password=admin_password,
+                connect_timeout=2,
+            )
+            break
+        except psycopg2.Error as exc:
+            last_error = exc
+            time.sleep(0.5)
+    if conn is None:
+        raise PostgresAgentError(
+            "Managed PostgreSQL is not available on this node",
+            status_code=503,
+        ) from last_error
+
+    try:
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("ALTER ROLE {} WITH PASSWORD %s").format(sql.Identifier(ADMIN_USER)),
+                (new_admin_password,),
+            )
+    except psycopg2.Error as exc:
+        raise PostgresAgentError(
+            "Could not rotate managed PostgreSQL admin password",
+            status_code=500,
+        ) from exc
+    finally:
+        conn.close()
+
+    # Verifikation: neues Passwort muss verbinden, altes wird hier nicht erneut getestet.
+    try:
+        verify = psycopg2.connect(
+            host=_db_host(),
+            port=settings.managed_postgres_port,
+            dbname=CONTROL_DB,
+            user=ADMIN_USER,
+            password=new_admin_password,
+            connect_timeout=5,
+        )
+        verify.close()
+    except psycopg2.Error as exc:
+        raise PostgresAgentError(
+            "Admin password was changed but verification with the new password failed",
+            status_code=500,
+        ) from exc
+
+    return {"ok": True, "admin_user": ADMIN_USER}
+
+
 def drop_databases_and_roles(
     *,
     admin_password: str,

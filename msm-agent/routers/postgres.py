@@ -23,6 +23,7 @@ from services.postgres_service import (
     promote_owner,
     provision,
     restore_sql,
+    rotate_admin_password,
     rotate_role_password,
 )
 
@@ -58,6 +59,13 @@ class RotateIn(BaseModel):
     admin_password: str = Field(..., min_length=1)
     role_name: str = Field(..., min_length=1, max_length=63)
     new_password: str = Field(..., min_length=1)
+
+
+class RotateAdminIn(BaseModel):
+    """Cluster-Admin-Rotation: altes und neues Passwort nur im Request-Body."""
+
+    admin_password: str = Field(..., min_length=1)
+    new_admin_password: str = Field(..., min_length=16, max_length=256)
 
 
 class DropIn(BaseModel):
@@ -148,6 +156,18 @@ def postgres_rotate(body: RotateIn) -> dict[str, Any]:
             admin_password=body.admin_password,
             role_name=body.role_name,
             new_password=body.new_password,
+        )
+    except PostgresAgentError as exc:
+        raise _http(exc) from exc
+
+
+@router.post("/admin/rotate")
+def postgres_rotate_admin(body: RotateAdminIn) -> dict[str, Any]:
+    """Rotiert msm_admin auf dem Node. Antwort enthaelt keine Passwoerter."""
+    try:
+        return rotate_admin_password(
+            admin_password=body.admin_password,
+            new_admin_password=body.new_admin_password,
         )
     except PostgresAgentError as exc:
         raise _http(exc) from exc

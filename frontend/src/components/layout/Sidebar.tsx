@@ -22,6 +22,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   const hasUsersManage = useHasPermission('users.manage')
   const canManageUsers = hasUsersRead || hasUsersManage
   const canManageRoles = useHasPermission('roles.manage')
+  const canViewAudit = useHasPermission('system.audit.read')
   const canCreateServer = useHasPermission('servers.create')
   const canViewSettings = useHasPermission('panel.settings.read')
   const canManagePanelBackups = useHasPermission('panel.settings.write')
@@ -55,10 +56,11 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
 
   const navItems = buildNavigation({
     dashboard: t('nav.dashboard'), servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
+    audit: t('nav.audit', 'Audit'),
     settings: t('nav.settings'), blueprints: t('nav.blueprints'), panelBackups: t('nav.panelBackups'),
     panelDatabase: t('nav.panelDatabase', 'Panel-Datenbank'), nodes: t('nav.nodes'), docs: t('nav.docs'),
   }, {
-    owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewSettings,
+    owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewAudit, canViewSettings,
     canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes,
   })
   const groupLabels: Record<NavGroupName, string> = {

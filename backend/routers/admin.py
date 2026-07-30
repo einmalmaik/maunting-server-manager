@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -32,6 +35,8 @@ from services.role_service import (
     get_role_by_name,
     role_permission_keys,
 )
+from services import audit_service, postgres_service
+from services.postgres_service import PostgresServiceError
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -378,3 +383,91 @@ def list_server_permissions_for_user(
         ServerPermissionsResponse(server_id=sid, permissions=sorted(keys))
         for sid, keys in sorted(grouped.items())
     ]
+
+
+# ── SaaS-Betrieb: Audit-Liste + Managed-Postgres-Admin-Rotation ─────────────
+
+
+class AuditLogOut(BaseModel):
+    """Oeffentliche Audit-Darstellung ohne Secrets."""
+
+    id: int
+    user_id: int | None
+    action: str
+    target_type: str | None
+    target_id: int | None
+    details: str | None
+    created_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class ManagedPostgresAdminRotateOut(BaseModel):
+    ok: bool
+    admin_user: str
+    nodes_updated: list[int]
+    nodes_skipped: list[int]
+
+
+@router.get("/audit-logs", response_model=list[AuditLogOut])
+def list_admin_audit_logs(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_global("system.audit.read")),
+    limit: int = Query(50, ge=1, le=200),
+    action: str | None = Query(None, max_length=64),
+    target_type: str | None = Query(None, max_length=64),
+    target_id: int | None = Query(None, ge=1),
+) -> list[AuditLog]:
+    """Listet privilegierte Operator-Aktionen. Unberechtigt: 403 (kein leeres OK)."""
+    try:
+        return audit_service.list_audit_logs(
+            db,
+            limit=limit,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/managed-postgres/rotate-admin",
+    response_model=ManagedPostgresAdminRotateOut,
+)
+def rotate_managed_postgres_admin(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("system.secrets.rotate")),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Rotiert das Cluster-Admin-Passwort (msm_admin) auf allen Nodes + Panel-Secret.
+
+    Antwort enthaelt niemals das neue Passwort. Fehler: 400/503 mit Klartext.
+    """
+    try:
+        result = postgres_service.rotate_cluster_admin_password(db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PostgresServiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Admin-Passwort-Rotation unerwartet fehlgeschlagen.",
+        ) from None
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="postgres.admin.rotate",
+        target_type="managed_postgres",
+        target_id=None,
+        details={
+            "nodes_updated": result.get("nodes_updated") or [],
+            "nodes_skipped": result.get("nodes_skipped") or [],
+            "admin_user": result.get("admin_user"),
+        },
+        commit=True,
+    )
+    return result

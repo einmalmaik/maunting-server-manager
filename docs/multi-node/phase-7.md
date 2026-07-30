@@ -112,3 +112,15 @@ diese Payload nicht. Operator mit Admin/Node-Zugriff bleibt privileged.
 
 - `msm-agent/tests/test_postgres_cross_tenant.py` — zwei Tenants, kein Cross-`CONNECT`
 - `msm-agent/tests/test_postgres_service.py` — Power-User bleibt `NOSUPERUSER`
+- `msm-agent/tests/test_postgres_admin_rotate.py` — Cluster-Admin-Rotation am Agenten
+- `backend/tests/test_saas_ops_audit_rotation.py` — Panel-Rotation, Audit, RBAC
+
+### SaaS-Betrieb (Operator)
+
+Für Vermietung an fremde Kunden: Node-Härtung, Secret-Rotation und
+Admin-Monitoring sind in [`docs/self-hosting.md`](../self-hosting.md)
+(Abschnitt *SaaS-Hosting-Betrieb*) beschrieben. Kurz:
+
+- Cluster-Admin rotieren: `POST /api/admin/managed-postgres/rotate-admin`
+- Audit lesen: `GET /api/admin/audit-logs` (`system.audit.read`)
+- Power-User bleibt DB-scoped (`is_power_user`), nie Cluster-SUPERUSER

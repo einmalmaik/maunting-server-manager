@@ -102,6 +102,14 @@ Für Server mit integrierter PostgreSQL-Datenbank wurde die Darstellung und Bene
 - **Klarere Hinweise beim Aktivieren, Rotieren und Entziehen**: Dialoge und Bestätigungstexte erklären den Geltungsbereich (nur diese DB, Passwort nur einmal sichtbar, nicht in Tickets/Logs teilen).
 - **Technisch unverändert stark**: Getrennte Datenbanken und Rollen pro Server, Netzwerkbindung und Panel-Berechtigungen bleiben die Grundlage der Isolation; die Texte und API-Felder (`is_power_user`) beschreiben das jetzt korrekt.
 
+### SaaS-Betrieb: Secret-Rotation und Admin-Audit
+Für Betreiber, die **fremde Kunden** auf denselben Nodes hosten, gibt es jetzt konkrete Betriebsfunktionen und Dokumentation:
+
+- **Cluster-Admin-Passwort rotieren**: Das interne Managed-Postgres-Admin-Secret (`msm_admin`) kann im Panel unter **Einstellungen → Sicherheit** (oder per Admin-API) sicher erneuert werden. Es wird auf den Nodes und im Panel aktualisiert — das neue Passwort erscheint **nicht** in der UI, Antwort oder Audit-Log.
+- **Admin-Audit-Log**: Wichtige privilegierte Aktionen (DB anlegen/löschen, Power-User, Dump/Restore, Node-Token, Enrollment-Freigabe, Admin-Rotation) werden dauerhaft protokolliert (wer / wann / was), ohne Passwörter oder Tokens zu speichern.
+- **Im Panel sichtbar**: Unter **Administration → Audit** (`/admin/audit`) für Nutzer mit `system.audit.read`. Andere Benutzer sehen den Menüpunkt nicht und erhalten auf der Route **403**.
+- **Betriebs-Checkliste**: In der Self-Hosting-Doku stehen Node-Härtung, was wann zu rotieren ist und wie man Admin-Aktivität prüft.
+
 ---
 
 *Maunting Server Manager v3.0.0 — Safety, Stability and Autonomous Operations.*

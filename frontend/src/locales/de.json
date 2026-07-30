@@ -13,7 +13,8 @@
     "logout": "Abmelden",
     "panelBackups": "Panel-Backups",
     "panelDatabase": "Panel-Datenbank",
-    "nodes": "Nodes"
+    "nodes": "Nodes",
+    "audit": "Audit"
   },
   "navGroups": {
     "overview": "Überblick",
@@ -37,6 +38,38 @@
     "workspaceSubtitle": "Prüfe Tabellen, Zeilen und Datenbankstatistiken.",
     "admin": "Admin-Zugriff",
     "readOnly": "Nur lesen"
+  },
+  "audit": {
+    "title": "Audit-Protokoll",
+    "subtitle": "Privilegierte Operator-Aktionen (wer, wann, was) — ohne Passwörter oder Tokens.",
+    "entries": "Einträge",
+    "filterAction": "Action-Filter",
+    "filterActionPlaceholder": "z. B. postgres.admin.rotate",
+    "limit": "Limit",
+    "applyFilter": "Filtern",
+    "empty": "Noch keine Audit-Einträge für diesen Filter.",
+    "loadFailed": "Audit-Log konnte nicht geladen werden.",
+    "colTime": "Zeit",
+    "colUser": "User-ID",
+    "colAction": "Action",
+    "colTarget": "Ziel",
+    "colDetails": "Details"
+  },
+  "security": {
+    "clusterAdminTitle": "Managed-Postgres Cluster-Admin",
+    "clusterAdminBody": "Das interne Passwort von msm_admin steuert Provisioning und Admin-DDL der Managed-Postgres-Instanz pro Node. Es ist verschlüsselt im Panel gespeichert. Rotation erneuert es auf den Nodes und im Panel — das neue Passwort erscheint nie in der UI.",
+    "notPanelLogin": "Nicht: Panel-Login-Passwort",
+    "notAppDbUser": "Nicht: App-DB-User pro Gameserver (msm_s…_u…)",
+    "isMsmAdmin": "Ja: Cluster-Rolle msm_admin (Managed Postgres)",
+    "rotateBtn": "Cluster-Admin-Passwort rotieren",
+    "rotating": "Rotiere…",
+    "rotateConfirmTitle": "Managed-Postgres-Admin rotieren?",
+    "rotateConfirmBody": "Erneuert das interne Cluster-Admin-Passwort (msm_admin) auf allen Nodes und im Panel. Das ist nicht dein Panel-Login und nicht das Passwort der Kunden-App-Datenbanken. Das neue Passwort wird dir nicht angezeigt.",
+    "rotateConfirmBtn": "Jetzt rotieren",
+    "rotateSuccess": "Cluster-Admin erfolgreich rotiert.",
+    "rotateFailed": "Rotation fehlgeschlagen.",
+    "noPermission": "Keine Berechtigung zum Rotieren von Cluster-Secrets.",
+    "noPermissionDetail": "Für diesen Bereich brauchst du die Berechtigung system.secrets.rotate (oder Owner)."
   },
   "shell": {
     "openNavigation": "Navigation öffnen",
@@ -1072,7 +1105,8 @@
       "captcha": "CAPTCHA",
       "imprint": "Impressum",
       "supportWidget": "Support-Widget",
-      "backup": "Backup"
+      "backup": "Backup",
+      "security": "Sicherheit"
     },
     "imprint": {
       "title": "Impressum",

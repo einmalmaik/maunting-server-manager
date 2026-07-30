@@ -7,6 +7,8 @@ export const routeAccessRules = {
   docs: null,
   users: ['users.read', 'users.manage'],
   roles: ['roles.manage'],
+  /** Admin-Audit-Protokoll (privilegierte Operator-Aktionen). */
+  audit: ['system.audit.read'],
   settings: ['panel.settings.read'],
   blueprints: ['panel.settings.read'],
   panelBackups: ['panel.settings.write'],

@@ -36,6 +36,8 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("servers.create",            "servers", "Neuen Server anlegen"),
     PermissionDef("servers.delete",            "servers", "Server loeschen (global, nicht delegierbar)"),
     PermissionDef("system.view",               "system",  "System-Ressourcen, Interfaces, Version"),
+    PermissionDef("system.audit.read",         "system",  "Admin-Audit-Log lesen (privilegierte Aktionen)"),
+    PermissionDef("system.secrets.rotate",     "system",  "Cluster-Secrets rotieren (Managed-Postgres-Admin)"),
     PermissionDef("nodes.read",                "system",  "Nodeliste sehen"),
     PermissionDef("nodes.manage",              "system",  "Nodes anlegen, bearbeiten, loeschen"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).

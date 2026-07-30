@@ -46,6 +46,7 @@ from services.node_service import (
     validate_remote_node_host,
 )
 from services.permission_service import has_global_permission
+from services import audit_service
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 _enrollment_begin_limit = parse("5/minute")
@@ -411,6 +412,15 @@ def approve_enrollment(
             detail="TLS-Fingerprint ist bereits einer anderen Node zugeordnet",
         ) from exc
     db.refresh(node)
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="nodes.enrollment.approve",
+        target_type="node",
+        target_id=node.id,
+        details={"enrollment_id": enrollment_id, "node_name": node.name},
+        commit=True,
+    )
     return node_out_dict(node, server_count=0)
 
 
@@ -500,14 +510,27 @@ def update_node(
         if has_fp_field:
             node.tls_fingerprint = body.tls_fingerprint
 
+    token_rotated = False
     if body.auth_token is not None:
         try:
             node.auth_token_enc = encrypt_node_token(body.auth_token)
+            token_rotated = True
         except Exception:
             raise HTTPException(status_code=503, detail="Token konnte nicht verschluesselt werden (DIS)")
 
     db.commit()
     db.refresh(node)
+    if token_rotated:
+        # Token-Inhalt nie in details — nur dass rotiert wurde.
+        audit_service.record_privileged_action(
+            db,
+            user_id=user.id,
+            action="nodes.token.update",
+            target_type="node",
+            target_id=node.id,
+            details={"node_name": node.name},
+            commit=True,
+        )
     count = db.query(Server).filter(Server.node_id == node.id).count()
     return node_out_dict(node, server_count=count)
 

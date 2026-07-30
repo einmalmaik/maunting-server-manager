@@ -1,0 +1,122 @@
+"""Zentrales Schreiben von Audit-Eintraegen ohne Secrets.
+
+KISS: ein Helper fuer privilegierte SaaS-Aktionen. Kein zweiter Event-Bus.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from models import AuditLog
+
+# Keys / Patterns, die nie in audit_logs.details landen duerfen.
+_SECRET_KEY_RE = re.compile(
+    r"(password|passwd|secret|token|authorization|api[_-]?key|credential)",
+    re.IGNORECASE,
+)
+_MAX_DETAILS_LEN = 500
+
+
+def _redact_mapping(data: dict[str, Any]) -> dict[str, Any]:
+    """Entfernt secret-aehnliche Schluessel aus einem Dict fuer Audit-Details."""
+    safe: dict[str, Any] = {}
+    for key, value in data.items():
+        if _SECRET_KEY_RE.search(str(key)):
+            safe[str(key)] = "[redacted]"
+            continue
+        if isinstance(value, dict):
+            safe[str(key)] = _redact_mapping(value)
+        elif isinstance(value, str) and len(value) > 64 and _SECRET_KEY_RE.search(key):
+            safe[str(key)] = "[redacted]"
+        else:
+            # Keine langen freien Strings (SQL, dumps) ins Audit.
+            if isinstance(value, str) and len(value) > 200:
+                safe[str(key)] = value[:200] + "…"
+            else:
+                safe[str(key)] = value
+    return safe
+
+
+def sanitize_audit_details(details: str | dict[str, Any] | None) -> str | None:
+    """Normalisiert Audit-Details und entfernt erkennbare Secrets."""
+    if details is None:
+        return None
+    if isinstance(details, dict):
+        text = json.dumps(_redact_mapping(details), ensure_ascii=True, sort_keys=True)
+    else:
+        text = str(details).strip()
+        # Grobe Absicherung: bekannte Secret-Praefixe in freiem Text maskieren.
+        if "password=" in text.lower() or "token=" in text.lower():
+            text = re.sub(
+                r"(?i)(password|token|secret|authorization)\s*=\s*\S+",
+                r"\1=[redacted]",
+                text,
+            )
+    if not text:
+        return None
+    if len(text) > _MAX_DETAILS_LEN:
+        return text[:_MAX_DETAILS_LEN] + "…"
+    return text
+
+
+def record_privileged_action(
+    db: Session,
+    *,
+    user_id: int | None,
+    action: str,
+    target_type: str | None = None,
+    target_id: int | None = None,
+    details: str | dict[str, Any] | None = None,
+    commit: bool = False,
+) -> AuditLog:
+    """Schreibt einen AuditLog-Eintrag fuer privilegierte Operator-Aktionen.
+
+    Speichert wer/wann/was/Ziel. Nie Passwoerter, Tokens oder SQL-Payloads.
+    Bei commit=False bleibt der Eintrag in der offenen Transaktion des Callers.
+    """
+    action_clean = (action or "").strip()
+    if not action_clean or len(action_clean) > 64:
+        raise ValueError("Ungueltiger Audit-Action-Key.")
+    if target_type is not None and len(target_type) > 64:
+        raise ValueError("Ungueltiger Audit-Target-Typ.")
+
+    entry = AuditLog(
+        user_id=user_id,
+        action=action_clean,
+        target_type=target_type,
+        target_id=target_id,
+        details=sanitize_audit_details(details),
+    )
+    db.add(entry)
+    if commit:
+        try:
+            db.commit()
+            db.refresh(entry)
+        except Exception:
+            db.rollback()
+            raise
+    return entry
+
+
+def list_audit_logs(
+    db: Session,
+    *,
+    limit: int = 50,
+    action: str | None = None,
+    target_type: str | None = None,
+    target_id: int | None = None,
+) -> list[AuditLog]:
+    """Listet die neuesten Audit-Eintraege mit optionalen Filtern."""
+    limit = min(max(int(limit), 1), 200)
+    q = db.query(AuditLog).order_by(AuditLog.id.desc())
+    if action:
+        q = q.filter(AuditLog.action == action.strip())
+    if target_type:
+        q = q.filter(AuditLog.target_type == target_type.strip())
+    if target_id is not None:
+        q = q.filter(AuditLog.target_id == int(target_id))
+    return q.limit(limit).all()

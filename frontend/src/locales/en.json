@@ -13,7 +13,8 @@
     "logout": "Logout",
     "panelBackups": "Panel Backups",
     "panelDatabase": "Panel Database",
-    "nodes": "Nodes"
+    "nodes": "Nodes",
+    "audit": "Audit"
   },
   "navGroups": {
     "overview": "Overview",
@@ -37,6 +38,38 @@
     "workspaceSubtitle": "Inspect tables, rows, and database statistics.",
     "admin": "Admin access",
     "readOnly": "Read only"
+  },
+  "audit": {
+    "title": "Audit log",
+    "subtitle": "Privileged operator actions (who, when, what) — without passwords or tokens.",
+    "entries": "entries",
+    "filterAction": "Action filter",
+    "filterActionPlaceholder": "e.g. postgres.admin.rotate",
+    "limit": "Limit",
+    "applyFilter": "Apply filter",
+    "empty": "No audit entries for this filter yet.",
+    "loadFailed": "Could not load the audit log.",
+    "colTime": "Time",
+    "colUser": "User ID",
+    "colAction": "Action",
+    "colTarget": "Target",
+    "colDetails": "Details"
+  },
+  "security": {
+    "clusterAdminTitle": "Managed Postgres cluster admin",
+    "clusterAdminBody": "The internal msm_admin password controls provisioning and admin DDL for managed Postgres on each node. It is stored encrypted in the panel. Rotation renews it on the nodes and in the panel — the new password is never shown in the UI.",
+    "notPanelLogin": "Not: panel login password",
+    "notAppDbUser": "Not: per-game-server app DB users (msm_s…_u…)",
+    "isMsmAdmin": "Yes: cluster role msm_admin (managed Postgres)",
+    "rotateBtn": "Rotate cluster admin password",
+    "rotating": "Rotating…",
+    "rotateConfirmTitle": "Rotate managed Postgres admin?",
+    "rotateConfirmBody": "Renews the internal cluster admin password (msm_admin) on all nodes and in the panel. This is not your panel login and not customer app database passwords. The new password will not be shown.",
+    "rotateConfirmBtn": "Rotate now",
+    "rotateSuccess": "Cluster admin rotated successfully.",
+    "rotateFailed": "Rotation failed.",
+    "noPermission": "No permission to rotate cluster secrets.",
+    "noPermissionDetail": "This area requires the system.secrets.rotate permission (or owner)."
   },
   "shell": {
     "openNavigation": "Open navigation",
@@ -1072,7 +1105,8 @@
       "captcha": "CAPTCHA",
       "imprint": "Imprint",
       "supportWidget": "Support widget",
-      "backup": "Backup"
+      "backup": "Backup",
+      "security": "Security"
     },
     "imprint": {
       "title": "Imprint",

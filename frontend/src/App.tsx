@@ -29,6 +29,7 @@ const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ def
 const PanelBackups = lazy(() => import('./pages/PanelBackups').then(module => ({ default: module.PanelBackups })))
 const PanelDatabase = lazy(() => import('./pages/PanelDatabase').then(module => ({ default: module.PanelDatabase })))
 const AdminNodes = lazy(() => import('./pages/AdminNodes').then(module => ({ default: module.AdminNodes })))
+const AdminAudit = lazy(() => import('./pages/AdminAudit').then(module => ({ default: module.AdminAudit })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
 import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
@@ -148,6 +149,14 @@ function App() {
             element={
               <RequirePermission routeKey="nodes">
                 <AdminNodes />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="admin/audit"
+            element={
+              <RequirePermission routeKey="audit">
+                <AdminAudit />
               </RequirePermission>
             }
           />

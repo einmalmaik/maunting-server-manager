@@ -782,6 +782,20 @@ class NodeClient:
     def postgres_rotate_user(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/postgres/users/rotate", json=payload)
 
+    def postgres_rotate_admin(
+        self, *, admin_password: str, new_admin_password: str
+    ) -> dict[str, Any]:
+        """Rotiert msm_admin auf dem Node. Payload wird nicht geloggt."""
+        return self._request(
+            "POST",
+            "/postgres/admin/rotate",
+            json={
+                "admin_password": admin_password,
+                "new_admin_password": new_admin_password,
+            },
+            timeout=_LONG_TIMEOUT,
+        )
+
     def postgres_drop(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/postgres/drop", json=payload)
 

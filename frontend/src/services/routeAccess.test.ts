@@ -62,6 +62,13 @@ describe('resolveRouteAccessState', () => {
     expect(resolve('nodes', userWith(['panel.settings.write']))).toBe('forbidden')
   })
 
+  it('allows audit only with system.audit.read or owner', () => {
+    expect(resolve('audit', owner)).toBe('allowed')
+    expect(resolve('audit', userWith(['system.audit.read']))).toBe('allowed')
+    expect(resolve('audit', userWith(['users.read']))).toBe('forbidden')
+    expect(resolve('audit', userWith(['panel.settings.read']))).toBe('forbidden')
+  })
+
   it('separates unknown routes and permission load errors', () => {
     expect(resolve('does-not-exist', owner)).toBe('notFound')
     expect(resolve('settings', null, { error: 'PERMISSIONS_LOAD_FAILED' })).toBe('error')

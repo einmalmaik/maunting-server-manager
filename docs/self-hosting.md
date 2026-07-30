@@ -284,6 +284,78 @@ manuellen Override aus `MSM_API_URL` abgeleitet, weil nur der API-Host sie setze
 darf. `MSM_LOCAL_AGENT_ENABLED=false` wird auf einer migrierten Backend-only-
 Control-Plane automatisch gesetzt; Betreiber müssen dafür keinen Token kopieren.
 
+## SaaS-Hosting-Betrieb: Node-Härtung, Secret-Rotation, Admin-Monitoring
+
+Wenn du **fremde Kunden** auf denselben Nodes hostest (Vermietung / SaaS), gilt
+zusätzlich zur DB-Mandantenisolation (siehe
+[`multi-node/phase-7.md` §6](multi-node/phase-7.md)) dieses Betriebs-Checkliste.
+Sie ergänzt Code-Gates und ersetzt kein Host-CIS-Audit.
+
+### Node-Härtung (Host / Agent / Docker)
+
+| Thema | Erwartung |
+| --- | --- |
+| SSH / Root | Wenige privilegierte Personen; kein shared root; Keys statt Passwort wo möglich |
+| Agent-Port | Nur Panel→Agent über TLS (+ Fingerprint-Pinning bei Remote-Nodes); nicht ungeschützt im Internet freigeben |
+| Managed Postgres | Host-Bind nur `127.0.0.1`; Game-Container über **internal** Docker-Netz (`msm-internal`) |
+| Docker | Kein unnötiges `privileged`; Agent-Hardening (`cap_drop`, Container-Name-Gates) beibehalten |
+| systemd | Agent-Unit mit restriktiven Defaults (`ProtectSystem` u. a. wie von Installer gesetzt) |
+| Trennung | Kritische Kunden optional auf eigenen Nodes, wenn Host-Compromise inakzeptabel ist |
+
+Produktseitig erzwingbar: Loopback-Postgres, internal net, Agent-Auth, Panel-RBAC.
+Nicht erzwingbar im Code: wer SSH auf dem Host hat — das bleibt Betriebsdisziplin.
+
+### Secret-Rotation (was und wann)
+
+| Secret | Wo | Rotation |
+| --- | --- | --- |
+| Managed-Postgres-Cluster-Admin (`msm_admin`) | Panel-Setting DIS (`managed_postgres.admin_password_encrypted`) + `ALTER ROLE` auf jedem Node mit Postgres | API: `POST /api/admin/managed-postgres/rotate-admin` (Permission `system.secrets.rotate`). Nach Verdacht, Personalwechsel oder periodisch (z. B. 90 Tage) |
+| Node-Agent-Token | Node-Datensatz `auth_token_enc` | Node bearbeiten / Token tauschen (`nodes.manage`); Audit: `nodes.token.update` |
+| App-DB-User / Power-User | Pro Server-DB | Bestehende Rotate-Endpunkte unter `/api/servers/{id}/databases/…` |
+| Panel-Owner / Admin-Passwort | Auth | Reguläre Konto-Passwort- und 2FA-Pflege |
+
+**Wichtig (kein stilles Split-Brain):** Die Admin-Rotation wendet `ALTER ROLE`
+zuerst auf den Nodes an. Schlägt ein Node **hart** fehl, nachdem andere schon
+rotiert wurden:
+
+1. MSM versucht die **vorwärts erfolgreichen** Nodes zurück auf das **alte** Passwort zu setzen.
+2. Gelingt der Rollback **vollständig**: Panel behält das **alte** Secret.
+3. Schlägt der Rollback **nur bei manchen** Nodes fehl: die bereits zurückgesetzten
+   Nodes bekommen das **neue** Secret erneut (`re-forward`), danach speichert das
+   Panel das **neue** Secret. Alle vorwärts-erfolgreichen Nodes und das Panel
+   liegen wieder auf demselben Secret.
+4. Nodes, die beim Vorwärts-Schritt **hart** fehlgeschlagen sind, können noch das
+   alte Secret haben — das wird in der Fehlermeldung benannt (manueller Follow-up).
+
+Antwort und Audit enthalten **nie** das Passwort.
+
+### Admin-Monitoring (Audit)
+
+Privilegierte Aktionen schreiben in `audit_logs` (wer / wann / action / Ziel,
+Details ohne Secrets):
+
+- `postgres.admin.rotate`, `postgres.database.*`, `postgres.user.*`, `postgres.power_user.*`, `postgres.dump`, `postgres.restore`
+- `nodes.token.update`, `nodes.enrollment.approve`
+
+**Im Panel:** Administration → **Audit** (`/admin/audit`, Permission `system.audit.read`).  
+**API:** `GET /api/admin/audit-logs?limit=50&action=…`  
+Ohne Recht: **403** (kein leeres OK). Nav und Route sind gesperrt.
+
+**Cluster-Admin rotieren im Panel:** Einstellungen → Tab **Sicherheit**  
+(`system.secrets.rotate`). API: `POST /api/admin/managed-postgres/rotate-admin`.
+Empfehlung: regelmäßig prüfen (wöchentlich oder nach Incidents), wer Power-User
+aktiviert, Dumps gezogen oder Admin-Secrets rotiert hat.
+
+### Kurz-Checkliste vor Go-Live mit Fremdkunden
+
+1. SSH/Root-Kreis dokumentiert und klein  
+2. Remote-Nodes nur HTTPS + TLS-Fingerprint  
+3. Managed-Postgres-Admin mindestens einmal prozessiert/rotiert und Prozess bekannt  
+4. `system.audit.read` / `system.secrets.rotate` nur für echte Betreiber-Rollen  
+5. Ersten Audit-Abruf (`GET /api/admin/audit-logs`) verifiziert  
+
+---
+
 ## Aktualität dieser Dokumentation
 
 Änderungen an Bootstrap, `install.sh`, `update.sh`, Node-Enrollment,

@@ -34,7 +34,7 @@ from schemas.postgres import (
     PostgresTableRequest,
     PostgresTableListItem,
 )
-from services import postgres_service
+from services import audit_service, postgres_service
 from services.postgres_service import PostgresServiceError
 
 router = APIRouter(prefix="/api/servers/{server_id}/databases", tags=["databases"])
@@ -57,6 +57,29 @@ def _service_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="PostgreSQL-Operation fehlgeschlagen")
 
 
+def _audit_db(
+    db: Session,
+    user: User,
+    *,
+    action: str,
+    server_id: int,
+    details: dict | None = None,
+) -> None:
+    """Schreibt Audit fuer privilegierte DB-Aktionen (ohne Secrets)."""
+    payload = {"server_id": server_id}
+    if details:
+        payload.update(details)
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action=action,
+        target_type="server",
+        target_id=server_id,
+        details=payload,
+        commit=True,
+    )
+
+
 @router.get("", response_model=PostgresResourcesResponse)
 def list_databases(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _ensure_server(db, server_id)
@@ -75,7 +98,15 @@ def bootstrap_databases(
     server = _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        return {"credentials": postgres_service.provision_server_databases(db, server, body.database_count)}
+        credentials = postgres_service.provision_server_databases(db, server, body.database_count)
+        _audit_db(
+            db,
+            user,
+            action="postgres.database.provision",
+            server_id=server_id,
+            details={"database_count": body.database_count},
+        )
+        return {"credentials": credentials}
     except Exception as exc:
         raise _service_error(exc) from exc
 
@@ -91,7 +122,15 @@ def create_database(
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        return {"credential": postgres_service.create_database(db, server_id, body.name)}
+        credential = postgres_service.create_database(db, server_id, body.name)
+        _audit_db(
+            db,
+            user,
+            action="postgres.database.create",
+            server_id=server_id,
+            details={"database_name": credential.get("database_name")},
+        )
+        return {"credential": credential}
     except Exception as exc:
         raise _service_error(exc) from exc
 
@@ -113,7 +152,15 @@ def delete_database(
     if body.confirm_name != database.name:
         raise HTTPException(status_code=400, detail="Bestaetigungsname stimmt nicht ueberein")
     try:
+        db_name = database.name
         postgres_service.delete_database(db, server_id, database_id)
+        _audit_db(
+            db,
+            user,
+            action="postgres.database.delete",
+            server_id=server_id,
+            details={"database_id": database_id, "database_name": db_name},
+        )
         return {"message": "Datenbank geloescht"}
     except Exception as exc:
         raise _service_error(exc) from exc
@@ -130,7 +177,15 @@ def rotate_user_password(
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        return postgres_service.rotate_user_password(db, server_id, user_id)
+        result = postgres_service.rotate_user_password(db, server_id, user_id)
+        _audit_db(
+            db,
+            user,
+            action="postgres.user.rotate",
+            server_id=server_id,
+            details={"username": result.get("username")},
+        )
+        return result
     except Exception as exc:
         raise _service_error(exc) from exc
 
@@ -146,7 +201,18 @@ def create_user(
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        return {"credential": postgres_service.create_user(db, server_id, body.database_id, body.username)}
+        credential = postgres_service.create_user(db, server_id, body.database_id, body.username)
+        _audit_db(
+            db,
+            user,
+            action="postgres.user.create",
+            server_id=server_id,
+            details={
+                "database_id": body.database_id,
+                "username": credential.get("username"),
+            },
+        )
+        return {"credential": credential}
     except Exception as exc:
         raise _service_error(exc) from exc
 
@@ -168,7 +234,15 @@ def delete_user(
     if body.confirm_name != pg_user.username:
         raise HTTPException(status_code=400, detail="Bestaetigungsname stimmt nicht ueberein")
     try:
+        uname = pg_user.username
         postgres_service.delete_user(db, server_id, user_id)
+        _audit_db(
+            db,
+            user,
+            action="postgres.user.delete",
+            server_id=server_id,
+            details={"username": uname},
+        )
         return {"message": "Datenbank-User geloescht"}
     except Exception as exc:
         raise _service_error(exc) from exc
@@ -350,7 +424,15 @@ def promote_to_power_user(
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        return postgres_service.promote_owner_to_power_user(db, server_id, body.database_id)
+        result = postgres_service.promote_owner_to_power_user(db, server_id, body.database_id)
+        _audit_db(
+            db,
+            user,
+            action="postgres.power_user.promote",
+            server_id=server_id,
+            details={"database_id": body.database_id, "username": result.get("username")},
+        )
+        return result
     except Exception as exc:
         raise _service_error(exc) from exc
 
@@ -367,7 +449,15 @@ def rotate_power_user_credentials(
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        return postgres_service.rotate_power_user_password(db, server_id, body.database_id)
+        result = postgres_service.rotate_power_user_password(db, server_id, body.database_id)
+        _audit_db(
+            db,
+            user,
+            action="postgres.power_user.rotate",
+            server_id=server_id,
+            details={"database_id": body.database_id, "username": result.get("username")},
+        )
+        return result
     except Exception as exc:
         raise _service_error(exc) from exc
 
@@ -392,6 +482,13 @@ def demote_from_power_user(
         ).first()
         if not database:
             raise ValueError("Datenbank wurde fuer diesen Server nicht gefunden.")
+        _audit_db(
+            db,
+            user,
+            action="postgres.power_user.demote",
+            server_id=server_id,
+            details={"database_id": body.database_id, "username": database.owner_role},
+        )
         return PostgresPowerUserResponse(
             username=database.owner_role,
             password="",
@@ -463,6 +560,14 @@ def export_databases(
         "X-MSM-Dump-DB-Names": ",".join(db_names),
         "X-MSM-Dump-Size": str(size_bytes),
     }
+    # Kein SQL-Inhalt im Audit — nur Metadaten.
+    _audit_db(
+        db,
+        user,
+        action="postgres.dump",
+        server_id=server_id,
+        details={"database_count": len(db_names), "size_bytes": size_bytes, "sha256": sha},
+    )
     return Response(content=payload, media_type="application/sql; charset=utf-8", headers=headers)
 
 
@@ -486,6 +591,17 @@ def import_database(
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        return postgres_service.restore_sql_to_server_dbs(db, server_id, body.sql)
+        result = postgres_service.restore_sql_to_server_dbs(db, server_id, body.sql)
+        _audit_db(
+            db,
+            user,
+            action="postgres.restore",
+            server_id=server_id,
+            details={
+                "database_count": len(result.get("databases") or []),
+                "bytes": result.get("bytes"),
+            },
+        )
+        return result
     except Exception as exc:
         raise _service_error(exc) from exc

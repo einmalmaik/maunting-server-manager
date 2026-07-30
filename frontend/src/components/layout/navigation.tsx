@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Archive, BookOpen, Boxes, Database, LayoutDashboard, Network, Server, Settings, Shield, Users } from 'lucide-react'
+import { Archive, BookOpen, Boxes, Database, History, LayoutDashboard, Network, Server, Settings, Shield, Users } from 'lucide-react'
 
 export type NavGroupName = 'Overview' | 'Infrastructure' | 'Administration' | 'Panel' | 'Help'
 export interface NavigationItem { to: string; icon: LucideIcon; label: string; group: NavGroupName }
@@ -8,12 +8,18 @@ interface NavigationAccess {
   owner: boolean
   canManageUsers: boolean
   canManageRoles: boolean
+  /** system.audit.read — privilegiertes Operator-Audit. */
+  canViewAudit: boolean
   canViewSettings: boolean
   canManagePanelBackups: boolean
   canReadPanelDatabase: boolean
   canViewNodes: boolean
 }
 
+/**
+ * Baut die Sidebar-Navigation anhand von Labels und Permission-Flags.
+ * Keine Secrets, keine Fachlogik — reine Sichtbarkeitsregeln.
+ */
 export function buildNavigation(labels: Record<string, string>, access: NavigationAccess): NavigationItem[] {
   return [
     { to: '/', icon: LayoutDashboard, label: labels.dashboard, group: 'Overview' },
@@ -21,6 +27,7 @@ export function buildNavigation(labels: Record<string, string>, access: Navigati
     ...(access.owner || access.canViewNodes ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),
     ...(access.owner || access.canManageUsers ? [{ to: '/users', icon: Users, label: labels.users, group: 'Administration' as const }] : []),
     ...(access.owner || access.canManageRoles ? [{ to: '/roles', icon: Shield, label: labels.roles, group: 'Administration' as const }] : []),
+    ...(access.owner || access.canViewAudit ? [{ to: '/admin/audit', icon: History, label: labels.audit, group: 'Administration' as const }] : []),
     ...(access.owner || access.canViewSettings ? [
       { to: '/settings', icon: Settings, label: labels.settings, group: 'Panel' as const },
       { to: '/blueprints', icon: Boxes, label: labels.blueprints, group: 'Panel' as const },

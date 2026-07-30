@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy } from 'lucide-react'
+import { Globe, Mail, Gamepad2, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
@@ -11,17 +11,29 @@ import { BackupTab } from './settings/BackupTab'
 import { ImprintTab } from './settings/ImprintTab'
 import { SupportWidgetTab } from './settings/SupportWidgetTab'
 import { CaptchaTab } from './settings/CaptchaTab'
+import { SecurityTab } from './settings/SecurityTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
-type TabId = 'general' | 'email' | 'steam' | 'github' | 'oauth' | 'imprint' | 'captcha' | 'supportWidget' | 'backup'
+type TabId =
+  | 'general'
+  | 'email'
+  | 'steam'
+  | 'github'
+  | 'oauth'
+  | 'imprint'
+  | 'captcha'
+  | 'supportWidget'
+  | 'backup'
+  | 'security'
 
 export function Settings() {
   const { t } = useTranslation()
   const canManageBackup = useHasPermission('panel.settings.write')
+  const canRotateSecrets = useHasPermission('system.secrets.rotate')
   const [activeTab, setActiveTab] = useState<TabId>('general')
 
-  // Backup-Tab nur fuer Admins (panel.settings.write) sichtbar.
+  // Backup-Tab: panel.settings.write. Security-Tab: system.secrets.rotate (msm_admin).
   const tabs: TabDef<TabId>[] = [
     { id: 'general', labelKey: 'settings.tabs.general', icon: Globe },
     { id: 'email', labelKey: 'settings.tabs.email', icon: Mail },
@@ -32,6 +44,9 @@ export function Settings() {
     { id: 'imprint', labelKey: 'settings.tabs.imprint', icon: FileText },
     { id: 'supportWidget', labelKey: 'settings.tabs.supportWidget', icon: LifeBuoy },
     ...(canManageBackup ? [{ id: 'backup' as TabId, labelKey: 'settings.tabs.backup', icon: Cloud }] : []),
+    ...(canRotateSecrets
+      ? [{ id: 'security' as TabId, labelKey: 'settings.tabs.security', icon: ShieldAlert }]
+      : []),
   ]
 
   return (
@@ -54,6 +69,7 @@ export function Settings() {
       {activeTab === 'imprint' && <ImprintTab />}
       {activeTab === 'supportWidget' && <SupportWidgetTab />}
       {activeTab === 'backup' && <BackupTab />}
+      {activeTab === 'security' && <SecurityTab />}
     </div>
   )
 }
