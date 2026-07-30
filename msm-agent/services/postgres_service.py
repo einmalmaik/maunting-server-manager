@@ -277,8 +277,10 @@ def provision(
         "user_name": user_name,
         "host": settings.managed_postgres_container_name,
         "port": 5432,
-        "is_superuser": False,
+        # power_user is panel metadata only; roles always stay NOSUPERUSER.
         "power_user": power_user,
+        "is_power_user": power_user,
+        "cluster_superuser": False,
     }
 
 

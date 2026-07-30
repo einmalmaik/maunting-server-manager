@@ -147,7 +147,7 @@ class TestCreateServer:
             "password": "***",
             "host": "msm-postgres",
             "port": 5432,
-            "is_superuser": False,
+            "is_power_user": False,
         }]
         with patch("routers.servers.os.makedirs"), \
              patch("routers.servers.os.chmod"), \

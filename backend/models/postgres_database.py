@@ -17,7 +17,9 @@ class PostgresDatabase(Base):
     name: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
     owner_role: Mapped[str] = mapped_column(String(63), nullable=False)
     owner_password_encrypted: Mapped[str] = mapped_column(String(4096), nullable=False)
-    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Panel flag: elevated owner credentials issued for this DB only.
+    # Never means PostgreSQL cluster SUPERUSER (agent enforces NOSUPERUSER).
+    is_power_user: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     power_credentials_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

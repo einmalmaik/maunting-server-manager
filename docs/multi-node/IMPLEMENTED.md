@@ -216,6 +216,12 @@ bis der zugehörige PostgreSQL-Restore erfolgreich abgeschlossen ist.
 
 **Invariante:** Admin/Owner-Passwörter nur im Request-Body (TLS) und RAM des Agenten; Panel speichert DIS-verschlüsselt; Agent speichert keine Klartext-Credentials auf Disk. Dumps werden per `psql` über stdin als jeweilige Owner-Rolle restauriert, damit Ownership und Rechte erhalten bleiben. Der finale Postgres-Container enthält kein Bootstrap-Passwort in `docker inspect`.
 
+**Bedrohungsmodell (Kunde↔Kunde vs. Operator):** siehe
+[`phase-7.md` §6](phase-7.md). Kurz: Isolation per Database/Rollen/Grants/Netz +
+Panel-RBAC; Power-User = DB-scoped Owner-Credentials (`is_power_user`), **kein**
+Cluster-SUPERUSER; `msm_admin`/Node-Root bleiben privileged. Tests:
+`msm-agent/tests/test_postgres_cross_tenant.py`.
+
 ---
 
 ## Security-Invarianten (über alle Phasen)
@@ -228,6 +234,7 @@ bis der zugehörige PostgreSQL-Restore erfolgreich abgeschlossen ist.
 6. Ports pro Node; Belegung wird auf dem jeweiligen Ziel-Node geprüft. Firewall-Regeln werden ebenfalls dort über einen validierenden Root-Wrapper gesetzt.
 7. Managed-Postgres-Passwörter: nur Panel-DIS-Storage + ephemeral HTTPS-Body zum Agenten (RAM only).
 8. Bestehende Installationen migrieren beim Backend-Start automatisch; ohne passenden Local-Agent-Token startet das Backend fail-closed.
+9. Managed-Postgres Mandantenisolation: separate DBs/Rollen, `NOSUPERUSER`, kein Cross-CONNECT; Power-User nur pro DB (`is_power_user`).
 
 ---
 

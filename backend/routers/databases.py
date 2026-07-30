@@ -346,11 +346,11 @@ def promote_to_power_user(
     user: User = Depends(get_current_user),
     _: None = Depends(verify_csrf),
 ):
-    """Promote a normal DB owner role to SUPERUSER. Returns one-time credentials."""
+    """Issue elevated owner credentials for this database only (not cluster SUPERUSER)."""
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        return postgres_service.promote_owner_to_superuser(db, server_id, body.database_id)
+        return postgres_service.promote_owner_to_power_user(db, server_id, body.database_id)
     except Exception as exc:
         raise _service_error(exc) from exc
 
@@ -363,7 +363,7 @@ def rotate_power_user_credentials(
     user: User = Depends(get_current_user),
     _: None = Depends(verify_csrf),
 ):
-    """Rotate the password of an existing superuser owner role. Returns new one-time credentials."""
+    """Rotate password of a database-scoped power-user owner role. One-time credentials."""
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
@@ -380,13 +380,13 @@ def demote_from_power_user(
     user: User = Depends(get_current_user),
     _: None = Depends(verify_csrf),
 ):
-    """Demote a superuser owner role back to normal. Confirmation username required."""
+    """Demote a power-user owner role back to normal owner. Confirmation username required."""
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     if body.confirm_name != body.username:
         raise HTTPException(status_code=400, detail="Bestaetigungsname stimmt nicht ueberein")
     try:
-        postgres_service.demote_owner_from_superuser(db, server_id, body.database_id)
+        postgres_service.demote_owner_from_power_user(db, server_id, body.database_id)
         database = db.query(PostgresDatabase).filter(
             PostgresDatabase.server_id == server_id, PostgresDatabase.id == body.database_id
         ).first()

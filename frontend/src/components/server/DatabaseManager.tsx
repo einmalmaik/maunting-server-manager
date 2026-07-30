@@ -268,8 +268,8 @@ export function DatabaseManager({ serverId }: Props) {
       if (!selectedDbId || !selectedDatabase) return
       if (kind === 'demote') {
         const typed = await prompt({
-          title: 'Superuser entziehen',
-          message: `Superuser-Rechte von "${selectedDatabase.owner_role}" entfernen?`,
+          title: 'Power-User entziehen',
+          message: `Power-User-Zugang von "${selectedDatabase.owner_role}" für diese Datenbank entfernen?`,
           expectedValue: selectedDatabase.owner_role,
           confirmText: 'Entziehen',
           danger: true,
@@ -384,7 +384,7 @@ export function DatabaseManager({ serverId }: Props) {
         history={history}
         canAdmin={canAdmin}
         canManagePowerUser={canAdmin}
-        powerUserActive={Boolean(selectedDatabase?.is_superuser)}
+        powerUserActive={Boolean(selectedDatabase?.is_power_user)}
         busy={busy}
         error={error}
         onSelectDatabase={(id) => {
@@ -430,10 +430,10 @@ function PowerUserDialog({ state, onClose }: { state: { db: PostgresDatabase; pa
       <div className="msm-card w-full max-w-2xl p-6" onClick={(event) => event.stopPropagation()}>
         <div className="mb-3 flex items-center gap-2">
           <Shield className="h-5 w-5 text-status-warning" />
-          <h3 className="font-headline text-xl font-semibold text-on-surface">Superuser-Zugang</h3>
+          <h3 className="font-headline text-xl font-semibold text-on-surface">Power-User-Zugang</h3>
         </div>
         <p className="mb-4 rounded-lg border border-status-warning/40 bg-status-warning/10 p-3 text-sm text-status-warning">
-          Passwort nur jetzt anzeigen. Nicht in Tickets, Logs oder URLs teilen.
+          Passwort nur jetzt anzeigen. Gilt nur für diese eine Datenbank — kein Cluster-SUPERUSER, kein Zugriff auf andere Kunden-DBs. Nicht in Tickets, Logs oder URLs teilen.
         </p>
         <div className="space-y-2 font-mono text-sm">
           <div>database: {state.db.name}</div>

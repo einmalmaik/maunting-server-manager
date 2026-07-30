@@ -31,7 +31,7 @@ def _make_pg_db(db: Session, server_id: int, name: str, *, index: int = 1) -> Po
         owner_password_encrypted=(
             f"test-enc-v1:{'msm:pg:db:owner'.encode().hex()}:{'dummy'.encode().hex()}"
         ),
-        is_superuser=False,
+        is_power_user=False,
     )
     db.add(pg)
     db.commit()

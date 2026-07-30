@@ -18,7 +18,7 @@ const PANEL_DATABASE = {
   id: PANEL_DB_ID,
   name: 'panel_database',
   owner_role: 'msm_panel',
-  is_superuser: false,
+  is_power_user: false,
 }
 const DEFAULT_SQL = 'SELECT table_schema, table_name\nFROM information_schema.tables\nWHERE table_schema NOT IN (\'pg_catalog\', \'information_schema\')\nORDER BY table_schema, table_name\nLIMIT 50;'
 

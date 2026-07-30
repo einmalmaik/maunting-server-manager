@@ -120,8 +120,9 @@ def test_power_user_provision_never_grants_cluster_superuser():
     owner_ddl = str(admin_cur.execute.call_args_list[0].args[0])
     assert "NOSUPERUSER" in owner_ddl
     assert "PASSWORD %s SUPERUSER" not in owner_ddl
-    assert result["is_superuser"] is False
+    assert result["cluster_superuser"] is False
     assert result["power_user"] is True
+    assert result["is_power_user"] is True
 
 
 def test_promote_owner_remains_database_scoped():

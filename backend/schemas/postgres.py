@@ -13,14 +13,15 @@ class PostgresOneTimeCredential(BaseModel):
     password: str
     host: str
     port: int
-    is_superuser: bool = False
+    is_power_user: bool = False
 
 
 class PostgresDatabaseResponse(BaseModel):
     id: int
     name: str
     owner_role: str
-    is_superuser: bool = False
+    # True = elevated owner credentials for this database only (not cluster SUPERUSER).
+    is_power_user: bool = False
     power_credentials_issued_at: datetime | None = None
     created_at: datetime
 
@@ -213,10 +214,9 @@ class PostgresPowerUserDemoteRequest(BaseModel):
 class PostgresDumpRequest(BaseModel):
     """Auswahl des Dump-Umfangs fuer ``pg_dump``.
 
-    Default: ``scope=all_dbs`` erfasst alle DBs des Servers (Power-User sieht
-    mehrere; Owner sieht eine). ``scope=database`` ist deprecated -- der Server
-    hat genau einen Postgres-Container mit allen DBs drin, daher macht
-    ``scope=all_dbs`` immer Sinn.
+    Default: ``scope=all_dbs`` erfasst alle DBs des Servers. ``scope=database``
+    ist deprecated -- der Server hat genau einen Postgres-Container mit allen
+    DBs drin, daher macht ``scope=all_dbs`` immer Sinn.
     """
     confirm_text: str | None = Field(
         None,

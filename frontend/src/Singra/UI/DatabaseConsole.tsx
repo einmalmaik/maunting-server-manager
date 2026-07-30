@@ -42,7 +42,7 @@ export interface DatabaseConsoleProps {
   title: string
   subtitle: string
   databaseLabel?: string
-  databases: Array<Pick<PostgresDatabase, 'id' | 'name' | 'owner_role' | 'is_superuser'>>
+  databases: Array<Pick<PostgresDatabase, 'id' | 'name' | 'owner_role' | 'is_power_user'>>
   selectedDatabaseId: number | null
   stats: PostgresDatabaseStats | null
   tables: PostgresTable[]
@@ -505,11 +505,13 @@ export function DatabaseConsole({
             <div className="mt-5 border-t border-outline-variant pt-4">
               <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-on-surface">
                 <KeyRound className="h-4 w-4 text-status-warning" />
-                Superuser
+                Power-User
               </h4>
               <div className="space-y-2">
                 <p className="text-xs text-on-surface-variant">
-                  {powerUserActive ? 'Owner-Rolle hat aktuell SUPERUSER-Rechte.' : 'Superuser nur für bewusste Admin-Arbeiten aktivieren.'}
+                  {powerUserActive
+                    ? 'Owner-Zugang für diese eine Datenbank aktiv (kein Cluster-SUPERUSER, keine anderen Kunden-DBs).'
+                    : 'Power-User nur für bewusste Admin-Arbeiten an dieser Datenbank aktivieren.'}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {powerUserActive ? (

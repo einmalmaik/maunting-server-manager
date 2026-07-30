@@ -305,7 +305,7 @@ def _create_database_and_user(
         owner_password_encrypted=AuthService.encrypt_secret(
             owner_password, aad="msm:pg:db:owner"
         ),
-        is_superuser=power_user,
+        is_power_user=power_user,
         power_credentials_issued_at=datetime.now(timezone.utc) if power_user else None,
     )
     user = PostgresUser(
@@ -330,7 +330,7 @@ def _create_database_and_user(
         "password": user_password,
         "host": settings.managed_postgres_container_name,
         "port": 5432,
-        "is_superuser": power_user,
+        "is_power_user": power_user,
     }
 
 
@@ -784,10 +784,11 @@ def drop_extension(db: Session, server_id: int, database_id: int, name: str) -> 
     _owner_query(db, server_id, database, "drop_extension", name=ext)
 
 
-def promote_owner_to_superuser(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
+def promote_owner_to_power_user(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
+    """Issue elevated owner credentials for this database only (not cluster SUPERUSER)."""
     database = _database_row(db, server_id, database_id)
-    if database.is_superuser:
-        raise ValueError("Owner-Rolle hat bereits Superuser-Rechte.")
+    if database.is_power_user:
+        raise ValueError("Owner-Rolle hat bereits Power-User-Zugang fuer diese Datenbank.")
     new_password = _generate_password()
     client = _client_for_server_id(db, server_id)
     try:
@@ -800,7 +801,7 @@ def promote_owner_to_superuser(db: Session, server_id: int, database_id: int) ->
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Promote failed") from exc
-    database.is_superuser = True
+    database.is_power_user = True
     database.owner_password_encrypted = AuthService.encrypt_secret(
         new_password, aad="msm:pg:db:owner"
     )
@@ -817,9 +818,9 @@ def promote_owner_to_superuser(db: Session, server_id: int, database_id: int) ->
 
 def rotate_power_user_password(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
     database = _database_row(db, server_id, database_id)
-    if not database.is_superuser:
+    if not database.is_power_user:
         raise ValueError(
-            "Owner-Rolle ist kein Superuser -- erst promote_owner_to_superuser aufrufen."
+            "Owner-Rolle ist kein Power-User -- erst promote_owner_to_power_user aufrufen."
         )
     new_password = _generate_password()
     client = _client_for_server_id(db, server_id)
@@ -847,10 +848,10 @@ def rotate_power_user_password(db: Session, server_id: int, database_id: int) ->
     }
 
 
-def demote_owner_from_superuser(db: Session, server_id: int, database_id: int) -> None:
+def demote_owner_from_power_user(db: Session, server_id: int, database_id: int) -> None:
     database = _database_row(db, server_id, database_id)
-    if not database.is_superuser:
-        raise ValueError("Owner-Rolle ist kein Superuser.")
+    if not database.is_power_user:
+        raise ValueError("Owner-Rolle ist kein Power-User.")
     client = _client_for_server_id(db, server_id)
     try:
         client.postgres_demote(
@@ -861,7 +862,7 @@ def demote_owner_from_superuser(db: Session, server_id: int, database_id: int) -
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Demote failed") from exc
-    database.is_superuser = False
+    database.is_power_user = False
     database.power_credentials_issued_at = None
     db.commit()
 

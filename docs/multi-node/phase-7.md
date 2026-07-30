@@ -66,3 +66,49 @@ Das Panel verliert die direkte Anbindung an den Docker-Dämon und die SQL-Ausfü
 ## 5. Status
 
 **ABGESCHLOSSEN** (Branch `feature/multi-node`).
+
+---
+
+## 6. Bedrohungsmodell: Managed Postgres (Mandantenisolation)
+
+Kurz und verbindlich für Hosting/Vermietung. Kein Zero-Knowledge-Vault für
+Game-Datenbanken — sondern harte DB/Rollen-Grenzen plus Panel-RBAC.
+
+### Was getrennt ist (Kunde ↔ Kunde)
+
+| Grenze | Umsetzung |
+|--------|-----------|
+| Daten | Pro Server-DB eine eigene PostgreSQL-**Database** (`msm_s{server_id}_db…`) |
+| Rollen | Eigene Owner- und App-Rollen, immer `NOSUPERUSER NOCREATEDB NOCREATEROLE` |
+| Grants | `REVOKE ALL ON DATABASE … FROM PUBLIC`; `CONNECT` nur an die eigene App-Rolle |
+| Netz | Host-Bind `127.0.0.1`; Game-Container über **internal** Docker-Netz |
+| Panel-API | `/api/servers/{server_id}/databases/*` + `server.databases.read\|write\|admin` |
+
+**Folge:** Kunde A (auch mit Power-User auf *seiner* DB) kann die DB von Kunde B
+weder lesen noch schreiben, solange er nur seine Credentials hat.
+
+### Power-User (kein Cluster-SUPERUSER)
+
+- Panel-Flag: `is_power_user` (früher irreführend `is_superuser` genannt).
+- Bedeutet: erweiterte **Owner-Credentials für genau diese eine Database**.
+- Agent vergibt **nie** PostgreSQL-Cluster-`SUPERUSER` (`promote_owner` hält
+  `NOSUPERUSER`). Power-User von A gilt **nicht** für Kunde B.
+
+### Was privileged bleibt (Betreiber / Node)
+
+| Actor | Zugriff |
+|-------|---------|
+| Cluster-Admin `msm_admin` (Secret DIS im Panel) | alle Managed-DBs am Node (Provision/Backup) |
+| Host-Root / Docker auf dem Node | OS-/Container-Ebene, umgeht DB-Rollen |
+| Panel-Owner / globale Admin-Rolle | alle Server über die API (Betreiber-RBAC) |
+
+### DIS / Verschlüsselung
+
+DIS schützt **Panel-Metadaten und Secrets** (Admin-/Owner-Passwörter). Die
+Inhalte der Game-DB müssen für die Kunden-App lesbar bleiben; DIS verschlüsselt
+diese Payload nicht. Operator mit Admin/Node-Zugriff bleibt privileged.
+
+### Tests
+
+- `msm-agent/tests/test_postgres_cross_tenant.py` — zwei Tenants, kein Cross-`CONNECT`
+- `msm-agent/tests/test_postgres_service.py` — Power-User bleibt `NOSUPERUSER`

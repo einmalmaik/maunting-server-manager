@@ -106,7 +106,8 @@ export interface PostgresCredential {
   password: string
   host: string
   port: number
-  is_superuser?: boolean
+  /** Elevated owner credentials for this database only — never cluster SUPERUSER. */
+  is_power_user?: boolean
 }
 
 export interface PostgresPowerUserCredential {
@@ -125,7 +126,8 @@ export interface PostgresDatabase {
   id: number
   name: string
   owner_role: string
-  is_superuser?: boolean
+  /** Elevated owner credentials for this database only — never cluster SUPERUSER. */
+  is_power_user?: boolean
   power_credentials_issued_at?: string | null
   created_at: string
 }

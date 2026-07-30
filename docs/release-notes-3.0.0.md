@@ -93,6 +93,15 @@ Außerhalb der Guardian Engine enthält v3.0.0 folgende Optimierungen und Fehler
 - **Guardian-Sync stabilisiert**: Nach dem Aufheben einer Quarantäne kann die Überwachung den gewünschten Zustand wieder sauber übernehmen. Endlose Sync-Konflikte („Konfigurationsprüfsumme weicht ab“) nach erfolgreicher Freigabe gehören damit der Vergangenheit an.
 - **Gilt auf jedem Node**: Der Fix sitzt im Agenten und im Panel-Contract — lokale und entfernte Worker verhalten sich gleich.
 
+### Managed PostgreSQL: Power-User klar und mandantensicher
+Für Server mit integrierter PostgreSQL-Datenbank wurde die Darstellung und Benennung des **Power-User**-Zugangs überarbeitet — vor allem für Betreiber, die mehrere Kunden oder Server auf denselben Nodes hosten.
+
+- **Keine irreführende „Superuser“-Bezeichnung mehr**: In der Datenbank-Oberfläche und in den Texten heißt es jetzt konsequent **Power-User**. Der frühere Eindruck, man erhalte einen clusterweiten PostgreSQL-SUPERUSER mit Zugriff außerhalb der eigenen Datenbank, war falsch und ist behoben.
+- **Gilt nur für diese eine Datenbank**: Power-User aktiviert erweiterte Owner-Credentials **ausschließlich für die ausgewählte Server-Datenbank**. Ein aktivierter Power-User bei Kunde A hat **keinen** Zugriff auf die Datenbank von Kunde B.
+- **Keine systemweiten Rechte**: Auch im Power-User-Modus bleibt die Rolle ohne Cluster-SUPERUSER und ohne Rechte, neue Datenbanken oder Rollen clusterweit anzulegen. Isolation zwischen Servern/Kunden bleibt erhalten.
+- **Klarere Hinweise beim Aktivieren, Rotieren und Entziehen**: Dialoge und Bestätigungstexte erklären den Geltungsbereich (nur diese DB, Passwort nur einmal sichtbar, nicht in Tickets/Logs teilen).
+- **Technisch unverändert stark**: Getrennte Datenbanken und Rollen pro Server, Netzwerkbindung und Panel-Berechtigungen bleiben die Grundlage der Isolation; die Texte und API-Felder (`is_power_user`) beschreiben das jetzt korrekt.
+
 ---
 
 *Maunting Server Manager v3.0.0 — Safety, Stability and Autonomous Operations.*
