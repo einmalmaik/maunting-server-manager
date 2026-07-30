@@ -41,18 +41,32 @@ from routers import (
     guardian_router,
 )
 from middleware.rate_limit import limiter
+from services.rate_limit_settings import current_auth_limit_from_settings
 from services.steam_service import close_steam_service
 from services.scheduler_service import start_scheduler, stop_scheduler, init_server_schedules
 from services.server_lifecycle_service import reconcile_orphaned_lifecycle_statuses
 
 
-# ── Auth-Endpunkte: 10/minute (strenger als global) ──
-_auth_limit_item = parse("10/minute")
+# ── Auth-Endpunkte: dynamisches Limit aus panel_settings (Default 10/min) ──
+# Warum pro Request neu lesen: Admin kann Login-Schutz unter Einstellungen →
+# Sicherheit anpassen (Firmen-IP / akuter Angriff), ohne Backend-Neustart.
+# parse() ist billig; bei Settings-Lesefehler greift resolve_* den Default.
 
 
 def auth_rate_limit(request: Request) -> None:
+    """Strenges Rate-Limit für Login/2FA/Passwort-Reset/Setup pro IP.
+
+    Liest rate_limit_auth aus den Panel-Settings (3–50, Default 10).
+    Bei ungültigen/fehlenden Werten fail-closed auf Default — nie unlimitiert.
+    """
     key = get_remote_address(request)
-    if not limiter.limiter.hit(_auth_limit_item, key):
+    try:
+        per_minute = current_auth_limit_from_settings()
+    except Exception:
+        # DB/Cache-Fehler dürfen Auth nie ungeschützt lassen
+        per_minute = 10
+    limit_item = parse(f"{per_minute}/minute")
+    if not limiter.limiter.hit(limit_item, key):
         raise HTTPException(
             status_code=429,
             detail="Zu viele Anfragen. Bitte warten Sie einen Moment.",

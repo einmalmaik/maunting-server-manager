@@ -37,7 +37,19 @@ export interface PanelSettings {
   captcha_provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
   captcha_site_key: string
   captcha_secret_key: string
+  /** Login/Auth-Anfragen pro Minute pro IP (Default 10, Range 3–50) */
+  rate_limit_auth: number
+  /** Globale API-Anfragen pro Minute pro IP (Default 100, Range 50–1000) */
+  rate_limit_global: number
 }
+
+/** Erlaubte Bereiche — spiegeln backend/services/rate_limit_settings.py */
+export const RATE_LIMIT_AUTH_MIN = 3
+export const RATE_LIMIT_AUTH_MAX = 50
+export const RATE_LIMIT_AUTH_DEFAULT = 10
+export const RATE_LIMIT_GLOBAL_MIN = 50
+export const RATE_LIMIT_GLOBAL_MAX = 1000
+export const RATE_LIMIT_GLOBAL_DEFAULT = 100
 
 export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   panel_url: '',
@@ -76,4 +88,6 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   captcha_provider: 'none',
   captcha_site_key: '',
   captcha_secret_key: '',
+  rate_limit_auth: RATE_LIMIT_AUTH_DEFAULT,
+  rate_limit_global: RATE_LIMIT_GLOBAL_DEFAULT,
 }

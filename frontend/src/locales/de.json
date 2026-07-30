@@ -69,7 +69,20 @@
     "rotateSuccess": "Cluster-Admin erfolgreich rotiert.",
     "rotateFailed": "Rotation fehlgeschlagen.",
     "noPermission": "Keine Berechtigung zum Rotieren von Cluster-Secrets.",
-    "noPermissionDetail": "Für diesen Bereich brauchst du die Berechtigung system.secrets.rotate (oder Owner)."
+    "noPermissionDetail": "Für diesen Bereich brauchst du die Berechtigung system.secrets.rotate (oder Owner).",
+    "rateLimitsTitle": "API- und Login-Rate-Limits",
+    "rateLimitsBody": "Begrenzt Anfragen pro Minute pro IP. Schützt Login und die Panel-API vor Brute-Force und Überlastung. Änderungen greifen ohne Neustart.",
+    "rateLimitAuthLabel": "Login & Authentifizierung (pro Minute)",
+    "rateLimitAuthHelp": "Maximal erlaubte Login- und Passwort-Versuche pro Minute pro IP. Erhöhe diesen Wert, wenn sich mehrere Personen über dieselbe Firmen-IP anmelden.",
+    "rateLimitAuthRange": "Bereich: {{min}}–{{max}} (Standard: {{default}})",
+    "rateLimitGlobalLabel": "Globales API-Limit (pro Minute)",
+    "rateLimitGlobalHelp": "Maximal erlaubte API-Aufrufe pro Minute pro IP. Erhöhe diesen Wert, wenn du eigene Skripte oder externe Tools zur Steuerung nutzt.",
+    "rateLimitGlobalRange": "Bereich: {{min}}–{{max}} (Standard: {{default}})",
+    "rateLimitNoWrite": "Keine Berechtigung zum Speichern von Rate-Limits.",
+    "rateLimitAuthInvalid": "Login-Limit muss eine ganze Zahl sein.",
+    "rateLimitGlobalInvalid": "API-Limit muss eine ganze Zahl sein.",
+    "rateLimitSaveFailed": "Rate-Limits konnten nicht gespeichert werden.",
+    "rotateHiddenHint": "Cluster-Admin-Rotation ist nur mit system.secrets.rotate (oder Owner) sichtbar."
   },
   "shell": {
     "openNavigation": "Navigation öffnen",

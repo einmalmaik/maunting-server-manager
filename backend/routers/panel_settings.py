@@ -22,6 +22,14 @@ from schemas.panel_settings import (
     SingraWebhookSecretRequest,
 )
 from services.panel_settings_service import PanelSettingsService
+from services.rate_limit_settings import (
+    KEY_AUTH as RATE_LIMIT_AUTH_KEY,
+    KEY_GLOBAL as RATE_LIMIT_GLOBAL_KEY,
+    resolve_auth_limit,
+    resolve_global_limit,
+    validate_auth_limit,
+    validate_global_limit,
+)
 from services.email_service import EmailService
 from services.auth_service import AuthService
 from services.steam_account_service import SteamAccountService
@@ -99,6 +107,9 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
                 aad="msm:settings:captcha_secret_key"
             ) if all_db.get("captcha_secret_key_encrypted", "") else all_db.get("captcha_secret_key", "")
         ),
+        # Rate-Limits: immer resolved (Default wenn unset/invalid), nie Rohmüll
+        "rate_limit_auth": resolve_auth_limit(all_db.get(RATE_LIMIT_AUTH_KEY, "")),
+        "rate_limit_global": resolve_global_limit(all_db.get(RATE_LIMIT_GLOBAL_KEY, "")),
     }
 
 
@@ -180,6 +191,18 @@ def update_settings(
             if len(snippet) > 8192:
                 raise HTTPException(status_code=400, detail="Snippet zu lang")
             value = snippet
+        # Rate-Limits: serverseitige Range-Validierung vor dem Schreiben.
+        # Ungültige Werte → 400, gespeicherte Werte bleiben unverändert.
+        if key == RATE_LIMIT_AUTH_KEY:
+            try:
+                value = validate_auth_limit(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if key == RATE_LIMIT_GLOBAL_KEY:
+            try:
+                value = validate_global_limit(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         if _is_masked(str(value)):
             continue
         if key == "smtp_password":

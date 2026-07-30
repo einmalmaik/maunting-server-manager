@@ -39,6 +39,9 @@ class PanelSettingsResponse(BaseModel):
     captcha_provider: str = "none"
     captcha_site_key: str = ""
     captcha_secret_key: str = ""
+    # Rate-Limits (Anfragen pro Minute pro IP); Defaults = Runtime-Fallback
+    rate_limit_auth: int = 10
+    rate_limit_global: int = 100
 
 
 class PanelSettingsUpdate(BaseModel):
@@ -65,6 +68,9 @@ class PanelSettingsUpdate(BaseModel):
     captcha_provider: str | None = None
     captcha_site_key: str | None = None
     captcha_secret_key: str | None = None
+    # Optional: nur mitsenden wenn der Security-Tab speichert
+    rate_limit_auth: int | None = None
+    rate_limit_global: int | None = None
 
 
 class TestEmailRequest(BaseModel):

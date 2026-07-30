@@ -69,7 +69,20 @@
     "rotateSuccess": "Cluster admin rotated successfully.",
     "rotateFailed": "Rotation failed.",
     "noPermission": "No permission to rotate cluster secrets.",
-    "noPermissionDetail": "This area requires the system.secrets.rotate permission (or owner)."
+    "noPermissionDetail": "This area requires the system.secrets.rotate permission (or owner).",
+    "rateLimitsTitle": "API and login rate limits",
+    "rateLimitsBody": "Limits requests per minute per IP. Protects login and the panel API from brute force and overload. Changes take effect without restart.",
+    "rateLimitAuthLabel": "Login & authentication (per minute)",
+    "rateLimitAuthHelp": "Maximum allowed login and password attempts per minute per IP. Raise this if several people sign in via the same corporate IP.",
+    "rateLimitAuthRange": "Range: {{min}}–{{max}} (default: {{default}})",
+    "rateLimitGlobalLabel": "Global API limit (per minute)",
+    "rateLimitGlobalHelp": "Maximum allowed API calls per minute per IP. Raise this if you use your own scripts or external tools for control.",
+    "rateLimitGlobalRange": "Range: {{min}}–{{max}} (default: {{default}})",
+    "rateLimitNoWrite": "No permission to save rate limits.",
+    "rateLimitAuthInvalid": "Login limit must be a whole number.",
+    "rateLimitGlobalInvalid": "API limit must be a whole number.",
+    "rateLimitSaveFailed": "Rate limits could not be saved.",
+    "rotateHiddenHint": "Cluster admin rotation is only visible with system.secrets.rotate (or owner)."
   },
   "shell": {
     "openNavigation": "Open navigation",

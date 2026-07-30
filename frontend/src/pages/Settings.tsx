@@ -30,10 +30,11 @@ type TabId =
 export function Settings() {
   const { t } = useTranslation()
   const canManageBackup = useHasPermission('panel.settings.write')
-  const canRotateSecrets = useHasPermission('system.secrets.rotate')
   const [activeTab, setActiveTab] = useState<TabId>('general')
 
-  // Backup-Tab: panel.settings.write. Security-Tab: system.secrets.rotate (msm_admin).
+  // Backup-Tab: panel.settings.write.
+  // Security-Tab: immer sichtbar (Rate-Limits für panel.settings.*;
+  // Cluster-Rotation bleibt im Tab selbst auf system.secrets.rotate beschränkt).
   const tabs: TabDef<TabId>[] = [
     { id: 'general', labelKey: 'settings.tabs.general', icon: Globe },
     { id: 'email', labelKey: 'settings.tabs.email', icon: Mail },
@@ -44,9 +45,7 @@ export function Settings() {
     { id: 'imprint', labelKey: 'settings.tabs.imprint', icon: FileText },
     { id: 'supportWidget', labelKey: 'settings.tabs.supportWidget', icon: LifeBuoy },
     ...(canManageBackup ? [{ id: 'backup' as TabId, labelKey: 'settings.tabs.backup', icon: Cloud }] : []),
-    ...(canRotateSecrets
-      ? [{ id: 'security' as TabId, labelKey: 'settings.tabs.security', icon: ShieldAlert }]
-      : []),
+    { id: 'security', labelKey: 'settings.tabs.security', icon: ShieldAlert },
   ]
 
   return (
