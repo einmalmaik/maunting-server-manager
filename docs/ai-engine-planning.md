@@ -48,6 +48,8 @@ backend/services/ai_engine/
 ├── memory_store.py      # Long-Term Preference & Entity Memory (DIS Encrypted / DB)
 ├── skill_registry.py    # Dynamic Skill Building & Procedural Knowledge Engine
 ├── persona_config.py    # Customizable System Prompt & Assistant Name Manager
+├── context_guard.py     # Token Budget & Log Slicing Middleware
+├── snapshot_guard.py    # Pre-Action Auto-Snapshot & Rollback Engine
 ├── tools.py             # Tool Definitions & Handlers (Server Ops, Files, Configs, Steam Workshop)
 └── safety.py            # Log Scrubbing, Path Sanitization, Mod Download Sandbox
 ```
@@ -72,6 +74,12 @@ backend/services/ai_engine/
 |   +-----------------------+     +-----------------------------+   |
 |   |  RBAC Permission Guard|     |  Skill & Memory Store       |   |
 |   |  (User Role Enforcement)|   |  (Continuous Learning)      |   |
+|   +-----------------------+     +-----------------------------+   |
+|               |                                |                  |
+|               v                                v                  |
+|   +-----------------------+     +-----------------------------+   |
+|   |  Token & Cost Budget  |     |  Pre-Action Snapshot Engine |   |
+|   |  (Context Window Guard)|    |  (1-Click Safety Rollback)  |   |
 |   +-----------------------+     +-----------------------------+   |
 |                                                |                  |
 +------------------------------------------------+------------------+
@@ -179,7 +187,7 @@ flowchart TD
     ActionType -- "Non-Destructive (Config, Mods, Start/Stop)" --> AutonomyCheck{"Autonomous Mode Active?"}
     
     AutonomyCheck -- "Nein (Assisted Mode)" --> DiffPreview["Visual Diff / Aktionsplan im UI"] --> UserConfirm["User klickt Bestätigen"]
-    AutonomyCheck -- "Ja (Autonomous Mode)" --> AutoExecute["Aktion direkt via Tools ausführen"]
+    AutonomyCheck -- "Ja (Autonomous Mode)" --> AutoExecute["Execute Action via Tool Calls"]
 ```
 
 ### Autonomous Mode Activation Flow
@@ -191,7 +199,28 @@ To activate Autonomous Mode:
 
 ---
 
-## 10. Defined LLM Tool Set (`backend/services/ai_engine/tools.py`)
+## 10. Critical Operational Invariants & Edge Case Safeguards
+
+To ensure absolute reliability in production environments, the following invariants are enforced:
+
+### A. Context Window Guard & Token Budget Protection (`context_guard.py`)
+* **Log Slicing:** Massive log files (e.g. 50 MB) are **never** fed raw into the LLM. Logs are pre-processed by regex error patterns and sliced into a max 16 KB / 200-line buffer.
+* **Daily Token Cap:** Admins can define a max daily token/credit usage cap in MSM Settings to protect BYOK keys from runaway costs.
+
+### B. Pre-Action Auto-Snapshot & 1-Click Rollback (`snapshot_guard.py`)
+* Before the AI modifies any configuration file or installs mods, MSM automatically creates a lightweight local **Pre-AI Config Snapshot**.
+* If the gameserver fails its boot healthcheck after an AI edit, a 1-click **"Rollback AI Changes"** button appears in the Chat UI.
+
+### C. Server Operational Mutex Lock
+* Simultaneous operations on the same gameserver (e.g. User A manually stopping a server while AI Assistant is installing a mod) are prevented using a Server Mutex Lock.
+
+### D. Audit Logging & Compliance Traceability
+* Every AI action (tool execution, power toggle, config patch) is recorded in MSM's central Audit Log as:  
+  `actor = "ai_assistant (on behalf of <username>)"`, linking the prompt, tool call, and result.
+
+---
+
+## 11. Defined LLM Tool Set (`backend/services/ai_engine/tools.py`)
 
 | Category | Tool Name | Parameters | Description |
 | :--- | :--- | :--- | :--- |
@@ -207,7 +236,7 @@ To activate Autonomous Mode:
 
 ---
 
-## 11. Development Roadmap & Phases
+## 12. Development Roadmap & Phases
 
 - [ ] **Phase 1: BYOK Provider Registry, DIS Storage & Onboarding Wizard**
   - OpenRouter, OpenAI, Anthropic, Gemini & Ollama provider adapters.
@@ -221,7 +250,9 @@ To activate Autonomous Mode:
 - [ ] **Phase 4: Memory Engine & Dynamic Skill Building (Hermes Style)**
   - Implement `memory_store.py` for user preferences.
   - Implement `skill_registry.py` for dynamic skill acquisition and runbook persistence.
-- [ ] **Phase 5: Mod Download Sandbox & 2FA Autonomy Barrier**
+- [ ] **Phase 5: Safety Safeguards, Mod Sandbox & 2FA Autonomy Barrier**
+  - Implement `snapshot_guard.py` for 1-click Auto-Rollback of AI edits.
+  - Implement `context_guard.py` for log slicing and daily token cost caps.
   - Implement `msm-mod-sandbox` container isolation for third-party mod downloads.
   - Implement 2-step activation modal + TOTP 2FA verification for Autonomous Mode.
   - Enforce non-bypassable manual approval for destructive actions.
