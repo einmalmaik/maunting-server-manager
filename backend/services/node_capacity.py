@@ -89,38 +89,10 @@ def ensure_ram_limit_fits(
     new_ram_limit_mb: int | None,
     exclude_server_id: int | None = None,
 ) -> None:
-    """Raise HTTPException 400 if the new limit would overbook the node.
+    """RAM overcommit is allowed by default. Soft accounting check.
 
-    Skip when:
-    - no node
-    - new limit is null (unlimited — not booked)
-    - node.ram_total is unknown (no heartbeat yet)
+    Skip blocking so users can assign RAM limits even if total booked limits
+    exceed host capacity (overcommit is handled via UI warning modal).
     """
-    from fastapi import HTTPException
+    return
 
-    if node is None or new_ram_limit_mb is None:
-        return
-    if node.ram_total is None:
-        return
-
-    try:
-        requested = int(new_ram_limit_mb)
-    except (TypeError, ValueError):
-        return
-    if requested <= 0:
-        return
-
-    allocated_others = sum_allocated_ram_mb(
-        db, node.id, exclude_server_id=exclude_server_id
-    )
-    remaining = allocatable_ram_mb(node, allocated_others)
-    if remaining is None:
-        return
-    if requested > remaining:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"RAM-Limit {requested} MB überschreitet den noch zuweisbaren Speicher "
-                f"dieses Nodes ({remaining} MB frei bei gebuchter Kapazität)."
-            ),
-        )

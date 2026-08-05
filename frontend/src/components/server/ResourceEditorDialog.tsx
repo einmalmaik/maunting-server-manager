@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { Cpu, MemoryStick, HardDrive, Info } from 'lucide-react'
 import { api, SanitizedApiError } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
+import type { Node } from '@/types'
 
 /**
  * Resource-Limit-Editor für Server-Detail (CPU / RAM / Disk).
@@ -23,6 +25,7 @@ import { toast } from '@/stores/toastStore'
 interface ResourceEditorDialogProps {
   onClose: () => void
   serverId: number
+  nodeId?: number | null
   cpuLimit: number | null
   ramLimit: number | null
   diskLimit: number | null
@@ -44,6 +47,7 @@ function limitToString(v: number | null): string {
 export function ResourceEditorDialog({
   onClose,
   serverId,
+  nodeId,
   cpuLimit,
   ramLimit,
   diskLimit,
@@ -200,6 +204,37 @@ export function ResourceEditorDialog({
       // No-op: keine geaenderten Felder -> Dialog schliessen ohne PATCH
       onClose()
       return
+    }
+
+    if (ramNum !== init.ram && ramNum != null && ramNum > 0 && nodeId) {
+      try {
+        const targetNode = await api<Node>(`/nodes/${nodeId}`)
+        if (targetNode) {
+          let availRamMb: number | null = null
+          if (targetNode.ram_allocatable_mb != null) {
+            availRamMb = Math.max(0, targetNode.ram_allocatable_mb)
+          } else if (targetNode.ram_total != null) {
+            availRamMb = Math.max(0, targetNode.ram_total - (targetNode.ram_allocated_mb ?? 0))
+          }
+          const currentLimit = init.ram ?? 0
+          const maxWithoutOvercommit = (availRamMb ?? 0) + currentLimit
+          if (availRamMb != null && ramNum > maxWithoutOvercommit) {
+            const formatRamMbLabel = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`)
+            const confirmed = await confirm({
+              title: t('servers.overcommitTitle'),
+              message: t('servers.overcommitWarning', {
+                requested: formatRamMbLabel(ramNum),
+                available: formatRamMbLabel(availRamMb),
+                total: formatRamMbLabel(targetNode.ram_total || 0),
+              }),
+              confirmText: t('servers.overcommitConfirm'),
+            })
+            if (!confirmed) return
+          }
+        }
+      } catch {
+        // Best-effort check
+      }
     }
 
     setSaving(true)

@@ -126,7 +126,8 @@ export function DatabaseConsole({
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => new Set())
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set())
-  const selectedDatabase = databases.find((db) => db.id === selectedDatabaseId) || databases[0] || null
+  const safeDatabases = Array.isArray(databases) ? databases : []
+  const selectedDatabase = safeDatabases.find((db) => db.id === selectedDatabaseId) || safeDatabases[0] || null
   const groupedTables = useMemo(() => groupTables(tables), [tables])
 
   const tabs: Array<{ key: TabKey; label: string; icon: typeof Table2 }> = [

@@ -310,7 +310,8 @@ export function FileManager({ serverId }: FileManagerProps) {
     setTreeOpen(false)
     setSelectedEntry(() => {
       const parent = parentPath(path)
-      const entry = nodes[parent]?.find((item) => item.name === fileName(path))
+      const parentNodes = Array.isArray(nodes[parent]) ? nodes[parent] : []
+      const entry = parentNodes.find((item) => item.name === fileName(path))
       return entry ? { entry, parent } : null
     })
     if (existing) return
@@ -475,7 +476,8 @@ export function FileManager({ serverId }: FileManagerProps) {
       try {
         const parent = parentPath(activePath)
         const response = await api<BrowseResponse>(`/files/${serverId}/browse?path=${encodeURIComponent(parent)}`)
-        const entry = response.entries.find((item) => item.name === fileName(activePath))
+        const entries = Array.isArray(response?.entries) ? response.entries : []
+        const entry = entries.find((item) => item.name === fileName(activePath))
         if (!entry) return
         setTabs((current) => current.map((tab) => tab.path === activePath ? {
           ...tab,
@@ -780,7 +782,7 @@ export function FileManager({ serverId }: FileManagerProps) {
             </div>
             <div className="p-3">
               <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">{t('files.quickActions')}</h4>
-              <button type="button" onClick={() => { const parent = parentPath(activeTab.path); const entry = nodes[parent]?.find((item) => item.name === fileName(activeTab.path)); if (entry) downloadEntry({ entry, parent }) }} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface"><Download className="h-3.5 w-3.5" />{t('files.download')}</button>
+              <button type="button" onClick={() => { const parent = parentPath(activeTab.path); const parentNodes = Array.isArray(nodes[parent]) ? nodes[parent] : []; const entry = parentNodes.find((item) => item.name === fileName(activeTab.path)); if (entry) downloadEntry({ entry, parent }) }} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface"><Download className="h-3.5 w-3.5" />{t('files.download')}</button>
             </div>
           </> : <p className="p-6 text-center text-xs text-on-surface-variant">{t('files.noDetails')}</p>}
         </aside>

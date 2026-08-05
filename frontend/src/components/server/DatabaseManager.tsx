@@ -47,8 +47,8 @@ export function DatabaseManager({ serverId }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   const selectedDatabase = useMemo(
-    () => resources.databases.find((database) => database.id === selectedDbId) || null,
-    [resources.databases, selectedDbId],
+    () => (Array.isArray(resources?.databases) ? resources.databases : []).find((database) => database.id === selectedDbId) || null,
+    [resources?.databases, selectedDbId],
   )
 
   const run = async (key: string, action: () => Promise<void>) => {
@@ -329,7 +329,7 @@ export function DatabaseManager({ serverId }: Props) {
 
   const deleteUser = (userId: number) =>
     run(`delete-user-${userId}`, async () => {
-      const user = resources.users.find((u) => u.id === userId)
+      const user = (Array.isArray(resources?.users) ? resources.users : []).find((u) => u.id === userId)
       if (!user) return
       const ok = await confirm({
         title: 'Datenbank-User löschen',

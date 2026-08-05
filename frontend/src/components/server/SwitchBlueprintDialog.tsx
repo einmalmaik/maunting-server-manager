@@ -29,10 +29,11 @@ export function SwitchBlueprintDialog({
     setLoading(true);
     api<BlueprintListEntry[]>("/blueprints")
       .then((data) => {
-        setBlueprints(data || []);
-        if (data && data.length > 0) {
-          const firstOther = data.find((b) => b.id !== server.game_type);
-          setSelectedId(firstOther ? firstOther.id : data[0].id);
+        const list = Array.isArray(data) ? data : [];
+        setBlueprints(list);
+        if (list.length > 0) {
+          const firstOther = list.find((b) => b.id !== server.game_type);
+          setSelectedId(firstOther ? firstOther.id : list[0].id);
         }
       })
       .catch((err) => {
@@ -64,7 +65,7 @@ export function SwitchBlueprintDialog({
   };
 
   const currentBpName =
-    blueprints.find((b) => b.id === server.game_type)?.name || server.game_type;
+    (Array.isArray(blueprints) ? blueprints : []).find((b) => b.id === server.game_type)?.name || server.game_type;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">

@@ -427,6 +427,9 @@
   "servers": {
     "subtitle": "Verwalte deine Game-Server",
     "create": "Server erstellen",
+    "overcommitTitle": "Node-Kapazität überschritten",
+    "overcommitWarning": "Auf diesem Node sind noch {{available}} RAM verfügbar (von {{total}}). Mit den neu zugewiesenen {{requested}} RAM wird die physische Kapazität überschritten. Wenn alle Server gleichzeitig laufen, reicht der Arbeitsspeicher nicht aus. Möchtest du die Ressourcen trotzdem so zuweisen?",
+    "overcommitConfirm": "Trotzdem zuweisen",
     "noServers": "Keine Server vorhanden",
     "createHint": "Erstelle deinen ersten Server, um loszulegen.",
     "name": "Name",

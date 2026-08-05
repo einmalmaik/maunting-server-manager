@@ -427,6 +427,9 @@
   "servers": {
     "subtitle": "Manage your game servers",
     "create": "Create Server",
+    "overcommitTitle": "Node capacity exceeded",
+    "overcommitWarning": "This node currently has {{available}} RAM available (out of {{total}}). Allocating {{requested}} RAM exceeds physical capacity. If all servers were running simultaneously, memory would not be sufficient. Do you still want to assign these resources?",
+    "overcommitConfirm": "Assign anyway",
     "noServers": "No servers yet",
     "createHint": "Create your first server to get started.",
     "name": "Name",

@@ -139,7 +139,7 @@ def test_sum_allocated_excludes_null_limits_and_other_nodes(db):
     ) == 4096
 
 
-def test_ensure_ram_limit_fits_blocks_overbook(db, monkeypatch):
+def test_ensure_ram_limit_fits_allows_overbook(db, monkeypatch):
     monkeypatch.setattr(node_capacity, "ram_headroom_mb", lambda: 1024)
     node = Node(
         name="n",
@@ -163,13 +163,10 @@ def test_ensure_ram_limit_fits_blocks_overbook(db, monkeypatch):
     )
     db.commit()
 
-    # budget = 8192 - 1024 = 7168; remaining = 7168 - 6144 = 1024
-    with pytest.raises(HTTPException) as exc:
-        node_capacity.ensure_ram_limit_fits(
-            db, node, new_ram_limit_mb=2048, exclude_server_id=None
-        )
-    assert exc.value.status_code == 400
-
+    # Overcommit is allowed (no exception raised)
+    node_capacity.ensure_ram_limit_fits(
+        db, node, new_ram_limit_mb=2048, exclude_server_id=None
+    )
     node_capacity.ensure_ram_limit_fits(
         db, node, new_ram_limit_mb=1024, exclude_server_id=None
     )

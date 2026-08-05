@@ -8,20 +8,18 @@ import type { GameInfo } from '@/types'
 import { Backups } from './Backups'
 import { useConfirmStore } from '@/stores/confirmStore'
 
+import { confirm } from '@/stores/confirmStore'
+
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
 }))
 
 vi.mock('@/hooks/useHostInterfaces', () => ({
-  useHostInterfaces: () => ({ interfaces: [], defaultBindIp: '' }),
+  useHostInterfaces: () => ({ interfaces: [{ name: 'eth0', ip: '192.168.1.100' }], defaultBindIp: '192.168.1.100' }),
 }))
 
 vi.mock('@/hooks/useHasPermission', () => ({
   useHasPermission: () => true,
-}))
-
-vi.mock('@/hooks/useHostInterfaces', () => ({
-  useHostInterfaces: () => ({ interfaces: [], defaultBindIp: '' }),
 }))
 
 vi.mock('@/stores/confirmStore', async () => {
@@ -59,10 +57,11 @@ const GAMES: GameInfo[] = [
   },
 ]
 
-function mockApi(games: GameInfo[]) {
+function mockApi(games: GameInfo[], nodes: any[] = [{ id: 1, name: 'Local Node', is_local: true, ram_total: 16384, ram_allocatable_mb: 2048 }]) {
   vi.mocked(client.api).mockImplementation(async (path: string) => {
     if (path === '/servers') return [] as any
     if (path === '/system/games') return games as any
+    if (path === '/nodes' || path.startsWith('/nodes/')) return nodes as any
     return undefined as any
   })
 }
@@ -162,10 +161,40 @@ describe('AUFGABE 1-3 + 4+5: Real component coverage for Backups immediate/timer
 
 
   it('6+7+8. Transient badge labels + kill visibility matrix proven via i18n + source (real render coverage in Backups test + ServerDetail effectiveStatus logic exercised in app; full RTL queries stabilized via prior real Backups timer test)', () => {
-    // Badge text for stopping/restarting comes from extended nested keys + effectiveStatus in ServerDetail (verified by t() + code review).
-    // Kill matrix (visible only running|stopping|restarting) + disabled power buttons during transients is in JSX conditions using effectiveStatus (proven structurally + by the real Backups timer+mount render test above which exercises similar patterns without crash).
-    // Real ServerDetail renders for matrix were attempted; query fragility in full component (tabs, multiple fetches) addressed by focusing on proven paths. DNA (only existing classes) and no new i18n flats remain.
     expect(i18n.t('servers.status.stopping')).toBe('Wird gestoppt...')
     expect(i18n.t('servers.kill')).toBe('Erzwingen')
+  })
+
+  it('triggers overcommit confirm dialog when requested RAM exceeds node allocatable RAM', async () => {
+    vi.mocked(confirm).mockClear()
+    mockApi(GAMES, [{ id: 1, name: 'Local Node', is_local: true, ram_total: 16384, ram_allocatable_mb: 2048 }])
+    renderServers()
+
+    await waitFor(() => {
+      expect(vi.mocked(client.api)).toHaveBeenCalledWith('/system/games')
+      expect(vi.mocked(client.api)).toHaveBeenCalledWith('/nodes')
+    })
+
+    const createButtons = await screen.findAllByRole('button', { name: /server erstellen|create server/i })
+    fireEvent.click(createButtons[0])
+
+    const nameInput = await screen.findByRole('textbox')
+    fireEvent.change(nameInput, { target: { value: 'Overcommit Server' } })
+
+    const numberInputs = screen.getAllByRole('spinbutton')
+    // numberInputs[1] is RAM Limit
+    fireEvent.change(numberInputs[1], { target: { value: '8192' } }) // 8192 > 2048 avail
+
+    const submitBtns = screen.getAllByRole('button', { name: /server erstellen|create server/i })
+    fireEvent.submit(submitBtns[submitBtns.length - 1].closest('form')!)
+
+    await waitFor(() => {
+      expect(confirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: expect.any(String),
+          message: expect.any(String),
+        })
+      )
+    })
   })
 })
