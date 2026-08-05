@@ -9,6 +9,8 @@ export interface AuditLogRow {
   action: string
   target_type: string | null
   target_id: number | null
+  origin: 'direct' | 'ai' | 'external' | 'system'
+  correlation_id: string | null
   details: string | null
   created_at: string | null
 }
@@ -69,6 +71,10 @@ export function mapAuditApiRows(payload: unknown): AuditLogRow[] {
       action,
       target_type: typeof raw.target_type === 'string' ? raw.target_type : null,
       target_id: raw.target_id == null ? null : Number(raw.target_id),
+      origin: raw.origin === 'ai' || raw.origin === 'external' || raw.origin === 'system'
+        ? raw.origin
+        : 'direct',
+      correlation_id: typeof raw.correlation_id === 'string' ? raw.correlation_id : null,
       details: typeof raw.details === 'string' ? raw.details : raw.details == null ? null : String(raw.details),
       created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
     })

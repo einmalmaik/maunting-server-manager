@@ -31,6 +31,7 @@ const PanelDatabase = lazy(() => import('./pages/PanelDatabase').then(module => 
 const AdminNodes = lazy(() => import('./pages/AdminNodes').then(module => ({ default: module.AdminNodes })))
 const AdminAudit = lazy(() => import('./pages/AdminAudit').then(module => ({ default: module.AdminAudit })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
+const Ai = lazy(() => import('./pages/Ai').then(module => ({ default: module.Ai })))
 import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
@@ -115,6 +116,7 @@ function App() {
             }
           />
           <Route path="profile" element={<Profile />} />
+          <Route path="ai" element={<RequirePermission routeKey="ai"><Ai /></RequirePermission>} />
           <Route path="docs" element={<Docs />} />
           <Route path="docs/blueprints" element={<BlueprintsDocs />} />
           <Route path="docs/oauth" element={<OAuthDocs />} />

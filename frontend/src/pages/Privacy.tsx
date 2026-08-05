@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-07-18',
-    version: '2.0',
+    lastUpdated: '2026-08-02',
+    version: '2.2',
     meta: 'Maunting Server Manager',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -52,6 +52,18 @@ export function Privacy() {
           t('privacyPolicy.sections.providers.items.oauth'),
           t('privacyPolicy.sections.providers.items.support'),
           t('privacyPolicy.sections.providers.items.s3'),
+        ],
+      },
+      {
+        heading: t('privacyPolicy.sections.ai.heading'),
+        body: t('privacyPolicy.sections.ai.body'),
+        items: [
+          t('privacyPolicy.sections.ai.items.messages'),
+          t('privacyPolicy.sections.ai.items.context'),
+          t('privacyPolicy.sections.ai.items.credentials'),
+          t('privacyPolicy.sections.ai.items.usage'),
+          t('privacyPolicy.sections.ai.items.memory'),
+          t('privacyPolicy.sections.ai.items.attachments'),
         ],
       },
       {

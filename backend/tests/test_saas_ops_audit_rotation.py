@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,6 +42,8 @@ def test_record_privileged_action_writes_row(db: Session, owner_user: User):
     )
     row = db.query(AuditLog).filter(AuditLog.id == entry.id).first()
     assert row is not None
+    assert row.origin == "direct"
+    assert str(UUID(row.correlation_id or "")) == row.correlation_id
     assert row.action == "postgres.database.create"
     assert row.target_id == 7
     assert row.details is not None
@@ -51,6 +54,24 @@ def test_record_privileged_action_writes_row(db: Session, owner_user: User):
 def test_record_rejects_empty_action(db: Session):
     with pytest.raises(ValueError, match="Ungueltiger Audit"):
         audit_service.record_privileged_action(db, user_id=1, action="")
+
+
+def test_record_rejects_invalid_audit_context(db: Session):
+    """Herkunft und Korrelation akzeptieren keine freien, unklaren Werte."""
+    with pytest.raises(ValueError, match="Audit-Herkunft"):
+        audit_service.record_privileged_action(
+            db,
+            user_id=1,
+            action="test.invalid_origin",
+            origin="browser",
+        )
+    with pytest.raises(ValueError, match="Korrelations-ID"):
+        audit_service.record_privileged_action(
+            db,
+            user_id=1,
+            action="test.invalid_correlation",
+            correlation_id="not-a-uuid",
+        )
 
 
 # ── Cluster admin rotation (service) ───────────────────────────────────────

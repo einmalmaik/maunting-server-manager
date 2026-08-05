@@ -69,6 +69,12 @@ describe('resolveRouteAccessState', () => {
     expect(resolve('audit', userWith(['panel.settings.read']))).toBe('forbidden')
   })
 
+  it('allows the AI surface for chat users and skill managers', () => {
+    expect(resolve('ai', userWith(['ai.chat.use']))).toBe('allowed')
+    expect(resolve('ai', userWith(['ai.skills.manage']))).toBe('allowed')
+    expect(resolve('ai', userWith(['ai.memory.use']))).toBe('forbidden')
+  })
+
   it('separates unknown routes and permission load errors', () => {
     expect(resolve('does-not-exist', owner)).toBe('notFound')
     expect(resolve('settings', null, { error: 'PERMISSIONS_LOAD_FAILED' })).toBe('error')

@@ -21,6 +21,14 @@ from .nodes import router as nodes_router
 from .incidents import router as incidents_router
 from .change_timeline import router as change_timeline_router
 from .guardian import router as guardian_router
+from .ai_settings import router as ai_settings_router
+from .tasks import router as tasks_router
+from .ai_providers import router as ai_providers_router
+from .ai_chat import router as ai_chat_router
+from .ai_actions import router as ai_actions_router
+from .ai_memory import router as ai_memory_router
+from .ai_skills import router as ai_skills_router
+from .ai_attachments import router as ai_attachments_router
 
 __all__ = [
     "auth_router",
@@ -46,4 +54,12 @@ __all__ = [
     "incidents_router",
     "change_timeline_router",
     "guardian_router",
+    "ai_settings_router",
+    "tasks_router",
+    "ai_providers_router",
+    "ai_chat_router",
+    "ai_actions_router",
+    "ai_memory_router",
+    "ai_skills_router",
+    "ai_attachments_router",
 ]  # noqa: E501

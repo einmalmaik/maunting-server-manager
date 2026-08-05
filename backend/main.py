@@ -5,7 +5,6 @@ import os
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
 
 from limits import parse
 from slowapi import _rate_limit_exceeded_handler
@@ -39,6 +38,14 @@ from routers import (
     incidents_router,
     change_timeline_router,
     guardian_router,
+    ai_settings_router,
+    tasks_router,
+    ai_providers_router,
+    ai_chat_router,
+    ai_actions_router,
+    ai_memory_router,
+    ai_skills_router,
+    ai_attachments_router,
 )
 from middleware.rate_limit import limiter
 from services.rate_limit_settings import current_auth_limit_from_settings
@@ -80,6 +87,11 @@ async def lifespan(app: FastAPI):
     import httpx
     limits = httpx.Limits(max_connections=200, max_keepalive_connections=50)
     app.state.http_client = httpx.AsyncClient(limits=limits, timeout=5.0)
+    app.state.ai_http_client = httpx.AsyncClient(
+        limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
+        timeout=httpx.Timeout(connect=5.0, read=90.0, write=10.0, pool=5.0),
+        follow_redirects=False,
+    )
 
     os.makedirs(settings.servers_dir, exist_ok=True)
     os.makedirs("/opt/msm/backups", exist_ok=True)
@@ -476,6 +488,16 @@ async def lifespan(app: FastAPI):
     from database import SessionLocal
     db = SessionLocal()
     try:
+        from services.operation_task_service import recover_interrupted_tasks
+
+        recovered_tasks = recover_interrupted_tasks(db)
+        if recovered_tasks:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "%d offene Backend-Aufgabe(n) nach Panel-Start abgeglichen.",
+                recovered_tasks,
+            )
         reconciled = reconcile_orphaned_lifecycle_statuses(db)
         if reconciled:
             import logging
@@ -513,10 +535,21 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).warning("OAuth-LoginChallenge-Cleanup fehlgeschlagen: %s", exc)
 
 
+    from services.ai_action_service import reconcile_interrupted_actions
+    from services.ai_chat_service import reconcile_interrupted_ai_streams
+
+    _ai_recovery_db = SessionLocal()
+    try:
+        reconcile_interrupted_ai_streams(_ai_recovery_db)
+        reconcile_interrupted_actions(_ai_recovery_db)
+    finally:
+        _ai_recovery_db.close()
+
     yield
 
     # Shutdown
     await app.state.http_client.aclose()
+    await app.state.ai_http_client.aclose()
     stop_scheduler()
     await close_steam_service()
 
@@ -536,7 +569,13 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-CSRF-Token",
+        "Idempotency-Key",
+        "X-Task-Retry-Of",
+    ],
     expose_headers=["X-CSRF-Token"],
 )
 
@@ -632,6 +671,14 @@ app.include_router(panel_database_router)
 app.include_router(incidents_router)
 app.include_router(change_timeline_router)
 app.include_router(guardian_router)
+app.include_router(ai_settings_router)
+app.include_router(ai_providers_router)
+app.include_router(ai_chat_router)
+app.include_router(ai_actions_router)
+app.include_router(ai_memory_router)
+app.include_router(ai_skills_router)
+app.include_router(ai_attachments_router)
+app.include_router(tasks_router)
 
 
 
@@ -649,7 +696,6 @@ def health():
 # damit /api/* und Health nicht vom SPA-Static-Fallback geschluckt werden.
 # /assets/* ohne html-Fallback: fehlende JS-Chunks liefern 404 (text/plain),
 # nicht index.html — verhindert „MIME type text/html“ bei veralteten Lazy-Chunks.
-import os
 _FRONTEND_DIST = "/opt/msm/frontend/dist"
 if settings.serve_frontend and os.path.exists(_FRONTEND_DIST):
     app.mount(

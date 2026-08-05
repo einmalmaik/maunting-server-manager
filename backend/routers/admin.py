@@ -3,6 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from database import get_db
 from models import (
@@ -17,6 +18,7 @@ from models import (
 from schemas.user import AdminUserCreate, UserResponse, UserUpdate
 from schemas.role import (
     AssignRoleRequest,
+    AssignRolesRequest,
     ServerPermissionsRequest,
     ServerPermissionsResponse,
 )
@@ -31,9 +33,11 @@ from services.permission_service import (
 )
 from services.permission_catalog import SYSTEM_ROLE_ADMIN, SYSTEM_ROLE_USER
 from services.role_service import (
+    effective_user_role_permission_keys,
     get_role,
     get_role_by_name,
     role_permission_keys,
+    set_user_roles,
 )
 from services import audit_service, postgres_service
 from services.postgres_service import PostgresServiceError
@@ -156,9 +160,11 @@ def delete_user(
     # Eskalations-Schutz: Wer einen User loescht, dessen Rolle Keys haelt, die
     # man selbst nicht hat, koennte indirekt Berechtigungen verschieben
     # (z.B. ein Non-Owner-Admin loescht einen Admin). Nur Subset zulassen.
-    if user.role_id is not None:
-        target_keys = role_permission_keys(db, user.role_id)
-        _ensure_no_global_escalation(db, actor, target_keys)
+    _ensure_no_global_escalation(
+        db,
+        actor,
+        effective_user_role_permission_keys(db, user),
+    )
 
     # FK-Cleanup: 4 abhängige Tabellen haben keine ON DELETE CASCADE-Regel
     # (audit_logs / backup_codes / jwt_blacklist / refresh_tokens).
@@ -215,6 +221,8 @@ async def create_user_admin(
             await EmailService.send_verification_code_email(req.email, req.username, code)
     db.commit()
     db.refresh(user)
+    if not user.is_owner and user.role_id is not None:
+        set_user_roles(db, user, [user.role_id])
     return user
 
 
@@ -229,6 +237,30 @@ def assign_role(
     actor: User = Depends(require_global("users.permissions.manage")),
     __: None = Depends(verify_csrf),
 ) -> User:
+    """Kompatibilitätsroute: ersetzt die Rollenmengen durch höchstens eine Rolle."""
+    role_ids = [] if req.role_id is None else [req.role_id]
+    return _assign_roles(user_id, role_ids, db, actor)
+
+
+@router.put("/users/{user_id}/roles", response_model=UserResponse)
+def assign_roles(
+    user_id: int,
+    req: AssignRolesRequest,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("users.permissions.manage")),
+    __: None = Depends(verify_csrf),
+) -> User:
+    """Ersetzt die globalen Rollen eines Benutzers durch eine validierte Menge."""
+    return _assign_roles(user_id, req.role_ids, db, actor)
+
+
+def _assign_roles(
+    user_id: int,
+    requested_role_ids: list[int],
+    db: Session,
+    actor: User,
+) -> User:
+    """Prüft Eskalationsgrenzen und speichert eine Multi-Role-Zuweisung."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User nicht gefunden")
@@ -247,11 +279,13 @@ def assign_role(
     # Auch das Entfernen der aktuellen Rolle ist eine Eskalations-Aktion: ein
     # Non-Owner darf einem User keine Rolle wegnehmen, deren Keys er selbst
     # nicht besitzt (sonst koennte er einen Admin-Account "entwaffnen").
-    if user.role_id is not None:
-        current_keys = role_permission_keys(db, user.role_id)
-        _ensure_no_global_escalation(db, actor, current_keys)
-    if req.role_id is not None:
-        role = get_role(db, req.role_id)
+    current_keys = effective_user_role_permission_keys(db, user)
+    _ensure_no_global_escalation(db, actor, current_keys)
+
+    desired_role_ids = sorted(set(requested_role_ids))
+    desired_keys: set[str] = set()
+    for role_id in desired_role_ids:
+        role = get_role(db, role_id)
         if not role:
             raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
         # Zuweisung der `admin`-System-Rolle ist nur dem Owner erlaubt
@@ -264,12 +298,30 @@ def assign_role(
         # Generalisiertes Eskalationsverbot: Actor muss alle Keys der
         # Ziel-Rolle selbst global besitzen — sonst koennte er sich (oder
         # andere) ueber eine Custom-Rolle hochziehen.
-        _ensure_no_global_escalation(
-            db, actor, role_permission_keys(db, role.id)
+        desired_keys.update(role_permission_keys(db, role.id))
+    _ensure_no_global_escalation(db, actor, sorted(desired_keys))
+
+    try:
+        set_user_roles(db, user, desired_role_ids, commit=False)
+        audit_service.record_privileged_action(
+            db,
+            user_id=actor.id,
+            action="user.roles.updated",
+            target_type="user",
+            target_id=user.id,
+            details={"role_ids": desired_role_ids},
         )
-    user.role_id = req.role_id
-    db.commit()
-    db.refresh(user)
+        db.commit()
+        db.refresh(user)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Rollenzuweisung konnte wegen einer gleichzeitigen Änderung nicht gespeichert werden",
+        ) from exc
     return user
 
 
@@ -396,6 +448,8 @@ class AuditLogOut(BaseModel):
     action: str
     target_type: str | None
     target_id: int | None
+    origin: str
+    correlation_id: str | None
     details: str | None
     created_at: datetime | None
 

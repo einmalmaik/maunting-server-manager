@@ -16,7 +16,7 @@ class PermissionDef:
     """Eine Permission-Definition (Key + UI-Metadaten)."""
 
     key: str
-    group: str       # "users", "panel", "servers", "server", "system" — UI-Gruppierung
+    group: str       # "users", "panel", "servers", "server", "system", "ai" — UI-Gruppierung
     label: str       # kurzer DE-Text fuer das Settings-UI
 
 
@@ -40,6 +40,16 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("system.secrets.rotate",     "system",  "Cluster-Secrets rotieren (Managed-Postgres-Admin)"),
     PermissionDef("nodes.read",                "system",  "Nodeliste sehen"),
     PermissionDef("nodes.manage",              "system",  "Nodes anlegen, bearbeiten, loeschen"),
+    # AI-Rechte bleiben fein granular. Kein Recht impliziert freie Shell- oder
+    # Host-Ausführung; spätere Tools prüfen zusätzlich ihr jeweiliges MSM-Recht.
+    PermissionDef("ai.chat.use",               "ai",      "KI-Chat verwenden"),
+    PermissionDef("ai.attachments.use",        "ai",      "Anhänge im KI-Chat verwenden"),
+    PermissionDef("ai.memory.use",             "ai",      "Eigenes KI-Memory verwenden"),
+    PermissionDef("ai.skills.use",             "ai",      "Freigegebene KI-Skills verwenden"),
+    PermissionDef("ai.skills.manage",          "ai",      "KI-Skills erstellen und verwalten"),
+    PermissionDef("ai.web_search.use",         "ai",      "Websuche über die KI verwenden"),
+    PermissionDef("ai.autonomous.use",         "ai",      "Autonomen KI-Modus verwenden"),
+    PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.

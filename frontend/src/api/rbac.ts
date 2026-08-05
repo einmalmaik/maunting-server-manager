@@ -7,6 +7,7 @@ import type {
   RoleUpdate,
   ServerPermissionsResponse,
 } from '@/types/permissions'
+import type { User } from '@/types'
 
 export const rbacApi = {
   catalog: () => api<PermissionCatalog>('/permissions/catalog'),
@@ -25,6 +26,12 @@ export const rbacApi = {
     api<void>(`/admin/users/${userId}/role`, {
       method: 'PATCH',
       body: JSON.stringify({ role_id: roleId }),
+    }),
+
+  assignRoles: (userId: number, roleIds: number[]) =>
+    api<User>(`/admin/users/${userId}/roles`, {
+      method: 'PUT',
+      body: JSON.stringify({ role_ids: roleIds }),
     }),
 
   getServerPermissions: (userId: number, serverId: number) =>

@@ -14,7 +14,8 @@
     "panelBackups": "Panel-Backups",
     "panelDatabase": "Panel-Datenbank",
     "nodes": "Nodes",
-    "audit": "Audit"
+    "audit": "Audit",
+    "ai": "KI-Assistent"
   },
   "navGroups": {
     "overview": "Überblick",
@@ -52,8 +53,16 @@
     "colTime": "Zeit",
     "colUser": "User-ID",
     "colAction": "Action",
+    "colOrigin": "Herkunft",
+    "colCorrelation": "Vorgang",
     "colTarget": "Ziel",
-    "colDetails": "Details"
+    "colDetails": "Details",
+    "origins": {
+      "direct": "Direkt",
+      "ai": "KI",
+      "external": "Extern",
+      "system": "System"
+    }
   },
   "security": {
     "clusterAdminTitle": "Managed-Postgres Cluster-Admin",
@@ -83,6 +92,164 @@
     "rateLimitGlobalInvalid": "API-Limit muss eine ganze Zahl sein.",
     "rateLimitSaveFailed": "Rate-Limits konnten nicht gespeichert werden.",
     "rotateHiddenHint": "Cluster-Admin-Rotation ist nur mit system.secrets.rotate (oder Owner) sichtbar."
+  },
+  "aiSettings": {
+    "title": "KI-Kontingente pro Rolle",
+    "description": "Konfiguriere Token-, Anfrage-, Parallelitäts- und Kostengrenzen getrennt von den Rollenrechten. Die Durchsetzung erfolgt ausschließlich im Backend.",
+    "ruleHelp": "Bei mehreren Rollen gewinnt der höchste Wert; eine explizit unbegrenzte Rolle gewinnt über begrenzte Rollen. 0 sperrt das jeweilige Kontingent.",
+    "dailyTokens": "Tägliches Tokenlimit",
+    "weeklyTokens": "Wöchentliches Tokenlimit",
+    "monthlyTokens": "Monatliches Tokenlimit",
+    "requestsPerMinute": "Anfragen pro Minute",
+    "concurrentOperations": "Gleichzeitige KI-Vorgänge",
+    "monthlyCostCents": "Monatliches Kostenlimit (Cent)",
+    "unlimited": "Unbegrenzt",
+    "configured": "Explizit konfiguriert",
+    "safeDefault": "Noch nicht konfiguriert — sicherer Standard: 0",
+    "noRoles": "Es sind noch keine Rollen vorhanden.",
+    "noPermission": "Keine Berechtigung zum Lesen der KI-Einstellungen.",
+    "loadFailed": "KI-Limits konnten nicht geladen werden.",
+    "saveFailed": "KI-Limits konnten nicht gespeichert werden.",
+    "saved": "KI-Limits gespeichert."
+  },
+  "ai": {
+    "providers": {
+      "title": "KI-Provider",
+      "description": "Konfiguriere vertrauenswürdige OpenAI-kompatible Endpunkte. Zieladresse und Operator-Key sind ausschließlich für Panel-Administratoren sichtbar.",
+      "add": "Provider hinzufügen",
+      "empty": "Noch kein KI-Provider konfiguriert.",
+      "name": "Name",
+      "model": "Standardmodell",
+      "baseUrl": "Basis-URL",
+      "operatorKey": "Operator-API-Key",
+      "keyConfigured": "Key konfiguriert ({{hint}}); leer lassen, um ihn beizubehalten",
+      "keyOptional": "Optionaler zentraler API-Key",
+      "clearOperatorKey": "Zentralen Operator-Key beim Speichern entfernen",
+      "enabled": "Provider aktiviert",
+      "requiresKey": "API-Key erforderlich",
+      "privateNetwork": "Private Netzwerkziele erlauben",
+      "privateNetworkHint": "Nur für bewusst betriebene interne Provider aktivieren. Link-local, reservierte und unspezifizierte Ziele bleiben blockiert.",
+      "saved": "KI-Provider gespeichert.",
+      "deleted": "KI-Provider gelöscht.",
+      "deleteTitle": "KI-Provider löschen?",
+      "deleteConfirm": "Provider {{name}} und die zugehörigen Zugangsdaten wirklich löschen?",
+      "errors": { "load": "KI-Provider konnten nicht geladen werden.", "save": "KI-Provider konnte nicht gespeichert werden.", "delete": "KI-Provider konnte nicht gelöscht werden." }
+    },
+    "credentials": {
+      "title": "Eigene KI-Zugangsdaten",
+      "description": "Dein API-Key wird verschlüsselt gespeichert und nur für deine Anfragen verwendet. Er wird nach dem Speichern nie wieder angezeigt.",
+      "empty": "Derzeit ist kein KI-Provider verfügbar.",
+      "available": "Verfügbar",
+      "keyRequired": "Eigener Key erforderlich",
+      "apiKey": "API-Key",
+      "configured": "Eigener Key konfiguriert; neuen Key eingeben, um ihn zu ersetzen",
+      "placeholder": "API-Key eingeben",
+      "remove": "Eigenen Key entfernen",
+      "saved": "KI-Zugangsdaten sicher gespeichert.",
+      "deleted": "Eigener KI-Key entfernt.",
+      "deleteTitle": "Eigenen API-Key entfernen?",
+      "deleteConfirm": "Deinen API-Key für {{name}} wirklich entfernen?",
+      "errors": { "load": "KI-Provider konnten nicht geladen werden.", "save": "API-Key konnte nicht gespeichert werden.", "delete": "API-Key konnte nicht entfernt werden." }
+    },
+    "memory": {
+      "title": "Persönliches KI-Memory",
+      "description": "Verwalte explizite Präferenzen, die deinen KI-Unterhaltungen als nicht vertrauenswürdiger Kontext bereitgestellt werden können.",
+      "enabled": "Memory im KI-Kontext verwenden",
+      "empty": "Noch keine persönlichen Memory-Einträge vorhanden.",
+      "key": "Schlüssel, z. B. response.language",
+      "value": "Präferenz",
+      "saved": "Memory-Eintrag gespeichert.",
+      "delete": "Memory-Eintrag löschen",
+      "deleteConfirm": "Den Memory-Eintrag „{{key}}“ wirklich löschen?",
+      "secretHint": "Keine Passwörter, API-Keys, Tokens oder anderen Zugangsdaten speichern. Memory-Inhalte können an den gewählten externen KI-Provider übertragen werden.",
+      "errors": { "load": "KI-Memory konnte nicht geladen werden.", "save": "KI-Memory konnte nicht gespeichert werden.", "delete": "Memory-Eintrag konnte nicht gelöscht werden." }
+    },
+    "skills": {
+      "title": "Versionierte KI-Skills",
+      "description": "Erstelle kurze, nachvollziehbare Abläufe aus fest freigegebenen MSM-Werkzeugen. Jede Änderung erzeugt eine neue unveränderliche Version.",
+      "safetyHint": "Leseschritte liefern minimierte Informationen. Schreibende Schritte erstellen nur einen Vorschlag und benötigen weiterhin die manuelle Bestätigung in der Unterhaltung.",
+      "add": "Neuer Skill",
+      "empty": "Noch kein Skill vorhanden. Lege den ersten freigegebenen Ablauf an.",
+      "existing": "Vorhandener Skill",
+      "newSkill": "Neuen Skill anlegen",
+      "key": "Stabiler Skill-Key",
+      "name": "Name",
+      "descriptionLabel": "Beschreibung",
+      "enabled": "Skill aktiviert",
+      "enabledHint": "Deaktivierte Skills werden im Server-Chat nicht angeboten.",
+      "disabled": "deaktiviert",
+      "steps": "Geordnete Schritte",
+      "stepsHint": "Bis zu 20 Schritte; freie Skripte und beliebige Befehle sind nicht erlaubt.",
+      "addStep": "Schritt hinzufügen",
+      "removeStep": "Schritt {{number}} entfernen",
+      "moveUp": "Schritt {{number}} nach oben verschieben",
+      "moveDown": "Schritt {{number}} nach unten verschieben",
+      "stepTool": "Werkzeug für Schritt {{number}}",
+      "readOnly": "nur lesen",
+      "proposal": "Bestätigung erforderlich",
+      "logLines": "Logzeilen (1–200)",
+      "configPath": "Relativer Konfigurationspfad",
+      "configPathPlaceholder": "config/server.cfg",
+      "operation": "Vorgeschlagene Serveraktion",
+      "operations": { "start": "Starten", "stop": "Stoppen", "restart": "Neu starten" },
+      "tools": { "read_server_status": "Serverstatus lesen", "read_server_capacity": "Serverkapazität lesen", "read_server_logs": "Bereinigte Serverlogs lesen", "read_config": "Konfiguration lesen", "propose_server_lifecycle": "Serveraktion vorschlagen", "propose_backup": "Backup vorschlagen" },
+      "select": "Skill auswählen",
+      "run": "Skill starten",
+      "readResult": "Sicheres Leseergebnis",
+      "runCreated": "Skill abgeschlossen; {{count}} Vorschlag/Vorschläge warten auf Prüfung.",
+      "create": "Skill erstellen",
+      "saveVersion": "Neue Version speichern",
+      "created": "Skill in Version {{version}} erstellt.",
+      "updated": "Neue Skill-Version {{version}} gespeichert.",
+      "error": "Skill konnte nicht ausgeführt werden.",
+      "errors": { "load": "KI-Skills konnten nicht geladen werden.", "save": "KI-Skill konnte nicht gespeichert werden." }
+    },
+    "attachments": {
+      "add": "Sicheren Anhang hinzufügen",
+      "uploading": "Anhang wird geprüft …",
+      "supported": "TXT, Konfiguration, Log, PNG oder JPEG · maximal 256 KiB",
+      "list": "Anhänge dieser Unterhaltung",
+      "remove": "Anhang entfernen",
+      "error": "Anhang konnte nicht sicher verarbeitet werden."
+    },
+    "chat": {
+      "title": "KI-Assistent",
+      "description": "Persistente, kontingentierte Unterstützung für Panel- und Serveraufgaben.",
+      "status": "Kontrollierter Kontext",
+      "new": "Neue Unterhaltung",
+      "newTitle": "Neue Unterhaltung",
+      "emptyConversations": "Noch keine Unterhaltungen.",
+      "selectProvider": "Provider auswählen",
+      "delete": "Unterhaltung löschen",
+      "deleteConfirm": "Diese Unterhaltung und alle Nachrichten wirklich löschen?",
+      "emptyTitle": "Womit kann ich helfen?",
+      "emptyDescription": "Der Assistent erhält nur den freigegebenen, minimierten Kontext. Prüfe wichtige Aussagen vor operativen Änderungen.",
+      "you": "Du",
+      "assistant": "Assistent",
+      "thinking": "Antwort wird erstellt …",
+      "noResponse": "Keine Antwort erhalten.",
+      "failed": "Diese Antwort konnte nicht abgeschlossen werden.",
+      "placeholder": "Nachricht eingeben …",
+      "message": "Nachricht",
+      "send": "Senden",
+      "noProvider": "Kein verfügbarer Provider. Hinterlege im Profil einen eigenen API-Key oder bitte einen Administrator um Konfiguration.",
+      "privacyHint": "Nachricht, freigegebener Kontext, aktiviertes Memory und bereitgestellte Anhänge werden an den gewählten externen Provider übertragen und im Panel gespeichert.",
+      "errors": { "load": "KI-Unterhaltungen konnten nicht geladen werden.", "create": "Unterhaltung konnte nicht erstellt werden.", "delete": "Unterhaltung konnte nicht gelöscht werden.", "stream": "Die KI-Antwort wurde unterbrochen.", "empty": "Die Nachricht ist leer.", "access": "Der Zugriff wurde entzogen.", "notFound": "Unterhaltung oder Provider ist nicht mehr verfügbar.", "keyMissing": "Für diesen Provider fehlt ein API-Key.", "requestConflict": "Diese Anfrage wurde bereits verarbeitet.", "quota": "Dein KI-Kontingent ist ausgeschöpft.", "credential": "Der API-Key ist vorübergehend nicht verfügbar.", "unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar.", "provider": "Der KI-Provider hat die Anfrage abgelehnt.", "toolRejected": "Der angeforderte KI-Werkzeugaufruf wurde aus Sicherheitsgründen abgelehnt." }
+    },
+    "actions": {
+      "title": "KI-Aktionsvorschlag",
+      "tools": { "propose_server_lifecycle": "Serverstatus ändern", "propose_backup": "Backup erstellen", "propose_config_update": "Konfiguration ändern" },
+      "status": { "proposed": "Prüfung erforderlich", "confirmed": "Bestätigt", "executing": "Wird ausgeführt", "succeeded": "Ausgeführt", "failed": "Fehlgeschlagen", "expired": "Abgelaufen" },
+      "operation": "Aktion: {{operation}}",
+      "review": "Prüfen und ausführen",
+      "execute": "Jetzt ausführen",
+      "executing": "Wird ausgeführt …",
+      "confirmTitle": "KI-Vorschlag manuell bestätigen?",
+      "confirm": { "propose_server_lifecycle": "Die Aktion „{{operation}}“ wirkt auf den Serverbetrieb. Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.", "propose_backup": "Jetzt ein Server-Backup erstellen? Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.", "propose_config_update": "Die angezeigte Änderung an „{{path}}“ revisionsgebunden schreiben? Bei zwischenzeitlicher Änderung wird die Ausführung blockiert." },
+      "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
+      "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
+      "error": "Der KI-Vorschlag konnte nicht ausgeführt werden."
+    }
   },
   "shell": {
     "openNavigation": "Navigation öffnen",
@@ -1044,7 +1211,8 @@
     "restarts": "Automatische Neustarts",
     "backups": "Backups",
     "databases": "Datenbanken",
-    "webhooks": "Webhooks"
+    "webhooks": "Webhooks",
+    "ai": "KI-Assistent"
   },
   "scheduler": {
     "title": "Scheduler",
@@ -1131,7 +1299,8 @@
       "imprint": "Impressum",
       "supportWidget": "Support-Widget",
       "backup": "Backup",
-      "security": "Sicherheit"
+      "security": "Sicherheit",
+      "ai": "KI"
     },
     "imprint": {
       "title": "Impressum",
@@ -1316,6 +1485,7 @@
       "password": "Passwort",
       "2fa": "2-Faktor",
       "linked": "Verknüpfte Konten",
+      "ai": "KI-Zugangsdaten",
       "danger": "Gefahrenzone"
     },
     "email": "E-Mail-Adresse",
@@ -1909,8 +2079,20 @@
           "s3": "S3-kompatibler Speicher: verschlüsselte Backup-Objekte sowie technische Objekt-, Account-, Zeit- und Übertragungsmetadaten"
         }
       },
+      "ai": {
+        "heading": "6. KI-Assistent und externe Modellanbieter",
+        "body": "KI-Funktionen sind optional. Bei Nutzung verarbeitet das Panel die Unterhaltung und überträgt die Nachricht mit einem minimierten, redigierten Kontext an den ausgewählten Modellanbieter. Der Betreiber bestimmt verfügbare Anbieter und muss deren Bedingungen und Rechtsgrundlage dokumentieren.",
+        "items": {
+          "messages": "Globale und serverbezogene Chatverläufe werden dem Account zugeordnet im Panel gespeichert und können vom Nutzer gelöscht werden",
+          "context": "Übertragen werden die eingegebene Nachricht, begrenzte vorherige Nachrichten und ausschließlich freigegebene Servermetadaten; IP-Adressen, Installationspfade, vollständige Konfigurationen und erkannte Secrets werden nicht in den Modellkontext aufgenommen",
+          "credentials": "Persönliche und zentrale Provider-API-Keys werden über DIS kontextgebunden verschlüsselt und nach dem Speichern nur als Konfigurationsstatus beziehungsweise Maske angezeigt",
+          "usage": "Provider, Modell, Tokenreservierung, tatsächlicher oder konservativ geschätzter Verbrauch und Zeitpunkte werden zur Kontingentdurchsetzung gespeichert; Preiswerte werden ohne belastbare Preisquelle nicht behauptet",
+          "memory": "Optionale persönliche, serverbezogene und panelweite Memory-Einträge werden verschlüsselt gespeichert, sind einsehbar und löschbar und werden nur bei aktivierter Memory-Nutzung als nicht vertrauenswürdiger Kontext übertragen",
+          "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen"
+        }
+      },
       "storage": {
-        "heading": "6. Cookies und lokale Browser-Speicherung",
+        "heading": "7. Cookies und lokale Browser-Speicherung",
         "body": "Das Panel nutzt Browser-Speicherung, die für den sicheren Betrieb und gewählte Einstellungen benötigt wird.",
         "items": {
           "session": "Session- oder Auth-Cookies, um Nutzer angemeldet zu halten",
@@ -1919,7 +2101,7 @@
         }
       },
       "retention": {
-        "heading": "7. Aufbewahrung und Account-Löschung",
+        "heading": "8. Aufbewahrung und Account-Löschung",
         "body": "Die Aufbewahrung hängt von Betreiberkonfiguration, Infrastruktur, Backups und rechtlichen Pflichten ab.",
         "items": {
           "operator": "Der Betreiber muss geeignete Fristen festlegen, dokumentieren und nicht mehr benötigte Daten löschen",
@@ -1928,7 +2110,7 @@
         }
       },
       "responsibility": {
-        "heading": "8. Verantwortung des Betreibers und Anfragen",
+        "heading": "9. Verantwortung des Betreibers und Anfragen",
         "body": "Nutzer richten Auskunfts-, Berichtigungs-, Lösch-, Widerspruchs- und Anbieterfragen an den Betreiber dieser MSM-Instanz. Der Betreiber ist für Veröffentlichung seiner Identität, Kontaktmöglichkeit, Rechtsgrundlage, Anbieterliste und instanzspezifischen Aufbewahrungsinformationen verantwortlich."
       }
     }

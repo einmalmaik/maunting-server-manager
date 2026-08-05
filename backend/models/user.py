@@ -46,6 +46,11 @@ class User(Base):
     )
 
     role: Mapped["Role | None"] = relationship("Role", back_populates="users")
+    role_assignments: Mapped[list["UserRole"]] = relationship(
+        "UserRole",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     server_permissions: Mapped[list["ServerPermission"]] = relationship(
         "ServerPermission",
         foreign_keys="ServerPermission.user_id",
@@ -54,6 +59,14 @@ class User(Base):
     )
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     backup_codes: Mapped[list["BackupCode"]] = relationship("BackupCode", back_populates="user", cascade="all, delete-orphan")
+
+    @property
+    def role_ids(self) -> list[int]:
+        """Liefert alle Rollen-IDs inklusive der kompatiblen Legacy-Primärrolle."""
+        assigned = {assignment.role_id for assignment in self.role_assignments}
+        if self.role_id is not None:
+            assigned.add(self.role_id)
+        return sorted(assigned)
 
     # ── E-Mail Property (transparente DIS-Ver-/Entschluesselung) ──
 

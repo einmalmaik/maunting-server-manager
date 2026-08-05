@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user, require_server_permission, verify_csrf
-from models import AuditLog, ChangeEvent, Server, User
+from models import ChangeEvent, Server, User
+from services import audit_service
 from services.guardian_state_service import prepare_quarantine_clear
 from services.server_lifecycle_service import sync_desired_state_to_agent
 
@@ -32,14 +33,14 @@ def clear_quarantine(
     import uuid
     operation_id = str(uuid.uuid4())
     prepare_quarantine_clear(server, operation_id=operation_id)
-    db.add(
-        AuditLog(
-            user_id=user.id,
-            action="guardian.quarantine.clear",
-            target_type="server",
-            target_id=server.id,
-            details=f"operation_id={operation_id}",
-        )
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="guardian.quarantine.clear",
+        target_type="server",
+        target_id=server.id,
+        details={"operation_id": operation_id},
+        correlation_id=operation_id,
     )
     db.add(
         ChangeEvent(

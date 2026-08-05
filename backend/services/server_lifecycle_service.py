@@ -362,6 +362,7 @@ def queue_lifecycle_operation(
     server: Server,
     operation: LifecycleOperation,
     notification: LifecycleNotification | None = None,
+    task_id: str | None = None,
 ) -> dict:
     """Startet eine Lifecycle-Aktion ausserhalb des HTTP-Request-Pfads.
 
@@ -452,6 +453,7 @@ def queue_lifecycle_operation(
             operation,
             notification or LifecycleNotification(),
             operation_epoch,
+            task_id,
         )
     except Exception as exc:
         _mark_job_done(server.id)
@@ -470,10 +472,11 @@ def _start_lifecycle_thread(
     operation: LifecycleOperation,
     notification: LifecycleNotification,
     operation_epoch: int,
+    task_id: str | None = None,
 ) -> None:
     thread = threading.Thread(
         target=_run_lifecycle_job,
-        args=(server_id, operation, notification, operation_epoch),
+        args=(server_id, operation, notification, operation_epoch, task_id),
         daemon=True,
         name=f"msm-lifecycle-{server_id}-{operation}",
     )
@@ -485,20 +488,25 @@ def _run_lifecycle_job(
     operation: LifecycleOperation,
     notification: LifecycleNotification | None = None,
     operation_epoch: int | None = None,
+    task_id: str | None = None,
 ) -> None:
     if operation_epoch is None:
         operation_epoch = _advance_operation_epoch(server_id)
     db = SessionLocal()
     lock = get_server_lifecycle_lock(server_id)
+    task_succeeded = False
+    task_error_code = "server_lifecycle_failed"
     try:
         with lock:
             _ensure_operation_current(server_id, operation_epoch)
             server = db.query(Server).filter(Server.id == server_id).first()
             if not server:
+                task_error_code = "server_not_found"
                 return
             plugin = get_plugin(server.game_type)
             if not plugin:
                 _set_status(db, server, "failed", "Spiel-Typ nicht unterstützt")
+                task_error_code = "unsupported_game_type"
                 return
 
             _set_status(db, server, _operation_status(operation), None)
@@ -522,10 +530,12 @@ def _run_lifecycle_job(
                         )
                     elif operation == "kill":
                         _run_kill(db, server)
+                    task_succeeded = True
                     if notification and notification.enabled:
                         _send_lifecycle_notification(notification, server.name, _operation_done_text(operation))
                 except LifecycleOperationCancelled:
                     db.rollback()
+                    task_error_code = "lifecycle_superseded"
                     logger.info(
                         "Lifecycle-%s fuer Server %s wurde durch eine neuere Operation abgebrochen",
                         operation,
@@ -533,6 +543,7 @@ def _run_lifecycle_job(
                     )
                 except Exception as exc:
                     db.rollback()
+                    task_error_code = "server_lifecycle_failed"
                     server = db.query(Server).filter(Server.id == server_id).first()
                     if server:
                         message = _safe_error_message(getattr(exc, "detail", exc))
@@ -541,7 +552,33 @@ def _run_lifecycle_job(
                         db.commit()
                         _append_console_log(server.id, f"[MSM] Lifecycle-{operation} fehlgeschlagen: {message}\n")
                     logger.warning("Lifecycle-%s fuer Server %s fehlgeschlagen: %s", operation, server_id, exc)
+    except Exception as exc:
+        db.rollback()
+        task_error_code = "server_lifecycle_failed"
+        logger.warning(
+            "Lifecycle-%s fuer Server %s ausserhalb der Operation fehlgeschlagen: %s",
+            operation,
+            server_id,
+            type(exc).__name__,
+        )
+        if task_id is None:
+            raise
     finally:
+        from services.operation_task_service import finish_lifecycle_task
+
+        try:
+            finish_lifecycle_task(
+                db,
+                task_id,
+                succeeded=task_succeeded,
+                error_code=task_error_code,
+            )
+        except Exception:
+            db.rollback()
+            logger.warning(
+                "Lifecycle-Task konnte nicht abgeschlossen werden (server_id=%s)",
+                server_id,
+            )
         _mark_job_done(server_id)
         db.close()
 

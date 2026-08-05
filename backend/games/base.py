@@ -183,6 +183,21 @@ def finish_install(server_id: int, result: dict) -> None:
             server.status = "error"
             server.status_message = err[:500]
         db.commit()
+        # Der persistente Provisionierungs-Task folgt demselben fachlichen
+        # Abschluss wie der Serverstatus. Es werden keine Installationsdetails
+        # oder Credentials in den Task übernommen.
+        from services.operation_task_service import finish_server_provisioning
+
+        finish_server_provisioning(
+            db,
+            server_id,
+            succeeded=bool(result.get("ok")),
+            success_phase=(
+                "awaiting_files"
+                if result.get("next_status") == "awaiting_files"
+                else "ready"
+            ),
+        )
     except Exception as e:
         # Kein Re-Raise — Thread soll nicht crashen, nur loggen
         logger.warning("finish_install failed for server %s: %s", server_id, e)

@@ -8,6 +8,8 @@ export interface User {
   two_factor_enabled: boolean
   email_notifications: boolean
   role_id: number | null
+  /** Alle globalen Rollen; role_id bleibt kompatible Primärrolle. */
+  role_ids?: number[]
   created_at: string
 }
 
@@ -145,6 +147,8 @@ export interface PostgresPowerUserCredential {
 
 export interface ServerCreateResult extends Server {
   postgres_credentials?: PostgresCredential[]
+  /** Persistente, secret-freie Vorgangs-ID für Status und Support-Korrelation. */
+  task_id?: string
 }
 
 export interface PostgresDatabase {

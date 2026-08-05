@@ -16,6 +16,8 @@ describe('auditPresentation', () => {
         action: 'postgres.admin.rotate',
         target_type: 'managed_postgres',
         target_id: null,
+        origin: 'ai',
+        correlation_id: '0a613465-487d-44a0-af1c-5aa031a873c9',
         details: '{"nodes_updated":[1]}',
         created_at: '2026-07-30T12:00:00Z',
       },
@@ -26,6 +28,8 @@ describe('auditPresentation', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].action).toBe('postgres.admin.rotate')
     expect(rows[0].user_id).toBe(1)
+    expect(rows[0].origin).toBe('ai')
+    expect(rows[0].correlation_id).toBe('0a613465-487d-44a0-af1c-5aa031a873c9')
   })
 
   it('formats target and time without inventing data', () => {

@@ -3,14 +3,12 @@ import shutil
 import threading
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from config import settings
+from config import get_cors_origins
 from database import SessionLocal
 from database import get_db
 from models import Server, User
@@ -19,12 +17,10 @@ from schemas.postgres import PostgresOneTimeCredential
 from dependencies import (
     get_current_user,
     get_current_user_for_ws,
-    require_global,
     require_server_permission,
     verify_csrf,
 )
 from services import permission_service, postgres_service
-from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
 from games import get_plugin
 from games.base import container_name_for, _console_log_path, _append_console_log
 from services import EmailService, docker_service
@@ -32,61 +28,31 @@ from services import exec_service
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
-from services.network_interfaces_service import default_bind_ip, list_host_interfaces
 from services.port_allocation_service import PortConflictError, allocate_ports
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.scheduler_service import sync_server_restart_schedule, evaluate_disk_soft_limit
 from services.server_lifecycle_service import (
-    LifecycleNotification,
     get_server_lifecycle_lock,
     is_lifecycle_job_active,
-    queue_lifecycle_operation,
     should_preserve_lifecycle_status,
 )
 from services.console_stream_service import connect as ws_connect
 from services.install_update_lock_service import (
-    INSTALL_UPDATE_ALREADY_RUNNING,
     release_install_update_lock,
     try_acquire_install_update_lock,
 )
+from services.actor_context import ActorContext
+from services.server_provisioning_service import (
+    assert_remote_ports_available as _assert_remote_ports_available,
+    install_update_busy_error as _install_update_busy_error,
+    normalize_server_restart_mode as _normalize_server_restart_mode,
+    provision_server,
+)
+from services.server_action_service import request_lifecycle_operation
 
 import logging
 logger = logging.getLogger(__name__)
 
-
-def _assert_remote_ports_available(node, ports: list[tuple[str, int, str]], bind_ip: str) -> None:
-    if node is None or node.is_local:
-        return
-    from services.node_client import NodeClient
-
-    normalized = [(port, protocol, role) for role, port, protocol in ports]
-    result = NodeClient.from_node(node).ports_available(normalized, bind_ip or "0.0.0.0")
-    if not result.get("available", False):
-        conflicts = ", ".join(
-            f"{item.get('port')}/{item.get('protocol')}" for item in result.get("conflicts", [])
-        )
-        raise HTTPException(status_code=409, detail=f"Port auf dem Ziel-Node belegt: {conflicts}")
-
-
-def _normalize_server_restart_mode(server: Server) -> None:
-    """Stellt sicher, dass nicht beide Auto-Restart-Modi (Intervall + feste Zeiten) gleichzeitig aktiv sind.
-
-    Intervall hat Vorrang (konsistent mit sync_server_restart_schedule).
-    Verhindert „sowohl als auch“-Zustände in der DB durch direkte PATCHes, Legacy-Daten,
-    fehlende Client-Normalisierung oder Migrationen.
-
-    KISS: zentrale Normalisierung an der Persistenzstelle.
-    """
-    interval = getattr(server, "restart_interval_hours", None)
-    times = getattr(server, "restart_times_utc", None) or getattr(server, "restart_time_utc", None)
-
-    if interval:
-        # Interval wins: clear any fixed times
-        server.restart_time_utc = None
-        server.restart_times_utc = None
-    elif times:
-        # Only fixed times: clear interval
-        server.restart_interval_hours = None
 
 # ── Leichtergewichtiger, passiver Cache für Update-Checks im Status-Endpoint ──
 # Zweck: Frontend-Badge (Update-Verfügbarkeit) ohne teure Calls (Workshop/Steam)
@@ -145,247 +111,37 @@ def _port_requirements_for_server(server: Server, protocol_overrides: dict[str, 
     ]
 
 
-def _install_update_busy_error() -> HTTPException:
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": INSTALL_UPDATE_ALREADY_RUNNING,
-            "message": f"errors.{INSTALL_UPDATE_ALREADY_RUNNING}",
-        },
-    )
-
-
-
-
-
 @router.post("", response_model=ServerCreateResponse, status_code=201)
-async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(require_global("servers.create")), _: None = Depends(verify_csrf)) -> ServerCreateResponse:
-
-    base_dir = os.path.abspath(settings.servers_dir)
-
-    plugin = get_plugin(req.game_type)
-    bp = plugin.get_blueprint() if plugin else None
-
-    # Map blueprint ports to stable, unique requirements [(role, protocol)].
-    port_requirements = blueprint_port_requirements(bp.ports) if bp else [
-        ("game", "udp"),
-        ("query", "udp"),
-        ("rcon", "tcp"),
-    ]
-
-    # Overrides mapping
-    requested_ports = dict(req.ports or {})
-    if req.game_port is not None:
-        requested_ports["game"] = req.game_port
-    if req.query_port is not None:
-        requested_ports["query"] = req.query_port
-    if req.rcon_port is not None:
-        requested_ports["rcon"] = req.rcon_port
-
-    bind_ip = req.public_bind_ip or default_bind_ip()
-    # Phase 2/3: node from request or default local; ports scoped per node
-    from models import Node
-    from services.node_service import get_local_node
-
-    target_node = None
-    if req.node_id is not None:
-        target_node = db.query(Node).filter(Node.id == req.node_id).first()
-        if not target_node:
-            raise HTTPException(status_code=400, detail="Node nicht gefunden")
-    else:
-        target_node = get_local_node(db)
-    if target_node is not None and not target_node.is_local and req.public_bind_ip is None:
-        bind_ip = "0.0.0.0"
-    target_node_id = target_node.id if target_node else None
-    from services.node_capacity import ensure_ram_limit_fits
-
-    ensure_ram_limit_fits(
+async def create_server(
+    req: ServerCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> ServerCreateResponse:
+    """Dünner HTTP-Adapter; RBAC und Provisionierung liegen im gemeinsamen Service."""
+    result = provision_server(
         db,
-        target_node,
-        new_ram_limit_mb=req.ram_limit_mb,
-        exclude_server_id=None,
+        req,
+        ActorContext.for_user(user),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
-    check_host = True if (target_node is None or target_node.is_local) else False
-    try:
-        allocated = allocate_ports(
-            db,
-            exclude_server_id=None,
-            bind_ip=bind_ip or "0.0.0.0",
-            port_requirements=port_requirements,
-            requested_ports=requested_ports,
-            node_id=target_node_id,
-            check_host=check_host,
+    if not result.reused and EmailService.is_configured() and user.email_notifications:
+        await EmailService.send_server_installed_notification(
+            user.email,
+            user.username,
+            result.server.name,
         )
-    except PortConflictError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
 
-    if isinstance(allocated, tuple) and len(allocated) == 3 and all(isinstance(x, int) for x in allocated):
-        allocated = [
-            ("game", allocated[0], "udp"),
-            ("query", allocated[1], "udp"),
-            ("rcon", allocated[2], "tcp"),
-        ]
-    _assert_remote_ports_available(target_node, allocated, bind_ip or "0.0.0.0")
-
-    # Placeholder-Row zuerst einfügen, um stabile PK (server.id) zu erhalten.
-    # Danach install_dir = f".../{game_type}_{id}" - kollisionsfrei über alle Zeit,
-    # auch nach DELETEs (Count-basiert war die Ursache für dayz_1-Reuse).
-    # Placeholder wird bei Konflikt sofort wieder gelöscht (nie sichtbar für User).
-    server = Server(
-        name=req.name,
-        game_type=req.game_type,
-        install_dir="/tmp/msm-pending-create",
-        status="stopped",
-        auto_restart=req.auto_restart,
-        restart_interval_hours=req.restart_interval_hours,
-        restart_time_utc=req.restart_time_utc,
-        restart_times_utc=req.restart_times_utc,
-        cpu_limit_percent=req.cpu_limit_percent,
-        ram_limit_mb=req.ram_limit_mb,
-        disk_limit_gb=req.disk_limit_gb,
-        public_bind_ip=bind_ip,
-        node_id=target_node_id,
-    )
-    _normalize_server_restart_mode(server)
-    db.add(server)
-    db.commit()
-    db.refresh(server)
-
-    install_lock_acquired = False
-    if plugin:
-        install_lock_acquired = try_acquire_install_update_lock(
-            server.id, "install", node_id=server.node_id
-        )
-        if not install_lock_acquired:
-            db.delete(server)
-            db.commit()
-            raise _install_update_busy_error()
-
-    install_started = False
-    created_install_dir = False
-    server_deleted = False
-    postgres_credentials: list[dict] = []
-    try:
-        from models.server_port import ServerPort
-        for role, port_val, proto in allocated:
-            db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
-        db.commit()
-        db.refresh(server)
-
-        is_remote_node = bool(target_node is not None and not target_node.is_local)
-        install_dir = os.path.join(base_dir, str(server.id) if is_remote_node else f"{req.game_type}_{server.id}")
-
-        # Vorheriges Verzeichnis auf Host prüfen (verwaist von abgebrochenem Install,
-        # manuellem Eingriff oder root-owned SteamCMD-Artifact). Saubere 409 statt
-        # mysteriösem EPERM auf chmod.
-        if not is_remote_node and os.path.exists(install_dir):
-            db.delete(server)
-            db.commit()
-            server_deleted = True
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Server-Verzeichnis existiert bereits auf dem Host: {install_dir}. "
-                    "Möglicherweise verwaist aus einem vorherigen (fehlgeschlagenen) "
-                    "Installationsversuch. Bitte manuell aufräumen oder Support kontaktieren."
-                ),
-            )
-
-        # Verzeichnis anlegen - wird vom Panel-User (`msm`) angelegt. Vor jedem
-        # Container-Start normalisiert docker_service.repair_bind_mount_permissions()
-        # Owner/Rechte im Container-Kontext, damit Runtime (z. B. Wine) und Panel
-        # konsistent auf dieselben Dateien zugreifen können.
-        # exist_ok=False ist jetzt sicher (Guard oben).
-        try:
-            if is_remote_node:
-                from services.node_client import NodeClient
-                from services.node_service import ensure_node_online
-
-                ensure_node_online(target_node)
-                NodeClient.from_node(target_node).files_ensure_server_root(server.id)
-            else:
-                os.makedirs(install_dir, exist_ok=False)
-                os.chmod(install_dir, 0o777)
-            created_install_dir = True
-        except OSError as e:
-            # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
-            db.delete(server)
-            db.commit()
-            raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
-
-        # install_dir endgültig setzen + persistieren.
-        server.install_dir = install_dir
-        db.commit()
-        db.refresh(server)
-
-        # Stabilen Container-Namen cachen (Debug/Audit).
-        server.container_name = container_name_for(server.id)
-        db.commit()
-        db.refresh(server)
-
-        if req.postgres_enabled:
-            try:
-                postgres_credentials = postgres_service.provision_server_databases(
-                    db,
-                    server,
-                    req.postgres_database_count or 1,
-                )
-            except Exception as exc:
-                raise HTTPException(status_code=503, detail=f"PostgreSQL-Provisionierung fehlgeschlagen: {exc}") from exc
-
-        # Auto-Install: Plugin startet Installation im Hintergrund.
-        # Firewall-Regeln werden ERST beim Start angelegt (Lifecycle-Kopplung).
-        plugin = get_plugin(req.game_type)
-        if plugin:
-            server.status = "installing"
-            server.status_message = "Installation gestartet"
-            db.commit()
-            try:
-                result = plugin.install(server)
-            except Exception:
-                raise HTTPException(status_code=500, detail="Installation konnte nicht gestartet werden")
-            if "error" in result:
-                raise HTTPException(status_code=500, detail=result["error"])
-            install_started = True
-    except Exception:
-        if install_lock_acquired and not install_started:
-            release_install_update_lock(server.id)
-        if not install_started and not server_deleted:
-            try:
-                postgres_service.drop_server_resources(db, server.id)
-            except Exception:
-                db.rollback()
-            try:
-                db.delete(server)
-                db.commit()
-            except Exception:
-                db.rollback()
-            if created_install_dir:
-                try:
-                    if target_node is not None and not target_node.is_local:
-                        from services.node_client import NodeClient
-
-                        NodeClient.from_node(target_node).files_delete_server_root(server.id)
-                    elif os.path.exists(server.install_dir):
-                        shutil.rmtree(server.install_dir)
-                except Exception:
-                    logger.warning("Install-Verzeichnis konnte nach Create-Abbruch nicht entfernt werden")
-        raise
-
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_server_installed_notification(user.email, user.username, server.name)
-
-    sync_server_restart_schedule(server)
-    response = _server_response(server)
+    response = _server_response(result.server)
     create_resp = ServerCreateResponse.model_validate(response.model_dump())
     create_resp.postgres_credentials = [
         PostgresOneTimeCredential.model_validate(item)
-        for item in postgres_credentials
+        for item in result.postgres_credentials
     ]
+    create_resp.task_id = result.task.id
     return create_resp
 
 
@@ -426,15 +182,6 @@ def _server_response(server: Server) -> ServerResponse:
         data.node_id = getattr(server, "node_id", None)
         data.node_name = None
     return data
-
-
-def _reject_if_node_offline(server: Server) -> None:
-    """Block start/stop/file-ops when heartbeat marked the node offline."""
-    from services.node_service import NODE_OFFLINE_MSG, is_node_offline
-
-    node = getattr(server, "node", None)
-    if is_node_offline(node):
-        raise HTTPException(status_code=503, detail=NODE_OFFLINE_MSG)
 
 
 @router.get("", response_model=list[ServerResponse])
@@ -934,110 +681,69 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
     }
 
 
-def _missing_required_files(install_dir: str, required_files: list[str]) -> list[str]:
-    """Prueft, ob alle requiredFiles als reguläre Dateien (keine Symlinks) vorhanden sind."""
-    base = Path(install_dir).resolve()
-    missing: list[str] = []
-    for p in required_files:
-        if not _is_safe_relative_path(p):
-            missing.append(p)
-            continue
-        target = base / p
-        # Path-Traversal via resolve pruefen (Symlinks werden dabei dereferenziert,
-        # aber der Existenz-Check zaehlt Symlinks selbst als fehlend).
-        try:
-            resolved = target.resolve(strict=False)
-            resolved.relative_to(base)
-        except (ValueError, RuntimeError):
-            missing.append(p)
-            continue
-        # Symlinks gelten nicht als vorhanden - Defense-in-Depth.
-        if target.is_symlink() or not target.is_file():
-            missing.append(p)
-    return missing
-
-
 @router.post("/{server_id}/start")
-async def start_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "server.start")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    _reject_if_node_offline(server)
-    plugin = get_plugin(server.game_type)
-    if not plugin:
-        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+async def start_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> dict:
+    from services.server_lifecycle_service import LifecycleNotification
 
-    # Sicherheits-Vorprüfung: Server ohne explizite public_bind_ip darf nicht
-    # starten - sonst würde Docker auf 0.0.0.0 binden und die UFW-Falle auslösen.
-    if not server.public_bind_ip:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Server hat keine Bind-IP konfiguriert. Bitte im Server-Detail "
-                "eine Public-IP zuweisen, bevor er gestartet wird."
-            ),
-        )
-
-    # NEU: Pre-Check fuer manualUpload - VOR Firewall-Regeln.
-    bp = plugin.get_blueprint()
-    if bp and bp.source.type == BlueprintSourceType.MANUAL_UPLOAD:
-        manual = bp.source.manual
-        assert manual is not None
-        missing = _missing_required_files(server.install_dir, manual.requiredFiles)
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Server kann nicht gestartet werden - folgende Dateien fehlen "
-                    f"im Server-Verzeichnis: {', '.join(missing)}. "
-                    "Bitte über den File Manager hochladen (Archive können per "
-                    "Rechtsklick → Entpacken ausgepackt werden)."
-                ),
-            )
-
-    return queue_lifecycle_operation(
+    return request_lifecycle_operation(
         db,
-        server,
-        "start",
-        LifecycleNotification(user.email, user.username, user.email_notifications),
+        server_id=server_id,
+        operation="start",
+        actor=ActorContext.for_user(user),
+        notification=LifecycleNotification(user.email, user.username, user.email_notifications),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
 
 
 @router.post("/{server_id}/stop")
-async def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "server.stop")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    _reject_if_node_offline(server)
-    plugin = get_plugin(server.game_type)
-    if not plugin:
-        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+async def stop_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> dict:
+    from services.server_lifecycle_service import LifecycleNotification
 
-    return queue_lifecycle_operation(
+    return request_lifecycle_operation(
         db,
-        server,
-        "stop",
-        LifecycleNotification(user.email, user.username, user.email_notifications),
+        server_id=server_id,
+        operation="stop",
+        actor=ActorContext.for_user(user),
+        notification=LifecycleNotification(user.email, user.username, user.email_notifications),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
 
 
 @router.post("/{server_id}/restart")
-async def restart_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "server.restart")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    _reject_if_node_offline(server)
-    plugin = get_plugin(server.game_type)
-    if not plugin:
-        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    return queue_lifecycle_operation(
+async def restart_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> dict:
+    from services.server_lifecycle_service import LifecycleNotification
+
+    return request_lifecycle_operation(
         db,
-        server,
-        "restart",
-        LifecycleNotification(user.email, user.username, user.email_notifications),
+        server_id=server_id,
+        operation="restart",
+        actor=ActorContext.for_user(user),
+        notification=LifecycleNotification(user.email, user.username, user.email_notifications),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
 
 
@@ -1075,20 +781,24 @@ async def cancel_auth_setup(server_id: int, db: Session = Depends(get_db), user:
 
 
 @router.post("/{server_id}/kill")
-async def kill_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+async def kill_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> dict:
     """Erzwungenes Beenden (Docker force remove). Als Notfall auch während start/restart nutzbar (emergency override des Job-Locks).
     Permission "server.kill" (Naming analog zu server.stop, nicht server.power.* für Code-Konsistenz mit bestehenden server.* Keys).
     """
-    require_server_permission(user, server_id, db, "server.kill")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-
-    return queue_lifecycle_operation(
+    return request_lifecycle_operation(
         db,
-        server,
-        "kill",
-        LifecycleNotification(user.email, user.username, user.email_notifications),
+        server_id=server_id,
+        operation="kill",
+        actor=ActorContext.for_user(user),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
 
 
@@ -1293,7 +1003,6 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
 
 # ── Erlaubte Origins fuer WebSocket-Upgrades ───────────────────────────────
 # Dieselbe Allowlist wie CORS (panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev).
-from config import get_cors_origins
 
 
 def _ws_origin_allowed(origin: str | None) -> bool:

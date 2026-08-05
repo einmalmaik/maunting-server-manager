@@ -15,6 +15,8 @@ export interface MePermissions {
   is_owner: boolean
   role_id: number | null
   role_name: string | null
+  role_ids?: number[]
+  role_names?: string[]
   global_keys: string[]
   /** server_id -> erlaubte Server-Keys (nur via Delegation, nicht via Rolle) */
   server_keys: Record<string, string[]>

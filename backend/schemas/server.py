@@ -215,6 +215,7 @@ class ServerResponse(BaseModel):
 
 class ServerCreateResponse(ServerResponse):
     postgres_credentials: list[PostgresOneTimeCredential] = Field(default_factory=list)
+    task_id: str | None = None
 
 
 class ServerStatusResponse(BaseModel):

@@ -19,7 +19,7 @@ from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
 from services.backup_code_service import BackupCodeService
 from services.permission_catalog import SYSTEM_ROLE_USER
-from services.role_service import get_role_by_name
+from services.role_service import get_role_by_name, set_user_roles
 from services.panel_settings_service import PanelSettingsService
 
 from services.captcha_service import CaptchaService
@@ -217,6 +217,8 @@ async def register(
     if default_role is not None:
         user.role_id = default_role.id
     db.commit()
+    if default_role is not None:
+        set_user_roles(db, user, [default_role.id])
     
     code = EmailVerificationService.create_verification(db, user.email, REGISTER_VERIFICATION_PURPOSE)
     if EmailService.is_configured():

@@ -55,6 +55,38 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'Nodes verwalten',
     desc: 'Erlaubt das Hinzufügen, Editieren, Löschen und Registrieren von Nodes.',
   },
+  'ai.chat.use': {
+    title: 'KI-Chat verwenden',
+    desc: 'Erlaubt den KI-Chat. Rollenlimits und Tool-Rechte werden zusätzlich im Backend geprüft.',
+  },
+  'ai.attachments.use': {
+    title: 'KI-Anhänge verwenden',
+    desc: 'Erlaubt geprüfte Anhänge im KI-Chat; Dateityp-, Größen- und Pfadgrenzen bleiben aktiv.',
+  },
+  'ai.memory.use': {
+    title: 'KI-Memory verwenden',
+    desc: 'Erlaubt das eigene, sichtbare und löschbare KI-Memory.',
+  },
+  'ai.skills.use': {
+    title: 'KI-Skills verwenden',
+    desc: 'Erlaubt freigegebene, versionierte Skills aus der MSM-Aktions-Whitelist.',
+  },
+  'ai.skills.manage': {
+    title: 'KI-Skills verwalten',
+    desc: 'Erlaubt das Erstellen und Verwalten von Skills, aber keine freien Skripte.',
+  },
+  'ai.web_search.use': {
+    title: 'KI-Websuche verwenden',
+    desc: 'Erlaubt kontrollierte Websuche über konfigurierte Provider.',
+  },
+  'ai.autonomous.use': {
+    title: 'Autonomen KI-Modus verwenden',
+    desc: 'Erlaubt autonome, typisierte Aktionen; Bestätigungspflichten bleiben unverändert.',
+  },
+  'ai.usage.read.all': {
+    title: 'Gesamte KI-Nutzung einsehen',
+    desc: 'Erlaubt die aggregierte Nutzung aller Benutzer statt nur der eigenen Nutzung.',
+  },
   'panel.oauth.read': {
     title: 'OAuth-Anbieter anzeigen',
     desc: 'Erlaubt das Einsehen der konfigurierten OAuth/Social-Login-Anbieter.',
@@ -205,6 +237,20 @@ const SUBGROUPS = [
       'panel.oauth.delete',
       'panel.oauth.secret_update',
       'panel.oauth.test',
+    ],
+  },
+  {
+    id: 'ai',
+    title: 'KI-Rechte',
+    keys: [
+      'ai.chat.use',
+      'ai.attachments.use',
+      'ai.memory.use',
+      'ai.skills.use',
+      'ai.skills.manage',
+      'ai.web_search.use',
+      'ai.autonomous.use',
+      'ai.usage.read.all',
     ],
   },
   {

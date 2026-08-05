@@ -41,6 +41,7 @@ from services.file_edit_service import FileRevisionConflict
 from services.dis_client import DisSidecarError
 from services.node_client import NodeClient, NodeClientError
 from services.node_service import resolve_server_node
+from services.server_file_access_service import read_server_text, write_server_text
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -423,31 +424,7 @@ def read_file(
 ) -> dict:
     """Read a text file's content."""
     require_server_permission(user, server_id, db, "server.files.read")
-    server = _get_server(server_id, db)
-    agent = _agent_client(server, db)
-    if agent is not None:
-        try:
-            info = agent.files_read_info(_agent_files_key(server), path)
-        except NodeClientError as exc:
-            raise _map_agent_error(exc) from exc
-        name = path.rsplit("/", 1)[-1] if path else ""
-        return {"path": path, "name": name, **info}
-
-    target = _safe_path(server.install_dir, path)
-
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
-    if not target.is_file():
-        raise HTTPException(status_code=400, detail="Pfad ist keine Datei")
-    if target.stat().st_size > MAX_EDIT_SIZE:
-        raise HTTPException(status_code=413, detail="Datei zu gross zum Bearbeiten (max 5 MB)")
-
-    try:
-        info = file_edit_service.read_text(target)
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail="Datei konnte nicht gelesen werden") from exc
-
-    return {"path": path, "name": target.name, **info}
+    return read_server_text(db, server_id=server_id, relative_path=path)
 
 
 @router.put("/{server_id}/write")
@@ -461,91 +438,17 @@ def write_file(
 ) -> dict:
     """Write/create a text file."""
     require_server_permission(user, server_id, db, "server.files.write")
-    server = _get_server(server_id, db)
-    agent = _agent_client(server, db)
-    if agent is not None:
-        try:
-            try:
-                current = agent.files_read_info(_agent_files_key(server), path)
-            except NodeClientError as exc:
-                if exc.status_code != 404:
-                    raise
-                current = None
-            if body.expected_revision is not None and (
-                current is None or current.get("revision") != body.expected_revision
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail={"code": "FILE_REVISION_CONFLICT"},
-                )
-            if body.create_only and current is not None:
-                raise HTTPException(status_code=409, detail="Zieldatei existiert bereits")
-            if current is not None:
-                file_history_service.snapshot(
-                    server_id,
-                    path,
-                    str(current.get("content", "")),
-                    user.id,
-                )
-            result = agent.files_write(
-                _agent_files_key(server),
-                path,
-                body.content,
-                body.expected_revision,
-                body.create_only,
-            )
-        except NodeClientError as exc:
-            raise _map_agent_error(exc) from exc
-        except DisSidecarError as exc:
-            raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
-        return {"message": "Datei gespeichert", "path": path, **result}
-
-    target = _safe_path(server.install_dir, path)
-
-    try:
-        current = file_edit_service.read_text(target) if target.is_file() else None
-        if body.expected_revision is not None and (
-            current is None or current.get("revision") != body.expected_revision
-        ):
-            raise FileRevisionConflict(current.get("revision") if current else None)
-        if body.create_only and current is not None:
-            raise FileExistsError("Target file already exists")
-        if current is not None:
-            file_history_service.snapshot(
-                server_id,
-                path,
-                str(current["content"]),
-                user.id,
-            )
-        result = _write_text_with_permission_repair(
-            server,
-            target,
-            body.content,
-            body.expected_revision,
-            body.create_only,
-        )
-        _apply_permissions(server.install_dir, target)
-        result.update(file_edit_service.metadata(target))
-    except FileRevisionConflict as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "FILE_REVISION_CONFLICT",
-                "current_revision": exc.current_revision,
-            },
-        ) from exc
-    except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail="Zieldatei existiert bereits") from exc
-    except DisSidecarError as exc:
-        raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Datei konnte nicht gespeichert werden") from exc
-
-    return {"message": "Datei gespeichert", "path": path, **result}
+    result = write_server_text(
+        db,
+        user=user,
+        server_id=server_id,
+        relative_path=path,
+        content=body.content,
+        expected_revision=body.expected_revision,
+        create_only=body.create_only,
+        repair_permissions=_repair_install_permissions,
+    )
+    return {"message": "Datei gespeichert", **result}
 
 
 @router.get("/{server_id}/versions")

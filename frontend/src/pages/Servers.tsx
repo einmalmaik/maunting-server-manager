@@ -179,6 +179,7 @@ export function Servers() {
 
       const created = await api<ServerCreateResult>('/servers', {
         method: 'POST',
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify(body),
       })
       if (created.postgres_credentials?.length) {

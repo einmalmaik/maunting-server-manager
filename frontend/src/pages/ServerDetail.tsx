@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowLeft,
+  Bot,
   Clock,
   Cpu,
   Database,
@@ -45,6 +46,7 @@ import { GuardianTab } from "@/features/guardian/GuardianTab";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
+import { AiChat } from "@/components/ai/AiChat";
 
 type TabKey =
   | "files"
@@ -54,7 +56,8 @@ type TabKey =
   | "restarts"
   | "backups"
   | "databases" | "webhooks"
-  | "guardian";
+  | "guardian"
+  | "ai";
 
 const VALID_TABS: TabKey[] = [
   "files",
@@ -66,6 +69,7 @@ const VALID_TABS: TabKey[] = [
   "databases",
   "webhooks",
   "guardian",
+  "ai",
 ];
 
 interface ServerStatus {
@@ -170,6 +174,7 @@ export function ServerDetail() {
   // isLoading-Check verhindert Permission-Load-Flash: Button erscheint erst
   // nach Abschluss des Permission-Loads (oder gar nicht bei fehlendem Recht).
   const canManageResources = useHasPermission("server.resources.manage", serverId);
+  const canUseAi = useHasPermission("ai.chat.use");
   const permissionsLoading = usePermissionsStore((s) => s.isLoading);
   const showResourceEdit = !permissionsLoading && canManageResources;
 
@@ -271,12 +276,17 @@ export function ServerDetail() {
         icon: Shield,
       });
     }
+    if (canUseAi) {
+      list.push({ key: "ai", label: t("tabs.ai"), icon: Bot });
+    }
     return list;
-  }, [t, showModTab, gameInfo?.enable_exec, server?.guardian_enabled]);
+  }, [t, showModTab, gameInfo?.enable_exec, server?.guardian_enabled, canUseAi]);
 
   const rawTab = (searchParams.get("tab") || "files") as TabKey;
   const activeTab: TabKey =
-    VALID_TABS.includes(rawTab) && (rawTab !== "mods" || showModTab)
+    VALID_TABS.includes(rawTab)
+      && (rawTab !== "mods" || showModTab)
+      && (rawTab !== "ai" || canUseAi)
       ? rawTab
       : "files";
 
@@ -295,7 +305,10 @@ export function ServerDetail() {
     // no "kill" branch here (handleKill dedicated; dead code removed per review Issue 6)
     setActionLoading(action);
     try {
-      await api(`/servers/${serverId}/${action}`, { method: "POST" });
+      await api(`/servers/${serverId}/${action}`, {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+      });
       if (action === "restart") {
         lastServerUpdateBadgeRef.current = null;
       }
@@ -408,7 +421,10 @@ export function ServerDetail() {
     setOptimisticStatus("stopped");
     setActionLoading("kill");
     try {
-      await api(`/servers/${serverId}/kill`, { method: "POST" });
+      await api(`/servers/${serverId}/kill`, {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+      });
       toast.success(t("servers.killSuccess"));
       void fetchAll().then(() => setOptimisticStatus(null));
     } catch (err: unknown) {
@@ -1000,6 +1016,7 @@ export function ServerDetail() {
         {activeTab === "guardian" && (
           <GuardianTab server={server} onRefreshServer={fetchAll} />
         )}
+        {activeTab === "ai" && canUseAi && <AiChat serverId={serverId} />}
       </div>
 
       {/* Edit-Network Modal */}

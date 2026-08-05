@@ -1,0 +1,159 @@
+"""Allowlist-, Versionierungs- und Bestaetigungsgrenzen fuer AI-Skills."""
+
+from uuid import uuid4
+
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from models import AiActionProposal, AiConversation, AiSkill, AuditLog, User
+
+
+def _csrf(cookies: dict) -> dict[str, str]:
+    return {"X-CSRF-Token": cookies.get("__Secure-csrf_token", "")}
+
+
+def test_skill_versions_are_immutable_and_latest_is_visible(
+    client: TestClient,
+    db: Session,
+    owner_cookies: dict,
+) -> None:
+    first_payload = {
+        "skill_key": "safe-backup",
+        "name": "Sicheres Backup",
+        "description": "Erstellt einen bestaetigungspflichtigen Backup-Vorschlag.",
+        "steps": [{"tool_name": "propose_backup", "arguments": {}}],
+        "enabled": True,
+    }
+    first = client.post(
+        "/api/ai/skills", json=first_payload, cookies=owner_cookies,
+        headers=_csrf(owner_cookies),
+    )
+    second = client.put(
+        "/api/ai/skills/safe-backup",
+        json={**first_payload, "description": "Version zwei."},
+        cookies=owner_cookies, headers=_csrf(owner_cookies),
+    )
+    listed = client.get("/api/ai/skills/manage", cookies=owner_cookies)
+
+    assert first.status_code == 201 and first.json()["version"] == 1
+    assert second.status_code == 200 and second.json()["version"] == 2
+    assert listed.status_code == 200
+    assert [(row["skill_key"], row["version"]) for row in listed.json()] == [
+        ("safe-backup", 2)
+    ]
+    assert db.query(AiSkill).count() == 2
+
+
+def test_skill_rejects_unregistered_or_secret_bearing_steps(
+    client: TestClient,
+    db: Session,
+    owner_cookies: dict,
+) -> None:
+    base = {
+        "skill_key": "unsafe",
+        "name": "Unsafe",
+        "description": "Muss abgelehnt werden.",
+        "enabled": True,
+    }
+    shell = client.post(
+        "/api/ai/skills",
+        json={**base, "steps": [{"tool_name": "execute_shell", "arguments": {}}]},
+        cookies=owner_cookies, headers=_csrf(owner_cookies),
+    )
+    secret = client.post(
+        "/api/ai/skills",
+        json={
+            **base,
+            "steps": [{
+                "tool_name": "read_server_logs",
+                "arguments": {"lines": 50, "api_key": "never-store"},
+            }],
+        },
+        cookies=owner_cookies, headers=_csrf(owner_cookies),
+    )
+
+    assert shell.status_code == 422
+    assert secret.status_code == 422
+    assert db.query(AiSkill).count() == 0
+
+
+def test_running_skill_creates_proposal_and_never_executes_it(
+    client: TestClient,
+    db: Session,
+    owner_user: User,
+    owner_cookies: dict,
+    test_server,
+) -> None:
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=owner_user.id, server_id=test_server.id,
+        title="Skill Run",
+    )
+    db.add(conversation)
+    db.commit()
+    created = client.post(
+        "/api/ai/skills",
+        json={
+            "skill_key": "restart-check",
+            "name": "Restart Check",
+            "description": "Liest Status und schlaegt einen Neustart vor.",
+            "steps": [
+                {"tool_name": "read_server_status", "arguments": {}},
+                {"tool_name": "propose_server_lifecycle", "arguments": {"operation": "restart"}},
+            ],
+            "enabled": True,
+        },
+        cookies=owner_cookies, headers=_csrf(owner_cookies),
+    ).json()
+
+    run = client.post(
+        f"/api/ai/skills/{created['id']}/run",
+        json={"conversation_id": conversation.id},
+        cookies=owner_cookies, headers=_csrf(owner_cookies),
+    )
+
+    assert run.status_code == 200
+    assert run.json()["read_results"][0]["result"]["status"] == "stopped"
+    assert len(run.json()["proposals"]) == 1
+    proposal = db.query(AiActionProposal).one()
+    assert proposal.status == "proposed"
+    assert db.query(AuditLog).filter(AuditLog.action == "ai.action.executed").count() == 0
+
+
+def test_old_skill_version_cannot_run_after_latest_is_disabled(
+    client: TestClient,
+    db: Session,
+    owner_user: User,
+    owner_cookies: dict,
+) -> None:
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=owner_user.id, server_id=None, title="Version guard"
+    )
+    db.add(conversation)
+    db.commit()
+    payload = {
+        "skill_key": "version-guard",
+        "name": "Version guard",
+        "description": "Only the latest version can run.",
+        "steps": [{"tool_name": "read_server_status", "arguments": {}}],
+        "enabled": True,
+    }
+    created = client.post(
+        "/api/ai/skills", json=payload, cookies=owner_cookies,
+        headers=_csrf(owner_cookies),
+    )
+    assert created.status_code == 201
+    payload["enabled"] = False
+    updated = client.put(
+        "/api/ai/skills/version-guard", json=payload, cookies=owner_cookies,
+        headers=_csrf(owner_cookies),
+    )
+    assert updated.status_code == 200
+
+    response = client.post(
+        f"/api/ai/skills/{created.json()['id']}/run",
+        json={"conversation_id": conversation.id},
+        cookies=owner_cookies,
+        headers=_csrf(owner_cookies),
+    )
+
+    assert response.status_code == 409

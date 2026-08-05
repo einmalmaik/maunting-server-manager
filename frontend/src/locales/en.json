@@ -14,7 +14,8 @@
     "panelBackups": "Panel Backups",
     "panelDatabase": "Panel Database",
     "nodes": "Nodes",
-    "audit": "Audit"
+    "audit": "Audit",
+    "ai": "AI Assistant"
   },
   "navGroups": {
     "overview": "Overview",
@@ -52,8 +53,16 @@
     "colTime": "Time",
     "colUser": "User ID",
     "colAction": "Action",
+    "colOrigin": "Origin",
+    "colCorrelation": "Operation",
     "colTarget": "Target",
-    "colDetails": "Details"
+    "colDetails": "Details",
+    "origins": {
+      "direct": "Direct",
+      "ai": "AI",
+      "external": "External",
+      "system": "System"
+    }
   },
   "security": {
     "clusterAdminTitle": "Managed Postgres cluster admin",
@@ -83,6 +92,164 @@
     "rateLimitGlobalInvalid": "API limit must be a whole number.",
     "rateLimitSaveFailed": "Rate limits could not be saved.",
     "rotateHiddenHint": "Cluster admin rotation is only visible with system.secrets.rotate (or owner)."
+  },
+  "aiSettings": {
+    "title": "AI quotas by role",
+    "description": "Configure token, request, concurrency, and cost limits separately from role permissions. Enforcement happens exclusively in the backend.",
+    "ruleHelp": "For multiple roles, the highest value wins; an explicitly unlimited role wins over limited roles. 0 disables that quota.",
+    "dailyTokens": "Daily token limit",
+    "weeklyTokens": "Weekly token limit",
+    "monthlyTokens": "Monthly token limit",
+    "requestsPerMinute": "Requests per minute",
+    "concurrentOperations": "Concurrent AI operations",
+    "monthlyCostCents": "Monthly cost limit (cents)",
+    "unlimited": "Unlimited",
+    "configured": "Explicitly configured",
+    "safeDefault": "Not configured yet — safe default: 0",
+    "noRoles": "No roles exist yet.",
+    "noPermission": "No permission to read AI settings.",
+    "loadFailed": "AI limits could not be loaded.",
+    "saveFailed": "AI limits could not be saved.",
+    "saved": "AI limits saved."
+  },
+  "ai": {
+    "providers": {
+      "title": "AI providers",
+      "description": "Configure trusted OpenAI-compatible endpoints. The target URL and operator key are visible only to panel administrators.",
+      "add": "Add provider",
+      "empty": "No AI provider is configured yet.",
+      "name": "Name",
+      "model": "Default model",
+      "baseUrl": "Base URL",
+      "operatorKey": "Operator API key",
+      "keyConfigured": "Key configured ({{hint}}); leave empty to keep it",
+      "keyOptional": "Optional central API key",
+      "clearOperatorKey": "Remove the central operator key when saving",
+      "enabled": "Provider enabled",
+      "requiresKey": "API key required",
+      "privateNetwork": "Allow private network targets",
+      "privateNetworkHint": "Enable only for intentionally operated internal providers. Link-local, reserved, and unspecified targets remain blocked.",
+      "saved": "AI provider saved.",
+      "deleted": "AI provider deleted.",
+      "deleteTitle": "Delete AI provider?",
+      "deleteConfirm": "Really delete provider {{name}} and its associated credentials?",
+      "errors": { "load": "AI providers could not be loaded.", "save": "AI provider could not be saved.", "delete": "AI provider could not be deleted." }
+    },
+    "credentials": {
+      "title": "Personal AI credentials",
+      "description": "Your API key is encrypted and used only for your requests. It is never shown again after saving.",
+      "empty": "No AI provider is currently available.",
+      "available": "Available",
+      "keyRequired": "Personal key required",
+      "apiKey": "API key",
+      "configured": "Personal key configured; enter a new key to replace it",
+      "placeholder": "Enter API key",
+      "remove": "Remove personal key",
+      "saved": "AI credentials stored securely.",
+      "deleted": "Personal AI key removed.",
+      "deleteTitle": "Remove personal API key?",
+      "deleteConfirm": "Really remove your API key for {{name}}?",
+      "errors": { "load": "AI providers could not be loaded.", "save": "API key could not be saved.", "delete": "API key could not be removed." }
+    },
+    "memory": {
+      "title": "Personal AI memory",
+      "description": "Manage explicit preferences that can be provided to your AI conversations as untrusted context.",
+      "enabled": "Use memory in AI context",
+      "empty": "No personal memory entries exist yet.",
+      "key": "Key, for example response.language",
+      "value": "Preference",
+      "saved": "Memory entry saved.",
+      "delete": "Delete memory entry",
+      "deleteConfirm": "Really delete the memory entry “{{key}}”?",
+      "secretHint": "Do not store passwords, API keys, tokens, or other credentials. Memory content may be sent to the selected external AI provider.",
+      "errors": { "load": "AI memory could not be loaded.", "save": "AI memory could not be saved.", "delete": "Memory entry could not be deleted." }
+    },
+    "skills": {
+      "title": "Versioned AI skills",
+      "description": "Build short, auditable workflows from explicitly approved MSM tools. Every change creates a new immutable version.",
+      "safetyHint": "Read steps return minimized information. Mutating steps only create a proposal and still require manual confirmation in the conversation.",
+      "add": "New skill",
+      "empty": "No skill exists yet. Create the first approved workflow.",
+      "existing": "Existing skill",
+      "newSkill": "Create a new skill",
+      "key": "Stable skill key",
+      "name": "Name",
+      "descriptionLabel": "Description",
+      "enabled": "Skill enabled",
+      "enabledHint": "Disabled skills are not offered in server chat.",
+      "disabled": "disabled",
+      "steps": "Ordered steps",
+      "stepsHint": "Up to 20 steps; free-form scripts and arbitrary commands are not allowed.",
+      "addStep": "Add step",
+      "removeStep": "Remove step {{number}}",
+      "moveUp": "Move step {{number}} up",
+      "moveDown": "Move step {{number}} down",
+      "stepTool": "Tool for step {{number}}",
+      "readOnly": "read only",
+      "proposal": "Confirmation required",
+      "logLines": "Log lines (1–200)",
+      "configPath": "Relative configuration path",
+      "configPathPlaceholder": "config/server.cfg",
+      "operation": "Proposed server action",
+      "operations": { "start": "Start", "stop": "Stop", "restart": "Restart" },
+      "tools": { "read_server_status": "Read server status", "read_server_capacity": "Read server capacity", "read_server_logs": "Read sanitized server logs", "read_config": "Read configuration", "propose_server_lifecycle": "Propose server action", "propose_backup": "Propose backup" },
+      "select": "Select skill",
+      "run": "Run skill",
+      "readResult": "Safe read result",
+      "runCreated": "Skill completed; {{count}} proposal(s) await review.",
+      "create": "Create skill",
+      "saveVersion": "Save new version",
+      "created": "Skill created as version {{version}}.",
+      "updated": "New skill version {{version}} saved.",
+      "error": "Skill could not be run.",
+      "errors": { "load": "AI skills could not be loaded.", "save": "AI skill could not be saved." }
+    },
+    "attachments": {
+      "add": "Add safe attachment",
+      "uploading": "Checking attachment …",
+      "supported": "TXT, configuration, log, PNG, or JPEG · maximum 256 KiB",
+      "list": "Attachments in this conversation",
+      "remove": "Remove attachment",
+      "error": "Attachment could not be processed safely."
+    },
+    "chat": {
+      "title": "AI Assistant",
+      "description": "Persistent, quota-controlled assistance for panel and server tasks.",
+      "status": "Controlled context",
+      "new": "New conversation",
+      "newTitle": "New conversation",
+      "emptyConversations": "No conversations yet.",
+      "selectProvider": "Select provider",
+      "delete": "Delete conversation",
+      "deleteConfirm": "Really delete this conversation and all messages?",
+      "emptyTitle": "How can I help?",
+      "emptyDescription": "The assistant receives only approved, minimized context. Verify important statements before operational changes.",
+      "you": "You",
+      "assistant": "Assistant",
+      "thinking": "Preparing response …",
+      "noResponse": "No response received.",
+      "failed": "This response could not be completed.",
+      "placeholder": "Enter a message …",
+      "message": "Message",
+      "send": "Send",
+      "noProvider": "No provider is available. Add your own API key in your profile or ask an administrator to configure one.",
+      "privacyHint": "Your message, approved context, enabled memory, and provided attachments are sent to the selected external provider and stored in the panel.",
+      "errors": { "load": "AI conversations could not be loaded.", "create": "Conversation could not be created.", "delete": "Conversation could not be deleted.", "stream": "The AI response was interrupted.", "empty": "The message is empty.", "access": "Access was revoked.", "notFound": "The conversation or provider is no longer available.", "keyMissing": "This provider requires an API key.", "requestConflict": "This request was already processed.", "quota": "Your AI quota has been exhausted.", "credential": "The API key is temporarily unavailable.", "unavailable": "The AI service is temporarily unavailable.", "provider": "The AI provider rejected the request.", "toolRejected": "The requested AI tool call was rejected for security reasons." }
+    },
+    "actions": {
+      "title": "AI action proposal",
+      "tools": { "propose_server_lifecycle": "Change server state", "propose_backup": "Create backup", "propose_config_update": "Change configuration" },
+      "status": { "proposed": "Review required", "confirmed": "Confirmed", "executing": "Executing", "succeeded": "Executed", "failed": "Failed", "expired": "Expired" },
+      "operation": "Action: {{operation}}",
+      "review": "Review and execute",
+      "execute": "Execute now",
+      "executing": "Executing …",
+      "confirmTitle": "Manually confirm AI proposal?",
+      "confirm": { "propose_server_lifecycle": "The “{{operation}}” action affects server operation. Permissions and server state are checked again immediately before execution.", "propose_backup": "Create a server backup now? Permissions and server state are checked again immediately before execution.", "propose_config_update": "Write the displayed, revision-bound change to “{{path}}”? Execution is blocked if the file changed in the meantime." },
+      "executed": "AI proposal was authorized and executed.",
+      "failed": "The action was stopped safely. Details are available in the audit log.",
+      "error": "The AI proposal could not be executed."
+    }
   },
   "shell": {
     "openNavigation": "Open navigation",
@@ -926,7 +1093,8 @@
     "restarts": "Auto-Restart",
     "backups": "Backups",
     "databases": "Databases",
-    "webhooks": "Webhooks"
+    "webhooks": "Webhooks",
+    "ai": "AI Assistant"
   },
   "files": {
     "title": "File Manager",
@@ -1131,7 +1299,8 @@
       "imprint": "Imprint",
       "supportWidget": "Support widget",
       "backup": "Backup",
-      "security": "Security"
+      "security": "Security",
+      "ai": "AI"
     },
     "imprint": {
       "title": "Imprint",
@@ -1316,6 +1485,7 @@
       "password": "Password",
       "2fa": "Two-Factor",
       "linked": "Linked Accounts",
+      "ai": "AI Credentials",
       "danger": "Danger Zone"
     },
     "email": "Email Address",
@@ -1909,8 +2079,20 @@
           "s3": "S3-compatible provider: encrypted backup objects plus technical object, account, timing, and transfer metadata"
         }
       },
+      "ai": {
+        "heading": "6. AI assistant and external model providers",
+        "body": "AI features are optional. When used, the panel processes the conversation and sends the message with minimized, redacted context to the selected model provider. The operator determines available providers and must document their terms and lawful basis.",
+        "items": {
+          "messages": "Global and server-specific chat histories are linked to the account, stored in the panel, and can be deleted by the user",
+          "context": "The submitted message, limited prior messages, and approved server metadata are transferred; IP addresses, installation paths, complete configurations, and detected secrets are excluded from model context",
+          "credentials": "Personal and central provider API keys are context-bound and encrypted through DIS, then shown only as configuration status or a mask",
+          "usage": "Provider, model, token reservation, actual or conservatively estimated usage, and timestamps are stored to enforce quotas; monetary cost is not claimed without an authoritative price source",
+          "memory": "Optional personal, server-specific, and panel-wide memory entries are encrypted, visible and deletable, and are transferred as untrusted context only when memory use is enabled",
+          "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider"
+        }
+      },
       "storage": {
-        "heading": "6. Cookies and local browser storage",
+        "heading": "7. Cookies and local browser storage",
         "body": "The panel uses browser storage needed for secure operation and selected preferences.",
         "items": {
           "session": "Session or authentication cookies used to keep users signed in",
@@ -1919,7 +2101,7 @@
         }
       },
       "retention": {
-        "heading": "7. Retention and account deletion",
+        "heading": "8. Retention and account deletion",
         "body": "Retention depends on the operator’s configuration, infrastructure, backups, and legal obligations.",
         "items": {
           "operator": "The operator must define and document suitable retention periods and delete data that is no longer needed",
@@ -1928,7 +2110,7 @@
         }
       },
       "responsibility": {
-        "heading": "8. Operator responsibility and requests",
+        "heading": "9. Operator responsibility and requests",
         "body": "Users should direct access, correction, deletion, objection, and provider questions to the operator of this MSM instance. The operator is responsible for publishing its identity, contact route, lawful basis, provider list, and instance-specific retention information."
       }
     }

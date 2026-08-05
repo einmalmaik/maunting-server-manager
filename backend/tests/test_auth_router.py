@@ -700,12 +700,12 @@ class TestCsrfProtectionOnEndpoints:
         # Routers nutzen kein subprocess mehr (Docker-Runtime). Wir patchen
         # nur Filesystem/Firewall/Plugin, damit der Create-Pfad ohne Side-Effects
         # gegen den Docker-Daemon laufen kann.
-        with patch("routers.servers.os.makedirs"), \
-             patch("routers.servers.os.chmod"), \
-             patch("routers.servers.os.path.exists", return_value=False), \
-             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
+        with patch("services.server_provisioning_service.os.makedirs"), \
+             patch("services.server_provisioning_service.os.chmod"), \
+             patch("services.server_provisioning_service.os.path.exists", return_value=False), \
+             patch("services.server_provisioning_service.allocate_ports", return_value=(27015, 27016, 27017)), \
              patch("routers.servers.open_ports"), \
-             patch("routers.servers.get_plugin", return_value=None):
+             patch("services.server_provisioning_service.get_plugin", return_value=None):
             csrf = owner_cookies.get("__Secure-csrf_token")
             response = client.post(
                 "/api/servers",

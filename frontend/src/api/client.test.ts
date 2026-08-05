@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import i18n from '@/i18n'
-import { api } from './client'
+import { api, apiStream } from './client'
 
 // Locking the language guarantees the test does not silently break, wenn der
 // LanguageDetector im jsdom-Env eine andere Sprache als Fallback waehlt.
@@ -35,6 +35,19 @@ describe('api client', () => {
   }
 
   describe('CSRF header', () => {
+    it('sends CSRF and keeps the SSE response body unread', async () => {
+      document.cookie = '__Secure-csrf_token=stream_csrf;path=/;secure'
+      const response = new Response('event: done\ndata: {}\n\n', { status: 200 })
+      fetchSpy.mockResolvedValueOnce(response)
+
+      const result = await apiStream('/ai/conversations/1/messages/stream', { method: 'POST', body: '{}' })
+
+      expect(result).toBe(response)
+      expect(await result.text()).toContain('event: done')
+      expect(fetchSpy.mock.calls[0][1]).toMatchObject({ credentials: 'include', cache: 'no-store' })
+      expect((fetchSpy.mock.calls[0][1]?.headers as Record<string, string>)['X-CSRF-Token']).toBe('stream_csrf')
+    })
+
     it('should send X-CSRF-Token for POST requests', async () => {
       document.cookie = '__Secure-csrf_token=test_csrf_value;path=/;secure'
       fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))

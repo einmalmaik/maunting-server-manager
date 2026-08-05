@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
@@ -29,6 +30,12 @@ class RoleResponse(BaseModel):
 
 class AssignRoleRequest(BaseModel):
     role_id: int | None  # None = Rolle entfernen
+
+
+class AssignRolesRequest(BaseModel):
+    """Vollständige globale Rollenzuweisung eines Benutzers."""
+
+    role_ids: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list, max_length=32)
 
 
 class ServerPermissionsRequest(BaseModel):

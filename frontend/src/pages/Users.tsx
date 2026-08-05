@@ -9,10 +9,10 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import { useAuthStore } from '@/stores/authStore'
 import { ServerPermissionsPanel } from '@/components/ServerPermissionsPanel'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Dropdown } from '@/components/ui/Dropdown'
 import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { MultiSelect } from '@/Singra/UI/MultiSelect'
 
 export function Users() {
   const { t } = useTranslation()
@@ -34,6 +34,7 @@ export function Users() {
     auto_verify: false,
   })
   const [creating, setCreating] = useState(false)
+  const [savingRoleUserId, setSavingRoleUserId] = useState<number | null>(null)
 
   const filteredServers = useMemo(() => {
     const query = serverSearch.trim().toLocaleLowerCase()
@@ -70,13 +71,18 @@ export function Users() {
     void fetchAll()
   }, [])
 
-  const assignRole = async (user: User, roleId: number | null) => {
+  /** Speichert das vollständige Rollen-Set atomar und verhindert parallele Updates pro Ansicht. */
+  const assignRoles = async (user: User, roleIds: number[]) => {
+    if (savingRoleUserId !== null) return
+    setSavingRoleUserId(user.id)
     try {
-      await rbacApi.assignRole(user.id, roleId)
+      const updated = await rbacApi.assignRoles(user.id, roleIds)
+      setUsers((current) => current.map((entry) => entry.id === updated.id ? updated : entry))
       toast.success(t('users.roleSaved'))
-      await fetchAll()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingRoleUserId(null)
     }
   }
 
@@ -359,11 +365,17 @@ export function Users() {
 
           <div className="divide-y divide-outline-variant/30">
             {users.map((user) => {
-              const role = roles.find((candidate) => candidate.id === user.role_id)
-              const roleLabel = role
-                ? role.is_system
-                  ? t(`roles.systemNames.${role.name}`, { defaultValue: role.name })
-                  : role.name
+              const assignedRoleIds = user.role_ids?.length
+                ? user.role_ids
+                : user.role_id != null
+                  ? [user.role_id]
+                  : []
+              const assignedRoles = roles.filter((candidate) => assignedRoleIds.includes(candidate.id))
+              const roleLabel = assignedRoles.length > 0
+                ? assignedRoles.map((role) => role.is_system
+                    ? t(`roles.systemNames.${role.name}`, { defaultValue: role.name })
+                    : role.name,
+                  ).join(', ')
                 : t('users.noRole')
 
               return (
@@ -424,17 +436,18 @@ export function Users() {
                     {user.is_owner ? (
                       <span className="font-mono-sm text-mono-sm text-status-warning">owner</span>
                     ) : canManagePermissions && user.id !== currentUser?.id ? (
-                      <Dropdown
-                        value={user.role_id != null ? String(user.role_id) : null}
-                        onChange={(value) => assignRole(user, value ? Number(value) : null)}
+                      <MultiSelect
+                        values={assignedRoleIds.map(String)}
+                        onChange={(values) => void assignRoles(user, values.map(Number))}
                         placeholder={t('users.noRole')}
                         options={roles.map((candidate) => ({
                           value: String(candidate.id),
                           label: candidate.is_system
                             ? t(`roles.systemNames.${candidate.name}`, { defaultValue: candidate.name })
                             : candidate.name,
+                          disabled: candidate.name === 'admin' && !currentUser?.is_owner,
                         }))}
-                        buttonClassName="text-sm py-1"
+                        disabled={savingRoleUserId !== null}
                         aria-label={`${t('users.assignRole')}: ${user.username}`}
                       />
                     ) : (

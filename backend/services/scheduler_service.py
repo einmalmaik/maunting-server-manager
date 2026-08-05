@@ -17,6 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from database import SessionLocal
 from games import get_plugin, _append_console_log
 from services import docker_service
+from services import audit_service
 from services.server_lifecycle_service import restart_server_with_updates, get_server_lifecycle_lock, acquire_lock_async
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ def stop_scheduler():
 
 async def _restart_server_task(server_id: int) -> None:
     """Top-level job task: restartet über denselben Pfad wie der manuelle Button."""
-    from models import AuditLog, Server
+    from models import Server
 
     db = SessionLocal()
     try:
@@ -149,14 +150,15 @@ async def _restart_server_task(server_id: int) -> None:
         except Exception as _e:
             logging.warning("Could not reschedule auto-restart interval after success: %s", _e)
 
-        audit = AuditLog(
+        audit_service.record_privileged_action(
+            db,
             user_id=None,
             action="auto_restart",
             target_type="server",
             target_id=server_id,
-            details=f"Auto-restart triggered for server {server.name}",
+            details={"result": "success"},
+            origin="system",
         )
-        db.add(audit)
         db.commit()
     except Exception as e:
         try:
@@ -464,8 +466,6 @@ def evaluate_disk_soft_limit(db, server) -> dict:
         ``{"ok": True, "action": "none"|"warning"|"stop"|"cleared"}``
         ``{"ok": False, "error": "..."}`` bei Mess- oder Enforcement-Fehler
     """
-    from models import AuditLog
-
     usage_mb = docker_service.disk_usage_mb(
         server.install_dir,
         node=getattr(server, "node", None),
@@ -497,13 +497,15 @@ def evaluate_disk_soft_limit(db, server) -> dict:
         server.status_message = (
             f"Disk-Soft-Limit erreicht ({usage_mb} MB / {limit_mb} MB). Container gestoppt."
         )
-        db.add(AuditLog(
+        audit_service.record_privileged_action(
+            db,
             user_id=None,
             action="disk_limit_stop",
             target_type="server",
             target_id=server.id,
-            details=f"Disk usage {usage_mb} MB hit limit {limit_mb} MB",
-        ))
+            details={"usage_mb": usage_mb, "limit_mb": limit_mb},
+            origin="system",
+        )
         return {"ok": True, "action": "stop"}
     elif percent >= DISK_WARN_THRESHOLD_PERCENT:
         server.status_message = (

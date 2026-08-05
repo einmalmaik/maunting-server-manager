@@ -10,16 +10,18 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from models import RolePermission, Server, ServerPermission, User
+from services.role_service import effective_user_role_ids
 
 
 def has_global_permission(db: Session, user: User, key: str) -> bool:
     if user.is_owner:
         return True
-    if user.role_id is None:
+    role_ids = effective_user_role_ids(db, user)
+    if not role_ids:
         return False
     exists = (
         db.query(RolePermission.id)
-        .filter(RolePermission.role_id == user.role_id, RolePermission.permission_key == key)
+        .filter(RolePermission.role_id.in_(role_ids), RolePermission.permission_key == key)
         .first()
     )
     return exists is not None
@@ -29,10 +31,11 @@ def has_server_permission(db: Session, user: User, server_id: int, key: str) -> 
     if user.is_owner:
         return True
     # Pauschale Rolle (z.B. admin oder Custom-Rolle mit server.* Keys)
-    if user.role_id is not None:
+    role_ids = effective_user_role_ids(db, user)
+    if role_ids:
         role_grant = (
             db.query(RolePermission.id)
-            .filter(RolePermission.role_id == user.role_id, RolePermission.permission_key == key)
+            .filter(RolePermission.role_id.in_(role_ids), RolePermission.permission_key == key)
             .first()
         )
         if role_grant is not None:
@@ -54,11 +57,12 @@ def list_visible_server_ids(db: Session, user: User) -> list[int] | None:
     """Server-IDs, die der User sehen darf. None = alle (Owner/pauschale Rolle)."""
     if user.is_owner:
         return None
-    if user.role_id is not None:
+    role_ids = effective_user_role_ids(db, user)
+    if role_ids:
         pauschal = (
             db.query(RolePermission.id)
             .filter(
-                RolePermission.role_id == user.role_id,
+                RolePermission.role_id.in_(role_ids),
                 RolePermission.permission_key == "server.view",
             )
             .first()
@@ -144,12 +148,13 @@ def set_user_server_permissions(
 
 
 def list_user_effective_global_keys(db: Session, user: User) -> list[str]:
-    """Globale Keys, die der User via Rolle hat (ohne Owner-Bypass auflisten)."""
-    if user.role_id is None:
+    """Globale Keys aller Rollen des Users (ohne Owner-Bypass auflisten)."""
+    role_ids = effective_user_role_ids(db, user)
+    if not role_ids:
         return []
     rows = (
         db.query(RolePermission.permission_key)
-        .filter(RolePermission.role_id == user.role_id)
+        .filter(RolePermission.role_id.in_(role_ids))
         .all()
     )
     return sorted({r[0] for r in rows})

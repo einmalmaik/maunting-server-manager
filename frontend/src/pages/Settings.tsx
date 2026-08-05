@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert } from 'lucide-react'
+import { Globe, Mail, Gamepad2, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
@@ -12,6 +12,7 @@ import { ImprintTab } from './settings/ImprintTab'
 import { SupportWidgetTab } from './settings/SupportWidgetTab'
 import { CaptchaTab } from './settings/CaptchaTab'
 import { SecurityTab } from './settings/SecurityTab'
+import { AiTab } from './settings/AiTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
@@ -26,6 +27,7 @@ type TabId =
   | 'supportWidget'
   | 'backup'
   | 'security'
+  | 'ai'
 
 export function Settings() {
   const { t } = useTranslation()
@@ -46,6 +48,7 @@ export function Settings() {
     { id: 'supportWidget', labelKey: 'settings.tabs.supportWidget', icon: LifeBuoy },
     ...(canManageBackup ? [{ id: 'backup' as TabId, labelKey: 'settings.tabs.backup', icon: Cloud }] : []),
     { id: 'security', labelKey: 'settings.tabs.security', icon: ShieldAlert },
+    { id: 'ai', labelKey: 'settings.tabs.ai', icon: Bot },
   ]
 
   return (
@@ -69,6 +72,7 @@ export function Settings() {
       {activeTab === 'supportWidget' && <SupportWidgetTab />}
       {activeTab === 'backup' && <BackupTab />}
       {activeTab === 'security' && <SecurityTab />}
+      {activeTab === 'ai' && <AiTab />}
     </div>
   )
 }

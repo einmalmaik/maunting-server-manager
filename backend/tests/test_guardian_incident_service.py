@@ -12,6 +12,25 @@ from models import Incident, Server
 from services.guardian_incident_service import ingest_incidents_and_ack
 
 
+@pytest.fixture(autouse=True)
+def _isolate_background_notification_worker(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Hält Incident-Transaktionstests frei von StaticPool-Thread-Races.
+
+    Die Benachrichtigung besitzt unten einen eigenen Integrationstest. Alle
+    anderen Tests prüfen Ingestion/Grouping/ACK und dürfen deshalb keinen
+    zweiten DB-Thread auf derselben In-Memory-SQLite-Verbindung starten.
+    """
+    if request.node.name != "test_notify_guardian_incident_triggers_webhook_and_email":
+        monkeypatch.setattr(
+            "services.guardian_incident_service._notify_guardian_incident",
+            lambda *_args, **_kwargs: None,
+        )
+    yield
+
+
 def _server() -> Server:
     return Server(
         id=42,
@@ -204,7 +223,18 @@ def test_agent_quarantine_state_is_mirrored(db: Session) -> None:
     assert db_inc.status == "quarantined"
 
 
-def test_grouped_incident_uuid_retry_does_not_increment_occurrence(db: Session) -> None:
+def test_grouped_incident_uuid_retry_does_not_increment_occurrence(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Notification delivery ist ein separater Post-Commit-Pfad. Ein echter
+    # Hintergrundthread darf in diesem StaticPool-SQLite-Test nicht dieselbe
+    # Verbindung parallel verwenden, sonst kann er die Incident-Transaktion
+    # nondeterministisch beeinflussen.
+    monkeypatch.setattr(
+        "services.guardian_incident_service._notify_guardian_incident",
+        lambda *_args, **_kwargs: None,
+    )
     server = _server()
     server.id = None
     db.add(server)
@@ -333,8 +363,19 @@ def test_ack_failure_preserves_delivery_record(db: Session) -> None:
 
 
 def test_notify_guardian_incident_triggers_webhook_and_email(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+
     from models import User, ServerPermission
     from services.guardian_incident_service import _notify_guardian_incident
+
+    class ImmediateThread:
+        """Führt den Worker deterministisch ohne parallelen SQLite-Zugriff aus."""
+
+        def __init__(self, *, target, daemon: bool = False):
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
 
     server = _server()
     server.id = None
@@ -368,11 +409,9 @@ def test_notify_guardian_incident_triggers_webhook_and_email(db: Session, monkey
     monkeypatch.setattr("services.outbound_webhook_service.dispatch_event", mock_dispatch)
     monkeypatch.setattr("services.email_service.EmailService.is_configured", lambda: True)
     monkeypatch.setattr("services.email_service.EmailService.send_guardian_incident_notification", mock_send_email)
+    monkeypatch.setattr(threading, "Thread", ImmediateThread)
 
     _notify_guardian_incident(server.id, "CrashLoop", "quarantined", "Process crashed 3 times")
-
-    import time
-    time.sleep(0.3)
 
     assert len(dispatched_events) == 1
     srv_id, evt_type, payload = dispatched_events[0]
@@ -389,4 +428,3 @@ def test_notify_guardian_incident_triggers_webhook_and_email(db: Session, monkey
     assert inc_t == "CrashLoop"
     assert st == "quarantined"
     assert "crashed 3 times" in det
-

@@ -29,6 +29,9 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   const canReadPanelDatabase = useHasPermission('panel.database.read')
   const canReadNodes = useHasPermission('nodes.read')
   const canManageNodes = useHasPermission('nodes.manage')
+  const canChatWithAi = useHasPermission('ai.chat.use')
+  const canManageAiSkills = useHasPermission('ai.skills.manage')
+  const canUseAi = canChatWithAi || canManageAiSkills
   
   const asideRef = useRef<HTMLElement>(null)
 
@@ -58,10 +61,10 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
     dashboard: t('nav.dashboard'), servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
     audit: t('nav.audit', 'Audit'),
     settings: t('nav.settings'), blueprints: t('nav.blueprints'), panelBackups: t('nav.panelBackups'),
-    panelDatabase: t('nav.panelDatabase', 'Panel-Datenbank'), nodes: t('nav.nodes'), docs: t('nav.docs'),
+    panelDatabase: t('nav.panelDatabase', 'Panel-Datenbank'), nodes: t('nav.nodes'), docs: t('nav.docs'), ai: t('nav.ai'),
   }, {
     owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewAudit, canViewSettings,
-    canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes,
+    canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes, canUseAi,
   })
   const groupLabels: Record<NavGroupName, string> = {
     Overview: t('navGroups.overview', 'Overview'), Infrastructure: t('navGroups.infrastructure', 'Infrastructure'),

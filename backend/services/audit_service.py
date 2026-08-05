@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,7 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_DETAILS_LEN = 500
+AUDIT_ORIGINS = frozenset({"direct", "ai", "external", "system"})
 
 
 def _redact_mapping(data: dict[str, Any]) -> dict[str, Any]:
@@ -71,6 +73,8 @@ def record_privileged_action(
     target_type: str | None = None,
     target_id: int | None = None,
     details: str | dict[str, Any] | None = None,
+    origin: str = "direct",
+    correlation_id: str | UUID | None = None,
     commit: bool = False,
 ) -> AuditLog:
     """Schreibt einen AuditLog-Eintrag fuer privilegierte Operator-Aktionen.
@@ -83,12 +87,21 @@ def record_privileged_action(
         raise ValueError("Ungueltiger Audit-Action-Key.")
     if target_type is not None and len(target_type) > 64:
         raise ValueError("Ungueltiger Audit-Target-Typ.")
+    origin_clean = (origin or "").strip().lower()
+    if origin_clean not in AUDIT_ORIGINS:
+        raise ValueError("Ungueltige Audit-Herkunft.")
+    try:
+        correlation_clean = str(UUID(str(correlation_id))) if correlation_id else str(uuid4())
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("Ungueltige Audit-Korrelations-ID.") from exc
 
     entry = AuditLog(
         user_id=user_id,
         action=action_clean,
         target_type=target_type,
         target_id=target_id,
+        origin=origin_clean,
+        correlation_id=correlation_clean,
         details=sanitize_audit_details(details),
     )
     db.add(entry)

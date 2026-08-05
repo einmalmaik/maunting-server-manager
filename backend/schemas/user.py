@@ -28,6 +28,7 @@ class UserResponse(BaseModel):
     two_factor_enabled: bool
     email_notifications: bool
     role_id: int | None = None
+    role_ids: list[int] = Field(default_factory=list)
     created_at: datetime
 
     class Config:

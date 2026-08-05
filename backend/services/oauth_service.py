@@ -796,6 +796,15 @@ def register_user_from_oauth(
     db.add(user)
     db.commit()
     db.refresh(user)
+    # OAuth-Registrierungen erhalten denselben sicheren Default wie lokale
+    # Registrierungen. Ohne diese Zuweisung waere der Account nach dem ersten
+    # Login rollenlos und Multi-Role-Limits waeren uneindeutig.
+    from services.permission_catalog import SYSTEM_ROLE_USER
+    from services.role_service import get_role_by_name, set_user_roles
+
+    default_role = get_role_by_name(db, SYSTEM_ROLE_USER)
+    if default_role is not None:
+        set_user_roles(db, user, [default_role.id])
     return user
 
 

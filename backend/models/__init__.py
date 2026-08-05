@@ -1,4 +1,14 @@
 from .user import User
+from .user_role import UserRole
+from .role_ai_limit import RoleAiLimit
+from .ai_usage_event import AiUsageEvent
+from .operation_task import OperationTask
+from .ai_provider import AiProvider, AiUserCredential
+from .ai_conversation import AiConversation, AiMessage
+from .ai_action_proposal import AiActionProposal
+from .ai_memory import AiMemoryEntry, AiMemoryPreference
+from .ai_skill import AiSkill
+from .ai_attachment import AiAttachment
 from .server import Server
 from .node import Node
 from .node_enrollment import NodeEnrollment
@@ -28,7 +38,10 @@ from .incident import Incident, GuardianIncidentDelivery
 from .change_event import ChangeEvent
 
 __all__ = [
-    "User", "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
+    "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
+    "AiProvider", "AiUserCredential", "AiConversation", "AiMessage", "AiActionProposal",
+    "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
+    "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",

@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Archive, BookOpen, Boxes, Database, History, LayoutDashboard, Network, Server, Settings, Shield, Users } from 'lucide-react'
+import { Archive, BookOpen, Bot, Boxes, Database, History, LayoutDashboard, Network, Server, Settings, Shield, Users } from 'lucide-react'
 
 export type NavGroupName = 'Overview' | 'Infrastructure' | 'Administration' | 'Panel' | 'Help'
 export interface NavigationItem { to: string; icon: LucideIcon; label: string; group: NavGroupName }
@@ -14,6 +14,7 @@ interface NavigationAccess {
   canManagePanelBackups: boolean
   canReadPanelDatabase: boolean
   canViewNodes: boolean
+  canUseAi: boolean
 }
 
 /**
@@ -23,6 +24,7 @@ interface NavigationAccess {
 export function buildNavigation(labels: Record<string, string>, access: NavigationAccess): NavigationItem[] {
   return [
     { to: '/', icon: LayoutDashboard, label: labels.dashboard, group: 'Overview' },
+    ...(access.owner || access.canUseAi ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Overview' as const }] : []),
     { to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' },
     ...(access.owner || access.canViewNodes ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),
     ...(access.owner || access.canManageUsers ? [{ to: '/users', icon: Users, label: labels.users, group: 'Administration' as const }] : []),

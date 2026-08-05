@@ -212,3 +212,76 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 
   return res.json()
 }
+
+/**
+ * Fuehrt einen authentifizierten API-Request aus, ohne den Response-Body zu
+ * konsumieren. Das ist fuer POST-SSE notwendig: EventSource unterstuetzt
+ * weder POST noch den CSRF-Header. Auth-, CSRF- und Fehlerverhalten bleiben
+ * damit identisch zum normalen API-Client.
+ */
+export async function apiStream(path: string, options: RequestInit): Promise<Response> {
+  const method = (options.method || 'GET').toUpperCase()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+    ...((options.headers as Record<string, string>) || {}),
+  }
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const csrf = getCsrfToken()
+    if (csrf) headers['X-CSRF-Token'] = csrf
+  }
+
+  const url = apiUrl(path)
+  const fetchOptions: RequestInit = {
+    ...options,
+    method,
+    credentials: 'include',
+    headers,
+    cache: 'no-store',
+  }
+  let res = await fetch(url, fetchOptions)
+  captureCsrfFromResponse(res)
+
+  if (res.status === 401 && path !== '/auth/refresh' && path !== '/auth/login') {
+    try {
+      await refreshToken()
+      const retryHeaders = { ...headers }
+      const csrf = getCsrfToken()
+      if (csrf) retryHeaders['X-CSRF-Token'] = csrf
+      else delete retryHeaders['X-CSRF-Token']
+      res = await fetch(url, { ...fetchOptions, headers: retryHeaders })
+      captureCsrfFromResponse(res)
+    } catch {
+      throw new SanitizedApiError(i18n.t('errors.SESSION_EXPIRED'))
+    }
+  }
+
+  if (!res.ok) {
+    if (res.status === 429) {
+      const message = i18n.t('errors.RATE_LIMITED')
+      toast.error(message)
+      throw new SanitizedApiError(message, { status: 429 })
+    }
+    const text = await res.text()
+    let message: string | null = null
+    let code: string | null = null
+    if (text) {
+      try {
+        const parsed = JSON.parse(text)
+        const detail = parsed.detail ?? parsed.message ?? parsed.error ?? parsed
+        message = extractErrorMessage(detail)
+        if (detail && typeof detail === 'object' && typeof detail.code === 'string') {
+          code = detail.code
+        }
+      } catch {
+        message = text
+      }
+    }
+    throw new SanitizedApiError(
+      message ? i18n.t(message) : res.statusText || `HTTP ${res.status}`,
+      { status: res.status, code: code ?? undefined },
+    )
+  }
+
+  return res
+}

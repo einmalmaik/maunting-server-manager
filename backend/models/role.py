@@ -23,3 +23,8 @@ class Role(Base):
         cascade="all, delete-orphan",
     )
     users: Mapped[list["User"]] = relationship("User", back_populates="role")
+    user_assignments: Mapped[list["UserRole"]] = relationship(
+        "UserRole",
+        back_populates="role",
+        cascade="all, delete-orphan",
+    )

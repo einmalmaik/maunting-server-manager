@@ -32,14 +32,14 @@ from config import settings, get_effective_cookie_domain
 from cookies import _set_auth_cookies
 from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
-from models import AuditLog, OAuthProvider, OAuthUserLink, User
+from models import OAuthProvider, OAuthUserLink, User
 from schemas.oauth import (
     OAuthProviderCreate,
     OAuthProviderPublic,
     OAuthProviderUpdate,
     OAuthTestResult,
 )
-from services import oauth_service
+from services import audit_service, oauth_service
 from services.auth_service import AuthService
 from services.email_service import EmailService
 from services.panel_settings_service import PanelSettingsService
@@ -115,15 +115,15 @@ def _provider_to_response(p: OAuthProvider) -> dict[str, Any]:
 
 def _audit(db: Session, user_id: int | None, action: str, target_id: int | None, details: str | None = None) -> None:
     """Schreibt einen Audit-Log-Eintrag. NIEMals Secret-Werte in `details`."""
-    entry = AuditLog(
+    audit_service.record_privileged_action(
+        db,
         user_id=user_id,
         action=action,
         target_type="oauth_provider",
         target_id=target_id,
         details=details,
+        commit=True,
     )
-    db.add(entry)
-    db.commit()
 
 
 def _set_login_session(response: Response, db: Session, user: User) -> None:

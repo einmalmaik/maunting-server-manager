@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user
-from models import ServerPermission, User
+from models import Role, ServerPermission, User
 from schemas import (
     MePermissionsResponse,
     PermissionCatalogResponse,
@@ -11,6 +11,7 @@ from schemas import (
 )
 from services.permission_catalog import GLOBAL_PERMISSIONS, SERVER_PERMISSIONS
 from services.permission_service import list_user_effective_global_keys
+from services.role_service import effective_user_role_ids
 
 router = APIRouter(prefix="/api/permissions", tags=["permissions"])
 
@@ -40,6 +41,14 @@ def get_my_permissions(
     prueft jeden Call zusaetzlich nochmal selbst.
     """
     global_keys = list_user_effective_global_keys(db, user)
+    role_ids = effective_user_role_ids(db, user)
+    role_names = [
+        row[0]
+        for row in db.query(Role.name)
+        .filter(Role.id.in_(role_ids))
+        .order_by(Role.name.asc())
+        .all()
+    ] if role_ids else []
     server_perms: dict[int, list[str]] = {}
     rows = (
         db.query(ServerPermission.server_id, ServerPermission.permission_key)
@@ -55,6 +64,8 @@ def get_my_permissions(
         is_owner=user.is_owner,
         role_id=user.role_id,
         role_name=user.role.name if user.role else None,
+        role_ids=role_ids,
+        role_names=role_names,
         global_keys=global_keys,
         server_keys=server_perms,
     )
