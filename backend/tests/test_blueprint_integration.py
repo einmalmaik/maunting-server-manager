@@ -124,6 +124,7 @@ def _bp_with_update_strategy(source_type: str, strategy: str | None, extra_sourc
         ("hytale", "non_steam_game"),
         ("minecraft_vanilla", "non_steam_game"),
         ("scum_server", "steam_game"),
+        ("seven_days_to_die", "steam_game"),
     ],
 )
 def test_native_blueprints_load_and_create_generic_plugin(bpid: str, expected_cat: str):
