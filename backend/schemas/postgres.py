@@ -96,6 +96,28 @@ class PostgresRowsRequest(PostgresTableRequest):
     search: str | None = Field(None, max_length=128)
 
 
+class PostgresUpdateRowRequest(BaseModel):
+    database_id: int | None = None
+    schema_name: str = Field("public", min_length=1, max_length=63)
+    table_name: str = Field(..., min_length=1, max_length=63)
+    key_conditions: dict[str, Any] = Field(..., min_length=1)
+    updates: dict[str, Any] = Field(..., min_length=1)
+
+
+class PostgresDeleteRowsRequest(BaseModel):
+    database_id: int | None = None
+    schema_name: str = Field("public", min_length=1, max_length=63)
+    table_name: str = Field(..., min_length=1, max_length=63)
+    row_conditions: list[dict[str, Any]] = Field(..., min_length=1)
+
+
+class PostgresInsertRowRequest(BaseModel):
+    database_id: int | None = None
+    schema_name: str = Field("public", min_length=1, max_length=63)
+    table_name: str = Field(..., min_length=1, max_length=63)
+    row_data: dict[str, Any] = Field(..., min_length=1)
+
+
 class PostgresSqlRequest(BaseModel):
     database_id: int
     sql: str = Field(..., min_length=1, max_length=20000)
@@ -134,6 +156,7 @@ class PostgresColumnInfo(BaseModel):
     data_type: str
     nullable: bool
     default: str | None = None
+    primary_key: bool = False
 
 
 class PostgresIndexInfo(BaseModel):

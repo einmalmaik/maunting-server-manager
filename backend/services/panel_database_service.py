@@ -97,6 +97,21 @@ def describe_table(schema_name: str, table_name: str) -> dict[str, Any]:
         with conn.cursor() as cur:
             cur.execute(
                 """
+                SELECT kcu.column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                WHERE tc.constraint_type = 'PRIMARY KEY'
+                  AND tc.table_schema = %s
+                  AND tc.table_name = %s
+                """,
+                (schema_name, table_name),
+            )
+            pk_cols = {row[0] for row in cur.fetchall()}
+
+            cur.execute(
+                """
                 SELECT column_name, data_type, is_nullable, column_default
                 FROM information_schema.columns
                 WHERE table_schema = %s AND table_name = %s
@@ -105,7 +120,13 @@ def describe_table(schema_name: str, table_name: str) -> dict[str, Any]:
                 (schema_name, table_name),
             )
             columns = [
-                {"name": row[0], "data_type": row[1], "nullable": row[2] == "YES", "default": row[3]}
+                {
+                    "name": row[0],
+                    "data_type": row[1],
+                    "nullable": row[2] == "YES",
+                    "default": row[3],
+                    "primary_key": row[0] in pk_cols,
+                }
                 for row in cur.fetchall()
             ]
             if not columns:
@@ -240,3 +261,94 @@ def execute_sql(statement: str, limit: int) -> dict[str, Any]:
         "total_duration_ms": int((time.monotonic() - started_total) * 1000),
         "statement_timeout_ms": STATEMENT_TIMEOUT_MS,
     }
+
+
+def update_row(
+    schema_name: str,
+    table_name: str,
+    key_conditions: dict[str, Any],
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    if not key_conditions or not updates:
+        raise ValueError("Key conditions und Updates dürfen nicht leer sein.")
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            set_clauses = [sql.SQL("{} = %s").format(sql.Identifier(col)) for col in updates]
+            where_clauses = [sql.SQL("{} = %s").format(sql.Identifier(col)) for col in key_conditions]
+            params = list(updates.values()) + list(key_conditions.values())
+            query = (
+                sql.SQL("UPDATE {}.{} SET ")
+                .format(sql.Identifier(schema_name), sql.Identifier(table_name))
+                + sql.SQL(", ").join(set_clauses)
+                + sql.SQL(" WHERE ")
+                + sql.SQL(" AND ").join(where_clauses)
+            )
+            cur.execute(query, tuple(params))
+            updated_count = cur.rowcount
+            conn.commit()
+    finally:
+        conn.close()
+    return {"updated_count": updated_count, "message": f"{updated_count} Zeile(n) aktualisiert"}
+
+
+def delete_rows(
+    schema_name: str,
+    table_name: str,
+    row_conditions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not row_conditions:
+        raise ValueError("Row conditions dürfen nicht leer sein.")
+    deleted_count = 0
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            for cond in row_conditions:
+                if not cond:
+                    continue
+                where_clauses = [sql.SQL("{} = %s").format(sql.Identifier(col)) for col in cond]
+                params = list(cond.values())
+                query = (
+                    sql.SQL("DELETE FROM {}.{} WHERE ")
+                    .format(sql.Identifier(schema_name), sql.Identifier(table_name))
+                    + sql.SQL(" AND ").join(where_clauses)
+                )
+                cur.execute(query, tuple(params))
+                deleted_count += max(cur.rowcount, 0)
+            conn.commit()
+    finally:
+        conn.close()
+    return {"deleted_count": deleted_count, "message": f"{deleted_count} Zeile(n) gelöscht"}
+
+
+def insert_row(
+    schema_name: str,
+    table_name: str,
+    row_data: dict[str, Any],
+) -> dict[str, Any]:
+    if not row_data:
+        raise ValueError("Row data darf nicht leer sein.")
+    columns = list(row_data.keys())
+    values = list(row_data.values())
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            col_sql = [sql.Identifier(col) for col in columns]
+            val_sql = [sql.Placeholder() for _ in values]
+            query = sql.SQL("INSERT INTO {}.{} ({}) VALUES ({}) RETURNING *").format(
+                sql.Identifier(schema_name),
+                sql.Identifier(table_name),
+                sql.SQL(", ").join(col_sql),
+                sql.SQL(", ").join(val_sql),
+            )
+            cur.execute(query, tuple(values))
+            inserted_row = None
+            if cur.description:
+                cols = [desc[0] for desc in cur.description]
+                fetched = cur.fetchone()
+                if fetched:
+                    inserted_row = dict(zip(cols, fetched, strict=False))
+            conn.commit()
+    finally:
+        conn.close()
+    return {"inserted_row": inserted_row, "message": "Zeile eingefügt"}

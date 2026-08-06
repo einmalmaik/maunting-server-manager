@@ -6,6 +6,8 @@ from dependencies import require_global, verify_csrf
 from models import User
 from schemas.postgres import (
     PostgresDatabaseStats,
+    PostgresDeleteRowsRequest,
+    PostgresInsertRowRequest,
     PostgresRowsRequest,
     PostgresRowsResponse,
     PostgresSqlRequest,
@@ -13,6 +15,7 @@ from schemas.postgres import (
     PostgresTableInfo,
     PostgresTableListItem,
     PostgresTableRequest,
+    PostgresUpdateRowRequest,
 )
 from services import panel_database_service
 
@@ -20,9 +23,17 @@ router = APIRouter(prefix="/api/panel/database", tags=["panel-database"])
 
 
 def _service_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, HTTPException):
+        return exc
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=str(exc))
-    return HTTPException(status_code=500, detail="Panel-Datenbank-Operation fehlgeschlagen")
+    err_str = str(exc)
+    if "foreign key constraint" in err_str.lower() or "foreignkeyviolation" in err_str.lower():
+        return HTTPException(
+            status_code=400,
+            detail="Zeile kann nicht gelöscht werden: Sie wird von einer anderen Tabelle referenziert (Fremdschlüssel-Einschränkung).",
+        )
+    return HTTPException(status_code=400, detail=f"Datenbank-Fehler: {err_str}")
 
 
 @router.get("/stats", response_model=PostgresDatabaseStats)
@@ -64,6 +75,55 @@ def read_rows(
             body.limit,
             body.offset,
             body.search,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/rows/update")
+def update_row(
+    body: PostgresUpdateRowRequest,
+    _: User = Depends(require_global("panel.database.admin")),
+    __: None = Depends(verify_csrf),
+):
+    try:
+        return panel_database_service.update_row(
+            body.schema_name,
+            body.table_name,
+            body.key_conditions,
+            body.updates,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/rows/delete")
+def delete_rows(
+    body: PostgresDeleteRowsRequest,
+    _: User = Depends(require_global("panel.database.admin")),
+    __: None = Depends(verify_csrf),
+):
+    try:
+        return panel_database_service.delete_rows(
+            body.schema_name,
+            body.table_name,
+            body.row_conditions,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/rows/insert")
+def insert_row(
+    body: PostgresInsertRowRequest,
+    _: User = Depends(require_global("panel.database.admin")),
+    __: None = Depends(verify_csrf),
+):
+    try:
+        return panel_database_service.insert_row(
+            body.schema_name,
+            body.table_name,
+            body.row_data,
         )
     except Exception as exc:
         raise _service_error(exc) from exc

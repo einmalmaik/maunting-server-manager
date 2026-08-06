@@ -205,6 +205,7 @@ export interface PostgresColumnInfo {
   data_type: string
   nullable: boolean
   default?: string | null
+  primary_key?: boolean
 }
 
 export interface PostgresIndexInfo {

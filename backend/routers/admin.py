@@ -147,12 +147,18 @@ def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="User nicht gefunden")
     if user.is_owner:
-        raise HTTPException(status_code=403, detail="Owner kann nicht gelöscht werden")
+        if not actor.is_owner:
+            raise HTTPException(status_code=403, detail="Nur ein Owner kann einen anderen Owner-Account löschen")
+        owner_count = db.query(User).filter(User.is_owner == True, User.is_active == True).count()
+        if owner_count <= 1:
+            raise HTTPException(status_code=403, detail="Owner kann nicht gelöscht werden")
+
     # Selbst-Loeschen verhindern — Account wuerde sofort wegbrechen, Session-
     # Cookies wuerden ins Leere zeigen und der User koennte nicht mehr
     # eingreifen, falls die Aktion versehentlich passiert.
     if user.id == actor.id:
         raise HTTPException(status_code=400, detail="Du kannst dich nicht selbst löschen")
+
     # Eskalations-Schutz: Wer einen User loescht, dessen Rolle Keys haelt, die
     # man selbst nicht hat, koennte indirekt Berechtigungen verschieben
     # (z.B. ein Non-Owner-Admin loescht einen Admin). Nur Subset zulassen.
@@ -160,21 +166,14 @@ def delete_user(
         target_keys = role_permission_keys(db, user.role_id)
         _ensure_no_global_escalation(db, actor, target_keys)
 
-    # FK-Cleanup: 4 abhängige Tabellen haben keine ON DELETE CASCADE-Regel
-    # (audit_logs / backup_codes / jwt_blacklist / refresh_tokens).
-    # Wir raeumen sie hier explizit auf, sonst blockt die FK-Constraint das DELETE.
-    # Audit-Logs NICHT loeschen (sicherheitsrelevant fuer Forensik) — nur user_id entkoppeln.
-    # Die anderen 3 sind reine Session-/Recovery-Hilfsdaten ohne Forensik-Wert.
-    # synchronize_session=False: nicht die Identity-Map aktualisieren, sondern
-    # direkt per bulk-DELETE/UPDATE arbeiten. Das ist schneller und sicherer
-    # bei Foreign-Key-Cleanups vor dem eigentlichen User-DELETE.
+    # FK-Cleanup: AuditLogs entkoppeln, Sessions & BackupCodes loeschen.
     db.query(AuditLog).filter(AuditLog.user_id == user_id).update(
         {AuditLog.user_id: None}, synchronize_session=False
     )
     db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete(synchronize_session=False)
     db.query(JwtBlacklist).filter(JwtBlacklist.user_id == user_id).delete(synchronize_session=False)
     db.query(BackupCode).filter(BackupCode.user_id == user_id).delete(synchronize_session=False)
-    db.flush()  # FK-Cleanups jetzt in der DB sichtbar, bevor user-DELETE laeuft
+    db.flush()
 
     db.delete(user)
     db.commit()

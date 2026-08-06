@@ -368,6 +368,31 @@ class TestDeleteUserProtection:
         )
         assert r.status_code == 403
 
+    def test_owner_can_delete_secondary_owner_user(
+        self,
+        client: TestClient,
+        db: Session,
+        owner_user: User,
+        owner_cookies: dict,
+    ):
+        """Ein Owner kann ein anderes Owner-Konto loeschen, wenn noch ein Owner verbleibt."""
+        from services import AuthService
+        second_owner = AuthService.create_user(db, "owner2", "owner2@test.de", "OwnerPass123!")
+        second_owner.is_owner = True
+        second_owner.email_verified = True
+        db.commit()
+        target_id = second_owner.id
+        db.expunge(second_owner)
+
+        r = client.delete(
+            f"/api/admin/users/{target_id}",
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 200
+        db.expire_all()
+        assert db.query(User).filter(User.id == target_id).first() is None
+
 
 class TestSetServerPermissionsEscalation:
     """set_server_permissions: Actor muss server-scoped Keys selbst besitzen."""
