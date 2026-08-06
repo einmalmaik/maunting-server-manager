@@ -187,10 +187,64 @@ def apply_agent_metrics(node: Node, metrics: dict[str, Any] | None) -> None:
         node.agent_version = agent_version.strip()[:50]
 
 
+def handle_node_probe_failure(
+    db: Session | None,
+    node: Node,
+    now: datetime | None = None,
+) -> None:
+    """Handle a failed heartbeat probe with hysteresis/grace-period.
+
+    If the node was previously 'online' and last_heartbeat is within the grace period,
+    do not immediately flip node.status to 'offline' (to prevent false-positives
+    during heavy I/O / SteamCMD downloads).
+    Only mark offline if last_heartbeat is missing or older than the grace period.
+    """
+    from datetime import datetime, timezone
+    from models import Server
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    try:
+        from config import settings
+        raw_grace = getattr(settings, "node_heartbeat_grace_period_seconds", 60.0)
+        grace_period = max(5.0, float(raw_grace))
+    except Exception:
+        grace_period = 60.0
+
+    if node.last_heartbeat is not None:
+        last_hb = node.last_heartbeat
+        if last_hb.tzinfo is None:
+            last_hb = last_hb.replace(tzinfo=timezone.utc)
+        elapsed = (now - last_hb).total_seconds()
+        if elapsed <= grace_period and node.status == "online":
+            logger.info(
+                "Node %s (%s) probe failed/timed out, but within grace period (%.1fs <= %.1fs). Retaining status.",
+                node.id,
+                node.name,
+                elapsed,
+                grace_period,
+            )
+            return
+
+    node.status = "offline"
+    if db is not None:
+        try:
+            db.query(Server).filter(Server.node_id == node.id).update(
+                {
+                    "guardian_observed_state": "unknown",
+                    "guardian_container_status": "unknown",
+                },
+                synchronize_session=False,
+            )
+        except Exception:
+            pass
+
+
 def probe_node_metrics(
     node: Node,
     *,
-    timeout: float = 2.5,
+    timeout: float = 5.0,
     mark_status: bool = True,
 ) -> dict[str, Any] | None:
     """Best-effort live metrics from the agent. Never raises for admin list UI.
@@ -206,12 +260,12 @@ def probe_node_metrics(
         metrics = client.metrics()
     except NodeClientError:
         if mark_status:
-            node.status = "offline"
+            handle_node_probe_failure(None, node)
         return None
     except Exception:
         logger.exception("unexpected node metrics probe failure (node_id=%s)", node.id)
         if mark_status:
-            node.status = "offline"
+            handle_node_probe_failure(None, node)
         return None
 
     if not isinstance(metrics, dict):

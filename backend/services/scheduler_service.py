@@ -772,39 +772,29 @@ async def _node_heartbeat_task() -> None:
         semaphore = asyncio.Semaphore(50)  # max 50 concurrent requests
         limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
 
-        def mark_offline(node: Node) -> None:
-            node.status = "offline"
-            # A node that cannot be observed must never leave a stale green
-            # Guardian state in the panel. Preserve incident history and the
-            # last timestamps, but fail the live observation closed.
-            db.query(Server).filter(Server.node_id == node.id).update(
-                {
-                    "guardian_observed_state": "unknown",
-                    "guardian_container_status": "unknown",
-                },
-                synchronize_session=False,
-            )
+        from services.node_service import handle_node_probe_failure
 
         async def check_node(client: httpx.AsyncClient, node: Node):
             async with semaphore:
+                now_utc = datetime.now(timezone.utc)
                 try:
-                    node_client = NodeClient.from_node(node, timeout=3.0)
+                    node_client = NodeClient.from_node(node, timeout=10.0)
                     metrics = await node_client.metrics_async(client=client)
                     if isinstance(metrics, dict):
                         node.status = "online"
-                        node.last_heartbeat = datetime.now(timezone.utc)
+                        node.last_heartbeat = now_utc
                         apply_agent_metrics(node, metrics)
                     else:
-                        mark_offline(node)
+                        handle_node_probe_failure(db, node, now_utc)
                 except NodeClientError:
-                    mark_offline(node)
+                    handle_node_probe_failure(db, node, now_utc)
                 except Exception:
-                    mark_offline(node)
+                    handle_node_probe_failure(db, node, now_utc)
                     logger.exception(
                         "unexpected node heartbeat failure (node_id=%s)", node.id
                     )
 
-        async with httpx.AsyncClient(limits=limits, timeout=4.0) as client:
+        async with httpx.AsyncClient(limits=limits, timeout=10.0) as client:
             tasks = [check_node(client, node) for node in nodes]
             await asyncio.gather(*tasks)
 
