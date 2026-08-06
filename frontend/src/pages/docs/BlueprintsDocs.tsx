@@ -402,15 +402,19 @@ export function BlueprintsDocs() {
             <FieldTable>
               <FieldRow field="runtime.image" type="string" required={true}>{t('docs.reference.runtimeImage')}</FieldRow>
               <FieldRow field="runtime.workdir" type="string" required={false}>{t('docs.reference.runtimeWorkdir')}</FieldRow>
+              <FieldRow field="runtime.user" type="string" required={false}>{t('docs.reference.runtimeUser')}</FieldRow>
               <FieldRow field="runtime.env" type="dict" required={false}>{t('docs.reference.runtimeEnv')}</FieldRow>
               <FieldRow field="runtime.startup" type="string" required={true}>{t('docs.reference.runtimeStartup')}</FieldRow>
               <FieldRow field="runtime.ensureDirs" type="list" required={false}>
                 {t('docs.reference.runtimeEnsureDirs', 'Relative directories created inside the server directory before each start. Useful for profile, log, cache, or runtime folders expected by startup arguments.')}
               </FieldRow>
+              <FieldRow field="runtime.requiredFiles" type="list" required={false}>{t('docs.reference.runtimeRequiredFiles')}</FieldRow>
               <FieldRow field="runtime.seedFiles" type="list" required={false}>
                 {t('docs.reference.runtimeSeedFiles', 'Default files written only when missing (seed-once). Each entry needs file + content. Port tokens allowed. Runs before configPatches.')}
               </FieldRow>
               <FieldRow field="runtime.configPatches" type="list" required={false}>{t('docs.reference.runtimeConfigPatches')}</FieldRow>
+              <FieldRow field="runtime.stopGracePeriodSeconds" type="integer" required={false}>{t('docs.reference.runtimeStopGracePeriodSeconds')}</FieldRow>
+              <FieldRow field="runtime.startupCheckSeconds" type="float" required={false}>{t('docs.reference.runtimeStartupCheckSeconds')}</FieldRow>
               {/* v1.4.7+: Exec-Tab-Opt-in. Default false. Erlaubt authentifizierten
                   Usern mit Permission ``server.console.exec``, One-Shot-Befehle
                   im MSM-Container auszufuehren (argv, kein Shell). Siehe
@@ -490,6 +494,9 @@ export function BlueprintsDocs() {
 
             <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.h2')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b2')}</p>
+
+            <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.hSeedFiles')}</h3>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.bSeedFiles')}</p>
 
             <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.h3')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b3')}</p>
