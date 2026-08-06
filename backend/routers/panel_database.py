@@ -23,9 +23,17 @@ router = APIRouter(prefix="/api/panel/database", tags=["panel-database"])
 
 
 def _service_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, HTTPException):
+        return exc
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=str(exc))
-    return HTTPException(status_code=500, detail="Panel-Datenbank-Operation fehlgeschlagen")
+    err_str = str(exc)
+    if "foreign key constraint" in err_str.lower() or "foreignkeyviolation" in err_str.lower():
+        return HTTPException(
+            status_code=400,
+            detail="Zeile kann nicht gelöscht werden: Sie wird von einer anderen Tabelle referenziert (Fremdschlüssel-Einschränkung).",
+        )
+    return HTTPException(status_code=400, detail=f"Datenbank-Fehler: {err_str}")
 
 
 @router.get("/stats", response_model=PostgresDatabaseStats)

@@ -97,6 +97,21 @@ def describe_table(schema_name: str, table_name: str) -> dict[str, Any]:
         with conn.cursor() as cur:
             cur.execute(
                 """
+                SELECT kcu.column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                WHERE tc.constraint_type = 'PRIMARY KEY'
+                  AND tc.table_schema = %s
+                  AND tc.table_name = %s
+                """,
+                (schema_name, table_name),
+            )
+            pk_cols = {row[0] for row in cur.fetchall()}
+
+            cur.execute(
+                """
                 SELECT column_name, data_type, is_nullable, column_default
                 FROM information_schema.columns
                 WHERE table_schema = %s AND table_name = %s
@@ -105,7 +120,13 @@ def describe_table(schema_name: str, table_name: str) -> dict[str, Any]:
                 (schema_name, table_name),
             )
             columns = [
-                {"name": row[0], "data_type": row[1], "nullable": row[2] == "YES", "default": row[3]}
+                {
+                    "name": row[0],
+                    "data_type": row[1],
+                    "nullable": row[2] == "YES",
+                    "default": row[3],
+                    "primary_key": row[0] in pk_cols,
+                }
                 for row in cur.fetchall()
             ]
             if not columns:

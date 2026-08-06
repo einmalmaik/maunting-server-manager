@@ -156,6 +156,7 @@ class PostgresColumnInfo(BaseModel):
     data_type: str
     nullable: bool
     default: str | None = None
+    primary_key: bool = False
 
 
 class PostgresIndexInfo(BaseModel):

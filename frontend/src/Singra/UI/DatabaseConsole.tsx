@@ -1492,7 +1492,7 @@ function DeleteConfirmModal({
 }
 
 function buildRowKeyConditions(row: Record<string, any>, tableInfo: PostgresTableInfo | null, columns: string[]): Record<string, any> {
-  const pkCols = tableInfo?.columns.filter((c) => (c as any).primary_key || c.name === 'id').map((c) => c.name) || []
+  const pkCols = tableInfo?.columns.filter((c) => c.primary_key || c.name === 'id').map((c) => c.name) || []
   if (pkCols.length > 0 && pkCols.every((col) => col in row && row[col] !== undefined && row[col] !== null)) {
     const keys: Record<string, any> = {}
     for (const col of pkCols) {
@@ -1502,7 +1502,7 @@ function buildRowKeyConditions(row: Record<string, any>, tableInfo: PostgresTabl
   }
   const keys: Record<string, any> = {}
   for (const col of columns) {
-    if (col in row && row[col] !== undefined) {
+    if (col in row && row[col] !== undefined && row[col] !== null && typeof row[col] !== 'object') {
       keys[col] = row[col]
     }
   }

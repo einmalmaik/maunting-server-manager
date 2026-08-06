@@ -51,13 +51,19 @@ def _ensure_server(db: Session, server_id: int) -> Server:
 
 
 def _service_error(exc: Exception) -> HTTPException:
-    import traceback
-    traceback.print_exc()
+    if isinstance(exc, HTTPException):
+        return exc
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, PostgresServiceError):
         return HTTPException(status_code=503, detail=str(exc))
-    return HTTPException(status_code=500, detail="PostgreSQL-Operation fehlgeschlagen")
+    err_str = str(exc)
+    if "foreign key constraint" in err_str.lower() or "foreignkeyviolation" in err_str.lower():
+        return HTTPException(
+            status_code=400,
+            detail="Zeile kann nicht gelöscht werden: Sie wird von einer anderen Tabelle referenziert (Fremdschlüssel-Einschränkung).",
+        )
+    return HTTPException(status_code=400, detail=f"PostgreSQL-Fehler: {err_str}")
 
 
 def _audit_db(
