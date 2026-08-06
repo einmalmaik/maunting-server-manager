@@ -7,11 +7,12 @@ name: Recovery App Release
 on:
   push:
     tags:
+      - "v*"
       - "recovery-v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. recovery-v1.0.0)"
+        description: "Release tag (e.g. v3.2.0 or recovery-v1.0.0)"
         required: false
 
 permissions:
