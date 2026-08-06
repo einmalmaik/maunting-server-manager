@@ -873,7 +873,18 @@ def _ensure_git_update_check_job() -> None:
 async def _guardian_reconciliation_task() -> None:
     """Reconcile durable intent, observed state and incidents for every server."""
     from services.guardian_reconciliation_service import reconcile_guardian_servers
+    from services.firewall_service import reconcile_firewall_rules
+    from database import SessionLocal
+
     await reconcile_guardian_servers()
+
+    db = SessionLocal()
+    try:
+        reconcile_firewall_rules(db)
+    except Exception as exc:
+        logger.warning("Error in firewall reconciliation task: %s", exc)
+    finally:
+        db.close()
 
 
 def _ensure_guardian_reconciliation_job() -> None:

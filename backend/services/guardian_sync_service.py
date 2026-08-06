@@ -302,6 +302,21 @@ def reconcile_guardian_server(
         # Save observed fields to database
         server.guardian_observed_state = observed_state
         server.guardian_container_status = container_state
+        if container_state in ("exited", "dead", "stopped", "missing") and server.status == "running":
+            server.status = "stopped"
+            try:
+                from services.server_lifecycle_service import _ports
+                from services.firewall_service import close_ports
+                close_ports(
+                    _ports(server),
+                    node=server.node,
+                    name=server.name,
+                    db=db,
+                    server_id=server.id,
+                    reason="Crash-Cleanup (Guardian/Sync)",
+                )
+            except Exception as exc:
+                logger.warning("Failed to auto-close ports for crashed server %s: %s", server.id, exc)
         server.guardian_active_incident_uuid = observed.get("active_incident_uuid")
         server.guardian_probe_timestamp = probe_dt
         server.guardian_transition_timestamp = trans_dt
