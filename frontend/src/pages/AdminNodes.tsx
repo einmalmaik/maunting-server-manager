@@ -20,7 +20,7 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { Badge } from '@/components/ui/Badge'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { ProgressBar } from '@/Singra/UI/ProgressBar'
+import { ProgressBar, StackedProgressBar, type Segment } from '@/Singra/UI/ProgressBar'
 import { NodeEnrollmentDialog } from '@/components/nodes/NodeEnrollmentDialog'
 import type { Node } from '@/types'
 import { api } from '@/api/client'
@@ -570,11 +570,30 @@ export function AdminNodes() {
                     const totalMb = node.disk_total ?? 0
                     const hostUsedMb = node.disk_used ?? (totalMb && fDisk != null ? Math.max(0, totalMb - fDisk) : 0)
                     const systemUsedMb = Math.max(0, hostUsedMb - panelUsedMb)
+                    const freeMb = fDisk ?? (totalMb ? Math.max(0, totalMb - hostUsedMb) : 0)
+
+                    const segments: Segment[] = [
+                      {
+                        value: panelUsedMb,
+                        colorClass: 'bg-primary',
+                        label: t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) }),
+                      },
+                      {
+                        value: systemUsedMb,
+                        colorClass: 'bg-neutral-500',
+                        label: t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) }),
+                      },
+                      {
+                        value: freeMb,
+                        colorClass: 'bg-emerald-500',
+                        label: t('nodes.diskFree', { value: formatRamMb(freeMb) }),
+                      },
+                    ]
 
                     return (
                       <>
-                        <ProgressBar
-                          value={diskP}
+                        <StackedProgressBar
+                          segments={segments}
                           label="Disk"
                           hint={
                             diskP != null
@@ -583,7 +602,6 @@ export function AdminNodes() {
                                 ? t('nodes.diskTotal', { value: formatRamMb(node.disk_total) })
                                 : '—'
                           }
-                          heat
                           data-testid={`node-disk-${node.id}`}
                         />
                         {node.disk_total != null && (
@@ -592,10 +610,10 @@ export function AdminNodes() {
                               <span className="text-primary" title={t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}>
                                 ■ {t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}
                               </span>
-                              <span className="text-on-surface-variant/80" title={t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}>
+                              <span className="text-neutral-400" title={t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}>
                                 ■ {t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}
                               </span>
-                              <span className="text-status-success" title={t('nodes.diskFree', { value: formatRamMb(fDisk) })}>
+                              <span className="text-emerald-400" title={t('nodes.diskFree', { value: formatRamMb(fDisk) })}>
                                 ■ {t('nodes.diskFree', { value: formatRamMb(fDisk) })}
                               </span>
                             </div>

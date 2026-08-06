@@ -68,8 +68,74 @@ export function ProgressBar({
         ) : (
           <div
             className="h-full w-full rounded-full bg-[repeating-linear-gradient(90deg,transparent,transparent_4px,rgba(255,255,255,0.04)_4px,rgba(255,255,255,0.04)_8px)]"
-            aria-hidden
           />
+        )}
+      </div>
+    </div>
+  )
+}
+
+export interface Segment {
+  /** Numerical value or percentage weight for this segment */
+  value: number
+  /** Tailwind background color class, e.g. 'bg-primary' */
+  colorClass: string
+  /** Tooltip or accessible label */
+  label?: string
+}
+
+interface StackedProgressBarProps {
+  label?: string
+  hint?: string
+  segments: Segment[]
+  className?: string
+  'data-testid'?: string
+}
+
+export function StackedProgressBar({
+  label,
+  hint,
+  segments,
+  className = '',
+  'data-testid': testId,
+}: StackedProgressBarProps) {
+  const totalWeight = segments.reduce((sum, s) => sum + Math.max(0, s.value || 0), 0)
+
+  return (
+    <div className={cx('w-full', className)} data-testid={testId}>
+      {(label || hint) && (
+        <div className="mb-1 flex items-center justify-between gap-2">
+          {label && (
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
+              {label}
+            </span>
+          )}
+          {hint && (
+            <span className="font-mono-sm text-mono-sm text-on-surface-variant">
+              {hint}
+            </span>
+          )}
+        </div>
+      )}
+      <div
+        className="flex h-2.5 w-full overflow-hidden rounded-full border border-outline-variant/40 bg-surface-container-highest"
+        role="progressbar"
+      >
+        {totalWeight > 0 ? (
+          segments.map((seg, i) => {
+            const pct = (Math.max(0, seg.value) / totalWeight) * 100
+            if (pct <= 0) return null
+            return (
+              <div
+                key={i}
+                className={cx('h-full transition-all duration-300', seg.colorClass)}
+                style={{ width: `${pct}%` }}
+                title={seg.label}
+              />
+            )
+          })
+        ) : (
+          <div className="h-full w-full rounded-full bg-surface-container-highest" />
         )}
       </div>
     </div>
