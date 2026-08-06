@@ -96,3 +96,102 @@ def ensure_ram_limit_fits(
     """
     return
 
+
+# ── Disk capacity accounting ───────────────────────────────────────────────
+
+
+def sum_allocated_disk_gb(
+    db: Session,
+    node_id: int,
+    *,
+    exclude_server_id: int | None = None,
+) -> int:
+    """Sum of non-null server.disk_limit_gb on the node (booked disk limit in GB)."""
+    query = db.query(func.coalesce(func.sum(Server.disk_limit_gb), 0)).filter(
+        Server.node_id == node_id,
+        Server.disk_limit_gb.isnot(None),
+    )
+    if exclude_server_id is not None:
+        query = query.filter(Server.id != exclude_server_id)
+    total = query.scalar()
+    try:
+        return int(total or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def allocated_disk_by_node_ids(db: Session, node_ids: list[int]) -> dict[int, int]:
+    """Batch SUM(disk_limit_gb) grouped by node_id."""
+    if not node_ids:
+        return {}
+    rows = (
+        db.query(Server.node_id, func.coalesce(func.sum(Server.disk_limit_gb), 0))
+        .filter(
+            Server.node_id.in_(node_ids),
+            Server.disk_limit_gb.isnot(None),
+        )
+        .group_by(Server.node_id)
+        .all()
+    )
+    out: dict[int, int] = {nid: 0 for nid in node_ids}
+    for node_id, total in rows:
+        if node_id is None:
+            continue
+        try:
+            out[int(node_id)] = int(total or 0)
+        except (TypeError, ValueError):
+            out[int(node_id)] = 0
+    return out
+
+
+def sum_panel_disk_used_mb(db: Session, node_id: int) -> int:
+    """Sum of server.disk_usage_mb on the node (actual storage used by panel servers + DBs)."""
+    total = (
+        db.query(func.coalesce(func.sum(Server.disk_usage_mb), 0))
+        .filter(
+            Server.node_id == node_id,
+            Server.disk_usage_mb.isnot(None),
+        )
+        .scalar()
+    )
+    try:
+        return int(total or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def panel_disk_used_by_node_ids(db: Session, node_ids: list[int]) -> dict[int, int]:
+    """Batch SUM(disk_usage_mb) grouped by node_id."""
+    if not node_ids:
+        return {}
+    rows = (
+        db.query(Server.node_id, func.coalesce(func.sum(Server.disk_usage_mb), 0))
+        .filter(
+            Server.node_id.in_(node_ids),
+            Server.disk_usage_mb.isnot(None),
+        )
+        .group_by(Server.node_id)
+        .all()
+    )
+    out: dict[int, int] = {nid: 0 for nid in node_ids}
+    for node_id, total in rows:
+        if node_id is None:
+            continue
+        try:
+            out[int(node_id)] = int(total or 0)
+        except (TypeError, ValueError):
+            out[int(node_id)] = 0
+    return out
+
+
+def allocatable_disk_gb(node: Node, allocated_gb: int) -> int | None:
+    """Remaining bookable disk limit (in GB), or None if host total unknown."""
+    if node.disk_total is None:
+        return None
+    try:
+        total_gb = int(node.disk_total) // 1024
+    except (TypeError, ValueError):
+        return None
+    return max(0, total_gb - max(0, int(allocated_gb)))
+
+

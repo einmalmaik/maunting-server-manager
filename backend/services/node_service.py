@@ -229,9 +229,11 @@ def node_out_dict(
     *,
     metrics: dict[str, Any] | None = None,
     ram_allocated_mb: int | None = None,
+    disk_allocated_gb: int | None = None,
+    disk_panel_used_mb: int | None = None,
 ) -> dict[str, Any]:
     """Serialize Node for API without auth_token_enc."""
-    from services.node_capacity import allocatable_ram_mb
+    from services.node_capacity import allocatable_ram_mb, allocatable_disk_gb
 
     count = server_count
     if count is None:
@@ -240,8 +242,12 @@ def node_out_dict(
         except Exception:
             count = 0
 
-    allocated = 0 if ram_allocated_mb is None else int(ram_allocated_mb)
-    ram_allocatable = allocatable_ram_mb(node, allocated)
+    allocated_ram = 0 if ram_allocated_mb is None else int(ram_allocated_mb)
+    ram_allocatable = allocatable_ram_mb(node, allocated_ram)
+
+    allocated_disk = 0 if disk_allocated_gb is None else int(disk_allocated_gb)
+    disk_allocatable = allocatable_disk_gb(node, allocated_disk)
+    panel_disk_used = 0 if disk_panel_used_mb is None else int(disk_panel_used_mb)
 
     cpu_percent = getattr(node, "cpu_percent", None)
     if metrics is None and cpu_percent is not None:
@@ -280,10 +286,14 @@ def node_out_dict(
         "cpu_model": getattr(node, "cpu_model", None),
         "ram_total": node.ram_total,
         "disk_total": node.disk_total,
+        "disk_used": getattr(node, "disk_used", None),
         "last_heartbeat": node.last_heartbeat,
         "server_count": int(count or 0),
-        "ram_allocated_mb": ram_allocated_mb if ram_allocated_mb is not None else allocated,
+        "ram_allocated_mb": ram_allocated_mb if ram_allocated_mb is not None else allocated_ram,
         "ram_allocatable_mb": ram_allocatable,
+        "disk_allocated_gb": allocated_disk,
+        "disk_allocatable_gb": disk_allocatable,
+        "disk_panel_used_mb": panel_disk_used,
     }
     if metrics is not None:
         # Prefer cached model when live metrics omit the field (older agents).

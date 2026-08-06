@@ -86,12 +86,19 @@ export interface Node {
   cpu_model?: string | null
   ram_total: number | null
   disk_total: number | null
+  disk_used?: number | null
   last_heartbeat: string | null
   server_count: number
   /** Sum of server.ram_limit_mb on this node (null limits excluded). */
   ram_allocated_mb?: number | null
   /** Remaining bookable RAM after headroom + booked limits; null if total unknown. */
   ram_allocatable_mb?: number | null
+  /** Sum of server.disk_limit_gb on this node. */
+  disk_allocated_gb?: number | null
+  /** Remaining bookable disk limit in GB. */
+  disk_allocatable_gb?: number | null
+  /** Storage used by panel servers and server-own databases on this node (in MB). */
+  disk_panel_used_mb?: number | null
   /** Live metrics from agent (optional, GET /nodes/{id}) */
   metrics?: {
     cpu_count?: number
@@ -120,6 +127,11 @@ export interface NodeCapacitySummary {
     ram_used_mb: number | null
     ram_allocated_mb: number
     ram_allocatable_mb: number | null
+    disk_total_mb?: number | null
+    disk_used_mb?: number | null
+    disk_allocated_gb?: number
+    disk_allocatable_gb?: number | null
+    disk_panel_used_mb?: number
     server_count: number
   }>
 }

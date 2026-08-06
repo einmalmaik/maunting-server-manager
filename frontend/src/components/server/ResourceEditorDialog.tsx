@@ -206,30 +206,57 @@ export function ResourceEditorDialog({
       return
     }
 
-    if (ramNum !== init.ram && ramNum != null && ramNum > 0 && nodeId) {
+    if ((ramNum !== init.ram || diskNum !== init.disk) && nodeId) {
       try {
         const targetNode = await api<Node>(`/nodes/${nodeId}`)
         if (targetNode) {
-          let availRamMb: number | null = null
-          if (targetNode.ram_allocatable_mb != null) {
-            availRamMb = Math.max(0, targetNode.ram_allocatable_mb)
-          } else if (targetNode.ram_total != null) {
-            availRamMb = Math.max(0, targetNode.ram_total - (targetNode.ram_allocated_mb ?? 0))
+          if (ramNum !== init.ram && ramNum != null && ramNum > 0) {
+            let availRamMb: number | null = null
+            if (targetNode.ram_allocatable_mb != null) {
+              availRamMb = Math.max(0, targetNode.ram_allocatable_mb)
+            } else if (targetNode.ram_total != null) {
+              availRamMb = Math.max(0, targetNode.ram_total - (targetNode.ram_allocated_mb ?? 0))
+            }
+            const currentLimit = init.ram ?? 0
+            const maxWithoutOvercommit = (availRamMb ?? 0) + currentLimit
+            if (availRamMb != null && ramNum > maxWithoutOvercommit) {
+              const formatRamMbLabel = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`)
+              const confirmed = await confirm({
+                title: t('servers.overcommitTitle'),
+                message: t('servers.overcommitWarning', {
+                  requested: formatRamMbLabel(ramNum),
+                  available: formatRamMbLabel(availRamMb),
+                  total: formatRamMbLabel(targetNode.ram_total || 0),
+                }),
+                confirmText: t('servers.overcommitConfirm'),
+              })
+              if (!confirmed) return
+            }
           }
-          const currentLimit = init.ram ?? 0
-          const maxWithoutOvercommit = (availRamMb ?? 0) + currentLimit
-          if (availRamMb != null && ramNum > maxWithoutOvercommit) {
-            const formatRamMbLabel = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`)
-            const confirmed = await confirm({
-              title: t('servers.overcommitTitle'),
-              message: t('servers.overcommitWarning', {
-                requested: formatRamMbLabel(ramNum),
-                available: formatRamMbLabel(availRamMb),
-                total: formatRamMbLabel(targetNode.ram_total || 0),
-              }),
-              confirmText: t('servers.overcommitConfirm'),
-            })
-            if (!confirmed) return
+
+          if (diskNum !== init.disk && diskNum != null && diskNum > 0) {
+            let availDiskGb: number | null = null
+            if (targetNode.disk_allocatable_gb != null) {
+              availDiskGb = Math.max(0, targetNode.disk_allocatable_gb)
+            } else if (targetNode.disk_total != null) {
+              const totalGb = Math.floor(targetNode.disk_total / 1024)
+              availDiskGb = Math.max(0, totalGb - (targetNode.disk_allocated_gb ?? 0))
+            }
+            const currentDiskLimit = init.disk ?? 0
+            const maxDiskWithoutOvercommit = (availDiskGb ?? 0) + currentDiskLimit
+            if (availDiskGb != null && diskNum > maxDiskWithoutOvercommit) {
+              const totalGb = Math.floor((targetNode.disk_total ?? 0) / 1024)
+              const confirmed = await confirm({
+                title: t('servers.overcommitTitle'),
+                message: t('servers.overcommitDiskWarning', {
+                  requested: `${diskNum} GB`,
+                  available: `${availDiskGb} GB`,
+                  total: `${totalGb} GB`,
+                }),
+                confirmText: t('servers.overcommitConfirm'),
+              })
+              if (!confirmed) return
+            }
           }
         }
       } catch {

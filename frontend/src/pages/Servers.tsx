@@ -173,6 +173,33 @@ export function Servers() {
         }
       }
 
+      const reqDiskGb = form.disk_limit_gb ? parseInt(form.disk_limit_gb, 10) : null
+      if (reqDiskGb && reqDiskGb > 0 && targetNode) {
+        let availDiskGb: number | null = null
+        if (targetNode.disk_allocatable_gb != null) {
+          availDiskGb = Math.max(0, targetNode.disk_allocatable_gb)
+        } else if (targetNode.disk_total != null) {
+          const totalGb = Math.floor(targetNode.disk_total / 1024)
+          availDiskGb = Math.max(0, totalGb - (targetNode.disk_allocated_gb ?? 0))
+        }
+        if (availDiskGb != null && reqDiskGb > availDiskGb) {
+          const totalGb = Math.floor((targetNode.disk_total ?? 0) / 1024)
+          const confirmed = await confirm({
+            title: t('servers.overcommitTitle'),
+            message: t('servers.overcommitDiskWarning', {
+              requested: `${reqDiskGb} GB`,
+              available: `${availDiskGb} GB`,
+              total: `${totalGb} GB`,
+            }),
+            confirmText: t('servers.overcommitConfirm'),
+          })
+          if (!confirmed) {
+            setCreating(false)
+            return
+          }
+        }
+      }
+
       const portsPayload: Record<string, number | null> = {}
       const selectedGame = safeGames.find((g) => g.id === form.game_type)
       const portDefs = selectedGame?.ports ?? [

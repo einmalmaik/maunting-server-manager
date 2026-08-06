@@ -72,12 +72,19 @@ class NodeOut(BaseModel):
     cpu_model: str | None = None
     ram_total: int | None = None
     disk_total: int | None = None
+    disk_used: int | None = None
     last_heartbeat: datetime | None = None
     server_count: int = 0
     # Sum of server.ram_limit_mb on this node (null limits excluded). Panel-side only.
     ram_allocated_mb: int | None = None
     # Remaining bookable RAM (total − headroom − allocated); null if host total unknown.
     ram_allocatable_mb: int | None = None
+    # Sum of server.disk_limit_gb on this node.
+    disk_allocated_gb: int = 0
+    # Remaining bookable disk limit in GB.
+    disk_allocatable_gb: int | None = None
+    # Actual storage used by panel servers + databases on this node (in MB).
+    disk_panel_used_mb: int = 0
     # Optional live metrics from agent (GET /api/nodes/{id})
     metrics: dict | None = None
 
@@ -96,6 +103,9 @@ class NodePickerOut(BaseModel):
     ram_total: int | None = None
     ram_allocated_mb: int | None = None
     ram_allocatable_mb: int | None = None
+    disk_total: int | None = None
+    disk_allocated_gb: int = 0
+    disk_allocatable_gb: int | None = None
 
 
 class NodeCapacityItem(BaseModel):
@@ -110,6 +120,11 @@ class NodeCapacityItem(BaseModel):
     ram_used_mb: int | None = None
     ram_allocated_mb: int = 0
     ram_allocatable_mb: int | None = None
+    disk_total_mb: int | None = None
+    disk_used_mb: int | None = None
+    disk_allocated_gb: int = 0
+    disk_allocatable_gb: int | None = None
+    disk_panel_used_mb: int = 0
     server_count: int = 0
 
 
@@ -117,3 +132,4 @@ class NodeCapacitySummary(BaseModel):
     online: int
     total: int
     items: list[NodeCapacityItem]
+

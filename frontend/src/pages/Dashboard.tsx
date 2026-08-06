@@ -162,6 +162,20 @@ function NodeCapacityCard() {
                       : '—'
                   }
                 />
+                {item.disk_total_mb != null && (
+                  <ProgressBar
+                    value={
+                      item.disk_total_mb > 0 && item.disk_used_mb != null
+                        ? Math.min(100, (item.disk_used_mb / item.disk_total_mb) * 100)
+                        : null
+                    }
+                    label="Disk"
+                    heat
+                    hint={`${formatRamMb(item.disk_used_mb)} / ${formatRamMb(item.disk_total_mb)} · ${t('nodes.diskAllocatable', {
+                      value: `${item.disk_allocatable_gb ?? 0} GB`,
+                    })}`}
+                  />
+                )}
               </li>
             )
           })}

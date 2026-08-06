@@ -47,6 +47,11 @@ from services.node_capacity import (
     allocatable_ram_mb,
     allocated_ram_by_node_ids,
     sum_allocated_ram_mb,
+    allocatable_disk_gb,
+    allocated_disk_by_node_ids,
+    panel_disk_used_by_node_ids,
+    sum_allocated_disk_gb,
+    sum_panel_disk_used_mb,
 )
 from services.node_client import NodeClient, NodeClientError
 from services.node_service import (
@@ -128,16 +133,25 @@ def _can_read_node_details(db: Session, user: User) -> bool:
     return user.is_owner or has_global_permission(db, user, "nodes.read")
 
 
-def _picker_out(node: Node, *, ram_allocated_mb: int | None = None) -> dict[str, Any]:
-    allocated = 0 if ram_allocated_mb is None else int(ram_allocated_mb)
+def _picker_out(
+    node: Node,
+    *,
+    ram_allocated_mb: int | None = None,
+    disk_allocated_gb: int | None = None,
+) -> dict[str, Any]:
+    ram_allocated = 0 if ram_allocated_mb is None else int(ram_allocated_mb)
+    disk_allocated = 0 if disk_allocated_gb is None else int(disk_allocated_gb)
     return NodePickerOut(
         id=node.id,
         name=node.name,
         status=node.status or "unknown",
         cpu_total=node.cpu_total,
         ram_total=node.ram_total,
-        ram_allocated_mb=allocated,
-        ram_allocatable_mb=allocatable_ram_mb(node, allocated),
+        ram_allocated_mb=ram_allocated,
+        ram_allocatable_mb=allocatable_ram_mb(node, ram_allocated),
+        disk_total=node.disk_total,
+        disk_allocated_gb=disk_allocated,
+        disk_allocatable_gb=allocatable_disk_gb(node, disk_allocated),
     ).model_dump()
 
 
@@ -162,7 +176,9 @@ def capacity_summary(
 
     nodes = db.query(Node).order_by(Node.id.asc()).all()
     node_ids = [n.id for n in nodes]
-    allocated_map = allocated_ram_by_node_ids(db, node_ids)
+    allocated_ram_map = allocated_ram_by_node_ids(db, node_ids)
+    allocated_disk_map = allocated_disk_by_node_ids(db, node_ids)
+    panel_disk_used_map = panel_disk_used_by_node_ids(db, node_ids)
     server_counts_raw = (
         db.query(Server.node_id, func.count(Server.id))
         .filter(Server.node_id.in_(node_ids))
@@ -178,7 +194,7 @@ def capacity_summary(
         online_rank = 0 if status == "online" else 1
         ram_total = int(node.ram_total or 0)
         ram_used = int(node.ram_used or 0)
-        allocated = int(allocated_map.get(node.id, 0))
+        allocated = int(allocated_ram_map.get(node.id, 0))
         used_ratio = (ram_used / ram_total) if ram_total > 0 else 0.0
         alloc_ratio = (allocated / ram_total) if ram_total > 0 else 0.0
         # Online first, then busiest (max of OS used vs booked), then name.
@@ -188,7 +204,9 @@ def capacity_summary(
     ranked = sorted(nodes, key=_sort_key)[:limit]
     items = []
     for n in ranked:
-        booked = int(allocated_map.get(n.id, 0))
+        ram_booked = int(allocated_ram_map.get(n.id, 0))
+        disk_booked = int(allocated_disk_map.get(n.id, 0))
+        panel_used = int(panel_disk_used_map.get(n.id, 0))
         items.append(
             {
                 "id": n.id,
@@ -198,8 +216,13 @@ def capacity_summary(
                 "cpu_total": n.cpu_total,
                 "ram_total_mb": n.ram_total,
                 "ram_used_mb": n.ram_used,
-                "ram_allocated_mb": booked,
-                "ram_allocatable_mb": allocatable_ram_mb(n, booked),
+                "ram_allocated_mb": ram_booked,
+                "ram_allocatable_mb": allocatable_ram_mb(n, ram_booked),
+                "disk_total_mb": n.disk_total,
+                "disk_used_mb": n.disk_used,
+                "disk_allocated_gb": disk_booked,
+                "disk_allocatable_gb": allocatable_disk_gb(n, disk_booked),
+                "disk_panel_used_mb": panel_used,
                 "server_count": int(server_counts.get(n.id, 0)),
             }
         )
@@ -252,10 +275,16 @@ def list_nodes(
             "limit": limit,
         }
         node_ids = [node.id for node in nodes]
-        allocated_map = allocated_ram_by_node_ids(db, node_ids)
+        allocated_ram_map = allocated_ram_by_node_ids(db, node_ids)
+        allocated_disk_map = allocated_disk_by_node_ids(db, node_ids)
+        panel_disk_used_map = panel_disk_used_by_node_ids(db, node_ids)
         if not can_read_details:
             result_page["items"] = [
-                _picker_out(node, ram_allocated_mb=allocated_map.get(node.id, 0))
+                _picker_out(
+                    node,
+                    ram_allocated_mb=allocated_ram_map.get(node.id, 0),
+                    disk_allocated_gb=allocated_disk_map.get(node.id, 0),
+                )
                 for node in nodes
             ]
             return result_page
@@ -273,7 +302,9 @@ def list_nodes(
             node_out_dict(
                 node,
                 server_count=server_counts.get(node.id, 0),
-                ram_allocated_mb=allocated_map.get(node.id, 0),
+                ram_allocated_mb=allocated_ram_map.get(node.id, 0),
+                disk_allocated_gb=allocated_disk_map.get(node.id, 0),
+                disk_panel_used_mb=panel_disk_used_map.get(node.id, 0),
             )
             for node in nodes
         ]
@@ -281,10 +312,16 @@ def list_nodes(
     else:
         nodes = query.all()
         node_ids = [node.id for node in nodes]
-        allocated_map = allocated_ram_by_node_ids(db, node_ids)
+        allocated_ram_map = allocated_ram_by_node_ids(db, node_ids)
+        allocated_disk_map = allocated_disk_by_node_ids(db, node_ids)
+        panel_disk_used_map = panel_disk_used_by_node_ids(db, node_ids)
         if not can_read_details:
             return [
-                _picker_out(node, ram_allocated_mb=allocated_map.get(node.id, 0))
+                _picker_out(
+                    node,
+                    ram_allocated_mb=allocated_ram_map.get(node.id, 0),
+                    disk_allocated_gb=allocated_disk_map.get(node.id, 0),
+                )
                 for node in nodes
             ]
         server_counts_raw = (
@@ -300,7 +337,9 @@ def list_nodes(
             node_out_dict(
                 n,
                 server_count=server_counts.get(n.id, 0),
-                ram_allocated_mb=allocated_map.get(n.id, 0),
+                ram_allocated_mb=allocated_ram_map.get(n.id, 0),
+                disk_allocated_gb=allocated_disk_map.get(n.id, 0),
+                disk_panel_used_mb=panel_disk_used_map.get(n.id, 0),
             )
             for n in nodes
         ]
@@ -574,13 +613,17 @@ def get_node(
             db_new.refresh(node)
             # Re-read count in the new session to return accurate serializable data
             count = db_new.query(Server).filter(Server.node_id == node.id).count()
-            allocated = sum_allocated_ram_mb(db_new, node.id)
+            allocated_ram = sum_allocated_ram_mb(db_new, node.id)
+            allocated_disk = sum_allocated_disk_gb(db_new, node.id)
+            panel_disk_used = sum_panel_disk_used_mb(db_new, node.id)
             # Return serialized output
             return node_out_dict(
                 node,
                 server_count=count,
                 metrics=metrics,
-                ram_allocated_mb=allocated,
+                ram_allocated_mb=allocated_ram,
+                disk_allocated_gb=allocated_disk,
+                disk_panel_used_mb=panel_disk_used,
             )
         else:
             raise HTTPException(status_code=404, detail="Node nicht gefunden")

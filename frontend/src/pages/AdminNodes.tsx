@@ -84,6 +84,37 @@ function allocatableRamMb(node: Node): number | null {
   return Math.max(0, Math.round(node.ram_total - booked))
 }
 
+function diskPercent(node: Node): number | null {
+  const m = node.metrics
+  if (m?.disk_percent != null) return m.disk_percent
+  if (m?.disk_used_bytes != null && m?.disk_total_bytes) {
+    return (m.disk_used_bytes / m.disk_total_bytes) * 100
+  }
+  if (node.disk_used != null && node.disk_total) {
+    return (node.disk_used / node.disk_total) * 100
+  }
+  return null
+}
+
+function freeDiskMb(node: Node): number | null {
+  const m = node.metrics
+  if (m?.disk_total_bytes != null && m?.disk_used_bytes != null) {
+    return Math.max(0, Math.round((m.disk_total_bytes - m.disk_used_bytes) / (1024 * 1024)))
+  }
+  if (node.disk_total != null && node.disk_used != null) {
+    return Math.max(0, node.disk_total - node.disk_used)
+  }
+  return null
+}
+
+function allocatableDiskGb(node: Node): number | null {
+  if (node.disk_allocatable_gb != null) return Math.max(0, node.disk_allocatable_gb)
+  if (node.disk_total == null) return null
+  const bookedGb = node.disk_allocated_gb ?? 0
+  const totalGb = Math.floor(node.disk_total / 1024)
+  return Math.max(0, totalGb - bookedGb)
+}
+
 export function AdminNodes() {
   const { t } = useTranslation()
   const { nodes, total, loading, fetchNodes, createNode, updateNode, deleteNode, healthCheck } =
@@ -532,6 +563,57 @@ export function AdminNodes() {
                       })}
                     </p>
                   )}
+                  {(() => {
+                    const diskP = diskPercent(node)
+                    const fDisk = freeDiskMb(node)
+                    const panelUsedMb = node.disk_panel_used_mb ?? 0
+                    const totalMb = node.disk_total ?? 0
+                    const hostUsedMb = node.disk_used ?? (totalMb && fDisk != null ? Math.max(0, totalMb - fDisk) : 0)
+                    const systemUsedMb = Math.max(0, hostUsedMb - panelUsedMb)
+
+                    return (
+                      <>
+                        <ProgressBar
+                          value={diskP}
+                          label="Disk"
+                          hint={
+                            diskP != null
+                              ? `${diskP.toFixed(0)}% · ${t('nodes.diskFree', { value: formatRamMb(fDisk) })}`
+                              : node.disk_total != null
+                                ? t('nodes.diskTotal', { value: formatRamMb(node.disk_total) })
+                                : '—'
+                          }
+                          heat
+                          data-testid={`node-disk-${node.id}`}
+                        />
+                        {node.disk_total != null && (
+                          <div className="space-y-1 text-xs text-on-surface-variant" data-testid={`node-disk-breakdown-${node.id}`}>
+                            <div className="flex flex-wrap items-center gap-3 font-mono text-[11px]">
+                              <span className="text-primary" title={t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}>
+                                ■ {t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}
+                              </span>
+                              <span className="text-on-surface-variant/80" title={t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}>
+                                ■ {t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}
+                              </span>
+                              <span className="text-status-success" title={t('nodes.diskFree', { value: formatRamMb(fDisk) })}>
+                                ■ {t('nodes.diskFree', { value: formatRamMb(fDisk) })}
+                              </span>
+                            </div>
+                            <p>
+                              {t('nodes.diskBooked', {
+                                used: `${node.disk_allocated_gb ?? 0} GB`,
+                                total: `${Math.floor((node.disk_total ?? 0) / 1024)} GB`,
+                              })}
+                              {' · '}
+                              {t('nodes.diskAllocatable', {
+                                value: `${allocatableDiskGb(node) ?? 0} GB`,
+                              })}
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
                 </div>
 
                 <div className="flex flex-wrap gap-4 text-xs text-on-surface-variant">
