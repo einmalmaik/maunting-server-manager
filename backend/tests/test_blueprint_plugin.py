@@ -842,6 +842,29 @@ def test_prepare_runtime_creates_blueprint_ensure_dirs(tmp_path) -> None:
     assert (tmp_path / "logs" / "runtime").is_dir()
 
 
+def test_seven_days_to_die_blueprint_patches_platform_and_appid(tmp_path) -> None:
+    plugin = _native_plugin("seven_days_to_die")
+    server = _FakeServer(id=99, install_dir=str(tmp_path), game_port=26900)
+
+    # Simulate Steam default files
+    (tmp_path / "7DaysToDieServer.x86_64").touch()
+    (tmp_path / "platform.cfg").write_text(
+        "platform=Steam\ncrossplatform=EOS\nserverplatforms=Steam,XBL,PSN,LAN,\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "steam_appid.txt").write_text("251570\n", encoding="utf-8")
+
+    plugin.prepare_runtime(server)
+
+    platform_cfg = (tmp_path / "platform.cfg").read_text(encoding="utf-8")
+    assert "crossplatform=\n" in platform_cfg or "crossplatform=" in platform_cfg
+    assert "crossplatform=EOS" not in platform_cfg
+    assert "serverplatforms=Steam,LAN," in platform_cfg
+
+    steam_appid = (tmp_path / "steam_appid.txt").read_text(encoding="utf-8").strip()
+    assert steam_appid == "294420"
+
+
 def test_dayz_blueprint_cleanup_removes_mod_symlinks_and_workshop_cache(tmp_path) -> None:
     plugin = _native_plugin("dayz")
     server = _FakeServer(id=77, install_dir=str(tmp_path))
