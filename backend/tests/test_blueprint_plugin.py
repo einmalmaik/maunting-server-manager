@@ -842,7 +842,7 @@ def test_prepare_runtime_creates_blueprint_ensure_dirs(tmp_path) -> None:
     assert (tmp_path / "logs" / "runtime").is_dir()
 
 
-def test_seven_days_to_die_blueprint_patches_platform_and_appid(tmp_path) -> None:
+def test_seven_days_to_die_blueprint_patches_platform_and_game_appid(tmp_path) -> None:
     plugin = _native_plugin("seven_days_to_die")
     server = _FakeServer(id=99, install_dir=str(tmp_path), game_port=26900)
 
@@ -862,7 +862,27 @@ def test_seven_days_to_die_blueprint_patches_platform_and_appid(tmp_path) -> Non
     assert "serverplatforms=Steam,LAN," in platform_cfg
 
     steam_appid = (tmp_path / "steam_appid.txt").read_text(encoding="utf-8").strip()
-    assert steam_appid == "294420"
+    # SteamCMD installs the dedicated-server tool via 294420, but the running
+    # server must advertise the game App-ID or Steam rejects it as bad_version.
+    assert steam_appid == "251570"
+
+
+def test_seven_days_to_die_blueprint_exposes_startup_logs_to_guardian() -> None:
+    plugin = _native_plugin("seven_days_to_die")
+    blueprint = plugin.get_blueprint()
+
+    assert blueprint.runtime.startupCheckSeconds <= 300
+    assert blueprint.health is not None
+    assert blueprint.health.startup is not None
+    assert (
+        blueprint.health.startup.timeout_seconds
+        > blueprint.health.startup.grace_period_seconds
+    )
+    assert "-logfile -" in blueprint.runtime.startup
+    assert blueprint.logs is not None
+    assert blueprint.logs.sources == ["stdout"]
+    assert "GameServer.LogOn successful" in blueprint.health.startup.success_patterns
+    assert "INF StartGame done" in blueprint.health.startup.success_patterns
 
 
 def test_dayz_blueprint_cleanup_removes_mod_symlinks_and_workshop_cache(tmp_path) -> None:
