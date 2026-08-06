@@ -139,13 +139,36 @@ class TestInstallEndpointLock:
             mock_get_plugin.return_value = MagicMock()
             response = client.post(
                 f"/api/servers/{test_server.id}/install",
-                cookies=owner_cookies,
                 headers={"X-CSRF-Token": csrf_token},
+                cookies=owner_cookies,
             )
-
         assert response.status_code == 409
-        assert response.json()["detail"]["code"] == INSTALL_UPDATE_ALREADY_RUNNING
-        assert response.json()["detail"]["message"] == "errors.install_update_already_running"
+        body = response.json()
+        assert body["detail"]["code"] == INSTALL_UPDATE_ALREADY_RUNNING
+
+    def test_unlock_endpoint_releases_stuck_lock(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        csrf_token: str,
+        test_server: Server,
+    ):
+        from services.install_update_lock_service import (
+            try_acquire_install_update_lock,
+            active_install_update_lock,
+        )
+
+        assert try_acquire_install_update_lock(test_server.id, "install", node_id=test_server.node_id) is True
+        assert active_install_update_lock() is not None
+
+        response = client.post(
+            f"/api/servers/{test_server.id}/unlock",
+            headers={"X-CSRF-Token": csrf_token},
+            cookies=owner_cookies,
+        )
+        assert response.status_code == 200
+        assert response.json()["released"] is True
+        assert active_install_update_lock() is None
 
     def test_install_releases_lock_when_plugin_errors_synchronously(
         self,

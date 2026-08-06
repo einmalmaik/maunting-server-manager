@@ -47,6 +47,7 @@ from services.console_stream_service import connect as ws_connect
 from services.install_update_lock_service import (
     INSTALL_UPDATE_ALREADY_RUNNING,
     release_install_update_lock,
+    force_release_install_update_lock,
     try_acquire_install_update_lock,
 )
 
@@ -922,6 +923,8 @@ def delete_server(server_id: int, db: Session = Depends(get_db), user: User = De
                 )
 
     # 8. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
+    release_install_update_lock(server.id)
+    force_release_install_update_lock(server.id)
     db.delete(server)
     db.commit()
     return {
@@ -1289,6 +1292,32 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
         release_install_update_lock(server.id)
         raise HTTPException(status_code=500, detail=result["error"])
     return {"message": "Installation gestartet", **result}
+
+
+@router.post("/{server_id}/unlock")
+def unlock_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Manuelle Freigabe hängender/blockierter Installation-Locks für einen Server."""
+    require_server_permission(user, server_id, db, "server.install")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+    released = force_release_install_update_lock(server.id)
+
+    if server.status == "installing":
+        server.status = "stopped"
+        server.status_message = "Manuell entsperrt"
+        db.commit()
+
+    return {
+        "message": "Installation-Lock freigegeben",
+        "released": released,
+    }
 
 
 # ── Erlaubte Origins fuer WebSocket-Upgrades ───────────────────────────────
