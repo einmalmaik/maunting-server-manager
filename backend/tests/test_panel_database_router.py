@@ -78,3 +78,47 @@ def test_panel_database_sql_rejects_missing_csrf(
     )
 
     assert response.status_code == 403
+
+
+def test_panel_database_row_crud_endpoints(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    user_csrf_token: str,
+):
+    _grant(db, regular_user, "panel.database.admin")
+
+    with patch("routers.panel_database.panel_database_service.update_row", return_value={"updated_count": 1, "message": "1 Zeile(n) aktualisiert"}) as mock_update:
+        res = client.post(
+            "/api/panel/database/rows/update",
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token or ""},
+            json={"schema_name": "public", "table_name": "users", "key_conditions": {"id": 1}, "updates": {"username": "admin2"}},
+        )
+        assert res.status_code == 200
+        assert res.json()["updated_count"] == 1
+        mock_update.assert_called_once_with("public", "users", {"id": 1}, {"username": "admin2"})
+
+    with patch("routers.panel_database.panel_database_service.delete_rows", return_value={"deleted_count": 1, "message": "1 Zeile(n) gelöscht"}) as mock_delete:
+        res = client.post(
+            "/api/panel/database/rows/delete",
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token or ""},
+            json={"schema_name": "public", "table_name": "users", "row_conditions": [{"id": 1}]},
+        )
+        assert res.status_code == 200
+        assert res.json()["deleted_count"] == 1
+        mock_delete.assert_called_once_with("public", "users", [{"id": 1}])
+
+    with patch("routers.panel_database.panel_database_service.insert_row", return_value={"inserted_row": {"id": 2, "username": "new_user"}, "message": "Zeile eingefügt"}) as mock_insert:
+        res = client.post(
+            "/api/panel/database/rows/insert",
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token or ""},
+            json={"schema_name": "public", "table_name": "users", "row_data": {"username": "new_user"}},
+        )
+        assert res.status_code == 200
+        assert res.json()["inserted_row"]["username"] == "new_user"
+        mock_insert.assert_called_once_with("public", "users", {"username": "new_user"})
+

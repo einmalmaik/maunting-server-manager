@@ -114,6 +114,42 @@ export function PanelDatabase() {
       toast.success('Panel-DB-Import ausgeführt')
     })
 
+  const handleUpdateRow = (schema: string, table: string, keyConditions: Record<string, any>, updates: Record<string, any>) =>
+    run('update-row', async () => {
+      await api('/panel/database/rows/update', {
+        method: 'POST',
+        body: JSON.stringify({ database_id: PANEL_DB_ID, schema_name: schema, table_name: table, key_conditions: keyConditions, updates }),
+      })
+      toast.success('Zeile erfolgreich aktualisiert')
+      if (selectedTable) {
+        await selectTable(selectedTable)
+      }
+    })
+
+  const handleDeleteRows = (schema: string, table: string, rowConditions: Array<Record<string, any>>) =>
+    run('delete-rows', async () => {
+      await api('/panel/database/rows/delete', {
+        method: 'POST',
+        body: JSON.stringify({ database_id: PANEL_DB_ID, schema_name: schema, table_name: table, row_conditions: rowConditions }),
+      })
+      toast.success(`${rowConditions.length} Zeile(n) gelöscht`)
+      if (selectedTable) {
+        await selectTable(selectedTable)
+      }
+    })
+
+  const handleInsertRow = (schema: string, table: string, rowData: Record<string, any>) =>
+    run('insert-row', async () => {
+      await api('/panel/database/rows/insert', {
+        method: 'POST',
+        body: JSON.stringify({ database_id: PANEL_DB_ID, schema_name: schema, table_name: table, row_data: rowData }),
+      })
+      toast.success('Zeile erfolgreich eingefügt')
+      if (selectedTable) {
+        await selectTable(selectedTable)
+      }
+    })
+
   return (
     <div className="msm-page">
       <PageHeader
@@ -123,29 +159,32 @@ export function PanelDatabase() {
         status={<span className={canAdmin ? 'msm-badge-warning' : 'msm-badge-info'}>{canAdmin ? t('panelDatabase.admin', 'Admin') : t('panelDatabase.readOnly', 'Read only')}</span>}
       />
       <DatabaseConsole
-      title={t('panelDatabase.workspace', 'Database explorer')}
-      subtitle={t('panelDatabase.workspaceSubtitle', 'Inspect tables, rows and database statistics.')}
-      databaseLabel="Panel"
-      databases={[PANEL_DATABASE]}
-      selectedDatabaseId={PANEL_DB_ID}
-      stats={stats}
-      tables={tables}
-      selectedTable={selectedTable}
-      tableInfo={tableInfo}
-      rows={rows}
-      sqlText={sqlText}
-      sqlResult={sqlResult}
-      history={history}
-      canAdmin={canAdmin}
-      busy={busy}
-      error={error}
-      onSelectDatabase={() => undefined}
-      onSelectTable={(table) => void run('table', () => selectTable(table))}
-      onSearchRows={(search) => selectedTable && void run('rows', () => selectTable(selectedTable, search))}
-      onSqlTextChange={setSqlText}
-      onRunSql={runSql}
-      onImport={canAdmin ? importSql : undefined}
-      onRefresh={() => void run('refresh', load)}
+        title={t('panelDatabase.workspace', 'Database explorer')}
+        subtitle={t('panelDatabase.workspaceSubtitle', 'Inspect tables, rows and database statistics.')}
+        databaseLabel="Panel"
+        databases={[PANEL_DATABASE]}
+        selectedDatabaseId={PANEL_DB_ID}
+        stats={stats}
+        tables={tables}
+        selectedTable={selectedTable}
+        tableInfo={tableInfo}
+        rows={rows}
+        sqlText={sqlText}
+        sqlResult={sqlResult}
+        history={history}
+        canAdmin={canAdmin}
+        busy={busy}
+        error={error}
+        onSelectDatabase={() => undefined}
+        onSelectTable={(table) => void run('table', () => selectTable(table))}
+        onSearchRows={(search) => selectedTable && void run('rows', () => selectTable(selectedTable, search))}
+        onSqlTextChange={setSqlText}
+        onRunSql={runSql}
+        onImport={canAdmin ? importSql : undefined}
+        onRefresh={() => void run('refresh', load)}
+        onUpdateRow={canAdmin ? handleUpdateRow : undefined}
+        onDeleteRows={canAdmin ? handleDeleteRows : undefined}
+        onInsertRow={canAdmin ? handleInsertRow : undefined}
       />
     </div>
   )

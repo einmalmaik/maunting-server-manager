@@ -15,12 +15,14 @@ from schemas.postgres import (
     PostgresCreateTableRequest,
     PostgresCreateUserRequest,
     PostgresDatabaseRequest,
-    PostgresDropTableRequest,
     PostgresDatabaseStats,
+    PostgresDeleteRowsRequest,
+    PostgresDropTableRequest,
     PostgresDumpRequest,
     PostgresExtensionDropRequest,
     PostgresExtensionInfo,
     PostgresExtensionRequest,
+    PostgresInsertRowRequest,
     PostgresPowerUserDemoteRequest,
     PostgresPowerUserResponse,
     PostgresResourcesResponse,
@@ -31,8 +33,9 @@ from schemas.postgres import (
     PostgresSqlRequest,
     PostgresSqlResponse,
     PostgresTableInfo,
-    PostgresTableRequest,
     PostgresTableListItem,
+    PostgresTableRequest,
+    PostgresUpdateRowRequest,
 )
 from services import audit_service, postgres_service
 from services.postgres_service import PostgresServiceError
@@ -355,6 +358,82 @@ def read_rows(
             body.limit,
             body.offset,
             body.search,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/rows/update")
+def update_row(
+    server_id: int,
+    body: PostgresUpdateRowRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.write")
+    if body.database_id is None:
+        raise HTTPException(status_code=400, detail="database_id ist erforderlich")
+    try:
+        return postgres_service.update_row(
+            db,
+            server_id,
+            body.database_id,
+            body.schema_name,
+            body.table_name,
+            body.key_conditions,
+            body.updates,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/rows/delete")
+def delete_rows(
+    server_id: int,
+    body: PostgresDeleteRowsRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.write")
+    if body.database_id is None:
+        raise HTTPException(status_code=400, detail="database_id ist erforderlich")
+    try:
+        return postgres_service.delete_rows(
+            db,
+            server_id,
+            body.database_id,
+            body.schema_name,
+            body.table_name,
+            body.row_conditions,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/rows/insert")
+def insert_row(
+    server_id: int,
+    body: PostgresInsertRowRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.write")
+    if body.database_id is None:
+        raise HTTPException(status_code=400, detail="database_id ist erforderlich")
+    try:
+        return postgres_service.insert_row(
+            db,
+            server_id,
+            body.database_id,
+            body.schema_name,
+            body.table_name,
+            body.row_data,
         )
     except Exception as exc:
         raise _service_error(exc) from exc

@@ -6,6 +6,8 @@ from dependencies import require_global, verify_csrf
 from models import User
 from schemas.postgres import (
     PostgresDatabaseStats,
+    PostgresDeleteRowsRequest,
+    PostgresInsertRowRequest,
     PostgresRowsRequest,
     PostgresRowsResponse,
     PostgresSqlRequest,
@@ -13,6 +15,7 @@ from schemas.postgres import (
     PostgresTableInfo,
     PostgresTableListItem,
     PostgresTableRequest,
+    PostgresUpdateRowRequest,
 )
 from services import panel_database_service
 
@@ -64,6 +67,55 @@ def read_rows(
             body.limit,
             body.offset,
             body.search,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/rows/update")
+def update_row(
+    body: PostgresUpdateRowRequest,
+    _: User = Depends(require_global("panel.database.admin")),
+    __: None = Depends(verify_csrf),
+):
+    try:
+        return panel_database_service.update_row(
+            body.schema_name,
+            body.table_name,
+            body.key_conditions,
+            body.updates,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/rows/delete")
+def delete_rows(
+    body: PostgresDeleteRowsRequest,
+    _: User = Depends(require_global("panel.database.admin")),
+    __: None = Depends(verify_csrf),
+):
+    try:
+        return panel_database_service.delete_rows(
+            body.schema_name,
+            body.table_name,
+            body.row_conditions,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/rows/insert")
+def insert_row(
+    body: PostgresInsertRowRequest,
+    _: User = Depends(require_global("panel.database.admin")),
+    __: None = Depends(verify_csrf),
+):
+    try:
+        return panel_database_service.insert_row(
+            body.schema_name,
+            body.table_name,
+            body.row_data,
         )
     except Exception as exc:
         raise _service_error(exc) from exc
