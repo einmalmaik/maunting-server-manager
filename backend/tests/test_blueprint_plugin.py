@@ -383,7 +383,8 @@ def test_wine_blueprint_start_repairs_home_container_for_runtime_user(tmp_path) 
         result = plugin.start(server)
 
     assert result["message"] == "Server gestartet"
-    mock_repair.assert_called_once_with(
+    assert mock_repair.call_count == 2
+    mock_repair.assert_called_with(
         str(tmp_path),
         container_path="/home/container",
         owner_uid_gid=(1000, 1000),

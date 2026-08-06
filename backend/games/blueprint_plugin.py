@@ -467,6 +467,10 @@ class BlueprintPlugin(GamePlugin):
             target = (base / rel_path).resolve()
             target.relative_to(base)
             target.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(target, 0o777)
+            except Exception:
+                pass
 
         # Seed-once before patches so first-start defaults exist to patch.
         for seed in resolved_seeds:
@@ -475,7 +479,15 @@ class BlueprintPlugin(GamePlugin):
             if target.is_file():
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(target.parent, 0o777)
+            except Exception:
+                pass
             target.write_text(seed["content"], encoding="utf-8")
+            try:
+                os.chmod(target, 0o666)
+            except Exception:
+                pass
 
         for patch, value in local_patches:
             target = (base / patch.file).resolve()

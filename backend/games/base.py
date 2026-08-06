@@ -1228,34 +1228,27 @@ class GamePlugin(ABC):
         name = container_name_for(server.id)
         volume_binds = self.build_volume_binds(server)
 
-        # Rechte VOR Runtime-Patches/Preflight normalisieren. Wenn externe Tools
-        # root-/fremd-eigene Dateien erzeugen, darf prepare_runtime nicht schon
-        # an Permission-Denied scheitern, bevor MSM reparieren konnte.
-        # Permission-Repair laeuft am Panel-Host nur wenn kein Remote-Node
-        # (Agent uebernimmt Dateirechte auf dem Node selbst).
-        if node is None or getattr(node, "is_local", False):
-            for volume in volume_binds:
-                if volume.read_only:
-                    continue
-                repair = docker_service.repair_bind_mount_permissions(
-                    volume.host_path,
-                    container_path=volume.container_path,
-                    owner_uid_gid=(uid, gid),
-                )
-                if not repair.get("ok"):
-                    err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
-                    _append_console_log(
-                        server.id,
-                        f"[MSM] Permission-Repair Hinweis (Start wird fortgesetzt): {err}\n",
+        def _do_permission_repair():
+            if node is None or getattr(node, "is_local", False):
+                for volume in volume_binds:
+                    if volume.read_only:
+                        continue
+                    repair = docker_service.repair_bind_mount_permissions(
+                        volume.host_path,
+                        container_path=volume.container_path,
+                        owner_uid_gid=(uid, gid),
                     )
-                elif repair.get("stderr", "").strip():
-                    _append_console_log(
-                        server.id,
-                        "[MSM] Permission-Repair: einige Dateien konnten nicht angepasst werden "
-                        "(z. B. root-owned unter Rootless Docker). Start wird fortgesetzt.\n",
-                    )
+                    if not repair.get("ok"):
+                        err = repair.get("error") or "Berechtigungen konnten nicht vorbereitet werden"
+                        _append_console_log(
+                            server.id,
+                            f"[MSM] Permission-Repair Hinweis (Start wird fortgesetzt): {err}\n",
+                        )
 
-        # Game-spezifische Config-Files vor dem Start aktualisieren (Ports, etc.)
+        # Rechte VOR prepare_runtime normalisieren (falls fremd-eigene Dateien existieren)
+        _do_permission_repair()
+
+        # Game-spezifische Config-Files / ensureDirs vor dem Start aktualisieren
         try:
             self.prepare_runtime(server)
         except Exception as e:
@@ -1263,6 +1256,11 @@ class GamePlugin(ABC):
                 server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
             )
             return {"error": str(e)}
+
+        # Rechte NACH prepare_runtime erneut normalisieren, damit neu erstellte
+        # Ordner (ensureDirs wie logs/, UserData/) und Seed-Dateien die Rechte
+        # des Container-Users (uid:gid) erhalten.
+        _do_permission_repair()
 
         result = docker_service.run_container(
             name=name,
