@@ -19,7 +19,7 @@
       "WORLD_NAME": "Navezgane",
       "GAME_MODE": "GameModeSurvival"
     },
-    "startup": "chmod +x ./7DaysToDieServer.x86_64 && ./7DaysToDieServer.x86_64 -configfile=serverconfig.xml -serverport={GAME_PORT} -dedicated -nographics -batchmode -logfile ./logs/output_log.txt",
+    "startup": "./7DaysToDieServer.x86_64 -configfile=serverconfig.xml -serverport={GAME_PORT} -dedicated -nographics -batchmode -logfile ./logs/output_log.txt",
     "ensureDirs": [
       "logs",
       "UserData"
