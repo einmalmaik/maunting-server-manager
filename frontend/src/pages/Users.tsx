@@ -443,7 +443,7 @@ export function Users() {
                   </div>
 
                   <div className="col-start-2 row-start-1 flex justify-end md:col-auto md:row-auto">
-                    {canManageUsers && !user.is_owner && user.id !== currentUser?.id && (
+                    {canManageUsers && user.id !== currentUser?.id && (!user.is_owner || currentUser?.is_owner) && (
                       <button
                         type="button"
                         onClick={() => handleDelete(user.id)}
