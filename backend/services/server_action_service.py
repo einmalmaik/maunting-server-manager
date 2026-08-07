@@ -100,7 +100,19 @@ def _validate_lifecycle_request(
                 ),
             )
         blueprint = plugin.get_blueprint()
-        if blueprint and blueprint.source.type == BlueprintSourceType.MANUAL_UPLOAD:
+        # `missing_required_files` prueft das Dateisystem des Panels. Bei einem
+        # Remote-Node liegen die Dateien aber auf dem Agent, und der Panel-Pfad
+        # existiert dort gar nicht — die Pruefung wuerde also *immer* fehlende
+        # Dateien melden und den Server dauerhaft unstartbar machen. Fuer
+        # Remote-Nodes uebernimmt die Runtime-Vorbereitung auf dem Agent diese
+        # Validierung, genau wie beim Installationspfad.
+        node = getattr(server, "node", None)
+        is_remote_node = node is not None and not getattr(node, "is_local", False)
+        if (
+            blueprint
+            and blueprint.source.type == BlueprintSourceType.MANUAL_UPLOAD
+            and not is_remote_node
+        ):
             manual = blueprint.source.manual
             assert manual is not None
             missing = missing_required_files(server.install_dir, manual.requiredFiles)

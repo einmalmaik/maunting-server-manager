@@ -172,11 +172,36 @@ def reconcile_orphaned_lifecycle_statuses(db: Session) -> int:
     """Nach Prozess-Neustart: DB kann noch ``starting``/``stopping`` zeigen, obwohl der
     In-Memory-Job weg ist. Status an Docker-Realität anbinden, damit das Panel nicht
     ewig „Startet…“ anzeigt und WebSockets sinnlos offen bleiben."""
+    from services.node_service import probe_node_metrics
+
     servers = db.query(Server).filter(Server.status.in_(_TRANSIENT_STATUSES)).all()
     changed = 0
+    # Ein Probe je Node, nicht je Server.
+    node_reachable: dict[int, bool] = {}
     for server in servers:
         if is_lifecycle_job_active(server.id):
             continue
+        node = server.node
+        if node is not None:
+            if node.id not in node_reachable:
+                # Bewusst nicht `node.status` auswerten: dieser Lauf passiert beim
+                # Start, bevor der Heartbeat-Job registriert ist. Der gespeicherte
+                # Status stammt dann noch von vor dem Herunterfahren und stuende
+                # gerade im gemeinsamen Neustart von Panel und Node auf "online".
+                node_reachable[node.id] = (
+                    probe_node_metrics(node, mark_status=False) is not None
+                )
+            if not node_reachable[node.id]:
+                # `inspect_state` kann "Container weg" nicht von "Agent nicht
+                # erreichbar" unterscheiden und liefert beides als None, woraus
+                # `get_status` ein "stopped" macht. Fuer einen tatsaechlich
+                # laufenden Server waere das eine falsche Tatsachenbehauptung:
+                # der Auto-Restart wuerde stillschweigend uebersprungen und ein
+                # Blueprint-Wechsel koennte das Verzeichnis unter einem
+                # laufenden Container loeschen. Lieber den Uebergangsstatus
+                # stehen lassen — der Statusabruf korrigiert ihn, sobald die
+                # Node wieder antwortet.
+                continue
         plugin = get_plugin(server.game_type)
         if not plugin:
             server.status = "failed"
