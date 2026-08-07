@@ -1,0 +1,32 @@
+# TLS ist Pflicht, nicht optional: das Panel setzt `__Secure-`-Cookies, die ein
+# Browser ueber reines HTTP verwirft. Ohne HTTPS ist kein Login moeglich.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: msm-panel
+  namespace: msm
+  annotations:
+    # Uploads (Serverdateien, Blueprints) brauchen mehr als den Default.
+    nginx.ingress.kubernetes.io/proxy-body-size: "512m"
+    # Konsolen-WebSocket und SSE-Streams der KI duerfen nicht nach 60s abreissen.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # SSE braucht ungepufferte Weiterleitung, sonst kommen Deltas erst am Ende an.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - panel.example.com
+      secretName: msm-panel-tls
+  rules:
+    - host: panel.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: msm-panel
+                port:
+                  name: http

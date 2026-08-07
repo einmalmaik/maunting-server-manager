@@ -509,3 +509,31 @@ allein erlauben es nicht, fremde Zugangsdaten in Betrieb zu nehmen.
 
 ---
 
+## Kubernetes
+
+Manifeste und Betriebsablauf liegen unter
+[`deploy/kubernetes/`](../deploy/kubernetes/README.md).
+
+**Wichtig zur Abgrenzung:** Kubernetes betreibt dort die **Control Plane**
+(Panel, DIS-Sidecar, optional PostgreSQL). Gameserver laufen unverändert als
+Docker-Container über den `msm-agent` auf angebundenen Nodes — sie werden
+**nicht** zu Pods. Kapazität wächst weiterhin über weitere MSM-Nodes.
+
+Zwei Punkte, die man nicht ändern sollte, ohne die Folgen zu kennen:
+
+- Der **DIS-Sidecar läuft im selben Pod** wie das Panel. Er bindet nur an
+  `127.0.0.1`; ein eigener Service würde die Krypto-Schnittstelle clusterweit
+  erreichbar machen.
+- **Genau eine Panel-Replica**, Rollout-Strategie `Recreate`. Scheduler-Jobs,
+  Lifecycle-Sperren und der Settings-Cache liegen im Prozessspeicher — zwei
+  gleichzeitige Panels würden Auto-Restarts, Backups und Webhook-Zustellungen
+  doppelt ausführen.
+
+---
+
+## Aktualität dieser Dokumentation
+
+Änderungen an Bootstrap, `install.sh`, `update.sh`, Node-Enrollment,
+`helper-scripts/migrate-panel-components.sh`, Release-Artefakten, Komponentenaufteilung oder
+Environment-Verträgen müssen in demselben Commit sowohl diese Datei als auch die
+sichtbare Panel-Seite `/docs/self-hosting` aktualisieren.

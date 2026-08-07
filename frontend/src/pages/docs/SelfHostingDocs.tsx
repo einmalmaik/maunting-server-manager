@@ -313,7 +313,7 @@ export function SelfHostingDocs() {
           </div>
         </div>
         <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
-          {(['order', 'vault', 'server', 'fallback', 'limits'] as const).map(item => (
+          {(['order', 'vault', 'server', 'fallback', 'limits', 'kubernetes'] as const).map(item => (
             <div key={item} className="bg-surface-container p-4">
               <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.credentials.${item}.title`)}</dt>
               <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.credentials.${item}.body`)}</dd>

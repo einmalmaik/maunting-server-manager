@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: msm-config
+  namespace: msm
+data:
+  # Ausschliesslich nicht-geheime Werte. Alles Geheime kommt aus `msm-secrets`.
+  MSM_APP_NAME: "Maunting Server Manager"
+  MSM_DEBUG: "false"
+  MSM_ALGORITHM: "HS256"
+  MSM_ACCESS_TOKEN_EXPIRE_MINUTES: "15"
+  MSM_REFRESH_TOKEN_EXPIRE_DAYS: "30"
+  MSM_CSRF_TOKEN_EXPIRE_MINUTES: "1440"
+  # Der Sidecar laeuft im selben Pod und lauscht nur auf Loopback.
+  MSM_DIS_SIDECAR_URL: "http://127.0.0.1:9100"
+  # An die eigene Ingress-Adresse anpassen. HTTPS ist Pflicht: das Panel setzt
+  # `__Secure-`-Cookies, die ueber HTTP vom Browser verworfen werden.
+  MSM_PANEL_URL: "https://panel.example.com"
+  MSM_API_URL: "https://panel.example.com"
+  MSM_SERVE_FRONTEND: "true"
+  # Im Cluster laeuft kein lokaler Agent: Gameserver liegen auf den
+  # angebundenen MSM-Nodes, nicht im Panel-Pod.
+  MSM_LOCAL_AGENT_ENABLED: "false"
+  MSM_SETUP_COMPLETED_FILE: "/opt/msm/.setup_completed"
+  MSM_PANEL_CONFIG_DIR: "/opt/msm"
+  MSM_PANEL_BACKUP_DIR: "/opt/msm/backups/panel"
+  MSM_BLUEPRINTS_DIR: "/opt/msm/blueprints/community"

@@ -1,0 +1,87 @@
+# Standard: alles zu. Erlaubt wird nur, was das Panel wirklich braucht.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: msm-default-deny
+  namespace: msm
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: msm-panel
+  namespace: msm
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: msm
+      app.kubernetes.io/component: panel
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # Nur der Ingress-Controller darf das Panel erreichen.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Datenbank
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: msm
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Ausgehend ins Internet und zu den msm-agent-Hosts (TLS). Bewusst offen
+    # gelassen, weil Node-Adressen, Blueprint-Quellen, KI-Provider und
+    # E-Mail-Versand installationsabhaengig sind. Wer die Node-Adressen kennt,
+    # sollte das hier auf diese einschraenken.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # Cloud-Metadata-Dienst bleibt gesperrt.
+              - 169.254.169.254/32
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 587
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: msm-postgres
+  namespace: msm
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: msm
+      app.kubernetes.io/component: postgres
+  policyTypes: ["Ingress"]
+  ingress:
+    # Nur das Panel darf die Datenbank erreichen.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: msm
+              app.kubernetes.io/component: panel
+      ports:
+        - protocol: TCP
+          port: 5432

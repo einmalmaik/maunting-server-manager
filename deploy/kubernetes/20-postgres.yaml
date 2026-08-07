@@ -1,0 +1,102 @@
+# Selbstgehostetes PostgreSQL fuer einen abgeschlossenen Cluster-Betrieb.
+#
+# Fuer produktive Installationen ist eine verwaltete Datenbank mit erprobtem
+# Backup und Point-in-Time-Recovery die bessere Wahl. In dem Fall diese Datei
+# weglassen und in `msm-secrets` einfach die externe Verbindungs-URL setzen.
+apiVersion: v1
+kind: Service
+metadata:
+  name: msm-postgres
+  namespace: msm
+spec:
+  # Headless: der StatefulSet-Pod bekommt einen stabilen DNS-Namen.
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: msm
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: msm-postgres
+  namespace: msm
+  labels:
+    app.kubernetes.io/name: msm
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: msm-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: msm
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: msm
+        app.kubernetes.io/component: postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: msm
+            - name: POSTGRES_USER
+              value: msm
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: msm-secrets
+                  key: POSTGRES_PASSWORD
+            # Das Datenverzeichnis liegt in einem Unterordner, damit der
+            # Volume-Mountpunkt selbst leer bleiben darf (initdb-Anforderung).
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "msm", "-d", "msm"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "msm", "-d", "msm"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi

@@ -1973,6 +1973,10 @@
       "limits": {
         "title": "Deliberate limits",
         "body": "The Steam Web API key stays panel-wide. A bound credential cannot be deleted while a server uses it, and an undecryptable one never falls back to the panel silently."
+      },
+      "kubernetes": {
+        "title": "Kubernetes",
+        "body": "The manifests under deploy/kubernetes run the control plane. Game servers remain Docker containers on the connected nodes. Exactly one panel replica, and the DIS sidecar runs in the same pod."
       }
     }
   },

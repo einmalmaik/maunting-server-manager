@@ -51,6 +51,9 @@ Integrierter CLI-Assistent zum Verschieben von Control Plane, externem Frontend 
 ### 8. Hoster- und Shop-Anbindung (optional)
 Ein externer Shop kann Server über eine idempotente Desired-State-API bestellen, sperren und kündigen. Die Anbindung verwendet dieselbe Provisionierungs- und Lifecycle-Logik wie das Panel — es gibt keinen zweiten Weg, einen Server anzulegen. Kunden gelangen über einen signierten Einmal-Link direkt ins Panel und benötigen kein zweites Passwort. **Ohne angelegte Integration ändert sich am Self-Hosted-Betrieb nichts.** Details in [`docs/self-hosting.md`](docs/self-hosting.md#hoster--und-shop-anbindung-optional-phase-6).
 
+### 9. Getrennte Zugangsdaten und Kubernetes
+GitHub-Token und Steam-Konto können panelweit, pro Benutzer oder pro Server hinterlegt werden. Ein Server verweist auf ein Credential, statt dessen Wert zu kopieren; der Klartext ist nach dem Speichern nicht mehr auslesbar. Der Betreiber entscheidet, ob ein Server ohne eigene Zuordnung den zentralen Zugang mitbenutzen darf. Für den Cluster-Betrieb liegen Manifeste unter [`deploy/kubernetes/`](deploy/kubernetes/README.md) — sie betreiben die Control Plane; Gameserver bleiben Docker-Container auf den angebundenen Nodes. **Self-Hosted funktioniert unverändert ohne beides.**
+
 ---
 
 ## Vergleich: MSM vs. Pelican Panel vs. Klassische Panels

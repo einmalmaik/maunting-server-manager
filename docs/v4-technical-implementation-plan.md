@@ -321,6 +321,31 @@ Quelle: `docs/ai-engine-planning.md` (verbindliches Produkt-Zielbild)
 - Die Serveroberfläche zeigt nur die Arten, die der Blueprint dieses Servers
   tatsächlich verlangt, samt Herkunft und Zuordnung.
 
+### Phase-7-Vertrag: Kubernetes
+
+- Kubernetes betreibt die **Control Plane** (Panel, DIS-Sidecar, optional
+  PostgreSQL). Gameserver laufen unverändert als Docker-Container über den
+  `msm-agent` auf angebundenen Nodes. Kapazität wächst über weitere Nodes, nicht
+  über weitere Panel-Replicas.
+- Der DIS-Sidecar bindet ausschließlich an `127.0.0.1` und läuft deshalb als
+  Container **im selben Pod**. Es gibt bewusst keinen Service und keinen Port
+  9100 nach außen.
+- `replicas: 1` und `strategy: Recreate` sind eine Korrektheitsbedingung, keine
+  Vorsicht: Scheduler-Jobs, Lifecycle-Sperren und der Settings-Cache liegen im
+  Prozessspeicher. Zwei Instanzen würden Serveraktionen doppelt ausführen.
+- Geheimnisse kommen ausschließlich per `secretKeyRef`. Im angewendeten
+  Manifestsatz existiert kein `Secret`-Objekt; `10-secrets.example.yaml` ist
+  reine Feldreferenz mit `REPLACE_ME`-Platzhaltern.
+- Alle Container laufen unprivilegiert (`runAsNonRoot`, `drop: ALL`, keine
+  Privilege-Escalation) mit gesetzten CPU- und Memory-Limits. Der Namespace
+  erzwingt `pod-security.kubernetes.io/enforce: restricted`.
+- Startup-, Readiness- und Liveness-Probe verwenden `GET /api/health`. Die
+  Startup-Probe lässt bis zu fünf Minuten für Migrationen. NetworkPolicies
+  verweigern standardmäßig alles; die Metadata-Adresse `169.254.169.254` bleibt
+  auch ausgehend gesperrt.
+- Diese Zusagen sind in `backend/tests/test_kubernetes_manifests.py` als Test
+  festgehalten, damit sie beim Bearbeiten der Manifeste nicht still wegbrechen.
+
 ## Abnahmekriterien je Schnitt
 
 - Eingaben sind begrenzt und validiert; erwartete Fehler sind typisiert und

@@ -1973,6 +1973,10 @@
       "limits": {
         "title": "Bewusste Grenzen",
         "body": "Der Steam-Web-API-Key bleibt panelweit. Ein gebundenes Credential lässt sich nicht löschen, solange ein Server es verwendet, und ein nicht entschlüsselbares fällt nie still auf das Panel zurück."
+      },
+      "kubernetes": {
+        "title": "Kubernetes",
+        "body": "Die Manifeste unter deploy/kubernetes betreiben die Control Plane. Gameserver bleiben Docker-Container auf den angebundenen Nodes. Genau eine Panel-Replica, der DIS-Sidecar läuft im selben Pod."
       }
     }
   },
