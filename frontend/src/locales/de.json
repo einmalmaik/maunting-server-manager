@@ -1547,7 +1547,8 @@
       "2fa": "2-Faktor",
       "linked": "Verknüpfte Konten",
       "ai": "KI-Zugangsdaten",
-      "danger": "Gefahrenzone"
+      "danger": "Gefahrenzone",
+      "credentials": "Zugangsdaten"
     },
     "email": "E-Mail-Adresse",
     "changePassword": "Passwort ändern",
@@ -1949,6 +1950,30 @@
         "title": "Self-Hosted bleibt unberührt",
         "body": "Ohne angelegte Integration ändert sich nichts: kein zusätzlicher Dienst, kein offener Endpunkt und keine neuen Pflichtfelder."
       }
+    },
+    "credentials": {
+      "title": "Zugangsdaten und Kubernetes",
+      "intro": "GitHub-Token und Steam-Konto können panelweit, pro Benutzer oder pro Server existieren. Für einen Self-Hosted-Betrieb ändert sich nichts: ohne eigene Zuordnung gilt weiterhin der panelweite Zugang.",
+      "order": {
+        "title": "Reihenfolge",
+        "body": "Server-Zuordnung vor Umgebungsvariable vor Panel-Zugang. Die Zuordnung steht oben, weil sie die spezifischste Aussage ist."
+      },
+      "vault": {
+        "title": "Eigener Tresor",
+        "body": "Profil → Zugangsdaten. Der Wert wird verschlüsselt gespeichert und nie wieder angezeigt — sichtbar bleiben Bezeichnung, Benutzername und die letzten vier Zeichen."
+      },
+      "server": {
+        "title": "Serverzuordnung",
+        "body": "Der Bereich im Server-Detail erscheint nur, wenn der Blueprint dieses Servers Zugangsdaten verlangt. Zuweisen darf man ausschließlich eigene Einträge."
+      },
+      "fallback": {
+        "title": "Zentraler Fallback",
+        "body": "Einstellungen → Hoster. Abgeschaltet läuft kein Server mehr unbemerkt mit den Zugangsdaten des Betreibers, sondern meldet einen verständlichen Fehler."
+      },
+      "limits": {
+        "title": "Bewusste Grenzen",
+        "body": "Der Steam-Web-API-Key bleibt panelweit. Ein gebundenes Credential lässt sich nicht löschen, solange ein Server es verwendet, und ein nicht entschlüsselbares fällt nie still auf das Panel zurück."
+      }
     }
   },
   "docsOAuth": {
@@ -2211,6 +2236,16 @@
           "noPassword": "Passwörter des Shops werden weder übernommen noch synchronisiert. Der Kunde erhält einen eigenen Panel-Zugang ohne zweites Passwort.",
           "handoff": "Ein Weiterleitungslink aus dem Shop gilt fünf Minuten und genau einmal. Gespeichert wird nur sein Hashwert; der Link selbst erscheint weder im Protokoll noch in Logs.",
           "webhook": "Statusmeldungen an den Shop enthalten nur Vertragskennung, Zustand und Zeitstempel — keine Serveradressen, Ports, Pfade oder Zugangsdaten."
+        }
+      },
+      "credentials": {
+        "heading": "Eigene Zugangsdaten",
+        "body": "Du kannst eigene Steam-Konten oder GitHub-Token hinterlegen, damit deine Server nicht die zentralen Zugänge des Betreibers mitbenutzen.",
+        "items": {
+          "storage": "Speicherung: Der Wert wird ausschließlich verschlüsselt abgelegt und ist an genau diesen Eintrag gebunden. Es gibt keinen Weg, ihn im Panel oder über die API wieder im Klartext auszulesen.",
+          "visibility": "Sichtbarkeit: Angezeigt werden nur die von dir vergebene Bezeichnung, der Benutzername und die letzten vier Zeichen. Andere Benutzer sehen deine Einträge nicht — auch nicht mit Serverrechten.",
+          "usage": "Verwendung: Der Klartext wird nur an den ausführenden Vorgang übergeben (SteamCMD-Anmeldung, Git-Abruf) und erscheint weder in Protokollen noch in Fehlermeldungen.",
+          "deletion": "Löschung: Du kannst jeden Eintrag jederzeit entfernen, sobald ihn kein Server mehr verwendet. Mit deinem Konto werden alle Einträge mitgelöscht."
         }
       }
     }
@@ -2883,6 +2918,51 @@
       "save": "Änderung konnte nicht gespeichert werden",
       "delete": "Eintrag konnte nicht entfernt werden",
       "rotate": "Geheimnis konnte nicht rotiert werden"
+    }
+  },
+  "credentials": {
+    "title": "Zugangsdaten",
+    "description": "Hier hinterlegst du eigene Steam-Konten oder GitHub-Token. Der Wert wird verschlüsselt gespeichert und danach nie wieder angezeigt. Zugewiesen wird ein Eintrag erst im jeweiligen Server unter „Zugangsdaten“.",
+    "empty": "Noch keine eigenen Zugangsdaten hinterlegt.",
+    "add": "Zugangsdaten hinzufügen",
+    "kind": "Art",
+    "label": "Bezeichnung",
+    "username": "Benutzername",
+    "secret": "Geheimnis",
+    "secretHint": "Wird ausschließlich verschlüsselt gespeichert. Nach dem Speichern siehst du nur noch die letzten vier Zeichen — eine Änderung ist jederzeit möglich.",
+    "save": "Speichern",
+    "saved": "Zugangsdaten gespeichert",
+    "deleted": "Zugangsdaten entfernt",
+    "deleteTitle": "Zugangsdaten entfernen",
+    "deleteConfirm": "Eintrag {{label}} wirklich entfernen?",
+    "bound": "Zuordnung gespeichert",
+    "serverTitle": "Zugangsdaten für diesen Server",
+    "serverDescription": "Dieser Server benötigt die folgenden Zugangsdaten. Ohne eigene Zuordnung verwendet er — sofern der Betreiber das erlaubt — den panelweiten Zugang.",
+    "assign": "Zuordnung",
+    "usePanelDefault": "Panelweiten Zugang verwenden",
+    "noneStored": "Du hast für diese Art noch keine eigenen Zugangsdaten im Profil hinterlegt.",
+    "missing": "Es ist kein Zugang verfügbar. Installation und Updates schlagen fehl, bis einer hinterlegt ist.",
+    "kinds": {
+      "steam_account": "Steam-Konto",
+      "github_token": "GitHub-Token"
+    },
+    "sources": {
+      "server": "Eigener Zugang",
+      "panel": "Panelweit",
+      "env": "Umgebungsvariable",
+      "none": "Nicht konfiguriert"
+    },
+    "policy": {
+      "title": "Zentraler Fallback",
+      "description": "Legt fest, ob ein Server ohne eigene Zuordnung den panelweiten Zugang mitbenutzen darf. Für den Self-Hosted-Betrieb sinnvoll, für einen Hoster in der Regel nicht.",
+      "label": "Panelweiten Zugang als Fallback erlauben",
+      "saved": "Einstellung gespeichert"
+    },
+    "errors": {
+      "load": "Zugangsdaten konnten nicht geladen werden",
+      "save": "Zugangsdaten konnten nicht gespeichert werden",
+      "delete": "Zugangsdaten konnten nicht entfernt werden",
+      "bind": "Zuordnung konnte nicht gespeichert werden"
     }
   }
 }

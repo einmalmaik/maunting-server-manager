@@ -81,6 +81,18 @@ export function Privacy() {
         ],
       },
       {
+        // Phase 7: eigene Zugangsdaten sind personenbezogen und verdienen
+        // einen eigenen Abschnitt statt einer Fussnote unter "Schutz".
+        heading: t('privacyPolicy.sections.credentials.heading'),
+        body: t('privacyPolicy.sections.credentials.body'),
+        items: [
+          t('privacyPolicy.sections.credentials.items.storage'),
+          t('privacyPolicy.sections.credentials.items.visibility'),
+          t('privacyPolicy.sections.credentials.items.usage'),
+          t('privacyPolicy.sections.credentials.items.deletion'),
+        ],
+      },
+      {
         heading: t('privacyPolicy.sections.storage.heading'),
         body: t('privacyPolicy.sections.storage.body'),
         items: [

@@ -1277,8 +1277,11 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 f"[MSM] Server-Datei-Update: git pull origin {branch} (synchron vor Start)\n",
             )
             node = getattr(server, "node", None)
+            # Derselbe serverbezogene Zugang wie im Installationspfad.
+            from games.blueprint_plugin import _resolve_github_token_for_server
+
+            token = _resolve_github_token_for_server(server_id)
             if node is not None and not getattr(node, "is_local", False):
-                from services.github_token_service import resolve_token
                 from services.node_client import NodeClient
 
                 cfg = blueprint.source.github
@@ -1287,12 +1290,12 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                     "server_id": str(server_id),
                     "repo": cfg.repo,
                     "branch": cfg.branch,
-                    "token": resolve_token(),
+                    "token": token,
                     "setup_commands": cfg.setupCommands,
                     "sub_path": cfg.subPath,
                     "runtime_image": blueprint.runtime.image,
                 })
-            return install_github_source(blueprint, install_dir)
+            return install_github_source(blueprint, install_dir, token)
         else:
             # manualUpload / dockerOnly / custom → Check sollte nie "update" liefern.
             return {

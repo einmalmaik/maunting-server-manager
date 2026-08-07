@@ -286,6 +286,41 @@ Quelle: `docs/ai-engine-planning.md` (verbindliches Produkt-Zielbild)
 3. Installation, Updates, Migration, Rollback und Datenschutzdokumentation
    synchron mit `docs/self-hosting.md`, Panel-Doku, README und Tests halten.
 
+### Phase-7-Vertrag: Credentials
+
+- Zugangsdaten existieren auf drei Ebenen. Panelweit bleiben sie unverändert in
+  `panel_settings`; neu hinzu kommen `user_credentials` (der Tresor eines
+  Benutzers) und `server_credential_bindings` (welcher Server welches Credential
+  für welche Art verwendet). Ein Server verweist auf ein Credential, statt
+  dessen Wert zu kopieren — eine Rotation wirkt damit sofort.
+- Die Auflösungsreihenfolge ist **Server-Bindung → Umgebungsvariable →
+  Panel-Zugang**. Die Bindung steht bewusst oben: sie ist die spezifischste
+  Aussage. Ohne Bindung verhält sich alles exakt wie bisher, deshalb bleibt ein
+  Self-Hosted-Betrieb unberührt.
+- Scoped sind `github_token` und `steam_account` — genau die beiden, die
+  Zielpunkt 17 nennt. Der **Steam-Web-API-Key bleibt panelweit**: er dient
+  Workshop-Metadatenabfragen, nicht dem Zugriff auf Kundendaten, und
+  `get_steam_service()` ist ein prozessglobaler Singleton, dessen Aufteilung ein
+  eigener Umbau wäre.
+- Geheimnisse liegen ausschließlich DIS-verschlüsselt mit der objektgebundenen
+  AAD `msm:credential:{id}:secret` vor. Es gibt keinen Lesepfad, der Klartext
+  ausliefert; Antworten enthalten nur Bezeichnung, Benutzername und die letzten
+  vier Zeichen.
+- Jeder Benutzer verwaltet seinen eigenen Tresor ohne zusätzliche Berechtigung.
+  Binden an einen Server erfordert `server.credentials.manage`, und gebunden
+  werden darf **nur ein Credential, das dem Handelnden selbst gehört** — sonst
+  könnte jemand mit Serverrechten fremde Zugangsdaten in Betrieb nehmen.
+  Hoster-Kunden erhalten dieses Recht auf ihrem eigenen Server.
+- Der zentrale Fallback ist eine Betreiberentscheidung
+  (`credentials.allow_panel_fallback`, Default `true`). Ist er aus, läuft ein
+  Server ohne eigene Bindung nicht still mit dem Betreiberzugang, sondern meldet
+  einen verständlichen Fehler.
+- Ein nicht entschlüsselbares gebundenes Credential fällt **nie** stillschweigend
+  auf den Panel-Zugang zurück; es endet mit `503`. Ein gebundenes Credential
+  lässt sich nicht löschen, solange ein Server es verwendet.
+- Die Serveroberfläche zeigt nur die Arten, die der Blueprint dieses Servers
+  tatsächlich verlangt, samt Herkunft und Zuordnung.
+
 ## Abnahmekriterien je Schnitt
 
 - Eingaben sind begrenzt und validiert; erwartete Fehler sind typisiert und

@@ -36,6 +36,13 @@ from .webhook_delivery import WebhookDelivery
 from .singra_webhook_event import SingraWebhookEvent
 from .incident import Incident, GuardianIncidentDelivery
 from .change_event import ChangeEvent
+from .credential import (
+    CREDENTIAL_KINDS,
+    KIND_GITHUB_TOKEN,
+    KIND_STEAM_ACCOUNT,
+    ServerCredentialBinding,
+    UserCredential,
+)
 from .hoster import (
     HosterHandoff,
     HosterIdentity,
@@ -58,4 +65,6 @@ __all__ = [
     "Incident", "GuardianIncidentDelivery", "ChangeEvent",
     "HosterIntegration", "HosterProduct", "HosterIdentity", "HosterService",
     "HosterHandoff", "HosterWebhookDelivery",
+    "UserCredential", "ServerCredentialBinding",
+    "CREDENTIAL_KINDS", "KIND_GITHUB_TOKEN", "KIND_STEAM_ACCOUNT",
 ]  # noqa: E501

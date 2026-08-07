@@ -58,10 +58,15 @@ def _repo_slug(github_cfg) -> str:
     return repo
 
 
-def _clone_url(repo: str) -> str:
-    token = _resolve_github_token()
-    if token:
-        return f"https://x-access-token:{token}@github.com/{repo}.git"
+def _clone_url(repo: str, token: str | None = None) -> str:
+    """Clone-URL, optional mit einem bereits aufgeloesten Token.
+
+    Ohne `token` gilt weiterhin der panelweite Zugang — bestehende Aufrufer
+    verhalten sich unveraendert.
+    """
+    effective = token if token is not None else _resolve_github_token()
+    if effective:
+        return f"https://x-access-token:{effective}@github.com/{repo}.git"
     return f"https://github.com/{repo}.git"
 
 
@@ -510,8 +515,14 @@ def _best_effort_restore_node_modules(install_dir: Path) -> None:
         )
 
 
-def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:
-    """Clone oder Pull (Reinstall/Update) in ``install_dir``."""
+def install_github_source(
+    blueprint: Blueprint, install_dir: str, token: str | None = None
+) -> dict:
+    """Clone oder Pull (Reinstall/Update) in ``install_dir``.
+
+    `token` erlaubt einen serverbezogenen GitHub-Zugang. Ohne Angabe gilt der
+    panelweite Token.
+    """
     if blueprint.source.type != BlueprintSourceType.GITHUB:
         return {"ok": False, "error": "Keine GitHub-Source"}
     gh = blueprint.source.github
@@ -525,7 +536,7 @@ def install_github_source(blueprint: Blueprint, install_dir: str) -> dict:
 
     target = Path(install_dir)
     target.mkdir(parents=True, exist_ok=True)
-    clone_url = _clone_url(repo)
+    clone_url = _clone_url(repo, token)
 
     has_git = (target / ".git").is_dir()
     try:

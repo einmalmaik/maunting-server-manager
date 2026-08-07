@@ -8,15 +8,19 @@ import { TwoFactorTab } from './profile/TwoFactorTab'
 import { LinkedAccountsTab } from './profile/LinkedAccountsTab'
 import { DangerZoneTab } from './profile/DangerZoneTab'
 import { AiCredentialsTab } from './profile/AiCredentialsTab'
+import { CredentialsTab } from './profile/CredentialsTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
-type TabId = 'account' | 'password' | '2fa' | 'linked' | 'ai' | 'danger'
+type TabId = 'account' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'danger'
 
 const BASE_TABS: TabDef<TabId>[] = [
   { id: 'account', labelKey: 'profile.tabs.account', icon: User },
   { id: 'password', labelKey: 'profile.tabs.password', icon: KeyRound },
   { id: '2fa', labelKey: 'profile.tabs.2fa', icon: Shield },
   { id: 'linked', labelKey: 'profile.tabs.linked', icon: Link2 },
+  // Eigener Zugangsdaten-Tresor: jeder Benutzer verwaltet seine eigenen
+  // Steam-/GitHub-Zugaenge selbst, ohne Operator-Hilfe.
+  { id: 'credentials', labelKey: 'profile.tabs.credentials', icon: KeyRound },
 ]
 
 /**
@@ -59,6 +63,7 @@ export function Profile() {
       {activeTab === 'password' && <PasswordTab />}
       {activeTab === '2fa' && <TwoFactorTab />}
       {activeTab === 'linked' && <LinkedAccountsTab />}
+      {activeTab === 'credentials' && <CredentialsTab />}
       {activeTab === 'ai' && canUseAi && <AiCredentialsTab />}
       {activeTab === 'danger' && <DangerZoneTab />}
     </div>

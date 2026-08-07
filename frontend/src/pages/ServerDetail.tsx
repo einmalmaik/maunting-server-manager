@@ -35,6 +35,7 @@ import { Backups } from "./Backups";
 import { ServerConsolePanel } from "@/components/server/ServerConsolePanel";
 import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
 import { AuthSetupBanner } from "@/components/server/AuthSetupBanner";
+import { ServerCredentialsPanel } from "@/components/server/ServerCredentialsPanel";
 import { PageHeader } from "@/Singra/UI/PageHeader";
 import { ResourceMetricCard } from "@/Singra/UI/ResourceMetricCard";
 import { DatabaseManager } from "@/components/server/DatabaseManager";
@@ -175,6 +176,7 @@ export function ServerDetail() {
   // nach Abschluss des Permission-Loads (oder gar nicht bei fehlendem Recht).
   const canManageResources = useHasPermission("server.resources.manage", serverId);
   const canUseAi = useHasPermission("ai.chat.use");
+  const canManageCredentials = useHasPermission("server.credentials.manage", serverId);
   const permissionsLoading = usePermissionsStore((s) => s.isLoading);
   const showResourceEdit = !permissionsLoading && canManageResources;
 
@@ -969,6 +971,10 @@ export function ServerDetail() {
         </div>
       </div>
       </div>
+
+      {/* Zugangsdaten: erscheint nur, wenn dieser Server welche braucht
+          oder bereits eine eigene Zuordnung hat (Zielpunkt 17.4). */}
+      <ServerCredentialsPanel serverId={serverId} canManage={canManageCredentials} />
 
       {/* Tabs */}
       <div className="sticky top-14 z-20 -mb-px overflow-x-auto border-b border-outline bg-background/95 backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:static md:bg-transparent md:backdrop-blur-none">

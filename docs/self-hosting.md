@@ -461,3 +461,51 @@ verwendet werden (Einstellungen → **OAuth**).
 
 ---
 
+## Zugangsdaten: panelweit, pro Benutzer, pro Server (Phase 7)
+
+GitHub-Token und Steam-Konto können auf drei Ebenen existieren. **Für einen
+Self-Hosted-Betrieb ändert sich nichts:** ohne eigene Zuordnung gilt weiterhin
+der panelweite Zugang.
+
+### Auflösungsreihenfolge
+
+1. **Server-Zuordnung** — das diesem Server ausdrücklich zugewiesene
+   Benutzer-Credential.
+2. **Umgebungsvariable** — `MSM_GITHUB_CLONE_TOKEN` usw., wie bisher.
+3. **Panel-Zugang** — Einstellungen → GitHub bzw. Steam Account.
+
+Die Zuordnung steht oben, weil sie die spezifischste Aussage ist. Stünde ENV
+davor, wäre eine bewusst gesetzte Kundenzuordnung wirkungslos.
+
+### Bedienung
+
+| Wo | Was |
+| --- | --- |
+| Profil → **Zugangsdaten** | Jeder Benutzer hinterlegt eigene Steam-Konten oder GitHub-Token. Der Wert wird verschlüsselt gespeichert und **nie wieder angezeigt** — sichtbar bleiben nur Bezeichnung, Benutzername und die letzten vier Zeichen. |
+| Server-Detail → **Zugangsdaten** | Erscheint nur, wenn der Blueprint dieses Servers welche verlangt. Zeigt die Herkunft und erlaubt die Zuordnung. Erfordert `server.credentials.manage`. |
+| Einstellungen → **Hoster** | Schalter *Zentraler Fallback*: darf ein Server ohne eigene Zuordnung den panelweiten Zugang mitbenutzen? |
+
+### Für Hoster
+
+Den zentralen Fallback **abschalten**. Dann läuft kein Kundenserver mehr
+unbemerkt mit den Zugangsdaten des Betreibers — ein Server ohne eigene
+Zuordnung meldet stattdessen einen verständlichen Fehler. Kunden erhalten auf
+ihrem eigenen Server automatisch `server.credentials.manage` und können ihr
+Steam-Konto selbst hinterlegen.
+
+Ein Benutzer kann ausschließlich **eigene** Zugangsdaten zuweisen. Serverrechte
+allein erlauben es nicht, fremde Zugangsdaten in Betrieb zu nehmen.
+
+### Grenzen (bewusst)
+
+- Der **Steam-Web-API-Key bleibt panelweit**. Er dient Workshop-Metadatenabfragen
+  und nicht dem Zugriff auf Daten eines einzelnen Kunden; der Steam-Client ist
+  zudem ein prozessglobaler Singleton.
+- Ein gebundenes Credential kann nicht gelöscht werden, solange ein Server es
+  verwendet — sonst fiele dieser Server bei der nächsten Installation unbemerkt
+  auf den Panel-Zugang zurück.
+- Ein nicht mehr entschlüsselbares Credential (typisch nach `MSM_SECRET_KEY`-
+  Rotation) führt zu einem klaren Fehler, **nicht** zu einem stillen Rückfall.
+
+---
+

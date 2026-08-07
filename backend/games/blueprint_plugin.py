@@ -42,6 +42,7 @@ from games.base import (
     GamePlugin,
     _append_console_log,
     _require_bind_ip,
+    _resolve_steam_login,
     active_mod_ids,
     finish_install,
     run_steamcmd_install,
@@ -92,6 +93,25 @@ def _load_detached_server(server_id: int):
         return server
     finally:
         db.close()
+
+
+def _resolve_github_token_for_server(server_id: int) -> str:
+    """GitHub-Token fuer genau diesen Server (Bindung vor panelweitem Zugang).
+
+    Eigene, kurzlebige Session — der Aufruf kommt aus einem Installations-Thread.
+    Ohne verfuegbaren Zugang wird ein leerer String zurueckgegeben; oeffentliche
+    Repositories funktionieren dann weiterhin ohne Token.
+    """
+    from database import SessionLocal
+    from models import KIND_GITHUB_TOKEN
+    from services.credential_service import resolve_for_server
+
+    db = SessionLocal()
+    try:
+        resolved = resolve_for_server(db, server_id, KIND_GITHUB_TOKEN)
+    finally:
+        db.close()
+    return resolved.secret if resolved is not None else ""
 
 
 def _start_install_worker(server_id: int, name: str, body) -> None:
@@ -207,12 +227,16 @@ class BlueprintPlugin(GamePlugin):
             assert bp.source.steam is not None
             requires_login = bp.source.steam.requiresLogin
 
-            if requires_login and not SteamAccountService.is_configured():
+            # Das Gate prueft dieselbe Aufloesung wie der spaetere Login: erst
+            # ein diesem Server zugewiesenes Konto, dann der panelweite Account.
+            # Sonst wuerde ein Kunde mit eigenem Steam-Konto hier abgewiesen,
+            # obwohl die Installation funktionieren wuerde.
+            if requires_login and _resolve_steam_login(server.id) is None:
                 error_msg = (
-                    "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
-                    "Bitte unter Einstellungen → Steam Account einen Benutzer "
-                    "und Passwort hinterlegen (Steam Guard muss deaktiviert sein, "
-                    "siehe Hinweis dort)."
+                    "Dieses Spiel benötigt einen Steam-Account-Login. Bitte im "
+                    "Server unter Zugangsdaten ein eigenes Steam-Konto hinterlegen "
+                    "oder unter Einstellungen → Steam Account einen panelweiten "
+                    "Account setzen (Steam Guard muss deaktiviert sein)."
                 )
                 # Status auf "error" setzen, sonst bleibt der Server in
                 # "installing" haengen (Create-Route ignoriert Rueckgabewert).
@@ -334,8 +358,10 @@ class BlueprintPlugin(GamePlugin):
 
                 def _install_source():
                     node = getattr(server, "node", None)
+                    # Serverbezogener GitHub-Zugang vor dem panelweiten. Damit
+                    # laeuft ein Kundenserver nicht mit dem Token des Betreibers.
+                    token = _resolve_github_token_for_server(server_id)
                     if node is not None and not getattr(node, "is_local", False):
-                        from services.github_token_service import resolve_token
                         from services.node_client import NodeClient
 
                         cfg = bp.source.github
@@ -344,12 +370,12 @@ class BlueprintPlugin(GamePlugin):
                             "server_id": str(server_id),
                             "repo": cfg.repo,
                             "branch": cfg.branch,
-                            "token": resolve_token(),
+                            "token": token,
                             "setup_commands": cfg.setupCommands,
                             "sub_path": cfg.subPath,
                             "runtime_image": bp.runtime.image,
                         })
-                    return install_github_source(bp, install_dir)
+                    return install_github_source(bp, install_dir, token)
 
                 result = perform_install_with_protection(server, _install_source, blueprint=bp)
                 if result.get("ok"):

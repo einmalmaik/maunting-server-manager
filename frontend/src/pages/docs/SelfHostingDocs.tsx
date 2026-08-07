@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowRightLeft, Check, Clipboard, FileArchive, GitBranch, MonitorSmartphone, Network, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, Check, Clipboard, FileArchive, GitBranch, KeyRound, MonitorSmartphone, Network, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
 export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \\
@@ -297,6 +297,29 @@ export function SelfHostingDocs() {
             ))}
           </dl>
         </div>
+      </section>
+
+      {/* Zugangsdaten und Kubernetes (Phase 7). */}
+      <section aria-labelledby="credentials-scoping" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="credentials-scoping" className="font-headline text-headline-md text-on-surface">
+              {t('docsSelfHosting.credentials.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.credentials.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['order', 'vault', 'server', 'fallback', 'limits'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.credentials.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.credentials.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       {/* Hoster-Anbindung (Phase 6). Optional: ohne angelegte Integration

@@ -336,6 +336,30 @@ def _bounded_log_buffer_append(buffer: list[str], line: str, *, max_chars: int =
         total -= len(buffer.pop(0))
 
 
+def _resolve_steam_login(server_id: int) -> tuple[str, str] | None:
+    """Liefert Benutzername und Passwort fuer den SteamCMD-Login dieses Servers.
+
+    Zuerst ein diesem Server zugewiesenes Benutzer-Credential, sonst der
+    panelweite Account. Faellt beides aus, gibt es bewusst keinen stillen
+    Rueckfall — der Aufrufer meldet das als verstaendlichen Fehler.
+
+    Eigene, kurzlebige Session: der Aufruf kommt aus einem Installations-Thread,
+    der keine Request-Session besitzt.
+    """
+    from database import SessionLocal
+    from models import KIND_STEAM_ACCOUNT
+    from services.credential_service import resolve_for_server
+
+    db = SessionLocal()
+    try:
+        resolved = resolve_for_server(db, server_id, KIND_STEAM_ACCOUNT)
+    finally:
+        db.close()
+    if resolved is None or not resolved.username:
+        return None
+    return resolved.username, resolved.secret
+
+
 def run_steamcmd_install(
     *,
     server_id: int,
@@ -393,16 +417,17 @@ def run_steamcmd_install(
         pass  # non-fatal
 
     if use_authenticated_login:
-        if not SteamAccountService.is_configured():
+        login = _resolve_steam_login(server_id)
+        if login is None:
             err = (
-                "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
-                "Bitte unter Einstellungen → Steam Account einen Benutzer "
-                "und Passwort hinterlegen (Steam Guard muss deaktiviert sein)."
+                "Dieses Spiel benötigt einen Steam-Account-Login. Bitte im Server "
+                "unter Zugangsdaten ein eigenes Steam-Konto hinterlegen oder unter "
+                "Einstellungen → Steam Account einen panelweiten Account setzen "
+                "(Steam Guard muss deaktiviert sein)."
             )
             _append_console_log(server_id, f"[MSM] {err}\n")
             return {"ok": False, "error": err}
-        username = SteamAccountService.get_username()
-        password = SteamAccountService.get_decrypted_password()
+        username, password = login
         login_args = ["+login", username, password]
         secrets_to_redact = [username, password]
     else:
@@ -612,15 +637,17 @@ def run_steamcmd_workshop_download_batch(
         }
 
     if use_authenticated_login:
-        if not SteamAccountService.is_configured():
+        login = _resolve_steam_login(server_id)
+        if login is None:
             err = (
                 "Dieses Spiel benötigt einen Steam-Account für Workshop-Downloads. "
-                "Bitte unter Einstellungen → Steam Account hinterlegen."
+                "Bitte im Server unter Zugangsdaten ein eigenes Steam-Konto "
+                "hinterlegen oder unter Einstellungen → Steam Account einen "
+                "panelweiten Account setzen."
             )
             _append_console_log(server_id, f"[MSM] {err}\n")
             return {"ok": False, "error": err}
-        username = SteamAccountService.get_username()
-        password = SteamAccountService.get_decrypted_password()
+        username, password = login
         login_args = ["+login", username, password]
         secrets_to_redact = [username, password]
     else:

@@ -394,7 +394,7 @@ def test_pull_updates_working_tree_despite_dirty_workdir(tmp_path, monkeypatch):
     # ohne Netz funktioniert. Wir mocken nur die Clone-URL-Berechnung.
     monkeypatch.setattr(
         "blueprints.github_source._clone_url",
-        lambda repo: str(upstream),
+        lambda repo, token=None: str(upstream),
     )
 
     bp = load_blueprint_dict({
@@ -453,7 +453,7 @@ def test_pull_overwrites_uncommitted_setup_artifacts(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "blueprints.github_source._clone_url",
-        lambda repo: str(upstream),
+        lambda repo, token=None: str(upstream),
     )
 
     bp = load_blueprint_dict({
@@ -517,7 +517,7 @@ def test_pull_tolerates_local_branch_already_exists_race(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "blueprints.github_source._clone_url",
-        lambda repo: str(upstream),
+        lambda repo, token=None: str(upstream),
     )
 
     bp = load_blueprint_dict({

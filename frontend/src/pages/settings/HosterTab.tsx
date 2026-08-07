@@ -18,6 +18,7 @@ import {
   type HosterProductWrite,
   type HosterService,
 } from '@/api/hoster'
+import { credentialsApi } from '@/api/credentials'
 import { SanitizedApiError } from '@/api/client'
 import { Button, NumberStepper, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
@@ -204,6 +205,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
         </div>
       )}
 
+      <PanelFallbackSection canWrite={canWrite} />
 
       {selected && <ProductSection integrationId={selected.id} canWrite={canWrite} />}
       {selected && <ServiceSection integrationId={selected.id} />}
@@ -330,6 +332,57 @@ function IntegrationForm({
  * einen Hoster in der Regel nicht — sonst liefe jeder Kundenserver mit den
  * zentralen Zugangsdaten des Betreibers.
  */
+function PanelFallbackSection({ canWrite }: { canWrite: boolean }) {
+  const { t } = useTranslation()
+  const [allowed, setAllowed] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    credentialsApi
+      .readPolicy()
+      .then((policy) => { if (active) setAllowed(policy.allow_panel_fallback) })
+      .catch(() => { if (active) setAllowed(null) })
+    return () => { active = false }
+  }, [])
+
+  if (allowed === null) return null
+
+  return (
+    <div className="msm-card space-y-3 p-6">
+      <h4 className="font-headline text-base font-semibold text-on-surface">
+        {t('credentials.policy.title')}
+      </h4>
+      <p className="text-sm text-on-surface-variant">{t('credentials.policy.description')}</p>
+      <label className="flex min-h-10 items-center justify-between gap-4 text-sm text-on-surface">
+        <span>{t('credentials.policy.label')}</span>
+        <Switch
+          checked={allowed}
+          disabled={!canWrite || busy}
+          onCheckedChange={(next) => {
+            if (!canWrite || busy) return
+            setBusy(true)
+            credentialsApi
+              .updatePolicy(next)
+              .then((policy) => {
+                setAllowed(policy.allow_panel_fallback)
+                toast.success(t('credentials.policy.saved'))
+              })
+              .catch((error: unknown) => {
+                toast.error(
+                  error instanceof SanitizedApiError
+                    ? error.message
+                    : t('credentials.errors.save'),
+                )
+              })
+              .finally(() => setBusy(false))
+          }}
+        />
+      </label>
+    </div>
+  )
+}
+
 function ProductSection({ integrationId, canWrite }: { integrationId: number; canWrite: boolean }) {
   const { t } = useTranslation()
   const [products, setProducts] = useState<HosterProduct[]>([])

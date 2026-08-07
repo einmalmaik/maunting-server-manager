@@ -64,6 +64,11 @@ CUSTOMER_SERVER_PERMISSIONS = (
     "server.mods.read",
     "server.mods.write",
     "server.mods.toggle",
+    # Zielpunkt 17.3: ein Kunde muss die fuer seinen Server noetigen
+    # Zugangsdaten selbst hinterlegen koennen, ohne beim Betreiber ein Ticket
+    # aufzumachen. Das Recht erlaubt nur die Bindung eigener Credentials an
+    # diesen Server — die Geheimnisse selbst bleiben unlesbar.
+    "server.credentials.manage",
 )
 
 

@@ -98,6 +98,10 @@ SERVER_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("server.databases.read",   "server", "PostgreSQL-Datenbanken lesen"),
     PermissionDef("server.databases.write",  "server", "PostgreSQL-Tabellen und Daten bearbeiten"),
     PermissionDef("server.databases.admin",  "server", "PostgreSQL-Datenbanken und User verwalten"),
+    # Phase 7: bestimmt, wer einem Server eigene Zugangsdaten zuweisen darf.
+    # Eigene Zugangsdaten anlegen darf jeder Benutzer im Profil; hier geht es
+    # ausschliesslich um die Bindung an einen konkreten Server.
+    PermissionDef("server.credentials.manage", "server", "Zugangsdaten fuer diesen Server zuweisen"),
 )
 
 

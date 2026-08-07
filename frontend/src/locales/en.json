@@ -1547,7 +1547,8 @@
       "2fa": "Two-Factor",
       "linked": "Linked Accounts",
       "ai": "AI Credentials",
-      "danger": "Danger Zone"
+      "danger": "Danger Zone",
+      "credentials": "Credentials"
     },
     "email": "Email Address",
     "changePassword": "Change Password",
@@ -1949,6 +1950,30 @@
         "title": "Self-hosted stays untouched",
         "body": "Without a configured integration nothing changes: no extra service, no open endpoint and no new mandatory fields."
       }
+    },
+    "credentials": {
+      "title": "Credentials and Kubernetes",
+      "intro": "GitHub tokens and Steam accounts can exist panel-wide, per user or per server. Nothing changes for self-hosted operation: without an own assignment the panel-wide access still applies.",
+      "order": {
+        "title": "Resolution order",
+        "body": "Server assignment before environment variable before panel access. The assignment comes first because it is the most specific statement."
+      },
+      "vault": {
+        "title": "Personal vault",
+        "body": "Profile → Credentials. The value is stored encrypted and never shown again — only the name, username and last four characters remain visible."
+      },
+      "server": {
+        "title": "Server assignment",
+        "body": "The section in the server detail appears only if that server's blueprint requires credentials. You may only assign entries you own."
+      },
+      "fallback": {
+        "title": "Central fallback",
+        "body": "Settings → Hoster. Switched off, no server silently runs with the operator's credentials; it reports a comprehensible error instead."
+      },
+      "limits": {
+        "title": "Deliberate limits",
+        "body": "The Steam Web API key stays panel-wide. A bound credential cannot be deleted while a server uses it, and an undecryptable one never falls back to the panel silently."
+      }
     }
   },
   "docsOAuth": {
@@ -2211,6 +2236,16 @@
           "noPassword": "Shop passwords are neither adopted nor synchronised. The customer gets their own panel access without a second password.",
           "handoff": "A forwarding link from the shop is valid for five minutes and exactly once. Only its hash is stored; the link itself appears neither in the audit trail nor in logs.",
           "webhook": "Status notifications to the shop contain only the contract identifier, state and timestamp — no server addresses, ports, paths or credentials."
+        }
+      },
+      "credentials": {
+        "heading": "Your own credentials",
+        "body": "You can store your own Steam accounts or GitHub tokens so that your servers do not have to use the operator's central access.",
+        "items": {
+          "storage": "Storage: the value is stored encrypted only and bound to exactly this entry. There is no way to read it back in plaintext, neither in the panel nor through the API.",
+          "visibility": "Visibility: only the name you chose, the username and the last four characters are shown. Other users cannot see your entries — not even with server permissions.",
+          "usage": "Use: the plaintext is only handed to the executing operation (SteamCMD login, git fetch) and appears neither in logs nor in error messages.",
+          "deletion": "Deletion: you can remove any entry at any time once no server uses it. Deleting your account removes all entries with it."
         }
       }
     }
@@ -2883,6 +2918,51 @@
       "save": "Could not save the change",
       "delete": "Could not remove the entry",
       "rotate": "Could not rotate the secret"
+    }
+  },
+  "credentials": {
+    "title": "Credentials",
+    "description": "Store your own Steam accounts or GitHub tokens here. The value is stored encrypted and never shown again. You assign an entry to a server in that server's \"Credentials\" section.",
+    "empty": "No own credentials stored yet.",
+    "add": "Add credentials",
+    "kind": "Type",
+    "label": "Name",
+    "username": "Username",
+    "secret": "Secret",
+    "secretHint": "Stored encrypted only. After saving you will only see the last four characters — you can replace it at any time.",
+    "save": "Save",
+    "saved": "Credentials saved",
+    "deleted": "Credentials removed",
+    "deleteTitle": "Remove credentials",
+    "deleteConfirm": "Really remove entry {{label}}?",
+    "bound": "Assignment saved",
+    "serverTitle": "Credentials for this server",
+    "serverDescription": "This server needs the following credentials. Without an own assignment it uses the panel-wide access — if the operator allows that.",
+    "assign": "Assignment",
+    "usePanelDefault": "Use panel-wide access",
+    "noneStored": "You have not stored any own credentials of this type in your profile yet.",
+    "missing": "No access is available. Installation and updates will fail until one is stored.",
+    "kinds": {
+      "steam_account": "Steam account",
+      "github_token": "GitHub token"
+    },
+    "sources": {
+      "server": "Own access",
+      "panel": "Panel-wide",
+      "env": "Environment variable",
+      "none": "Not configured"
+    },
+    "policy": {
+      "title": "Central fallback",
+      "description": "Controls whether a server without its own assignment may use the panel-wide access. Useful for self-hosted operation, usually not for a hoster.",
+      "label": "Allow panel-wide access as a fallback",
+      "saved": "Setting saved"
+    },
+    "errors": {
+      "load": "Could not load credentials",
+      "save": "Could not save credentials",
+      "delete": "Could not remove credentials",
+      "bind": "Could not save the assignment"
     }
   }
 }

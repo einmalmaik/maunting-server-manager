@@ -46,6 +46,7 @@ from routers import (
     ai_memory_router,
     ai_skills_router,
     ai_attachments_router,
+    credentials_router,
     hoster_admin_router,
     hoster_api_router,
     hoster_handoff_router,
@@ -688,6 +689,8 @@ app.include_router(tasks_router)
 app.include_router(hoster_admin_router)
 app.include_router(hoster_api_router)
 app.include_router(hoster_handoff_router)
+# Zugangsdaten auf Benutzer- und Serverebene (Phase 7).
+app.include_router(credentials_router)
 
 
 

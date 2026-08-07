@@ -55,6 +55,9 @@ vi.mock('@/components/server/UptimeDisplay', () => ({
 vi.mock('@/components/server/ResourceEditorDialog', () => ({
   ResourceEditorDialog: () => null,
 }))
+vi.mock('@/components/server/ServerCredentialsPanel', () => ({
+  ServerCredentialsPanel: () => null,
+}))
 
 const mockApi = vi.mocked(client.api)
 
