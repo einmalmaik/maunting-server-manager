@@ -43,7 +43,13 @@ export function AiActionProposalCard({
       const confirmation = await aiApi.confirmAction(proposal.id)
       const executed = await aiApi.executeAction(proposal.id, confirmation.confirmation_token)
       onChange(executed.proposal)
-      toast.success(t('ai.actions.executed'))
+      // Lifecycle-Aktionen laufen im Hintergrund weiter. Eine Erfolgsmeldung
+      // waere hier eine Aussage ueber einen noch offenen Ausgang.
+      toast.success(
+        executed.proposal.status === 'executing'
+          ? t('ai.actions.queued')
+          : t('ai.actions.executed'),
+      )
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.actions.error'))
       void aiApi.getAction(proposal.id).then(onChange).catch(() => undefined)

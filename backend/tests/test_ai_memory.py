@@ -128,3 +128,40 @@ def test_disabled_memory_is_not_added_to_provider_context(
     )
     assert disabled.status_code == 200
     assert "Deutsch bevorzugt" not in str(build_provider_messages(db, conversation))
+
+
+def test_memory_upsert_maps_unique_violation_to_conflict(
+    db: Session,
+    regular_user: User,
+    monkeypatch,
+) -> None:
+    """Ein paralleler Schreibvorgang endet als 409, nicht als 500.
+
+    Der Upsert liest erst und schreibt dann. Gewinnt dazwischen ein anderer
+    Vorgang, weist uq_ai_memory_scope_key den Verlierer ab. Simuliert wird
+    genau dieser Commit-Fehler, weil das Zeitfenster sonst nicht deterministisch
+    zu treffen ist.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from services import ai_memory_service
+
+    _enable_memory(db, regular_user)
+
+    def _raise_conflict() -> None:
+        raise IntegrityError("INSERT", {}, Exception("uq_ai_memory_scope_key"))
+
+    monkeypatch.setattr(db, "commit", _raise_conflict)
+    rolled_back: list[bool] = []
+    monkeypatch.setattr(db, "rollback", lambda: rolled_back.append(True))
+
+    try:
+        ai_memory_service.upsert_entry(
+            db, user=regular_user, scope="user", server_id=None,
+            key="language", value="Deutsch",
+        )
+    except Exception as exc:  # noqa: BLE001 - Statuscode ist die Zusicherung
+        assert getattr(exc, "status_code", None) == 409
+    else:
+        raise AssertionError("Unique-Verletzung wurde nicht als Konflikt gemeldet")
+    assert rolled_back == [True]

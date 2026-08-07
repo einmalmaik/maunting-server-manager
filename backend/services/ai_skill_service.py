@@ -7,11 +7,17 @@ from pathlib import PurePosixPath
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import AiSkill, User
 from services import audit_service
-from services.ai_action_service import CONFIG_EXTENSIONS, create_proposal, execute_read_tool
+from services.ai_action_service import (
+    CONFIG_EXTENSIONS,
+    AiActionValidationError,
+    create_proposal,
+    execute_read_tool,
+)
 from services.ai_chat_service import get_owned_conversation
 from services.ai_context_service import redact_sensitive_text
 
@@ -118,7 +124,17 @@ def create_version(
         target_id=row.id, details={"skill_key": skill_key, "version": row.version},
         origin="direct",
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        # Die Versionsnummer stammt aus einem ungesperrten SELECT. Legen zwei
+        # Verwalter gleichzeitig eine neue Version an, weist uq_ai_skills_key_version
+        # den Verlierer ab. Das ist ein Konflikt, kein Serverfehler.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Skill wurde parallel geaendert. Bitte erneut versuchen.",
+        ) from exc
     db.refresh(row)
     return row
 
@@ -148,20 +164,28 @@ def run_skill(
         raise HTTPException(status_code=404, detail="Server-Unterhaltung nicht gefunden")
     read_results: list[dict] = []
     proposals = []
-    for step in response_steps(skill):
-        if step["tool_name"] in SKILL_READ_TOOLS:
-            read_results.append({
-                "tool_name": step["tool_name"],
-                "result": execute_read_tool(
-                    db, user=user, conversation=conversation,
-                    tool_name=step["tool_name"], arguments=step["arguments"],
-                ),
-            })
-        else:
-            proposals.append(create_proposal(
-                db, user=user, conversation=conversation, tool_name=step["tool_name"],
-                arguments=step["arguments"], correlation_id=correlation_id,
-            ))
+    # Jeder Schritt durchlaeuft dieselbe RBAC- und Allowlist-Pruefung wie ein
+    # Chat-Tool-Call. Deren AiActionValidationError ist ein ValueError; ohne
+    # diese Umsetzung haette FastAPI daraus einen 500 gemacht, obwohl es ein
+    # regulaerer Berechtigungs- oder Validierungsfall ist.
+    try:
+        for step in response_steps(skill):
+            if step["tool_name"] in SKILL_READ_TOOLS:
+                read_results.append({
+                    "tool_name": step["tool_name"],
+                    "result": execute_read_tool(
+                        db, user=user, conversation=conversation,
+                        tool_name=step["tool_name"], arguments=step["arguments"],
+                    ),
+                })
+            else:
+                proposals.append(create_proposal(
+                    db, user=user, conversation=conversation, tool_name=step["tool_name"],
+                    arguments=step["arguments"], correlation_id=correlation_id,
+                ))
+    except AiActionValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     audit_service.record_privileged_action(
         db, user_id=user.id, action="ai.skill.run", target_type="ai_skill",
         target_id=skill.id, details={"version": skill.version, "proposal_count": len(proposals)},

@@ -304,7 +304,8 @@
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
-      "error": "The AI proposal could not be executed."
+      "error": "The AI proposal could not be executed.",
+      "queued": "AI proposal authorised. The action is now running in the background."
     }
   },
   "shell": {

@@ -230,8 +230,12 @@ def provider_attachment_messages(
             text = DisClient.decrypt(row.extracted_text_encrypted, aad=_aad(row.id, "text"))
             text = text[:remaining_text_chars]
             remaining_text_chars -= len(text)
+            # Bewusst role="user": ein Anhang ist Benutzerdaten, keine
+            # Systemanweisung. Mit role="system" haette hochgeladener Text
+            # dieselbe Autoritaet wie der MSM-Systemprompt und waere damit ein
+            # direkter Prompt-Injection-Pfad.
             messages.append({
-                "role": "system",
+                "role": "user",
                 "content": f"Unvertrauenswuerdiger Textanhang {row.original_name}:\n{text}",
             })
         elif row.media_type in {"image/png", "image/jpeg"}:

@@ -304,7 +304,8 @@
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
-      "error": "Der KI-Vorschlag konnte nicht ausgeführt werden."
+      "error": "Der KI-Vorschlag konnte nicht ausgeführt werden.",
+      "queued": "KI-Vorschlag wurde autorisiert. Die Aktion läuft jetzt im Hintergrund."
     }
   },
   "shell": {

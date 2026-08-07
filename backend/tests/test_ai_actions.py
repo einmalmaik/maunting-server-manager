@@ -55,12 +55,12 @@ def _csrf(cookies: dict) -> dict[str, str]:
     return {"X-CSRF-Token": cookies.get("__Secure-csrf_token", "")}
 
 
-def test_config_proposal_encrypts_payload_and_redacts_old_secret(
+def test_config_proposal_encrypts_payload_and_keeps_audit_content_free(
     db: Session, owner_user: User, tmp_path: Path
 ) -> None:
     server = _server(db, owner_user, tmp_path)
     config = Path(server.install_dir) / "server.cfg"
-    config.write_text("api_key=old-secret-value\nport=2302\n", encoding="utf-8")
+    config.write_text("port=2302\nmaxPlayers=40\n", encoding="utf-8")
     conversation = _conversation(db, owner_user, server)
     proposal = ai_action_service.create_proposal(
         db,
@@ -69,24 +69,109 @@ def test_config_proposal_encrypts_payload_and_redacts_old_secret(
         tool_name="propose_config_update",
         arguments={
             "path": "server.cfg",
-            "content": "port=2402\n",
+            "content": "port=2402\nmaxPlayers=40\n",
             "expected_revision": content_revision(config.read_bytes()),
         },
         correlation_id=str(uuid4()),
     )
     db.commit()
 
-    preview = json.loads(proposal.preview_json)
-    assert "old-secret-value" not in proposal.payload_encrypted
-    assert "old-secret-value" not in json.dumps(preview)
-    assert "[REDACTED]" in preview["diff"]
     decrypted = json.loads(DisClient.decrypt(
         proposal.payload_encrypted,
         aad=f"msm:ai:action-proposal:v1:{proposal.id}",
     ))
-    assert decrypted["content"] == "port=2402\n"
+    assert decrypted["content"] == "port=2402\nmaxPlayers=40\n"
     audit = db.query(AuditLog).filter(AuditLog.action == "ai.action.proposed").one()
     assert "port=2402" not in (audit.details or "")
+
+
+def test_config_with_credentials_is_never_overwritten_by_ai(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Eine Config mit erkennbaren Zugangsdaten bleibt fuer die KI schreibgeschuetzt.
+
+    Die KI sieht solche Dateien nur redigiert. Ein Vorschlag auf Basis dieser
+    Sicht wuerde den echten Wert durch den Platzhalter ersetzen oder die Zeile
+    ganz entfernen. Beides muss vor dem Schreiben scheitern.
+    """
+    server = _server(db, owner_user, tmp_path)
+    config = Path(server.install_dir) / "server.cfg"
+    config.write_text("api_key=old-secret-value\nport=2302\n", encoding="utf-8")
+    conversation = _conversation(db, owner_user, server)
+
+    try:
+        ai_action_service.create_proposal(
+            db,
+            user=owner_user,
+            conversation=conversation,
+            tool_name="propose_config_update",
+            arguments={
+                "path": "server.cfg",
+                "content": "port=2402\n",
+                "expected_revision": content_revision(config.read_bytes()),
+            },
+            correlation_id=str(uuid4()),
+        )
+    except ai_action_service.AiActionValidationError:
+        pass
+    else:
+        raise AssertionError("Config mit Zugangsdaten wurde zum Ueberschreiben akzeptiert")
+
+    db.rollback()
+    assert db.query(AiActionProposal).count() == 0
+    assert config.read_text(encoding="utf-8") == "api_key=old-secret-value\nport=2302\n"
+
+
+def test_read_config_withholds_revision_for_redacted_or_truncated_view(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Ohne vollstaendige Sicht gibt es keine Revision — und damit keinen Write.
+
+    Die Revision ist die Zusage "du hast den aktuellen Stand vollstaendig
+    gesehen". Redigierte oder gekuerzte Ansichten sind das nicht.
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+
+    secret_config = Path(server.install_dir) / "secret.cfg"
+    secret_config.write_text("api_key=super-secret-value\nport=2302\n", encoding="utf-8")
+    redacted_view = ai_action_service.execute_read_tool(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="read_config",
+        arguments={"path": "secret.cfg"},
+    )
+    assert redacted_view["redacted"] is True
+    assert redacted_view["editable"] is False
+    assert redacted_view["revision"] is None
+    assert "super-secret-value" not in redacted_view["content"]
+
+    big_config = Path(server.install_dir) / "big.cfg"
+    big_config.write_text("x" * (ai_action_service.MAX_READ_CONFIG_CHARS + 10), encoding="utf-8")
+    truncated_view = ai_action_service.execute_read_tool(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="read_config",
+        arguments={"path": "big.cfg"},
+    )
+    assert truncated_view["truncated"] is True
+    assert truncated_view["editable"] is False
+    assert truncated_view["revision"] is None
+    assert len(truncated_view["content"]) == ai_action_service.MAX_READ_CONFIG_CHARS
+
+    plain_config = Path(server.install_dir) / "plain.cfg"
+    plain_config.write_text("port=2302\n", encoding="utf-8")
+    full_view = ai_action_service.execute_read_tool(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="read_config",
+        arguments={"path": "plain.cfg"},
+    )
+    assert full_view["editable"] is True
+    assert full_view["revision"] == content_revision(plain_config.read_bytes())
 
 
 def test_unregistered_tool_is_rejected_without_persistence(
@@ -350,3 +435,118 @@ def test_confirmation_rechecks_revoked_rbac(
     assert response.status_code == 403
     db.refresh(proposal)
     assert proposal.status == "proposed"
+
+
+def test_lifecycle_proposal_stays_executing_until_the_task_finishes(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Ein nur eingereihter Start darf nicht als "ausgefuehrt" gelten.
+
+    Start, Stop und Restart laufen in einem Hintergrund-Thread weiter. Bis der
+    fertig ist, weiss niemand, ob der Server wirklich hochgekommen ist — der
+    Vorschlag darf das also nicht behaupten.
+    """
+    from unittest.mock import patch
+
+    from services.operation_task_service import finish_lifecycle_task
+    from services.actor_context import ActorContext
+    from services.operation_task_service import create_or_reuse_task, mark_running
+
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    proposal = ai_action_service.create_proposal(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="propose_server_lifecycle",
+        arguments={"operation": "start"},
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+    _, token = ai_action_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+
+    task, _created = create_or_reuse_task(
+        db,
+        actor=ActorContext.for_user(owner_user),
+        task_type="server.lifecycle.start",
+        request_hash="f" * 64,
+        idempotency_key=f"lifecycle-proposal-{proposal.id}",
+    )
+    mark_running(db, task, "queued")
+    task.server_id = server.id
+    db.commit()
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        return_value={"status": "queued", "task_id": task.id},
+    ):
+        executed, _result = ai_action_service.execute_proposal(
+            db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+        )
+
+    assert executed.status == "executing"
+    assert executed.task_id == task.id
+    assert executed.executed_at is None
+
+    # Der Hintergrund-Vorgang scheitert — der Vorschlag muss das uebernehmen.
+    finish_lifecycle_task(db, task.id, succeeded=False, error_code="server_lifecycle_failed")
+
+    db.expire_all()
+    final = db.query(AiActionProposal).filter(AiActionProposal.id == proposal.id).one()
+    assert final.status == "failed"
+    assert final.error_code == "server_lifecycle_failed"
+
+
+def test_lifecycle_proposal_becomes_succeeded_when_the_task_succeeds(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    from unittest.mock import patch
+
+    from services.actor_context import ActorContext
+    from services.operation_task_service import (
+        create_or_reuse_task,
+        finish_lifecycle_task,
+        mark_running,
+    )
+
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    proposal = ai_action_service.create_proposal(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="propose_server_lifecycle",
+        arguments={"operation": "restart"},
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+    _, token = ai_action_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    task, _created = create_or_reuse_task(
+        db,
+        actor=ActorContext.for_user(owner_user),
+        task_type="server.lifecycle.restart",
+        request_hash="a" * 64,
+        idempotency_key=f"lifecycle-ok-{proposal.id}",
+    )
+    mark_running(db, task, "queued")
+    task.server_id = server.id
+    db.commit()
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        return_value={"status": "queued", "task_id": task.id},
+    ):
+        ai_action_service.execute_proposal(
+            db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+        )
+
+    finish_lifecycle_task(db, task.id, succeeded=True)
+
+    db.expire_all()
+    final = db.query(AiActionProposal).filter(AiActionProposal.id == proposal.id).one()
+    assert final.status == "succeeded"
+    assert final.executed_at is not None

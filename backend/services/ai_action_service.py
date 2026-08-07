@@ -26,10 +26,18 @@ CONFIRMATION_TTL = timedelta(minutes=5)
 MAX_CONFIG_CHARS = 64_000
 MAX_DIFF_CHARS = 16_000
 MAX_DIFF_LINES = 200
+# Harte Obergrenzen fuer alles, was aus einem Server zum Provider fliesst.
+# Bewusst als Konstanten, weil dieselben Werte im Phase-4-Vertrag stehen.
+MAX_READ_CONFIG_CHARS = 24_000
+MAX_LOG_CHARS = 24_000
 CONFIG_EXTENSIONS = {
     ".cfg", ".conf", ".ini", ".json", ".properties", ".toml", ".txt", ".yaml", ".yml"
 }
 WRITE_TOOLS = {"propose_server_lifecycle", "propose_backup", "propose_config_update"}
+# Diese beiden Aktionen fassen Serverdateien an und teilen sich deshalb den
+# vorhandenen, nicht blockierenden Server-Lifecycle-Mutex. Lifecycle-Aktionen
+# brauchen ihn nicht: `request_lifecycle_operation` hat eine eigene Job-Sperre.
+_MUTEX_TOOLS = {"propose_backup", "propose_config_update"}
 READ_TOOLS = {
     "read_server_status",
     "read_server_capacity",
@@ -177,14 +185,36 @@ def execute_read_tool(
         if not isinstance(lines, int) or isinstance(lines, bool) or not 1 <= lines <= 200:
             raise AiActionValidationError("Ungueltige Log-Zeilenanzahl")
         from services import docker_service
+        from services.node_service import is_node_offline
 
+        # docker_service.logs() liefert bei einem nicht erreichbaren Node
+        # denselben leeren String wie bei einem Container ohne Ausgabe. Ohne
+        # diese Unterscheidung wuerde das Modell "keine Fehler gefunden"
+        # antworten, obwohl es in Wahrheit gar nichts gelesen hat.
+        if is_node_offline(server.node):
+            return {
+                "server_id": server.id,
+                "lines_requested": lines,
+                "content": "",
+                "available": False,
+                "reason": "node_unreachable",
+            }
+        if not server.container_name:
+            return {
+                "server_id": server.id,
+                "lines_requested": lines,
+                "content": "",
+                "available": False,
+                "reason": "container_missing",
+            }
         content = docker_service.logs(server.container_name, lines=lines, node=server.node)
         redacted = redact_sensitive_text(content)
         return {
             "server_id": server.id,
             "lines_requested": lines,
-            "content": redacted[-24_000:],
-            "truncated": len(redacted) > 24_000,
+            "content": redacted[-MAX_LOG_CHARS:],
+            "available": True,
+            "truncated": len(redacted) > MAX_LOG_CHARS,
             "redacted": redacted != content,
         }
     if set(arguments) != {"path"} or not permission_service.has_server_permission(
@@ -195,12 +225,32 @@ def execute_read_tool(
     result = read_server_text(db, server_id=server.id, relative_path=path)
     content = str(result["content"])
     redacted = redact_sensitive_text(content)
+    truncated = len(redacted) > MAX_READ_CONFIG_CHARS
+    was_redacted = redacted != content
+    # Die Revision ist die Zusage "du hast den aktuellen Stand vollstaendig und
+    # unveraendert gesehen". Eine redigierte oder gekuerzte Ansicht ist das
+    # nicht: ein darauf aufgebauter Vorschlag wuerde echte Zugangsdaten durch
+    # den Platzhalter ersetzen bzw. die Datei hinter dem Limit abschneiden.
+    # Ohne Revision kommt propose_config_update fuer diese Datei nicht durch.
+    editable = not (truncated or was_redacted)
     return {
         "path": path,
-        "revision": result["revision"],
-        "content": redacted[:24_000],
-        "truncated": len(redacted) > 24_000,
-        "redacted": redacted != content,
+        "revision": result["revision"] if editable else None,
+        "content": redacted[:MAX_READ_CONFIG_CHARS],
+        "truncated": truncated,
+        "redacted": was_redacted,
+        "editable": editable,
+        **(
+            {}
+            if editable
+            else {
+                "edit_blocked_reason": (
+                    "Diese Datei kann nicht automatisch geaendert werden, weil sie "
+                    "gekuerzt oder redigiert gelesen wurde. Bitte die Aenderung im "
+                    "Dateimanager vornehmen."
+                )
+            }
+        ),
     }
 
 
@@ -287,9 +337,24 @@ def _config_payload(db: Session, server_id: int, arguments: dict) -> tuple[dict,
             raise
         current = None
     current_revision = str(current["revision"]) if current is not None else None
+    if expected is None and current is not None:
+        # read_config gibt fuer gekuerzte oder redigierte Dateien bewusst keine
+        # Revision aus. Ein Vorschlag ohne Revision auf eine existierende Datei
+        # kann daher nur aus einer unvollstaendigen Sicht stammen.
+        raise AiActionValidationError(
+            "Diese Datei kann nicht automatisch geaendert werden, weil sie nicht "
+            "vollstaendig gelesen werden konnte"
+        )
     if current_revision != expected:
         raise AiActionValidationError("Config wurde seit der Analyse veraendert")
     old_content = str(current["content"]) if current is not None else ""
+    # Unabhaengige zweite Schranke: eine Datei mit erkennbaren Zugangsdaten wird
+    # nie durch einen KI-Vorschlag ueberschrieben. Das gilt auch dann, wenn der
+    # Vorschlag auf einem anderen Weg als read_config entstanden ist.
+    if redact_sensitive_text(old_content) != old_content:
+        raise AiActionValidationError(
+            "Diese Datei enthaelt moegliche Zugangsdaten und wird nicht automatisch geaendert"
+        )
     # Auch entfernte Zeilen koennen Zugangsdaten enthalten. Deshalb wird nur
     # aus redigierten Inhalten eine sichtbare Vorschau erzeugt.
     preview_old_content = redact_sensitive_text(old_content)
@@ -400,13 +465,30 @@ def owned_proposal(db: Session, proposal_id: str, user: User) -> AiActionProposa
     return proposal
 
 
+def _lock_proposal(db: Session, proposal_id: str) -> AiActionProposal:
+    """Laedt eine Proposal-Zeile gesperrt und garantiert frisch aus der Datenbank.
+
+    `with_for_update()` sperrt zwar die Zeile, liefert ohne `populate_existing()`
+    aber das bereits geladene Objekt aus der Identity Map zurueck — also den
+    Stand *vor* der Sperre. Genau dadurch konnten zwei parallele Execute-Aufrufe
+    denselben Einmal-Token als noch gueltig sehen.
+    """
+    return (
+        db.query(AiActionProposal)
+        .filter(AiActionProposal.id == proposal_id)
+        .populate_existing()
+        .with_for_update()
+        .one()
+    )
+
+
 def confirm_proposal(
     db: Session, *, proposal_id: str, user: User, now: datetime | None = None
 ) -> tuple[AiActionProposal, str]:
     proposal = owned_proposal(db, proposal_id, user)
     if proposal is None:
         raise AiActionStateError("AI_ACTION_NOT_FOUND")
-    proposal = db.query(AiActionProposal).filter(AiActionProposal.id == proposal.id).with_for_update().one()
+    proposal = _lock_proposal(db, proposal.id)
     if proposal.status != "proposed":
         raise AiActionStateError("AI_ACTION_NOT_PROPOSED")
     payload = _json_object(DisClient.decrypt(proposal.payload_encrypted, aad=_aad(proposal.id)))
@@ -450,7 +532,14 @@ def execute_proposal(
     proposal = owned_proposal(db, proposal_id, user)
     if proposal is None:
         raise AiActionStateError("AI_ACTION_NOT_FOUND")
-    proposal = db.query(AiActionProposal).filter(AiActionProposal.id == proposal.id).with_for_update().one()
+    proposal = _lock_proposal(db, proposal.id)
+    # Feste Kopien, damit die spaetere Fehlerbehandlung nach einem Rollback
+    # nicht auf ein abgelaufenes ORM-Objekt zugreifen muss.
+    row_id = proposal.id
+    server_id = proposal.server_id
+    tool_name = proposal.tool_name
+    correlation_id = proposal.correlation_id
+    expected_revision = proposal.expected_revision
     current = now or datetime.now(timezone.utc)
     token_hash = hashlib.sha256(confirmation_token.encode()).hexdigest()
     if proposal.status != "confirmed" or not proposal.confirmation_token_hash:
@@ -471,112 +560,142 @@ def execute_proposal(
     except AiActionValidationError as exc:
         raise AiActionStateError("AI_ACTION_ACCESS_REVOKED") from exc
 
-    proposal.status = "executing"
-    proposal.confirmation_token_hash = None
-    db.commit()
+    # Der Server-Mutex wird VOR dem Verbrauch des Einmal-Tokens geholt. Vorher
+    # entwertete ein nur kurz belegter Server die Bestaetigung dauerhaft: der
+    # Token war bereits geloescht, der Vorschlag wurde als `failed` abgelegt und
+    # der Benutzer musste ohne fachlichen Grund neu bestaetigen.
+    lock = None
+    if tool_name in _MUTEX_TOOLS:
+        from services.server_lifecycle_service import get_server_lifecycle_lock
+
+        lock = get_server_lifecycle_lock(server_id)
+        if not lock.acquire(blocking=False):
+            raise AiActionStateError("AI_ACTION_SERVER_BUSY")
     try:
-        if proposal.tool_name == "propose_server_lifecycle":
-            from services.server_action_service import request_lifecycle_operation
-
-            result = request_lifecycle_operation(
-                db,
-                server_id=proposal.server_id,
-                operation=str(payload["operation"]),
-                actor=ActorContext.for_user(
-                    active_user, origin="ai", correlation_id=proposal.correlation_id
-                ),
-                idempotency_key=proposal.id,
+        # Atomarer Einmal-Verbrauch. Das bedingte UPDATE gewinnt genau einmal,
+        # unabhaengig davon ob die Datenbank Zeilensperren unterstuetzt.
+        consumed = (
+            db.query(AiActionProposal)
+            .filter(
+                AiActionProposal.id == row_id,
+                AiActionProposal.status == "confirmed",
+                AiActionProposal.confirmation_token_hash == token_hash,
             )
-            proposal.task_id = result.get("task_id")
-        elif proposal.tool_name == "propose_backup":
-            from services.backup_orchestrator import create_server_backup
-            from services.server_lifecycle_service import get_server_lifecycle_lock
+            .update(
+                {"status": "executing", "confirmation_token_hash": None},
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        if consumed != 1:
+            raise AiActionStateError("AI_ACTION_NOT_CONFIRMED")
 
-            lock = get_server_lifecycle_lock(proposal.server_id)
-            if not lock.acquire(blocking=False):
-                raise AiActionStateError("AI_ACTION_SERVER_BUSY")
-            try:
-                backup = create_server_backup(
-                    proposal.server_id, db, name="AI-confirmed snapshot"
+        try:
+            if tool_name == "propose_server_lifecycle":
+                from services.server_action_service import request_lifecycle_operation
+
+                result = request_lifecycle_operation(
+                    db,
+                    server_id=server_id,
+                    operation=str(payload["operation"]),
+                    actor=ActorContext.for_user(
+                        active_user, origin="ai", correlation_id=correlation_id
+                    ),
+                    idempotency_key=row_id,
                 )
-                result = {"backup_id": backup.id}
-            finally:
-                lock.release()
-        elif proposal.tool_name == "propose_config_update":
-            from services.server_lifecycle_service import get_server_lifecycle_lock
+                task_id = result.get("task_id")
+                # Start/Stop/Restart laufen in einem Hintergrund-Thread weiter.
+                # Zum Zeitpunkt dieser Antwort ist die Aktion nur eingereiht,
+                # nicht ausgefuehrt. Der Vorschlag bleibt deshalb "executing";
+                # den Endzustand setzt `finish_lifecycle_task`, sobald der
+                # Vorgang wirklich fertig ist. Ein bereits abgeschlossener Task
+                # (Wiederverwendung derselben Idempotency-ID) bleibt terminal.
+                queued = result.get("status") == "queued"
+            elif tool_name == "propose_backup":
+                from services.backup_orchestrator import create_server_backup
 
-            lock = get_server_lifecycle_lock(proposal.server_id)
-            if not lock.acquire(blocking=False):
-                raise AiActionStateError("AI_ACTION_SERVER_BUSY")
-            try:
+                backup = create_server_backup(server_id, db, name="AI-confirmed snapshot")
+                result = {"backup_id": backup.id}
+                task_id = None
+                queued = False
+            elif tool_name == "propose_config_update":
                 result = write_server_text(
                     db,
                     user=active_user,
-                    server_id=proposal.server_id,
+                    server_id=server_id,
                     relative_path=str(payload["path"]),
                     content=str(payload["content"]),
-                    expected_revision=proposal.expected_revision,
+                    expected_revision=expected_revision,
                     create_only=bool(payload.get("create_only")),
                 )
-            finally:
-                lock.release()
-        else:
-            raise AiActionStateError("AI_ACTION_TOOL_NOT_ALLOWED")
+                task_id = None
+                queued = False
+            else:
+                raise AiActionStateError("AI_ACTION_TOOL_NOT_ALLOWED")
 
-        proposal = db.get(AiActionProposal, proposal.id)
-        assert proposal is not None
-        proposal.status = "succeeded"
-        proposal.executed_at = datetime.now(timezone.utc)
-        audit_service.record_privileged_action(
-            db,
-            user_id=active_user.id,
-            action="ai.action.executed",
-            target_type="server",
-            target_id=proposal.server_id,
-            details={
-                "proposal_id": proposal.id,
-                "tool": proposal.tool_name,
-                "confirmed": True,
-                "succeeded": True,
-                **({"task_id": proposal.task_id} if proposal.task_id else {}),
-            },
-            origin="ai",
-            correlation_id=proposal.correlation_id,
-        )
-        db.commit()
-        db.refresh(proposal)
-        return proposal, result
-    except Exception as exc:
-        db.rollback()
-        failed = db.get(AiActionProposal, proposal.id)
-        if failed is not None:
-            failed.status = "failed"
-            failed.error_code = (
-                exc.code if isinstance(exc, AiActionStateError) else "AI_ACTION_EXECUTION_FAILED"
-            )
-            failed.executed_at = datetime.now(timezone.utc)
+            proposal = db.get(AiActionProposal, row_id)
+            if proposal is None:
+                raise AiActionStateError("AI_ACTION_NOT_FOUND")
+            # "succeeded" bedeutet: die Aktion ist fertig. Fuer eine nur
+            # eingereihte Lifecycle-Aktion waere das eine Behauptung ueber einen
+            # Ausgang, der noch gar nicht feststeht.
+            proposal.status = "executing" if queued else "succeeded"
+            proposal.task_id = task_id
+            proposal.executed_at = None if queued else datetime.now(timezone.utc)
             audit_service.record_privileged_action(
                 db,
                 user_id=active_user.id,
                 action="ai.action.executed",
                 target_type="server",
-                target_id=failed.server_id,
+                target_id=server_id,
                 details={
-                    "proposal_id": failed.id,
-                    "tool": failed.tool_name,
+                    "proposal_id": row_id,
+                    "tool": tool_name,
                     "confirmed": True,
-                    "succeeded": False,
-                    "error_code": failed.error_code,
+                    "succeeded": not queued,
+                    **({"queued": True} if queued else {}),
+                    **({"task_id": task_id} if task_id else {}),
                 },
                 origin="ai",
-                correlation_id=failed.correlation_id,
+                correlation_id=correlation_id,
             )
             db.commit()
-        if isinstance(exc, AiActionStateError):
-            raise
-        if isinstance(exc, HTTPException) and exc.status_code == 409:
-            raise AiActionStateError("AI_ACTION_REVISION_CONFLICT") from exc
-        raise AiActionStateError("AI_ACTION_EXECUTION_FAILED") from exc
+            db.refresh(proposal)
+            return proposal, result
+        except Exception as exc:
+            db.rollback()
+            failed = db.get(AiActionProposal, row_id)
+            if failed is not None:
+                failed.status = "failed"
+                failed.error_code = (
+                    exc.code if isinstance(exc, AiActionStateError) else "AI_ACTION_EXECUTION_FAILED"
+                )
+                failed.executed_at = datetime.now(timezone.utc)
+                audit_service.record_privileged_action(
+                    db,
+                    user_id=active_user.id,
+                    action="ai.action.executed",
+                    target_type="server",
+                    target_id=server_id,
+                    details={
+                        "proposal_id": row_id,
+                        "tool": tool_name,
+                        "confirmed": True,
+                        "succeeded": False,
+                        "error_code": failed.error_code,
+                    },
+                    origin="ai",
+                    correlation_id=correlation_id,
+                )
+                db.commit()
+            if isinstance(exc, AiActionStateError):
+                raise
+            if isinstance(exc, HTTPException) and exc.status_code == 409:
+                raise AiActionStateError("AI_ACTION_REVISION_CONFLICT") from exc
+            raise AiActionStateError("AI_ACTION_EXECUTION_FAILED") from exc
+    finally:
+        if lock is not None:
+            lock.release()
 
 
 def reconcile_interrupted_actions(db: Session) -> int:

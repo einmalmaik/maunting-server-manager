@@ -157,3 +157,68 @@ def test_old_skill_version_cannot_run_after_latest_is_disabled(
     )
 
     assert response.status_code == 409
+
+
+def test_skill_run_without_step_permission_returns_403_not_500(
+    client: TestClient,
+    db: Session,
+    owner_cookies: dict,
+    regular_user: User,
+    user_cookies: dict,
+    user_csrf_token: str,
+) -> None:
+    """Ein Skill-Schritt ohne Recht ist ein Berechtigungsfall, kein Serverfehler.
+
+    Die Schrittpruefung wirft AiActionValidationError (ein ValueError). Ohne
+    Umsetzung in eine HTTPException haette FastAPI daraus einen 500 gemacht und
+    dem Benutzer waere unklar geblieben, dass ihm schlicht ein Recht fehlt.
+    """
+    from models import Role, RolePermission, Server, ServerPermission
+    from services.role_service import set_user_roles
+
+    created = client.post(
+        "/api/ai/skills",
+        json={
+            "skill_key": "needs-backup-right",
+            "name": "Backup-Skill",
+            "description": "Erzeugt einen Backup-Vorschlag.",
+            "steps": [{"tool_name": "propose_backup", "arguments": {}}],
+            "enabled": True,
+        },
+        cookies=owner_cookies,
+        headers=_csrf(owner_cookies),
+    )
+    assert created.status_code == 201
+
+    role = Role(name=f"skill-runner-{regular_user.id}", is_system=False)
+    db.add(role)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_key="ai.skills.use"))
+    set_user_roles(db, regular_user, [role.id])
+    server = Server(
+        name="Skill RBAC Server",
+        game_type="dayz",
+        install_dir="/tmp/skill-rbac-server",
+        status="stopped",
+    )
+    db.add(server)
+    db.commit()
+    # Nur Sichtrecht, bewusst KEIN server.backups.create.
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+    ))
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=regular_user.id, server_id=server.id, title="Skill"
+    )
+    db.add(conversation)
+    db.commit()
+
+    response = client.post(
+        f"/api/ai/skills/{created.json()['id']}/run",
+        json={"conversation_id": conversation.id},
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
+    )
+
+    assert response.status_code == 403
+    assert db.query(AiActionProposal).count() == 0

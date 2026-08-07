@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, AiMemoryPreference, User
@@ -98,7 +99,18 @@ def upsert_entry(
         db, user_id=user.id, action=action, target_type="ai_memory", target_id=row.id,
         details={"scope": scope}, origin="direct",
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        # Zwei parallele Schreibvorgaenge auf denselben (scope, key). Die
+        # UNIQUE-Bedingung hat den Verlierer abgewiesen. Das ist ein
+        # verstaendlicher Konflikt und kein Serverfehler: der naechste Versuch
+        # findet die Zeile vor und nimmt den Update-Zweig.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Memory-Eintrag wurde parallel geaendert. Bitte erneut versuchen.",
+        ) from exc
     db.refresh(row)
     return row, safe_value
 
