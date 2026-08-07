@@ -40,6 +40,11 @@ from services.scheduler_service import sync_server_restart_schedule
 
 logger = logging.getLogger(__name__)
 
+# Platzhalter zwischen dem Anlegen der Serverzeile und dem Erzeugen des
+# Installationsverzeichnisses. Ein Server, der diesen Wert nach einem
+# Prozessneustart noch traegt, ist nachweislich unvollstaendig provisioniert.
+PENDING_INSTALL_DIR = "/tmp/msm-pending-create"
+
 
 @dataclass(frozen=True)
 class ProvisioningResult:
@@ -278,7 +283,7 @@ def provision_server(
         server = Server(
             name=req.name,
             game_type=req.game_type,
-            install_dir="/tmp/msm-pending-create",
+            install_dir=PENDING_INSTALL_DIR,
             status="stopped",
             auto_restart=req.auto_restart,
             restart_interval_hours=req.restart_interval_hours,
@@ -427,7 +432,20 @@ def provision_server(
         else:
             finish_server_provisioning(db, server.id, succeeded=True)
 
-        sync_server_restart_schedule(server)
+        # Ab hier ist die Provisionierung fachlich abgeschlossen. Ein Fehler in
+        # der Zeitplanung darf den Vorgang nicht mehr als gescheitert melden:
+        # der Server existiert, die Installation laeuft und der Abschluss
+        # gehoert dem Install-Callback. Frueher fuehrte genau das dazu, dass ein
+        # erfolgreicher Create als `failed` galt und ein Retry einen zweiten
+        # Server mit einem zweiten Portblock erzeugte.
+        try:
+            sync_server_restart_schedule(server)
+        except Exception:
+            logger.warning(
+                "Restart-Zeitplan konnte nach der Provisionierung nicht gesetzt werden "
+                "(server_id=%s)",
+                server.id,
+            )
         db.refresh(server)
         db.refresh(task)
         return ProvisioningResult(
@@ -440,8 +458,11 @@ def provision_server(
         if server is not None and install_lock_acquired and not install_started:
             release_install_update_lock(server.id)
         if server is not None and not install_started and not server_deleted:
+            # Werte festhalten, bevor ein Rollback das ORM-Objekt entwertet.
+            failed_server_id = server.id
+            failed_install_dir = server.install_dir
             try:
-                postgres_service.drop_server_resources(db, server.id)
+                postgres_service.drop_server_resources(db, failed_server_id)
             except Exception:
                 db.rollback()
             try:
@@ -450,23 +471,35 @@ def provision_server(
                 server_deleted = True
             except Exception:
                 db.rollback()
-            if created_install_dir:
+                logger.warning(
+                    "Serverzeile konnte nach Create-Abbruch nicht entfernt werden "
+                    "(server_id=%s)",
+                    failed_server_id,
+                )
+            # Dateien werden nur entfernt, wenn die Datenbankzeile wirklich weg
+            # ist. Sonst bliebe ein Server im Panel sichtbar, dessen Daten
+            # bereits geloescht sind — und dessen Ports weiterhin belegt waeren.
+            if server_deleted and created_install_dir:
                 try:
                     if target_node is not None and not target_node.is_local:
                         from services.node_client import NodeClient
 
-                        NodeClient.from_node(target_node).files_delete_server_root(server.id)
-                    elif server.install_dir and os.path.exists(server.install_dir):
-                        shutil.rmtree(server.install_dir)
+                        NodeClient.from_node(target_node).files_delete_server_root(failed_server_id)
+                    elif failed_install_dir and os.path.exists(failed_install_dir):
+                        shutil.rmtree(failed_install_dir)
                 except Exception:
                     logger.warning(
                         "Install-Verzeichnis konnte nach Create-Abbruch nicht entfernt werden "
                         "(server_id=%s)",
-                        server.id,
+                        failed_server_id,
                     )
         try:
             persisted_task = db.query(OperationTask).filter(OperationTask.id == task.id).first()
-            if persisted_task is not None:
+            # Sobald die Installation laeuft, gehoert der Endzustand des Tasks
+            # dem Install-Callback. Ihn hier zu ueberschreiben wuerde einen
+            # laufenden Vorgang faelschlich als gescheitert und damit als
+            # wiederholbar ausweisen.
+            if persisted_task is not None and not install_started:
                 already_failed = persisted_task.status == "failed"
                 if not already_failed:
                     mark_failed(db, persisted_task, error_code=error_code)

@@ -373,3 +373,41 @@ def test_shared_provisioning_service_rechecks_rbac_before_side_effects(
     assert exc.value.status_code == 403
     allocate.assert_not_called()
     assert db.query(OperationTask).filter(OperationTask.actor_user_id == regular_user.id).count() == 0
+
+
+def test_startup_discards_a_server_stuck_at_the_placeholder_directory(
+    db: Session,
+    owner_user: User,
+    test_server: Server,
+) -> None:
+    """Ein halb angelegter Server darf nicht als erfolgreiche Provisionierung gelten.
+
+    Zwischen dem Commit der Serverzeile und dem Anlegen des
+    Installationsverzeichnisses traegt der Server einen Platzhalterpfad und den
+    Status "stopped". Genau dieser Status galt der Recovery frueher als Beleg
+    fuer einen fertigen Server — obwohl die Zeile unbrauchbar war und ihren
+    Portblock dauerhaft belegte.
+    """
+    from services.server_provisioning_service import PENDING_INSTALL_DIR
+
+    task, _ = create_or_reuse_task(
+        db,
+        actor=ActorContext.for_user(owner_user),
+        task_type=TASK_SERVER_PROVISION,
+        request_hash="e" * 64,
+        idempotency_key="interrupted-placeholder-001",
+    )
+    mark_running(db, task, "creating")
+    set_phase(db, task, "creating", server_id=test_server.id)
+    test_server.install_dir = PENDING_INSTALL_DIR
+    test_server.status = "stopped"
+    server_id = test_server.id
+    db.commit()
+
+    assert recover_interrupted_tasks(db) == 1
+
+    db.expire_all()
+    finished = db.query(OperationTask).filter(OperationTask.id == task.id).one()
+    assert finished.status == "failed"
+    assert finished.error_code == "server_provisioning_interrupted"
+    assert db.query(Server).filter(Server.id == server_id).first() is None

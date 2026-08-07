@@ -281,6 +281,25 @@ def finish_lifecycle_task(
         mark_succeeded(db, task)
     else:
         mark_failed(db, task, error_code=error_code, phase="failed")
+    # Ein KI-Vorschlag, der diese Aktion ausgeloest hat, wartet auf genau diesen
+    # Abschluss. Ohne das bliebe er dauerhaft auf "executing" stehen, obwohl der
+    # Vorgang laengst entschieden ist.
+    from models import AiActionProposal
+
+    proposal = (
+        db.query(AiActionProposal)
+        .filter(
+            AiActionProposal.task_id == task.id,
+            AiActionProposal.status == "executing",
+        )
+        .first()
+    )
+    if proposal is not None:
+        proposal.status = "succeeded" if succeeded else "failed"
+        proposal.executed_at = _utcnow()
+        if not succeeded:
+            proposal.error_code = error_code[:64]
+
     operation = task.task_type.rsplit(".", 1)[-1]
     audit_service.record_privileged_action(
         db,
@@ -306,8 +325,25 @@ def recover_interrupted_tasks(db: Session) -> int:
     for task in tasks:
         if task.task_type == TASK_SERVER_PROVISION and task.server_id is not None:
             from models import Server
+            from services.server_provisioning_service import PENDING_INSTALL_DIR
 
             server = db.query(Server).filter(Server.id == task.server_id).first()
+            if server is not None and server.install_dir == PENDING_INSTALL_DIR:
+                # Der Prozess endete zwischen dem Commit der Serverzeile und dem
+                # Anlegen des Installationsverzeichnisses. Die Zeile ist nicht
+                # benutzbar, belegt aber ihren Portblock. Ohne diesen Zweig
+                # wurde sie wegen status="stopped" als erfolgreiche
+                # Provisionierung gemeldet.
+                db.delete(server)
+                db.commit()
+                mark_failed(
+                    db,
+                    task,
+                    error_code="server_provisioning_interrupted",
+                    phase="failed",
+                )
+                recovered += 1
+                continue
             if server is not None and server.status in {"stopped", "running", "awaiting_files"}:
                 mark_succeeded(db, task)
                 recovered += 1
