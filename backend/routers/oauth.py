@@ -41,6 +41,7 @@ from schemas.oauth import (
 )
 from services import audit_service, oauth_service
 from services.auth_service import AuthService
+from services.session_service import issue_session
 from services.email_service import EmailService
 from services.panel_settings_service import PanelSettingsService
 
@@ -127,10 +128,8 @@ def _audit(db: Session, user_id: int | None, action: str, target_id: int | None,
 
 
 def _set_login_session(response: Response, db: Session, user: User) -> None:
-    access_token = AuthService.create_access_token({"sub": user.username, "user_id": user.id, "jti": str(uuid.uuid4())})
-    refresh_token = AuthService.create_refresh_token(db, user.id)
-    csrf_token = AuthService.create_csrf_token()
-    _set_auth_cookies(response, access_token, refresh_token, csrf_token)
+    """Duennes Alias auf die gemeinsame Sitzungsausstellung (siehe session_service)."""
+    issue_session(response, db, user)
 
 
 def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:

@@ -46,6 +46,9 @@ from routers import (
     ai_memory_router,
     ai_skills_router,
     ai_attachments_router,
+    hoster_admin_router,
+    hoster_api_router,
+    hoster_handoff_router,
 )
 from middleware.rate_limit import limiter
 from services.rate_limit_settings import current_auth_limit_from_settings
@@ -679,6 +682,12 @@ app.include_router(ai_memory_router)
 app.include_router(ai_skills_router)
 app.include_router(ai_attachments_router)
 app.include_router(tasks_router)
+# Hoster-Anbindung (Phase 6). Panel-Verwaltung mit Cookie-Auth + CSRF,
+# externe Shop-API ausschliesslich per API-Key, Handoff-Einloesung per
+# Einmal-Token im Browser des Kunden.
+app.include_router(hoster_admin_router)
+app.include_router(hoster_api_router)
+app.include_router(hoster_handoff_router)
 
 
 

@@ -36,6 +36,14 @@ from .webhook_delivery import WebhookDelivery
 from .singra_webhook_event import SingraWebhookEvent
 from .incident import Incident, GuardianIncidentDelivery
 from .change_event import ChangeEvent
+from .hoster import (
+    HosterHandoff,
+    HosterIdentity,
+    HosterIntegration,
+    HosterProduct,
+    HosterService,
+    HosterWebhookDelivery,
+)
 
 __all__ = [
     "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
@@ -48,4 +56,6 @@ __all__ = [
     "PostgresDatabase", "PostgresUser", "PostgresGrant",
     "WebhookSubscription", "WebhookDelivery", "SingraWebhookEvent",
     "Incident", "GuardianIncidentDelivery", "ChangeEvent",
+    "HosterIntegration", "HosterProduct", "HosterIdentity", "HosterService",
+    "HosterHandoff", "HosterWebhookDelivery",
 ]  # noqa: E501

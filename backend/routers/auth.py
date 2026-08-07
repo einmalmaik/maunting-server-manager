@@ -21,6 +21,7 @@ from services.backup_code_service import BackupCodeService
 from services.permission_catalog import SYSTEM_ROLE_USER
 from services.role_service import get_role_by_name, set_user_roles
 from services.panel_settings_service import PanelSettingsService
+from services.session_service import issue_session
 
 from services.captcha_service import CaptchaService
 
@@ -52,10 +53,8 @@ def _log_smtp_missing(email: str) -> None:
 
 
 def _set_login_session(response: Response, db: Session, user: User) -> None:
-    access_token = AuthService.create_access_token({"sub": user.username, "user_id": user.id, "jti": str(uuid.uuid4())})
-    refresh_token = AuthService.create_refresh_token(db, user.id)
-    csrf_token = AuthService.create_csrf_token()
-    _set_auth_cookies(response, access_token, refresh_token, csrf_token)
+    """Duennes Alias auf die gemeinsame Sitzungsausstellung (siehe session_service)."""
+    issue_session(response, db, user)
 
 
 def _save_initial_email_config(req: OwnerSetupRequest) -> None:

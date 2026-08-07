@@ -906,6 +906,52 @@ def _ensure_guardian_reconciliation_job() -> None:
     )
 
 
+async def _hoster_maintenance_task() -> None:
+    """Stellt faellige Hoster-Webhooks zu und beendet abgelaufene Kuendigungen.
+
+    Beides bewusst in einem Lauf und mit eigener Session: der Lauf darf weder
+    eine Request-Session belegen noch den Panelbetrieb blockieren. Fehler werden
+    protokolliert, aber nie weitergereicht — ein defekter Shop darf den
+    Scheduler nicht anhalten.
+    """
+    import logging
+
+    from database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from services.hoster_service_lifecycle import purge_terminated_services
+        from services.hoster_webhook_service import deliver_pending
+
+        deliver_pending(db)
+        purge_terminated_services(db)
+    except Exception as exc:
+        db.rollback()
+        logging.getLogger(__name__).warning(
+            "Hoster-Wartungslauf fehlgeschlagen: %s", type(exc).__name__
+        )
+    finally:
+        db.close()
+
+
+def _ensure_hoster_maintenance_job() -> None:
+    scheduler = get_scheduler()
+    job_id = "global_hoster_maintenance"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_hoster_maintenance_task,
+        trigger=IntervalTrigger(seconds=60),
+        id=job_id,
+        name="Hoster Webhooks und Kuendigungsfristen",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def init_server_schedules(db):
     """Initialize schedules for all servers on startup."""
     from models import Server
@@ -915,6 +961,7 @@ def init_server_schedules(db):
     _ensure_git_update_check_job()
     _ensure_node_heartbeat_job()
     _ensure_guardian_reconciliation_job()
+    _ensure_hoster_maintenance_job()
 
     servers = db.query(Server).all()
     for server in servers:

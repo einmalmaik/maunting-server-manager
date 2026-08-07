@@ -59,6 +59,11 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("panel.oauth.delete",        "panel",   "OAuth-Provider loeschen"),
     PermissionDef("panel.oauth.secret_update", "panel",   "OAuth-Client-Secret aendern (rotieren)"),
     PermissionDef("panel.oauth.test",          "panel",   "OAuth-Provider-Verbindung testen"),
+    # Hoster-Anbindung (Phase 6). Bewusst getrennt von panel.settings.*, damit
+    # ein Support-Mitarbeiter Vertraege einsehen kann, ohne API-Keys rotieren
+    # oder Produkte umkonfigurieren zu duerfen.
+    PermissionDef("panel.hoster.read",          "panel",   "Hoster-Integrationen und Vertraege einsehen"),
+    PermissionDef("panel.hoster.write",         "panel",   "Hoster-Integrationen, Produkte und Schluessel verwalten"),
 )
 
 
