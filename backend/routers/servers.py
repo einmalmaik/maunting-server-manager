@@ -283,7 +283,17 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
         guard_node = None
         if server.node_id is not None:
-            guard_node = db.query(NodeModel).filter(NodeModel.id == server.node_id).first()
+            # Dieselbe Node-Zeilensperre wie in der Provisionierung. Ohne sie
+            # laufen Kapazitaetspruefung und Buchung nicht gegeneinander
+            # serialisiert: zwei parallele Vorgaenge lesen beide den alten
+            # Stand und ueberbuchen den Node. Die Sperre haelt bis zum
+            # gemeinsamen Commit am Ende dieses Requests.
+            guard_node = (
+                db.query(NodeModel)
+                .filter(NodeModel.id == server.node_id)
+                .with_for_update()
+                .first()
+            )
         ensure_ram_limit_fits(
             db,
             guard_node,
@@ -323,6 +333,14 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             node = getattr(server, "node", None)
             node_id = getattr(server, "node_id", None)
             check_host = True if (node is None or getattr(node, "is_local", True)) else False
+            if node_id is not None:
+                # Portvergabe gegen die Provisionierung serialisieren. Sonst
+                # koennen ein PATCH und ein gleichzeitiges Anlegen denselben
+                # Port auf demselben Node vergeben — beide lesen die belegten
+                # Ports, bevor einer von beiden schreibt.
+                from models import Node as NodeModel
+
+                db.query(NodeModel).filter(NodeModel.id == node_id).with_for_update().one()
             try:
                 allocated = allocate_ports(
                     db,
@@ -551,134 +569,23 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
 
 @router.delete("/{server_id}")
-def delete_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    """Löscht einen Server vollständig:
+def delete_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """HTTP-Rand der gemeinsamen Server-Loeschung.
 
-    1. Docker-Container stoppen + entfernen (idempotent, force=True killt auch
-       laufende Container).
-    2. UFW-Regeln für Ports schließen.
-    3. Install-Verzeichnis (Bind-Mount-Quelle) vom Host entfernen.
-    4. Backup-Verzeichnis (alle TAR-Archive) vom Host entfernen + S3-Objekte
-       der Backups best-effort löschen (vor Cascade, sonst verwaist).
-    5. MSM-Console-Log-Verzeichnis entfernen.
-    6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups).
+    Die eigentliche Reihenfolge, Fehlerbehandlung und Rechtepruefung liegt in
+    `services.server_deletion_service`, damit Panel und Hoster-Anbindung exakt
+    denselben Weg verwenden (Zielpunkt 10).
     """
-    if not permission_service.has_global_permission(db, user, "servers.delete"):
-        raise HTTPException(status_code=403, detail="Keine Berechtigung")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    from services.server_deletion_service import delete_server_completely
 
-    # 1. Container stoppen + entfernen (idempotent - force killt running)
-    container = container_name_for(server.id)
-    node = getattr(server, "node", None)
-    remove_result = docker_service.remove(container, force=True, node=node)
-    if not remove_result.get("ok"):
-        raise HTTPException(status_code=503, detail="Container konnte auf dem Node nicht entfernt werden")
-
-    # 2. Firewall- und iptables-Regeln schließen
-    ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
-    close_ports(ports_list, node=node, name=server.name)
-    if node is None or node.is_local:
-        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
-
-    # 3. Install-Verzeichnis physisch löschen
-    install_dir = server.install_dir
-    dir_removed = False
-    if node is not None and not node.is_local:
-        try:
-            from services.node_client import NodeClient
-
-            NodeClient.from_node(node).files_delete_server_root(server.id)
-            dir_removed = True
-        except Exception as e:
-            raise HTTPException(
-                status_code=503,
-                detail="Abbruch: Server-Verzeichnis konnte auf dem Node nicht gelöscht werden",
-            ) from e
-    elif install_dir and os.path.exists(install_dir):
-        repair = docker_service.repair_bind_mount_permissions(install_dir)
-        if not repair.get("ok"):
-            logger.warning(
-                "Install-Verzeichnis-Rechte konnten vor Delete nicht normalisiert werden: %s",
-                repair.get("error") or "unbekannter Fehler",
-            )
-        try:
-            shutil.rmtree(install_dir)
-            dir_removed = True
-        except OSError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Abbruch (Atomar): Install-Verzeichnis konnte nicht gelöscht werden. Bitte behebe die Berechtigungen (z. B. chown/chmod) oder lösche den Ordner manuell, bevor du den Server im Panel entfernst: {e}"
-            )
-
-    # 4. Backup-Verzeichnis (Files) löschen - DB-Cascade räumt Records
-    #    Nur fuer lokale Nodes, da Remote-Backups auf dem Node liegen.
-    backup_dir = f"/opt/msm/backups/{server.id}"
-    backups_removed = False
-    if node is None or node.is_local:
-        if os.path.exists(backup_dir):
-            try:
-                shutil.rmtree(backup_dir)
-                backups_removed = True
-            except OSError as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Abbruch (Atomar): Backup-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
-                )
-
-    # 5. MSM-Console-Log-Verzeichnis räumen (nur lokal vorhanden)
-    if node is None or node.is_local:
-        console_log_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "logs",
-            str(server.id),
-        )
-        if os.path.exists(console_log_dir):
-            try:
-                shutil.rmtree(console_log_dir)
-            except OSError as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Abbruch (Atomar): Console-Log-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
-                )
-
-    # 6. Verwaltete PostgreSQL-Ressourcen loeschen. Bei Fehler bleibt der
-    # Server-Datensatz erhalten, damit der Cleanup erneut versucht werden kann.
-    try:
-        postgres_service.drop_server_resources(db, server.id)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Abbruch: PostgreSQL-Ressourcen konnten nicht gelöscht werden. Bitte später erneut versuchen: {e}",
-        )
-
-    # 7. S3-Objekte der Backups best-effort löschen - VOR db.delete, da der
-    #    Cascade-Delete die Backup-Records (und damit s3_key) entfernt und
-    #    die S3-Objekte sonst permanent verwaisten. Local-Import + Warning-Log
-    #    wie in cleanup_old_backups / delete_backup (keine Secrets im Log).
-    for backup in server.backups:
-        if backup.s3_key:
-            try:
-                from services.s3_service import S3Service
-                S3Service.delete_object(backup.s3_key, bucket=backup.s3_bucket)
-            except Exception as e:
-                logger.warning(
-                    "S3-Delete fehlgeschlagen (Backup %s): %s",
-                    backup.id, type(e).__name__,
-                )
-
-    # 8. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
-    db.delete(server)
-    db.commit()
-    return {
-        "message": "Server gelöscht",
-        "cleanup": {
-            "container_removed": container,
-            "dir_removed": install_dir if dir_removed else None,
-            "backups_removed": backup_dir if backups_removed else None,
-        },
-    }
+    return delete_server_completely(
+        db, server_id=server_id, actor=ActorContext.for_user(user)
+    )
 
 
 @router.post("/{server_id}/start")
@@ -987,6 +894,28 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
     if not try_acquire_install_update_lock(server.id, "install", node_id=server.node_id):
         raise _install_update_busy_error()
+    # Der Status vor der Installation wird gemerkt, damit ein Fehlstart ihn
+    # wiederherstellen kann. Ohne das blieb der Server dauerhaft auf
+    # "installing": weder die Statusaktualisierung noch die
+    # Lifecycle-Reconciliation korrigieren diesen Zustand, der Server war im
+    # Panel also nicht mehr bedienbar.
+    previous_status = server.status
+    previous_status_message = server.status_message
+
+    def _restore_status() -> None:
+        try:
+            db.rollback()
+            server.status = previous_status
+            server.status_message = previous_status_message
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning(
+                "Serverstatus konnte nach fehlgeschlagenem Installationsstart nicht "
+                "zurueckgesetzt werden (server_id=%s)",
+                server_id,
+            )
+
     try:
         server.status = "installing"
         server.status_message = "Installation gestartet"
@@ -994,9 +923,17 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
         result = plugin.install(server)
     except Exception:
         release_install_update_lock(server.id)
+        _restore_status()
         raise HTTPException(status_code=500, detail="Installation konnte nicht gestartet werden")
     if "error" in result:
         release_install_update_lock(server.id)
+        # plugin.install() hat den Server bereits selbst auf "error" gesetzt,
+        # wenn es die Installation gar nicht erst starten konnte. In dem Fall
+        # bleibt dieser Status stehen; nur ein noch auf "installing" stehender
+        # Server wird zurueckgesetzt.
+        db.refresh(server)
+        if server.status == "installing":
+            _restore_status()
         raise HTTPException(status_code=500, detail=result["error"])
     return {"message": "Installation gestartet", **result}
 
