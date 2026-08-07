@@ -10,6 +10,8 @@ export interface AiProviderAdmin {
   allow_private_network: boolean
   operator_key_configured: boolean
   operator_key_hint: string | null
+  /** Preis in Cent je 1 Mio. Tokens. null = keine Preisquelle, Kosten bleiben 0. */
+  token_price_cents_per_million: number | null
   updated_at: string
 }
 
@@ -127,6 +129,7 @@ export interface AiProviderWrite {
   enabled: boolean
   requires_api_key: boolean
   allow_private_network: boolean
+  token_price_cents_per_million?: number | null
   operator_api_key?: string
   clear_operator_api_key?: boolean
 }

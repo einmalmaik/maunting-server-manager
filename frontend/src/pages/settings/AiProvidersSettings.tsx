@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiProviderAdmin, type AiProviderWrite } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { Button, Switch } from '@/Singra/UI'
+import { Button, NumberStepper, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -21,6 +21,7 @@ const EMPTY_PROVIDER: ProviderDraft = {
   enabled: true,
   requires_api_key: true,
   allow_private_network: false,
+  token_price_cents_per_million: null,
   operator_api_key: '',
 }
 
@@ -33,6 +34,7 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     enabled: provider.enabled,
     requires_api_key: provider.requires_api_key,
     allow_private_network: provider.allow_private_network,
+    token_price_cents_per_million: provider.token_price_cents_per_million,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
     operator_key_hint: provider.operator_key_hint,
@@ -74,6 +76,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       enabled: draft.enabled,
       requires_api_key: draft.requires_api_key,
       allow_private_network: draft.allow_private_network,
+      token_price_cents_per_million: draft.token_price_cents_per_million ?? null,
       ...(draft.operator_api_key ? { operator_api_key: draft.operator_api_key } : {}),
       ...(draft.clear_operator_api_key ? { clear_operator_api_key: true } : {}),
     }
@@ -226,6 +229,19 @@ function ProviderForm({
         <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
           <Toggle label={t('ai.providers.privateNetwork')} checked={draft.allow_private_network} onChange={(allow_private_network) => change({ allow_private_network })} />
           <p className="mt-2 text-xs text-on-surface-variant">{t('ai.providers.privateNetworkHint')}</p>
+        </div>
+        <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+          <label className="space-y-1.5 block">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.tokenPrice')}</span>
+            <NumberStepper
+              value={draft.token_price_cents_per_million === null || draft.token_price_cents_per_million === undefined ? '' : String(draft.token_price_cents_per_million)}
+              onValueChange={(value) => change({ token_price_cents_per_million: value === '' ? null : Number(value) })}
+              min={0}
+              max={10000000}
+              step={10}
+            />
+          </label>
+          <p className="mt-2 text-xs text-on-surface-variant">{t('ai.providers.tokenPriceHint')}</p>
         </div>
       </fieldset>
       <div className="flex flex-wrap justify-end gap-2">

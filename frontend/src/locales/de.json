@@ -137,7 +137,9 @@
         "load": "KI-Provider konnten nicht geladen werden.",
         "save": "KI-Provider konnte nicht gespeichert werden.",
         "delete": "KI-Provider konnte nicht gelöscht werden."
-      }
+      },
+      "tokenPrice": "Preis in Cent je 1 Mio. Tokens",
+      "tokenPriceHint": "Aus der Preisliste des Anbieters übernehmen. MSM schätzt keinen Preis: ohne diesen Wert werden Kosten mit null verbucht und das rollenbasierte Kostenlimit greift nicht."
     },
     "credentials": {
       "title": "Eigene KI-Zugangsdaten",

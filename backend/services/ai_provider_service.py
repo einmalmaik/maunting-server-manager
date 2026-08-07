@@ -88,6 +88,8 @@ def create_provider(
     requires_api_key: bool,
     allow_private_network: bool,
     operator_api_key: str | None,
+    # Optional: ohne Preis bleiben die Kosten bei null (siehe estimate_cost_microunits).
+    token_price_cents_per_million: int | None = None,
 ) -> AiProvider:
     if not name.strip() or not default_model.strip():
         raise AiProviderConfigurationError("Provider-Name und Modell duerfen nicht leer sein")
@@ -100,6 +102,7 @@ def create_provider(
         enabled=enabled,
         requires_api_key=requires_api_key,
         allow_private_network=allow_private_network,
+        token_price_cents_per_million=token_price_cents_per_million,
     )
     db.add(provider)
     db.flush()
@@ -134,6 +137,8 @@ def update_provider(
     for field in ("enabled", "requires_api_key", "allow_private_network"):
         if field in values:
             setattr(provider, field, values[field])
+    if "token_price_cents_per_million" in values:
+        provider.token_price_cents_per_million = values['token_price_cents_per_million']
     if clear_operator_api_key:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None
@@ -196,9 +201,43 @@ def resolve_api_key(db: Session, provider: AiProvider, user_id: int) -> str | No
     return None
 
 
-def assert_provider_destination(provider: AiProvider) -> None:
-    """Revalidiert DNS unmittelbar vor jedem Request gegen Rebinding/Aenderungen."""
-    validate_provider_base_url(
+def assert_provider_destination(provider: AiProvider) -> str | None:
+    """Revalidiert das Providerziel unmittelbar vor jedem Request.
+
+    Rueckgabe ist die freigegebene IP-Adresse als String — oder ``None``, wenn
+    der Host bereits als IP-Literal konfiguriert ist und nichts zu pinnen ist.
+
+    Warum die Adresse zurueckgegeben wird: eine Pruefung, deren Ergebnis danach
+    weggeworfen wird, schuetzt nicht vor DNS-Rebinding. Der Client wuerde den
+    Namen erneut aufloesen und koennte dabei eine andere — etwa interne —
+    Adresse erhalten. Der Aufrufer verbindet sich deshalb mit genau der hier
+    geprueften Adresse.
+    """
+    normalized = validate_provider_base_url(
         provider.base_url,
         allow_private_network=provider.allow_private_network,
     )
+    hostname = urlparse(normalized).hostname or ""
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        return None
+    addresses = _resolved_addresses(hostname)
+    # Deterministisch dieselbe Adresse waehlen, damit Keep-Alive-Verbindungen
+    # nicht bei jedem Request auf einen anderen Endpunkt springen.
+    return str(sorted(addresses, key=str)[0])
+
+
+def estimate_cost_microunits(provider: AiProvider, tokens: int) -> int:
+    """Rechnet Tokens in Verbrauchskosten um.
+
+    Ohne gepflegten Preis bleibt das Ergebnis null — MSM erfindet keinen Preis.
+    Die Rechnung laeuft bewusst ganzzahlig: 1 Cent sind 10.000 Microunits, der
+    Preis gilt je eine Million Tokens, also `tokens * cent / 100`.
+    """
+    price = provider.token_price_cents_per_million
+    if not price or tokens <= 0:
+        return 0
+    return (int(tokens) * int(price)) // 100

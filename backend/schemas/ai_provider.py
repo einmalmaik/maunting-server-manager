@@ -12,6 +12,9 @@ class AiProviderCreate(BaseModel):
     enabled: bool = True
     requires_api_key: bool = True
     allow_private_network: bool = False
+    # Preis in Cent je eine Million Tokens. ``None`` bedeutet: keine
+    # belastbare Preisquelle, Kosten werden mit null verbucht.
+    token_price_cents_per_million: int | None = Field(default=None, ge=0, le=10_000_000)
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
 
 
@@ -22,6 +25,9 @@ class AiProviderUpdate(BaseModel):
     enabled: bool | None = None
     requires_api_key: bool | None = None
     allow_private_network: bool | None = None
+    # Preis in Cent je eine Million Tokens. ``None`` bedeutet: keine
+    # belastbare Preisquelle, Kosten werden mit null verbucht.
+    token_price_cents_per_million: int | None = Field(default=None, ge=0, le=10_000_000)
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
     clear_operator_api_key: bool = False
 
@@ -36,6 +42,7 @@ class AiProviderResponse(BaseModel):
     allow_private_network: bool
     operator_key_configured: bool
     operator_key_hint: str | None
+    token_price_cents_per_million: int | None
     updated_at: datetime
 
 

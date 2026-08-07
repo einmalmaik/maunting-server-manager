@@ -24,6 +24,7 @@ const provider: AiProviderAdmin = {
   allow_private_network: false,
   operator_key_configured: true,
   operator_key_hint: '********1234',
+  token_price_cents_per_million: null,
   updated_at: '2026-08-01T12:00:00Z',
 }
 

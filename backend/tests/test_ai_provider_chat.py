@@ -649,3 +649,284 @@ def test_startup_recovery_closes_stream_and_keeps_full_reservation(
     usage = db.query(AiUsageEvent).one()
     assert usage.status == "completed"
     assert usage.accounted_tokens == 321
+
+
+def test_provider_destination_returns_pinnable_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Die Zielpruefung muss ihr Ergebnis herausgeben, nicht nur wegwerfen.
+
+    Loest der HTTP-Client den Namen spaeter erneut auf, kann er eine andere —
+    etwa interne — Adresse erhalten. Die geprueft freigegebene Adresse ist
+    deshalb Teil des Vertrags.
+    """
+    _public_dns(monkeypatch)
+    named = AiProvider(
+        id=101,
+        name="Named",
+        base_url="https://api.example.invalid/v1",
+        default_model="model-a",
+        enabled=True,
+        requires_api_key=False,
+        allow_private_network=False,
+    )
+    assert ai_provider_service.assert_provider_destination(named) == "93.184.216.34"
+
+    literal = AiProvider(
+        id=102,
+        name="Literal",
+        base_url="https://93.184.216.34/v1",
+        default_model="model-a",
+        enabled=True,
+        requires_api_key=False,
+        allow_private_network=False,
+    )
+    # Bei einem IP-Literal gibt es nichts zu pinnen.
+    assert ai_provider_service.assert_provider_destination(literal) is None
+
+
+@pytest.mark.asyncio
+async def test_adapter_connects_to_the_validated_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Der Request geht an die freigegebene IP, Host-Header bleibt der Name."""
+    monkeypatch.setattr(
+        "services.openai_compatible_adapter.assert_provider_destination",
+        lambda _provider: "93.184.216.34",
+    )
+    provider = AiProvider(
+        id=103,
+        name="Pinned",
+        base_url="https://api.example.invalid/v1",
+        default_model="model-a",
+        enabled=True,
+        requires_api_key=False,
+        allow_private_network=False,
+    )
+    seen: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen["host_in_url"] = request.url.host
+        seen["host_header"] = request.headers.get("host")
+        seen["sni"] = request.extensions.get("sni_hostname")
+        return httpx.Response(
+            200,
+            text='data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+            headers={"content-type": "text/event-stream"},
+        )
+
+    usage = StreamUsage()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        chunks = [
+            chunk
+            async for chunk in stream_chat_completion(
+                http_client,
+                provider=provider,
+                api_key=None,
+                messages=[{"role": "user", "content": "Hi"}],
+                usage=usage,
+            )
+        ]
+
+    assert chunks == ["ok"]
+    assert seen["host_in_url"] == "93.184.216.34"
+    assert seen["host_header"] == "api.example.invalid"
+    assert seen["sni"] == "api.example.invalid"
+
+
+@pytest.mark.asyncio
+async def test_adapter_stops_a_stream_that_never_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein endlos tropfender Provider darf die Reservierung nicht ewig halten."""
+    monkeypatch.setattr(
+        "services.openai_compatible_adapter.assert_provider_destination",
+        lambda _provider: None,
+    )
+    monkeypatch.setattr(
+        "services.openai_compatible_adapter.MAX_STREAM_FRAMES", 5
+    )
+    provider = AiProvider(
+        id=104,
+        name="Endless",
+        base_url="https://api.example.invalid/v1",
+        default_model="model-a",
+        enabled=True,
+        requires_api_key=False,
+        allow_private_network=False,
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        # Kein [DONE] und mehr Frames als erlaubt.
+        stream = 'data: {"choices":[{"delta":{"content":"x"}}]}\n\n' * 50
+        return httpx.Response(200, text=stream, headers={"content-type": "text/event-stream"})
+
+    usage = StreamUsage()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        with pytest.raises(AiProviderRequestError) as excinfo:
+            async for _ in stream_chat_completion(
+                http_client,
+                provider=provider,
+                api_key=None,
+                messages=[{"role": "user", "content": "Hi"}],
+                usage=usage,
+            ):
+                pass
+
+    assert excinfo.value.code == "AI_PROVIDER_RESPONSE_TOO_LARGE"
+
+
+@pytest.mark.asyncio
+async def test_adapter_bounds_a_single_unterminated_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein Provider ohne Zeilenumbruch darf den Panel-Prozess nicht fluten."""
+    monkeypatch.setattr(
+        "services.openai_compatible_adapter.assert_provider_destination",
+        lambda _provider: None,
+    )
+    monkeypatch.setattr(
+        "services.openai_compatible_adapter.MAX_STREAM_LINE_CHARS", 500
+    )
+    provider = AiProvider(
+        id=105,
+        name="Flood",
+        base_url="https://api.example.invalid/v1",
+        default_model="model-a",
+        enabled=True,
+        requires_api_key=False,
+        allow_private_network=False,
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text="data: " + "y" * 5_000,  # bewusst ohne \n
+            headers={"content-type": "text/event-stream"},
+        )
+
+    usage = StreamUsage()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        with pytest.raises(AiProviderRequestError) as excinfo:
+            async for _ in stream_chat_completion(
+                http_client,
+                provider=provider,
+                api_key=None,
+                messages=[{"role": "user", "content": "Hi"}],
+                usage=usage,
+            ):
+                pass
+
+    assert excinfo.value.code == "AI_PROVIDER_RESPONSE_TOO_LARGE"
+
+
+def test_finalization_settles_usage_even_if_the_message_is_gone(
+    db: Session,
+    regular_user: User,
+) -> None:
+    """Eine verwaiste Reservierung muss abgerechnet werden, nicht stillschweigend bleiben.
+
+    Wird der Chat waehrend eines laufenden Streams geloescht, existiert die
+    Assistant-Nachricht nicht mehr. Vorher brach die Finalisierung dann
+    kommentarlos ab — die Reservierung blieb "reserved" und blockierte bis zum
+    Prozessneustart Kontingent und einen Nebenlaeufigkeitsplatz.
+    """
+    from services.ai_stream_service import _finalize_stream
+
+    request_id = str(uuid4())
+    usage_event = AiUsageEvent(
+        request_id=request_id,
+        user_id=regular_user.id,
+        status="reserved",
+        reserved_tokens=150,
+        reserved_cost_microunits=0,
+        accounted_tokens=150,
+        accounted_cost_microunits=0,
+    )
+    db.add(usage_event)
+    db.commit()
+    db.refresh(usage_event)
+
+    _finalize_stream(
+        message_id=str(uuid4()),  # existiert bewusst nicht
+        usage_event_id=usage_event.id,
+        content="ignoriert",
+        provider_total_tokens=None,
+        estimated_actual_tokens=0,
+        failed=True,
+        had_output=True,
+    )
+
+    db.expire_all()
+    settled = db.query(AiUsageEvent).filter(AiUsageEvent.request_id == request_id).one()
+    assert settled.status == "completed"
+    assert settled.accounted_tokens == 150
+
+
+def test_cost_limit_actually_blocks_once_a_token_price_is_configured(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    user_csrf_token: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Das monatliche Kostenlimit muss wirken, nicht nur konfigurierbar sein.
+
+    Ohne Preisquelle wurde jeder Verbrauch mit null Kosten verbucht — ein
+    Betreiber konnte ein Limit setzen und war trotzdem ungeschuetzt. Mit
+    gepflegtem Providerpreis greift die Grenze und der Provider wird gar nicht
+    erst aufgerufen.
+    """
+    _enable_chat(db, regular_user)
+    role = db.query(Role).filter(Role.name == f"ai-chat-{regular_user.id}").one()
+    set_role_limit(db, role.id, {
+        **{field: None for field in LIMIT_FIELDS},
+        "monthly_cost_limit_cents": 1,
+    })
+    db.commit()
+    provider = _provider(db, monkeypatch)
+    # 100.000 Cent je Million Tokens: schon eine kleine Anfrage sprengt 1 Cent.
+    provider.token_price_cents_per_million = 100_000
+    db.commit()
+    calls = 0
+
+    async def forbidden_provider(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        yield "unexpected"
+
+    monkeypatch.setattr("services.ai_stream_service.stream_chat_completion", forbidden_provider)
+    created = client.post(
+        "/api/ai/conversations",
+        json={"title": "Kosten"},
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
+    ).json()
+    response = client.post(
+        f"/api/ai/conversations/{created['id']}/messages/stream",
+        json={"content": "Hallo", "provider_id": provider.id, "request_id": str(uuid4())},
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
+    )
+
+    assert response.status_code == 200
+    assert "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS" in response.text
+    assert calls == 0
+    assert db.query(AiUsageEvent).count() == 0
+
+
+def test_without_a_token_price_cost_stays_zero_and_the_limit_does_not_fire(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MSM erfindet keinen Preis: ohne Konfiguration bleiben die Kosten null."""
+    provider = _provider(db, monkeypatch)
+
+    assert provider.token_price_cents_per_million is None
+    assert ai_provider_service.estimate_cost_microunits(provider, 1_000_000) == 0
+
+    provider.token_price_cents_per_million = 300  # 3,00 EUR je 1M Tokens
+    # 1.000.000 Tokens * 300 Cent / 100 = 3.000.000 Microunits = 300 Cent.
+    assert ai_provider_service.estimate_cost_microunits(provider, 1_000_000) == 3_000_000
+    assert ai_provider_service.estimate_cost_microunits(provider, 0) == 0

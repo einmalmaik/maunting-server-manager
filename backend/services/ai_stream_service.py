@@ -29,7 +29,7 @@ from services.ai_context_service import (
     message_character_count,
     redact_sensitive_text,
 )
-from services.ai_provider_service import resolve_api_key
+from services.ai_provider_service import estimate_cost_microunits, resolve_api_key
 from services.ai_usage_service import (
     AiQuotaExceeded,
     AiUsageConflict,
@@ -63,14 +63,24 @@ def _finalize_stream(
     estimated_actual_tokens: int,
     failed: bool,
     had_output: bool,
+    token_price_cents_per_million: int | None = None,
 ) -> None:
     with SessionLocal() as db:
         message = db.get(AiMessage, message_id)
         usage_event = db.get(AiUsageEvent, usage_event_id)
-        if message is None or usage_event is None:
+        if usage_event is None:
+            # Ohne Verbrauchszeile gibt es nichts mehr abzurechnen.
+            logger.warning("AI usage event missing at finalization message_id=%s", message_id)
             return
-        message.content = content
-        message.status = "failed" if failed else "complete"
+        if message is not None:
+            message.content = content
+            message.status = "failed" if failed else "complete"
+        else:
+            # Die Nachricht wurde waehrend des Streams entfernt (z. B. Chat
+            # geloescht). Die Reservierung muss trotzdem abgeschlossen werden:
+            # sonst bliebe sie dauerhaft "reserved" und wuerde Kontingent sowie
+            # einen Nebenlaeufigkeitsplatz des Benutzers permanent blockieren.
+            logger.warning("AI message missing at finalization message_id=%s", message_id)
         if failed and not had_output:
             fail_ai_usage(db, usage_event)
         else:
@@ -81,11 +91,21 @@ def _finalize_stream(
                 actual_tokens = (
                     usage_event.reserved_tokens if failed else estimated_actual_tokens
                 )
+            accounted_tokens = min(TOKEN_LIMIT_MAX, max(0, actual_tokens))
+            # Kosten folgen den tatsaechlich verbuchten Tokens. Ohne gepflegten
+            # Preis bleibt die Reserve (null) stehen; nie weniger als reserviert,
+            # damit eine Ueberschreitung nicht nachtraeglich verschwindet.
+            actual_cost = usage_event.reserved_cost_microunits
+            if token_price_cents_per_million:
+                actual_cost = max(
+                    actual_cost,
+                    (accounted_tokens * int(token_price_cents_per_million)) // 100,
+                )
             complete_ai_usage(
                 db,
                 usage_event,
-                actual_tokens=min(TOKEN_LIMIT_MAX, max(0, actual_tokens)),
-                actual_cost_microunits=usage_event.reserved_cost_microunits,
+                actual_tokens=accounted_tokens,
+                actual_cost_microunits=actual_cost,
             )
         db.commit()
 
@@ -191,6 +211,7 @@ async def stream_conversation_reply(
     provider_messages: list[dict[str, str]] = []
     api_key: str | None = None
     server_id: int | None = None
+    token_price_cents_per_million: int | None = None
     preparation_error: tuple[str, str] | None = None
     try:
         with SessionLocal() as db:
@@ -219,15 +240,22 @@ async def stream_conversation_reply(
                         db.flush()
                         provider_messages = build_provider_messages(db, conversation)
                         estimated_tokens = estimate_reserved_tokens(provider_messages)
+                        # Kosten werden aus dem vom Betreiber gepflegten
+                        # Providerpreis abgeleitet. Ohne Preis bleibt der Wert
+                        # null — dann greift auch das Kostenlimit bewusst nicht.
                         usage_event = reserve_ai_usage(
                             db,
                             user,
                             request_id=request_id,
                             estimated_tokens=estimated_tokens,
+                            estimated_cost_microunits=estimate_cost_microunits(
+                                provider, estimated_tokens
+                            ),
                             server_id=conversation.server_id,
                             provider_id=provider.id,
                             model=provider.default_model,
                         )
+                        token_price_cents_per_million = provider.token_price_cents_per_million
                         assistant = AiMessage(
                             id=assistant_id,
                             conversation_id=conversation.id,
@@ -266,6 +294,10 @@ async def stream_conversation_reply(
     yield sse_event("message", {"message_id": assistant_id, "request_id": str(request_id)})
     chunks: list[str] = []
     usage = StreamUsage()
+    # Merkt sich, ob die Abrechnung bereits erfolgt ist. Der Abbruchpfad darf
+    # eine schon erfolgreich abgeschlossene Antwort nicht nachtraeglich als
+    # fehlgeschlagen ueberschreiben.
+    finalized = False
     try:
         tools = provider_tool_definitions() if server_id is not None else None
         async for delta in stream_chat_completion(
@@ -339,18 +371,27 @@ async def stream_conversation_reply(
             estimated_actual_tokens=estimated_actual,
             failed=False,
             had_output=bool(chunks),
+            token_price_cents_per_million=token_price_cents_per_million,
         )
+        finalized = True
         yield sse_event("done", {"message_id": assistant_id})
-    except asyncio.CancelledError:
-        _finalize_stream(
-            message_id=assistant_id,
-            usage_event_id=usage_event_id,
-            content="".join(chunks),
-            provider_total_tokens=usage.total_tokens,
-            estimated_actual_tokens=0,
-            failed=True,
-            had_output=bool(chunks),
-        )
+    except (asyncio.CancelledError, GeneratorExit):
+        # Bricht der Browser die Verbindung ab, wirft Python beim Aufraeumen des
+        # Generators ein GeneratorExit. Das ist kein `Exception` und lief bisher
+        # durch alle Handler hindurch: Nachricht blieb "streaming", Reservierung
+        # blieb "reserved" und belegte bis zum Prozessneustart Kontingent und
+        # einen Nebenlaeufigkeitsplatz.
+        if not finalized:
+            _finalize_stream(
+                message_id=assistant_id,
+                usage_event_id=usage_event_id,
+                content="".join(chunks),
+                provider_total_tokens=usage.total_tokens,
+                estimated_actual_tokens=0,
+                failed=True,
+                had_output=bool(chunks),
+                token_price_cents_per_million=token_price_cents_per_million,
+            )
         raise
     except AiProviderRequestError as exc:
         _finalize_stream(
@@ -361,6 +402,7 @@ async def stream_conversation_reply(
             estimated_actual_tokens=0,
             failed=True,
             had_output=bool(chunks),
+            token_price_cents_per_million=token_price_cents_per_million,
         )
         yield sse_event("error", {"code": exc.code, "message_key": "ai.errors.provider"})
     except AiActionValidationError:
@@ -372,6 +414,7 @@ async def stream_conversation_reply(
             estimated_actual_tokens=0,
             failed=True,
             had_output=bool(chunks),
+            token_price_cents_per_million=token_price_cents_per_million,
         )
         yield sse_event("error", {"code": "AI_TOOL_REJECTED", "message_key": "ai.errors.toolRejected"})
     except Exception as exc:
@@ -384,5 +427,6 @@ async def stream_conversation_reply(
             estimated_actual_tokens=0,
             failed=True,
             had_output=bool(chunks),
+            token_price_cents_per_million=token_price_cents_per_million,
         )
         yield sse_event("error", {"code": "AI_STREAM_FAILED", "message_key": "ai.errors.unavailable"})

@@ -33,6 +33,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         allow_private_network=provider.allow_private_network,
         operator_key_configured=bool(provider.operator_api_key_encrypted),
         operator_key_hint=provider.operator_api_key_hint,
+        token_price_cents_per_million=provider.token_price_cents_per_million,
         updated_at=provider.updated_at,
     )
 

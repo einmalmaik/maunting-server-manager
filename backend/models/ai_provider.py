@@ -26,6 +26,10 @@ class AiProvider(Base):
     allow_private_network: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     operator_api_key_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)
     operator_api_key_hint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Vom Betreiber gepflegter Preis in Cent je eine Million Tokens. MSM raet
+    # keinen Preis: ohne diesen Wert bleiben die Kosten bei null und das
+    # rollenbasierte Kostenlimit greift nicht (die Oberflaeche weist darauf hin).
+    token_price_cents_per_million: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

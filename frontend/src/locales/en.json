@@ -137,7 +137,9 @@
         "load": "AI providers could not be loaded.",
         "save": "AI provider could not be saved.",
         "delete": "AI provider could not be deleted."
-      }
+      },
+      "tokenPrice": "Price in cents per 1M tokens",
+      "tokenPriceHint": "Take this from the provider's price list. MSM does not guess a price: without this value costs are accounted as zero and the role-based cost limit has no effect."
     },
     "credentials": {
       "title": "Personal AI credentials",

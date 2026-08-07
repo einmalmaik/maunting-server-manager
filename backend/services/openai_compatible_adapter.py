@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import logging
+import time
 from typing import Any, AsyncIterator
 
 import httpx
@@ -17,6 +18,12 @@ logger = logging.getLogger(__name__)
 MAX_STREAM_LINE_CHARS = 1_000_000
 MAX_ASSISTANT_CHARS = 64_000
 MAX_TOOL_ARGUMENT_CHARS = 128_000
+# Harte Obergrenzen fuer einen einzelnen Providerstream. Ohne sie haelt ein
+# langsam tropfender Provider die Kontingentreservierung und einen
+# Nebenlaeufigkeitsplatz unbegrenzt besetzt: der Lesetimeout von httpx greift
+# nur je Chunk, nicht fuer die Gesamtdauer.
+MAX_STREAM_SECONDS = 300.0
+MAX_STREAM_FRAMES = 20_000
 
 
 class AiProviderRequestError(RuntimeError):
@@ -39,6 +46,31 @@ class ProviderToolCall:
     id: str
     name: str
     arguments: dict
+
+
+async def _iter_sse_lines(
+    response: httpx.Response, *, deadline: float
+) -> AsyncIterator[str]:
+    """Zerlegt die Providerantwort in Zeilen mit harter Puffergrenze.
+
+    `response.aiter_lines()` puffert eine Zeile unbegrenzt, bevor sie
+    zurueckkommt. Ein Provider, der nie einen Zeilenumbruch sendet, koennte den
+    Panel-Prozess damit in den Speicher treiben, ohne dass die nachgelagerte
+    Laengenpruefung je erreicht wird. Deshalb wird hier selbst gepuffert und
+    sowohl die Puffergroesse als auch die Gesamtlaufzeit begrenzt.
+    """
+    buffer = ""
+    async for chunk in response.aiter_text():
+        if time.monotonic() > deadline:
+            raise AiProviderRequestError("AI_PROVIDER_STREAM_TIMEOUT")
+        buffer += chunk
+        if len(buffer) > MAX_STREAM_LINE_CHARS:
+            raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            yield line.rstrip("\r")
+    if buffer:
+        yield buffer.rstrip("\r")
 
 
 def _error_code(status_code: int) -> str:
@@ -67,7 +99,7 @@ async def stream_chat_completion(
     und ob daraus lediglich ein Vorschlag entsteht, entscheidet die interne
     AI-Aktionsschicht; Providerdaten loesen hier niemals Aktionen aus.
     """
-    assert_provider_destination(provider)
+    pinned_address = assert_provider_destination(provider)
     if provider.requires_api_key and not api_key:
         raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
 
@@ -82,13 +114,25 @@ async def stream_chat_completion(
     if tools:
         request_body["tools"] = tools
         request_body["tool_choice"] = "auto"
-    target = provider.base_url.rstrip("/") + "/chat/completions"
+    target = httpx.URL(provider.base_url.rstrip("/") + "/chat/completions")
+    extensions: dict[str, Any] = {}
+    if pinned_address is not None:
+        # Verbindung auf die soeben freigegebene Adresse festnageln. Host-Header
+        # und SNI bleiben der konfigurierte Name, damit Routing und
+        # Zertifikatspruefung unveraendert gegen den echten Hostnamen laufen.
+        hostname = target.host
+        headers["Host"] = target.netloc.decode("ascii")
+        extensions["sni_hostname"] = hostname
+        target = target.copy_with(host=pinned_address)
+    deadline = time.monotonic() + MAX_STREAM_SECONDS
+    frames = 0
     try:
         async with client.stream(
             "POST",
             target,
             headers=headers,
             json=request_body,
+            extensions=extensions,
         ) as response:
             if response.status_code != 200:
                 logger.warning(
@@ -100,11 +144,14 @@ async def stream_chat_completion(
 
             saw_done = False
             tool_buffers: dict[int, dict[str, str]] = {}
-            async for line in response.aiter_lines():
+            async for line in _iter_sse_lines(response, deadline=deadline):
+                if time.monotonic() > deadline:
+                    raise AiProviderRequestError("AI_PROVIDER_STREAM_TIMEOUT")
+                frames += 1
+                if frames > MAX_STREAM_FRAMES:
+                    raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
                 if not line:
                     continue
-                if len(line) > MAX_STREAM_LINE_CHARS:
-                    raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
                 if not line.startswith("data:"):
                     continue
                 payload = line[5:].strip()
