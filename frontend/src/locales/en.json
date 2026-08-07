@@ -133,7 +133,11 @@
       "deleted": "AI provider deleted.",
       "deleteTitle": "Delete AI provider?",
       "deleteConfirm": "Really delete provider {{name}} and its associated credentials?",
-      "errors": { "load": "AI providers could not be loaded.", "save": "AI provider could not be saved.", "delete": "AI provider could not be deleted." }
+      "errors": {
+        "load": "AI providers could not be loaded.",
+        "save": "AI provider could not be saved.",
+        "delete": "AI provider could not be deleted."
+      }
     },
     "credentials": {
       "title": "Personal AI credentials",
@@ -149,7 +153,11 @@
       "deleted": "Personal AI key removed.",
       "deleteTitle": "Remove personal API key?",
       "deleteConfirm": "Really remove your API key for {{name}}?",
-      "errors": { "load": "AI providers could not be loaded.", "save": "API key could not be saved.", "delete": "API key could not be removed." }
+      "errors": {
+        "load": "AI providers could not be loaded.",
+        "save": "API key could not be saved.",
+        "delete": "API key could not be removed."
+      }
     },
     "memory": {
       "title": "Personal AI memory",
@@ -162,7 +170,11 @@
       "delete": "Delete memory entry",
       "deleteConfirm": "Really delete the memory entry “{{key}}”?",
       "secretHint": "Do not store passwords, API keys, tokens, or other credentials. Memory content may be sent to the selected external AI provider.",
-      "errors": { "load": "AI memory could not be loaded.", "save": "AI memory could not be saved.", "delete": "Memory entry could not be deleted." }
+      "errors": {
+        "load": "AI memory could not be loaded.",
+        "save": "AI memory could not be saved.",
+        "delete": "Memory entry could not be deleted."
+      }
     },
     "skills": {
       "title": "Versioned AI skills",
@@ -191,8 +203,19 @@
       "configPath": "Relative configuration path",
       "configPathPlaceholder": "config/server.cfg",
       "operation": "Proposed server action",
-      "operations": { "start": "Start", "stop": "Stop", "restart": "Restart" },
-      "tools": { "read_server_status": "Read server status", "read_server_capacity": "Read server capacity", "read_server_logs": "Read sanitized server logs", "read_config": "Read configuration", "propose_server_lifecycle": "Propose server action", "propose_backup": "Propose backup" },
+      "operations": {
+        "start": "Start",
+        "stop": "Stop",
+        "restart": "Restart"
+      },
+      "tools": {
+        "read_server_status": "Read server status",
+        "read_server_capacity": "Read server capacity",
+        "read_server_logs": "Read sanitized server logs",
+        "read_config": "Read configuration",
+        "propose_server_lifecycle": "Propose server action",
+        "propose_backup": "Propose backup"
+      },
       "select": "Select skill",
       "run": "Run skill",
       "readResult": "Safe read result",
@@ -202,7 +225,10 @@
       "created": "Skill created as version {{version}}.",
       "updated": "New skill version {{version}} saved.",
       "error": "Skill could not be run.",
-      "errors": { "load": "AI skills could not be loaded.", "save": "AI skill could not be saved." }
+      "errors": {
+        "load": "AI skills could not be loaded.",
+        "save": "AI skill could not be saved."
+      }
     },
     "attachments": {
       "add": "Add safe attachment",
@@ -234,18 +260,48 @@
       "send": "Send",
       "noProvider": "No provider is available. Add your own API key in your profile or ask an administrator to configure one.",
       "privacyHint": "Your message, approved context, enabled memory, and provided attachments are sent to the selected external provider and stored in the panel.",
-      "errors": { "load": "AI conversations could not be loaded.", "create": "Conversation could not be created.", "delete": "Conversation could not be deleted.", "stream": "The AI response was interrupted.", "empty": "The message is empty.", "access": "Access was revoked.", "notFound": "The conversation or provider is no longer available.", "keyMissing": "This provider requires an API key.", "requestConflict": "This request was already processed.", "quota": "Your AI quota has been exhausted.", "credential": "The API key is temporarily unavailable.", "unavailable": "The AI service is temporarily unavailable.", "provider": "The AI provider rejected the request.", "toolRejected": "The requested AI tool call was rejected for security reasons." }
+      "errors": {
+        "load": "AI conversations could not be loaded.",
+        "create": "Conversation could not be created.",
+        "delete": "Conversation could not be deleted.",
+        "stream": "The AI response was interrupted.",
+        "empty": "The message is empty.",
+        "access": "Access was revoked.",
+        "notFound": "The conversation or provider is no longer available.",
+        "keyMissing": "This provider requires an API key.",
+        "requestConflict": "This request was already processed.",
+        "quota": "Your AI quota has been exhausted.",
+        "credential": "The API key is temporarily unavailable.",
+        "unavailable": "The AI service is temporarily unavailable.",
+        "provider": "The AI provider rejected the request.",
+        "toolRejected": "The requested AI tool call was rejected for security reasons."
+      }
     },
     "actions": {
       "title": "AI action proposal",
-      "tools": { "propose_server_lifecycle": "Change server state", "propose_backup": "Create backup", "propose_config_update": "Change configuration" },
-      "status": { "proposed": "Review required", "confirmed": "Confirmed", "executing": "Executing", "succeeded": "Executed", "failed": "Failed", "expired": "Expired" },
+      "tools": {
+        "propose_server_lifecycle": "Change server state",
+        "propose_backup": "Create backup",
+        "propose_config_update": "Change configuration"
+      },
+      "status": {
+        "proposed": "Review required",
+        "confirmed": "Confirmed",
+        "executing": "Executing",
+        "succeeded": "Executed",
+        "failed": "Failed",
+        "expired": "Expired"
+      },
       "operation": "Action: {{operation}}",
       "review": "Review and execute",
       "execute": "Execute now",
       "executing": "Executing …",
       "confirmTitle": "Manually confirm AI proposal?",
-      "confirm": { "propose_server_lifecycle": "The “{{operation}}” action affects server operation. Permissions and server state are checked again immediately before execution.", "propose_backup": "Create a server backup now? Permissions and server state are checked again immediately before execution.", "propose_config_update": "Write the displayed, revision-bound change to “{{path}}”? Execution is blocked if the file changed in the meantime." },
+      "confirm": {
+        "propose_server_lifecycle": "The “{{operation}}” action affects server operation. Permissions and server state are checked again immediately before execution.",
+        "propose_backup": "Create a server backup now? Permissions and server state are checked again immediately before execution.",
+        "propose_config_update": "Write the displayed, revision-bound change to “{{path}}”? Execution is blocked if the file changed in the meantime."
+      },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
       "error": "The AI proposal could not be executed."

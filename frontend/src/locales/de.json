@@ -133,7 +133,11 @@
       "deleted": "KI-Provider gelöscht.",
       "deleteTitle": "KI-Provider löschen?",
       "deleteConfirm": "Provider {{name}} und die zugehörigen Zugangsdaten wirklich löschen?",
-      "errors": { "load": "KI-Provider konnten nicht geladen werden.", "save": "KI-Provider konnte nicht gespeichert werden.", "delete": "KI-Provider konnte nicht gelöscht werden." }
+      "errors": {
+        "load": "KI-Provider konnten nicht geladen werden.",
+        "save": "KI-Provider konnte nicht gespeichert werden.",
+        "delete": "KI-Provider konnte nicht gelöscht werden."
+      }
     },
     "credentials": {
       "title": "Eigene KI-Zugangsdaten",
@@ -149,7 +153,11 @@
       "deleted": "Eigener KI-Key entfernt.",
       "deleteTitle": "Eigenen API-Key entfernen?",
       "deleteConfirm": "Deinen API-Key für {{name}} wirklich entfernen?",
-      "errors": { "load": "KI-Provider konnten nicht geladen werden.", "save": "API-Key konnte nicht gespeichert werden.", "delete": "API-Key konnte nicht entfernt werden." }
+      "errors": {
+        "load": "KI-Provider konnten nicht geladen werden.",
+        "save": "API-Key konnte nicht gespeichert werden.",
+        "delete": "API-Key konnte nicht entfernt werden."
+      }
     },
     "memory": {
       "title": "Persönliches KI-Memory",
@@ -162,7 +170,11 @@
       "delete": "Memory-Eintrag löschen",
       "deleteConfirm": "Den Memory-Eintrag „{{key}}“ wirklich löschen?",
       "secretHint": "Keine Passwörter, API-Keys, Tokens oder anderen Zugangsdaten speichern. Memory-Inhalte können an den gewählten externen KI-Provider übertragen werden.",
-      "errors": { "load": "KI-Memory konnte nicht geladen werden.", "save": "KI-Memory konnte nicht gespeichert werden.", "delete": "Memory-Eintrag konnte nicht gelöscht werden." }
+      "errors": {
+        "load": "KI-Memory konnte nicht geladen werden.",
+        "save": "KI-Memory konnte nicht gespeichert werden.",
+        "delete": "Memory-Eintrag konnte nicht gelöscht werden."
+      }
     },
     "skills": {
       "title": "Versionierte KI-Skills",
@@ -191,8 +203,19 @@
       "configPath": "Relativer Konfigurationspfad",
       "configPathPlaceholder": "config/server.cfg",
       "operation": "Vorgeschlagene Serveraktion",
-      "operations": { "start": "Starten", "stop": "Stoppen", "restart": "Neu starten" },
-      "tools": { "read_server_status": "Serverstatus lesen", "read_server_capacity": "Serverkapazität lesen", "read_server_logs": "Bereinigte Serverlogs lesen", "read_config": "Konfiguration lesen", "propose_server_lifecycle": "Serveraktion vorschlagen", "propose_backup": "Backup vorschlagen" },
+      "operations": {
+        "start": "Starten",
+        "stop": "Stoppen",
+        "restart": "Neu starten"
+      },
+      "tools": {
+        "read_server_status": "Serverstatus lesen",
+        "read_server_capacity": "Serverkapazität lesen",
+        "read_server_logs": "Bereinigte Serverlogs lesen",
+        "read_config": "Konfiguration lesen",
+        "propose_server_lifecycle": "Serveraktion vorschlagen",
+        "propose_backup": "Backup vorschlagen"
+      },
       "select": "Skill auswählen",
       "run": "Skill starten",
       "readResult": "Sicheres Leseergebnis",
@@ -202,7 +225,10 @@
       "created": "Skill in Version {{version}} erstellt.",
       "updated": "Neue Skill-Version {{version}} gespeichert.",
       "error": "Skill konnte nicht ausgeführt werden.",
-      "errors": { "load": "KI-Skills konnten nicht geladen werden.", "save": "KI-Skill konnte nicht gespeichert werden." }
+      "errors": {
+        "load": "KI-Skills konnten nicht geladen werden.",
+        "save": "KI-Skill konnte nicht gespeichert werden."
+      }
     },
     "attachments": {
       "add": "Sicheren Anhang hinzufügen",
@@ -234,18 +260,48 @@
       "send": "Senden",
       "noProvider": "Kein verfügbarer Provider. Hinterlege im Profil einen eigenen API-Key oder bitte einen Administrator um Konfiguration.",
       "privacyHint": "Nachricht, freigegebener Kontext, aktiviertes Memory und bereitgestellte Anhänge werden an den gewählten externen Provider übertragen und im Panel gespeichert.",
-      "errors": { "load": "KI-Unterhaltungen konnten nicht geladen werden.", "create": "Unterhaltung konnte nicht erstellt werden.", "delete": "Unterhaltung konnte nicht gelöscht werden.", "stream": "Die KI-Antwort wurde unterbrochen.", "empty": "Die Nachricht ist leer.", "access": "Der Zugriff wurde entzogen.", "notFound": "Unterhaltung oder Provider ist nicht mehr verfügbar.", "keyMissing": "Für diesen Provider fehlt ein API-Key.", "requestConflict": "Diese Anfrage wurde bereits verarbeitet.", "quota": "Dein KI-Kontingent ist ausgeschöpft.", "credential": "Der API-Key ist vorübergehend nicht verfügbar.", "unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar.", "provider": "Der KI-Provider hat die Anfrage abgelehnt.", "toolRejected": "Der angeforderte KI-Werkzeugaufruf wurde aus Sicherheitsgründen abgelehnt." }
+      "errors": {
+        "load": "KI-Unterhaltungen konnten nicht geladen werden.",
+        "create": "Unterhaltung konnte nicht erstellt werden.",
+        "delete": "Unterhaltung konnte nicht gelöscht werden.",
+        "stream": "Die KI-Antwort wurde unterbrochen.",
+        "empty": "Die Nachricht ist leer.",
+        "access": "Der Zugriff wurde entzogen.",
+        "notFound": "Unterhaltung oder Provider ist nicht mehr verfügbar.",
+        "keyMissing": "Für diesen Provider fehlt ein API-Key.",
+        "requestConflict": "Diese Anfrage wurde bereits verarbeitet.",
+        "quota": "Dein KI-Kontingent ist ausgeschöpft.",
+        "credential": "Der API-Key ist vorübergehend nicht verfügbar.",
+        "unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar.",
+        "provider": "Der KI-Provider hat die Anfrage abgelehnt.",
+        "toolRejected": "Der angeforderte KI-Werkzeugaufruf wurde aus Sicherheitsgründen abgelehnt."
+      }
     },
     "actions": {
       "title": "KI-Aktionsvorschlag",
-      "tools": { "propose_server_lifecycle": "Serverstatus ändern", "propose_backup": "Backup erstellen", "propose_config_update": "Konfiguration ändern" },
-      "status": { "proposed": "Prüfung erforderlich", "confirmed": "Bestätigt", "executing": "Wird ausgeführt", "succeeded": "Ausgeführt", "failed": "Fehlgeschlagen", "expired": "Abgelaufen" },
+      "tools": {
+        "propose_server_lifecycle": "Serverstatus ändern",
+        "propose_backup": "Backup erstellen",
+        "propose_config_update": "Konfiguration ändern"
+      },
+      "status": {
+        "proposed": "Prüfung erforderlich",
+        "confirmed": "Bestätigt",
+        "executing": "Wird ausgeführt",
+        "succeeded": "Ausgeführt",
+        "failed": "Fehlgeschlagen",
+        "expired": "Abgelaufen"
+      },
       "operation": "Aktion: {{operation}}",
       "review": "Prüfen und ausführen",
       "execute": "Jetzt ausführen",
       "executing": "Wird ausgeführt …",
       "confirmTitle": "KI-Vorschlag manuell bestätigen?",
-      "confirm": { "propose_server_lifecycle": "Die Aktion „{{operation}}“ wirkt auf den Serverbetrieb. Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.", "propose_backup": "Jetzt ein Server-Backup erstellen? Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.", "propose_config_update": "Die angezeigte Änderung an „{{path}}“ revisionsgebunden schreiben? Bei zwischenzeitlicher Änderung wird die Ausführung blockiert." },
+      "confirm": {
+        "propose_server_lifecycle": "Die Aktion „{{operation}}“ wirkt auf den Serverbetrieb. Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.",
+        "propose_backup": "Jetzt ein Server-Backup erstellen? Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.",
+        "propose_config_update": "Die angezeigte Änderung an „{{path}}“ revisionsgebunden schreiben? Bei zwischenzeitlicher Änderung wird die Ausführung blockiert."
+      },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
       "error": "Der KI-Vorschlag konnte nicht ausgeführt werden."
