@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot } from 'lucide-react'
+import { Globe, Mail, Gamepad2, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
@@ -13,6 +13,7 @@ import { SupportWidgetTab } from './settings/SupportWidgetTab'
 import { CaptchaTab } from './settings/CaptchaTab'
 import { SecurityTab } from './settings/SecurityTab'
 import { AiTab } from './settings/AiTab'
+import { HosterTab } from './settings/HosterTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
@@ -28,10 +29,15 @@ type TabId =
   | 'backup'
   | 'security'
   | 'ai'
+  | 'hoster'
 
 export function Settings() {
   const { t } = useTranslation()
   const canManageBackup = useHasPermission('panel.settings.write')
+  // Der Hoster-Tab erscheint nur, wenn die Anbindung ueberhaupt sichtbar ist.
+  // Self-Hosted-Betreiber ohne Shop sollen den Bereich gar nicht erst sehen.
+  const canReadHoster = useHasPermission('panel.hoster.read')
+  const canWriteHoster = useHasPermission('panel.hoster.write')
   const [activeTab, setActiveTab] = useState<TabId>('general')
 
   // Backup-Tab: panel.settings.write.
@@ -49,6 +55,7 @@ export function Settings() {
     ...(canManageBackup ? [{ id: 'backup' as TabId, labelKey: 'settings.tabs.backup', icon: Cloud }] : []),
     { id: 'security', labelKey: 'settings.tabs.security', icon: ShieldAlert },
     { id: 'ai', labelKey: 'settings.tabs.ai', icon: Bot },
+    ...(canReadHoster ? [{ id: 'hoster' as TabId, labelKey: 'settings.tabs.hoster', icon: Plug }] : []),
   ]
 
   return (
@@ -73,6 +80,7 @@ export function Settings() {
       {activeTab === 'backup' && <BackupTab />}
       {activeTab === 'security' && <SecurityTab />}
       {activeTab === 'ai' && <AiTab />}
+      {activeTab === 'hoster' && canReadHoster && <HosterTab canWrite={canWriteHoster} />}
     </div>
   )
 }

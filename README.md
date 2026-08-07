@@ -48,6 +48,9 @@ Verschlüsselung von Server- und Datenbank-Backups über den DIS Cryptographic S
 ### 7. Komponenten-Migration (`migrate-panel-components.sh`)
 Integrierter CLI-Assistent zum Verschieben von Control Plane, externem Frontend oder einzelnen Server-Instanzen zwischen Nodes inklusive atomarem Cutover und Rollback-Schutz.
 
+### 8. Hoster- und Shop-Anbindung (optional)
+Ein externer Shop kann Server über eine idempotente Desired-State-API bestellen, sperren und kündigen. Die Anbindung verwendet dieselbe Provisionierungs- und Lifecycle-Logik wie das Panel — es gibt keinen zweiten Weg, einen Server anzulegen. Kunden gelangen über einen signierten Einmal-Link direkt ins Panel und benötigen kein zweites Passwort. **Ohne angelegte Integration ändert sich am Self-Hosted-Betrieb nichts.** Details in [`docs/self-hosting.md`](docs/self-hosting.md#hoster--und-shop-anbindung-optional-phase-6).
+
 ---
 
 ## Vergleich: MSM vs. Pelican Panel vs. Klassische Panels

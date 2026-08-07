@@ -356,9 +356,108 @@ aktiviert, Dumps gezogen oder Admin-Secrets rotiert hat.
 
 ---
 
-## Aktualität dieser Dokumentation
+## Hoster- und Shop-Anbindung (optional, Phase 6)
 
-Änderungen an Bootstrap, `install.sh`, `update.sh`, Node-Enrollment,
-`helper-scripts/migrate-panel-components.sh`, Release-Artefakten, Komponentenaufteilung oder
-Environment-Verträgen müssen in demselben Commit sowohl diese Datei als auch die
-sichtbare Panel-Seite `/docs/self-hosting` aktualisieren.
+Ein Betreiber kann einen externen Shop an MSM anbinden. MSM übernimmt dabei
+**nicht** Shop, Zahlung oder Rechnung — nur den technischen Benutzerzugang, die
+Servererstellung und den Lifecycle.
+
+**Self-Hosted bleibt unberührt.** Ohne angelegte Integration existiert kein
+Verhalten dieses Abschnitts. Die Tabellen bleiben leer, es gibt keinen
+zusätzlichen Dienst und keinen offenen Endpunkt, der ohne API-Key etwas tut.
+
+### Einrichtung im Panel
+
+Einstellungen → Tab **Hoster** (Permission `panel.hoster.read`, Änderungen
+`panel.hoster.write`).
+
+1. **Dienstbenutzer anlegen.** Ein normaler Panel-Benutzer mit einer Rolle, die
+   `servers.create` (und für automatische Löschung nach Kündigung zusätzlich
+   `servers.delete`) enthält. Der Owner-Account ist bewusst nicht zulässig.
+   Die Integration kann nie mehr als dieser Benutzer — das ist die
+   Sicherheitsgrenze, nicht der API-Key.
+2. **Integration anlegen.** Name, Slug, Dienstbenutzer-ID, optional das
+   HTTPS-Webhook-Ziel und die Aufbewahrungsfrist nach Kündigung (Default 7 Tage).
+   Der API-Key wird **genau einmal** angezeigt; MSM speichert nur seinen
+   SHA-256-Hash.
+3. **Produkte zuordnen.** Jede Shop-Produktkennung wird auf einen Blueprint und
+   ein Ressourcenpaket abgebildet (RAM, CPU, Speicher, optional feste Node und
+   Backup-Intervall). Der Shop muss keine internen MSM-IDs kennen.
+4. **Webhook-Secret erzeugen**, falls der Shop Statusmeldungen empfangen soll.
+   Auch dieser Wert erscheint nur einmal.
+
+### Externe API
+
+Authentifizierung über den Header `X-MSM-Hoster-Key`. Es gibt keinen
+Cookie-Pfad; eine Browser-Session kann diese Endpunkte nicht ansprechen.
+
+| Endpunkt | Zweck |
+| --- | --- |
+| `GET /api/hoster/v1/health` | API-Key prüfen, ohne etwas zu ändern |
+| `PUT /api/hoster/v1/services/{external_service_id}` | Gewünschten Zustand setzen (`active`, `suspended`, `terminated`) |
+| `GET /api/hoster/v1/services/{external_service_id}` | Tatsächlichen Zustand abfragen |
+| `POST /api/hoster/v1/handoffs` | Einmal-Link in das Panel des Kunden erzeugen |
+
+Beispiel für eine Bestellung:
+
+```bash
+curl -X PUT https://panel.example/api/hoster/v1/services/SVC-4711 \
+  -H "X-MSM-Hoster-Key: $MSM_HOSTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"desired_state":"active","external_subject":"CUST-1234","product_key":"mc-8gb"}'
+```
+
+Derselbe Aufruf darf beliebig oft wiederholt werden: `(Integration,
+external_service_id)` ist eindeutig, ein Netzwerk-Retry erzeugt keinen zweiten
+Server. Schlägt die Provisionierung fehl, bleibt der Vertrag mit
+`status: "failed"` und einem stabilen Fehlercode abfragbar.
+
+### Lebenszyklus
+
+- `active` → Server wird bei Bedarf erstellt, Kundenrechte werden gesetzt.
+- `suspended` → Server wird gestoppt, Kundenrechte werden entzogen. Der
+  **Panelaccount des Kunden bleibt bestehen** und eine spätere Entsperrung ist
+  möglich.
+- `terminated` → Server wird gestoppt und eine Frist gesetzt. **Es wird nichts
+  sofort gelöscht.** Erst ein Wartungslauf (jede Minute) entfernt den Server
+  nach Ablauf von `terminate_grace_days` über denselben Löschpfad wie das Panel.
+
+### Webhooks
+
+MSM signiert jede Zustellung mit HMAC-SHA256 über `timestamp.body`:
+
+```
+X-MSM-Timestamp: 1786120930
+X-MSM-Signature: sha256=<hex>
+X-MSM-Event: service.ready
+```
+
+Der Empfänger berechnet dieselbe Signatur mit dem Webhook-Secret und vergleicht
+zeitkonstant. Das Secret selbst wird **nie** übertragen. Zustellungen sind
+persistiert: fünf Versuche mit wachsendem Abstand, 4xx ohne Wiederholung, und
+ein Panel-Neustart während eines Backoffs verliert nichts. Fehlgeschlagene
+Zustellungen lassen sich im Panel manuell erneut einplanen.
+
+### Ein-Klick-Handoff
+
+`POST /api/hoster/v1/handoffs` liefert eine URL, die fünf Minuten und genau
+einmal gilt und nur auf `/servers`, `/servers/{id}` oder `/dashboard` führen
+kann. MSM speichert ausschließlich den Hash; der Link erscheint weder im Audit
+noch in Logs. Jeder Fehlerfall — unbekannt, abgelaufen, bereits verwendet —
+führt einheitlich auf die Loginseite.
+
+Alternativ oder zusätzlich kann der bestehende Custom-OIDC-Login des Hosters
+verwendet werden (Einstellungen → **OAuth**).
+
+### Betriebshinweise
+
+- Der API-Key ist gleichwertig zu den Rechten des Dienstbenutzers. Bei Verdacht
+  im Panel rotieren — der alte Key ist sofort ungültig.
+- Eine Integration mit noch aktiven Verträgen lässt sich nicht löschen. Das ist
+  Absicht: ein Cascade würde die Zuordnung zwischen Kunden und ihren laufenden
+  Servern zerstören, während die Server weiterlaufen.
+- Alle Vorgänge erscheinen im Audit (`hoster.*`) mit Origin `external` und einer
+  gemeinsamen Korrelations-ID, ohne Secrets und ohne Kundenkennungen im Klartext.
+
+---
+

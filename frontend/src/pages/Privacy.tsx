@@ -67,6 +67,20 @@ export function Privacy() {
         ],
       },
       {
+        // Phase 6: nur sichtbar relevant, wenn ein Hoster angebunden ist —
+        // der Abschnitt erklaert aber unabhaengig davon, was MSM in dem Fall
+        // speichert und was ausdruecklich nicht.
+        heading: t('privacyPolicy.sections.hoster.heading'),
+        body: t('privacyPolicy.sections.hoster.body'),
+        items: [
+          t('privacyPolicy.sections.hoster.items.identity'),
+          t('privacyPolicy.sections.hoster.items.contract'),
+          t('privacyPolicy.sections.hoster.items.noPassword'),
+          t('privacyPolicy.sections.hoster.items.handoff'),
+          t('privacyPolicy.sections.hoster.items.webhook'),
+        ],
+      },
+      {
         heading: t('privacyPolicy.sections.storage.heading'),
         body: t('privacyPolicy.sections.storage.body'),
         items: [

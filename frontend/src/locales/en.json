@@ -1356,7 +1356,8 @@
       "supportWidget": "Support widget",
       "backup": "Backup",
       "security": "Security",
-      "ai": "AI"
+      "ai": "AI",
+      "hoster": "Hoster"
     },
     "imprint": {
       "title": "Imprint",
@@ -1531,7 +1532,8 @@
       "passwordHint": "Stored encrypted. The password is never returned and is required to encrypt/decrypt backups.",
       "savePassword": "Save password",
       "passwordSaved": "Backup password saved"
-    }
+    },
+    "loadFailed": "Loading failed"
   },
   "profile": {
     "title": "Profile",
@@ -1916,6 +1918,34 @@
       "label": "Self-hosting documentation links",
       "nodes": "Open node administration",
       "docs": "Back to documentation"
+    },
+    "hoster": {
+      "title": "Hoster and shop integration (optional)",
+      "intro": "An external shop can order, suspend and terminate servers automatically. MSM only handles the technical access and the server — not the shop, the payment or the invoice.",
+      "setup": {
+        "title": "Setup",
+        "body": "Settings → Hoster tab. First create a service user holding the 'servers.create' permission, then the integration. The API key is shown exactly once and stored only as a hash."
+      },
+      "api": {
+        "title": "External API",
+        "body": "The shop reports only the desired state via PUT /api/hoster/v1/services/{id}. Authentication uses the X-MSM-Hoster-Key header; a repeated call never creates a second server."
+      },
+      "lifecycle": {
+        "title": "Lifecycle",
+        "body": "active, suspended and terminated. Suspension stops the server and revokes customer permissions but keeps the panel account. Termination sets a grace period and deletes nothing immediately."
+      },
+      "webhooks": {
+        "title": "Webhooks",
+        "body": "Status notifications are signed with HMAC-SHA256 over timestamp and body; the secret is never transmitted. Deliveries are persisted and survive a panel restart."
+      },
+      "handoff": {
+        "title": "One-click handoff",
+        "body": "The shop creates a link valid for five minutes and exactly one use that can only lead to allowed panel pages. Only its hash is stored."
+      },
+      "selfHosted": {
+        "title": "Self-hosted stays untouched",
+        "body": "Without a configured integration nothing changes: no extra service, no open endpoint and no new mandatory fields."
+      }
     }
   },
   "docsOAuth": {
@@ -2168,6 +2198,17 @@
       "responsibility": {
         "heading": "9. Operator responsibility and requests",
         "body": "Users should direct access, correction, deletion, objection, and provider questions to the operator of this MSM instance. The operator is responsible for publishing its identity, contact route, lawful basis, provider list, and instance-specific retention information."
+      },
+      "hoster": {
+        "heading": "Hoster and shop integration",
+        "body": "If the operator has connected an external shop, MSM only manages the technical access and the server — not the purchase, the payment or the invoice.",
+        "items": {
+          "identity": "Customer mapping: the shop's customer identifier is stored only as a non-reversible hash, together with a four-character hint for support. An email address is adopted only if it is still unused in the panel.",
+          "contract": "Contract data: external service identifier, desired state, reached status, assigned server and timestamps. Payment, invoice and address data are neither transferred nor stored.",
+          "noPassword": "Shop passwords are neither adopted nor synchronised. The customer gets their own panel access without a second password.",
+          "handoff": "A forwarding link from the shop is valid for five minutes and exactly once. Only its hash is stored; the link itself appears neither in the audit trail nor in logs.",
+          "webhook": "Status notifications to the shop contain only the contract identifier, state and timestamp — no server addresses, ports, paths or credentials."
+        }
       }
     }
   },
@@ -2776,6 +2817,69 @@
       "cancel": "Cancel",
       "cancelled": "Auth setup cancelled",
       "cancelFailed": "Auth setup could not be cancelled"
+    }
+  },
+  "hoster": {
+    "title": "Hoster integration",
+    "description": "Connects an external shop to MSM. The shop only reports the desired contract state; server creation, permissions and lifecycle use the same logic as the panel.",
+    "add": "Add integration",
+    "empty": "No hoster integration configured yet. Self-hosted operation works unchanged without this area.",
+    "integration": "Integration",
+    "name": "Name",
+    "slug": "Slug",
+    "serviceUserId": "Service user (user ID)",
+    "serviceUserHint": "The integration acts on behalf of this panel user and can never do more than they can. The user needs the 'servers.create' permission; the owner account is not allowed.",
+    "webhookUrl": "Webhook target (HTTPS)",
+    "webhookSecret": "Webhook secret",
+    "apiKey": "API key",
+    "graceDays": "Retention after termination (days)",
+    "notConfigured": "Not configured",
+    "rotateApiKey": "Rotate API key",
+    "rotateWebhookSecret": "Rotate webhook secret",
+    "rotated": "New secret generated",
+    "deleted": "Integration removed",
+    "deleteTitle": "Remove integration",
+    "deleteConfirm": "Really remove integration {{name}}?",
+    "copied": "Copied to clipboard",
+    "secretOnce": "{{label}} is shown only now",
+    "secretOnceHint": "MSM does not store this value in plaintext. Once dismissed it cannot be retrieved — only rotation helps.",
+    "secretUnderstood": "Understood",
+    "states": {
+      "active": "Active",
+      "suspended": "Suspended",
+      "terminated": "Terminated"
+    },
+    "products": {
+      "title": "Product mapping",
+      "description": "Maps a shop product key to a blueprint and a resource package. The shop does not need to know internal MSM details.",
+      "empty": "No products mapped yet.",
+      "key": "Shop product key",
+      "gameType": "Blueprint / game type",
+      "ram": "RAM limit (MB)",
+      "cpu": "CPU limit (%)",
+      "disk": "Disk limit (GB)",
+      "backupInterval": "Backup interval (hours)",
+      "enabled": "Orderable",
+      "save": "Save product",
+      "saved": "Product saved",
+      "deleted": "Product removed"
+    },
+    "services": {
+      "title": "Contracts",
+      "empty": "No contracts submitted yet."
+    },
+    "deliveries": {
+      "title": "Webhook deliveries",
+      "empty": "No deliveries yet.",
+      "attempt": "Attempt {{count}}",
+      "retry": "Send again",
+      "retried": "Delivery scheduled again"
+    },
+    "errors": {
+      "load": "Could not load hoster data",
+      "save": "Could not save the change",
+      "delete": "Could not remove the entry",
+      "rotate": "Could not rotate the secret"
     }
   }
 }

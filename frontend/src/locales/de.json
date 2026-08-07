@@ -1356,7 +1356,8 @@
       "supportWidget": "Support-Widget",
       "backup": "Backup",
       "security": "Sicherheit",
-      "ai": "KI"
+      "ai": "KI",
+      "hoster": "Hoster"
     },
     "imprint": {
       "title": "Impressum",
@@ -1531,7 +1532,8 @@
       "passwordHint": "Wird verschlüsselt gespeichert. Das Passwort wird niemals zurückgegeben und benötigt, um Backups zu verschlüsseln/entschlüsseln.",
       "savePassword": "Passwort speichern",
       "passwordSaved": "Backup-Passwort gespeichert"
-    }
+    },
+    "loadFailed": "Laden fehlgeschlagen"
   },
   "profile": {
     "title": "Profil",
@@ -1916,6 +1918,34 @@
       "label": "Links der Self-Hosting-Dokumentation",
       "nodes": "Node-Verwaltung öffnen",
       "docs": "Zurück zur Dokumentation"
+    },
+    "hoster": {
+      "title": "Hoster- und Shop-Anbindung (optional)",
+      "intro": "Ein externer Shop kann Server automatisch bestellen, sperren und kündigen. MSM übernimmt dabei nur den technischen Zugang und den Server — nicht Shop, Zahlung oder Rechnung.",
+      "setup": {
+        "title": "Einrichtung",
+        "body": "Einstellungen → Tab Hoster. Zuerst einen Dienstbenutzer mit dem Recht 'servers.create' anlegen, dann die Integration. Der API-Key wird genau einmal angezeigt und nur als Hash gespeichert."
+      },
+      "api": {
+        "title": "Externe API",
+        "body": "Der Shop meldet per PUT /api/hoster/v1/services/{id} nur den gewünschten Zustand. Authentifizierung über den Header X-MSM-Hoster-Key; ein wiederholter Aufruf erzeugt keinen zweiten Server."
+      },
+      "lifecycle": {
+        "title": "Lebenszyklus",
+        "body": "aktiv, gesperrt und beendet. Eine Sperrung stoppt den Server und entzieht Kundenrechte, lässt den Panelaccount aber bestehen. Eine Kündigung setzt eine Frist und löscht nicht sofort."
+      },
+      "webhooks": {
+        "title": "Webhooks",
+        "body": "Statusmeldungen sind mit HMAC-SHA256 über Zeitstempel und Body signiert; das Secret wird nie übertragen. Zustellungen sind persistiert und überstehen einen Panel-Neustart."
+      },
+      "handoff": {
+        "title": "Ein-Klick-Handoff",
+        "body": "Der Shop erzeugt einen Link, der fünf Minuten und genau einmal gilt und nur auf erlaubte Panelseiten führt. Gespeichert wird nur sein Hashwert."
+      },
+      "selfHosted": {
+        "title": "Self-Hosted bleibt unberührt",
+        "body": "Ohne angelegte Integration ändert sich nichts: kein zusätzlicher Dienst, kein offener Endpunkt und keine neuen Pflichtfelder."
+      }
     }
   },
   "docsOAuth": {
@@ -2168,6 +2198,17 @@
       "responsibility": {
         "heading": "9. Verantwortung des Betreibers und Anfragen",
         "body": "Nutzer richten Auskunfts-, Berichtigungs-, Lösch-, Widerspruchs- und Anbieterfragen an den Betreiber dieser MSM-Instanz. Der Betreiber ist für Veröffentlichung seiner Identität, Kontaktmöglichkeit, Rechtsgrundlage, Anbieterliste und instanzspezifischen Aufbewahrungsinformationen verantwortlich."
+      },
+      "hoster": {
+        "heading": "Hoster- und Shop-Anbindung",
+        "body": "Wenn der Betreiber einen externen Shop angebunden hat, verwaltet MSM nur den technischen Zugang und den Server — nicht den Kauf, die Zahlung oder die Rechnung.",
+        "items": {
+          "identity": "Zuordnung des Kunden: Die Kundenkennung des Shops wird ausschließlich als nicht umkehrbarer Hashwert gespeichert, zusammen mit einem vierstelligen Hinweis für den Support. Eine E-Mail-Adresse wird nur übernommen, wenn sie im Panel noch frei ist.",
+          "contract": "Vertragsdaten: externe Service-Kennung, gewünschter Zustand, erreichter Status, zugeordneter Server und Zeitstempel. Zahlungs-, Rechnungs- und Adressdaten werden nicht übertragen und nicht gespeichert.",
+          "noPassword": "Passwörter des Shops werden weder übernommen noch synchronisiert. Der Kunde erhält einen eigenen Panel-Zugang ohne zweites Passwort.",
+          "handoff": "Ein Weiterleitungslink aus dem Shop gilt fünf Minuten und genau einmal. Gespeichert wird nur sein Hashwert; der Link selbst erscheint weder im Protokoll noch in Logs.",
+          "webhook": "Statusmeldungen an den Shop enthalten nur Vertragskennung, Zustand und Zeitstempel — keine Serveradressen, Ports, Pfade oder Zugangsdaten."
+        }
       }
     }
   },
@@ -2776,6 +2817,69 @@
       "cancel": "Abbrechen",
       "cancelled": "Auth-Setup abgebrochen",
       "cancelFailed": "Auth-Setup konnte nicht abgebrochen werden"
+    }
+  },
+  "hoster": {
+    "title": "Hoster-Anbindung",
+    "description": "Verbindet einen externen Shop mit MSM. Der Shop meldet nur den gewünschten Vertragszustand; Servererstellung, Rechte und Lifecycle laufen über dieselbe Logik wie im Panel.",
+    "add": "Integration hinzufügen",
+    "empty": "Noch keine Hoster-Integration angelegt. Self-Hosted-Betrieb funktioniert unverändert ohne diesen Bereich.",
+    "integration": "Integration",
+    "name": "Name",
+    "slug": "Kurzname (Slug)",
+    "serviceUserId": "Dienstbenutzer (User-ID)",
+    "serviceUserHint": "Die Integration handelt im Namen dieses Panel-Benutzers und kann nie mehr als er. Der Benutzer benötigt das Recht 'servers.create'; der Owner-Account ist nicht zulässig.",
+    "webhookUrl": "Webhook-Ziel (HTTPS)",
+    "webhookSecret": "Webhook-Secret",
+    "apiKey": "API-Key",
+    "graceDays": "Aufbewahrung nach Kündigung (Tage)",
+    "notConfigured": "Nicht konfiguriert",
+    "rotateApiKey": "API-Key rotieren",
+    "rotateWebhookSecret": "Webhook-Secret rotieren",
+    "rotated": "Neues Geheimnis erzeugt",
+    "deleted": "Integration entfernt",
+    "deleteTitle": "Integration entfernen",
+    "deleteConfirm": "Integration {{name}} wirklich entfernen?",
+    "copied": "In die Zwischenablage kopiert",
+    "secretOnce": "{{label}} wird nur jetzt angezeigt",
+    "secretOnceHint": "MSM speichert diesen Wert nicht im Klartext. Nach dem Schliessen ist er nicht mehr abrufbar — dann hilft nur eine Rotation.",
+    "secretUnderstood": "Verstanden",
+    "states": {
+      "active": "Aktiv",
+      "suspended": "Gesperrt",
+      "terminated": "Beendet"
+    },
+    "products": {
+      "title": "Produktzuordnung",
+      "description": "Ordnet eine Shop-Produktkennung einem Blueprint und einem Ressourcenpaket zu. Der Shop muss keine internen MSM-Details kennen.",
+      "empty": "Noch keine Produkte zugeordnet.",
+      "key": "Produktkennung im Shop",
+      "gameType": "Blueprint / Spieltyp",
+      "ram": "RAM-Limit (MB)",
+      "cpu": "CPU-Limit (%)",
+      "disk": "Speicher-Limit (GB)",
+      "backupInterval": "Backup-Intervall (Stunden)",
+      "enabled": "Buchbar",
+      "save": "Produkt speichern",
+      "saved": "Produkt gespeichert",
+      "deleted": "Produkt entfernt"
+    },
+    "services": {
+      "title": "Verträge",
+      "empty": "Noch keine Verträge übermittelt."
+    },
+    "deliveries": {
+      "title": "Webhook-Zustellungen",
+      "empty": "Noch keine Zustellungen.",
+      "attempt": "Versuch {{count}}",
+      "retry": "Erneut senden",
+      "retried": "Zustellung erneut eingeplant"
+    },
+    "errors": {
+      "load": "Hoster-Daten konnten nicht geladen werden",
+      "save": "Änderung konnte nicht gespeichert werden",
+      "delete": "Eintrag konnte nicht entfernt werden",
+      "rotate": "Geheimnis konnte nicht rotiert werden"
     }
   }
 }

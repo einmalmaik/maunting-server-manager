@@ -215,6 +215,67 @@ Quelle: `docs/ai-engine-planning.md` (verbindliches Produkt-Zielbild)
    Logs.
 4. Signierte, wiederholbare Webhooks mit Zustellstatus und Secret-Redaktion.
 
+### Phase-6-Vertrag
+
+- Eine Integration handelt ausschließlich im Namen eines vom Betreiber
+  benannten Panel-Dienstbenutzers. Dieser muss aktiv sein und `servers.create`
+  besitzen; der Owner-Account ist ausgeschlossen. Verliert der Dienstbenutzer
+  sein Recht, scheitert auch der Shop-Aufruf. Es gibt keinen namenlosen
+  Provisionierungspfad an RBAC vorbei.
+- `PUT /api/hoster/v1/services/{external_service_id}` setzt den gewünschten
+  Zustand (`active`, `suspended`, `terminated`). `(integration_id,
+  external_service_id)` ist ein Unique-Constraint; ein wiederholter Aufruf
+  führt denselben Vertrag weiter und erzeugt keinen zweiten Server. Die
+  Provisionierung läuft über `server_provisioning_service.provision_server` mit
+  einem an den Vertrag gebundenen Idempotency-Key, Start/Stop über
+  `server_action_service.request_lifecycle_operation` — beides mit
+  Actor-Origin `external`.
+- Der Vertrag wird vor dem ersten Zustandswechsel festgeschrieben. Scheitert
+  die Provisionierung, bleibt ein abfragbarer Vertrag mit `status="failed"` und
+  stabilem Fehlercode zurück, statt spurlos zurückgerollt zu werden.
+- Der Shop übermittelt keine internen MSM-Details. Ein Produkt wird über
+  `(integration_id, external_product_key)` auf Blueprint, Ressourcenpaket,
+  optionale Node und Backup-Intervall abgebildet. Antworten enthalten weder
+  Node-Namen noch Hostadressen, Ports oder Installationspfade.
+- Kunden erhalten ausschließlich serverbezogene Rechte auf genau ihrem Server.
+  Netzwerk-, Ressourcen-, Reinstall- und Datenbankadministration sind nicht
+  enthalten; `servers.delete` bleibt global und damit für Kunden unerreichbar.
+  Eine Sperrung entzieht diese Rechte und stoppt den Server, lässt den
+  Panelaccount des Kunden aber bestehen.
+- Eine Kündigung löscht nichts sofort. Sie sperrt den Server und setzt eine
+  Frist (`terminate_grace_days`, Default 7). Erst ein späterer Wartungslauf
+  löscht über den gemeinsamen `server_deletion_service` — mit erneuter
+  Rechteprüfung gegen den Dienstbenutzer.
+- Der externe Kundenbezeichner wird nur als SHA-256-Hash gespeichert. Die
+  externe Service-ID bleibt im Klartext, weil Idempotenz, Statusabfrage und
+  Support sie benötigen. E-Mail-Adressen werden nur übernommen, wenn sie in MSM
+  noch frei sind; eine bestehende Adresse führt nie zu einer automatischen
+  Kontoübernahme.
+- API-Keys liegen ausschließlich als SHA-256-Hash vor, Webhook-Secrets
+  DIS-verschlüsselt, Handoff-Token als SHA-256-Hash. Klartextwerte werden genau
+  einmal beim Erzeugen bzw. Rotieren zurückgegeben. Unbekannter, falscher und
+  deaktivierter API-Key liefern dieselbe `401`-Antwort.
+- Handoffs gelten fünf Minuten, genau einmal und nur für eine feste Allowlist
+  interner Pfade (`/servers`, `/servers/{id}`, `/dashboard`). Der Verbrauch ist
+  ein bedingtes UPDATE und damit auch bei parallelen Klicks eindeutig. Jeder
+  Fehlerfall führt einheitlich auf die Loginseite; der Token erscheint weder im
+  Audit noch in Logs.
+- Webhooks sind HMAC-SHA256 über `timestamp.body` signiert (`X-MSM-Signature`,
+  `X-MSM-Timestamp`) — das Secret verlässt MSM nie. Zustellungen sind mit
+  `next_attempt_at` in der Datenbank persistiert und überleben einen
+  Panel-Neustart; fünf Versuche mit wachsendem Abstand, 4xx ohne Wiederholung,
+  manueller Retry über das Panel.
+- Panelseitige Verwaltung erfordert `panel.hoster.read` bzw.
+  `panel.hoster.write` und CSRF. Die externe API kennt keinen Cookie-Pfad, die
+  Handoff-Einlösung keinen API-Key. Alle Vorgänge erscheinen mit gemeinsamer
+  Korrelations-ID und Origin `external` im secret-freien Audit.
+- Der Server-Löschpfad wurde aus dem Router in `server_deletion_service`
+  extrahiert, damit Panel und Hoster-Anbindung dieselbe Implementierung
+  verwenden. Prüfbare Schritte laufen dort jetzt vor den unwiderruflichen, und
+  nach außen gehen nur stabile Fehlercodes statt roher Pfad- und Agentfehler.
+- Self-Hosted bleibt unberührt: ohne angelegte Integration existiert kein
+  Verhalten dieser Phase. Die Migration ist in beide Richtungen getestet.
+
 ## Phase 7 — Credentials, Kubernetes und Betrieb
 
 1. Panel-, Benutzer- und Server-Credentials trennen; Klartext wird nach dem
