@@ -17,6 +17,7 @@ alle Server-Typen dieselbe.
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import re
 import shlex
@@ -50,6 +51,87 @@ from games.ini_utils import set_ini_value
 from services.docker_service import PortPublish, VolumeBind
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.steam_account_service import SteamAccountService
+
+
+logger = logging.getLogger(__name__)
+
+
+def _load_detached_server(server_id: int):
+    """Laedt einen Server samt Node in einer eigenen, sofort geschlossenen Session.
+
+    Der Aufrufer erhaelt ein vollstaendig geladenes, aber losgeloestes Objekt.
+    Das ist genau der Zustand, den ein Installations-Thread braucht:
+
+    - Er darf die Request-Session nicht verwenden. Die ist geschlossen, sobald
+      die Antwort geschrieben wurde, und waere ausserdem nicht thread-sicher.
+    - Er darf aber auch keine Session ueber die gesamte Installation offen
+      halten — ein SteamCMD-Lauf dauert Minuten bis Stunden und wuerde so lange
+      eine Verbindung aus dem Pool blockieren.
+
+    `joinedload` ist hier notwendig und nicht bloss eine Optimierung: nach dem
+    Schliessen der Session kann eine nicht geladene Relationship nicht mehr
+    nachgeladen werden.
+    """
+    from sqlalchemy.orm import joinedload
+
+    from database import SessionLocal
+    from models import Server
+
+    db = SessionLocal()
+    try:
+        server = (
+            db.query(Server)
+            .options(joinedload(Server.node))
+            .filter(Server.id == server_id)
+            .first()
+        )
+        if server is not None:
+            # `expunge_all` loest Server und Node aus der Session, ohne die
+            # bereits geladenen Werte zu verwerfen.
+            db.expunge_all()
+        return server
+    finally:
+        db.close()
+
+
+def _start_install_worker(server_id: int, name: str, body) -> None:
+    """Startet einen Installations-Thread, der immer terminal abschliesst.
+
+    Der Rumpf bekommt einen frisch geladenen Server uebergeben. Frueher
+    schleppten die Closures das Request-gebundene ORM-Objekt mit; ein Zugriff
+    auf `server.node` im Thread lief dann auf eine geschlossene Session und warf
+    `DetachedInstanceError` — auf Remote-Nodes bei jeder Installation.
+
+    `finish_install` ist der einzige Ort, der Serverstatus, Provisionierungs-Task
+    und die node-weite Install-Sperre abschliesst. Wirft der Thread davor eine
+    Ausnahme, wurde bisher nichts davon erreicht: Der Server blieb dauerhaft auf
+    "installing", der Task auf "running" und die Sperre bis zu ihrem TTL belegt —
+    damit war jede weitere Installation oder jedes Update auf diesem Node
+    blockiert. Der Wrapper faengt deshalb alles ab und meldet einen Fehlschlag.
+
+    Die Fehlermeldung nennt bewusst nur den Ausnahmetyp: Pfade und
+    Providerdetails gehoeren nicht in den fuer Benutzer sichtbaren Serverstatus.
+    """
+
+    def _runner() -> None:
+        try:
+            server = _load_detached_server(server_id)
+            if server is None:
+                # Der Server wurde zwischen Anforderung und Threadstart entfernt.
+                finish_install(
+                    server_id,
+                    {"ok": False, "error": "Server existiert nicht mehr"},
+                )
+                return
+            body(server)
+        except Exception as exc:
+            logger.exception("Installations-Thread abgebrochen (server_id=%s)", server_id)
+            finish_install(
+                server_id,
+                {"ok": False, "error": f"Installation abgebrochen ({type(exc).__name__})"},
+            )
+
+    threading.Thread(target=_runner, name=name, daemon=True).start()
 
 
 WORKSHOP_BATCH_SIZE = 25
@@ -141,7 +223,7 @@ class BlueprintPlugin(GamePlugin):
             install_dir = server.install_dir
             server_id = server.id
 
-            def _install():
+            def _install(server):
                 # Reinstall-Schutz (manuelle .cfg/.ini etc.): Cache vor, Restore nach.
                 # Frische Install: 0 Dateien → No-Op. Nutzt zentrale Helper aus updater.py.
                 from games.updater import _steam_effective_branch, perform_install_with_protection
@@ -177,14 +259,14 @@ class BlueprintPlugin(GamePlugin):
                 )
                 finish_install(server_id, result)
 
-            threading.Thread(target=_install, daemon=True).start()
+            _start_install_worker(server_id, f"install-steam-{server_id}", _install)
             return {"message": "Installation gestartet"}
 
         if bp.source.type == BlueprintSourceType.HTTP:
             install_dir = server.install_dir
             server_id = server.id
 
-            def _http_install():
+            def _http_install(server):
                 _append_console_log(server_id, "[MSM] HTTP-Source-Download startet\n")
                 node = getattr(server, "node", None)
                 reinstall = (
@@ -230,14 +312,14 @@ class BlueprintPlugin(GamePlugin):
                     )
                 finish_install(server_id, result)
 
-            threading.Thread(target=_http_install, daemon=True).start()
+            _start_install_worker(server_id, f"install-http-{server_id}", _http_install)
             return {"message": "Installation gestartet"}
 
         if bp.source.type == BlueprintSourceType.GITHUB:
             install_dir = server.install_dir
             server_id = server.id
 
-            def _github_install():
+            def _github_install(server):
                 from blueprints.github_source import install_github_source
 
                 _append_console_log(server_id, "[MSM] GitHub-Source: Clone/Pull startet\n")
@@ -283,7 +365,7 @@ class BlueprintPlugin(GamePlugin):
                     )
                 finish_install(server_id, result)
 
-            threading.Thread(target=_github_install, daemon=True).start()
+            _start_install_worker(server_id, f"install-github-{server_id}", _github_install)
             return {"message": "Installation gestartet"}
 
         if bp.source.type == BlueprintSourceType.MANUAL_UPLOAD:
