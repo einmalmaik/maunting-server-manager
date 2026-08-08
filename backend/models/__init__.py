@@ -6,6 +6,8 @@ from .operation_task import OperationTask
 from .ai_provider import AiProvider, AiUserCredential
 from .ai_conversation import AiConversation, AiMessage
 from .ai_action_proposal import AiActionProposal
+from .ai_autonomy_grant import AiAutonomyGrant
+from .ai_tool_result import AiToolResult
 from .ai_memory import AiMemoryEntry, AiMemoryPreference
 from .ai_skill import AiSkill
 from .ai_attachment import AiAttachment
@@ -56,6 +58,7 @@ __all__ = [
     "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
     "AiProvider", "AiUserCredential", "AiConversation", "AiMessage", "AiActionProposal",
     "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
+    "AiAutonomyGrant", "AiToolResult",
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",

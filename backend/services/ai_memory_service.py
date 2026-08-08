@@ -152,7 +152,14 @@ def provider_memory_context(db: Session, user: User, server_id: int | None) -> s
     used = 0
     for row in rows:
         value = DisClient.decrypt(row.value_encrypted, aad=_aad(row.id))
-        line = f"[{row.scope}] {row.key}: {value}"
+        # Der Block ist zeilenbasiert und jede Zeile traegt ihren Scope. Ein Wert
+        # mit Zeilenumbruch koennte deshalb beliebig viele gefaelschte
+        # "[panel] ..."-Zeilen vortaeuschen — ein Benutzer wuerde sich damit im
+        # eigenen Kontext panelweite Vorgaben andichten. Der Schluessel ist
+        # bereits auf [A-Za-z0-9_.-] begrenzt (schemas/ai_memory.py), der Wert
+        # ist es bewusst nicht: er soll frei formulierbar bleiben.
+        flattened = " ".join(str(value).splitlines())
+        line = f"[{row.scope}] {row.key}: {flattened}"
         if used + len(line) > MAX_CONTEXT_CHARS:
             break
         lines.append(line)

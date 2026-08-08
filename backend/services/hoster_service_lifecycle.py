@@ -42,6 +42,22 @@ logger = logging.getLogger(__name__)
 
 DESIRED_STATES = frozenset({"active", "suspended", "terminated"})
 
+# Vollstaendiges Statusvokabular eines Vertrags. Jeder Wert wird als Webhook
+# `service.<status>` an den Shop gemeldet und ist damit Teil des oeffentlichen
+# Vertrags — nicht nur ein interner Merker. Deshalb steht er hier an einer
+# Stelle statt verstreut in den Zuweisungen: `test_hoster_api_docs_contract`
+# prueft gegen diese Liste, dass jeder Wert in `docs/hoster-api.md` erklaert
+# ist. Ein neuer Status ohne Doku laesst den Test fehlschlagen.
+SERVICE_STATUSES: tuple[str, ...] = (
+    "pending",
+    "provisioning",
+    "ready",
+    "suspended",
+    "terminating",
+    "terminated",
+    "failed",
+)
+
 # Rechte, die ein Kunde auf seinem eigenen gemieteten Server erhaelt.
 # Bewusst NICHT enthalten: Netzwerk- und Ressourcenverwaltung (die bestimmt das
 # gebuchte Produkt), Reinstall und Datenbankadministration. `servers.delete`
@@ -74,6 +90,18 @@ CUSTOMER_SERVER_PERMISSIONS = (
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _set_status(service: HosterService, status: str) -> None:
+    """Setzt den Vertragsstatus und haelt ihn im dokumentierten Vokabular.
+
+    Der Status verlaesst MSM als Webhook-Event `service.<status>`. Ein Tippfehler
+    waere deshalb kein interner Schoenheitsfehler, sondern ein Ereignis, auf das
+    der angebundene Shop nie reagieren wuerde.
+    """
+    if status not in SERVICE_STATUSES:
+        raise HosterConfigurationError(f"Unbekannter Servicestatus: {status}")
+    service.status = status
 
 
 def _actor(db: Session, integration: HosterIntegration, correlation_id: str) -> ActorContext:
@@ -177,7 +205,7 @@ def _provision(
         disk_limit_gb=product.disk_limit_gb,
         node_id=product.node_id,
     )
-    service.status = "provisioning"
+    _set_status(service, "provisioning")
     service.status_code = None
     db.flush()
 
@@ -192,7 +220,7 @@ def _provision(
     )
     service.server_id = result.server.id
     service.task_id = result.task.id
-    service.status = "ready"
+    _set_status(service, "ready")
     service.status_code = None
     _grant_customer_permissions(db, service)
     if product.backup_interval_hours:
@@ -301,7 +329,7 @@ def apply_desired_state(
             if service.server_id is None:
                 _provision(db, integration=integration, service=service)
             else:
-                service.status = "ready"
+                _set_status(service, "ready")
                 service.terminate_after = None
                 _grant_customer_permissions(db, service)
         elif desired_state == "suspended":
@@ -312,7 +340,7 @@ def apply_desired_state(
                 permission_service.set_user_server_permissions(
                     db, service.identity.user_id, service.server_id, [], granted_by=None
                 )
-            service.status = "suspended"
+            _set_status(service, "suspended")
         else:
             # Kuendigung: sperren und eine Frist setzen. Es wird hier bewusst
             # nichts geloescht — das uebernimmt spaeter der Aufraeumlauf.
@@ -322,7 +350,9 @@ def apply_desired_state(
                     db, service.identity.user_id, service.server_id, [], granted_by=None
                 )
             service.terminate_after = _now() + timedelta(days=integration.terminate_grace_days)
-            service.status = "terminating" if service.server_id is not None else "terminated"
+            _set_status(
+                service, "terminating" if service.server_id is not None else "terminated"
+            )
     except HTTPException as exc:
         db.rollback()
         _fail(db, integration=integration, service_id=service.id, code=_error_code(exc))
@@ -367,7 +397,7 @@ def _fail(db: Session, *, integration: HosterIntegration, service_id: int, code:
         service = db.query(HosterService).filter(HosterService.id == service_id).first()
         if service is None:
             return
-        service.status = "failed"
+        _set_status(service, "failed")
         service.status_code = code
         service.updated_at = _now()
         _record(
@@ -436,7 +466,7 @@ def purge_terminated_services(db: Session, *, now: datetime | None = None) -> in
                     actor=_actor(db, integration, service.correlation_id),
                 )
             service.server_id = None
-            service.status = "terminated"
+            _set_status(service, "terminated")
             service.status_code = None
             service.updated_at = current
             _record(

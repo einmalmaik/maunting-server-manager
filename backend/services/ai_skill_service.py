@@ -20,13 +20,32 @@ from services.ai_action_service import (
 )
 from services.ai_chat_service import get_owned_conversation
 from services.ai_context_service import redact_sensitive_text
+from services.ai_usage_service import complete_ai_usage, fail_ai_usage, reserve_ai_usage
 
 
+# Bewusst eine eigene, engere Allowlist als der Chat. Ein Skill ist ein
+# gespeicherter Ablauf, der spaeter ohne erneute Pruefung des Inhalts laeuft —
+# `propose_config_update` und `propose_server_create` gehoeren deshalb nicht
+# hinein, `search_workshop_mods` ebenso wenig (eine gespeicherte Suchanfrage ist
+# kein wiederverwendbarer Ablauf).
 SKILL_READ_TOOLS = {
-    "read_server_status", "read_server_capacity", "read_server_logs", "read_config"
+    "read_server_status",
+    "read_server_capacity",
+    "read_server_logs",
+    "read_config",
+    "read_server_ports",
+    "read_server_mods",
+    "read_server_backups",
+    "read_guardian_incidents",
+    "read_ai_action_history",
+    "read_mod_updates",
 }
 SKILL_WRITE_TOOLS = {"propose_server_lifecycle", "propose_backup"}
 SKILL_TOOLS = SKILL_READ_TOOLS | SKILL_WRITE_TOOLS
+# Diese Schritte nehmen keine Argumente entgegen.
+SKILL_NO_ARGUMENT_TOOLS = (SKILL_READ_TOOLS - {"read_server_logs", "read_config"}) | {
+    "propose_backup"
+}
 
 
 def _validate_step(step: dict) -> dict:
@@ -40,7 +59,7 @@ def _validate_step(step: dict) -> dict:
         arguments, ensure_ascii=True
     ):
         raise HTTPException(status_code=422, detail="Skill darf keine Zugangsdaten enthalten")
-    if tool_name in {"read_server_status", "read_server_capacity", "propose_backup"} and arguments:
+    if tool_name in SKILL_NO_ARGUMENT_TOOLS and arguments:
         raise HTTPException(status_code=422, detail="Skill-Schritt akzeptiert keine Argumente")
     if tool_name == "read_server_logs":
         if set(arguments) - {"lines"}:
@@ -150,6 +169,30 @@ def get_skill(db: Session, skill_id: str) -> AiSkill:
     return row
 
 
+def _release_reservation(db: Session, correlation_id: str) -> None:
+    """Gibt eine Reservierung frei, die einen Fehlschlag ueberlebt hat.
+
+    Nach einem Rollback ist die Zeile in aller Regel ohnehin verschwunden, weil
+    sie in derselben Transaktion entstand. Verlassen wollen wir uns darauf
+    nicht: sobald ein Tool-Schritt zwischendurch committet, bliebe die
+    Reservierung sonst dauerhaft auf `reserved` stehen und wuerde einen
+    Nebenlaeufigkeitsplatz des Benutzers bis zum Prozessneustart belegen.
+    """
+    from models import AiUsageEvent
+
+    try:
+        event = (
+            db.query(AiUsageEvent)
+            .filter(AiUsageEvent.request_id == correlation_id)
+            .first()
+        )
+        if event is not None and event.status == "reserved":
+            fail_ai_usage(db, event)
+            db.commit()
+    except Exception:
+        db.rollback()
+
+
 def run_skill(
     db: Session, *, user: User, skill: AiSkill, conversation_id: str,
     correlation_id: str,
@@ -162,6 +205,24 @@ def run_skill(
     conversation = get_owned_conversation(db, conversation_id, user)
     if conversation is None or conversation.server_id is None:
         raise HTTPException(status_code=404, detail="Server-Unterhaltung nicht gefunden")
+
+    # Ein Skill-Lauf ruft keinen Provider auf, verbraucht also keine Tokens —
+    # er loest aber bis zu 20 Tool-Aufrufe gegen Docker, Dateisystem und Node
+    # aus. Ohne Reservierung liefe er komplett an den Rollenkontingenten vorbei:
+    # `requests_per_minute` und `concurrent_operations` haetten fuer Skills gar
+    # keine Wirkung, obwohl Zielpunkt 6 sie fuer KI-Vorgaenge fordert. Deshalb
+    # wird mit null Tokens reserviert: die Zaehl- und Nebenlaeufigkeitsgrenzen
+    # greifen, die Token- und Kostengrenzen bleiben korrekt unberuehrt.
+    usage_event = reserve_ai_usage(
+        db,
+        user,
+        request_id=correlation_id,
+        estimated_tokens=0,
+        estimated_cost_microunits=0,
+        server_id=conversation.server_id,
+    )
+    db.flush()
+
     read_results: list[dict] = []
     proposals = []
     # Jeder Schritt durchlaeuft dieselbe RBAC- und Allowlist-Pruefung wie ein
@@ -169,7 +230,7 @@ def run_skill(
     # diese Umsetzung haette FastAPI daraus einen 500 gemacht, obwohl es ein
     # regulaerer Berechtigungs- oder Validierungsfall ist.
     try:
-        for step in response_steps(skill):
+        for index, step in enumerate(response_steps(skill), start=1):
             if step["tool_name"] in SKILL_READ_TOOLS:
                 read_results.append({
                     "tool_name": step["tool_name"],
@@ -182,10 +243,24 @@ def run_skill(
                 proposals.append(create_proposal(
                     db, user=user, conversation=conversation, tool_name=step["tool_name"],
                     arguments=step["arguments"], correlation_id=correlation_id,
+                    # Ein Skill-Schritt braucht keine vom Modell formulierte
+                    # Begruendung — seine Herkunft ist die praezisere Angabe.
+                    rationale_fallback=(
+                        f"Schritt {index} aus Skill \"{skill.name}\" (Version {skill.version})",
+                        "Der Ablauf wurde vom Betreiber als Skill hinterlegt und geprueft.",
+                    ),
                 ))
     except AiActionValidationError as exc:
         db.rollback()
+        _release_reservation(db, correlation_id)
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        # Eine haengende Reservierung wuerde sonst dauerhaft einen
+        # Nebenlaeufigkeitsplatz des Benutzers blockieren.
+        _release_reservation(db, correlation_id)
+        raise
+    complete_ai_usage(db, usage_event, actual_tokens=0, actual_cost_microunits=0)
     audit_service.record_privileged_action(
         db, user_id=user.id, action="ai.skill.run", target_type="ai_skill",
         target_id=skill.id, details={"version": skill.version, "proposal_count": len(proposals)},

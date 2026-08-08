@@ -71,6 +71,8 @@ def test_config_proposal_encrypts_payload_and_keeps_audit_content_free(
             "path": "server.cfg",
             "content": "port=2402\nmaxPlayers=40\n",
             "expected_revision": content_revision(config.read_bytes()),
+            "reason": "Testbegruendung",
+            "expected_effect": "Testwirkung",
         },
         correlation_id=str(uuid4()),
     )
@@ -109,6 +111,8 @@ def test_config_with_credentials_is_never_overwritten_by_ai(
                 "path": "server.cfg",
                 "content": "port=2402\n",
                 "expected_revision": content_revision(config.read_bytes()),
+                "reason": "Testbegruendung",
+                "expected_effect": "Testwirkung",
             },
             correlation_id=str(uuid4()),
         )
@@ -254,6 +258,8 @@ def test_confirmation_token_is_hashed_one_time_and_config_write_is_revision_boun
             "path": "server.cfg",
             "content": "port=2402\n",
             "expected_revision": content_revision(config.read_bytes()),
+            "reason": "Testbegruendung",
+            "expected_effect": "Testwirkung",
         },
         correlation_id=str(uuid4()),
     )
@@ -310,6 +316,8 @@ def test_execute_blocks_changed_revision_and_marks_proposal_failed(
             "path": "server.cfg",
             "content": "port=2402\n",
             "expected_revision": content_revision(config.read_bytes()),
+            "reason": "Testbegruendung",
+            "expected_effect": "Testwirkung",
         },
         correlation_id=str(uuid4()),
     )
@@ -345,7 +353,7 @@ def test_expired_confirmation_cannot_execute(
         user=owner_user,
         conversation=conversation,
         tool_name="propose_backup",
-        arguments={},
+        arguments={"reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -377,7 +385,7 @@ def test_startup_recovery_fails_closed(db: Session, owner_user: User, tmp_path: 
         user=owner_user,
         conversation=conversation,
         tool_name="propose_backup",
-        arguments={},
+        arguments={"reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     proposal.status = "executing"
@@ -419,7 +427,7 @@ def test_confirmation_rechecks_revoked_rbac(
         user=regular_user,
         conversation=conversation,
         tool_name="propose_backup",
-        arguments={},
+        arguments={"reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -459,7 +467,7 @@ def test_lifecycle_proposal_stays_executing_until_the_task_finishes(
         user=owner_user,
         conversation=conversation,
         tool_name="propose_server_lifecycle",
-        arguments={"operation": "start"},
+        arguments={"operation": "start", "reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -518,7 +526,7 @@ def test_lifecycle_proposal_becomes_succeeded_when_the_task_succeeds(
         user=owner_user,
         conversation=conversation,
         tool_name="propose_server_lifecycle",
-        arguments={"operation": "restart"},
+        arguments={"operation": "restart", "reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     db.commit()

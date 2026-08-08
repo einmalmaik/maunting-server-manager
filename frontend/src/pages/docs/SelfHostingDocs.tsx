@@ -1,7 +1,7 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowRightLeft, Check, Clipboard, FileArchive, GitBranch, KeyRound, MonitorSmartphone, Network, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, FileArchive, GitBranch, KeyRound, MonitorSmartphone, Network, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
 export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \\
@@ -17,42 +17,15 @@ const artifacts = [
 
 function CommandBlock({ command, label, testId }: { command: string; label: string; testId: string }) {
   const { t } = useTranslation()
-  const [copied, setCopied] = useState(false)
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Die Zwischenablage ist nur Komfort; Installationsfehler werden hier nicht vorgetaeuscht.
-    }
-  }
 
   return (
-    <div className="relative mt-4 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
-      <div className="flex items-center justify-between gap-3 border-b border-outline-variant px-4 py-2.5">
-        <span className="inline-flex items-center gap-2 font-label-md text-xs uppercase tracking-wider text-on-surface-variant">
-          <Terminal className="h-4 w-4 text-primary" />
-          {label}
-        </span>
-        <button
-          type="button"
-          onClick={() => void copy()}
-          className="msm-btn-secondary inline-flex items-center gap-2 px-3 py-1.5 text-xs"
-          aria-label={copied ? t('docsSelfHosting.install.copied') : t('docsSelfHosting.install.copy')}
-        >
-          {copied ? <Check className="h-3.5 w-3.5 text-status-success" /> : <Clipboard className="h-3.5 w-3.5" />}
-          {copied ? t('docsSelfHosting.install.copied') : t('docsSelfHosting.install.copy')}
-        </button>
-      </div>
-      <pre className="overflow-x-auto p-4 font-mono text-xs leading-6 text-on-surface sm:text-sm">
-        <code data-testid={testId}>{command}</code>
-      </pre>
-      <span className="sr-only" role="status" aria-live="polite">
-        {copied ? t('docsSelfHosting.install.copied') : ''}
-      </span>
-    </div>
+    <CodeBlock
+      code={command}
+      label={label}
+      testId={testId}
+      copyLabel={t('docsSelfHosting.install.copy')}
+      copiedLabel={t('docsSelfHosting.install.copied')}
+    />
   )
 }
 
@@ -89,7 +62,11 @@ export function SelfHostingDocs() {
         status={<Network className="h-6 w-6 text-primary" aria-hidden="true" />}
       />
 
-      <nav className="sticky top-16 z-10 -mx-1 mb-6 flex gap-2 overflow-x-auto bg-surface/95 px-1 py-2 backdrop-blur lg:hidden" aria-label={t('docsSelfHosting.navigation.label')}>
+      {/* Die Sprungnavigation galt frueher nur unterhalb `lg` — auf dem Desktop,
+          wo die Seite am laengsten ist, gab es gar keine. Ausserdem fehlten die
+          beiden zuletzt ergaenzten Abschnitte, die dadurch nur durch Scrollen
+          auffindbar waren. */}
+      <nav className="sticky top-16 z-10 -mx-1 mb-6 flex gap-2 overflow-x-auto bg-surface/95 px-1 py-2 backdrop-blur" aria-label={t('docsSelfHosting.navigation.label')}>
         {[
           ['deployment-units', t('docsSelfHosting.units.title')],
           ['panel-install', t('docsSelfHosting.install.title')],
@@ -98,6 +75,8 @@ export function SelfHostingDocs() {
           ['enrollment', t('docsSelfHosting.enrollment.title')],
           ['guardian-state', t('docsSelfHosting.guardian.title')],
           ['artifacts', t('docsSelfHosting.artifacts.title')],
+          ['credentials-scoping', t('docsSelfHosting.credentials.title')],
+          ['hoster-integration', t('docsSelfHosting.hoster.title')],
         ].map(([id, label]) => (
           <a key={id} href={`#${id}`} className="msm-btn-secondary shrink-0 px-3 py-2 text-xs">{label}</a>
         ))}
@@ -344,6 +323,15 @@ export function SelfHostingDocs() {
             </div>
           ))}
         </dl>
+        {/* Dieser Abschnitt beschreibt den Betrieb. Wer den Shop tatsaechlich
+            anbindet, braucht die Endpunkt- und Webhook-Referenz. */}
+        <Link
+          to="/docs/hoster-api"
+          className="msm-btn-secondary mt-5 inline-flex items-center gap-2 px-4 py-2 text-sm"
+        >
+          <Plug className="h-4 w-4" />
+          {t('docsSelfHosting.hoster.apiReferenceLink')}
+        </Link>
       </section>
 
       <aside className="mb-8 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning" aria-labelledby="database-compatibility">

@@ -48,6 +48,7 @@ import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
 import { AiChat } from "@/components/ai/AiChat";
+import { AiAutonomyPanel } from "@/components/ai/AiAutonomyPanel";
 
 type TabKey =
   | "files"
@@ -1022,7 +1023,14 @@ export function ServerDetail() {
         {activeTab === "guardian" && (
           <GuardianTab server={server} onRefreshServer={fetchAll} />
         )}
-        {activeTab === "ai" && canUseAi && <AiChat serverId={serverId} />}
+        {activeTab === "ai" && canUseAi && (
+          <div className="space-y-4">
+            <AiChat serverId={serverId} />
+            {/* Die Freigabe gilt genau fuer diesen Server und steht deshalb hier,
+                nicht in den Panel-Einstellungen. */}
+            <AiAutonomyPanel serverId={serverId} />
+          </div>
+        )}
       </div>
 
       {/* Edit-Network Modal */}

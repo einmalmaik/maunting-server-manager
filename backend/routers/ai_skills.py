@@ -2,7 +2,7 @@
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -10,6 +10,7 @@ from dependencies import require_global, verify_csrf
 from models import AiSkill, User
 from schemas.ai_skill import AiSkillResponse, AiSkillRunRequest, AiSkillRunResponse, AiSkillStep, AiSkillWrite
 from services import ai_skill_service
+from services.ai_usage_service import AiQuotaExceeded, AiUsageConflict
 
 
 router = APIRouter(prefix="/api/ai/skills", tags=["ai-skills"])
@@ -87,10 +88,24 @@ def run_skill(
 ) -> AiSkillRunResponse:
     skill = ai_skill_service.get_skill(db, skill_id)
     correlation_id = str(uuid4())
-    reads, proposals = ai_skill_service.run_skill(
-        db, user=user, skill=skill, conversation_id=payload.conversation_id,
-        correlation_id=correlation_id,
-    )
+    try:
+        reads, proposals = ai_skill_service.run_skill(
+            db, user=user, skill=skill, conversation_id=payload.conversation_id,
+            correlation_id=correlation_id,
+        )
+    except AiQuotaExceeded as exc:
+        # Ein ausgeschoepftes Kontingent ist kein Serverfehler. Der Grund wird
+        # als stabiler Code gemeldet, damit die Oberflaeche ihn uebersetzen
+        # kann — der Zahlenwert des Limits bleibt bewusst drin.
+        raise HTTPException(
+            status_code=429,
+            detail={"code": f"AI_QUOTA_{exc.reason.upper()}", "message": "ai.errors.quota"},
+        ) from exc
+    except AiUsageConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "AI_REQUEST_CONFLICT", "message": "ai.errors.requestConflict"},
+        ) from exc
     return AiSkillRunResponse(
         skill_id=skill.id, version=skill.version,
         read_results=reads, proposals=proposals,

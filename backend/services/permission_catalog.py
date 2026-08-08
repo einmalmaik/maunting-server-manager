@@ -47,9 +47,14 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("ai.memory.use",             "ai",      "Eigenes KI-Memory verwenden"),
     PermissionDef("ai.skills.use",             "ai",      "Freigegebene KI-Skills verwenden"),
     PermissionDef("ai.skills.manage",          "ai",      "KI-Skills erstellen und verwalten"),
-    PermissionDef("ai.web_search.use",         "ai",      "Websuche über die KI verwenden"),
+    # NOCH NICHT DURCHGESETZT: diese beiden Keys existieren im Katalog, werden
+    # aber an keiner Stelle im Backend geprueft. Der Rollen-Editor weist im
+    # Beschreibungstext ausdruecklich darauf hin. Wer die Funktion baut, prueft
+    # das Recht — und entfernt hier diesen Kommentar.
+    PermissionDef("ai.web_search.use",         "ai",      "Websuche über die KI verwenden (noch ohne Funktion)"),
+    PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen (noch ohne Funktion)"),
+    # Durchgesetzt in routers/ai_autonomy.py und services/ai_autonomy_service.py.
     PermissionDef("ai.autonomous.use",         "ai",      "Autonomen KI-Modus verwenden"),
-    PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.

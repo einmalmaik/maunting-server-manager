@@ -216,7 +216,13 @@
         "read_server_logs": "Bereinigte Serverlogs lesen",
         "read_config": "Konfiguration lesen",
         "propose_server_lifecycle": "Serveraktion vorschlagen",
-        "propose_backup": "Backup vorschlagen"
+        "propose_backup": "Backup vorschlagen",
+        "read_server_ports": "Ports lesen",
+        "read_server_mods": "Mods lesen",
+        "read_server_backups": "Backups lesen",
+        "read_guardian_incidents": "Guardian-Vorfälle lesen",
+        "read_ai_action_history": "KI-Aktionsverlauf lesen",
+        "read_mod_updates": "Mod-Updates prüfen"
       },
       "select": "Skill auswählen",
       "run": "Skill starten",
@@ -284,7 +290,9 @@
       "tools": {
         "propose_server_lifecycle": "Serverstatus ändern",
         "propose_backup": "Backup erstellen",
-        "propose_config_update": "Konfiguration ändern"
+        "propose_config_update": "Konfiguration ändern",
+        "propose_mod_install": "Mod installieren",
+        "propose_server_create": "Server erstellen"
       },
       "status": {
         "proposed": "Prüfung erforderlich",
@@ -302,12 +310,36 @@
       "confirm": {
         "propose_server_lifecycle": "Die Aktion „{{operation}}“ wirkt auf den Serverbetrieb. Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.",
         "propose_backup": "Jetzt ein Server-Backup erstellen? Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.",
-        "propose_config_update": "Die angezeigte Änderung an „{{path}}“ revisionsgebunden schreiben? Bei zwischenzeitlicher Änderung wird die Ausführung blockiert."
+        "propose_config_update": "Die angezeigte Änderung an „{{path}}“ revisionsgebunden schreiben? Bei zwischenzeitlicher Änderung wird die Ausführung blockiert.",
+        "propose_mod_install": "Die Mod „{{path}}“ über den vorhandenen Installationspfad einspielen? Der Download läuft im Hintergrund, die Mod wirkt erst nach einem Neustart.",
+        "propose_server_create": "Einen neuen Server anlegen? Blueprint, Kapazität, Ports und Rechte werden dabei genauso geprüft wie beim Anlegen über das Panel."
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
       "error": "Der KI-Vorschlag konnte nicht ausgeführt werden.",
-      "queued": "KI-Vorschlag wurde autorisiert. Die Aktion läuft jetzt im Hintergrund."
+      "queued": "KI-Vorschlag wurde autorisiert. Die Aktion läuft jetzt im Hintergrund.",
+      "confirmDiffLines": "Betroffen sind {{count}} Diff-Zeilen. Die vollständige Vorschau steht in der Karte hinter diesem Dialog.",
+      "confirmProvenance": "Dieser Vorschlag kann aus der Analyse unvertrauenswürdiger Daten stammen — Logzeilen, Konfigurationsinhalte oder Anhänge. Prüfe ihn, bevor du ihn ausführst.",
+      "reasonLabel": "Begründung der KI:",
+      "effectLabel": "Erwartete Wirkung:",
+      "autonomousBadge": "Automatisch ausgeführt",
+      "autonomousHint": "Diese Aktion lief ohne Rückfrage, weil du den autonomen Modus für diesen Bereich freigegeben hast. Berechtigungen wurden unverändert geprüft; der Vorgang steht vollständig im Audit-Log."
+    },
+    "autonomy": {
+      "title": "Autonomer Modus",
+      "descriptionPanel": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Mit panelweiter Freigabe führt sie erlaubte Aktionen auf allen deinen Servern sofort aus.",
+      "descriptionServer": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Mit Freigabe führt sie erlaubte Aktionen auf genau diesem Server sofort aus.",
+      "toggle": "Aktionen ohne Rückfrage ausführen",
+      "budget": "Höchstens Aktionen pro Stunde",
+      "budgetHint": "In der letzten Stunde automatisch ausgeführt: {{used}}. Ist das Kontingent erschöpft, fragt die KI wieder nach — es schlägt nichts fehl.",
+      "boundary": "Der autonome Modus entfernt genau eine Sache: deine Bestätigung. Berechtigungen, Serversperren und Audit gelten unverändert weiter — die KI kann nichts, was du selbst nicht dürftest. Nicht enthalten sind Löschen, Wipe, Neuinstallation und Backup-Wiederherstellung: die verlangen immer eine Bestätigung.",
+      "confirmTitle": "Autonomen Modus einschalten?",
+      "confirmPanel": "Die KI führt danach erlaubte Aktionen auf allen deinen Servern ohne Rückfrage aus — einschließlich Konfigurationsänderungen, Mod-Installationen und dem Anlegen neuer Server.\n\nDeine Berechtigungen bleiben die Grenze. Alles erscheint im Audit-Log.",
+      "confirmServer": "Die KI führt danach erlaubte Aktionen auf diesem Server ohne Rückfrage aus — einschließlich Konfigurationsänderungen und Mod-Installationen.\n\nDeine Berechtigungen bleiben die Grenze. Alles erscheint im Audit-Log.",
+      "enable": "Einschalten",
+      "save": "Kontingent speichern",
+      "saved": "Freigabe gespeichert.",
+      "error": "Die Freigabe konnte nicht gespeichert werden."
     }
   },
   "shell": {
@@ -1784,7 +1816,10 @@
     "legalTitle": "Rechtliches",
     "legalDesc": "Datenschutzerklärung und optionales Betreiber-Impressum dieser Instanz.",
     "privacyLink": "Datenschutz öffnen",
-    "imprintLink": "Impressum öffnen"
+    "imprintLink": "Impressum öffnen",
+    "hosterApiTitle": "Hoster-API",
+    "hosterApiDesc": "Endpunkte, Webhooks und Signaturprüfung für die Anbindung eines externen Shops.",
+    "hosterApiLink": "Referenz öffnen"
   },
   "docsSelfHosting": {
     "eyebrow": "Betriebshandbuch",
@@ -1949,7 +1984,8 @@
       "selfHosted": {
         "title": "Self-Hosted bleibt unberührt",
         "body": "Ohne angelegte Integration ändert sich nichts: kein zusätzlicher Dienst, kein offener Endpunkt und keine neuen Pflichtfelder."
-      }
+      },
+      "apiReferenceLink": "Zur API-Referenz"
     },
     "credentials": {
       "title": "Zugangsdaten und Kubernetes",
@@ -2206,7 +2242,9 @@
           "credentials": "Persönliche und zentrale Provider-API-Keys werden über DIS kontextgebunden verschlüsselt und nach dem Speichern nur als Konfigurationsstatus beziehungsweise Maske angezeigt",
           "usage": "Provider, Modell, Tokenreservierung, tatsächlicher oder konservativ geschätzter Verbrauch und Zeitpunkte werden zur Kontingentdurchsetzung gespeichert; Preiswerte werden ohne belastbare Preisquelle nicht behauptet",
           "memory": "Optionale persönliche, serverbezogene und panelweite Memory-Einträge werden verschlüsselt gespeichert, sind einsehbar und löschbar und werden nur bei aktivierter Memory-Nutzung als nicht vertrauenswürdiger Kontext übertragen",
-          "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen"
+          "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
+          "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
+          "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht"
         }
       },
       "storage": {
@@ -2967,6 +3005,305 @@
       "save": "Zugangsdaten konnten nicht gespeichert werden",
       "delete": "Zugangsdaten konnten nicht entfernt werden",
       "bind": "Zuordnung konnte nicht gespeichert werden"
+    }
+  },
+  "docsCommon": {
+    "copy": "Kopieren",
+    "copied": "Kopiert"
+  },
+  "docsHosterApi": {
+    "eyebrow": "Integration",
+    "title": "Hoster-API",
+    "subtitle": "Endpunkt-, Webhook- und Signaturreferenz für die Anbindung eines externen Shops.",
+    "backToDocs": "Zurück zur Dokumentation",
+    "navigationLabel": "Abschnitte dieser Seite",
+    "optionalNote": "Ohne angelegte Integration existiert nichts aus diesem Dokument. Ein Self-Hosted-Betrieb ohne Shop hat keinen offenen Endpunkt, der ohne API-Key etwas tut.",
+    "principle": {
+      "title": "Grundprinzip",
+      "desiredState": "Der Shop sendet keine Befehle, sondern einen gewünschten Zustand. Statt „starte den Server“ meldet er „dieser Vertrag soll aktiv sein“. Das ist der Kern der Idempotenz: ein Befehl, der wegen eines Timeouts zweimal ankommt, wäre gefährlich — ein Zielzustand, der zweimal ankommt, ist folgenlos.",
+      "noInternals": "Der Shop übermittelt bewusst keine internen MSM-Details: keine Node-ID, keine Portnummern, keine Installationspfade. Er nennt eine Produktkennung; MSM löst daraus Blueprint, Ressourcen, Host und Ports selbst auf.",
+      "sharedLogic": "Alles, was die Hoster-API auslöst, läuft durch dieselben Services wie ein Klick im Panel. Es gibt keinen Pfad, der Rechteprüfung, Kapazitätsprüfung, Portvergabe oder Guardian umgeht."
+    },
+    "auth": {
+      "title": "Authentifizierung",
+      "header": "Alle Endpunkte unter /api/hoster/v1/ erwarten den Integrations-API-Key im Header:",
+      "headerLabel": "Header",
+      "noCookie": "Es gibt keinen Cookie-Pfad. Eine Browser-Session kann diese Endpunkte nicht ansprechen, und CORS ist für sie irrelevant — der Aufruf muss serverseitig aus dem Shop erfolgen. Ein Test aus der Browserkonsole schlägt deshalb immer fehl; das ist Absicht, kein Konfigurationsfehler.",
+      "hashOnly": "MSM speichert vom API-Key nur den SHA-256-Hash. Der Klartext erscheint genau einmal bei der Erzeugung im Panel und ist danach nicht wieder abrufbar. Fehlender und ungültiger Schlüssel liefern denselben Text und beide 401, damit nicht erkennbar ist, ob ein Schlüssel existiert.",
+      "boundary": "Der API-Key ist gleichwertig zu den Rechten des Dienstbenutzers der Integration — nicht mehr. Die Sicherheitsgrenze ist dieser Benutzer und sein Rechteprofil, nicht der Schlüssel.",
+      "healthLabel": "Schlüsseltest ohne Nebenwirkung"
+    },
+    "endpoints": {
+      "title": "Externe API",
+      "health": "API-Key prüfen, ohne etwas zu ändern.",
+      "put": "Gewünschten Vertragszustand setzen. Legt den Vertrag beim ersten Mal an und führt ihn danach fort.",
+      "get": "Tatsächlichen Zustand abfragen. Antwortet mit 404, wenn der Vertrag nicht existiert.",
+      "handoff": "Einmal-Link in das Panel des Kunden erzeugen.",
+      "redeem": "Einlösung durch den Browser des Kunden. Kein API-Key — hier klickt ein Mensch.",
+      "requestTitle": "Request-Body (PUT)",
+      "idempotencyKey": "external_service_id ist die Vertragskennung aus dem Shop, maximal 128 Zeichen. Zusammen mit der Integration ist sie eindeutig und dient als Idempotenzschlüssel.",
+      "orderLabel": "Bestellung",
+      "responseTitle": "Response-Body (PUT und GET)",
+      "responseLabel": "Antwort",
+      "repeatable": "Derselbe Aufruf darf beliebig oft gesendet werden. Ein Netzwerk-Retry erzeugt keinen zweiten Server: die Provisionierung ist an einen Idempotency-Key gebunden. Auch zwei gleichzeitige Erstaufrufe führen zu genau einem Vertrag — der Verlierer übernimmt den Gewinner.",
+      "async": "Die Provisionierung läuft asynchron: nach PUT kann status noch provisioning sein. Der Shop sollte entweder auf den Webhook service.ready warten oder in Abständen GET aufrufen — nicht in einer engen Schleife."
+    },
+    "request": {
+      "desired_state": {
+        "type": "string, Pflicht",
+        "body": "active, suspended oder terminated."
+      },
+      "external_subject": {
+        "type": "string 1–128, Pflicht",
+        "body": "Kunden-ID aus dem Shop. Die feste Zuordnung läuft über diese ID, nicht über die E-Mail — sonst bräche eine E-Mail-Änderung des Kunden die Verknüpfung."
+      },
+      "product_key": {
+        "type": "string 1–128, bei Neuanlage",
+        "body": "Shop-Produktkennung. MSM bildet sie auf Blueprint und Ressourcenpaket ab. Bei einem bestehenden Vertrag löst ein abweichender Wert einen Tarifwechsel aus."
+      },
+      "email": {
+        "type": "string ≤255, optional",
+        "body": "Wird nur für die Erstanlage des Panel-Benutzers verwendet. MSM übernimmt niemals ein Shop-Passwort."
+      }
+    },
+    "response": {
+      "external_service_id": {
+        "type": "string",
+        "body": "Die Vertragskennung des Shops."
+      },
+      "desired_state": {
+        "type": "string",
+        "body": "Zuletzt gemeldeter Zielzustand."
+      },
+      "status": {
+        "type": "string",
+        "body": "Tatsächlicher Zustand des Vertrags."
+      },
+      "status_code": {
+        "type": "string | null",
+        "body": "Stabiler Fehler- oder Hinweiscode, sonst null."
+      },
+      "server_id": {
+        "type": "integer | null",
+        "body": "Interne Server-ID, sobald einer existiert."
+      },
+      "task_id": {
+        "type": "string | null",
+        "body": "ID des laufenden Provisionierungs- oder Lifecycle-Vorgangs."
+      },
+      "correlation_id": {
+        "type": "string (UUID)",
+        "body": "Klammert alle Audit-Einträge und Webhooks dieses Vertrags."
+      },
+      "terminate_after": {
+        "type": "string | null",
+        "body": "ISO-8601-Zeitpunkt, ab dem nach einer Kündigung gelöscht wird."
+      },
+      "updated_at": {
+        "type": "string",
+        "body": "ISO-8601-Zeitpunkt der letzten Änderung."
+      }
+    },
+    "states": {
+      "title": "Zustandsmodell",
+      "intro": "desired_state ist das, was der Shop will. status ist das, was ist. Die beiden können vorübergehend auseinanderlaufen — genau dafür gibt es zwei Felder.",
+      "desiredTitle": "Zielzustände (vom Shop gesetzt)",
+      "actualTitle": "Tatsächliche Zustände (von MSM gesetzt, jeder erzeugt einen Webhook)",
+      "purge": "Der Übergang terminating → terminated passiert nicht im API-Aufruf, sondern in einem Wartungslauf, der jede Minute prüft, ob terminate_after erreicht ist. Der Löschpfad ist derselbe wie im Panel.",
+      "productChange": "Ein Tarifwechsel setzt status_code auf product_changed_manual_resize_required. Die Produktzuordnung ändert sich sofort, die Ressourcengrenzen eines laufenden Servers bleiben eine bewusste Operator-Aktion — sie erfordern einen Neustart."
+    },
+    "desired": {
+      "active": "Vertrag läuft. Server wird bei Bedarf erstellt, Kundenrechte werden gesetzt.",
+      "suspended": "Zahlungssperre. Server wird gestoppt, Kundenrechte werden entzogen. Der Panelaccount bleibt bestehen, Daten bleiben erhalten, eine spätere Entsperrung ist möglich.",
+      "terminated": "Kündigung. Server wird gestoppt und eine Frist gesetzt. Es wird nichts sofort gelöscht."
+    },
+    "status": {
+      "pending": "Vertrag angelegt, technische Umsetzung noch nicht begonnen.",
+      "provisioning": "Server wird gerade erstellt und installiert.",
+      "ready": "Server existiert und ist dem Kunden zugewiesen.",
+      "suspended": "Server gestoppt, Kundenrechte entzogen, Daten erhalten.",
+      "terminating": "Gekündigt, Frist läuft — der Server existiert noch.",
+      "terminated": "Frist abgelaufen, Server gelöscht. server_id ist danach null.",
+      "failed": "Ein Vorgang ist gescheitert. status_code nennt den Grund."
+    },
+    "errors": {
+      "title": "Fehler und Statuscodes",
+      "persisted": "Ein fachlicher Fehlschlag ist nicht nur ein HTTP-Fehler. Der Vertrag bleibt mit status „failed“ und einem stabilen status_code abfragbar, damit der Shop nachträglich herausfinden kann, was passiert ist."
+    },
+    "http": {
+      "200": "Erfolg. Auch bei PUT — es gibt kein 201.",
+      "401": "API-Key fehlt, ist ungültig oder die Integration ist deaktiviert.",
+      "404": "Vertrag unbekannt (GET, Handoff).",
+      "422": "Konfigurationsfehler: unbekanntes oder deaktiviertes Produkt, fehlende Produktkennung bei Neuanlage, deaktivierter Dienstbenutzer, ungültiges Handoff-Ziel.",
+      "503": "Interner Fehler bei der Umsetzung."
+    },
+    "statusCode": {
+      "port_conflict": "Kein freier Portblock auf dem Zielhost.",
+      "node_not_found": "Das Produkt verweist auf eine Node, die es nicht gibt.",
+      "install_directory_exists": "Rückstand einer früheren Installation.",
+      "install_update_already_running": "Auf dem Server läuft bereits eine Installation.",
+      "hoster_configuration_error": "Produkt, Dienstbenutzer oder Identität sind nicht nutzbar.",
+      "hoster_internal_error": "Unerwarteter Fehler, im Panel-Log nachvollziehbar.",
+      "product_changed_manual_resize_required": "Hinweis, kein Fehler: Tarif gewechselt, Ressourcen noch nicht angepasst."
+    },
+    "webhooks": {
+      "title": "Webhooks",
+      "intro": "MSM meldet jede Zustandsänderung an das im Panel hinterlegte HTTPS-Ziel — wenn dort ein Webhook-Secret erzeugt wurde. Ohne Ziel oder Secret wird bewusst nichts eingestellt.",
+      "eventsLabel": "Eventnamen",
+      "headersLabel": "Header",
+      "bodyIntro": "Der Body ist das Response-Schema der externen API ohne task_id, plus das Feld event:",
+      "bodyLabel": "Body",
+      "noInternals": "Node-Namen, Hostadressen, Ports und Installationspfade gehören dem Betreiber, nicht dem Shop — sie erscheinen absichtlich nicht.",
+      "durable": "Zustellungen liegen in der Datenbank, nicht im Speicher: ein Panel-Neustart während eines Backoffs verliert nichts. Endgültig fehlgeschlagene Zustellungen lassen sich im Panel manuell erneut einplanen.",
+      "payloadLimit": "Payload-Obergrenze 16 KiB. Ein größerer Body wird still verworfen — es entsteht keine Zustellung und der Empfänger erfährt nichts davon. Im Normalbetrieb ist das unerreichbar, aber ein Empfänger sollte sich nicht darauf verlassen, jede Zustandsänderung zu sehen. Der GET-Endpunkt bleibt die verbindliche Quelle.",
+      "clientError": "Ein 200 ist die Bestätigung. Antwortet der Empfänger mit 4xx, gilt die Zustellung als endgültig abgelehnt — auch bei 401. Wer die Signatur falsch prüft, verliert dadurch Events ohne Retry."
+    },
+    "delivery": {
+      "timeout": {
+        "term": "Timeout je Versuch",
+        "body": "10 Sekunden. Danach wertet MSM den Versuch als fehlgeschlagen — die eigentliche Verarbeitung gehört beim Empfänger in eine Queue."
+      },
+      "attempts": {
+        "term": "Versuche",
+        "body": "5"
+      },
+      "backoff": {
+        "term": "Abstände",
+        "body": "30 s, 120 s, 600 s, 3600 s"
+      },
+      "clientError": {
+        "term": "4xx-Antwort",
+        "body": "Endgültig, keine Wiederholung."
+      },
+      "serverError": {
+        "term": "5xx oder Netzwerkfehler",
+        "body": "Wiederholung nach dem nächsten Abstand."
+      },
+      "redirects": {
+        "term": "Redirects",
+        "body": "Werden nicht verfolgt."
+      },
+      "retention": {
+        "term": "Aufbewahrung der Zustellprotokolle",
+        "body": "30 Tage"
+      }
+    },
+    "signature": {
+      "title": "Signatur nachrechnen",
+      "formula": "Die Signatur ist HMAC-SHA256 über die Zeichenkette {timestamp}.{body}, ausgegeben als sha256=<hex>. Der Zeitstempel ist Teil der signierten Daten — ohne ihn liesse sich ein abgefangener Request beliebig oft erneut zustellen.",
+      "rawBody": "Über den Rohbody signieren, nicht über neu serialisiertes JSON. MSM serialisiert ohne Leerzeichen und mit echten Umlauten. Wer den Body erst in ein Objekt parst und dann neu serialisiert, bekommt nahezu sicher eine andere Zeichenkette und damit eine andere Signatur. Die meisten Signaturprobleme in der Praxis haben genau diese Ursache.",
+      "exampleIntro": "Mit diesen Werten muss jede korrekte Implementierung denselben Digest liefern:",
+      "exampleLabel": "Rechenbeispiel",
+      "rulesTitle": "Regeln für den Empfänger"
+    },
+    "receiver": {
+      "constantTime": {
+        "term": "Zeitkonstant vergleichen",
+        "body": "hash_equals bzw. hmac.compare_digest. Ein == auf Strings gibt über die Laufzeit Auskunft über den korrekten Präfix."
+      },
+      "replay": {
+        "term": "Replay-Fenster prüfen",
+        "body": "MSM setzt keines durch; empfohlen sind ±5 Minuten. Der Zeitstempel ist signiert, kann also nicht gefälscht werden — aber ohne Fenster ist ein alter, mitgeschnittener Request beliebig lange wiederverwendbar."
+      },
+      "idempotent": {
+        "term": "Idempotent verarbeiten",
+        "body": "Bei einem 5xx oder Timeout wiederholt MSM. Dieselbe Zustandsmeldung kann mehrfach eintreffen; correlation_id plus status identifiziert sie."
+      },
+      "ordering": {
+        "term": "Reihenfolge nicht voraussetzen",
+        "body": "Bei Wiederholungen kann eine ältere Meldung nach einer neueren eintreffen. updated_at entscheidet, welche die aktuellere ist."
+      },
+      "fast": {
+        "term": "Schnell antworten",
+        "body": "Nach 10 Sekunden bricht MSM ab und wertet das als Fehlversuch."
+      }
+    },
+    "handoff": {
+      "title": "Ein-Klick-Handoff",
+      "intro": "Der Kunde klickt im Shop auf „Server verwalten“ und landet angemeldet in seinem MSM-Panel — ohne zweites Passwort und ohne separate Registrierung.",
+      "serviceIdType": "string 1–128, Pflicht",
+      "serviceIdBody": "Vertrag, für den der Link gilt.",
+      "targetType": "string ≤128, optional",
+      "targetBody": "Sprungziel im Panel. Erlaubt sind ausschliesslich /servers, /servers/{id} und /dashboard. Default ist /servers, alles andere ergibt 422.",
+      "commandLabel": "Handoff erzeugen",
+      "createOnClick": "Der Link sollte deshalb beim Klick erzeugt werden, nicht beim Rendern der Shop-Seite.",
+      "splitHosting": "Split-Hosting beachten: die zurückgegebene URL wird aus MSM_PANEL_URL gebaut, während /api/hoster/handoff/{token} eine Backend-Route ist. Wer Frontend und API auf getrennten Hosts betreibt, muss sicherstellen, dass MSM_PANEL_URL auf einen Host zeigt, der /api/* an das Backend weiterreicht — sonst führt der Link ins Leere.",
+      "oidc": "Zusätzlich kann der bestehende Custom-OIDC-Login verwendet werden. Beides ist gleichzeitig möglich: Handoff für den direkten Klick aus dem Shop, OIDC für einen normalen erneuten Login im Panel."
+    },
+    "handoffFact": {
+      "ttl": {
+        "term": "Gültigkeit",
+        "body": "5 Minuten"
+      },
+      "once": {
+        "term": "Verwendung",
+        "body": "Genau einmal"
+      },
+      "bound": {
+        "term": "Bindung",
+        "body": "An einen bestimmten Benutzer und Vertrag"
+      },
+      "targets": {
+        "term": "Zielpfade",
+        "body": "Nur /servers, /servers/{id}, /dashboard — kein frei steuerbarer Redirect"
+      },
+      "hashOnly": {
+        "term": "Speicherung",
+        "body": "Nur der Hash. Der Link erscheint weder im Audit noch in Logs."
+      },
+      "concurrent": {
+        "term": "Gleichzeitig gültig",
+        "body": "Höchstens 5 Token je Benutzer, ältere verfallen"
+      },
+      "uniformError": {
+        "term": "Fehlerverhalten",
+        "body": "Unbekannt, abgelaufen und bereits verwendet führen einheitlich auf die Loginseite. Aus der Antwort ist nicht ableitbar, welcher Fall vorlag."
+      }
+    },
+    "admin": {
+      "title": "Panel-Verwaltung",
+      "intro": "Diese Endpunkte bedienen die Panel-Oberfläche. Sie nutzen Cookie-Auth mit CSRF-Schutz, nicht den Hoster-API-Key. Für Automatisierung und Infrastructure-as-Code sind sie hier vollständig gelistet.",
+      "colMethod": "Methode",
+      "colPath": "Pfad",
+      "colPermission": "Berechtigung",
+      "colPurpose": "Zweck",
+      "list": "Integrationen auflisten",
+      "create": "Integration anlegen — Antwort enthält den API-Key einmalig",
+      "update": "Name, Status, Dienstbenutzer, Webhook-Ziel, Kulanzfrist ändern",
+      "rotateKey": "API-Key rotieren — alter Key sofort ungültig",
+      "rotateSecret": "Webhook-Secret erzeugen oder rotieren",
+      "delete": "Integration löschen (nur ohne aktive Verträge)",
+      "listProducts": "Produktzuordnungen lesen",
+      "putProduct": "Produktzuordnung anlegen oder ersetzen",
+      "deleteProduct": "Produktzuordnung entfernen",
+      "listServices": "Verträge dieser Integration",
+      "listDeliveries": "Webhook-Zustellprotokoll (Statuscode, Versuch — nie Signatur oder Body)",
+      "retryDelivery": "Fehlgeschlagene Zustellung erneut einplanen",
+      "openapi": "Das vollständige OpenAPI-Schema ist unter /api/docs verfügbar und erfordert eine Anmeldung mit der Berechtigung panel.settings.read."
+    },
+    "operations": {
+      "title": "Betriebshinweise",
+      "serviceUser": {
+        "term": "Der Dienstbenutzer ist die Grenze",
+        "body": "Die Integration kann nie mehr als er. Er braucht servers.create und — für die automatische Löschung nach Ablauf der Kündigungsfrist — zusätzlich servers.delete. Der Owner-Account ist bewusst nicht zulässig."
+      },
+      "customerRights": {
+        "term": "Kundenrechte",
+        "body": "Kunden erhalten Rechte nur auf ihrem eigenen Server, per-Server delegiert statt über eine globale Rolle. Bewusst nicht enthalten: Neuinstallation, Netzwerk- und Ressourcenverwaltung, Container-Exec, Datenbankadministration."
+      },
+      "noDelete": {
+        "term": "Keine Löschung mit aktiven Verträgen",
+        "body": "Ein Cascade würde die Zuordnung zwischen Kunden und ihren laufenden Servern zerstören, während die Server weiterlaufen."
+      },
+      "audit": {
+        "term": "Audit",
+        "body": "Alle Vorgänge erscheinen mit Origin external und der gemeinsamen correlation_id — ohne Secrets und ohne Kundenkennungen im Klartext."
+      },
+      "noSecrets": {
+        "term": "Keine Shop-Geheimnisse",
+        "body": "MSM speichert kein Shop-Passwort und keine Zahlungsdaten. Gespeichert werden die externe Kunden- und Vertragskennung sowie optional die E-Mail für die Erstanlage des Panel-Benutzers."
+      },
+      "setupLink": "Einrichtung im Panel"
     }
   }
 }

@@ -4,6 +4,8 @@ import os
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from limits import parse
@@ -43,6 +45,7 @@ from routers import (
     ai_providers_router,
     ai_chat_router,
     ai_actions_router,
+    ai_autonomy_router,
     ai_memory_router,
     ai_skills_router,
     ai_attachments_router,
@@ -558,11 +561,23 @@ async def lifespan(app: FastAPI):
     await close_steam_service()
 
 
+# Die automatischen Doku-Routen sind bewusst abgeschaltet und werden weiter
+# unten unter /api/* neu registriert. Zwei Gruende:
+#
+# 1. FastAPI registriert /docs bereits im Konstruktor, der SPA-Mount auf "/"
+#    kommt erst am Dateiende. Starlette matcht in Registrierungsreihenfolge —
+#    im Single-Host-Betrieb lieferte ein Aufruf von https://panel/docs deshalb
+#    die Swagger-UI statt der Doku-Seite des Panels.
+# 2. /openapi.json haette keinerlei Auth-Dependency und gaebe damit anonym das
+#    vollstaendige Schema aller Endpunkte inklusive der Hoster-Verwaltung heraus.
 app = FastAPI(
     title=settings.app_name,
     description="Maunting Server Manager — Universeller Game Server Manager",
     version="3.0.0",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # ── CORS: Explizite Origins (panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev) ──
@@ -605,14 +620,23 @@ def _csp_connect_src() -> str:
     return " ".join(parts)
 
 
+# Die Swagger- und ReDoc-Oberflaechen laden ihre Assets von jsdelivr. Die
+# Freigabe gilt ausschliesslich fuer diese beiden Pfade — jede andere Antwort
+# behaelt die enge Standard-CSP. Ohne diese Ausnahme waere die Seite leer, und
+# eine leere Seite haette man leicht fuer einen Serverfehler gehalten.
+_API_DOCS_PATHS = frozenset({"/api/docs", "/api/redoc"})
+_DOCS_CDN = "https://cdn.jsdelivr.net"
+
+
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
+    docs_page = request.url.path in _API_DOCS_PATHS
     csp = (
         "default-src 'self'; "
-        "script-src 'self' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
-        "style-src 'self' 'unsafe-inline' https://singrabot.mauntingstudios.de; "
-        "img-src 'self' data: https://singrabot.mauntingstudios.de; "
+        f"script-src 'self'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
+        f"style-src 'self' 'unsafe-inline'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
+        f"img-src 'self' data:{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
         f"connect-src {_csp_connect_src()} https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to; "
         "font-src 'self' https://singrabot.mauntingstudios.de; "
         "frame-src 'self' https://singrabot.mauntingstudios.de; "
@@ -680,6 +704,7 @@ app.include_router(ai_providers_router)
 app.include_router(ai_chat_router)
 app.include_router(ai_actions_router)
 app.include_router(ai_memory_router)
+app.include_router(ai_autonomy_router)
 app.include_router(ai_skills_router)
 app.include_router(ai_attachments_router)
 app.include_router(tasks_router)
@@ -692,6 +717,35 @@ app.include_router(hoster_handoff_router)
 # Zugangsdaten auf Benutzer- und Serverebene (Phase 7).
 app.include_router(credentials_router)
 
+
+
+# ── OpenAPI: unter /api/*, angemeldet und rechtegebunden ──
+# Das Schema beschreibt jeden Endpunkt inklusive der Hoster-Verwaltung und der
+# erwarteten Header. Das ist kein Geheimnis, aber auch nichts, was ohne Login
+# herausgehen muss. `panel.settings.read` ist dasselbe Recht, das auch die
+# Provider- und Integrationsansichten oeffnet.
+from dependencies import require_global  # noqa: E402  (nach der App-Definition noetig)
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+def openapi_schema(_: object = Depends(require_global("panel.settings.read"))):
+    return JSONResponse(app.openapi())
+
+
+@app.get("/api/docs", include_in_schema=False)
+def swagger_ui(_: object = Depends(require_global("panel.settings.read"))):
+    return get_swagger_ui_html(
+        openapi_url="/api/openapi.json",
+        title=f"{settings.app_name} — API",
+    )
+
+
+@app.get("/api/redoc", include_in_schema=False)
+def redoc_ui(_: object = Depends(require_global("panel.settings.read"))):
+    return get_redoc_html(
+        openapi_url="/api/openapi.json",
+        title=f"{settings.app_name} — API",
+    )
 
 
 @app.get("/api/version")

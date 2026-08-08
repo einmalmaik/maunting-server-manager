@@ -366,6 +366,12 @@ Servererstellung und den Lifecycle.
 Verhalten dieses Abschnitts. Die Tabellen bleiben leer, es gibt keinen
 zusätzlichen Dienst und keinen offenen Endpunkt, der ohne API-Key etwas tut.
 
+> Dieser Abschnitt beschreibt **Einrichtung und Betrieb**. Wer den Shop
+> tatsächlich anbindet, braucht die vollständige Referenz mit allen
+> Request- und Response-Feldern, Webhook-Nutzlasten, Eventnamen und einem
+> nachrechenbaren HMAC-Beispiel: **[hoster-api.md](hoster-api.md)**, im Panel
+> auch unter *Hilfe → Hoster-API*.
+
 ### Einrichtung im Panel
 
 Einstellungen → Tab **Hoster** (Permission `panel.hoster.read`, Änderungen
@@ -506,6 +512,72 @@ allein erlauben es nicht, fremde Zugangsdaten in Betrieb zu nehmen.
   auf den Panel-Zugang zurück.
 - Ein nicht mehr entschlüsselbares Credential (typisch nach `MSM_SECRET_KEY`-
   Rotation) führt zu einem klaren Fehler, **nicht** zu einem stillen Rückfall.
+
+---
+
+## KI-Werkzeuge und autonomer Modus (Phase 8)
+
+**Ohne konfigurierten Provider passiert nichts von alledem.** Ein frisch
+installiertes Panel hat keinen KI-Anbieter und alle Rollenkontingente stehen auf
+0 — die KI ist damit aus, bis ein Betreiber sie unter *Einstellungen → KI*
+einrichtet.
+
+### Was die KI tun kann
+
+Die KI verwendet ausschließlich vorhandene MSM-Funktionen; es gibt keine freie
+Befehlsausführung und keinen eigenen Downloadpfad.
+
+**Lesend** (jedes Werkzeug prüft sein eigenes Recht): Serverstatus, Node-Kapazität,
+Logausschnitt, Konfigurationsdatei, Ports, Mods, Backups, Guardian-Vorfälle,
+bisherige KI-Aktionen, ausstehende Modupdates, Workshop-Suche. Im Panel-Chat
+zusätzlich die Blueprint-Liste und die Hostkapazität.
+
+**Schreibend** — jedes erzeugt zunächst nur einen sichtbaren Vorschlag:
+Start/Stop/Neustart, Backup, revisionsgebundene Konfigurationsänderung,
+Mod-Installation und Servererstellung.
+
+Die Servererstellung läuft über denselben `server_provisioning_service` wie ein
+Klick im Panel und eine Shop-Bestellung. Blueprintprüfung, Kapazität, Portvergabe,
+Installation und Rollback sind identisch — es gibt bewusst keinen zweiten Weg,
+einen Server anzulegen.
+
+### Autonomer Modus
+
+Standard ist der unterstützte Modus: die KI analysiert, schlägt vor, wartet.
+
+Autonomie verlangt **vier** Bedingungen gleichzeitig:
+
+1. die Berechtigung `ai.autonomous.use`;
+2. eine ausdrückliche Freigabe des Benutzers — pro Server im KI-Tab des Servers
+   oder panelweit unter *KI*. Eine Freigabe für einen konkreten Server gewinnt
+   über die panelweite, **auch wenn sie abschaltet**;
+3. ein Werkzeug, das nicht auf der Immer-bestätigen-Liste steht (Löschen, Wipe,
+   Neuinstallation, Backup-Wiederherstellung, Blueprint-Wechsel, Secret-Rotation,
+   Rechteänderung);
+4. freies Stundenbudget (Standard 10 Aktionen). Ist es erschöpft, **schlägt
+   nichts fehl** — die KI fragt einfach wieder nach.
+
+> **Was Autonomie nicht entfernt.** Sie ersetzt genau einen Schritt: die
+> Bestätigung durch einen Menschen. Die Rechteprüfung läuft weiterhin dreimal
+> (Vorschlag, Freigabe, unmittelbar vor der Ausführung), der Server-Mutex gilt,
+> und jede Aktion steht im Audit mit `origin=ai` und `autonomous: true`. Die KI
+> kann nichts, was der handelnde Benutzer nicht selbst dürfte.
+
+Ein Betreiber, der Autonomie grundsätzlich erlauben, aber auf einem empfindlichen
+Server ausschließen will, legt dort eine Freigabe mit `enabled: false` an.
+
+### Was an den Anbieter geht
+
+Nachricht, begrenzte Historie, freigegebene Servermetadaten und die Ergebnisse
+der Werkzeugaufrufe — jeweils durch `redact_sensitive_text` geführt und
+längenbegrenzt. Tool-Ergebnisse werden für Rückfragen im selben Chat gespeichert
+und mit dem Chat gelöscht. Alles, was aus einem Server stammt (Logs, Configs,
+Memory, Anhänge), ist im Modellkontext ausdrücklich als `untrusted` markiert.
+
+Der Prompt ist dabei **nicht** die Sicherheitsgrenze. Selbst wenn ein Modell
+einer in ein Gameserver-Log geschriebenen Anweisung folgt, scheitert die
+Umsetzung an RBAC, der Tool-Allowlist, den Pfadgrenzen und der
+Bestätigungspflicht.
 
 ---
 

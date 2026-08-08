@@ -15,3 +15,11 @@ moto[s3]==5.2.2
 # Asyncio-Testausführung für echte Scheduler-, Streaming- und Multi-Node-Tests.
 # Test-only; keine Produktionseinbindung und kein Zugriff auf Runtime-Secrets.
 pytest-asyncio==1.4.0
+
+# YAML-Parser für die Kubernetes-Vertragstests (test_kubernetes_manifests.py).
+# Bisher war PyYAML nur transitiv über moto→responses vorhanden. Der Test nutzt
+# `pytest.importorskip("yaml")` und hätte sich bei einer Änderung dieser Kette
+# still übersprungen — neun Tests, die Betriebsbedingungen erzwingen sollen,
+# wären wirkungslos geworden, ohne dass jemand es bemerkt.
+# Test-only; kein Produktionseinsatz.
+PyYAML==6.0.3

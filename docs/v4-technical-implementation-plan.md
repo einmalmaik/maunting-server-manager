@@ -346,6 +346,83 @@ Quelle: `docs/ai-engine-planning.md` (verbindliches Produkt-Zielbild)
 - Diese Zusagen sind in `backend/tests/test_kubernetes_manifests.py` als Test
   festgehalten, damit sie beim Bearbeiten der Manifeste nicht still wegbrechen.
 
+## Phase 8 — Shop-API-Referenz, erweiterte AI-Werkzeuge, autonomer Modus
+
+### Shop-API-Referenz
+
+`docs/hoster-api.md` und die In-App-Seite `/docs/hoster-api` beschreiben den
+vollständigen Vertrag: alle fünf externen Endpunkte plus die zwölf
+Admin-Endpunkte, jedes Request- und Response-Feld, das Zustandsvokabular, die
+Webhook-Nutzlast mit allen Eventnamen und ein nachrechenbares HMAC-Beispiel.
+
+`SERVICE_STATUSES` in `hoster_service_lifecycle.py` ist die gemeinsame Quelle;
+`_set_status()` erzwingt sie bei jeder Zuweisung.
+`test_hoster_api_docs_contract.py` schlägt fehl, sobald ein Endpunkt, ein
+Status, ein Antwortfeld oder ein Betriebswert (Timeout, Backoff, Retention,
+Payload-Grenze) nicht dokumentiert ist — und wenn das HMAC-Beispiel nicht mehr
+zu `sign_payload()` passt.
+
+Dokumentiert ist ausdrücklich auch, was vorher nur im Code stand: dass eine
+Payload über 16 KiB **still verworfen** wird und dass eine `4xx`-Antwort des
+Empfängers die Zustellung endgültig beendet.
+
+### Erweiterte AI-Werkzeuge
+
+Die Tool-Allowlist wächst von 7 auf 15 server-bezogene plus 3 globale Werkzeuge.
+Neu lesend: Ports, Mods, Backups, Guardian-Vorfälle, KI-Aktionsverlauf,
+Mod-Updates, Workshop-Suche; im Panel-Chat Blueprint-Liste und Hostkapazität.
+Neu schreibend: `propose_mod_install` und `propose_server_create`.
+
+- **Kein zweiter Erstellungsweg.** `propose_server_create` ruft ausschließlich
+  `server_provisioning_service.provision_server` mit `ActorContext(origin="ai")`
+  und `idempotency_key=f"ai-{proposal_id}"`. `propose_mod_install` nutzt
+  `install_mod_bg` samt dessen Install-Lock — die KI bekommt keinen eigenen
+  Downloadpfad, Zielpunkt 16 bleibt unangetastet.
+- **`ai_action_proposals.server_id` ist nullable**, weil ein Erstellungsvorschlag
+  vor der Ausführung keinen Server hat. Nach der Ausführung trägt er ihn.
+- **Bis zu drei Read-Runden** statt einer. Ohne das war „Kapazität lesen →
+  Blueprints lesen → vorschlagen" unmöglich.
+- **Tool-Ergebnisse werden persistiert** (`ai_tool_results`) und als ein
+  untrusted `user`-Block wieder eingespeist, begrenzt auf 8.000 Zeichen. Eine
+  Rückfrage sieht die zuvor gelesenen Daten damit noch.
+- **Jedes Schreib-Tool verlangt `reason` und `expected_effect`** (Zielpunkt 3.6).
+  Ein Skill-Schritt liefert stattdessen seine Herkunft — die präzisere Angabe.
+
+### Autonomer Modus
+
+`ai.autonomous.use` bekommt eine Wirkung. Vier Bedingungen müssen gleichzeitig
+gelten: die Berechtigung, ein aktiver `AiAutonomyGrant` (pro Server oder
+panelweit, spezifischer gewinnt **auch wenn er abschaltet**), ein Werkzeug
+außerhalb von `ALWAYS_CONFIRM_TOOLS`, und freies Stundenbudget.
+
+Die Ausführung läuft über `execute_autonomously()` und damit über exakt dieselben
+zwei Schritte wie eine bestätigte Aktion — `confirm_proposal` und
+`execute_proposal`. Autonomie ersetzt genau einen Schritt: den Klick des
+Menschen. Rechteprüfung, Aktivprüfung, Server-Mutex und Audit bleiben. Ist das
+Budget erschöpft, schlägt nichts fehl; der Vorschlag wird wieder
+bestätigungspflichtig.
+
+### Sicherheitsbefunde
+
+- `assert_provider_destination` prüft und pinnt jetzt dieselbe DNS-Auflösung.
+  Vorher stammte die gepinnte Adresse aus einer zweiten, ungeprüften Abfrage —
+  exakt das Rebinding-Fenster, das die Funktion schließen sollte.
+- Skill-Läufe reservieren über `reserve_ai_usage`. Vorher liefen sie an
+  `requests_per_minute` und `concurrent_operations` vollständig vorbei.
+- Die FastAPI-Doku-Routen liegen unter `/api/docs`, `/api/redoc`,
+  `/api/openapi.json` und verlangen `panel.settings.read`. Vorher überschattete
+  Swagger im Single-Host-Betrieb die Doku-Seite des Panels, und das vollständige
+  Schema war ohne Login abrufbar.
+- Tool-Ergebnisse tragen ein `untrusted`-Flag, Memory läuft als `role: user`
+  statt `system` und escaped Zeilenumbrüche, und der Bestätigungsdialog nennt
+  Werkzeug, Änderung und Herkunft.
+
+### Migrationskette
+
+`test_migration_chain_upgrade.py` fährt die neun Migrationen dieses Branches
+per `downgrade` auf den Stand von `main` und wieder hoch — echte DDL statt
+`stamp`. Vorher führten zwei von ihnen ihr `upgrade()` in keinem Test aus.
+
 ## Abnahmekriterien je Schnitt
 
 - Eingaben sind begrenzt und validiert; erwartete Fehler sind typisiert und

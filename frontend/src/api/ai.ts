@@ -53,18 +53,41 @@ export interface AiConversationDetail extends AiConversation {
   messages: AiMessage[]
 }
 
+export type AiWriteTool =
+  | 'propose_server_lifecycle'
+  | 'propose_backup'
+  | 'propose_config_update'
+  | 'propose_mod_install'
+  | 'propose_server_create'
+
 export interface AiActionProposal {
   id: string
   conversation_id: string
-  server_id: number
-  tool_name: 'propose_server_lifecycle' | 'propose_backup' | 'propose_config_update'
+  /** Null bei einem Erstellungsvorschlag — den Server gibt es dann noch nicht. */
+  server_id: number | null
+  tool_name: AiWriteTool
   preview: Record<string, unknown>
   expected_revision: string | null
   requires_confirmation: boolean
+  /** True heisst: kein Mensch hat zugestimmt. Muss sichtbar anders aussehen. */
+  autonomous: boolean
+  reason: string | null
+  expected_effect: string | null
   status: 'proposed' | 'confirmed' | 'executing' | 'succeeded' | 'failed' | 'expired'
   task_id: string | null
   error_code: string | null
   created_at: string
+}
+
+export interface AiAutonomyGrant {
+  id: number
+  /** Null = panelweit. */
+  server_id: number | null
+  enabled: boolean
+  max_actions_per_hour: number
+  used_last_hour: number
+  created_at: string
+  updated_at: string
 }
 
 export interface AiMemoryEntry {
@@ -119,6 +142,9 @@ export type AiStreamEvent =
   | { event: 'message'; data: { message_id: string; request_id: string } }
   | { event: 'delta'; data: { content: string } }
   | { event: 'proposal'; data: AiActionProposal }
+  // Eine bereits ausgefuehrte autonome Aktion. Bewusst ein eigenes Ereignis:
+  // sie ist keine Anfrage an den Benutzer, sondern eine Meldung.
+  | { event: 'action'; data: AiActionProposal }
   | { event: 'done'; data: { message_id: string; replayed?: boolean } }
   | { event: 'error'; data: { code: string; message_key: string } }
 
@@ -169,6 +195,11 @@ export const aiApi = {
     method: 'POST',
     body: JSON.stringify({ confirmation_token: confirmationToken }),
   }),
+  listAutonomyGrants: () => api<AiAutonomyGrant[]>('/ai/autonomy'),
+  saveAutonomyGrant: (payload: { server_id: number | null; enabled: boolean; max_actions_per_hour: number }) =>
+    api<AiAutonomyGrant>('/ai/autonomy', { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteAutonomyGrant: (serverId: number | null) =>
+    api(`/ai/autonomy${serverId === null ? '' : `?server_id=${serverId}`}`, { method: 'DELETE' }),
   listMemory: (scope: AiMemoryEntry['scope'], serverId?: number) => api<AiMemoryEntry[]>(`/ai/memory?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}`),
   saveMemory: (payload: { scope: AiMemoryEntry['scope']; server_id?: number; key: string; value: string }) => api<AiMemoryEntry>('/ai/memory', {
     method: 'PUT', body: JSON.stringify(payload),

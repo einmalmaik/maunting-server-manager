@@ -64,6 +64,10 @@ export function Privacy() {
           t('privacyPolicy.sections.ai.items.usage'),
           t('privacyPolicy.sections.ai.items.memory'),
           t('privacyPolicy.sections.ai.items.attachments'),
+          // Zielpunkt 17: der autonome Modus veraendert, wer eine Aktion
+          // ausloest. Das gehoert ausdruecklich in den Datenschutzhinweis.
+          t('privacyPolicy.sections.ai.items.autonomy'),
+          t('privacyPolicy.sections.ai.items.tools'),
         ],
       },
       {

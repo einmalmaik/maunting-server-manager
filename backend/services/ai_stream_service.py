@@ -13,13 +13,15 @@ import httpx
 from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
-from models import AiMessage, AiProvider, AiUsageEvent, User
+from models import AiActionProposal, AiMessage, AiProvider, AiToolResult, AiUsageEvent, User
 from services.ai_chat_service import get_owned_conversation
 from services.ai_action_service import (
+    AiActionStateError,
     AiActionValidationError,
     READ_TOOLS,
     WRITE_TOOLS,
     create_proposal,
+    execute_autonomously,
     execute_read_tool,
     provider_tool_definitions,
 )
@@ -48,6 +50,11 @@ from services.openai_compatible_adapter import (
 
 logger = logging.getLogger(__name__)
 MAX_TOOL_CALLS = 4
+# Bis zu drei aufeinanderfolgende Read-Runden. Vorher war genau eine erlaubt:
+# ein Ablauf wie "Kapazitaet lesen → Blueprints lesen → Server vorschlagen" war
+# damit unmoeglich, weil die zweite Runde nur noch Write-Tools akzeptierte und
+# ein legitimer zweiter Lesezugriff den ganzen Stream abbrach.
+MAX_TOOL_ROUNDS = 3
 
 
 def sse_event(event: str, payload: dict) -> str:
@@ -146,11 +153,31 @@ def _tool_followup_messages(
                 tool_name=call.name,
                 arguments=call.arguments,
             )
+            # Persistieren, damit eine Rueckfrage im selben Chat die gerade
+            # gelesenen Daten noch sieht. Ohne das musste das Modell sie neu
+            # holen — oder antwortete ohne sie, obwohl es sie selbst geholt hatte.
+            db.add(AiToolResult(
+                id=str(uuid4()),
+                conversation_id=conversation.id,
+                tool_name=call.name,
+                result_json=json.dumps(value, ensure_ascii=True, separators=(",", ":")),
+            ))
+            # Das Ergebnis wird ausdruecklich als unvertrauenswuerdig gekennzeichnet.
+            # Genau hier kommt der Text an, den ein Spieler ueber den Chat eines
+            # Gameservers in dessen Log geschrieben hat: read_server_logs liefert
+            # bis zu 24.000 Zeichen, die vollstaendig von aussen stammen koennen.
+            # Anhaenge tragen dieses Label seit jeher (ai_attachment_service),
+            # Tool-Ergebnisse bisher nicht — obwohl sie der offenere Kanal sind.
             results.append({
                 "role": "tool",
                 "tool_call_id": call.id,
-                "content": json.dumps(value, ensure_ascii=True, separators=(",", ":")),
+                "content": json.dumps(
+                    {"untrusted": True, "tool": call.name, "data": value},
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ),
             })
+        db.commit()
         return results
 
 
@@ -178,16 +205,37 @@ def _persist_write_proposals(
             for call in tool_calls
         ]
         db.commit()
-        return [
-            {
-                "id": proposal.id,
-                "server_id": proposal.server_id,
-                "tool_name": proposal.tool_name,
-                "preview": json.loads(proposal.preview_json),
-                "status": proposal.status,
-            }
+        results: list[dict] = []
+        # Feste Kopien: `execute_autonomously` committet und rollt bei einem
+        # Fehler zurueck. Ein danach noch gehaltenes ORM-Objekt waere abgelaufen.
+        summaries = [
+            (proposal.id, proposal.tool_name, proposal.preview_json, proposal.autonomous)
             for proposal in proposals
         ]
+        for proposal_id, tool_name, preview_json, autonomous in summaries:
+            error_code: str | None = None
+            if autonomous:
+                # Sofort ausfuehren — aber ueber denselben Pfad wie eine
+                # bestaetigte Aktion. Scheitert sie, endet das nicht den Stream:
+                # der Benutzer soll die Antwort samt Fehlergrund sehen.
+                try:
+                    execute_autonomously(db, proposal_id=proposal_id, user=user)
+                except AiActionStateError as exc:
+                    error_code = exc.code
+                except Exception:
+                    logger.warning("Autonome AI-Aktion fehlgeschlagen id=%s", proposal_id)
+                    error_code = "AI_ACTION_EXECUTION_FAILED"
+            current = db.get(AiActionProposal, proposal_id)
+            results.append({
+                "id": proposal_id,
+                "server_id": current.server_id if current is not None else None,
+                "tool_name": tool_name,
+                "preview": json.loads(preview_json),
+                "status": current.status if current is not None else "failed",
+                "autonomous": bool(autonomous),
+                **({"error_code": error_code} if error_code else {}),
+            })
+        return results
 
 
 async def stream_conversation_reply(
@@ -299,64 +347,62 @@ async def stream_conversation_reply(
     # fehlgeschlagen ueberschreiben.
     finalized = False
     try:
-        tools = provider_tool_definitions() if server_id is not None else None
-        async for delta in stream_chat_completion(
-            client,
-            provider=provider,
-            api_key=api_key,
-            messages=provider_messages,
-            usage=usage,
-            tools=tools,
-        ):
-            chunks.append(delta)
-            yield sse_event("delta", {"content": delta})
-        if usage.tool_calls:
+        # Auch der Panel-Chat bekommt Werkzeuge — dort die globalen. Vorher war
+        # `tools` ohne Serverbezug schlicht `None`, weshalb die in Zielpunkt 3.1
+        # geforderte Servererstellung nirgends andocken konnte.
+        tools = provider_tool_definitions(server_scoped=server_id is not None)
+        current_usage = usage
+        rounds = 0
+        while True:
+            async for delta in stream_chat_completion(
+                client,
+                provider=provider,
+                api_key=api_key,
+                messages=provider_messages,
+                usage=current_usage,
+                tools=tools,
+            ):
+                chunks.append(delta)
+                yield sse_event("delta", {"content": delta})
+            if current_usage is not usage:
+                usage.total_tokens = (
+                    usage.total_tokens + current_usage.total_tokens
+                    if usage.total_tokens is not None and current_usage.total_tokens is not None
+                    else usage.total_tokens or current_usage.total_tokens
+                )
+            if not current_usage.tool_calls:
+                break
+
             kinds = {
                 "read" if call.name in READ_TOOLS else "write" if call.name in WRITE_TOOLS else "unknown"
-                for call in usage.tool_calls
+                for call in current_usage.tool_calls
             }
-            if kinds == {"read"}:
-                provider_messages.extend(_tool_followup_messages(
+            if kinds == {"write"}:
+                # Schreib-Tools beenden die Schleife: ab hier entscheidet der
+                # Mensch (oder, bei erteilter Freigabe, die Autonomiegrenze).
+                for proposal in _persist_write_proposals(
                     user_id=user_id,
                     conversation_id=conversation_id,
-                    tool_calls=usage.tool_calls,
-                ))
-                followup_usage = StreamUsage()
-                async for delta in stream_chat_completion(
-                    client,
-                    provider=provider,
-                    api_key=api_key,
-                    messages=provider_messages,
-                    usage=followup_usage,
-                    tools=tools,
-                ):
-                    chunks.append(delta)
-                    yield sse_event("delta", {"content": delta})
-                if followup_usage.tool_calls:
-                    proposals = _persist_write_proposals(
-                        user_id=user_id,
-                        conversation_id=conversation_id,
-                        tool_calls=followup_usage.tool_calls,
-                        correlation_id=str(request_id),
-                    )
-                    for proposal in proposals:
-                        yield sse_event("proposal", proposal)
-                usage.total_tokens = (
-                    usage.total_tokens + followup_usage.total_tokens
-                    if usage.total_tokens is not None and followup_usage.total_tokens is not None
-                    else usage.total_tokens or followup_usage.total_tokens
-                )
-            elif kinds == {"write"}:
-                proposals = _persist_write_proposals(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    tool_calls=usage.tool_calls,
+                    tool_calls=current_usage.tool_calls,
                     correlation_id=str(request_id),
-                )
-                for proposal in proposals:
-                    yield sse_event("proposal", proposal)
-            else:
+                ):
+                    yield sse_event(
+                        "action" if proposal.get("autonomous") else "proposal", proposal
+                    )
+                break
+            if kinds != {"read"}:
+                # Gemischt oder unbekannt: nicht entscheidbar, also gar nichts.
                 raise AiProviderRequestError("AI_PROVIDER_TOOL_SEQUENCE_INVALID")
+
+            rounds += 1
+            if rounds > MAX_TOOL_ROUNDS:
+                raise AiProviderRequestError("AI_PROVIDER_TOOL_ROUNDS_EXCEEDED")
+            provider_messages.extend(_tool_followup_messages(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                tool_calls=current_usage.tool_calls,
+            ))
+            current_usage = StreamUsage()
         complete_content = "".join(chunks)
         estimated_actual = max(
             1,

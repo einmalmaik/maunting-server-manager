@@ -1,0 +1,142 @@
+"""Autonomer KI-Modus: wann eine Aktion ohne Rueckfrage laufen darf.
+
+Zielpunkt 3.7. Der Standardmodus bleibt der unterstuetzte: die KI analysiert,
+schlaegt vor und wartet. Autonomie ist die Ausnahme und muss vier Bedingungen
+gleichzeitig erfuellen — Recht, ausdrueckliche Freigabe, erlaubtes Werkzeug und
+freies Stundenbudget.
+
+**Was Autonomie nicht tut:** sie hebt keine Berechtigung auf. Jede Aktion
+durchlaeuft `_require_tool_permission` beim Anlegen und erneut unmittelbar vor
+der Ausfuehrung, dazu die Aktivpruefung des Benutzers und den Server-Mutex.
+Entfernt wird ausschliesslich der Schritt, in dem ein Mensch zustimmt.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy.orm import Session
+
+from models import AiActionProposal, AiAutonomyGrant, User
+from services import permission_service
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def resolve_grant(
+    db: Session, *, user_id: int, server_id: int | None
+) -> AiAutonomyGrant | None:
+    """Sucht die zutreffende Freigabe: erst der Server, dann panelweit.
+
+    Die spezifischere Angabe gewinnt — **auch wenn sie abschaltet**. Deshalb
+    wird hier bewusst nicht nach `enabled` gefiltert: sonst waere ein gezielt
+    deaktivierter Server-Grant unsichtbar und die panelweite Freigabe wuerde ihn
+    ueberstimmen. Genau der Fall, den ein Betreiber braucht, der Autonomie
+    grundsaetzlich erlaubt, aber auf einem empfindlichen Server nicht.
+
+    Die `enabled`-Pruefung passiert deshalb erst beim Aufrufer.
+    """
+    rows = (
+        db.query(AiAutonomyGrant)
+        .filter(AiAutonomyGrant.user_id == user_id)
+        .all()
+    )
+    by_scope = {row.server_id: row for row in rows}
+    if server_id is not None and server_id in by_scope:
+        return by_scope[server_id]
+    return by_scope.get(None)
+
+
+def hourly_usage(db: Session, *, user_id: int, now: datetime | None = None) -> int:
+    """Zaehlt die autonom erzeugten Aktionen der letzten Stunde."""
+    since = (now or _now()) - timedelta(hours=1)
+    return int(
+        db.query(AiActionProposal)
+        .filter(
+            AiActionProposal.user_id == user_id,
+            AiActionProposal.autonomous.is_(True),
+            AiActionProposal.created_at >= since,
+        )
+        .count()
+    )
+
+
+def autonomy_allows(
+    db: Session,
+    *,
+    user: User,
+    server_id: int | None,
+    tool_name: str,
+    now: datetime | None = None,
+) -> bool:
+    """Entscheidet, ob dieser eine Vorschlag ohne Bestaetigung laufen darf."""
+    from services.ai_action_service import ALWAYS_CONFIRM_TOOLS
+
+    if tool_name in ALWAYS_CONFIRM_TOOLS:
+        return False
+    if not permission_service.has_global_permission(db, user, "ai.autonomous.use"):
+        return False
+    grant = resolve_grant(db, user_id=user.id, server_id=server_id)
+    if grant is None or not grant.enabled:
+        return False
+    if grant.max_actions_per_hour <= 0:
+        return False
+    # Die Obergrenze begrenzt nicht die Berechtigung, sondern die Menge: ein in
+    # eine Schleife geratenes Modell soll nicht in einer Minute vierzig Backups
+    # anstossen. Bei Erreichen faellt die Aktion zurueck auf Bestaetigungspflicht
+    # statt zu scheitern — der Benutzer verliert nur die Bequemlichkeit.
+    return hourly_usage(db, user_id=user.id, now=now) < grant.max_actions_per_hour
+
+
+def set_grant(
+    db: Session,
+    *,
+    user: User,
+    server_id: int | None,
+    enabled: bool,
+    max_actions_per_hour: int,
+    granted_by: int | None,
+) -> AiAutonomyGrant:
+    from models.ai_autonomy_grant import MAX_ACTIONS_PER_HOUR_LIMIT
+
+    if not 0 <= max_actions_per_hour <= MAX_ACTIONS_PER_HOUR_LIMIT:
+        raise ValueError("Stundenbudget liegt ausserhalb des erlaubten Bereichs")
+    row = (
+        db.query(AiAutonomyGrant)
+        .filter(
+            AiAutonomyGrant.user_id == user.id,
+            AiAutonomyGrant.server_id.is_(None)
+            if server_id is None
+            else AiAutonomyGrant.server_id == server_id,
+        )
+        .first()
+    )
+    if row is None:
+        row = AiAutonomyGrant(user_id=user.id, server_id=server_id)
+        db.add(row)
+    row.enabled = enabled
+    row.max_actions_per_hour = max_actions_per_hour
+    row.granted_by = granted_by
+    row.updated_at = _now()
+    db.flush()
+    return row
+
+
+def clear_grant(db: Session, *, user_id: int, server_id: int | None) -> bool:
+    row = (
+        db.query(AiAutonomyGrant)
+        .filter(
+            AiAutonomyGrant.user_id == user_id,
+            AiAutonomyGrant.server_id.is_(None)
+            if server_id is None
+            else AiAutonomyGrant.server_id == server_id,
+        )
+        .first()
+    )
+    if row is None:
+        return False
+    db.delete(row)
+    db.flush()
+    return True

@@ -1,4 +1,4 @@
-import { AlertTriangle, FilePenLine, HardDriveDownload, Power } from 'lucide-react'
+import { AlertTriangle, Bot, FilePenLine, HardDriveDownload, Package, Power, ServerCog } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -24,14 +24,35 @@ export function AiActionProposalCard({
   const operation = previewText(proposal.preview.operation)
   const path = previewText(proposal.preview.path)
   const diff = previewText(proposal.preview.diff)
-  const Icon = proposal.tool_name === 'propose_config_update'
-    ? FilePenLine
-    : proposal.tool_name === 'propose_backup' ? HardDriveDownload : Power
+  const Icon = {
+    propose_config_update: FilePenLine,
+    propose_backup: HardDriveDownload,
+    propose_mod_install: Package,
+    propose_server_create: ServerCog,
+    propose_server_lifecycle: Power,
+  }[proposal.tool_name] ?? Power
+  // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
+  // eine eigene, neutrale Farbgebung statt der warnenden — und keinen Knopf.
+  const tone = proposal.autonomous
+    ? 'border-outline-variant bg-surface-container'
+    : 'border-status-warning/35 bg-status-warning/5'
 
   const execute = async () => {
+    // Der Dialog zeigte bisher nur Operation und Pfad — Tool-Name und Diff
+    // standen ausschliesslich in der Karte dahinter. Im Bestaetigungsmoment sah
+    // der Benutzer damit weniger als vorher. Jetzt steht alles Wesentliche im
+    // Dialog, inklusive des Hinweises, woher ein Vorschlag stammen kann:
+    // Logs, Configs und Anhaenge sind Daten aus dem Server, nicht aus dem Panel.
+    const message = [
+      t(`ai.actions.tools.${proposal.tool_name}`),
+      t(`ai.actions.confirm.${proposal.tool_name}`, { operation, path }),
+      diff ? t('ai.actions.confirmDiffLines', { count: diff.split('\n').length }) : '',
+      t('ai.actions.confirmProvenance'),
+    ].filter(Boolean).join('\n\n')
+
     const accepted = await confirm({
       title: t('ai.actions.confirmTitle'),
-      message: t(`ai.actions.confirm.${proposal.tool_name}`, { operation, path }),
+      message,
       confirmText: t('ai.actions.execute'),
       danger: proposal.tool_name === 'propose_server_lifecycle',
     })
@@ -59,20 +80,44 @@ export function AiActionProposalCard({
   }
 
   return (
-    <article className="rounded-xl border border-status-warning/35 bg-status-warning/5 p-4" aria-label={t('ai.actions.title')}>
+    <article className={`rounded-xl border p-4 ${tone}`} aria-label={t('ai.actions.title')}>
       <div className="flex flex-wrap items-start gap-3">
-        <span className="rounded-lg bg-status-warning/10 p-2 text-status-warning"><Icon className="h-4 w-4" /></span>
+        <span className={`rounded-lg p-2 ${proposal.autonomous ? 'bg-surface-container-highest text-primary' : 'bg-status-warning/10 text-status-warning'}`}><Icon className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-on-surface">{t(`ai.actions.tools.${proposal.tool_name}`)}</h3>
             <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">{t(`ai.actions.status.${proposal.status}`)}</span>
+            {proposal.autonomous && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                <Bot className="h-3 w-3" />
+                {t('ai.actions.autonomousBadge')}
+              </span>
+            )}
           </div>
           {operation && <p className="mt-1 text-sm text-on-surface-variant">{t('ai.actions.operation', { operation })}</p>}
           {path && <p className="mt-1 break-all font-mono text-xs text-on-surface-variant">{path}</p>}
+          {/* Zielpunkt 3.6: warum geaendert wird und welche Folgen erwartet
+              werden. Beides stammt vom Modell und wird als dessen Begruendung
+              gekennzeichnet, nicht als Zusage des Panels. */}
+          {proposal.reason && (
+            <p className="mt-2 text-sm text-on-surface-variant">
+              <span className="font-semibold text-on-surface">{t('ai.actions.reasonLabel')}</span>{' '}
+              {proposal.reason}
+            </p>
+          )}
+          {proposal.expected_effect && (
+            <p className="mt-1 text-sm text-on-surface-variant">
+              <span className="font-semibold text-on-surface">{t('ai.actions.effectLabel')}</span>{' '}
+              {proposal.expected_effect}
+            </p>
+          )}
           {diff && <pre className="mt-3 max-h-64 overflow-auto rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-3 text-xs text-on-surface-variant">{diff}</pre>}
+          {proposal.autonomous && (
+            <p className="mt-2 text-xs text-on-surface-variant">{t('ai.actions.autonomousHint')}</p>
+          )}
           {proposal.error_code && <p className="mt-2 flex items-center gap-1 text-xs text-status-error"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
         </div>
-        {proposal.status === 'proposed' && <Button type="button" variant={proposal.tool_name === 'propose_server_lifecycle' ? 'destructive' : 'primary'} disabled={busy} onClick={() => void execute()}>{busy ? t('ai.actions.executing') : t('ai.actions.review')}</Button>}
+        {proposal.status === 'proposed' && !proposal.autonomous && <Button type="button" variant={proposal.tool_name === 'propose_server_lifecycle' ? 'destructive' : 'primary'} disabled={busy} onClick={() => void execute()}>{busy ? t('ai.actions.executing') : t('ai.actions.review')}</Button>}
       </div>
     </article>
   )

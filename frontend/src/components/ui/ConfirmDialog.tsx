@@ -56,7 +56,10 @@ export function ConfirmDialog() {
                 {pending.title}
               </h2>
             )}
-            <p className="font-body-md text-sm text-on-surface">
+            {/* `whitespace-pre-line`, damit mehrzeilige Meldungen ihre Struktur
+                behalten. Ohne das lief eine Aufzaehlung — etwa was eine
+                KI-Aktion genau aendert — zu einem Fliesstext zusammen. */}
+            <p className="font-body-md whitespace-pre-line text-sm text-on-surface">
               {pending.message}
             </p>
           </div>

@@ -411,7 +411,12 @@ def test_server_stream_persists_write_tool_as_proposal_without_execution(
         usage.tool_calls = [ProviderToolCall(
             id="call-backup",
             name="propose_backup",
-            arguments={},
+            # Zielpunkt 3.6: jedes Schreib-Tool muss begruenden, warum es
+            # vorschlaegt und was danach anders sein soll.
+            arguments={
+                "reason": "Vor der Konfigurationsaenderung absichern",
+                "expected_effect": "Ein wiederherstellbarer Stand liegt vor",
+            },
         )]
         if False:
             yield ""

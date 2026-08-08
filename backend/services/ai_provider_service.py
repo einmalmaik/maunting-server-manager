@@ -32,6 +32,31 @@ def _resolved_addresses(host: str) -> set[ipaddress.IPv4Address | ipaddress.IPv6
     return addresses
 
 
+def _assert_addresses_allowed(
+    addresses: set[ipaddress.IPv4Address | ipaddress.IPv6Address],
+    *,
+    scheme: str,
+    allow_private_network: bool,
+) -> None:
+    """Prueft eine konkrete Adressmenge gegen die SSRF-Politik.
+
+    Bewusst als eigene Funktion: die Politik muss auf *genau die* Adressen
+    angewendet werden, mit denen anschliessend verbunden wird. Eine Pruefung,
+    die auf einer anderen Aufloesung basiert als die Verbindung, ist keine.
+    """
+    if scheme == "http" and (
+        not allow_private_network
+        or any(not (address.is_private or address.is_loopback) for address in addresses)
+    ):
+        raise AiProviderConfigurationError("HTTP ist nur fuer explizit freigegebene private Provider erlaubt")
+
+    for address in addresses:
+        if address.is_link_local or address.is_multicast or address.is_reserved or address.is_unspecified:
+            raise AiProviderConfigurationError("Provider-Ziel ist aus SSRF-Schutzgruenden gesperrt")
+        if (address.is_private or address.is_loopback) and not allow_private_network:
+            raise AiProviderConfigurationError("Private Provider-Ziele benoetigen eine explizite Freigabe")
+
+
 def validate_provider_base_url(base_url: str, *, allow_private_network: bool) -> str:
     """Validiert und normalisiert einen OpenAI-kompatiblen Basis-Endpunkt.
 
@@ -49,18 +74,11 @@ def validate_provider_base_url(base_url: str, *, allow_private_network: bool) ->
         _ = parsed.port
     except ValueError as exc:
         raise AiProviderConfigurationError("Provider-URL enthaelt einen ungueltigen Port") from exc
-    addresses = _resolved_addresses(parsed.hostname)
-    if parsed.scheme == "http" and (
-        not allow_private_network
-        or any(not (address.is_private or address.is_loopback) for address in addresses)
-    ):
-        raise AiProviderConfigurationError("HTTP ist nur fuer explizit freigegebene private Provider erlaubt")
-
-    for address in addresses:
-        if address.is_link_local or address.is_multicast or address.is_reserved or address.is_unspecified:
-            raise AiProviderConfigurationError("Provider-Ziel ist aus SSRF-Schutzgruenden gesperrt")
-        if (address.is_private or address.is_loopback) and not allow_private_network:
-            raise AiProviderConfigurationError("Private Provider-Ziele benoetigen eine explizite Freigabe")
+    _assert_addresses_allowed(
+        _resolved_addresses(parsed.hostname),
+        scheme=parsed.scheme,
+        allow_private_network=allow_private_network,
+    )
 
     normalized_path = parsed.path.rstrip("/")
     return urlunparse((parsed.scheme, parsed.netloc, normalized_path, "", "", ""))
@@ -212,19 +230,46 @@ def assert_provider_destination(provider: AiProvider) -> str | None:
     Namen erneut aufloesen und koennte dabei eine andere — etwa interne —
     Adresse erhalten. Der Aufrufer verbindet sich deshalb mit genau der hier
     geprueften Adresse.
+
+    Entscheidend ist, dass Pruefung und Rueckgabe aus *derselben* Aufloesung
+    stammen. Frueher wurde zuerst ueber `validate_provider_base_url` geprueft und
+    danach ein zweites, unabhaengiges `getaddrinfo` fuer das Pinning gemacht —
+    lieferte das eine andere Adresse, wurde exakt die nie geprueft. Genau die
+    Luecke, die diese Funktion schliessen soll.
     """
-    normalized = validate_provider_base_url(
-        provider.base_url,
-        allow_private_network=provider.allow_private_network,
+    parsed = urlparse(
+        (provider.base_url or "").strip().rstrip("/")
     )
-    hostname = urlparse(normalized).hostname or ""
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise AiProviderConfigurationError("Provider-URL muss eine absolute HTTP(S)-URL sein")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise AiProviderConfigurationError("Provider-URL darf keine Credentials, Query oder Fragmente enthalten")
     try:
-        ipaddress.ip_address(hostname)
+        _ = parsed.port
+    except ValueError as exc:
+        raise AiProviderConfigurationError("Provider-URL enthaelt einen ungueltigen Port") from exc
+
+    hostname = parsed.hostname
+    try:
+        literal = ipaddress.ip_address(hostname)
     except ValueError:
         pass
     else:
+        # Ein IP-Literal wird nicht aufgeloest, muss aber trotzdem der Politik
+        # genuegen — sonst waere `http://169.254.169.254` einfach erlaubt.
+        _assert_addresses_allowed(
+            {literal},
+            scheme=parsed.scheme,
+            allow_private_network=provider.allow_private_network,
+        )
         return None
+
     addresses = _resolved_addresses(hostname)
+    _assert_addresses_allowed(
+        addresses,
+        scheme=parsed.scheme,
+        allow_private_network=provider.allow_private_network,
+    )
     # Deterministisch dieselbe Adresse waehlen, damit Keep-Alive-Verbindungen
     # nicht bei jedem Request auf einen anderen Endpunkt springen.
     return str(sorted(addresses, key=str)[0])

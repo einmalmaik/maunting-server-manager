@@ -195,7 +195,10 @@ export function AiChat({ serverId }: { serverId?: number }) {
           setMessages((current) => current.map((item) => item.role === 'assistant' && item.status === 'streaming' ? { ...item, content: item.content + data.content } : item))
         } else if (eventName === 'done') {
           setMessages((current) => current.map((item) => item.role === 'assistant' && item.status === 'streaming' ? { ...item, status: 'complete' } : item))
-        } else if (eventName === 'proposal') {
+        } else if (eventName === 'proposal' || eventName === 'action') {
+          // `action` ist eine bereits autonom ausgefuehrte Aktion. Sie landet in
+          // derselben Liste, wird aber von der Karte anders dargestellt: sie ist
+          // eine Meldung, keine Anfrage.
           setProposals((current) => current.some((item) => item.id === data.id) ? current : [...current, data])
         } else {
           streamFailed = true

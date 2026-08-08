@@ -216,7 +216,13 @@
         "read_server_logs": "Read sanitized server logs",
         "read_config": "Read configuration",
         "propose_server_lifecycle": "Propose server action",
-        "propose_backup": "Propose backup"
+        "propose_backup": "Propose backup",
+        "read_server_ports": "Read ports",
+        "read_server_mods": "Read mods",
+        "read_server_backups": "Read backups",
+        "read_guardian_incidents": "Read Guardian incidents",
+        "read_ai_action_history": "Read AI action history",
+        "read_mod_updates": "Check mod updates"
       },
       "select": "Select skill",
       "run": "Run skill",
@@ -284,7 +290,9 @@
       "tools": {
         "propose_server_lifecycle": "Change server state",
         "propose_backup": "Create backup",
-        "propose_config_update": "Change configuration"
+        "propose_config_update": "Change configuration",
+        "propose_mod_install": "Install mod",
+        "propose_server_create": "Create server"
       },
       "status": {
         "proposed": "Review required",
@@ -302,12 +310,36 @@
       "confirm": {
         "propose_server_lifecycle": "The “{{operation}}” action affects server operation. Permissions and server state are checked again immediately before execution.",
         "propose_backup": "Create a server backup now? Permissions and server state are checked again immediately before execution.",
-        "propose_config_update": "Write the displayed, revision-bound change to “{{path}}”? Execution is blocked if the file changed in the meantime."
+        "propose_config_update": "Write the displayed, revision-bound change to “{{path}}”? Execution is blocked if the file changed in the meantime.",
+        "propose_mod_install": "Install the mod “{{path}}” through the existing installation path? The download runs in the background and the mod only takes effect after a restart.",
+        "propose_server_create": "Create a new server? Blueprint, capacity, ports and permissions are checked exactly as they are when creating one through the panel."
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
       "error": "The AI proposal could not be executed.",
-      "queued": "AI proposal authorised. The action is now running in the background."
+      "queued": "AI proposal authorised. The action is now running in the background.",
+      "confirmDiffLines": "{{count}} diff lines are affected. The full preview is in the card behind this dialog.",
+      "confirmProvenance": "This proposal may originate from analysing untrusted data — log lines, configuration contents or attachments. Review it before you execute it.",
+      "reasonLabel": "AI reasoning:",
+      "effectLabel": "Expected effect:",
+      "autonomousBadge": "Executed automatically",
+      "autonomousHint": "This action ran without asking because you enabled autonomous mode for this scope. Permissions were checked unchanged; the operation is fully recorded in the audit log."
+    },
+    "autonomy": {
+      "title": "Autonomous mode",
+      "descriptionPanel": "Without a grant the AI asks before every action. With a panel-wide grant it executes permitted actions on all of your servers immediately.",
+      "descriptionServer": "Without a grant the AI asks before every action. With a grant it executes permitted actions on this server immediately.",
+      "toggle": "Execute actions without asking",
+      "budget": "At most actions per hour",
+      "budgetHint": "Executed automatically in the last hour: {{used}}. Once the budget is used up the AI asks again — nothing fails.",
+      "boundary": "Autonomous mode removes exactly one thing: your confirmation. Permissions, server locks and the audit log stay unchanged — the AI can do nothing you could not do yourself. Not included are deletion, wipe, reinstall and backup restore: those always require a confirmation.",
+      "confirmTitle": "Enable autonomous mode?",
+      "confirmPanel": "The AI will then execute permitted actions on all of your servers without asking — including configuration changes, mod installations and creating new servers.\n\nYour permissions remain the boundary. Everything appears in the audit log.",
+      "confirmServer": "The AI will then execute permitted actions on this server without asking — including configuration changes and mod installations.\n\nYour permissions remain the boundary. Everything appears in the audit log.",
+      "enable": "Enable",
+      "save": "Save budget",
+      "saved": "Grant saved.",
+      "error": "The grant could not be saved."
     }
   },
   "shell": {
@@ -1784,7 +1816,10 @@
     "legalTitle": "Legal",
     "legalDesc": "Privacy policy and optional operator imprint for this instance.",
     "privacyLink": "Open privacy policy",
-    "imprintLink": "Open imprint"
+    "imprintLink": "Open imprint",
+    "hosterApiTitle": "Hoster API",
+    "hosterApiDesc": "Endpoints, webhooks and signature verification for connecting an external shop.",
+    "hosterApiLink": "Open reference"
   },
   "docsSelfHosting": {
     "eyebrow": "Operator runbook",
@@ -1949,7 +1984,8 @@
       "selfHosted": {
         "title": "Self-hosted stays untouched",
         "body": "Without a configured integration nothing changes: no extra service, no open endpoint and no new mandatory fields."
-      }
+      },
+      "apiReferenceLink": "Go to API reference"
     },
     "credentials": {
       "title": "Credentials and Kubernetes",
@@ -2206,7 +2242,9 @@
           "credentials": "Personal and central provider API keys are context-bound and encrypted through DIS, then shown only as configuration status or a mask",
           "usage": "Provider, model, token reservation, actual or conservatively estimated usage, and timestamps are stored to enforce quotas; monetary cost is not claimed without an authoritative price source",
           "memory": "Optional personal, server-specific, and panel-wide memory entries are encrypted, visible and deletable, and are transferred as untrusted context only when memory use is enabled",
-          "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider"
+          "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
+          "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
+          "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat"
         }
       },
       "storage": {
@@ -2967,6 +3005,305 @@
       "save": "Could not save credentials",
       "delete": "Could not remove credentials",
       "bind": "Could not save the assignment"
+    }
+  },
+  "docsCommon": {
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "docsHosterApi": {
+    "eyebrow": "Integration",
+    "title": "Hoster API",
+    "subtitle": "Endpoint, webhook and signature reference for connecting an external shop.",
+    "backToDocs": "Back to documentation",
+    "navigationLabel": "Sections on this page",
+    "optionalNote": "Nothing in this document exists until an integration is created. A self-hosted setup without a shop has no endpoint that does anything without an API key.",
+    "principle": {
+      "title": "Core principle",
+      "desiredState": "The shop does not send commands, it sends a desired state. Instead of “start the server” it reports “this contract should be active”. That is the heart of idempotency: a command that arrives twice after a timeout is dangerous — a desired state that arrives twice is a no-op.",
+      "noInternals": "The shop deliberately sends no internal MSM details: no node ID, no port numbers, no install paths. It names a product key; MSM resolves blueprint, resources, host and ports itself.",
+      "sharedLogic": "Everything the hoster API triggers runs through the same services as a click in the panel. There is no path that bypasses permission checks, capacity checks, port allocation or Guardian."
+    },
+    "auth": {
+      "title": "Authentication",
+      "header": "Every endpoint under /api/hoster/v1/ expects the integration API key in a header:",
+      "headerLabel": "Header",
+      "noCookie": "There is no cookie path. A browser session cannot reach these endpoints, and CORS is irrelevant for them — the call must be made server-side from the shop. Testing from the browser console will always fail; that is intentional, not a misconfiguration.",
+      "hashOnly": "MSM stores only the SHA-256 hash of the API key. The plaintext appears exactly once when it is created in the panel and cannot be retrieved afterwards. A missing and an invalid key return the same text and both a 401, so it is not detectable whether a key exists.",
+      "boundary": "The API key is equivalent to the rights of the integration's service user — no more. The security boundary is that user and their permissions, not the key.",
+      "healthLabel": "Key check without side effects"
+    },
+    "endpoints": {
+      "title": "External API",
+      "health": "Verify the API key without changing anything.",
+      "put": "Set the desired contract state. Creates the contract on first call and continues it afterwards.",
+      "get": "Query the actual state. Returns 404 if the contract does not exist.",
+      "handoff": "Create a one-time link into the customer's panel.",
+      "redeem": "Redemption by the customer's browser. No API key — a human is clicking here.",
+      "requestTitle": "Request body (PUT)",
+      "idempotencyKey": "external_service_id is the contract identifier from the shop, at most 128 characters. Together with the integration it is unique and serves as the idempotency key.",
+      "orderLabel": "Order",
+      "responseTitle": "Response body (PUT and GET)",
+      "responseLabel": "Response",
+      "repeatable": "The same call may be sent any number of times. A network retry does not create a second server: provisioning is bound to an idempotency key. Even two simultaneous first calls result in exactly one contract — the loser adopts the winner.",
+      "async": "Provisioning is asynchronous: after PUT the status may still be provisioning. The shop should either wait for the service.ready webhook or poll GET at intervals — not in a tight loop."
+    },
+    "request": {
+      "desired_state": {
+        "type": "string, required",
+        "body": "active, suspended or terminated."
+      },
+      "external_subject": {
+        "type": "string 1–128, required",
+        "body": "Customer ID from the shop. The stable mapping uses this ID, not the email address — otherwise a customer changing their email would break the link."
+      },
+      "product_key": {
+        "type": "string 1–128, on creation",
+        "body": "Shop product key. MSM maps it to a blueprint and a resource package. On an existing contract a different value triggers a plan change."
+      },
+      "email": {
+        "type": "string ≤255, optional",
+        "body": "Used only to create the panel user initially. MSM never takes over a shop password."
+      }
+    },
+    "response": {
+      "external_service_id": {
+        "type": "string",
+        "body": "The shop's contract identifier."
+      },
+      "desired_state": {
+        "type": "string",
+        "body": "Most recently reported target state."
+      },
+      "status": {
+        "type": "string",
+        "body": "Actual state of the contract."
+      },
+      "status_code": {
+        "type": "string | null",
+        "body": "Stable error or hint code, otherwise null."
+      },
+      "server_id": {
+        "type": "integer | null",
+        "body": "Internal server ID once one exists."
+      },
+      "task_id": {
+        "type": "string | null",
+        "body": "ID of the running provisioning or lifecycle operation."
+      },
+      "correlation_id": {
+        "type": "string (UUID)",
+        "body": "Ties together all audit entries and webhooks of this contract."
+      },
+      "terminate_after": {
+        "type": "string | null",
+        "body": "ISO-8601 timestamp after which deletion happens following a cancellation."
+      },
+      "updated_at": {
+        "type": "string",
+        "body": "ISO-8601 timestamp of the last change."
+      }
+    },
+    "states": {
+      "title": "State model",
+      "intro": "desired_state is what the shop wants. status is what is. The two may temporarily diverge — that is exactly why there are two fields.",
+      "desiredTitle": "Target states (set by the shop)",
+      "actualTitle": "Actual states (set by MSM, each emits a webhook)",
+      "purge": "The transition terminating → terminated does not happen in the API call but in a maintenance run that checks every minute whether terminate_after has been reached. The deletion path is the same as in the panel.",
+      "productChange": "A plan change sets status_code to product_changed_manual_resize_required. The product mapping changes immediately; resource limits of a running server remain a deliberate operator action — they require a restart."
+    },
+    "desired": {
+      "active": "Contract is running. A server is created if needed and customer permissions are granted.",
+      "suspended": "Payment hold. The server is stopped and customer permissions are revoked. The panel account remains, data is preserved, and unsuspending later is possible.",
+      "terminated": "Cancellation. The server is stopped and a grace period is set. Nothing is deleted immediately."
+    },
+    "status": {
+      "pending": "Contract created, technical work not yet started.",
+      "provisioning": "The server is currently being created and installed.",
+      "ready": "The server exists and is assigned to the customer.",
+      "suspended": "Server stopped, customer permissions revoked, data preserved.",
+      "terminating": "Cancelled, grace period running — the server still exists.",
+      "terminated": "Grace period elapsed, server deleted. server_id is null afterwards.",
+      "failed": "An operation failed. status_code names the reason."
+    },
+    "errors": {
+      "title": "Errors and status codes",
+      "persisted": "A functional failure is not just an HTTP error. The contract remains queryable with status “failed” and a stable status_code, so the shop can find out afterwards what happened."
+    },
+    "http": {
+      "200": "Success. Also for PUT — there is no 201.",
+      "401": "API key missing, invalid, or the integration is disabled.",
+      "404": "Unknown contract (GET, handoff).",
+      "422": "Configuration error: unknown or disabled product, missing product key on creation, disabled service user, invalid handoff target.",
+      "503": "Internal error while applying the change."
+    },
+    "statusCode": {
+      "port_conflict": "No free port block on the target host.",
+      "node_not_found": "The product points at a node that does not exist.",
+      "install_directory_exists": "Leftover from an earlier installation.",
+      "install_update_already_running": "An installation is already running on the server.",
+      "hoster_configuration_error": "Product, service user or identity is not usable.",
+      "hoster_internal_error": "Unexpected error, traceable in the panel log.",
+      "product_changed_manual_resize_required": "A hint, not an error: plan changed, resources not yet adjusted."
+    },
+    "webhooks": {
+      "title": "Webhooks",
+      "intro": "MSM reports every state change to the HTTPS target configured in the panel — provided a webhook secret was created there. Without a target or secret nothing is queued, deliberately.",
+      "eventsLabel": "Event names",
+      "headersLabel": "Headers",
+      "bodyIntro": "The body is the external API response schema without task_id, plus the event field:",
+      "bodyLabel": "Body",
+      "noInternals": "Node names, host addresses, ports and install paths belong to the operator, not the shop — they intentionally do not appear.",
+      "durable": "Deliveries live in the database, not in memory: a panel restart during a backoff loses nothing. Permanently failed deliveries can be re-queued manually in the panel.",
+      "payloadLimit": "Payload limit 16 KiB. A larger body is silently dropped — no delivery is created and the receiver learns nothing about it. In normal operation this is unreachable, but a receiver should not rely on seeing every state change. The GET endpoint remains the authoritative source.",
+      "clientError": "A 200 is the acknowledgement. If the receiver answers with 4xx the delivery counts as permanently rejected — including 401. Verifying the signature incorrectly therefore loses events with no retry."
+    },
+    "delivery": {
+      "timeout": {
+        "term": "Timeout per attempt",
+        "body": "10 seconds. After that MSM counts the attempt as failed — the actual processing belongs in a queue on the receiver side."
+      },
+      "attempts": {
+        "term": "Attempts",
+        "body": "5"
+      },
+      "backoff": {
+        "term": "Intervals",
+        "body": "30 s, 120 s, 600 s, 3600 s"
+      },
+      "clientError": {
+        "term": "4xx response",
+        "body": "Final, no retry."
+      },
+      "serverError": {
+        "term": "5xx or network error",
+        "body": "Retried after the next interval."
+      },
+      "redirects": {
+        "term": "Redirects",
+        "body": "Not followed."
+      },
+      "retention": {
+        "term": "Delivery log retention",
+        "body": "30 days"
+      }
+    },
+    "signature": {
+      "title": "Verifying the signature",
+      "formula": "The signature is HMAC-SHA256 over the string {timestamp}.{body}, emitted as sha256=<hex>. The timestamp is part of the signed data — without it an intercepted request could be replayed indefinitely.",
+      "rawBody": "Sign over the raw body, not over re-serialised JSON. MSM serialises without whitespace and with real non-ASCII characters. Parsing the body into an object and serialising it again almost certainly yields a different string and therefore a different signature. Most signature problems in practice have exactly this cause.",
+      "exampleIntro": "With these values every correct implementation must produce the same digest:",
+      "exampleLabel": "Worked example",
+      "rulesTitle": "Rules for the receiver"
+    },
+    "receiver": {
+      "constantTime": {
+        "term": "Compare in constant time",
+        "body": "hash_equals or hmac.compare_digest. A == on strings leaks the correct prefix through timing."
+      },
+      "replay": {
+        "term": "Check a replay window",
+        "body": "MSM does not enforce one; ±5 minutes is recommended. The timestamp is signed and cannot be forged — but without a window an old, captured request stays reusable indefinitely."
+      },
+      "idempotent": {
+        "term": "Process idempotently",
+        "body": "On a 5xx or timeout MSM retries. The same state report may arrive more than once; correlation_id plus status identifies it."
+      },
+      "ordering": {
+        "term": "Do not assume ordering",
+        "body": "With retries an older report can arrive after a newer one. updated_at decides which is more recent."
+      },
+      "fast": {
+        "term": "Answer quickly",
+        "body": "After 10 seconds MSM aborts and counts it as a failed attempt."
+      }
+    },
+    "handoff": {
+      "title": "One-click handoff",
+      "intro": "The customer clicks “Manage server” in the shop and lands signed in inside their MSM panel — with no second password and no separate registration.",
+      "serviceIdType": "string 1–128, required",
+      "serviceIdBody": "The contract the link applies to.",
+      "targetType": "string ≤128, optional",
+      "targetBody": "Target path in the panel. Only /servers, /servers/{id} and /dashboard are allowed. Default is /servers; anything else returns 422.",
+      "commandLabel": "Create handoff",
+      "createOnClick": "The link should therefore be created on click, not when the shop page is rendered.",
+      "splitHosting": "Mind split hosting: the returned URL is built from MSM_PANEL_URL, while /api/hoster/handoff/{token} is a backend route. If frontend and API run on separate hosts, MSM_PANEL_URL must point at a host that forwards /api/* to the backend — otherwise the link goes nowhere.",
+      "oidc": "The existing custom OIDC login can be used in addition. Both work at the same time: handoff for the direct click out of the shop, OIDC for a normal repeat login in the panel."
+    },
+    "handoffFact": {
+      "ttl": {
+        "term": "Validity",
+        "body": "5 minutes"
+      },
+      "once": {
+        "term": "Usage",
+        "body": "Exactly once"
+      },
+      "bound": {
+        "term": "Binding",
+        "body": "To one specific user and contract"
+      },
+      "targets": {
+        "term": "Target paths",
+        "body": "Only /servers, /servers/{id}, /dashboard — no freely steerable redirect"
+      },
+      "hashOnly": {
+        "term": "Storage",
+        "body": "Hash only. The link appears neither in the audit log nor in logs."
+      },
+      "concurrent": {
+        "term": "Valid at once",
+        "body": "At most 5 tokens per user; older ones expire"
+      },
+      "uniformError": {
+        "term": "Error behaviour",
+        "body": "Unknown, expired and already used all lead uniformly to the login page. The response does not reveal which case applied."
+      }
+    },
+    "admin": {
+      "title": "Panel administration",
+      "intro": "These endpoints serve the panel UI. They use cookie auth with CSRF protection, not the hoster API key. They are listed here in full for automation and infrastructure-as-code.",
+      "colMethod": "Method",
+      "colPath": "Path",
+      "colPermission": "Permission",
+      "colPurpose": "Purpose",
+      "list": "List integrations",
+      "create": "Create an integration — the response contains the API key once",
+      "update": "Change name, status, service user, webhook target, grace period",
+      "rotateKey": "Rotate the API key — the old key is invalid immediately",
+      "rotateSecret": "Create or rotate the webhook secret",
+      "delete": "Delete an integration (only without active contracts)",
+      "listProducts": "Read product mappings",
+      "putProduct": "Create or replace a product mapping",
+      "deleteProduct": "Remove a product mapping",
+      "listServices": "Contracts of this integration",
+      "listDeliveries": "Webhook delivery log (status code, attempt — never signature or body)",
+      "retryDelivery": "Re-queue a failed delivery",
+      "openapi": "The full OpenAPI schema is available at /api/docs and requires a login with the panel.settings.read permission."
+    },
+    "operations": {
+      "title": "Operational notes",
+      "serviceUser": {
+        "term": "The service user is the boundary",
+        "body": "The integration can never do more than they can. They need servers.create and — for automatic deletion after the cancellation grace period — also servers.delete. The owner account is deliberately not allowed."
+      },
+      "customerRights": {
+        "term": "Customer permissions",
+        "body": "Customers get permissions only on their own server, delegated per server instead of through a global role. Deliberately excluded: reinstall, network and resource management, container exec, database administration."
+      },
+      "noDelete": {
+        "term": "No deletion with active contracts",
+        "body": "A cascade would destroy the mapping between customers and their running servers while those servers keep running."
+      },
+      "audit": {
+        "term": "Audit",
+        "body": "Every operation appears with origin external and the shared correlation_id — without secrets and without customer identifiers in plaintext."
+      },
+      "noSecrets": {
+        "term": "No shop secrets",
+        "body": "MSM stores no shop password and no payment data. It stores the external customer and contract identifier plus, optionally, the email used to create the panel user."
+      },
+      "setupLink": "Setup in the panel"
     }
   }
 }

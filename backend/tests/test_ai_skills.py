@@ -5,11 +5,32 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from models import AiActionProposal, AiConversation, AiSkill, AuditLog, User
+from models import AiActionProposal, AiConversation, AiSkill, AuditLog, Role, RolePermission, User
+from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
+from services.role_service import set_user_roles
 
 
 def _csrf(cookies: dict) -> dict[str, str]:
     return {"X-CSRF-Token": cookies.get("__Secure-csrf_token", "")}
+
+
+def _grant_ai_budget(db: Session, user: User) -> None:
+    """Gibt dem Benutzer ein unbegrenztes KI-Kontingent.
+
+    Skill-Laeufe reservieren seit Phase 2 gegen dieselben Rollenkontingente wie
+    ein Chat — sonst liefen sie an `requests_per_minute` und
+    `concurrent_operations` vorbei. Der sichere Default ist 0, deshalb braucht
+    auch der Owner hier eine ausdrueckliche Freigabe: bei den KI-Limits gibt es
+    bewusst keinen Owner-Bypass, damit Kosten fuer alle gelten.
+    """
+    role = Role(name=f"ai-budget-{user.id}", description=None, is_system=False)
+    db.add(role)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_key="ai.skills.use"))
+    db.add(RolePermission(role_id=role.id, permission_key="ai.skills.manage"))
+    set_role_limit(db, role.id, {field: None for field in LIMIT_FIELDS})
+    db.commit()
+    set_user_roles(db, user, [role.id])
 
 
 def test_skill_versions_are_immutable_and_latest_is_visible(
@@ -84,6 +105,7 @@ def test_running_skill_creates_proposal_and_never_executes_it(
     owner_cookies: dict,
     test_server,
 ) -> None:
+    _grant_ai_budget(db, owner_user)
     conversation = AiConversation(
         id=str(uuid4()), user_id=owner_user.id, server_id=test_server.id,
         title="Skill Run",
@@ -194,6 +216,9 @@ def test_skill_run_without_step_permission_returns_403_not_500(
     db.add(role)
     db.flush()
     db.add(RolePermission(role_id=role.id, permission_key="ai.skills.use"))
+    # Ohne Kontingent scheiterte der Lauf schon an der Reservierung (429) und
+    # der eigentlich gepruefte Rechtefall waere gar nicht erreicht worden.
+    set_role_limit(db, role.id, {field: None for field in LIMIT_FIELDS})
     set_user_roles(db, regular_user, [role.id])
     server = Server(
         name="Skill RBAC Server",

@@ -14,6 +14,7 @@ from services.install_update_lock_service import (
     release_install_update_lock,
     acquire_install_update_lock_blocking,
 )
+from services import mod_update_service
 from services.mod_install_status_service import (
     INSTALL_RUNNING,
     mark_mod_failed,
@@ -25,8 +26,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mods", tags=["mods"])
 
-_MOD_UPDATE_CHECK_CACHE: dict[int, float] = {}
-_MOD_UPDATE_CHECK_TTL_SECONDS = 300
 _MOD_ACTIONS = {"install", "update", "reinstall"}
 _WORKSHOP_ID_RE = re.compile(r"^\d{1,20}$")
 
@@ -43,47 +42,14 @@ def _validate_workshop_id(workshop_id: str) -> str:
     return value
 
 
-def _mark_update_candidates(db: Session, server_id: int, updates: list[dict]) -> None:
-    changed = False
-    for update in updates:
-        workshop_id = str(update.get("workshop_id") or "")
-        action = str(update.get("action") or "update")
-        if not workshop_id or action not in {"install", "update"}:
-            continue
-        mod = (
-            db.query(Mod)
-            .filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id)
-            .first()
-        )
-        if not mod or mod.install_status == INSTALL_RUNNING:
-            continue
-        mod.install_status = "pending"
-        mod.install_action = action
-        mod.install_progress = 0
-        mod.install_eta_seconds = None
-        mod.install_error = None
-        mod.update_status = "missing" if action == "install" else "outdated"
-        mod.update_reason = str(update.get("reason") or action)
-        changed = True
-    if changed:
-        db.commit()
-
-
 def _refresh_mod_update_availability(db: Session, server: Server, plugin, *, force: bool = False) -> list[dict]:
-    if not plugin or not getattr(plugin, "supports_mods", False):
-        return []
-    now = time.time()
-    if not force and now - _MOD_UPDATE_CHECK_CACHE.get(server.id, 0) < _MOD_UPDATE_CHECK_TTL_SECONDS:
-        return []
-    _MOD_UPDATE_CHECK_CACHE[server.id] = now
-    try:
-        updates = plugin.check_for_mod_updates(server)
-    except Exception as exc:
-        logger.warning("Mod-Update-Check fehlgeschlagen fuer Server %s: %s", server.id, exc)
-        return []
-    if updates:
-        _mark_update_candidates(db, server.id, updates)
-    return updates
+    """Duenner Aufruf auf den gemeinsamen Service.
+
+    Die Logik liegt in `services/mod_update_service.py`, damit das AI-Werkzeug
+    `read_mod_updates` exakt dieselbe Pruefung ausfuehrt wie dieser Router —
+    inklusive derselben Fuenf-Minuten-Sperre gegen Serienabfragen bei Steam.
+    """
+    return mod_update_service.refresh_update_availability(db, server, plugin, force=force)
 
 
 def _server_has_active_mod_jobs(db: Session, server_id: int) -> bool:
