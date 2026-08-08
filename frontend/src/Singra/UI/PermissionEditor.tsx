@@ -47,6 +47,14 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'Systemstatus anzeigen',
     desc: 'Erlaubt das Betrachten der Systemauslastung, Log-Dateien und Netzwerkschnittstellen des Host-Systems.',
   },
+  'system.audit.read': {
+    title: 'Audit-Log lesen',
+    desc: 'Erlaubt das Einsehen des Admin-Audit-Logs mit allen privilegierten Aktionen. Secrets und vollständige Logdateien stehen dort bewusst nicht drin.',
+  },
+  'system.secrets.rotate': {
+    title: 'Cluster-Secrets rotieren',
+    desc: 'Erlaubt das Erneuern der Managed-Postgres-Admin-Zugangsdaten. Stark privilegiert: betrifft alle verwalteten Datenbanken gleichzeitig.',
+  },
   'nodes.read': {
     title: 'Nodes anzeigen',
     desc: 'Erlaubt das Auflisten der Nodes (Infrastruktur-Server) und deren Systemauslastung.',
@@ -114,6 +122,14 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
   'panel.oauth.test': {
     title: 'OAuth-Verbindung testen',
     desc: 'Erlaubt das Testen der Authentifizierungsverbindung zum OAuth-Provider.',
+  },
+  'panel.hoster.read': {
+    title: 'Hoster-Verträge einsehen',
+    desc: 'Erlaubt das Betrachten der Hoster-Integrationen, Produkte und gebuchten Services — ohne Zugriff auf API-Schlüssel.',
+  },
+  'panel.hoster.write': {
+    title: 'Hoster-Anbindung verwalten',
+    desc: 'Erlaubt das Anlegen und Ändern von Hoster-Integrationen, Produktzuordnungen und deren API-Schlüsseln.',
   },
   'server.view': {
     title: 'Server anzeigen',
@@ -219,6 +235,10 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'PostgreSQL verwalten',
     desc: 'Erlaubt das Hinzufügen, Löschen und Konfigurieren von PostgreSQL-Datenbanken und Usern.',
   },
+  'server.credentials.manage': {
+    title: 'Zugangsdaten zuweisen',
+    desc: 'Erlaubt das Verknüpfen dieses Servers mit einem hinterlegten Steam- oder GitHub-Zugang. Der Klartext bleibt dabei verborgen; eigene Zugangsdaten anlegen darf jeder im eigenen Profil.',
+  },
 }
 
 const SUBGROUPS = [
@@ -241,6 +261,8 @@ const SUBGROUPS = [
       'panel.oauth.delete',
       'panel.oauth.secret_update',
       'panel.oauth.test',
+      'panel.hoster.read',
+      'panel.hoster.write',
     ],
   },
   {
@@ -260,7 +282,15 @@ const SUBGROUPS = [
   {
     id: 'infrastructure',
     title: 'Infrastruktur & System',
-    keys: ['servers.create', 'servers.delete', 'nodes.read', 'nodes.manage', 'system.view'],
+    keys: [
+      'servers.create',
+      'servers.delete',
+      'nodes.read',
+      'nodes.manage',
+      'system.view',
+      'system.audit.read',
+      'system.secrets.rotate',
+    ],
   },
   {
     id: 'server_basic',
@@ -278,7 +308,12 @@ const SUBGROUPS = [
   {
     id: 'server_config',
     title: 'Server-Konfiguration & Ressourcen',
-    keys: ['server.config.write', 'server.network.manage', 'server.resources.manage'],
+    keys: [
+      'server.config.write',
+      'server.network.manage',
+      'server.resources.manage',
+      'server.credentials.manage',
+    ],
   },
   {
     id: 'server_console',

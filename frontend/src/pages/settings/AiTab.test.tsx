@@ -27,6 +27,20 @@ const row: AiRoleLimits = {
   updated_at: '2026-08-01T12:00:00Z',
 }
 
+/** Eine zweite, noch unkonfigurierte Rolle — der Normalfall im frischen Panel. */
+const blankRow: AiRoleLimits = {
+  role_id: 3,
+  role_name: 'user',
+  configured: false,
+  daily_token_limit: null,
+  weekly_token_limit: null,
+  monthly_token_limit: null,
+  requests_per_minute: null,
+  concurrent_operations: null,
+  monthly_cost_limit_cents: null,
+  updated_at: null,
+}
+
 describe('AiTab', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('de')
@@ -38,9 +52,11 @@ describe('AiTab', () => {
 
   it('loads role limits and saves a complete set including unlimited', async () => {
     render(<AiTab />)
-    await screen.findByRole('heading', { name: 'ai-vip' })
+    await screen.findByRole('switch', {
+      name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i,
+    })
 
-    fireEvent.click(screen.getByRole('checkbox', {
+    fireEvent.click(screen.getByRole('switch', {
       name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i,
     }))
     vi.mocked(client.api).mockResolvedValue({ ...row, monthly_token_limit: null })
@@ -59,6 +75,39 @@ describe('AiTab', () => {
         }),
       })
     })
+  })
+
+  it('shows only the selected role and switches to another one', async () => {
+    vi.mocked(client.api).mockResolvedValue([blankRow, row])
+    render(<AiTab />)
+
+    // Vorauswahl faellt auf die bereits konfigurierte Rolle: dort gibt es
+    // etwas zu sehen. Die unkonfigurierte Rolle ist gleichzeitig unsichtbar —
+    // genau das war vorher das Problem, alle Rollen standen untereinander.
+    await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i })
+    expect(screen.queryByRole('switch', { name: /: user$/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rolle' }))
+    fireEvent.click(screen.getByRole('option', { name: /user/i }))
+
+    await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: user/i })
+    expect(
+      screen.queryByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('presents an unconfigured role as unlimited, never as a silent zero', async () => {
+    vi.mocked(client.api).mockResolvedValue([blankRow])
+    render(<AiTab />)
+
+    // Regression zum Quota-Blocker: eine unkonfigurierte Rolle darf hier nicht
+    // wie ein gespeichertes Nulllimit aussehen. Wer das versehentlich
+    // speichert, sperrt die KI fuer alle Traeger dieser Rolle.
+    const unlimited = await screen.findByRole('switch', {
+      name: /Unbegrenzt: Tägliches Tokenlimit: user/i,
+    })
+    expect(unlimited).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText(/noch kein Kontingent gespeichert/i)).toBeInTheDocument()
   })
 
   it('shows API failures and does not silently discard them', async () => {

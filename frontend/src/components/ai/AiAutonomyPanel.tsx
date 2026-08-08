@@ -4,7 +4,7 @@ import { Bot, ShieldAlert } from 'lucide-react'
 
 import { aiApi, type AiAutonomyGrant } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { Button, NumberStepper } from '@/Singra/UI'
+import { Button, NumberStepper, Switch } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -93,17 +93,15 @@ export function AiAutonomyPanel({ serverId = null }: { serverId?: number | null 
         </div>
       </div>
 
-      <label className="mt-4 flex items-center gap-3">
-        <input
-          type="checkbox"
-          className="h-4 w-4"
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <span className="text-sm text-on-surface">{t('ai.autonomy.toggle')}</span>
+        <Switch
           checked={enabled}
           disabled={busy}
-          onChange={(event) => void save(event.target.checked, budget)}
+          onCheckedChange={(next) => void save(next, budget)}
           aria-label={t('ai.autonomy.toggle')}
         />
-        <span className="text-sm text-on-surface">{t('ai.autonomy.toggle')}</span>
-      </label>
+      </div>
 
       {enabled && (
         <div className="mt-4 space-y-3">

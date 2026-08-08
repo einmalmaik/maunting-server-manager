@@ -43,17 +43,72 @@ def _csrf(cookies: dict) -> dict[str, str]:
     return {"X-CSRF-Token": cookies.get("__Secure-csrf_token", "")}
 
 
-def test_missing_configuration_resolves_to_zero(
+def test_missing_configuration_resolves_to_unlimited(
     db: Session,
     regular_user: User,
 ) -> None:
-    """Ein neues AI-Recht schaltet ohne Limits niemals implizit Kosten frei."""
+    """Ohne jede Rollenkonfiguration gilt unbegrenzt, nicht gesperrt.
+
+    Regression: frueher ergab die leere Zeilenmenge ueber ``max(default=0)``
+    ein Limit von 0. Damit brach jede Anfrage auf einer frischen Installation
+    mit ``ai.errors.quota`` ab, obwohl der Betreiber gar keine Grenze gesetzt
+    hatte. Die Zugangsgrenze ist ``ai.chat.use``, nicht ein stilles Nulllimit.
+    """
     role = _role(db, "ai-unconfigured")
     set_user_roles(db, regular_user, [role.id])
 
     effective = resolve_effective_limits(db, regular_user)
 
-    assert all(getattr(effective, field) == 0 for field in LIMIT_FIELDS)
+    assert all(getattr(effective, field) is None for field in LIMIT_FIELDS)
+    # Und die Reservierung laeuft dann auch wirklich durch.
+    event = reserve_ai_usage(
+        db,
+        regular_user,
+        request_id=uuid4(),
+        estimated_tokens=5_000,
+    )
+    assert event.status == "reserved"
+
+
+def test_unconfigured_role_does_not_lift_a_configured_one(
+    db: Session,
+    regular_user: User,
+) -> None:
+    """Eine zusaetzliche Rolle ohne Konfiguration hebt kein Limit auf.
+
+    Nur der voellig unkonfigurierte Fall bedeutet „unbegrenzt“. Sobald *eine*
+    Rolle Werte traegt, tragen die uebrigen nichts bei — sonst waere jede neu
+    angelegte Rolle ein stiller Freibrief.
+    """
+    limited = _role(db, "ai-limited-role")
+    blank = _role(db, "ai-blank-role")
+    set_role_limit(db, limited.id, _limits(daily_token_limit=100))
+    db.commit()
+    set_user_roles(db, regular_user, [limited.id, blank.id])
+
+    effective = resolve_effective_limits(db, regular_user)
+
+    assert effective.daily_token_limit == 100
+    assert effective.requests_per_minute == 0
+
+
+def test_unconfigured_role_is_listed_as_unlimited_not_zero(
+    client: TestClient,
+    db: Session,
+    owner_cookies: dict,
+) -> None:
+    """Die Einstellungsansicht zeigt „nicht konfiguriert“ als unbegrenzt.
+
+    Vorher stand dort 0. Ein unbeabsichtigtes Speichern haette die Rolle damit
+    hart gesperrt, obwohl der angezeigte Zustand nie gespeichert worden war.
+    """
+    role = _role(db, "ai-listed-unconfigured")
+
+    listed = client.get("/api/ai/settings/role-limits", cookies=owner_cookies)
+
+    row = next(item for item in listed.json() if item["role_id"] == role.id)
+    assert row["configured"] is False
+    assert all(row[field] is None for field in LIMIT_FIELDS)
 
 
 def test_service_rejects_invalid_internal_limit_values(db: Session) -> None:

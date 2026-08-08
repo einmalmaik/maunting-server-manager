@@ -1,9 +1,23 @@
 """Auflösung und Persistenz rollenbasierter KI-Limits.
 
 Die Regeln sind absichtlich klein und deterministisch:
-- fehlende Rollenkonfiguration trägt 0 bei (sicherer Default),
-- der höchste endliche Wert gewinnt,
+- hat *keine* Rolle des Benutzers eine Konfiguration, gilt „unbegrenzt“,
+- unter den konfigurierten Rollen gewinnt der höchste endliche Wert,
 - ein explizites ``None`` gewinnt als „unbegrenzt“.
+
+Die erste Regel ist bewusst so und war früher anders: eine leere Zeilenmenge
+ergab über ``max(..., default=0)`` ein effektives Limit von **0** und damit eine
+KI, die auf jeder frischen Installation jede Anfrage mit „Kontingent
+ausgeschöpft“ abwies — auch für Owner und Admin. Das war kein sicherer Default,
+sondern ein stiller Totalausfall. Die Zugangsgrenze zur KI ist ``ai.chat.use``;
+die Limits hier sind Kostensteuerung. Solange der Betreiber dazu gar nichts
+hinterlegt hat, darf MSM ihm keine Politik unterstellen.
+
+Sobald **mindestens eine** Rolle des Benutzers konfiguriert ist, gilt wieder die
+alte Auflösung: unkonfigurierte Rollen tragen nichts bei, der höchste Wert der
+konfigurierten gewinnt. Eine zusätzliche, privilegierte Rolle erhöht damit das
+Kontingent (Zielpunkt 6.1) und eine bewusst auf 0 gesetzte Rolle sperrt, solange
+keine andere Rolle mehr erlaubt.
 
 Verbrauch wird erst an den späteren Provider-/Chat-Endpunkten gezählt. Dieses
 Modul stellt dafür die zentrale, backendseitige Grenzauflösung bereit.
@@ -90,11 +104,19 @@ def set_role_limit(
 
 
 def _resolve_field(rows: list[RoleAiLimit], field: str) -> int | None:
-    """Löst ein Feld nach „unbegrenzt vor Maximum vor sicherem Nullwert“ auf."""
+    """Löst ein Feld unter den *konfigurierten* Rollen auf.
+
+    ``rows`` ist hier garantiert nicht leer — den leeren Fall behandelt
+    ``resolve_effective_limits`` vorher, weil er eine andere Bedeutung hat
+    („gar keine Politik hinterlegt“ statt „auf 0 gesetzt“).
+    """
     configured = [getattr(row, field) for row in rows]
     if any(value is None for value in configured):
         return None
-    return max((int(value) for value in configured), default=0)
+    return max(int(value) for value in configured)
+
+
+UNLIMITED_AI_LIMITS = EffectiveAiLimits(**{field: None for field in LIMIT_FIELDS})
 
 
 def resolve_effective_limits(db: Session, user: User) -> EffectiveAiLimits:
@@ -105,6 +127,10 @@ def resolve_effective_limits(db: Session, user: User) -> EffectiveAiLimits:
         if role_ids
         else []
     )
+    if not rows:
+        # Keine einzige Rolle des Benutzers hat ein KI-Kontingent hinterlegt.
+        # Siehe Modul-Docstring: das ist „nicht konfiguriert“, nicht „gesperrt“.
+        return UNLIMITED_AI_LIMITS
     return EffectiveAiLimits(
         **{field: _resolve_field(rows, field) for field in LIMIT_FIELDS}
     )

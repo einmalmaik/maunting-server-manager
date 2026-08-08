@@ -15,13 +15,17 @@ def _csrf(cookies: dict) -> dict[str, str]:
 
 
 def _grant_ai_budget(db: Session, user: User) -> None:
-    """Gibt dem Benutzer ein unbegrenztes KI-Kontingent.
+    """Gibt dem Benutzer ausdruecklich ein unbegrenztes KI-Kontingent.
 
     Skill-Laeufe reservieren seit Phase 2 gegen dieselben Rollenkontingente wie
     ein Chat — sonst liefen sie an `requests_per_minute` und
-    `concurrent_operations` vorbei. Der sichere Default ist 0, deshalb braucht
-    auch der Owner hier eine ausdrueckliche Freigabe: bei den KI-Limits gibt es
-    bewusst keinen Owner-Bypass, damit Kosten fuer alle gelten.
+    `concurrent_operations` vorbei.
+
+    Die Freigabe steht hier ausdruecklich, obwohl eine voellig unkonfigurierte
+    Rolle inzwischen ohnehin unbegrenzt bedeutet: diese Tests sollen die Skills
+    pruefen, nicht die Limitaufloesung. Sie duerfen sich deshalb nicht still auf
+    deren Defaultverhalten stuetzen. Dass es bei den KI-Limits keinen
+    Owner-Bypass gibt, prueft `test_ai_skill_limits.py`.
     """
     role = Role(name=f"ai-budget-{user.id}", description=None, is_system=False)
     db.add(role)

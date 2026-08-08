@@ -169,17 +169,24 @@ def test_a_rejected_skill_run_does_not_hold_a_reservation(
     assert reserved == 0, "Eine haengende Reservierung blockiert dauerhaft Kontingent"
 
 
-def test_skill_run_without_any_configured_limit_is_denied(
+def test_skill_run_without_any_configured_limit_is_allowed(
     client: TestClient,
     db: Session,
     owner_user: User,
     owner_cookies: dict,
     test_server,
 ) -> None:
-    """Der sichere Default 0 gilt auch fuer den Owner.
+    """Ohne hinterlegtes Kontingent laeuft ein Skill — er wird nur gezaehlt.
 
-    Bei den KI-Limits gibt es bewusst keinen Owner-Bypass: die Kosten entstehen
-    unabhaengig davon, wer die Anfrage ausloest.
+    Frueher erwartete dieser Test hier ein 429 und beschrieb das als „sicheren
+    Default 0“. Das war kein Default, sondern ein Totalausfall: auf einer
+    frischen Installation hatte niemand eine `RoleAiLimit`-Zeile, also war jede
+    KI-Aktion gesperrt — auch fuer Owner und Admin, und ohne erkennbaren Grund
+    in der Oberflaeche. Wer nichts konfiguriert hat, hat keine Grenze gesetzt;
+    die Zugangsgrenze ist das Recht, nicht ein unsichtbares Nulllimit.
+
+    Der Verbrauch wird trotzdem verbucht, damit eine spaeter gesetzte Grenze
+    sofort greift.
     """
     skill_id = _skill(client, owner_cookies, "no-budget")
     conversation_id = _conversation(db, owner_user, test_server.id)
@@ -190,4 +197,33 @@ def test_skill_run_without_any_configured_limit_is_denied(
         cookies=owner_cookies, headers=_csrf(owner_cookies),
     )
 
+    assert response.status_code == 200, response.text
+    assert db.query(AiUsageEvent).count() == 1
+
+
+def test_owner_has_no_bypass_for_an_explicitly_configured_zero_limit(
+    client: TestClient,
+    db: Session,
+    owner_user: User,
+    owner_cookies: dict,
+    test_server,
+) -> None:
+    """Ein ausdruecklich auf 0 gesetztes Kontingent sperrt auch den Owner.
+
+    Das ist die eigentliche Aussage des frueheren Tests und bleibt bestehen:
+    Bei den KI-Limits gibt es keinen Owner-Bypass, denn die Kosten entstehen
+    unabhaengig davon, wer die Anfrage ausloest. Unterschieden wird nur noch
+    zwischen „nichts konfiguriert“ und „ausdruecklich auf 0 gesetzt“.
+    """
+    _role_with_limits(db, owner_user, {"requests_per_minute": 0})
+    skill_id = _skill(client, owner_cookies, "zero-budget")
+    conversation_id = _conversation(db, owner_user, test_server.id)
+
+    response = client.post(
+        f"/api/ai/skills/{skill_id}/run",
+        json={"conversation_id": conversation_id},
+        cookies=owner_cookies, headers=_csrf(owner_cookies),
+    )
+
     assert response.status_code == 429
+    assert response.json()["detail"]["code"] == "AI_QUOTA_REQUESTS_PER_MINUTE"

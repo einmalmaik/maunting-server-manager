@@ -25,10 +25,18 @@ router = APIRouter(prefix="/api/ai", tags=["ai-settings"])
 
 
 def _role_response(db: Session, role: Role) -> AiRoleLimitsResponse:
-    """Mappt fehlende Konfiguration sicher auf gesperrte Null-Limits."""
+    """Zeigt eine unkonfigurierte Rolle als „unbegrenzt“ statt als Null-Limit.
+
+    Frueher stand hier 0. Das war doppelt irrefuehrend: es beschrieb weder den
+    gespeicherten Zustand (es ist gar nichts gespeichert) noch das tatsaechliche
+    Verhalten (ohne jede Rollenkonfiguration gilt unbegrenzt, siehe
+    ``ai_limit_service``) — und ein unbeabsichtigtes Speichern haette die Rolle
+    hart gesperrt. ``configured`` bleibt der ehrliche Unterschied zwischen
+    „nichts hinterlegt“ und „ausdruecklich unbegrenzt gesetzt“.
+    """
     row = ai_limit_service.get_role_limit(db, role.id)
     values = {
-        field: getattr(row, field) if row is not None else 0
+        field: getattr(row, field) if row is not None else None
         for field in ai_limit_service.LIMIT_FIELDS
     }
     return AiRoleLimitsResponse(

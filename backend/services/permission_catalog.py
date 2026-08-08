@@ -26,20 +26,20 @@ class PermissionDef:
 
 GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("users.read",                "users",   "Userliste sehen"),
-    PermissionDef("users.manage",              "users",   "User anlegen, bearbeiten, loeschen"),
+    PermissionDef("users.manage",              "users",   "User anlegen, bearbeiten, löschen"),
     PermissionDef("users.permissions.manage",  "users",   "User-Rollen und Server-Permissions verwalten"),
-    PermissionDef("roles.manage",              "users",   "Rollen anlegen, bearbeiten, loeschen"),
+    PermissionDef("roles.manage",              "users",   "Rollen anlegen, bearbeiten, löschen"),
     PermissionDef("panel.settings.read",       "panel",   "Panel-Einstellungen lesen"),
-    PermissionDef("panel.settings.write",      "panel",   "Panel-Einstellungen aendern (Steam, E-Mail, ...)"),
+    PermissionDef("panel.settings.write",      "panel",   "Panel-Einstellungen ändern (Steam, E-Mail, ...)"),
     PermissionDef("panel.database.read",       "panel",   "Panel-Datenbank lesen"),
     PermissionDef("panel.database.admin",      "panel",   "Panel-Datenbank verwalten"),
     PermissionDef("servers.create",            "servers", "Neuen Server anlegen"),
-    PermissionDef("servers.delete",            "servers", "Server loeschen (global, nicht delegierbar)"),
+    PermissionDef("servers.delete",            "servers", "Server löschen (global, nicht delegierbar)"),
     PermissionDef("system.view",               "system",  "System-Ressourcen, Interfaces, Version"),
     PermissionDef("system.audit.read",         "system",  "Admin-Audit-Log lesen (privilegierte Aktionen)"),
     PermissionDef("system.secrets.rotate",     "system",  "Cluster-Secrets rotieren (Managed-Postgres-Admin)"),
     PermissionDef("nodes.read",                "system",  "Nodeliste sehen"),
-    PermissionDef("nodes.manage",              "system",  "Nodes anlegen, bearbeiten, loeschen"),
+    PermissionDef("nodes.manage",              "system",  "Nodes anlegen, bearbeiten, löschen"),
     # AI-Rechte bleiben fein granular. Kein Recht impliziert freie Shell- oder
     # Host-Ausführung; spätere Tools prüfen zusätzlich ihr jeweiliges MSM-Recht.
     PermissionDef("ai.chat.use",               "ai",      "KI-Chat verwenden"),
@@ -61,14 +61,14 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("panel.oauth.read",          "panel",   "OAuth-Provider-Konfiguration lesen"),
     PermissionDef("panel.oauth.create",        "panel",   "OAuth-Provider anlegen"),
     PermissionDef("panel.oauth.update",        "panel",   "OAuth-Provider bearbeiten (Slug, Client-ID, Endpoints)"),
-    PermissionDef("panel.oauth.delete",        "panel",   "OAuth-Provider loeschen"),
-    PermissionDef("panel.oauth.secret_update", "panel",   "OAuth-Client-Secret aendern (rotieren)"),
+    PermissionDef("panel.oauth.delete",        "panel",   "OAuth-Provider löschen"),
+    PermissionDef("panel.oauth.secret_update", "panel",   "OAuth-Client-Secret ändern (rotieren)"),
     PermissionDef("panel.oauth.test",          "panel",   "OAuth-Provider-Verbindung testen"),
     # Hoster-Anbindung (Phase 6). Bewusst getrennt von panel.settings.*, damit
     # ein Support-Mitarbeiter Vertraege einsehen kann, ohne API-Keys rotieren
     # oder Produkte umkonfigurieren zu duerfen.
-    PermissionDef("panel.hoster.read",          "panel",   "Hoster-Integrationen und Vertraege einsehen"),
-    PermissionDef("panel.hoster.write",         "panel",   "Hoster-Integrationen, Produkte und Schluessel verwalten"),
+    PermissionDef("panel.hoster.read",          "panel",   "Hoster-Integrationen und Verträge einsehen"),
+    PermissionDef("panel.hoster.write",         "panel",   "Hoster-Integrationen, Produkte und Schlüssel verwalten"),
 )
 
 
@@ -83,20 +83,20 @@ SERVER_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("server.restart",          "server", "Server neustarten"),
     PermissionDef("server.kill",             "server", "Server erzwungen beenden (kill)"),
     PermissionDef("server.install",          "server", "Server (re)installieren"),
-    PermissionDef("server.config.write",     "server", "Server-Einstellungen aendern (Name, Auto-Restart, Backup-Schedule)"),
+    PermissionDef("server.config.write",     "server", "Server-Einstellungen ändern (Name, Auto-Restart, Backup-Schedule)"),
     PermissionDef("server.update",           "server", "Server updaten (Reinstall/Update, Outbound-Webhooks)"),
-    PermissionDef("server.network.manage",   "server", "Ports und Bind-IP aendern"),
-    PermissionDef("server.resources.manage", "server", "CPU-/RAM-/Disk-Limits aendern"),
+    PermissionDef("server.network.manage",   "server", "Ports und Bind-IP ändern"),
+    PermissionDef("server.resources.manage", "server", "CPU-/RAM-/Disk-Limits ändern"),
     PermissionDef("server.console.read",     "server", "Konsole und Logs lesen"),
     PermissionDef("server.console.write",    "server", "Befehle an die Konsole senden"),
-    PermissionDef("server.console.exec",     "server", "Befehle im Container ausfuehren (Exec-Tab, Blueprint-Gate)"),
+    PermissionDef("server.console.exec",     "server", "Befehle im Container ausführen (Exec-Tab, Blueprint-Gate)"),
     PermissionDef("server.files.read",       "server", "Dateien lesen, downloaden"),
     PermissionDef("server.files.write",      "server", "Dateien hochladen, anlegen, bearbeiten, entpacken"),
-    PermissionDef("server.files.delete",     "server", "Dateien loeschen"),
+    PermissionDef("server.files.delete",     "server", "Dateien löschen"),
     PermissionDef("server.backups.read",     "server", "Backups auflisten"),
     PermissionDef("server.backups.create",   "server", "Backup erstellen"),
     PermissionDef("server.backups.restore",  "server", "Backup wiederherstellen"),
-    PermissionDef("server.backups.delete",   "server", "Backup loeschen"),
+    PermissionDef("server.backups.delete",   "server", "Backup löschen"),
     PermissionDef("server.mods.read",        "server", "Mods auflisten, Workshop durchsuchen"),
     PermissionDef("server.mods.write",       "server", "Mods abonnieren, entfernen, sortieren"),
     PermissionDef("server.mods.toggle",      "server", "Mods aktivieren oder deaktivieren"),
@@ -106,7 +106,7 @@ SERVER_PERMISSIONS: tuple[PermissionDef, ...] = (
     # Phase 7: bestimmt, wer einem Server eigene Zugangsdaten zuweisen darf.
     # Eigene Zugangsdaten anlegen darf jeder Benutzer im Profil; hier geht es
     # ausschliesslich um die Bindung an einen konkreten Server.
-    PermissionDef("server.credentials.manage", "server", "Zugangsdaten fuer diesen Server zuweisen"),
+    PermissionDef("server.credentials.manage", "server", "Zugangsdaten für diesen Server zuweisen"),
 )
 
 

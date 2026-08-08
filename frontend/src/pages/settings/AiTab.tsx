@@ -1,20 +1,26 @@
 /**
  * Rollenbasierte KI-Kontingente. Die Ansicht ist nur Konfiguration: Das
  * Backend löst mehrere Rollen auf und erzwingt die Werte an den AI-Endpunkten.
+ *
+ * Es wird bewusst immer nur *eine* Rolle gleichzeitig gezeigt. Vorher standen
+ * alle Rollen mit je sechs Zahlenfeldern untereinander — bei einer Handvoll
+ * Rollen war die Seite nicht mehr überschaubar und man verlor beim Scrollen,
+ * welches Feld zu welcher Rolle gehört.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Bot, Save } from 'lucide-react'
 
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { NumberStepper } from '@/Singra/UI'
+import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { AiProvidersSettings } from './AiProvidersSettings'
 
 export interface AiRoleLimits {
   role_id: number
   role_name: string
+  /** False heisst: für diese Rolle ist nichts gespeichert (alle Werte null). */
   configured: boolean
   daily_token_limit: number | null
   weekly_token_limit: number | null
@@ -56,8 +62,9 @@ export function AiTab() {
   const canRead = useHasPermission('panel.settings.read')
   const canWrite = useHasPermission('panel.settings.write')
   const [rows, setRows] = useState<AiRoleLimits[]>([])
+  const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null)
   const [loading, setLoading] = useState(canRead)
-  const [savingRoleId, setSavingRoleId] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!canRead) {
@@ -67,7 +74,12 @@ export function AiTab() {
     let active = true
     api<AiRoleLimits[]>('/ai/settings/role-limits')
       .then((data) => {
-        if (active) setRows(Array.isArray(data) ? data : [])
+        if (!active) return
+        const list = Array.isArray(data) ? data : []
+        setRows(list)
+        // Bevorzugt die erste bereits konfigurierte Rolle: dort gibt es etwas
+        // zu sehen. Ist nichts konfiguriert, greift schlicht die erste Rolle.
+        setSelectedRoleId((list.find((row) => row.configured) ?? list[0])?.role_id ?? null)
       })
       .catch((error: unknown) => {
         if (active) toast.error(error instanceof Error ? error.message : t('aiSettings.loadFailed'))
@@ -80,6 +92,11 @@ export function AiTab() {
     }
   }, [canRead, t])
 
+  const selected = useMemo(
+    () => rows.find((row) => row.role_id === selectedRoleId) ?? null,
+    [rows, selectedRoleId],
+  )
+
   /** Ändert genau ein Feld lokal; gespeichert wird anschließend das Vollset. */
   const updateField = (roleId: number, field: LimitField, value: number | null) => {
     setRows((current) => current.map((row) => (
@@ -88,8 +105,8 @@ export function AiTab() {
   }
 
   const save = async (row: AiRoleLimits) => {
-    if (!canWrite || savingRoleId !== null) return
-    setSavingRoleId(row.role_id)
+    if (!canWrite || saving) return
+    setSaving(true)
     try {
       const payload = Object.fromEntries(
         FIELD_DEFINITIONS.map(({ key }) => [key, row[key]]),
@@ -105,7 +122,7 @@ export function AiTab() {
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : t('aiSettings.saveFailed'))
     } finally {
-      setSavingRoleId(null)
+      setSaving(false)
     }
   }
 
@@ -133,68 +150,82 @@ export function AiTab() {
         <div className="msm-card p-6 text-sm text-on-surface-variant">{t('aiSettings.noRoles')}</div>
       )}
 
-      {rows.map((row) => (
-        <section key={row.role_id} className="msm-card p-6" aria-labelledby={`ai-role-${row.role_id}`}>
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h4 id={`ai-role-${row.role_id}`} className="font-headline text-base font-semibold text-on-surface">{row.role_name}</h4>
-              <p className="text-xs text-on-surface-variant">
-                {row.configured ? t('aiSettings.configured') : t('aiSettings.safeDefault')}
-              </p>
-            </div>
+      {selected && (
+        <section className="msm-card p-6" aria-labelledby="ai-role-limits-title">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+            <label className="block w-full max-w-sm space-y-1.5">
+              <span id="ai-role-limits-title" className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                {t('aiSettings.selectRole')}
+              </span>
+              <Dropdown
+                value={String(selected.role_id)}
+                onChange={(value) => setSelectedRoleId(Number(value))}
+                options={rows.map((row) => ({
+                  value: String(row.role_id),
+                  label: row.role_name,
+                  hint: row.configured ? t('aiSettings.configured') : t('aiSettings.notConfigured'),
+                }))}
+                disabled={saving}
+                aria-label={t('aiSettings.selectRole')}
+              />
+            </label>
             {canWrite && (
-              <button
+              <Button
                 type="button"
-                className="msm-btn-primary inline-flex min-h-10 items-center gap-2 px-4 py-2 text-sm"
-                disabled={savingRoleId !== null}
-                onClick={() => void save(row)}
-                aria-label={`${t('settings.save')}: ${row.role_name}`}
+                disabled={saving}
+                onClick={() => void save(selected)}
+                aria-label={`${t('settings.save')}: ${selected.role_name}`}
               >
                 <Save className="h-4 w-4" aria-hidden="true" />
-                {savingRoleId === row.role_id ? t('common.loading') : t('settings.save')}
-              </button>
+                {saving ? t('common.loading') : t('settings.save')}
+              </Button>
             )}
           </div>
 
+          {!selected.configured && (
+            <p className="mb-5 rounded-lg border border-outline-variant/40 bg-surface-container-low/45 p-3 text-xs leading-5 text-on-surface-variant">
+              {t('aiSettings.notConfiguredHint')}
+            </p>
+          )}
+
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
             {FIELD_DEFINITIONS.map(({ key, labelKey, max, step }) => {
-              const unlimited = row[key] === null
+              const unlimited = selected[key] === null
               const label = t(labelKey)
+              const fieldId = `ai-${selected.role_id}-${key}`
               return (
                 <div key={key} className="space-y-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-                  <label htmlFor={`ai-${row.role_id}-${key}`} className="block min-h-10 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  <label htmlFor={fieldId} className="block min-h-10 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
                     {label}
                   </label>
                   <NumberStepper
-                    id={`ai-${row.role_id}-${key}`}
+                    id={fieldId}
                     min={0}
                     max={max}
                     step={step}
-                    value={row[key] ?? 0}
-                    disabled={!canWrite || unlimited || savingRoleId !== null}
+                    value={selected[key] ?? 0}
+                    disabled={!canWrite || unlimited || saving}
                     onValueChange={(raw) => {
                       const parsed = parseLimitValue(raw, max)
-                      if (parsed !== null) updateField(row.role_id, key, parsed)
+                      if (parsed !== null) updateField(selected.role_id, key, parsed)
                     }}
-                    aria-label={`${label}: ${row.role_name}`}
+                    aria-label={`${label}: ${selected.role_name}`}
                   />
-                  <label className="flex min-h-10 items-center gap-2 text-xs text-on-surface-variant">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 accent-primary"
+                  <div className="flex min-h-10 items-center justify-between gap-3">
+                    <span className="text-xs text-on-surface-variant">{t('aiSettings.unlimited')}</span>
+                    <Switch
                       checked={unlimited}
-                      disabled={!canWrite || savingRoleId !== null}
-                      onChange={(event) => updateField(row.role_id, key, event.target.checked ? null : 0)}
-                      aria-label={`${t('aiSettings.unlimited')}: ${label}: ${row.role_name}`}
+                      disabled={!canWrite || saving}
+                      onCheckedChange={(next) => updateField(selected.role_id, key, next ? null : 0)}
+                      aria-label={`${t('aiSettings.unlimited')}: ${label}: ${selected.role_name}`}
                     />
-                    {t('aiSettings.unlimited')}
-                  </label>
+                  </div>
                 </div>
               )
             })}
           </div>
         </section>
-      ))}
+      )}
     </div>
   )
 }
