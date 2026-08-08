@@ -1,6 +1,7 @@
-"""Ownership, DIS-Schutz und Secret-Abweisung fuer AI-Memory."""
+"""Ownership, DIS-Schutz, Secret-Abweisung und Abruf fuer AI-Memory."""
 
 from datetime import datetime, timezone
+import re
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
@@ -15,6 +16,10 @@ from services.dis_client import DisClient
 
 MAX_ENTRIES_PER_SCOPE = 100
 MAX_CONTEXT_CHARS = 6_000
+# Nach so vielen Tagen ohne Nutzung haelbiert sich der Aktualitaetsbonus. Grob
+# an "eine Arbeitswoche" angelehnt; der Wert entscheidet nur bei Platzmangel.
+RECENCY_HALFLIFE_DAYS = 7.0
+_WORD_RE = re.compile(r"[\w]+", re.UNICODE)
 
 
 def _aad(entry_id: str) -> str:
@@ -74,8 +79,24 @@ def list_entries(db: Session, user: User, scope: str, server_id: int | None) -> 
 
 
 def upsert_entry(
-    db: Session, *, user: User, scope: str, server_id: int | None, key: str, value: str
+    db: Session, *, user: User, scope: str, server_id: int | None, key: str, value: str,
+    origin: str = "user",
 ) -> tuple[AiMemoryEntry, str]:
+    """Legt einen Eintrag an oder ueberschreibt ihn unter demselben Schluessel.
+
+    Das Ueberschreiben ist die Konfliktaufloesung des Gedaechtnisses: "ich will
+    jetzt 16 GB" ersetzt "8 GB", statt beides nebeneinander stehen zu lassen.
+    Deshalb ist der Schluessel die Identitaet eines Fakts — und deshalb bekommt
+    die KI im Werkzeugtext die ausdrueckliche Anweisung, einen vorhandenen
+    Schluessel wiederzuverwenden, statt einen fuenften aehnlichen anzulegen.
+
+    ``origin`` unterscheidet eine Ansage des Benutzers von einer Ableitung der
+    KI. Eine Ableitung ueberschreibt bewusst **keine** ausdrueckliche Ansage:
+    was der Benutzer selbst gesagt hat, darf die KI nicht stillschweigend
+    korrigieren.
+    """
+    if origin not in {"user", "ai"}:
+        raise HTTPException(status_code=422, detail="Unbekannte Memory-Herkunft")
     identity, owner_id, normalized_server_id = scope_identity(db, user, scope, server_id)
     if scope == "panel" and not permission_service.has_global_permission(db, user, "panel.settings.write"):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
@@ -90,14 +111,26 @@ def upsert_entry(
         row = AiMemoryEntry(
             id=str(uuid4()), owner_user_id=owner_id, server_id=normalized_server_id,
             scope=scope, scope_identity=identity, key=key, value_encrypted="",
+            origin=origin,
         )
         db.add(row)
         action = "ai.memory.created"
+    elif origin == "ai" and row.origin == "user":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Dieser Eintrag stammt vom Benutzer und wird nicht automatisch "
+                "ueberschrieben. Frage nach oder verwende einen anderen Schluessel."
+            ),
+        )
+    else:
+        row.origin = origin
     row.value_encrypted = DisClient.encrypt(safe_value, aad=_aad(row.id))
     row.updated_at = datetime.now(timezone.utc)
     audit_service.record_privileged_action(
         db, user_id=user.id, action=action, target_type="ai_memory", target_id=row.id,
-        details={"scope": scope}, origin="direct",
+        details={"scope": scope, "origin": origin},
+        origin="ai" if origin == "ai" else "direct",
     )
     try:
         db.commit()
@@ -139,29 +172,130 @@ def delete_entry(db: Session, user: User, entry_id: str) -> None:
     db.commit()
 
 
-def provider_memory_context(db: Session, user: User, server_id: int | None) -> str | None:
+def _tokens(text: str) -> set[str]:
+    """Zerlegt Text in vergleichbare Wortstaemme.
+
+    Bewusst simpel: Kleinschreibung, alles Nicht-Alphanumerische trennt, kurze
+    Fuellwoerter fliegen raus. Das ist **keine** semantische Aehnlichkeit — es
+    ist ein Wortabgleich und funktioniert nur innerhalb derselben Sprache.
+    Genau deshalb ist er unten nur ein Kriterium von dreien und entscheidet nie
+    allein.
+    """
+    return {word for word in _WORD_RE.findall(text.lower()) if len(word) > 2}
+
+
+def _relevance(row: AiMemoryEntry, value: str, query_tokens: set[str], now: datetime) -> float:
+    """Bewertet einen Eintrag fuer die aktuelle Frage.
+
+    Drei Anteile, die absichtlich verschiedene Dinge messen:
+
+    - **Bezug zur Frage** (Wortueberlappung). Stark, wenn er greift — aber er
+      greift eben nur bei gleicher Sprache.
+    - **Nutzung.** Was oft abgerufen wurde, ist erfahrungsgemaess wichtig. Das
+      ist der sprachunabhaengige Anteil und der Grund, warum ein deutscher
+      Eintrag auch bei englischer Frage nicht hinten runterfaellt.
+    - **Aktualitaet.** Frisch Gemerktes gewinnt gegen Altes, das nie gebraucht
+      wurde — sonst kaeme ein neuer Eintrag nie zum Zug, weil ihm die
+      Nutzungshistorie fehlt.
+    """
+    overlap = len(query_tokens & _tokens(f"{row.key} {value}"))
+    reference = row.last_used_at or row.updated_at or row.created_at
+    age_days = max(0.0, (now - _utc(reference)).total_seconds() / 86_400)
+    recency = 1.0 / (1.0 + age_days / RECENCY_HALFLIFE_DAYS)
+    return overlap * 3.0 + min(row.use_count, 20) * 0.5 + recency * 2.0
+
+
+def _utc(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _memory_line(row: AiMemoryEntry, value: str) -> str:
+    # Der Block ist zeilenbasiert und jede Zeile traegt ihren Scope. Ein Wert
+    # mit Zeilenumbruch koennte deshalb beliebig viele gefaelschte
+    # "[panel] ..."-Zeilen vortaeuschen — ein Benutzer wuerde sich damit im
+    # eigenen Kontext panelweite Vorgaben andichten. Der Schluessel ist
+    # bereits auf [A-Za-z0-9_.-] begrenzt (schemas/ai_memory.py), der Wert
+    # ist es bewusst nicht: er soll frei formulierbar bleiben.
+    flattened = " ".join(str(value).splitlines())
+    origin = "gesagt" if row.origin == "user" else "gemerkt"
+    return f"[{row.scope}/{origin}] {row.key}: {flattened}"
+
+
+def provider_memory_context(
+    db: Session,
+    user: User,
+    server_id: int | None,
+    query: str = "",
+) -> str | None:
+    """Baut den Memory-Block fuer eine konkrete Anfrage.
+
+    Passt alles ins Budget, kommt alles mit — das ist der Normalfall bei
+    hoechstens 100 Eintraegen je Scope und zugleich der sprachunabhaengigste:
+    das Sprachmodell sieht jeden Eintrag und stellt den Bezug selbst her, egal
+    in welcher Sprache er formuliert ist.
+
+    Erst wenn es *nicht* passt, wird ausgewaehlt — nach Bezug zur Frage,
+    Nutzung und Aktualitaet. Vorher wurde an dieser Stelle alphabetisch nach
+    Schluessel sortiert und bei 6.000 Zeichen abgeschnitten: ein Eintrag
+    "zeitzone" fiel damit systematisch raus, "backup" blieb immer drin.
+
+    Ausgewaehlte Eintraege werden als benutzt vermerkt. Dieses Zaehlwerk ist
+    das Gedaechtnis des Gedaechtnisses: es entscheidet beim naechsten Engpass
+    mit, was bleibt.
+    """
     if not preference(db, user.id):
         return None
     identities = ["panel", f"user:{user.id}"]
     if server_id is not None:
         identities.append(f"server:{server_id}:user:{user.id}")
-    rows = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity.in_(identities)).order_by(
-        AiMemoryEntry.scope, AiMemoryEntry.key
-    ).all()
-    lines: list[str] = []
-    used = 0
-    for row in rows:
-        value = DisClient.decrypt(row.value_encrypted, aad=_aad(row.id))
-        # Der Block ist zeilenbasiert und jede Zeile traegt ihren Scope. Ein Wert
-        # mit Zeilenumbruch koennte deshalb beliebig viele gefaelschte
-        # "[panel] ..."-Zeilen vortaeuschen — ein Benutzer wuerde sich damit im
-        # eigenen Kontext panelweite Vorgaben andichten. Der Schluessel ist
-        # bereits auf [A-Za-z0-9_.-] begrenzt (schemas/ai_memory.py), der Wert
-        # ist es bewusst nicht: er soll frei formulierbar bleiben.
-        flattened = " ".join(str(value).splitlines())
-        line = f"[{row.scope}] {row.key}: {flattened}"
-        if used + len(line) > MAX_CONTEXT_CHARS:
-            break
-        lines.append(line)
-        used += len(line)
-    return "\n".join(lines) or None
+    rows = db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity.in_(identities)
+    ).order_by(AiMemoryEntry.scope, AiMemoryEntry.key).all()
+    if not rows:
+        return None
+
+    decoded = [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row.id))) for row in rows]
+    lines = [_memory_line(row, value) for row, value in decoded]
+    total = sum(len(line) + 1 for line in lines)
+
+    if total <= MAX_CONTEXT_CHARS:
+        selected = decoded
+        truncated = False
+    else:
+        now = datetime.now(timezone.utc)
+        query_tokens = _tokens(query)
+        ranked = sorted(
+            decoded,
+            key=lambda item: _relevance(item[0], item[1], query_tokens, now),
+            reverse=True,
+        )
+        selected = []
+        used = 0
+        for row, value in ranked:
+            line = _memory_line(row, value)
+            if used + len(line) + 1 > MAX_CONTEXT_CHARS:
+                continue
+            selected.append((row, value))
+            used += len(line) + 1
+        # Die urspruengliche Reihenfolge lesbar halten, nicht die Rangfolge.
+        selected.sort(key=lambda item: (item[0].scope, item[0].key))
+        truncated = len(selected) < len(decoded)
+
+    if not selected:
+        return None
+
+    now = datetime.now(timezone.utc)
+    for row, _value in selected:
+        row.use_count = int(row.use_count or 0) + 1
+        row.last_used_at = now
+    db.flush()
+
+    block = "\n".join(_memory_line(row, value) for row, value in selected)
+    if truncated:
+        # Ehrlich bleiben: das Modell soll wissen, dass es nicht alles sieht,
+        # statt aus einer Luecke zu schliessen, es gebe nichts.
+        block += (
+            f"\n[Hinweis] {len(decoded) - len(selected)} weitere Eintraege wurden "
+            "aus Platzgruenden ausgelassen."
+        )
+    return block

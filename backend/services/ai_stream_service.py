@@ -303,7 +303,11 @@ async def stream_conversation_reply(
                         )
                         db.add(user_message)
                         db.flush()
-                        provider_messages = build_provider_messages(db, conversation)
+                        # Die gerade gestellte Frage steuert mit, welche
+                        # Memory-Eintraege bei knappem Platz ueberleben.
+                        provider_messages = build_provider_messages(
+                            db, conversation, query=safe_content
+                        )
                         estimated_tokens = estimate_reserved_tokens(provider_messages)
                         # Kosten werden aus dem vom Betreiber gepflegten
                         # Providerpreis abgeleitet. Ohne Preis bleibt der Wert
@@ -450,6 +454,22 @@ async def stream_conversation_reply(
         )
         finalized = True
         yield sse_event("done", {"message_id": assistant_id})
+
+        # Erst jetzt falten — der Benutzer hat seine Antwort und wartet nicht
+        # auf die Zusammenfassung. Scheitert sie, bleibt der Chat unveraendert
+        # und der naechste Durchlauf versucht es erneut.
+        try:
+            from services.ai_compaction_service import compact_conversation
+
+            if await compact_conversation(
+                client=client,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                provider_id=provider.id,
+            ):
+                yield sse_event("compacted", {"conversation_id": conversation_id})
+        except Exception as exc:
+            logger.info("AI-Kompression uebersprungen error=%s", type(exc).__name__)
     except (asyncio.CancelledError, GeneratorExit):
         # Bricht der Browser die Verbindung ab, wirft Python beim Aufraeumen des
         # Generators ein GeneratorExit. Das ist kein `Exception` und lief bisher

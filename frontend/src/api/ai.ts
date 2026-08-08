@@ -109,6 +109,10 @@ export interface AiMemoryEntry {
   server_id: number | null
   key: string
   value: string
+  /** "user" = selbst hinterlegt, "ai" = von der KI gemerkt. */
+  origin: 'user' | 'ai'
+  use_count: number
+  last_used_at: string | null
   created_at: string
   updated_at: string
 }
@@ -160,6 +164,8 @@ export type AiStreamEvent =
   // Ein gerade ausgefuehrtes Lesewerkzeug — macht sichtbar, worauf die Antwort
   // beruht.
   | { event: 'tool'; data: AiToolUse }
+  // Der aeltere Teil des Verlaufs wurde zu einer Zusammenfassung gefaltet.
+  | { event: 'compacted'; data: { conversation_id: string } }
   | { event: 'proposal'; data: AiActionProposal }
   // Eine bereits ausgefuehrte autonome Aktion. Bewusst ein eigenes Ereignis:
   // sie ist keine Anfrage an den Benutzer, sondern eine Meldung.
@@ -167,7 +173,7 @@ export type AiStreamEvent =
   | { event: 'done'; data: { message_id: string; replayed?: boolean } }
   | { event: 'error'; data: { code: string; message_key: string } }
 
-const STREAM_EVENTS = ['message', 'delta', 'reasoning', 'tool', 'proposal', 'action', 'done', 'error']
+const STREAM_EVENTS = ['message', 'delta', 'reasoning', 'tool', 'compacted', 'proposal', 'action', 'done', 'error']
 
 export interface AiProviderWrite {
   name: string

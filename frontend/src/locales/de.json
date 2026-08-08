@@ -182,7 +182,11 @@
         "load": "KI-Memory konnte nicht geladen werden.",
         "save": "KI-Memory konnte nicht gespeichert werden.",
         "delete": "Memory-Eintrag konnte nicht gelöscht werden."
-      }
+      },
+      "originAi": "von der KI gemerkt",
+      "usedCount": "{{count}}× verwendet",
+      "usedCount_one": "{{count}}× verwendet",
+      "usedCount_other": "{{count}}× verwendet"
     },
     "skills": {
       "title": "Versionierte KI-Skills",
@@ -295,7 +299,8 @@
         "logs": "Mein Server startet nicht — schau dir mal die Logs an.",
         "network": "Mein Minecraft-Server ist an, aber nicht erreichbar. Woran liegt das?",
         "mods": "Welche Mods sind auf meinem Server installiert und gibt es Updates?"
-      }
+      },
+      "compacted": "Ältere Nachrichten wurden zusammengefasst"
     },
     "actions": {
       "title": "KI-Aktionsvorschlag",
@@ -370,7 +375,8 @@
       "read_guardian_incidents": "Autopilot-Vorfälle gelesen",
       "read_ai_action_history": "Frühere KI-Aktionen gelesen",
       "read_mod_updates": "Mod-Updates geprüft",
-      "search_workshop_mods": "Workshop durchsucht"
+      "search_workshop_mods": "Workshop durchsucht",
+      "remember": "Gemerkt"
     },
     "errors": {
       "codes": {

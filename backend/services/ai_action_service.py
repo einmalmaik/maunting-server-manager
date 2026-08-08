@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 from pathlib import PurePosixPath
+import re
 import secrets
 from uuid import UUID, uuid4
 
@@ -61,8 +62,17 @@ SERVER_READ_TOOLS = {
     "read_mod_updates",
     "search_workshop_mods",
 }
-GLOBAL_READ_TOOLS = {"list_my_servers", "list_blueprints", "read_node_capacity"}
+GLOBAL_READ_TOOLS = {"list_my_servers", "list_blueprints", "read_node_capacity", "remember"}
 READ_TOOLS = SERVER_READ_TOOLS | GLOBAL_READ_TOOLS
+
+# `remember` steht bewusst bei den Read-Tools, obwohl es schreibt. Der
+# Unterschied zwischen beiden Mengen ist nicht "aendert etwas", sondern "fasst
+# einen Server an und braucht deshalb eine Bestaetigung". Ein gemerkter Satz im
+# eigenen Profil des Benutzers tut das nicht: er ist jederzeit einsehbar,
+# aenderbar und loeschbar, beruehrt keinen Server und keine Datei. Als
+# Write-Tool wuerde jedes Merken den Chat unterbrechen und eine Rueckfrage
+# erzeugen — ein Gedaechtnis, das man einzeln bestaetigen muss, ist keines.
+MEMORY_TOOLS = {"remember"}
 
 # Jedes serverbezogene Werkzeug traegt seit dem Einzelchat seine eigene
 # `server_id`. Vorher stand sie an der Unterhaltung — dadurch konnte der
@@ -154,6 +164,33 @@ def _global_tool_definitions() -> list[dict]:
             "nur mit Namen nennt oder gar nicht benennt.",
             {},
             [],
+        ),
+        _function(
+            "remember",
+            "Merkt sich eine dauerhafte Vorliebe oder Eigenheit des Benutzers "
+            "oder eines Servers. Nur fuer Dinge, die ueber dieses Gespraech "
+            "hinaus gelten — nicht fuer Zwischenergebnisse. Verwende einen "
+            "bereits vorhandenen Schluessel erneut, wenn du einen Fakt "
+            "aktualisierst, statt einen aehnlichen neuen anzulegen. Niemals "
+            "Passwoerter, Schluessel oder Tokens merken.",
+            {
+                "scope": {
+                    "type": "string",
+                    "enum": ["user", "server"],
+                    "description": "user = gilt ueberall, server = gilt nur fuer diesen Server.",
+                },
+                "server_id": {
+                    "type": ["integer", "null"],
+                    "description": "Nur bei scope=server. Sonst null.",
+                },
+                "key": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Kurzer stabiler Bezeichner, z. B. ram.bevorzugt.",
+                },
+                "value": {"type": "string", "maxLength": 2_000},
+            },
+            ["scope", "key", "value"],
         ),
         _function(
             "list_blueprints",
@@ -347,6 +384,62 @@ def _resolve_server(db: Session, user: User, arguments: dict) -> tuple[Server, d
     return server, rest
 
 
+_MEMORY_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
+    """Laesst die KI einen dauerhaften Fakt im Memory des Benutzers ablegen.
+
+    Die Rechtegrenze ist `ai.memory.use` — dasselbe Recht, das entscheidet, ob
+    Memory ueberhaupt in den Kontext fliesst. Wer sein Memory nicht nutzen darf,
+    bekommt auch keines geschrieben.
+
+    Alle inhaltlichen Schutzmassnahmen liegen bereits in
+    `ai_memory_service.upsert_entry`: Secret-Abweisung, Groessengrenze,
+    DIS-Verschluesselung, Scope-Trennung je Benutzer und die Regel, dass eine
+    Ableitung der KI keine ausdrueckliche Ansage des Benutzers ueberschreibt.
+    Hier steht nur die Argumentpruefung.
+    """
+    from services import ai_memory_service
+
+    if not permission_service.has_global_permission(db, user, "ai.memory.use"):
+        raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
+    if set(arguments) - {"scope", "server_id", "key", "value"}:
+        raise AiActionValidationError("Memory-Werkzeug hat ungueltige Argumente")
+
+    scope = arguments.get("scope")
+    if scope not in {"user", "server"}:
+        # "panel" ist bewusst nicht erreichbar: panelweites Memory gilt fuer
+        # alle Benutzer und ist eine Betreiberentscheidung, keine der KI.
+        raise AiActionValidationError("Unbekannter Memory-Bereich")
+
+    key = arguments.get("key")
+    if not isinstance(key, str) or not _MEMORY_KEY_RE.match(key):
+        raise AiActionValidationError("Ungueltiger Memory-Schluessel")
+    value = arguments.get("value")
+    if not isinstance(value, str) or not value.strip():
+        raise AiActionValidationError("Memory-Inhalt ist leer")
+
+    server_id = arguments.get("server_id")
+    if scope == "server":
+        if isinstance(server_id, bool) or not isinstance(server_id, int) or server_id < 1:
+            raise AiActionValidationError("Server-Memory braucht eine gueltige server_id")
+    elif server_id is not None:
+        raise AiActionValidationError("Benutzer-Memory akzeptiert keinen Server")
+
+    try:
+        row, stored = ai_memory_service.upsert_entry(
+            db, user=user, scope=scope, server_id=server_id if scope == "server" else None,
+            key=key, value=value, origin="ai",
+        )
+    except HTTPException as exc:
+        # Volles Scope, Secret im Wert, fremder Server, geschuetzter Eintrag:
+        # alles regulaere Faelle, die das Modell erfahren soll, statt dass der
+        # Stream mit einem Serverfehler abbricht.
+        raise AiActionValidationError(str(exc.detail)) from exc
+    return {"remembered": True, "scope": row.scope, "key": row.key, "value": stored}
+
+
 def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, arguments: dict) -> dict:
     """Werkzeuge ohne Serverbezug.
 
@@ -359,6 +452,9 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
     Servererstellung. Wer keine Server anlegen darf, hat auch keinen Grund, die
     Kapazitaetsplanung des Betreibers zu sehen.
     """
+    if tool_name == "remember":
+        return _execute_remember(db, user=user, arguments=arguments)
+
     _require_no_arguments(tool_name, arguments)
 
     if tool_name == "list_my_servers":

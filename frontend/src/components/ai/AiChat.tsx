@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, Brain, Loader2, Paperclip, Play, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
+import { Bot, Brain, BrainCircuit, Loader2, Paperclip, Play, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -27,6 +27,9 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 type Entry =
   | { kind: 'message'; id: string; message: AiMessage }
   | { kind: 'tool'; id: string; tool: AiToolUse }
+  // Marke fuer das Falten des aelteren Verlaufs. Ohne sichtbaren Hinweis
+  // wuerde die KI spaeter Dinge "vergessen", ohne dass jemand weiss warum.
+  | { kind: 'compacted'; id: string }
   | { kind: 'proposal'; id: string; proposal: AiActionProposal }
 
 interface ServerOption {
@@ -252,6 +255,12 @@ export function AiChat() {
           setEntries((current) => insertBeforeStreaming(current, {
             kind: 'tool', id: `${data.tool_name}-${current.length}`, tool: data,
           }))
+        } else if (name === 'compacted') {
+          // Die Marke gehoert an den Anfang: sie beschreibt, was *vorher* war.
+          setEntries((current) => [
+            { kind: 'compacted', id: `compacted-${data.conversation_id}` },
+            ...current.filter((entry) => entry.kind !== 'compacted'),
+          ])
         } else if (name === 'done') {
           patchAssistantById(setEntries, undefined, assistantId, (message) => ({
             ...message, status: 'complete',
@@ -439,14 +448,26 @@ export function AiChat() {
           <div className="space-y-4">
             {entries.map((entry) => {
               if (entry.kind === 'tool') {
+                const isMemory = entry.tool.tool_name === 'remember'
                 return (
                   <p
                     key={entry.id}
                     className="flex items-center gap-2 text-xs text-on-surface-variant"
                   >
-                    <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+                    {isMemory
+                      ? <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                      : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
                     {t(`ai.tools.${entry.tool.tool_name}`, { defaultValue: entry.tool.tool_name })}
                   </p>
+                )
+              }
+              if (entry.kind === 'compacted') {
+                return (
+                  <div key={entry.id} className="flex items-center gap-3 py-2">
+                    <span className="h-px flex-1 bg-outline-variant/40" />
+                    <span className="text-xs text-on-surface-variant">{t('ai.chat.compacted')}</span>
+                    <span className="h-px flex-1 bg-outline-variant/40" />
+                  </div>
                 )
               }
               if (entry.kind === 'proposal') {
@@ -620,10 +641,17 @@ function mergeEntries(messages: AiMessage[], proposals: AiActionProposal[]): Ent
     ...proposals.map((proposal) => ({ kind: 'proposal' as const, id: proposal.id, proposal })),
   ]
   return merged.sort((a, b) => {
-    const left = a.kind === 'message' ? a.message.created_at : a.kind === 'proposal' ? a.proposal.created_at : ''
-    const right = b.kind === 'message' ? b.message.created_at : b.kind === 'proposal' ? b.proposal.created_at : ''
+    const left = entryTimestamp(a)
+    const right = entryTimestamp(b)
     return left.localeCompare(right)
   })
+}
+
+/** Zeitstempel eines Eintrags; typlose Marken sortieren an den Anfang. */
+function entryTimestamp(entry: Entry): string {
+  if (entry.kind === 'message') return entry.message.created_at
+  if (entry.kind === 'proposal') return entry.proposal.created_at
+  return ''
 }
 
 /** Aendert die streamende Nachricht, egal ob sie schon die Server-ID traegt. */

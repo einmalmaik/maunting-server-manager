@@ -26,6 +26,11 @@ class AiMemoryResponse(BaseModel):
     server_id: int | None
     key: str
     value: str
+    # "user" = du hast es hinterlegt, "ai" = die KI hat es sich gemerkt.
+    # Sichtbar, damit niemand raten muss, woher ein Eintrag stammt.
+    origin: Literal["user", "ai"] = "user"
+    use_count: int = 0
+    last_used_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

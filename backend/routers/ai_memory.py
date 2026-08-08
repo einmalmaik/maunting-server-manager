@@ -23,7 +23,9 @@ router = APIRouter(prefix="/api/ai/memory", tags=["ai-memory"])
 def _response(row: AiMemoryEntry, value: str) -> AiMemoryResponse:
     return AiMemoryResponse(
         id=row.id, scope=row.scope, server_id=row.server_id, key=row.key,
-        value=value, created_at=row.created_at, updated_at=row.updated_at,
+        value=value, origin=row.origin, use_count=row.use_count,
+        last_used_at=row.last_used_at,
+        created_at=row.created_at, updated_at=row.updated_at,
     )
 
 

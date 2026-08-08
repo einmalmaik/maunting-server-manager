@@ -1,0 +1,240 @@
+"""Das Memory soll sich wie ein Gedaechtnis verhalten, nicht wie eine Liste.
+
+Vorher hing `provider_memory_context` die Eintraege alphabetisch nach Schluessel
+aneinander und brach bei 6.000 Zeichen ab. Ein Eintrag "zeitzone" fiel damit
+systematisch heraus, "backup" blieb immer drin — unabhaengig davon, was
+gebraucht wurde. Diese Datei haelt die drei Eigenschaften fest, die daraus ein
+brauchbares Gedaechtnis machen: alles mitnehmen solange es passt, sonst nach
+Relevanz auswaehlen, und Herkunft respektieren.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from models import AiMemoryEntry, Role, RolePermission, User
+from services import ai_action_service, ai_memory_service
+from services.role_service import set_user_roles
+
+
+def _allow_memory(db: Session, user: User) -> None:
+    role = Role(name=f"memory-{user.id}", description=None, is_system=False)
+    db.add(role)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_key="ai.memory.use"))
+    db.commit()
+    set_user_roles(db, user, [role.id])
+
+
+def _write(db: Session, user: User, key: str, value: str, origin: str = "user") -> AiMemoryEntry:
+    row, _ = ai_memory_service.upsert_entry(
+        db, user=user, scope="user", server_id=None, key=key, value=value, origin=origin,
+    )
+    return row
+
+
+def test_everything_fits_so_everything_is_sent(db: Session, regular_user: User) -> None:
+    """Der Normalfall: kein Auswaehlen, kein Abschneiden, keine Sprachgrenze.
+
+    Genau deshalb funktioniert das Gedaechtnis sprachuebergreifend ohne
+    Embeddings — ein deutscher Eintrag steht auch dann im Kontext, wenn auf
+    Englisch gefragt wird, weil das Sprachmodell den Bezug herstellt.
+    """
+    _allow_memory(db, regular_user)
+    _write(db, regular_user, "ram.bevorzugt", "8 GB fuer Minecraft")
+    _write(db, regular_user, "zeitzone", "Europe/Berlin")
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, None, query="what timezone do I use?"
+    )
+
+    assert "8 GB fuer Minecraft" in block
+    assert "Europe/Berlin" in block
+    assert "ausgelassen" not in block
+
+
+def test_a_tight_budget_selects_by_relevance_instead_of_alphabet(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Passt nicht alles, entscheidet der Bezug zur Frage — nicht der Schluessel."""
+    _allow_memory(db, regular_user)
+    _write(db, regular_user, "aaa.irrelevant", "Voellig anderes Thema ohne Bezug")
+    _write(db, regular_user, "zzz.relevant", "Der Backup-Zeitpunkt ist nachts um drei")
+    # Budget so klein, dass genau ein Eintrag passt.
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 70)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, None, query="Wann laeuft mein Backup?"
+    )
+
+    assert "Backup-Zeitpunkt" in block
+    assert "Voellig anderes Thema" not in block
+    # Ehrlich bleiben: das Modell erfaehrt, dass es nicht alles sieht.
+    assert "ausgelassen" in block
+
+
+def test_frequently_used_entries_survive_a_foreign_language_question(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nutzung ist der sprachunabhaengige Anteil der Auswahl.
+
+    Ein Wortabgleich greift nur innerhalb einer Sprache. Fragt jemand auf
+    Englisch, waere ein rein lexikalisches Ranking blind — dann entscheidet,
+    was sich in der Vergangenheit als wichtig erwiesen hat.
+    """
+    _allow_memory(db, regular_user)
+    important = _write(db, regular_user, "wichtig", "Etwas dauerhaft Wichtiges")
+    _write(db, regular_user, "unwichtig", "Etwas nie Gebrauchtes")
+    important.use_count = 15
+    important.last_used_at = datetime.now(timezone.utc)
+    db.commit()
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 60)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, None, query="please summarise my setup"
+    )
+
+    assert "dauerhaft Wichtiges" in block
+    assert "nie Gebrauchtes" not in block
+
+
+def test_reading_the_memory_records_the_usage(db: Session, regular_user: User) -> None:
+    """Das Zaehlwerk ist das Gedaechtnis des Gedaechtnisses."""
+    _allow_memory(db, regular_user)
+    row = _write(db, regular_user, "gezaehlt", "Wert")
+    assert row.use_count == 0
+
+    ai_memory_service.provider_memory_context(db, regular_user, None, query="Wert?")
+    db.refresh(row)
+
+    assert row.use_count == 1
+    assert row.last_used_at is not None
+
+
+def test_the_ai_never_silently_overwrites_what_the_user_said(
+    db: Session, regular_user: User
+) -> None:
+    """Eine Ableitung darf keine ausdrueckliche Ansage korrigieren."""
+    _allow_memory(db, regular_user)
+    _write(db, regular_user, "ram.bevorzugt", "16 GB", origin="user")
+
+    with pytest.raises(HTTPException) as excinfo:
+        _write(db, regular_user, "ram.bevorzugt", "4 GB", origin="ai")
+
+    assert excinfo.value.status_code == 409
+    stored = ai_memory_service.list_entries(db, regular_user, "user", None)
+    assert stored[0][1] == "16 GB"
+
+
+def test_the_ai_updates_its_own_entry_under_the_same_key(
+    db: Session, regular_user: User
+) -> None:
+    """Konsolidieren statt sammeln: derselbe Schluessel ersetzt den Wert."""
+    _allow_memory(db, regular_user)
+    _write(db, regular_user, "spielzeit", "abends", origin="ai")
+    _write(db, regular_user, "spielzeit", "am Wochenende", origin="ai")
+
+    stored = ai_memory_service.list_entries(db, regular_user, "user", None)
+
+    assert len(stored) == 1
+    assert stored[0][1] == "am Wochenende"
+
+
+def test_remember_requires_the_memory_permission(db: Session, regular_user: User) -> None:
+    """Wer sein Memory nicht nutzen darf, bekommt auch keines geschrieben."""
+    with pytest.raises(ai_action_service.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="remember",
+            arguments={"scope": "user", "key": "test", "value": "Wert"},
+        )
+
+
+def test_remember_rejects_secrets_and_the_panel_scope(
+    db: Session, regular_user: User
+) -> None:
+    """Zwei Grenzen, die das Werkzeug nicht verschieben darf."""
+    _allow_memory(db, regular_user)
+
+    # Panelweites Memory gilt fuer alle Benutzer — das ist eine
+    # Betreiberentscheidung und nicht die der KI.
+    with pytest.raises(ai_action_service.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="remember",
+            arguments={"scope": "panel", "key": "regel", "value": "Wert"},
+        )
+
+    with pytest.raises(ai_action_service.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="remember",
+            arguments={
+                "scope": "user", "key": "zugang",
+                "value": "api_key=sk-abcdefghijklmnopqrstuvwxyz012345",
+            },
+        )
+
+
+def test_remember_stores_a_preference_with_its_origin(
+    db: Session, regular_user: User
+) -> None:
+    _allow_memory(db, regular_user)
+
+    result = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="remember",
+        arguments={"scope": "user", "key": "ram.bevorzugt", "value": "8 GB"},
+    )
+
+    assert result["remembered"] is True
+    row = db.query(AiMemoryEntry).filter(AiMemoryEntry.key == "ram.bevorzugt").one()
+    assert row.origin == "ai"
+    assert row.scope == "user"
+
+
+def test_a_disabled_memory_is_not_read_at_all(db: Session, regular_user: User) -> None:
+    """Der Abschalter des Benutzers gilt vor jeder Auswahl."""
+    _allow_memory(db, regular_user)
+    _write(db, regular_user, "vorhanden", "Wert")
+    ai_memory_service.set_preference(db, regular_user, False)
+
+    assert ai_memory_service.provider_memory_context(
+        db, regular_user, None, query="Wert?"
+    ) is None
+
+
+def test_memory_of_one_user_never_reaches_another(
+    db: Session, regular_user: User, owner_user: User
+) -> None:
+    """Die Trennung je Benutzer ist im Hoster-Betrieb die zentrale Zusage."""
+    _allow_memory(db, regular_user)
+    _allow_memory(db, owner_user)
+    _write(db, regular_user, "privat", "Nur fuer den einen Benutzer")
+
+    block = ai_memory_service.provider_memory_context(
+        db, owner_user, None, query="privat"
+    )
+
+    assert block is None
+
+
+def test_recency_beats_an_old_never_used_entry(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Frisch Gemerktes braucht eine Chance, obwohl ihm die Historie fehlt."""
+    _allow_memory(db, regular_user)
+    old = _write(db, regular_user, "alt", "Lange her und nie gebraucht")
+    fresh = _write(db, regular_user, "neu", "Gerade eben gemerkt")
+    old.updated_at = datetime.now(timezone.utc) - timedelta(days=120)
+    old.last_used_at = None
+    fresh.last_used_at = None
+    db.commit()
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 60)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, None, query="unrelated question in english"
+    )
+
+    assert "Gerade eben gemerkt" in block
+    assert "Lange her" not in block

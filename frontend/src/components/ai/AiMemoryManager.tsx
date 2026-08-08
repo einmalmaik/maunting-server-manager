@@ -1,4 +1,4 @@
-import { Brain, Save, Trash2 } from 'lucide-react'
+import { Brain, BrainCircuit, Save, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -63,7 +63,30 @@ export function AiMemoryManager() {
         <label className="flex min-h-10 items-center gap-3 text-sm text-on-surface-variant"><span>{t('ai.memory.enabled')}</span><Switch checked={enabled} disabled={busy} onCheckedChange={(next) => { setBusy(true); void aiApi.setMemoryPreference(next).then(() => setEnabled(next)).catch(() => toast.error(t('ai.memory.errors.save'))).finally(() => setBusy(false)) }} aria-label={t('ai.memory.enabled')} /></label>
       </div>
       <div className="space-y-2">
-        {entries.map((entry) => <div key={entry.id} className="flex items-start gap-3 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-3"><div className="min-w-0 flex-1"><p className="font-mono text-xs font-semibold text-primary">{entry.key}</p><p className="mt-1 whitespace-pre-wrap break-words text-sm text-on-surface-variant">{entry.value}</p></div><Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => void remove(entry)} aria-label={t('ai.memory.delete')}><Trash2 className="h-4 w-4" /></Button></div>)}
+        {entries.map((entry) => (
+          <div key={entry.id} className="flex items-start gap-3 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-mono text-xs font-semibold text-primary">{entry.key}</p>
+                {/* Herkunft sichtbar machen: niemand soll raten muessen, ob er
+                    das selbst hinterlegt hat oder ob die KI es abgeleitet hat. */}
+                {entry.origin === 'ai' && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/50 px-2 py-0.5 text-[10px] text-on-surface-variant">
+                    <BrainCircuit className="h-3 w-3" aria-hidden="true" />
+                    {t('ai.memory.originAi')}
+                  </span>
+                )}
+                {entry.use_count > 0 && (
+                  <span className="text-[10px] text-on-surface-variant/70">
+                    {t('ai.memory.usedCount', { count: entry.use_count })}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-on-surface-variant">{entry.value}</p>
+            </div>
+            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => void remove(entry)} aria-label={t('ai.memory.delete')}><Trash2 className="h-4 w-4" /></Button>
+          </div>
+        ))}
         {entries.length === 0 && <p className="rounded-xl border border-dashed border-outline-variant/50 px-4 py-5 text-sm text-on-surface-variant">{t('ai.memory.empty')}</p>}
       </div>
       <form className="grid gap-3 md:grid-cols-[14rem_minmax(0,1fr)_auto]" onSubmit={save}><input className="msm-input" pattern="[A-Za-z0-9_.-]+" maxLength={64} value={key} onChange={(event) => setKey(event.target.value)} placeholder={t('ai.memory.key')} aria-label={t('ai.memory.key')} /><input className="msm-input" maxLength={2000} value={value} onChange={(event) => setValue(event.target.value)} placeholder={t('ai.memory.value')} aria-label={t('ai.memory.value')} /><Button type="submit" disabled={busy || !key.trim() || !value.trim()}><Save className="h-4 w-4" />{t('settings.save')}</Button></form>

@@ -24,8 +24,22 @@ const entry: AiMemoryEntry = {
   server_id: null,
   key: 'response.language',
   value: 'Synthetic test preference',
+  origin: 'user',
+  use_count: 0,
+  last_used_at: null,
   created_at: '2026-08-01T12:00:00Z',
   updated_at: '2026-08-01T12:00:00Z',
+}
+
+/** Ein von der KI selbst gemerkter Eintrag — muss sichtbar anders aussehen. */
+const learned: AiMemoryEntry = {
+  ...entry,
+  id: '00000000-0000-0000-0000-000000000102',
+  key: 'ram.bevorzugt',
+  value: '8 GB',
+  origin: 'ai',
+  use_count: 4,
+  last_used_at: '2026-08-05T09:00:00Z',
 }
 
 describe('AiMemoryManager', () => {
@@ -55,6 +69,19 @@ describe('AiMemoryManager', () => {
     await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
       scope: 'user', key: 'answer.format', value: 'Use concise synthetic output',
     }))
+  })
+
+  it('marks what the AI remembered on its own and how often it was used', async () => {
+    // Ohne diese Kennzeichnung waere nicht erkennbar, ob ein Eintrag eine
+    // eigene Ansage ist oder eine Ableitung der KI — und genau daran haengt,
+    // wie sehr man ihm trauen sollte.
+    vi.mocked(aiApi.listMemory).mockResolvedValue([entry, learned])
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('von der KI gemerkt')).toBeInTheDocument()
+    expect(screen.getByText('4× verwendet')).toBeInTheDocument()
+    // Der selbst hinterlegte Eintrag traegt die Kennzeichnung nicht.
+    expect(screen.getAllByText('von der KI gemerkt')).toHaveLength(1)
   })
 
   it('renders nothing without the memory permission', () => {
