@@ -49,7 +49,7 @@ def test_everything_fits_so_everything_is_sent(db: Session, regular_user: User) 
     _write(db, regular_user, "zeitzone", "Europe/Berlin")
 
     block = ai_memory_service.provider_memory_context(
-        db, regular_user, None, query="what timezone do I use?"
+        db, regular_user, query="what timezone do I use?"
     )
 
     assert "8 GB fuer Minecraft" in block
@@ -68,7 +68,7 @@ def test_a_tight_budget_selects_by_relevance_instead_of_alphabet(
     monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 70)
 
     block = ai_memory_service.provider_memory_context(
-        db, regular_user, None, query="Wann laeuft mein Backup?"
+        db, regular_user, query="Wann laeuft mein Backup?"
     )
 
     assert "Backup-Zeitpunkt" in block
@@ -95,7 +95,7 @@ def test_frequently_used_entries_survive_a_foreign_language_question(
     monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 60)
 
     block = ai_memory_service.provider_memory_context(
-        db, regular_user, None, query="please summarise my setup"
+        db, regular_user, query="please summarise my setup"
     )
 
     assert "dauerhaft Wichtiges" in block
@@ -108,7 +108,8 @@ def test_reading_the_memory_records_the_usage(db: Session, regular_user: User) -
     row = _write(db, regular_user, "gezaehlt", "Wert")
     assert row.use_count == 0
 
-    ai_memory_service.provider_memory_context(db, regular_user, None, query="Wert?")
+    ai_memory_service.provider_memory_context(
+        db, regular_user, query="Wert?")
     db.refresh(row)
 
     assert row.use_count == 1
@@ -142,6 +143,75 @@ def test_the_ai_updates_its_own_entry_under_the_same_key(
 
     assert len(stored) == 1
     assert stored[0][1] == "am Wochenende"
+
+
+def test_server_scoped_memory_reaches_the_context_with_its_server_id(
+    db: Session, regular_user: User
+) -> None:
+    """Regression: serverbezogenes Memory war schreibbar, aber unlesbar.
+
+    Der Kontextaufbau uebergab fest ``server_id=None``, weil die Unterhaltung
+    seit dem Einzelchat keinen Serverbezug mehr hat. Die KI konnte sich damit
+    etwas zu einem Server merken und sah es nie wieder — ein Gedaechtnis, das
+    nur schreibt, ist keines.
+
+    Die Server-ID muss in der Zeile stehen, sonst wendet das Modell eine
+    Eigenheit von Server A auf Server B an.
+    """
+    from models import Server, ServerPermission
+
+    _allow_memory(db, regular_user)
+    server = Server(
+        name="Memory-Server", game_type="dayz",
+        install_dir="/tmp/memory-server", status="stopped",
+    )
+    db.add(server)
+    db.commit()
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+    ))
+    db.commit()
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="server", server_id=server.id,
+        key="startzeit", value="Startet nur mit erhoehtem Timeout", origin="ai",
+    )
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Warum startet der Server so langsam?"
+    )
+
+    assert "erhoehtem Timeout" in block
+    assert f"server:{server.id}" in block
+
+
+def test_losing_access_to_a_server_removes_its_memory_from_the_context(
+    db: Session, regular_user: User
+) -> None:
+    """Die Sichtbarkeit wird bei jedem Abruf neu geprueft, nicht beim Schreiben."""
+    from models import Server, ServerPermission
+
+    _allow_memory(db, regular_user)
+    server = Server(
+        name="Entzogen", game_type="dayz",
+        install_dir="/tmp/entzogen", status="stopped",
+    )
+    db.add(server)
+    db.commit()
+    permission = ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+    )
+    db.add(permission)
+    db.commit()
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="server", server_id=server.id,
+        key="notiz", value="Etwas ueber diesen Server", origin="ai",
+    )
+
+    db.delete(permission)
+    db.commit()
+    block = ai_memory_service.provider_memory_context(db, regular_user, query="Notiz?")
+
+    assert block is None or "Etwas ueber diesen Server" not in block
 
 
 def test_remember_requires_the_memory_permission(db: Session, regular_user: User) -> None:
@@ -200,7 +270,7 @@ def test_a_disabled_memory_is_not_read_at_all(db: Session, regular_user: User) -
     ai_memory_service.set_preference(db, regular_user, False)
 
     assert ai_memory_service.provider_memory_context(
-        db, regular_user, None, query="Wert?"
+        db, regular_user, query="Wert?"
     ) is None
 
 
@@ -213,7 +283,7 @@ def test_memory_of_one_user_never_reaches_another(
     _write(db, regular_user, "privat", "Nur fuer den einen Benutzer")
 
     block = ai_memory_service.provider_memory_context(
-        db, owner_user, None, query="privat"
+        db, owner_user, query="privat"
     )
 
     assert block is None
@@ -233,7 +303,7 @@ def test_recency_beats_an_old_never_used_entry(
     monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 60)
 
     block = ai_memory_service.provider_memory_context(
-        db, regular_user, None, query="unrelated question in english"
+        db, regular_user, query="unrelated question in english"
     )
 
     assert "Gerade eben gemerkt" in block

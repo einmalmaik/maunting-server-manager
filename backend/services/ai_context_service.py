@@ -147,10 +147,9 @@ def build_provider_messages(
         from services import ai_memory_service, permission_service
 
         if permission_service.has_global_permission(db, user, "ai.memory.use"):
-            # Ohne Serverbezug an der Unterhaltung bleibt hier das panelweite
-            # und das benutzereigene Memory. Serverbezogene Eintraege kommen
-            # spaeter ueber das Werkzeug, das den Server tatsaechlich anfasst.
-            memory = ai_memory_service.provider_memory_context(db, user, None, query)
+            # Panelweite, benutzereigene und serverbezogene Eintraege — bei
+            # letzteren nur fuer Server, die der Benutzer gerade sehen darf.
+            memory = ai_memory_service.provider_memory_context(db, user, query)
             if memory:
                 # Bewusst role="user", nicht "system" — wie bei Anhaengen.
                 # Memory ist vom Benutzer frei befuellter Text. Mit der

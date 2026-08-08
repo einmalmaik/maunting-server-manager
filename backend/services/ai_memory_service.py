@@ -5,6 +5,7 @@ import re
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -209,6 +210,39 @@ def _utc(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+def _visible_scope_rows(db: Session, user: User) -> list[AiMemoryEntry]:
+    """Alle Eintraege, die dieser Benutzer gerade sehen darf.
+
+    Panelweite und eigene Eintraege immer. Serverbezogene nur fuer Server, die
+    der Benutzer **jetzt** sehen darf — verliert er den Zugriff, verschwindet
+    auch seine Notiz dazu aus dem Kontext.
+
+    Die serverbezogenen kommen bewusst *alle* mit, nicht die eines bestimmten
+    Servers: der Assistent hat seit dem Einzelchat keinen festen Serverbezug
+    mehr. Vorher fehlten sie damit vollstaendig — die KI konnte sich etwas zu
+    einem Server merken und sah es nie wieder.
+    """
+    rows = db.query(AiMemoryEntry).filter(
+        or_(
+            AiMemoryEntry.scope_identity.in_(["panel", f"user:{user.id}"]),
+            and_(
+                AiMemoryEntry.scope == "server",
+                AiMemoryEntry.owner_user_id == user.id,
+            ),
+        )
+    ).order_by(AiMemoryEntry.scope, AiMemoryEntry.key).all()
+
+    visible: list[AiMemoryEntry] = []
+    for row in rows:
+        if row.scope == "server":
+            if row.server_id is None or not permission_service.has_server_permission(
+                db=db, user=user, server_id=row.server_id, key="server.view"
+            ):
+                continue
+        visible.append(row)
+    return visible
+
+
 def _memory_line(row: AiMemoryEntry, value: str) -> str:
     # Der Block ist zeilenbasiert und jede Zeile traegt ihren Scope. Ein Wert
     # mit Zeilenumbruch koennte deshalb beliebig viele gefaelschte
@@ -218,13 +252,16 @@ def _memory_line(row: AiMemoryEntry, value: str) -> str:
     # ist es bewusst nicht: er soll frei formulierbar bleiben.
     flattened = " ".join(str(value).splitlines())
     origin = "gesagt" if row.origin == "user" else "gemerkt"
-    return f"[{row.scope}/{origin}] {row.key}: {flattened}"
+    # Bei serverbezogenen Eintraegen muss die ID mit dran: sonst weiss das
+    # Modell nicht, auf welchen der Server sich die Notiz bezieht, und wendet
+    # eine Eigenheit von Server 62 versehentlich auf Server 84 an.
+    scope = f"server:{row.server_id}" if row.scope == "server" else row.scope
+    return f"[{scope}/{origin}] {row.key}: {flattened}"
 
 
 def provider_memory_context(
     db: Session,
     user: User,
-    server_id: int | None,
     query: str = "",
 ) -> str | None:
     """Baut den Memory-Block fuer eine konkrete Anfrage.
@@ -245,12 +282,7 @@ def provider_memory_context(
     """
     if not preference(db, user.id):
         return None
-    identities = ["panel", f"user:{user.id}"]
-    if server_id is not None:
-        identities.append(f"server:{server_id}:user:{user.id}")
-    rows = db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity.in_(identities)
-    ).order_by(AiMemoryEntry.scope, AiMemoryEntry.key).all()
+    rows = _visible_scope_rows(db, user)
     if not rows:
         return None
 
