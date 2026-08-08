@@ -107,6 +107,53 @@ def _delete(port: int, protocol: str) -> bool:
     return True
 
 
+# Eine Zeile aus ``ufw status``:
+#   25565/tcp                  ALLOW       Anywhere
+#   25565                      ALLOW       Anywhere
+# Die zweite Form ohne Protokoll gilt fuer TCP **und** UDP.
+_ALLOW_LINE_RE = re.compile(
+    r"^\s*(?P<port>\d+)(?:/(?P<protocol>tcp|udp))?\s+ALLOW\b",
+    re.IGNORECASE,
+)
+
+
+def allowed_ports() -> set[tuple[int, str]] | None:
+    """Liest die aktuell freigegebenen Ports. Aendert nichts.
+
+    Rueckgabe ist ``None``, wenn UFW nicht installiert oder nicht abfragbar
+    ist. Das ist ausdruecklich **nicht** dasselbe wie eine leere Menge: "keine
+    Firewall gefunden" und "Firewall blockiert alles" sind fuer eine Diagnose
+    entgegengesetzte Aussagen. Wer das verwechselt, meldet einem Betreiber ohne
+    UFW, seine Ports seien zu.
+
+    Eine Regel ohne Protokollangabe gilt in UFW fuer TCP und UDP und wird
+    entsprechend fuer beide aufgenommen.
+    """
+    if not _ufw_available():
+        return None
+    status = _run_ufw("status")
+    if status.returncode != 0:
+        logger.debug("UFW status nicht abfragbar: %s", (status.stderr or "").strip())
+        return None
+    # Ist die Firewall inaktiv, laesst sie alles durch — auch das ist nicht
+    # "alles gesperrt" und darf nicht als leere Menge durchgehen.
+    if "Status: inactive" in status.stdout:
+        return None
+
+    result: set[tuple[int, str]] = set()
+    for line in status.stdout.splitlines():
+        match = _ALLOW_LINE_RE.match(line)
+        if not match:
+            continue
+        port = int(match.group("port"))
+        protocol = (match.group("protocol") or "").lower()
+        if protocol:
+            result.add((port, protocol))
+        else:
+            result.update({(port, "tcp"), (port, "udp")})
+    return result
+
+
 def _comment_for(name: str, role: str) -> str:
     """Baut einen UFW-Kommentar — ``MSM <name> <role>`` (max 32 Zeichen)."""
     # UFW erlaubt bis zu 64 Zeichen Kommentare; wir bleiben konservativ.

@@ -83,18 +83,18 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'KI-Skills verwalten',
     desc: 'Erlaubt das Erstellen und Verwalten von Skills, aber keine freien Skripte.',
   },
-  // Diese beiden Rechte sind vergeben, aber im Backend noch nirgends geprüft.
-  // Der Hinweis steht bewusst im Text: ein Schalter, der nichts bewirkt, ist
-  // schlimmer als ein fehlender — der Betreiber hält sonst etwas für begrenzt
-  // oder freigeschaltet, was es nicht ist.
   'ai.web_search.use': {
     title: 'KI-Websuche verwenden',
-    desc: 'Vorgesehen für kontrollierte Websuche über konfigurierte Provider. Noch nicht implementiert — dieses Recht bewirkt derzeit nichts.',
+    desc: 'Erlaubt der KI, im Web nachzuschlagen. Sucht über den in den KI-Einstellungen hinterlegten Suchdienst; ohne Schlüssel steht das Werkzeug gar nicht zur Verfügung. Treffer werden gekürzt und als unvertrauenswürdige Daten behandelt.',
   },
   'ai.autonomous.use': {
     title: 'Autonomen KI-Modus verwenden',
     desc: 'Erlaubt dem Benutzer, den autonomen Modus pro Server oder panelweit freizugeben. Ohne zusätzliche Freigabe bleibt jede Aktion bestätigungspflichtig; Berechtigungen gelten unverändert.',
   },
+  // Dieses Recht ist vergeben, aber im Backend noch nirgends geprüft. Der
+  // Hinweis steht bewusst im Text: ein Schalter, der nichts bewirkt, ist
+  // schlimmer als ein fehlender — der Betreiber hält sonst etwas für begrenzt
+  // oder freigeschaltet, was es nicht ist.
   'ai.usage.read.all': {
     title: 'Gesamte KI-Nutzung einsehen',
     desc: 'Vorgesehen für die aggregierte Nutzung aller Benutzer. Noch nicht implementiert — dieses Recht bewirkt derzeit nichts.',

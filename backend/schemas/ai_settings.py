@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from services.ai_limit_service import (
     CONCURRENT_OPERATIONS_MAX,
@@ -47,3 +47,19 @@ class EffectiveAiLimitsResponse(AiLimitsBase):
     """Backendseitig aufgelöste Grenzen des aktuellen Benutzers."""
 
     role_ids: list[int] = Field(default_factory=list)
+
+
+class AiWebSearchKeyUpdate(BaseModel):
+    """Suchschluessel setzen oder entfernen.
+
+    ``SecretStr`` sorgt dafuer, dass der Wert in Logs und Fehlermeldungen als
+    Platzhalter erscheint. Ein leerer Wert entfernt den Schluessel.
+    """
+
+    api_key: SecretStr | None = Field(default=None, max_length=512)
+
+
+class AiWebSearchStatus(BaseModel):
+    """Nur der Zustand — der Schluessel verlaesst das Backend nie."""
+
+    configured: bool

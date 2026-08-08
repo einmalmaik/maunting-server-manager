@@ -376,7 +376,11 @@
       "read_ai_action_history": "Read earlier AI actions",
       "read_mod_updates": "Check mod updates",
       "search_workshop_mods": "Search the Workshop",
-      "remember": "Remembered"
+      "remember": "Remembered",
+      "read_server_network": "Read network setup",
+      "check_server_reachability": "Checked reachability",
+      "read_node_health": "Read node health",
+      "web_search": "Searched the web"
     },
     "errors": {
       "codes": {
@@ -391,6 +395,21 @@
         "AI_PROVIDER_STREAM_INCOMPLETE": "The provider's response ended prematurely.",
         "AI_PROVIDER_PROTOCOL_ERROR": "The provider returned an unexpected response.",
         "AI_PROVIDER_RESPONSE_TOO_LARGE": "The provider's response was too large."
+      }
+    },
+    "webSearch": {
+      "title": "Web search",
+      "description": "Store a Brave Search key so the AI can look things up on the web. Without a key the tool is not offered at all. The user's role additionally needs the “Use AI web search” permission.",
+      "apiKey": "Brave Search API key",
+      "configured": "Key stored; enter a new key to replace it",
+      "placeholder": "Enter key",
+      "remove": "Remove key",
+      "saved": "Search key saved.",
+      "removed": "Search key removed.",
+      "hint": "Search results are shortened, redacted and treated as untrusted data like any other foreign text.",
+      "errors": {
+        "load": "Web search status could not be loaded.",
+        "save": "Search key could not be saved."
       }
     }
   },

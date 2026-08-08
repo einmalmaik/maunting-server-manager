@@ -9,15 +9,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import SessionLocal, get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from models import Role, User
 from schemas.ai_settings import (
     AiRoleLimitsResponse,
     AiRoleLimitsUpdate,
+    AiWebSearchKeyUpdate,
+    AiWebSearchStatus,
     EffectiveAiLimitsResponse,
 )
 from services import ai_limit_service, audit_service
+from services.dis_client import DisSidecarError
 from services.role_service import effective_user_role_ids
 
 
@@ -101,6 +104,52 @@ def update_role_limits(
             detail="KI-Limits konnten wegen einer gleichzeitigen Änderung nicht gespeichert werden",
         ) from exc
     return _role_response(db, role)
+
+
+@router.get("/settings/web-search", response_model=AiWebSearchStatus)
+def get_web_search_status(
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiWebSearchStatus:
+    """Nur ob ein Schluessel hinterlegt ist — nie der Schluessel selbst."""
+    from services import ai_web_search_service
+
+    return AiWebSearchStatus(configured=ai_web_search_service.is_configured())
+
+
+@router.put("/settings/web-search", response_model=AiWebSearchStatus)
+def set_web_search_key(
+    payload: AiWebSearchKeyUpdate,
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiWebSearchStatus:
+    """Hinterlegt oder entfernt den Suchschluessel.
+
+    Ein leerer Wert entfernt ihn — dann verschwindet auch das Werkzeug aus dem
+    Katalog, statt bei jedem Versuch zu scheitern.
+    """
+    from services import ai_web_search_service
+
+    secret = payload.api_key.get_secret_value() if payload.api_key else ""
+    try:
+        ai_web_search_service.store_api_key(secret)
+    except DisSidecarError as exc:
+        raise HTTPException(
+            status_code=503, detail="Suchschluessel konnte nicht sicher gespeichert werden"
+        ) from exc
+
+    configured = ai_web_search_service.is_configured()
+    with SessionLocal() as audit_db:
+        audit_service.record_privileged_action(
+            audit_db,
+            user_id=actor.id,
+            action="ai.web_search.key.updated",
+            target_type="panel_setting",
+            target_id=None,
+            # Bewusst nur der Zustand, nie ein Teil des Schluessels.
+            details={"configured": configured},
+        )
+        audit_db.commit()
+    return AiWebSearchStatus(configured=configured)
 
 
 @router.get("/limits/me", response_model=EffectiveAiLimitsResponse)

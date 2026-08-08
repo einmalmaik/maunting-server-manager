@@ -376,7 +376,11 @@
       "read_ai_action_history": "Frühere KI-Aktionen gelesen",
       "read_mod_updates": "Mod-Updates geprüft",
       "search_workshop_mods": "Workshop durchsucht",
-      "remember": "Gemerkt"
+      "remember": "Gemerkt",
+      "read_server_network": "Netzwerkeinrichtung gelesen",
+      "check_server_reachability": "Erreichbarkeit geprüft",
+      "read_node_health": "Node-Zustand gelesen",
+      "web_search": "Im Web gesucht"
     },
     "errors": {
       "codes": {
@@ -391,6 +395,21 @@
         "AI_PROVIDER_STREAM_INCOMPLETE": "Die Antwort des Anbieters brach vorzeitig ab.",
         "AI_PROVIDER_PROTOCOL_ERROR": "Der Anbieter hat eine unerwartete Antwort geliefert.",
         "AI_PROVIDER_RESPONSE_TOO_LARGE": "Die Antwort des Anbieters war zu groß."
+      }
+    },
+    "webSearch": {
+      "title": "Websuche",
+      "description": "Hinterlege einen Brave-Search-Schlüssel, damit die KI im Web nachschlagen kann. Ohne Schlüssel steht das Werkzeug gar nicht zur Verfügung. Die Rolle des Benutzers braucht zusätzlich das Recht „Websuche über die KI verwenden“.",
+      "apiKey": "Brave-Search-API-Schlüssel",
+      "configured": "Schlüssel hinterlegt; neuen Schlüssel eingeben, um ihn zu ersetzen",
+      "placeholder": "Schlüssel eingeben",
+      "remove": "Schlüssel entfernen",
+      "saved": "Suchschlüssel gespeichert.",
+      "removed": "Suchschlüssel entfernt.",
+      "hint": "Suchtreffer werden gekürzt, redigiert und wie jeder andere Fremdtext als nicht vertrauenswürdig behandelt.",
+      "errors": {
+        "load": "Zustand der Websuche konnte nicht geladen werden.",
+        "save": "Suchschlüssel konnte nicht gespeichert werden."
       }
     }
   },

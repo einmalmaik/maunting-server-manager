@@ -55,7 +55,12 @@ MAX_TOOL_CALLS = 4
 # ein Ablauf wie "Kapazitaet lesen → Blueprints lesen → Server vorschlagen" war
 # damit unmoeglich, weil die zweite Runde nur noch Write-Tools akzeptierte und
 # ein legitimer zweiter Lesezugriff den ganzen Stream abbrach.
-MAX_TOOL_ROUNDS = 3
+# Vier Leserunden. Gemessen an einer echten Netzwerkdiagnose reichen drei
+# nicht: das Modell geht list_my_servers → read_server_network →
+# read_server_status → check_server_reachability, und erst der letzte Schritt
+# ist die eigentliche Messung. Wird die Grenze erreicht, bricht der Stream
+# nicht ab — das Modell bekommt einen letzten Durchgang ohne Werkzeuge.
+MAX_TOOL_ROUNDS = 4
 
 
 def sse_event(event: str, payload: dict) -> str:
@@ -423,7 +428,29 @@ async def stream_conversation_reply(
 
             rounds += 1
             if rounds > MAX_TOOL_ROUNDS:
-                raise AiProviderRequestError("AI_PROVIDER_TOOL_ROUNDS_EXCEEDED")
+                # Frueher endete das hier mit einem Fehler. Gemessen an einer
+                # echten Netzwerkdiagnose war das falsch: die Kette
+                # list_my_servers → read_server_network → read_server_status →
+                # check_server_reachability ist voellig legitim und riss dem
+                # Benutzer die Antwort weg, obwohl die KI bereits genug wusste.
+                # Ein Assistent, der abbricht *weil* er gruendlich war, ist
+                # schlechter als einer, der mit dem Vorhandenen antwortet.
+                #
+                # Die Grenze bleibt: ab hier gibt es keine Werkzeuge mehr. Das
+                # Modell bekommt einen letzten Durchgang ohne `tools` und muss
+                # aus dem antworten, was es hat.
+                # Die Aufrufe dieser Runde werden bewusst **nicht** mehr
+                # ausgefuehrt: sonst waere die Grenze um eins verschoben. Sie
+                # landen auch nicht in der Historie — ohne zugehoerige
+                # Werkzeugantwort wuerden manche Anbieter die naechste Anfrage
+                # ablehnen.
+                logger.info(
+                    "AI-Werkzeugrunden erschoepft, letzte Antwort ohne Werkzeuge "
+                    "conversation_id=%s", conversation_id,
+                )
+                tools = None
+                current_usage = StreamUsage()
+                continue
             followup, used_tools = _tool_followup_messages(
                 user_id=user_id,
                 conversation_id=conversation_id,

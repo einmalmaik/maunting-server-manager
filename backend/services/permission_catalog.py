@@ -47,11 +47,13 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("ai.memory.use",             "ai",      "Eigenes KI-Memory verwenden"),
     PermissionDef("ai.skills.use",             "ai",      "Freigegebene KI-Skills verwenden"),
     PermissionDef("ai.skills.manage",          "ai",      "KI-Skills erstellen und verwalten"),
-    # NOCH NICHT DURCHGESETZT: diese beiden Keys existieren im Katalog, werden
-    # aber an keiner Stelle im Backend geprueft. Der Rollen-Editor weist im
+    # Durchgesetzt in ai_action_service._execute_web_search. Ohne hinterlegten
+    # Suchschluessel wird das Werkzeug dem Modell gar nicht erst angeboten.
+    PermissionDef("ai.web_search.use",         "ai",      "Websuche über die KI verwenden"),
+    # NOCH NICHT DURCHGESETZT: dieser Key existiert im Katalog, wird aber an
+    # keiner Stelle im Backend geprueft. Der Rollen-Editor weist im
     # Beschreibungstext ausdruecklich darauf hin. Wer die Funktion baut, prueft
     # das Recht — und entfernt hier diesen Kommentar.
-    PermissionDef("ai.web_search.use",         "ai",      "Websuche über die KI verwenden (noch ohne Funktion)"),
     PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen (noch ohne Funktion)"),
     # Durchgesetzt in routers/ai_autonomy.py und services/ai_autonomy_service.py.
     PermissionDef("ai.autonomous.use",         "ai",      "Autonomen KI-Modus verwenden"),

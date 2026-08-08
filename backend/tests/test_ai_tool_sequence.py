@@ -101,8 +101,13 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, rounds: list[list[ProviderTool
         _client, *, provider, api_key, messages, usage: StreamUsage,
         tools=None, reasoning=False,
     ):
-        del provider, api_key, tools, reasoning
+        del provider, api_key, reasoning
         seen.append([dict(item) for item in messages])
+        if tools is None:
+            # Letzte Runde: ohne Werkzeuge kann das Modell nur noch antworten.
+            usage.total_tokens = 10
+            yield StreamChunk("content", "ok")
+            return
         index = calls["round"]
         calls["round"] += 1
         if index < len(rounds):
@@ -301,19 +306,36 @@ async def test_several_read_rounds_may_precede_a_write_round(
 async def test_endless_read_rounds_are_cut_off(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Ein Modell, das immer weiter liest, darf das Kostenbudget nicht leerlaufen."""
+    """Ein Modell, das immer weiter liest, verliert seine Werkzeuge — nicht die Antwort.
+
+    Frueher endete dieser Fall mit `AI_PROVIDER_TOOL_ROUNDS_EXCEEDED`, also mit
+    einer Fehlermeldung statt einer Antwort. Gemessen an einer echten
+    Netzwerkdiagnose war das falsch: die Kette list_my_servers →
+    read_server_network → read_server_status → check_server_reachability ist
+    voellig legitim, und ein Assistent, der abbricht *weil* er gruendlich war,
+    ist schlechter als einer, der mit dem Vorhandenen antwortet.
+
+    Die Grenze bleibt hart — sie beendet nur die Werkzeugnutzung statt den
+    Stream. Das Kostenbudget kann damit nicht leerlaufen.
+    """
     server = _server(db, "endless")
     _grant(db, regular_user, server=server, server_keys=("server.view",))
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     _fake_stream(monkeypatch, [
         [ProviderToolCall(id=f"r{index}", name="read_server_status", arguments={"server_id": server.id})]
-        for index in range(ai_stream_service.MAX_TOOL_ROUNDS + 2)
+        for index in range(ai_stream_service.MAX_TOOL_ROUNDS + 3)
     ])
 
     events = await _collect(regular_user, conversation, provider)
 
-    assert "AI_PROVIDER_TOOL_ROUNDS_EXCEEDED" in _error_codes(events)
+    assert _error_codes(events) == []
+    assert any(event.startswith("event: done") for event in events)
+    # Die aussagekraeftige Zahl ist, wie oft tatsaechlich ein Werkzeug lief —
+    # nicht, wie oft der Provider angesprochen wurde. Genau MAX_TOOL_ROUNDS
+    # Ausfuehrungen, danach ist Schluss.
+    executed = [event for event in events if event.startswith("event: tool")]
+    assert len(executed) == ai_stream_service.MAX_TOOL_ROUNDS
 
 
 @pytest.mark.asyncio

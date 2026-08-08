@@ -61,8 +61,13 @@ SERVER_READ_TOOLS = {
     "read_ai_action_history",
     "read_mod_updates",
     "search_workshop_mods",
+    "read_server_network",
+    "check_server_reachability",
 }
-GLOBAL_READ_TOOLS = {"list_my_servers", "list_blueprints", "read_node_capacity", "remember"}
+GLOBAL_READ_TOOLS = {
+    "list_my_servers", "list_blueprints", "read_node_capacity",
+    "read_node_health", "remember", "web_search",
+}
 READ_TOOLS = SERVER_READ_TOOLS | GLOBAL_READ_TOOLS
 
 # `remember` steht bewusst bei den Read-Tools, obwohl es schreibt. Der
@@ -92,6 +97,7 @@ SERVER_WRITE_TOOLS = {
     "propose_backup",
     "propose_config_update",
     "propose_mod_install",
+    "propose_bind_ip_update",
 }
 GLOBAL_WRITE_TOOLS = {"propose_server_create"}
 WRITE_TOOLS = SERVER_WRITE_TOOLS | GLOBAL_WRITE_TOOLS
@@ -107,6 +113,11 @@ _MUTEX_TOOLS = {"propose_backup", "propose_config_update"}
 # gebaut; die Menge steht hier trotzdem, damit ein kuenftiges Tool sich
 # ausdruecklich einordnen muss statt stillschweigend autonomiefaehig zu sein.
 ALWAYS_CONFIRM_TOOLS = {
+    # Eine Netzwerkaenderung startet den Container neu und kann einen Server
+    # unerreichbar machen, wenn die Adresse falsch ist. Sie laeuft deshalb nie
+    # autonom — auch bei erteilter Freigabe nicht. Als einziges Werkzeug dieser
+    # Menge ist es tatsaechlich gebaut; die uebrigen sind Platzhalter.
+    "propose_bind_ip_update",
     "propose_server_delete",
     "propose_server_wipe",
     "propose_server_reinstall",
@@ -156,7 +167,26 @@ def _server_function(
 
 def _global_tool_definitions() -> list[dict]:
     """Werkzeuge ohne Serverbezug: Serverliste, Blueprints, Kapazitaet, Anlage."""
-    return [
+    optional: list[dict] = []
+    # Ohne hinterlegten Schluessel gar nicht erst anbieten. Ein Werkzeug, das
+    # immer scheitert, verwirrt ein Modell mehr als es hilft: es versucht es
+    # erneut, formuliert um und verbraucht dabei Tokens.
+    from services.ai_web_search_service import MAX_RESULTS, is_configured
+
+    if is_configured():
+        optional.append(_function(
+            "web_search",
+            "Sucht im Web. Fuer aktuelle Informationen, die nicht aus dem "
+            "Panel kommen — Fehlermeldungen, Modkompatibilitaet, "
+            "Spielversionen. Liefert Titel, Adresse und Kurztext.",
+            {
+                "query": {"type": "string", "maxLength": 200},
+                "count": {"type": "integer", "minimum": 1, "maximum": MAX_RESULTS},
+            },
+            ["query"],
+        ))
+
+    return optional + [
         _function(
             "list_my_servers",
             "Listet alle Server, die der Benutzer sehen darf, mit ID, Name, Spiel "
@@ -201,6 +231,14 @@ def _global_tool_definitions() -> list[dict]:
         _function(
             "read_node_capacity",
             "Liest freie und belegte Kapazitaet aller Hosts, um Ressourcen sinnvoll zu waehlen.",
+            {},
+            [],
+        ),
+        _function(
+            "read_node_health",
+            "Liest den Gesundheitszustand aller Hosts: erreichbar, Docker "
+            "verbunden, CPU, RAM, Festplatte, Containerzahl, letzter Kontakt. "
+            "Fuer Fragen wie 'bei einer meiner Nodes stimmt etwas nicht'.",
             {},
             [],
         ),
@@ -264,6 +302,24 @@ def provider_tool_definitions() -> list[dict]:
             "Liest die vergebenen Ports des Servers mit Rolle und Protokoll.",
         ),
         _server_function(
+            "read_server_network",
+            "Liest die Netzwerkeinrichtung: Bind-IP mit Einordnung, Ports, "
+            "verfuegbare Host-Adressen und Firewall-Zustand. Erster Schritt, "
+            "wenn ein Server laeuft, aber niemand sich verbinden kann. "
+            "Rufe danach check_server_reachability auf — erst beide zusammen "
+            "ergeben eine Diagnose. read_server_status ist dafuer nicht noetig, "
+            "der Status steht bereits in dieser Antwort.",
+        ),
+        _server_function(
+            "check_server_reachability",
+            "Misst, ob auf den Ports des Servers tatsaechlich etwas lauscht. "
+            "Der eigentliche Beweis bei 'laeuft, aber niemand kommt drauf': "
+            "meldet ein Port sich als frei, obwohl der Server laeuft, horcht "
+            "der Dienst nicht oder horcht auf einer anderen Adresse. "
+            "Beantwortet nicht, ob der Server aus dem Internet erreichbar ist — "
+            "das kann MSM nicht messen und behauptet es auch nicht.",
+        ),
+        _server_function(
             "read_server_mods",
             "Liest die installierten Mods mit Aktivierungs-, Installations- und Updatestatus.",
         ),
@@ -319,6 +375,19 @@ def provider_tool_definitions() -> list[dict]:
                 **_RATIONALE_SCHEMA,
             },
             ["path", "content", "expected_revision", *_RATIONALE_REQUIRED],
+        ),
+        _server_function(
+            "propose_bind_ip_update",
+            "Schlaegt eine andere Bind-IP vor — etwa wenn der Server an eine "
+            "Docker- oder Loopback-Adresse gebunden ist und deshalb von aussen "
+            "nicht erreichbar sein kann. Nur Adressen, die dem Host tatsaechlich "
+            "gehoeren; nimm sie aus read_server_network. Ein laufender Server "
+            "wird dabei neu gestartet.",
+            {
+                "bind_ip": {"type": "string", "maxLength": 45},
+                **_RATIONALE_SCHEMA,
+            },
+            ["bind_ip", *_RATIONALE_REQUIRED],
         ),
         _server_function(
             "propose_mod_install",
@@ -440,6 +509,79 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     return {"remembered": True, "scope": row.scope, "key": row.key, "value": stored}
 
 
+def _execute_web_search(db: Session, *, user: User, arguments: dict) -> dict:
+    """Websuche im Namen des Benutzers.
+
+    Die Rechtegrenze ist `ai.web_search.use`. Bis hierher stand dieses Recht im
+    Katalog, ohne an irgendeiner Stelle geprueft zu werden.
+    """
+    from services import ai_web_search_service
+
+    if not permission_service.has_global_permission(db, user, "ai.web_search.use"):
+        raise AiActionValidationError("Websuche ist fuer diesen Benutzer nicht freigegeben")
+    if set(arguments) - {"query", "count"}:
+        raise AiActionValidationError("Websuche hat ungueltige Argumente")
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise AiActionValidationError("Suchanfrage ist leer")
+    count = arguments.get("count", ai_web_search_service.MAX_RESULTS)
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= ai_web_search_service.MAX_RESULTS:
+        raise AiActionValidationError("Ungueltige Trefferanzahl")
+
+    try:
+        results = ai_web_search_service.search(query, count)
+    except ai_web_search_service.WebSearchUnavailable as exc:
+        # Ehrlich melden statt eine leere Trefferliste liefern: "nichts
+        # gefunden" waere eine falsche Aussage ueber das Web.
+        return {"available": False, "reason": exc.code, "results": []}
+    return {"available": True, "query": query.strip()[:200], "results": results}
+
+
+def _node_health(db: Session) -> dict:
+    """Zustand aller Hosts — ohne Hostnamen und ohne IP.
+
+    Dieselbe Zurueckhaltung wie bei `read_node_capacity`: das Modell soll
+    Auslastung und Erreichbarkeit vergleichen koennen, nicht die Netzstruktur
+    des Betreibers kennen. Ein Node-Name waere zusaetzlich frei befuellter Text
+    und damit ein weiterer Einfallsweg fuer Prompt Injection.
+    """
+    from models import Node
+    from services.node_service import is_node_offline
+
+    rows = db.query(Node).order_by(Node.id).limit(MAX_LISTED_NODES).all()
+    nodes = []
+    for node in rows:
+        ram_percent = (
+            round(node.ram_used / node.ram_total * 100, 1)
+            if node.ram_total and node.ram_used is not None
+            else None
+        )
+        disk_percent = (
+            round(node.disk_used / node.disk_total * 100, 1)
+            if node.disk_total and node.disk_used is not None
+            else None
+        )
+        nodes.append({
+            "node_id": node.id,
+            "is_local": bool(node.is_local),
+            "status": node.status,
+            "offline": is_node_offline(node),
+            "docker_connected": node.docker_connected,
+            "container_count": node.container_count,
+            "cpu_total": node.cpu_total,
+            "cpu_percent": node.cpu_percent,
+            "ram_total_bytes": node.ram_total,
+            "ram_used_bytes": node.ram_used,
+            "ram_used_percent": ram_percent,
+            "disk_total_bytes": node.disk_total,
+            "disk_used_bytes": node.disk_used,
+            "disk_used_percent": disk_percent,
+            "agent_version": node.agent_version,
+            "last_heartbeat": node.last_heartbeat.isoformat() if node.last_heartbeat else None,
+        })
+    return {"nodes": nodes, "count": len(nodes)}
+
+
 def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, arguments: dict) -> dict:
     """Werkzeuge ohne Serverbezug.
 
@@ -454,6 +596,9 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
     """
     if tool_name == "remember":
         return _execute_remember(db, user=user, arguments=arguments)
+
+    if tool_name == "web_search":
+        return _execute_web_search(db, user=user, arguments=arguments)
 
     _require_no_arguments(tool_name, arguments)
 
@@ -473,6 +618,15 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
             "count": len(servers),
             "truncated": len(servers) >= MAX_LISTED_SERVERS,
         }
+
+    if tool_name == "read_node_health":
+        # Bewusst `nodes.read` statt `servers.create`: den Zustand der Hosts zu
+        # sehen ist eine Aufgabe des Betriebs, nicht der Serverplanung. Ein
+        # Support-Mitarbeiter soll nachsehen koennen, ohne Server anlegen zu
+        # duerfen.
+        if not permission_service.has_global_permission(db, user, "nodes.read"):
+            raise AiActionValidationError("Node-Einsicht ist nicht erlaubt")
+        return _node_health(db)
 
     if not permission_service.has_global_permission(db, user, "servers.create"):
         raise AiActionValidationError("Serverplanung ist nicht erlaubt")
@@ -530,6 +684,22 @@ def _execute_server_context_tool(
                 {"role": row.role, "port": row.port, "protocol": row.protocol} for row in rows
             ],
         }
+
+    if tool_name in {"read_server_network", "check_server_reachability"}:
+        _require_no_arguments(tool_name, arguments)
+        from services import server_network_diagnostics
+
+        if tool_name == "check_server_reachability":
+            return server_network_diagnostics.check_reachability(db, server)
+        # Host-Adressen und Firewall-Regeln sind die Netzstruktur des
+        # Betreibers, nicht die des Servers. Wer sie nicht aendern darf, muss
+        # sie auch nicht sehen — die Ports des eigenen Servers schon.
+        return server_network_diagnostics.describe_network(
+            db, server,
+            include_host_details=permission_service.has_server_permission(
+                db, user, server.id, "server.network.manage"
+            ),
+        )
 
     if tool_name in {"read_server_mods", "read_mod_updates", "search_workshop_mods"}:
         if not permission_service.has_server_permission(db, user, server.id, "server.mods.read"):
@@ -867,6 +1037,8 @@ def _permission_for(tool_name: str, payload: dict) -> str:
         return "server.files.write"
     if tool_name == "propose_mod_install":
         return "server.mods.write"
+    if tool_name == "propose_bind_ip_update":
+        return "server.network.manage"
     return ""
 
 
@@ -1052,6 +1224,45 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
     return payload, preview
 
 
+def _bind_ip_payload(db: Session, server: Server, arguments: dict) -> tuple[dict, dict]:
+    """Prueft eine vorgeschlagene Bind-IP, bevor der Vorschlag ueberhaupt entsteht.
+
+    Die Pruefung laeuft bewusst schon hier und nicht erst bei der Ausfuehrung:
+    ein Vorschlag, der garantiert scheitert, soll dem Benutzer gar nicht erst
+    zur Bestaetigung vorgelegt werden. Vor der Ausfuehrung wird sie trotzdem
+    wiederholt — zwischen Vorschlag und Klick koennen Minuten liegen.
+    """
+    from services.server_network_service import BindIpRejected, assert_bind_ip_usable
+
+    if set(arguments) != {"bind_ip"}:
+        raise AiActionValidationError("Netzwerk-Tool hat ungueltige Argumente")
+    bind_ip = arguments["bind_ip"]
+    if not isinstance(bind_ip, str) or not bind_ip.strip():
+        raise AiActionValidationError("Ungueltige Bind-IP")
+    bind_ip = bind_ip.strip()
+    if bind_ip == (server.public_bind_ip or ""):
+        raise AiActionValidationError("Diese Bind-IP ist bereits eingestellt")
+
+    try:
+        assert_bind_ip_usable(db, server, bind_ip)
+    except BindIpRejected as exc:
+        raise AiActionValidationError(exc.detail) from exc
+
+    from services.server_network_diagnostics import _classify_bind_ip
+
+    return {"bind_ip": bind_ip}, {
+        "operation": "bind_ip_update",
+        "current_bind_ip": server.public_bind_ip,
+        "new_bind_ip": bind_ip,
+        "current_kind": _classify_bind_ip(server.public_bind_ip)["kind"],
+        "new_kind": _classify_bind_ip(bind_ip)["kind"],
+        "current_status": server.status,
+        # Ein laufender Server wird dabei gestoppt und neu angelegt — das muss
+        # in der Vorschau stehen, nicht in der Ueberraschung danach.
+        "restart_required": server.status == "running",
+    }
+
+
 def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[dict, dict]:
     """Erwartet die Argumente *ohne* Begruendung und ohne `server_id`."""
     from games import get_plugin
@@ -1132,6 +1343,9 @@ def create_proposal(
                 "current_status": server.status,
                 "restart_required": False,
             }
+            expected_revision = None
+        elif tool_name == "propose_bind_ip_update":
+            payload, preview = _bind_ip_payload(db, server, rest)
             expected_revision = None
         elif tool_name == "propose_mod_install":
             payload, preview = _mod_install_payload(db, server, rest)
@@ -1343,6 +1557,52 @@ def _execute_server_create(
     )
 
 
+def _execute_bind_ip_update(db: Session, *, server_id: int, payload: dict) -> dict:
+    """Setzt die Bind-IP und baut die Netzwerkregeln neu auf.
+
+    Die Pruefung wird hier wiederholt, obwohl sie beim Anlegen des Vorschlags
+    schon lief: zwischen Vorschlag und Bestaetigung koennen Minuten liegen, und
+    in der Zeit kann ein anderer Server denselben Port belegt oder ein
+    Interface verschwunden sein.
+
+    Der Neuaufbau laeuft ueber dieselbe Funktion wie der Netzwerk-Tab. Es gibt
+    keinen KI-Sonderweg — genau das verlangt Zielpunkt 10.
+    """
+    from services.server_network_service import (
+        BindIpRejected,
+        assert_bind_ip_usable,
+        recreate_server_network,
+    )
+
+    server = db.get(Server, server_id)
+    if server is None:
+        raise AiActionStateError("AI_ACTION_TARGET_MISSING")
+    bind_ip = str(payload["bind_ip"])
+    old_bind_ip = server.public_bind_ip
+    old_ports = [(row.port, row.protocol, row.role) for row in server.ports]
+
+    try:
+        assert_bind_ip_usable(db, server, bind_ip)
+    except BindIpRejected as exc:
+        logger.info("Bind-IP-Aenderung abgelehnt code=%s", exc.code)
+        raise AiActionStateError("AI_ACTION_BIND_IP_REJECTED") from exc
+
+    server.public_bind_ip = bind_ip
+    # Guardian vergleicht den gewuenschten mit dem beobachteten Zustand. Ohne
+    # diese Marke wuerde er die Aenderung als Abweichung melden.
+    from services.guardian_state_service import mark_guardian_configuration_changed
+
+    mark_guardian_configuration_changed(server)
+    db.commit()
+
+    restarted = recreate_server_network(server, old_ports, old_bind_ip)
+    return {
+        "bind_ip": bind_ip,
+        "previous_bind_ip": old_bind_ip,
+        "restarted": restarted,
+    }
+
+
 def _execute_mod_install(db: Session, *, server_id: int, payload: dict) -> dict:
     """Stoesst die Mod-Installation ueber den vorhandenen Panel-Pfad an.
 
@@ -1505,6 +1765,12 @@ def execute_proposal(
                     content=str(payload["content"]),
                     expected_revision=expected_revision,
                     create_only=bool(payload.get("create_only")),
+                )
+                task_id = None
+                queued = False
+            elif tool_name == "propose_bind_ip_update":
+                result = _execute_bind_ip_update(
+                    db, server_id=server_id, payload=payload
                 )
                 task_id = None
                 queued = False

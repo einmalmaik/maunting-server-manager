@@ -60,6 +60,11 @@ export interface AiToolUse {
   server_id: number | null
 }
 
+/** Nur der Zustand — der Suchschluessel verlaesst das Backend nie. */
+export interface AiWebSearchStatus {
+  configured: boolean
+}
+
 export interface AiProviderTestResult {
   ok: boolean
   code: string | null
@@ -206,6 +211,12 @@ export const aiApi = {
   deleteCredential: (providerId: number) => api(`/ai/providers/${providerId}/credential`, { method: 'DELETE' }),
   testProvider: (id: number) => api<AiProviderTestResult>(`/ai/settings/providers/${id}/test`, {
     method: 'POST',
+  }),
+  getWebSearchStatus: () => api<AiWebSearchStatus>('/ai/settings/web-search'),
+  /** Leerer Schluessel entfernt ihn — dann verschwindet auch das Werkzeug. */
+  setWebSearchKey: (apiKey: string) => api<AiWebSearchStatus>('/ai/settings/web-search', {
+    method: 'PUT',
+    body: JSON.stringify({ api_key: apiKey || null }),
   }),
   /** Die eine Unterhaltung. Wird beim ersten Aufruf serverseitig angelegt. */
   getConversation: () => api<AiConversationDetail>('/ai/conversation'),

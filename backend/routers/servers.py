@@ -540,26 +540,13 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         raise HTTPException(status_code=500, detail="Server-Aktualisierung fehlgeschlagen")
 
     if network_change:
-        # Alte Firewall- und iptables-Regeln entfernen, neue anlegen - ABER
-        # nur, wenn der Server gerade laeuft. Fuer gestoppte Server bleiben die
-        # Regeln zu (Lifecycle-Kopplung).
-        plugin = get_plugin(server.game_type)
-        was_running = plugin is not None and docker_service.is_running(
-            container_name_for(server.id), node=server.node
-        )
+        # Der Ablauf steht in server_network_service, weil ihn seit dem
+        # KI-Vorschlag `propose_bind_ip_update` zwei Wege brauchen. Ein zweiter
+        # Weg, der die Firewall *fast* genauso behandelt, waere genau die stille
+        # Abweichung, die Zielpunkt 10 ausschliesst.
+        from services.server_network_service import recreate_server_network
 
-        if was_running:
-            close_ports(old_ports, node=server.node, name=server.name)
-            if server.node is None or server.node.is_local:
-                iptables_revoke_server(server.name, old_bind_ip or "", old_ports)
-            # Container stoppen - Plugin.start() legt ihn mit den neuen Ports/
-            # Bind-Werten frisch an.
-            plugin.stop(server)
-            new_ports = [(p.port, p.protocol, p.role) for p in server.ports]
-            open_ports(server.name, new_ports, node=server.node)
-            if server.node is None or server.node.is_local:
-                iptables_accept_server(server.name, server.public_bind_ip or "", new_ports)
-            plugin.start(server)
+        recreate_server_network(server, old_ports, old_bind_ip)
 
     if guardian_network_changed:
         from services.server_lifecycle_service import sync_desired_state_to_agent
