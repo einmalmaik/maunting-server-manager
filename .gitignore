@@ -79,3 +79,9 @@ node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json
 .factory-test-data/evidence/e2e-safety/VAL-CROSS-001-api-get-after-edit.json
 .factory-test-data/evidence/e2e-safety-cross-area-pytest-output.txt
 prompt.txt
+/.claude
+
+# Lokales Embedding-Modell fuer das KI-Gedaechtnis (~507 MB).
+# Wird von install.sh/update.sh aus dem HuggingFace-Hub geladen und gehoert
+# niemals ins Repository.
+/backend/ml-models/

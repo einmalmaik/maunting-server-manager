@@ -528,3 +528,85 @@ Kapselung:
 Exit-Plan:
   Markierte Tests auf explizite asyncio.run-Szenarien umstellen und den einen
   Eintrag aus dev-requirements.txt entfernen.
+
+---
+
+## model2vec + numpy — Lokale Embeddings für das KI-Gedächtnis
+
+Stand: 2026-08-08
+
+Problem:
+  Die Auswahl der Erinnerungen bei knappem Kontextbudget lief über
+  Wortüberlappung. Die greift ausschließlich innerhalb einer Sprache: ein
+  deutscher Eintrag und eine englische oder französische Frage haben kein
+  gemeinsames Wort, und das Gedächtnis wirkt in diesem Moment defekt, obwohl
+  der passende Eintrag danebenliegt.
+
+Notwendigkeit:
+  Semantische Ähnlichkeit braucht Vektoren. Gemessen am 2026-08-08 bietet
+  OpenRouter kein kostenloses Embedding-Modell — HTTP 402 bei
+  `openai/text-embedding-3-small`, HTTP 400 bei `openrouter/free`. Ein
+  Gedächtnis, dessen Suche einen bezahlten Provider-Account voraussetzt, wäre
+  für einen Teil der Betreiber nicht nutzbar. Also lokal.
+
+Alternativen (gemessen, nicht geschätzt):
+  - mem0ai: 35 Pakete. Ausgeschlossen aus drei unabhängigen Gründen.
+    `posthog` ist Pflichtabhängigkeit — Abschnitt 2 dieser Datei listet
+    Analytics-Bibliotheken im Server-Management-Kontext unter harte Verbote.
+    `httpx>=0.28.0` kollidiert mit unserem gepinnten `httpx==0.27.0` im
+    SSRF-geschützten Ausgangspfad. `openai>=1.90.0` wäre ein zweites
+    Provider-SDK neben dem eigenen Adapter, ohne dessen IP-Pinning.
+  - fastembed: 30 Pakete, davon `onnxruntime` als großes Binärpaket. Kein
+    Ausschlussgrund, aber deutlich mehr Fläche bei gleichem Nutzen.
+  - Postgres-Volltextsuche: sprachgebunden und damit am Problem vorbei.
+  - pgvector: MSM verwaltet seinen PostgreSQL selbst mit `postgres:17-alpine`
+    (config.managed_postgres_image), das die Erweiterung nicht enthält. Ein
+    Image-Wechsel träfe jede Installation. Bei höchstens 100 Einträgen je
+    Bereich ist ein Skalarprodukt in Python ohnehin schneller als der
+    Datenbank-Roundtrip; ein Vektorindex lohnt ab etwa 10.000 Einträgen.
+
+Security:
+  `model2vec` berührt weder Secrets noch Server-Verbindungen. Der Dienst
+  bekommt bereits entschlüsselten Erinnerungstext und liefert Zahlen zurück.
+  Kein Netzwerkzugriff zur Laufzeit: die Gewichte kommen einmalig über
+  `backend/scripts/fetch_embedding_model.py`, aufgerufen aus install.sh und
+  update.sh. Ein Panel, das im Betrieb Gewichte nachlädt, wäre eine
+  Supply-Chain-Fläche und ist ausdrücklich ausgeschlossen.
+
+  Der berechnete Vektor liegt unverschlüsselt neben dem weiterhin
+  DIS-verschlüsselten Wert. Begründung: der `key` derselben Zeile steht ohnehin
+  im Klartext und verrät mehr als 256 Gleitkommazahlen, aus denen sich der Text
+  nicht rekonstruieren lässt. Der Gewinn ist konkret — die Auswahl findet vor
+  dem Entschlüsseln statt, was pro Chatnachricht dutzende Sidecar-Aufrufe
+  spart. Restrisiko benannt: wer die Datenbank besitzt, kann mit den Vektoren
+  Vermutungen über Inhalte bestätigen, den Text aber nicht lesen.
+
+Transitive Fläche und Lizenz:
+  23 Pakete, im Wesentlichen numpy, tokenizers, huggingface_hub. MIT.
+  `huggingface_hub` verlangt `httpx<1,>=0.23.0` und ist damit mit unserem
+  `httpx==0.27.0` verträglich — geprüft per Auflösungstest.
+
+Modell:
+  `minishlab/potion-multilingual-128M`, MIT, rund 507 MB. Statische
+  Embeddings, also eine vorberechnete Tabelle plus Mittelung — kein neuronales
+  Netz zur Laufzeit, daher kein torch und keine ONNX-Runtime.
+
+  Gemessene Grenzen, damit niemand mehr erwartet als es kann: `Zeitzone` zu
+  `timezone` 0,62, aber `Sicherung` zu `backup` nur 0,27. Unverwandtes trennt
+  es zuverlässig (nahe 0,0). In einem kleinen Vergleich über acht Fragen traf
+  Wortabgleich 5, Embedding 6, beide kombiniert 6. Deshalb ersetzt die
+  Bedeutungssuche den Wortabgleich nicht, sondern ergänzt ihn — im
+  Gameserver-Umfeld besteht viel Fachsprache aus Lehnwörtern, die wörtlich in
+  deutschen Einträgen stehen.
+
+Kapselung:
+  Ausschließlich `services/ai_embedding_service.py`. Kein anderer Modulteil
+  importiert model2vec oder numpy direkt.
+
+Exit-Plan:
+  `encode()` liefert `None`, wenn das Modell fehlt oder nicht lädt — die
+  Auswahl läuft dann über Wortabgleich, Nutzung und Aktualität weiter. Das ist
+  kein theoretischer Ausstieg, sondern ein getesteter Betriebszustand
+  (`test_ai_memory_embeddings.py::test_without_a_model_nothing_breaks`).
+  Entfernen heißt: zwei Zeilen aus requirements.txt, den Dienst löschen, die
+  beiden Spalten per Migration fallen lassen.

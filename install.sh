@@ -1330,6 +1330,18 @@ if $RUN_BACKEND_SETUP; then
     log "Installiere Python-Abhängigkeiten..."
     # recreate=true: clean venv after in-place wipe / dependency upgrades
     prepare_app_venv "$MSM_DIR/backend" "Python-Backend" true
+
+    # Lokales Embeddingmodell fuer die KI-Gedaechtnissuche (~507 MB).
+    # Bewusst hier und nicht zur Laufzeit: das Panel laedt im Betrieb niemals
+    # Gewichte aus dem Internet nach. Ein Fehlschlag bricht die Installation
+    # nicht ab — ohne Modell laeuft die Suche ohne Vektoren weiter.
+    log "Stelle KI-Embeddingmodell bereit (einmalig, ~507 MB)..."
+    su - msm -c "
+        cd $MSM_DIR/backend
+        source venv/bin/activate
+        python3 scripts/fetch_embedding_model.py
+    " 2>&1 | tee -a "$LOG_FILE" || warn "Embeddingmodell nicht verfuegbar - KI-Gedaechtnis laeuft ohne Vektoren."
+
     ok "Python-Backend bereit"
 
     # MSM Agent (lokaler Node, rootless Docker) — eigenes venv, gleiche User-ID

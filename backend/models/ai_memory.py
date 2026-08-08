@@ -55,5 +55,13 @@ class AiMemoryEntry(Base):
     origin: Mapped[str] = mapped_column(String(8), nullable=False, default="user")
     use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Lokal berechneter Vektor als JSON-Liste. Bewusst *nicht* verschluesselt:
+    # der `key` daneben steht ohnehin im Klartext und verraet mehr, und nur so
+    # kann die Auswahl vor dem Entschluesseln stattfinden — was pro Chatnachricht
+    # dutzende Sidecar-Aufrufe spart. NULL heisst: noch nicht berechnet.
+    embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Womit gerechnet wurde. Passt es nicht zum geladenen Modell, wird der
+    # Vektor ignoriert statt falsche Aehnlichkeiten zu liefern.
+    embedding_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

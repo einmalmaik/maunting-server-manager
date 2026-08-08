@@ -94,6 +94,13 @@ class Settings(BaseSettings):
     # verifizierten Remote-Node umgewandelt werden; kein stiller Fallback.
     local_agent_enabled: bool = True
 
+    # Lokales Embedding-Modell fuer die Gedaechtnissuche der KI. Leer heisst:
+    # das mit dem Update ausgelieferte Verzeichnis `backend/ml-models/...`.
+    # Ein eigener Pfad ist fuer Betreiber gedacht, die die Gewichte zentral
+    # ablegen (Netzlaufwerk, geteiltes Volume) statt je Installation.
+    # Fehlt das Modell, laeuft die Suche ohne Vektoren weiter.
+    ai_embedding_model_dir: str = ""
+
     # Verwaltetes PostgreSQL fuer Game-Server-Datenbanken.
     # Der Host-Port ist absichtlich nur an Loopback gebunden. Game-Container
     # erreichen PostgreSQL ueber das interne Docker-Netz und msm-postgres:5432.

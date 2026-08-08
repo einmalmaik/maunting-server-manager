@@ -1,6 +1,7 @@
 """Ownership, DIS-Schutz, Secret-Abweisung und Abruf fuer AI-Memory."""
 
 from datetime import datetime, timezone
+import json
 import re
 from uuid import UUID, uuid4
 
@@ -10,13 +11,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, AiMemoryPreference, User
-from services import audit_service, permission_service
+from services import ai_embedding_service, audit_service, permission_service
 from services.ai_context_service import redact_sensitive_text
+from services.ai_embedding_service import EMBEDDING_DIMENSIONS
 from services.dis_client import DisClient
 
 
 MAX_ENTRIES_PER_SCOPE = 100
 MAX_CONTEXT_CHARS = 6_000
+# Kennung des Modells, mit dem ein gespeicherter Vektor entstanden ist. Wechselt
+# der Betreiber das Modell, passen alte Vektoren nicht mehr — sie werden dann
+# ignoriert statt falsche Aehnlichkeiten zu liefern.
+_EMBEDDING_MODEL_TAG = "potion-multilingual-128M"
 # Nach so vielen Tagen ohne Nutzung haelbiert sich der Aktualitaetsbonus. Grob
 # an "eine Arbeitswoche" angelehnt; der Wert entscheidet nur bei Platzmangel.
 RECENCY_HALFLIFE_DAYS = 7.0
@@ -127,6 +133,9 @@ def upsert_entry(
     else:
         row.origin = origin
     row.value_encrypted = DisClient.encrypt(safe_value, aad=_aad(row.id))
+    # Der Vektor entsteht aus dem Klartext, bevor er verschluesselt wird —
+    # danach waere er nicht mehr zu haben, ohne erneut zu entschluesseln.
+    refresh_embedding(row, safe_value)
     row.updated_at = datetime.now(timezone.utc)
     audit_service.record_privileged_action(
         db, user_id=user.id, action=action, target_type="ai_memory", target_id=row.id,
@@ -185,25 +194,80 @@ def _tokens(text: str) -> set[str]:
     return {word for word in _WORD_RE.findall(text.lower()) if len(word) > 2}
 
 
-def _relevance(row: AiMemoryEntry, value: str, query_tokens: set[str], now: datetime) -> float:
+def _relevance(
+    row: AiMemoryEntry,
+    value: str,
+    query_tokens: set[str],
+    now: datetime,
+    similarity: float | None = None,
+) -> float:
     """Bewertet einen Eintrag fuer die aktuelle Frage.
 
-    Drei Anteile, die absichtlich verschiedene Dinge messen:
+    Vier Anteile, die absichtlich verschiedene Dinge messen:
 
-    - **Bezug zur Frage** (Wortueberlappung). Stark, wenn er greift — aber er
-      greift eben nur bei gleicher Sprache.
-    - **Nutzung.** Was oft abgerufen wurde, ist erfahrungsgemaess wichtig. Das
-      ist der sprachunabhaengige Anteil und der Grund, warum ein deutscher
-      Eintrag auch bei englischer Frage nicht hinten runterfaellt.
+    - **Bedeutung** (Vektoraehnlichkeit). Das einzige Kriterium, das ueber
+      Sprachgrenzen traegt: "quel jeu je prefere" findet "lieblingsspiel", wo
+      Wortabgleich null liefert.
+    - **Bezug zur Frage** (Wortueberlappung). Bleibt trotzdem drin, weil im
+      Gameserver-Umfeld die halbe Fachsprache aus Lehnwoertern besteht: Backup,
+      RAM, Mods, Ports stehen woertlich in deutschen Eintraegen. Gemessen
+      erkennt der Wortabgleich diese Faelle sicherer als das statische
+      Embedding — die beiden Signale ergaenzen sich.
+    - **Nutzung.** Was oft abgerufen wurde, ist erfahrungsgemaess wichtig.
     - **Aktualitaet.** Frisch Gemerktes gewinnt gegen Altes, das nie gebraucht
       wurde — sonst kaeme ein neuer Eintrag nie zum Zug, weil ihm die
       Nutzungshistorie fehlt.
+
+    ``similarity`` ist ``None``, wenn kein Modell geladen ist oder der Eintrag
+    noch keinen Vektor hat. Dann entscheiden die drei uebrigen Kriterien; der
+    Eintrag faellt nicht heraus.
     """
     overlap = len(query_tokens & _tokens(f"{row.key} {value}"))
     reference = row.last_used_at or row.updated_at or row.created_at
     age_days = max(0.0, (now - _utc(reference)).total_seconds() / 86_400)
     recency = 1.0 / (1.0 + age_days / RECENCY_HALFLIFE_DAYS)
-    return overlap * 3.0 + min(row.use_count, 20) * 0.5 + recency * 2.0
+    # Negative Aehnlichkeit heisst "hat nichts miteinander zu tun" und darf
+    # einen Eintrag nicht unter einen ohne Vektor druecken.
+    meaning = max(0.0, similarity) if similarity is not None else 0.0
+    return meaning * 6.0 + overlap * 3.0 + min(row.use_count, 20) * 0.5 + recency * 2.0
+
+
+def _stored_vector(row: AiMemoryEntry) -> list[float] | None:
+    """Liest den gespeicherten Vektor, wenn er zum aktuellen Modell passt."""
+    if not row.embedding_json or row.embedding_model != _EMBEDDING_MODEL_TAG:
+        return None
+    try:
+        vector = json.loads(row.embedding_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(vector, list) or len(vector) != EMBEDDING_DIMENSIONS:
+        return None
+    return vector
+
+
+def _embedding_source(key: str, value: str) -> str:
+    """Der Text, aus dem der Vektor entsteht.
+
+    Schluessel und Wert zusammen: der Schluessel traegt oft das Stichwort
+    ("zeitzone"), der Wert den Inhalt. Punkte und Unterstriche werden zu
+    Leerzeichen, damit `backup.zeitpunkt` als zwei Woerter gelesen wird.
+    """
+    readable_key = key.replace(".", " ").replace("_", " ").replace("-", " ")
+    return f"{readable_key}: {value}"
+
+
+def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
+    """Berechnet den Vektor eines Eintrags neu, falls ein Modell da ist.
+
+    Schlaegt es fehl, bleibt der alte Wert stehen und der Eintrag wird eben
+    ohne Bedeutungsanteil bewertet. Ein Gedaechtniseintrag darf nicht daran
+    scheitern, dass ein Modell fehlt.
+    """
+    vectors = ai_embedding_service.encode([_embedding_source(row.key, value)])
+    if not vectors:
+        return
+    row.embedding_json = json.dumps(vectors[0], separators=(",", ":"))
+    row.embedding_model = _EMBEDDING_MODEL_TAG
 
 
 def _utc(value: datetime) -> datetime:
@@ -259,6 +323,34 @@ def _memory_line(row: AiMemoryEntry, value: str) -> str:
     return f"[{scope}/{origin}] {row.key}: {flattened}"
 
 
+def _similarities(query: str, rows: list[AiMemoryEntry]) -> list[float | None]:
+    """Bedeutungsaehnlichkeit der Eintraege zur Frage, oder lauter ``None``.
+
+    ``None`` steht fuer "kein Vergleich moeglich" und nicht fuer "unaehnlich":
+    ohne Modell, ohne Frage oder ohne gespeicherten Vektor soll ein Eintrag
+    nach den uebrigen Kriterien bewertet werden, statt hinten anzustehen.
+    """
+    if not query.strip():
+        return [None] * len(rows)
+    query_vectors = ai_embedding_service.encode([query])
+    if not query_vectors:
+        return [None] * len(rows)
+
+    stored = [_stored_vector(row) for row in rows]
+    known = [vector for vector in stored if vector is not None]
+    if not known:
+        return [None] * len(rows)
+
+    scores = ai_embedding_service.similarity(query_vectors[0], known)
+    if len(scores) != len(known):
+        return [None] * len(rows)
+    result: list[float | None] = []
+    iterator = iter(scores)
+    for vector in stored:
+        result.append(next(iterator) if vector is not None else None)
+    return result
+
+
 def provider_memory_context(
     db: Session,
     user: User,
@@ -271,9 +363,9 @@ def provider_memory_context(
     das Sprachmodell sieht jeden Eintrag und stellt den Bezug selbst her, egal
     in welcher Sprache er formuliert ist.
 
-    Erst wenn es *nicht* passt, wird ausgewaehlt — nach Bezug zur Frage,
-    Nutzung und Aktualitaet. Vorher wurde an dieser Stelle alphabetisch nach
-    Schluessel sortiert und bei 6.000 Zeichen abgeschnitten: ein Eintrag
+    Erst wenn es *nicht* passt, wird ausgewaehlt — nach Bedeutung, Bezug zur
+    Frage, Nutzung und Aktualitaet. Vorher wurde an dieser Stelle alphabetisch
+    nach Schluessel sortiert und bei 6.000 Zeichen abgeschnitten: ein Eintrag
     "zeitzone" fiel damit systematisch raus, "backup" blieb immer drin.
 
     Ausgewaehlte Eintraege werden als benutzt vermerkt. Dieses Zaehlwerk ist
@@ -296,14 +388,17 @@ def provider_memory_context(
     else:
         now = datetime.now(timezone.utc)
         query_tokens = _tokens(query)
+        scores = _similarities(query, [row for row, _ in decoded])
         ranked = sorted(
-            decoded,
-            key=lambda item: _relevance(item[0], item[1], query_tokens, now),
+            zip(decoded, scores),
+            key=lambda item: _relevance(
+                item[0][0], item[0][1], query_tokens, now, item[1]
+            ),
             reverse=True,
         )
         selected = []
         used = 0
-        for row, value in ranked:
+        for (row, value), _score in ranked:
             line = _memory_line(row, value)
             if used + len(line) + 1 > MAX_CONTEXT_CHARS:
                 continue

@@ -32,3 +32,25 @@ docker==7.1.0
 # (Sektion: S3-Backup-Dependencies). Exit-Plan: S3Service-Fassade ermoeglicht
 # Austausch gegen alternative S3-Client-Library ohne Aenderung an Fachlogik.
 boto3==1.43.40
+
+# --- Lokale Embeddings fuer das KI-Gedaechtnis ---
+# model2vec: statische Satz-Embeddings, gekapselt in services/ai_embedding_service.py.
+# Warum lokal: OpenRouter bietet nachweislich kein kostenloses Embedding-Modell
+# (402 bei text-embedding-3-small, 400 bei openrouter/free). Eine Suche, die
+# einen bezahlten Account voraussetzt, waere fuer einen Teil der Betreiber tot.
+# Warum diese Bibliothek: statische Embeddings sind eine vorberechnete Tabelle
+# plus Mittelung — kein neuronales Netz zur Laufzeit, also kein torch und keine
+# ONNX-Runtime. Gemessener Abhaengigkeitsbaum: 23 Pakete gegenueber 35 bei
+# mem0ai, ohne Telemetriepaket (mem0ai verlangt posthog, was
+# docs/agent-rules/dependencies.md unter harte Verbote listet), ohne zweites
+# Provider-SDK neben unserem SSRF-gepinnten Adapter und ohne Kollision mit
+# httpx==0.27.0 (mem0ai verlangt >=0.28).
+# Beruehrt keine Secrets: der Dienst bekommt nur den bereits entschluesselten
+# Erinnerungstext und liefert Zahlen zurueck. Kein Netzzugriff zur Laufzeit —
+# die Gewichte kommen einmalig ueber install.sh/update.sh.
+# Exit-Plan: ai_embedding_service kapselt die gesamte Nutzung; faellt die
+# Bibliothek weg, liefert encode() None und die Suche laeuft ohne Vektoren.
+model2vec==0.8.2
+# Transitiv durch model2vec, hier gepinnt, weil ai_embedding_service direkt
+# damit rechnet (Normalisierung, Skalarprodukt).
+numpy==2.5.1
