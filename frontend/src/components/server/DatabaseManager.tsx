@@ -47,8 +47,8 @@ export function DatabaseManager({ serverId }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   const selectedDatabase = useMemo(
-    () => resources.databases.find((database) => database.id === selectedDbId) || null,
-    [resources.databases, selectedDbId],
+    () => (Array.isArray(resources?.databases) ? resources.databases : []).find((database) => database.id === selectedDbId) || null,
+    [resources?.databases, selectedDbId],
   )
 
   const run = async (key: string, action: () => Promise<void>) => {
@@ -329,7 +329,7 @@ export function DatabaseManager({ serverId }: Props) {
 
   const deleteUser = (userId: number) =>
     run(`delete-user-${userId}`, async () => {
-      const user = resources.users.find((u) => u.id === userId)
+      const user = (Array.isArray(resources?.users) ? resources.users : []).find((u) => u.id === userId)
       if (!user) return
       const ok = await confirm({
         title: 'Datenbank-User löschen',
@@ -352,6 +352,48 @@ export function DatabaseManager({ serverId }: Props) {
       })
       await fetchResources()
       toast.success('Datenbank-User gelöscht')
+    })
+
+  const handleUpdateRow = (schema: string, table: string, keyConditions: Record<string, any>, updates: Record<string, any>) =>
+    run('update-row', async () => {
+      if (!selectedDbId) return
+      await api(`/servers/${serverId}/databases/rows/update`, {
+        method: 'POST',
+        headers: csrfHeader(),
+        body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, key_conditions: keyConditions, updates }),
+      })
+      toast.success('Zeile erfolgreich aktualisiert')
+      if (selectedTable) {
+        await selectTable(selectedTable, selectedDbId)
+      }
+    })
+
+  const handleDeleteRows = (schema: string, table: string, rowConditions: Array<Record<string, any>>) =>
+    run('delete-rows', async () => {
+      if (!selectedDbId) return
+      await api(`/servers/${serverId}/databases/rows/delete`, {
+        method: 'POST',
+        headers: csrfHeader(),
+        body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, row_conditions: rowConditions }),
+      })
+      toast.success(`${rowConditions.length} Zeile(n) gelöscht`)
+      if (selectedTable) {
+        await selectTable(selectedTable, selectedDbId)
+      }
+    })
+
+  const handleInsertRow = (schema: string, table: string, rowData: Record<string, any>) =>
+    run('insert-row', async () => {
+      if (!selectedDbId) return
+      await api(`/servers/${serverId}/databases/rows/insert`, {
+        method: 'POST',
+        headers: csrfHeader(),
+        body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, row_data: rowData }),
+      })
+      toast.success('Zeile erfolgreich eingefügt')
+      if (selectedTable) {
+        await selectTable(selectedTable, selectedDbId)
+      }
     })
 
   if (resources.databases.length === 0) {
@@ -410,6 +452,9 @@ export function DatabaseManager({ serverId }: Props) {
         onCreateUser={canAdmin ? createUser : undefined}
         onRotateUser={canAdmin ? rotateUser : undefined}
         onDeleteUser={canAdmin ? deleteUser : undefined}
+        onUpdateRow={canWrite ? handleUpdateRow : undefined}
+        onDeleteRows={canWrite ? handleDeleteRows : undefined}
+        onInsertRow={canWrite ? handleInsertRow : undefined}
       />
       <PostgresCredentialsDialog credentials={credentials} onClose={() => setCredentials([])} />
       <PowerUserDialog state={powerDialog} onClose={() => setPowerDialog(null)} />

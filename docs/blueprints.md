@@ -388,6 +388,36 @@ Beispiel (DayZ `serverDZ.cfg`):
 }
 ```
 
+### 3. Zusammenspiel von `seedFiles` und `configPatches` (z. B. 7 Days to Die)
+Fehlt eine Konfigurationsdatei vor dem ersten Start (z. B. `platform.cfg` oder `steam_appid.txt`), legt MSM sie über `seedFiles` an. Lädt Steam oder das Spiel die Datei im Anschluss herunter oder überschreibt sie, wendet MSM bei jedem weiteren Start die `configPatches` an. Dadurch bleiben Einstellungen (z. B. Deaktivieren fehlerhafter Crossplay-Module oder Setzen der App-ID) dauerhaft erhalten:
+
+```json
+"seedFiles": [
+  {
+    "file": "platform.cfg",
+    "content": "platform=Steam\ncrossplatform=\nserverplatforms=Steam,LAN,\n"
+  },
+  {
+    "file": "steam_appid.txt",
+    "content": "294420\n"
+  }
+],
+"configPatches": [
+  {
+    "type": "regex",
+    "file": "platform.cfg",
+    "regex": "(?m)^crossplatform=.*$",
+    "value": "crossplatform="
+  },
+  {
+    "type": "regex",
+    "file": "steam_appid.txt",
+    "regex": "^.*$",
+    "value": "294420"
+  }
+]
+```
+
 Erlaubte Tokens in `value`:
 
 - `{GAME_PORT}`

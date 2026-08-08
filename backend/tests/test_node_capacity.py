@@ -139,7 +139,7 @@ def test_sum_allocated_excludes_null_limits_and_other_nodes(db):
     ) == 4096
 
 
-def test_ensure_ram_limit_fits_blocks_overbook(db, monkeypatch):
+def test_ensure_ram_limit_fits_allows_overbook(db, monkeypatch):
     monkeypatch.setattr(node_capacity, "ram_headroom_mb", lambda: 1024)
     node = Node(
         name="n",
@@ -163,13 +163,10 @@ def test_ensure_ram_limit_fits_blocks_overbook(db, monkeypatch):
     )
     db.commit()
 
-    # budget = 8192 - 1024 = 7168; remaining = 7168 - 6144 = 1024
-    with pytest.raises(HTTPException) as exc:
-        node_capacity.ensure_ram_limit_fits(
-            db, node, new_ram_limit_mb=2048, exclude_server_id=None
-        )
-    assert exc.value.status_code == 400
-
+    # Overcommit is allowed (no exception raised)
+    node_capacity.ensure_ram_limit_fits(
+        db, node, new_ram_limit_mb=2048, exclude_server_id=None
+    )
     node_capacity.ensure_ram_limit_fits(
         db, node, new_ram_limit_mb=1024, exclude_server_id=None
     )
@@ -262,3 +259,44 @@ def test_capacity_summary_endpoint_auth_and_shape(client, owner_cookies, db):
     # Without auth
     denied = client.get("/api/nodes/capacity-summary")
     assert denied.status_code in (401, 403)
+
+
+def test_disk_capacity_accounting(db):
+    node = Node(
+        name="disk_node",
+        host="https://disk:9000",
+        auth_token_enc="enc",
+        is_local=False,
+        status="online",
+        disk_total=204800,  # 200 GB in MB
+        disk_used=51200,    # 50 GB in MB
+    )
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+    db.add_all([
+        Server(
+            name="d1",
+            game_type="t",
+            install_dir="/tmp/d1",
+            node_id=node.id,
+            disk_limit_gb=20,
+            disk_usage_mb=10240,
+        ),
+        Server(
+            name="d2",
+            game_type="t",
+            install_dir="/tmp/d2",
+            node_id=node.id,
+            disk_limit_gb=30,
+            disk_usage_mb=5120,
+        ),
+    ])
+    db.commit()
+
+    assert node_capacity.sum_allocated_disk_gb(db, node.id) == 50
+    assert node_capacity.sum_panel_disk_used_mb(db, node.id) == 15360
+    # 200 GB total - 50 GB allocated = 150 GB allocatable
+    assert node_capacity.allocatable_disk_gb(node, 50) == 150
+

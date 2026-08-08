@@ -604,6 +604,21 @@ def describe_table(
         with conn.cursor() as cur:
             cur.execute(
                 """
+                SELECT kcu.column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                WHERE tc.constraint_type = 'PRIMARY KEY'
+                  AND tc.table_schema = %s
+                  AND tc.table_name = %s
+                """,
+                (schema_name, table_name),
+            )
+            pk_cols = {row[0] for row in cur.fetchall()}
+
+            cur.execute(
+                """
                 SELECT column_name, data_type, is_nullable, column_default
                 FROM information_schema.columns
                 WHERE table_schema = %s AND table_name = %s
@@ -617,6 +632,7 @@ def describe_table(
                     "data_type": row[1],
                     "nullable": row[2] == "YES",
                     "default": row[3],
+                    "primary_key": row[0] in pk_cols,
                 }
                 for row in cur.fetchall()
             ]
@@ -1138,6 +1154,28 @@ def dispatch_query(action: str, payload: dict[str, Any]) -> Any:
             int(payload.get("offset") or 0),
             payload.get("search"),
         )
+    if act == "update_row":
+        return update_row(
+            dbn, owner, opw,
+            payload.get("schema_name") or "public",
+            payload.get("table_name") or "",
+            payload.get("key_conditions") or {},
+            payload.get("updates") or {},
+        )
+    if act == "delete_rows":
+        return delete_rows(
+            dbn, owner, opw,
+            payload.get("schema_name") or "public",
+            payload.get("table_name") or "",
+            payload.get("row_conditions") or [],
+        )
+    if act == "insert_row":
+        return insert_row(
+            dbn, owner, opw,
+            payload.get("schema_name") or "public",
+            payload.get("table_name") or "",
+            payload.get("row_data") or {},
+        )
     if act == "execute_sql":
         return execute_sql(
             dbn, owner, opw,
@@ -1151,6 +1189,103 @@ def dispatch_query(action: str, payload: dict[str, Any]) -> Any:
     if act == "drop_extension":
         return drop_extension(dbn, owner, opw, payload.get("name") or "")
     raise PostgresAgentError(f"Unknown query action: {act}")
+
+
+def update_row(
+    database_name: str,
+    owner_role: str,
+    owner_password: str,
+    schema_name: str,
+    table_name: str,
+    key_conditions: dict[str, Any],
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    if not key_conditions or not updates:
+        raise PostgresAgentError("Key conditions and updates required")
+    schema_name = validate_identifier(schema_name or "public")
+    table_name = validate_identifier(table_name)
+    with _owner_connect(database_name, owner_role, owner_password) as conn:
+        with conn.cursor() as cur:
+            set_clauses = [sql.SQL("{} = %s").format(sql.Identifier(k)) for k in updates]
+            where_clauses = [sql.SQL("{} = %s").format(sql.Identifier(k)) for k in key_conditions]
+            params = list(updates.values()) + list(key_conditions.values())
+            query = (
+                sql.SQL("UPDATE {}.{} SET ")
+                .format(sql.Identifier(schema_name), sql.Identifier(table_name))
+                + sql.SQL(", ").join(set_clauses)
+                + sql.SQL(" WHERE ")
+                + sql.SQL(" AND ").join(where_clauses)
+            )
+            cur.execute(query, tuple(params))
+            count = cur.rowcount
+            conn.commit()
+    return {"updated_count": count, "message": f"{count} Zeile(n) aktualisiert"}
+
+
+def delete_rows(
+    database_name: str,
+    owner_role: str,
+    owner_password: str,
+    schema_name: str,
+    table_name: str,
+    row_conditions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not row_conditions:
+        raise PostgresAgentError("Row conditions required")
+    schema_name = validate_identifier(schema_name or "public")
+    table_name = validate_identifier(table_name)
+    deleted_count = 0
+    with _owner_connect(database_name, owner_role, owner_password) as conn:
+        with conn.cursor() as cur:
+            for cond in row_conditions:
+                if not cond:
+                    continue
+                where_clauses = [sql.SQL("{} = %s").format(sql.Identifier(k)) for k in cond]
+                params = list(cond.values())
+                query = (
+                    sql.SQL("DELETE FROM {}.{} WHERE ")
+                    .format(sql.Identifier(schema_name), sql.Identifier(table_name))
+                    + sql.SQL(" AND ").join(where_clauses)
+                )
+                cur.execute(query, tuple(params))
+                deleted_count += max(cur.rowcount, 0)
+            conn.commit()
+    return {"deleted_count": deleted_count, "message": f"{deleted_count} Zeile(n) gelöscht"}
+
+
+def insert_row(
+    database_name: str,
+    owner_role: str,
+    owner_password: str,
+    schema_name: str,
+    table_name: str,
+    row_data: dict[str, Any],
+) -> dict[str, Any]:
+    if not row_data:
+        raise PostgresAgentError("Row data required")
+    schema_name = validate_identifier(schema_name or "public")
+    table_name = validate_identifier(table_name)
+    columns = list(row_data.keys())
+    values = list(row_data.values())
+    with _owner_connect(database_name, owner_role, owner_password) as conn:
+        with conn.cursor() as cur:
+            col_sql = [sql.Identifier(col) for col in columns]
+            val_sql = [sql.Placeholder() for _ in values]
+            query = sql.SQL("INSERT INTO {}.{} ({}) VALUES ({}) RETURNING *").format(
+                sql.Identifier(schema_name),
+                sql.Identifier(table_name),
+                sql.SQL(", ").join(col_sql),
+                sql.SQL(", ").join(val_sql),
+            )
+            cur.execute(query, tuple(values))
+            inserted_row = None
+            if cur.description:
+                cols = [desc[0] for desc in cur.description]
+                fetched = cur.fetchone()
+                if fetched:
+                    inserted_row = dict(zip(cols, fetched, strict=False))
+            conn.commit()
+    return {"inserted_row": inserted_row, "message": "Zeile eingefügt"}
 
 
 def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[str, str]:

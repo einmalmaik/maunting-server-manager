@@ -65,11 +65,12 @@ export const useNodeStore = create<NodeState>((set, get) => ({
         set({ nodes: res, total: res.length, page: 1, limit: res.length, loading: false })
       } else {
         if (requestId !== latestFetchRequest) return
+        const safeItems = Array.isArray(res?.items) ? res.items : []
         set({
-          nodes: res.items,
-          total: res.total,
-          page: res.page,
-          limit: res.limit,
+          nodes: safeItems,
+          total: res?.total ?? safeItems.length,
+          page: res?.page ?? 1,
+          limit: res?.limit ?? 50,
           loading: false,
         })
       }
@@ -87,7 +88,8 @@ export const useNodeStore = create<NodeState>((set, get) => ({
       body: JSON.stringify(input),
     })
     latestFetchRequest += 1
-    set({ nodes: [...get().nodes, created].slice(0, get().limit), total: get().total + 1, loading: false })
+    const currentNodes = Array.isArray(get().nodes) ? get().nodes : []
+    set({ nodes: [...currentNodes, created].slice(0, get().limit), total: get().total + 1, loading: false })
     return created
   },
 
@@ -97,8 +99,9 @@ export const useNodeStore = create<NodeState>((set, get) => ({
       body: JSON.stringify(input),
     })
     latestFetchRequest += 1
+    const currentNodes = Array.isArray(get().nodes) ? get().nodes : []
     set({
-      nodes: get().nodes.map((n) => (n.id === id ? updated : n)),
+      nodes: currentNodes.map((n) => (n.id === id ? updated : n)),
     })
     return updated
   },
@@ -106,14 +109,16 @@ export const useNodeStore = create<NodeState>((set, get) => ({
   deleteNode: async (id) => {
     await api(`/nodes/${id}`, { method: 'DELETE' })
     latestFetchRequest += 1
-    set({ nodes: get().nodes.filter((n) => n.id !== id), total: Math.max(0, get().total - 1), loading: false })
+    const currentNodes = Array.isArray(get().nodes) ? get().nodes : []
+    set({ nodes: currentNodes.filter((n) => n.id !== id), total: Math.max(0, get().total - 1), loading: false })
   },
 
   healthCheck: async (id) => {
     // GET /nodes/{id} probes agent metrics and updates status
     const fresh = await api<Node>(`/nodes/${id}`)
+    const currentNodes = Array.isArray(get().nodes) ? get().nodes : []
     set({
-      nodes: get().nodes.map((n) => (n.id === id ? fresh : n)),
+      nodes: currentNodes.map((n) => (n.id === id ? fresh : n)),
     })
     return fresh
   },

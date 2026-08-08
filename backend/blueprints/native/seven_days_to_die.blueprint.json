@@ -1,0 +1,183 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "seven_days_to_die",
+    "name": "7 Days to Die",
+    "category": "steam_game",
+    "author": "Maunting Studios",
+    "description": "7 Days to Die Dedicated Server via SteamCMD (App-ID 294420). Nativer Linux-Support."
+  },
+  "runtime": {
+    "image": "ghcr.io/parkervcp/steamcmd:debian",
+    "workdir": "/data",
+    "user": "1000:1000",
+    "env": {
+      "HOME": "/data",
+      "LD_LIBRARY_PATH": ".:./linux64:./7DaysToDieServer_Data/Plugins/x86_64:/usr/lib32:/usr/lib/x86_64-linux-gnu",
+      "SERVER_NAME": "My 7 Days to Die Server",
+      "SERVER_PASSWORD": "",
+      "WORLD_NAME": "Navezgane",
+      "GAME_MODE": "GameModeSurvival"
+    },
+    "startup": "./7DaysToDieServer.x86_64 -configfile=serverconfig.xml -serverport={GAME_PORT} -dedicated -nographics -batchmode -logfile -",
+    "ensureDirs": [
+      "logs",
+      "UserData"
+    ],
+    "requiredFiles": [
+      "7DaysToDieServer.x86_64"
+    ],
+    "seedFiles": [
+      {
+        "file": "serverconfig.xml",
+        "content": "<?xml version=\"1.0\"?>\n<ServerSettings>\n  <property name=\"ServerName\" value=\"My 7 Days to Die Server\"/>\n  <property name=\"ServerDescription\" value=\"Hosted with Maunting Server Manager\"/>\n  <property name=\"ServerWebsiteURL\" value=\"\"/>\n  <property name=\"ServerPassword\" value=\"\"/>\n  <property name=\"ServerLoginConfirmationText\" value=\"\"/>\n  <property name=\"ServerPort\" value=\"{GAME_PORT}\"/>\n  <property name=\"ServerVisibility\" value=\"2\"/>\n  <property name=\"ServerMaxPlayerCount\" value=\"8\"/>\n  <property name=\"ServerReservedSlots\" value=\"0\"/>\n  <property name=\"ServerReservedSlotsPermission\" value=\"100\"/>\n  <property name=\"ServerAdminSlots\" value=\"0\"/>\n  <property name=\"ServerAdminSlotsPermission\" value=\"0\"/>\n  <property name=\"ControlPanelEnabled\" value=\"false\"/>\n  <property name=\"ControlPanelPort\" value=\"8080\"/>\n  <property name=\"ControlPanelPassword\" value=\"\"/>\n  <property name=\"TelnetEnabled\" value=\"false\"/>\n  <property name=\"TelnetPort\" value=\"8081\"/>\n  <property name=\"TelnetPassword\" value=\"\"/>\n  <property name=\"UserDataFolder\" value=\"/data/UserData\"/>\n  <property name=\"GameWorld\" value=\"Navezgane\"/>\n  <property name=\"WorldGenSeed\" value=\"msmseed\"/>\n  <property name=\"WorldGenSize\" value=\"6144\"/>\n  <property name=\"GameName\" value=\"My7D2DWorld\"/>\n  <property name=\"GameMode\" value=\"GameModeSurvival\"/>\n  <property name=\"Difficulty\" value=\"2\"/>\n  <property name=\"BlockDamagePlayer\" value=\"100\"/>\n  <property name=\"BlockDamageAI\" value=\"100\"/>\n  <property name=\"BlockDamageAIBM\" value=\"100\"/>\n  <property name=\"XPMultiplier\" value=\"100\"/>\n  <property name=\"DayNightLength\" value=\"60\"/>\n  <property name=\"DayLightLength\" value=\"18\"/>\n  <property name=\"DropOnDeath\" value=\"1\"/>\n  <property name=\"DropOnQuit\" value=\"0\"/>\n  <property name=\"BedrollDeadZoneSize\" value=\"15\"/>\n  <property name=\"BedrollExpiryTime\" value=\"45\"/>\n  <property name=\"EACEnabled\" value=\"true\"/>\n</ServerSettings>\n"
+      },
+      {
+        "file": "platform.cfg",
+        "content": "platform=Steam\ncrossplatform=\nserverplatforms=Steam,LAN,\n"
+      },
+      {
+        "file": "steam_appid.txt",
+        "content": "251570\n"
+      }
+    ],
+    "configPatches": [
+      {
+        "type": "regex",
+        "file": "serverconfig.xml",
+        "regex": "(<property\\s+name=\"ServerPort\"\\s+value=\")[^\"]*(\"/>)",
+        "value": "\\g<1>{GAME_PORT}\\g<2>"
+      },
+      {
+        "type": "regex",
+        "file": "platform.cfg",
+        "regex": "(?m)^crossplatform=.*$",
+        "value": "crossplatform="
+      },
+      {
+        "type": "regex",
+        "file": "platform.cfg",
+        "regex": "(?m)^serverplatforms=.*$",
+        "value": "serverplatforms=Steam,LAN,"
+      },
+      {
+        "type": "regex",
+        "file": "steam_appid.txt",
+        "regex": "^.*$",
+        "value": "251570"
+      }
+    ],
+    "stopGracePeriodSeconds": 60,
+    "startupCheckSeconds": 180.0
+  },
+  "ports": [
+    {
+      "name": "game",
+      "protocol": "udp"
+    },
+    {
+      "name": "game",
+      "protocol": "tcp"
+    },
+    {
+      "name": "custom",
+      "protocol": "udp"
+    },
+    {
+      "name": "custom",
+      "protocol": "udp"
+    },
+    {
+      "name": "custom",
+      "protocol": "udp"
+    }
+  ],
+  "source": {
+    "type": "steam",
+    "steam": {
+      "appId": "294420",
+      "platform": "linux",
+      "compatibility": "native",
+      "requiresLogin": false,
+      "validate": false
+    },
+    "updateStrategy": "checkBased"
+  },
+  "mods": {
+    "supportsMods": false,
+    "supportsSteamWorkshop": false,
+    "workshopAppId": null,
+    "modInjection": "none",
+    "modStartupArgumentFormat": null,
+    "modListFilePath": null,
+    "modListContent": "workshopIds",
+    "postInstall": []
+  },
+  "health": {
+    "process": {},
+    "port": {
+      "protocol": "udp",
+      "port": "{{GAME_PORT}}",
+      "interval": "60s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 120,
+      "timeout_seconds": 300,
+      "success_patterns": [
+        "GameServer.Init successful",
+        "GameServer.LogOn successful",
+        "INF StartGame done",
+        "INF Started thread ServerApp",
+        "INF Dedicated server only build",
+        "INF World static data loaded"
+      ],
+      "failure_patterns": [
+        "Address already in use",
+        "Could not bind",
+        "Port conflict"
+      ]
+    }
+  },
+  "recovery": {
+    "policies": [
+      {
+        "match": "process_not_running",
+        "action": "restart"
+      },
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
+      }
+    ],
+    "attempt_window_seconds": 600,
+    "max_attempts": 3,
+    "cooldown_seconds": 60
+  },
+  "backup": {
+    "includePaths": [
+      "serverconfig.xml",
+      "UserData"
+    ]
+  },
+  "logs": {
+    "sources": [
+      "stdout"
+    ],
+    "redact": [
+      "regex:ServerPassword",
+      "regex:TelnetPassword",
+      "regex:ControlPanelPassword"
+    ]
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict"
+    ]
+  }
+}

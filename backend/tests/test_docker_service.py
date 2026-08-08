@@ -458,7 +458,8 @@ class TestGamePluginStartPermissions:
             result = plugin.start(server)
 
         assert result["message"] == "Server gestartet"
-        mock_repair.assert_called_once_with(
+        assert mock_repair.call_count == 2
+        mock_repair.assert_called_with(
             str(tmp_path),
             container_path="/home/container",
             owner_uid_gid=(1001, 1002),
@@ -466,7 +467,7 @@ class TestGamePluginStartPermissions:
         kwargs = mock_run.call_args.kwargs
         assert kwargs["user"] == "1001:1002"
         assert kwargs["volumes"] == [VolumeBind(str(tmp_path), "/home/container", read_only=False)]
-        assert calls == ["repair", "prepare"]
+        assert calls == ["repair", "prepare", "repair"]
 
     def test_start_continues_with_warning_when_permission_repair_fails(self, tmp_path):
         """Bei Repair-Fehler wird der Start NICHT hart abgebrochen — best-effort.

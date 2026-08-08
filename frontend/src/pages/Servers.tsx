@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
 import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { Server, GameInfo, PostgresCredential, ServerCreateResult, Node } from '@/types'
@@ -71,8 +72,9 @@ export function Servers() {
     setNodesLoading(true)
     try {
       const list = await api<Node[]>('/nodes')
-      setNodes(list)
-      const local = list.find((n) => n.is_local) || list[0]
+      const safeList = Array.isArray(list) ? list : []
+      setNodes(safeList)
+      const local = safeList.find((n) => n.is_local) || safeList[0]
       if (local) {
         setForm((prev) => (prev.node_id ? prev : { ...prev, node_id: String(local.id) }))
       }
@@ -130,7 +132,8 @@ export function Servers() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (nodesLoading || interfacesLoading || interfaces.length === 0 || !form.public_bind_ip) {
+    const effectiveBindIp = form.public_bind_ip || defaultBindIp
+    if (nodesLoading || interfacesLoading || interfaces.length === 0 || !effectiveBindIp) {
       toast.error(t(interfacesLoading ? 'servers.bindIp.loading' : 'servers.bindIp.noneAvailable'))
       return
     }
@@ -140,8 +143,65 @@ export function Servers() {
     }
     setCreating(true)
     try {
+      const safeNodes = Array.isArray(nodes) ? nodes : []
+      const safeGames = Array.isArray(games) ? games : []
+      const targetNodeId = form.node_id ? parseInt(form.node_id, 10) : null
+      const targetNode = safeNodes.find((n) => targetNodeId ? n.id === targetNodeId : n.is_local) || safeNodes[0]
+      const reqRamMb = form.ram_limit_mb ? parseInt(form.ram_limit_mb, 10) : null
+
+      if (reqRamMb && reqRamMb > 0 && targetNode) {
+        let availRamMb: number | null = null
+        if (targetNode.ram_allocatable_mb != null) {
+          availRamMb = Math.max(0, targetNode.ram_allocatable_mb)
+        } else if (targetNode.ram_total != null) {
+          availRamMb = Math.max(0, targetNode.ram_total - (targetNode.ram_allocated_mb ?? 0))
+        }
+        if (availRamMb != null && reqRamMb > availRamMb) {
+          const confirmed = await confirm({
+            title: t('servers.overcommitTitle'),
+            message: t('servers.overcommitWarning', {
+              requested: formatRamMbLabel(reqRamMb),
+              available: formatRamMbLabel(availRamMb),
+              total: formatRamMbLabel(targetNode.ram_total || 0),
+            }),
+            confirmText: t('servers.overcommitConfirm'),
+          })
+          if (!confirmed) {
+            setCreating(false)
+            return
+          }
+        }
+      }
+
+      const reqDiskGb = form.disk_limit_gb ? parseInt(form.disk_limit_gb, 10) : null
+      if (reqDiskGb && reqDiskGb > 0 && targetNode) {
+        let availDiskGb: number | null = null
+        if (targetNode.disk_allocatable_gb != null) {
+          availDiskGb = Math.max(0, targetNode.disk_allocatable_gb)
+        } else if (targetNode.disk_total != null) {
+          const totalGb = Math.floor(targetNode.disk_total / 1024)
+          availDiskGb = Math.max(0, totalGb - (targetNode.disk_allocated_gb ?? 0))
+        }
+        if (availDiskGb != null && reqDiskGb > availDiskGb) {
+          const totalGb = Math.floor((targetNode.disk_total ?? 0) / 1024)
+          const confirmed = await confirm({
+            title: t('servers.overcommitTitle'),
+            message: t('servers.overcommitDiskWarning', {
+              requested: `${reqDiskGb} GB`,
+              available: `${availDiskGb} GB`,
+              total: `${totalGb} GB`,
+            }),
+            confirmText: t('servers.overcommitConfirm'),
+          })
+          if (!confirmed) {
+            setCreating(false)
+            return
+          }
+        }
+      }
+
       const portsPayload: Record<string, number | null> = {}
-      const selectedGame = games.find((g) => g.id === form.game_type)
+      const selectedGame = safeGames.find((g) => g.id === form.game_type)
       const portDefs = selectedGame?.ports ?? [
         { name: 'game', protocol: 'udp' },
         { name: 'query', protocol: 'udp' },
@@ -168,7 +228,7 @@ export function Servers() {
         query_port: form.query_port ? parseInt(form.query_port) : null,
         rcon_port: form.rcon_port ? parseInt(form.rcon_port) : null,
         ports: portsPayload,
-        public_bind_ip: form.public_bind_ip || null,
+        public_bind_ip: effectiveBindIp || null,
         postgres_enabled: form.postgres_enabled,
         postgres_database_count: form.postgres_enabled ? parseInt(form.postgres_database_count || '1') : null,
       }
@@ -186,7 +246,7 @@ export function Servers() {
         setOneTimeCredentials(created.postgres_credentials)
       }
       setShowCreate(false)
-      const defaultNode = nodes.find((n) => n.is_local) || nodes[0]
+      const defaultNode = safeNodes.find((n) => n.is_local) || safeNodes[0]
       setForm({
         name: '',
         game_type: 'conan_exiles_ue5',
@@ -233,7 +293,7 @@ export function Servers() {
     }
   }
 
-  const gameName = (id: string) => games.find((g) => g.id === id)?.name || id
+  const gameName = (id: string) => (Array.isArray(games) ? games : []).find((g) => g.id === id)?.name || id
 
   if (loading) {
     return (
@@ -450,7 +510,7 @@ export function Servers() {
               </div>
 
               {(() => {
-                const selectedGame = games.find((g) => g.id === form.game_type)
+                const selectedGame = (Array.isArray(games) ? games : []).find((g) => g.id === form.game_type)
                 const portDefs = selectedGame?.ports ?? [
                   { name: 'game', protocol: 'udp' },
                   { name: 'query', protocol: 'udp' },
@@ -565,7 +625,7 @@ export function Servers() {
                 <button
                   type="submit"
                   className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
-                  disabled={creating || nodesLoading || interfacesLoading || interfaces.length === 0 || !form.public_bind_ip}
+                  disabled={creating || nodesLoading || interfacesLoading || interfaces.length === 0 || !(form.public_bind_ip || defaultBindIp)}
                 >
                   {creating ? t('common.loading') : t('servers.create')}
                 </button>

@@ -383,7 +383,8 @@ def test_wine_blueprint_start_repairs_home_container_for_runtime_user(tmp_path) 
         result = plugin.start(server)
 
     assert result["message"] == "Server gestartet"
-    mock_repair.assert_called_once_with(
+    assert mock_repair.call_count == 2
+    mock_repair.assert_called_with(
         str(tmp_path),
         container_path="/home/container",
         owner_uid_gid=(1000, 1000),
@@ -839,6 +840,49 @@ def test_prepare_runtime_creates_blueprint_ensure_dirs(tmp_path) -> None:
 
     assert (tmp_path / "profiles").is_dir()
     assert (tmp_path / "logs" / "runtime").is_dir()
+
+
+def test_seven_days_to_die_blueprint_patches_platform_and_game_appid(tmp_path) -> None:
+    plugin = _native_plugin("seven_days_to_die")
+    server = _FakeServer(id=99, install_dir=str(tmp_path), game_port=26900)
+
+    # Simulate Steam default files
+    (tmp_path / "7DaysToDieServer.x86_64").touch()
+    (tmp_path / "platform.cfg").write_text(
+        "platform=Steam\ncrossplatform=EOS\nserverplatforms=Steam,XBL,PSN,LAN,\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "steam_appid.txt").write_text("251570\n", encoding="utf-8")
+
+    plugin.prepare_runtime(server)
+
+    platform_cfg = (tmp_path / "platform.cfg").read_text(encoding="utf-8")
+    assert "crossplatform=\n" in platform_cfg or "crossplatform=" in platform_cfg
+    assert "crossplatform=EOS" not in platform_cfg
+    assert "serverplatforms=Steam,LAN," in platform_cfg
+
+    steam_appid = (tmp_path / "steam_appid.txt").read_text(encoding="utf-8").strip()
+    # SteamCMD installs the dedicated-server tool via 294420, but the running
+    # server must advertise the game App-ID or Steam rejects it as bad_version.
+    assert steam_appid == "251570"
+
+
+def test_seven_days_to_die_blueprint_exposes_startup_logs_to_guardian() -> None:
+    plugin = _native_plugin("seven_days_to_die")
+    blueprint = plugin.get_blueprint()
+
+    assert blueprint.runtime.startupCheckSeconds <= 300
+    assert blueprint.health is not None
+    assert blueprint.health.startup is not None
+    assert (
+        blueprint.health.startup.timeout_seconds
+        > blueprint.health.startup.grace_period_seconds
+    )
+    assert "-logfile -" in blueprint.runtime.startup
+    assert blueprint.logs is not None
+    assert blueprint.logs.sources == ["stdout"]
+    assert "GameServer.LogOn successful" in blueprint.health.startup.success_patterns
+    assert "INF StartGame done" in blueprint.health.startup.success_patterns
 
 
 def test_dayz_blueprint_cleanup_removes_mod_symlinks_and_workshop_cache(tmp_path) -> None:

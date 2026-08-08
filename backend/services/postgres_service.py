@@ -754,6 +754,68 @@ def read_rows(
     )
 
 
+def update_row(
+    db: Session,
+    server_id: int,
+    database_id: int,
+    schema_name: str,
+    table_name: str,
+    key_conditions: dict[str, Any],
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    database = _database_row(db, server_id, database_id)
+    return _owner_query(
+        db,
+        server_id,
+        database,
+        "update_row",
+        schema_name=schema_name or "public",
+        table_name=table_name,
+        key_conditions=key_conditions,
+        updates=updates,
+    )
+
+
+def delete_rows(
+    db: Session,
+    server_id: int,
+    database_id: int,
+    schema_name: str,
+    table_name: str,
+    row_conditions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    database = _database_row(db, server_id, database_id)
+    return _owner_query(
+        db,
+        server_id,
+        database,
+        "delete_rows",
+        schema_name=schema_name or "public",
+        table_name=table_name,
+        row_conditions=row_conditions,
+    )
+
+
+def insert_row(
+    db: Session,
+    server_id: int,
+    database_id: int,
+    schema_name: str,
+    table_name: str,
+    row_data: dict[str, Any],
+) -> dict[str, Any]:
+    database = _database_row(db, server_id, database_id)
+    return _owner_query(
+        db,
+        server_id,
+        database,
+        "insert_row",
+        schema_name=schema_name or "public",
+        table_name=table_name,
+        row_data=row_data,
+    )
+
+
 def _split_sql_statements(text: str) -> list[str]:
     """Split a SQL script into individual statements (panel_database_service + tests)."""
     statements: list[str] = []

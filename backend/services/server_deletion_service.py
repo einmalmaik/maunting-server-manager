@@ -35,6 +35,10 @@ from services import audit_service, docker_service, permission_service, postgres
 from services.actor_context import ActorContext
 from services.firewall_service import close_ports
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
+from services.install_update_lock_service import (
+    force_release_install_update_lock,
+    release_install_update_lock,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -192,6 +196,10 @@ def delete_server_completely(db: Session, *, server_id: int, actor: ActorContext
         origin=actor.origin,
         correlation_id=actor.correlation_id,
     )
+    # Ein haengender Installations-Lock ueberlebt den geloeschten Server sonst im
+    # Prozessspeicher und blockiert eine spaetere Server-ID-Wiederverwendung.
+    release_install_update_lock(server.id)
+    force_release_install_update_lock(server.id)
     db.delete(server)
     db.commit()
 

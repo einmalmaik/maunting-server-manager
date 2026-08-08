@@ -51,7 +51,8 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
     const rootRef = useRef<HTMLDivElement | null>(null)
     const menuRef = useRef<HTMLDivElement | null>(null)
     const listId = useId()
-    const selected = options.find((option) => option.value === value)
+    const safeOptions = Array.isArray(options) ? options : []
+    const selected = safeOptions.find((option) => option.value === value)
 
     useEffect(() => {
       if (!open) return

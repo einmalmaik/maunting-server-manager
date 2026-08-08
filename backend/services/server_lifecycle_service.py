@@ -904,7 +904,7 @@ def _run_start(
     _ensure_operation_current(server.id, operation_epoch)
 
     ports_list = _ports(server)
-    open_ports(server.name, ports_list, node=server.node)
+    open_ports(server.name, ports_list, node=server.node, db=db, server_id=server.id, reason="Server gestartet")
     if server.node is None or server.node.is_local:
         iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
     _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
@@ -913,7 +913,7 @@ def _run_start(
     try:
         result = plugin.start(server)
     except Exception:
-        close_ports(ports_list, node=server.node, name=server.name)
+        close_ports(ports_list, node=server.node, name=server.name, db=db, server_id=server.id, reason="Start-Fehler Cleanup")
         if server.node is None or server.node.is_local:
             iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         raise
@@ -930,7 +930,7 @@ def _run_start(
             f"Lifecycle start for server {server.id} was cancelled"
         )
     if "error" in result:
-        close_ports(ports_list, node=server.node, name=server.name)
+        close_ports(ports_list, node=server.node, name=server.name, db=db, server_id=server.id, reason="Start-Fehler Cleanup")
         if server.node is None or server.node.is_local:
             iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         # Auth-Setup-Recovery: wenn der Container-Output auf einen interaktiven
@@ -959,7 +959,7 @@ def _run_stop(db: Session, server: Server, plugin) -> None:
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "stop", "Server gestoppt.")
     ports_list = _ports(server)
-    close_ports(ports_list, node=server.node, name=server.name)
+    close_ports(ports_list, node=server.node, name=server.name, db=db, server_id=server.id, reason="Server gestoppt")
     if server.node is None or server.node.is_local:
         iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
 
@@ -976,7 +976,7 @@ def _run_kill(db: Session, server: Server) -> None:
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "stop", "Server erzwungen beendet.")
     ports_list = _ports(server)
-    close_ports(ports_list, node=server.node, name=server.name)
+    close_ports(ports_list, node=server.node, name=server.name, db=db, server_id=server.id, reason="Erzwungen beendet (Kill)")
     if server.node is None or server.node.is_local:
         iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
 
@@ -1053,7 +1053,7 @@ def _run_restart(
     _ensure_operation_current(server.id, operation_epoch)
 
     ports_list = _ports(server)
-    open_ports(server.name, ports_list, node=server.node)
+    open_ports(server.name, ports_list, node=server.node, db=db, server_id=server.id, reason="Server neugestartet")
     if server.node is None or server.node.is_local:
         iptables_accept_server(server.name, server.public_bind_ip or "", ports_list)
     _append_console_log(server.id, "[MSM] Server-Start gestartet. Bei großen Wine/Proton-Images (z.B. SCUM) oder erstem Start kann der Image-Pull + Steam-Validierung 5-15 Minuten dauern. Die Konsole zeigt Pull-Fortschritt sobald der Container läuft.\n")
@@ -1062,7 +1062,7 @@ def _run_restart(
     try:
         start_result = plugin.start(server)
     except Exception:
-        close_ports(ports_list, node=server.node, name=server.name)
+        close_ports(ports_list, node=server.node, name=server.name, db=db, server_id=server.id, reason="Restart-Fehler Cleanup")
         if server.node is None or server.node.is_local:
             iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         raise
@@ -1079,7 +1079,7 @@ def _run_restart(
             f"Lifecycle restart for server {server.id} was cancelled"
         )
     if "error" in start_result:
-        close_ports(ports_list, node=server.node, name=server.name)
+        close_ports(ports_list, node=server.node, name=server.name, db=db, server_id=server.id, reason="Restart-Fehler Cleanup")
         if server.node is None or server.node.is_local:
             iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
         raise HTTPException(status_code=500, detail=start_result["error"])

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import { UptimeDisplay } from '@/components/server/UptimeDisplay'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { ProgressBar } from '@/Singra/UI/ProgressBar'
+import { ProgressBar, StackedProgressBar, type Segment } from '@/Singra/UI/ProgressBar'
 import { Badge } from '@/components/ui/Badge'
 
 interface ServiceStatus {
@@ -162,6 +162,29 @@ function NodeCapacityCard() {
                       : '—'
                   }
                 />
+                {item.disk_total_mb != null && (() => {
+                  const totalMb = item.disk_total_mb ?? 0
+                  const usedMb = item.disk_used_mb ?? 0
+                  const panelUsedMb = item.disk_panel_used_mb ?? 0
+                  const systemUsedMb = Math.max(0, usedMb - panelUsedMb)
+                  const freeMb = Math.max(0, totalMb - usedMb)
+
+                  const segments: Segment[] = [
+                    { value: panelUsedMb, colorClass: 'bg-primary' },
+                    { value: systemUsedMb, colorClass: 'bg-neutral-500' },
+                    { value: freeMb, colorClass: 'bg-emerald-500' },
+                  ]
+
+                  return (
+                    <StackedProgressBar
+                      segments={segments}
+                      label="Disk"
+                      hint={`${formatRamMb(usedMb)} / ${formatRamMb(totalMb)} · ${t('nodes.diskAllocatable', {
+                        value: `${item.disk_allocatable_gb ?? 0} GB`,
+                      })}`}
+                    />
+                  )
+                })()}
               </li>
             )
           })}

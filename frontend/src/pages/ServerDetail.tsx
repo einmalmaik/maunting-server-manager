@@ -1191,6 +1191,7 @@ export function ServerDetail() {
         <ResourceEditorDialog
           onClose={closeResourceEditor}
           serverId={serverId}
+          nodeId={server?.node_id}
           cpuLimit={configuredCpuLimit}
           ramLimit={configuredRamLimit}
           diskLimit={configuredDiskLimit}

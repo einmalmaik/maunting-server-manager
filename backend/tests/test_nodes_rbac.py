@@ -63,6 +63,9 @@ def test_servers_create_gets_reduced_node_picker_without_trust_metadata(
         "ram_allocated_mb": 0,
         "ram_allocatable_mb": None,
         "cpu_total": None,
+        "disk_total": None,
+        "disk_allocated_gb": 0,
+        "disk_allocatable_gb": None,
     }
 
 
