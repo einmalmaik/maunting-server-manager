@@ -54,18 +54,29 @@ def _arguments(**overrides) -> dict:
     return values
 
 
-def test_the_panel_chat_offers_the_creation_tool(db: Session) -> None:
-    """Ohne Serverbezug muss es Werkzeuge geben — vorher gab es dort gar keine."""
-    names = {
-        item["function"]["name"]
-        for item in ai_action_service.provider_tool_definitions(server_scoped=False)
-    }
+def test_the_single_tool_catalog_covers_panel_and_server_work(db: Session) -> None:
+    """Es gibt genau einen Werkzeugsatz — mit und ohne Serverbezug.
 
-    assert "propose_server_create" in names
-    assert "list_blueprints" in names
-    assert "read_node_capacity" in names
-    # Serverbezogene Werkzeuge haben im Panel-Chat nichts zu suchen.
-    assert "read_server_logs" not in names
+    Frueher war der Katalog geteilt: der Panel-Chat sah nur globale Werkzeuge,
+    der Server-Chat nur serverbezogene. Mit dem Einzelchat gibt es diese
+    Trennung nicht mehr; stattdessen traegt jedes serverbezogene Werkzeug seine
+    eigene `server_id`.
+    """
+    tools = ai_action_service.provider_tool_definitions()
+    names = {item["function"]["name"] for item in tools}
+
+    assert {"propose_server_create", "list_blueprints", "read_node_capacity"} <= names
+    assert {"list_my_servers", "read_server_logs", "propose_backup"} <= names
+
+    # Jedes serverbezogene Werkzeug verlangt die ID ausdruecklich. Ohne diese
+    # Zusicherung koennte ein Modell sie weglassen und `_resolve_server`
+    # muesste raten — genau das darf es nie.
+    for item in tools:
+        function = item["function"]
+        if function["name"] in ai_action_service.GLOBAL_READ_TOOLS | ai_action_service.GLOBAL_WRITE_TOOLS:
+            continue
+        assert "server_id" in function["parameters"]["properties"], function["name"]
+        assert "server_id" in function["parameters"]["required"], function["name"]
 
 
 def test_creation_without_servers_create_is_rejected(

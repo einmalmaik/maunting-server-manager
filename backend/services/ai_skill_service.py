@@ -18,7 +18,7 @@ from services.ai_action_service import (
     create_proposal,
     execute_read_tool,
 )
-from services.ai_chat_service import get_owned_conversation
+from services.ai_chat_service import get_or_create_primary_conversation
 from services.ai_context_service import redact_sensitive_text
 from services.ai_usage_service import complete_ai_usage, fail_ai_usage, reserve_ai_usage
 
@@ -194,17 +194,22 @@ def _release_reservation(db: Session, correlation_id: str) -> None:
 
 
 def run_skill(
-    db: Session, *, user: User, skill: AiSkill, conversation_id: str,
+    db: Session, *, user: User, skill: AiSkill, server_id: int,
     correlation_id: str,
 ) -> tuple[list[dict], list[dict]]:
+    """Fuehrt einen Skill gegen genau einen Server aus.
+
+    Der Server kommt seit dem Einzelchat als Parameter und nicht mehr aus der
+    Unterhaltung. Die Rechtepruefung bleibt dieselbe: jeder Schritt laeuft
+    ueber `execute_read_tool` bzw. `create_proposal` und damit ueber
+    `_resolve_server`.
+    """
     latest = db.query(AiSkill).filter(AiSkill.skill_key == skill.skill_key).order_by(
         AiSkill.version.desc()
     ).first()
     if latest is None or latest.id != skill.id or not latest.enabled:
         raise HTTPException(status_code=409, detail="Skill ist deaktiviert")
-    conversation = get_owned_conversation(db, conversation_id, user)
-    if conversation is None or conversation.server_id is None:
-        raise HTTPException(status_code=404, detail="Server-Unterhaltung nicht gefunden")
+    conversation = get_or_create_primary_conversation(db, user)
 
     # Ein Skill-Lauf ruft keinen Provider auf, verbraucht also keine Tokens —
     # er loest aber bis zu 20 Tool-Aufrufe gegen Docker, Dateisystem und Node
@@ -219,7 +224,7 @@ def run_skill(
         request_id=correlation_id,
         estimated_tokens=0,
         estimated_cost_microunits=0,
-        server_id=conversation.server_id,
+        server_id=server_id,
     )
     db.flush()
 
@@ -231,18 +236,22 @@ def run_skill(
     # regulaerer Berechtigungs- oder Validierungsfall ist.
     try:
         for index, step in enumerate(response_steps(skill), start=1):
+            # Der Skill selbst speichert keine Server-ID — er ist ein Ablauf,
+            # kein Serverbezug. Sie wird hier je Schritt eingesetzt und
+            # anschliessend von `_resolve_server` gegen die Rechte geprueft.
+            step_arguments = {**step["arguments"], "server_id": server_id}
             if step["tool_name"] in SKILL_READ_TOOLS:
                 read_results.append({
                     "tool_name": step["tool_name"],
                     "result": execute_read_tool(
-                        db, user=user, conversation=conversation,
-                        tool_name=step["tool_name"], arguments=step["arguments"],
+                        db, user=user,
+                        tool_name=step["tool_name"], arguments=step_arguments,
                     ),
                 })
             else:
                 proposals.append(create_proposal(
                     db, user=user, conversation=conversation, tool_name=step["tool_name"],
-                    arguments=step["arguments"], correlation_id=correlation_id,
+                    arguments=step_arguments, correlation_id=correlation_id,
                     # Ein Skill-Schritt braucht keine vom Modell formulierte
                     # Begruendung — seine Herkunft ist die praezisere Angabe.
                     rationale_fallback=(

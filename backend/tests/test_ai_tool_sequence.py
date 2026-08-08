@@ -26,7 +26,7 @@ from models import (
 )
 from services import ai_stream_service
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
-from services.openai_compatible_adapter import ProviderToolCall, StreamUsage
+from services.openai_compatible_adapter import ProviderToolCall, StreamChunk, StreamUsage
 from services.role_service import set_user_roles
 
 
@@ -73,8 +73,15 @@ def _grant(db: Session, user: User, *, server: Server, server_keys: tuple[str, .
 
 
 def _conversation(db: Session, user: User, server: Server) -> AiConversation:
+    """Die eine Unterhaltung des Benutzers — ohne Serverbezug.
+
+    Der Server steht seit dem Einzelchat in den Werkzeugargumenten. Er bleibt
+    hier trotzdem Parameter, damit die Tests lesbar bleiben und beim Anlegen
+    sichtbar ist, auf welchen Server sie sich beziehen.
+    """
+    del server
     conversation = AiConversation(
-        id=str(uuid4()), user_id=user.id, server_id=server.id, title="Sequence"
+        id=str(uuid4()), user_id=user.id, server_id=None, title="Sequence"
     )
     db.add(conversation)
     db.commit()
@@ -90,15 +97,18 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, rounds: list[list[ProviderTool
     seen: list[list[dict]] = []
     calls = {"round": 0}
 
-    async def fake(_client, *, provider, api_key, messages, usage: StreamUsage, tools=None):
-        del provider, api_key, tools
+    async def fake(
+        _client, *, provider, api_key, messages, usage: StreamUsage,
+        tools=None, reasoning=False,
+    ):
+        del provider, api_key, tools, reasoning
         seen.append([dict(item) for item in messages])
         index = calls["round"]
         calls["round"] += 1
         if index < len(rounds):
             usage.tool_calls = list(rounds[index])
         usage.total_tokens = 10
-        yield "ok"
+        yield StreamChunk("content", "ok")
 
     monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake)
     return seen
@@ -138,8 +148,8 @@ async def test_mixed_read_and_write_in_one_round_is_rejected(
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     _fake_stream(monkeypatch, [[
-        ProviderToolCall(id="a", name="read_server_status", arguments={}),
-        ProviderToolCall(id="b", name="propose_server_lifecycle", arguments={"operation": "restart"}),
+        ProviderToolCall(id="a", name="read_server_status", arguments={"server_id": server.id}),
+        ProviderToolCall(id="b", name="propose_server_lifecycle", arguments={"server_id": server.id, "operation": "restart"}),
     ]])
 
     events = await _collect(regular_user, conversation, provider)
@@ -177,7 +187,7 @@ async def test_more_than_max_tool_calls_per_round_is_rejected(
     conversation = _conversation(db, regular_user, server)
     excess = ai_stream_service.MAX_TOOL_CALLS + 1
     _fake_stream(monkeypatch, [[
-        ProviderToolCall(id=f"c{index}", name="read_server_status", arguments={})
+        ProviderToolCall(id=f"c{index}", name="read_server_status", arguments={"server_id": server.id})
         for index in range(excess)
     ]])
 
@@ -201,7 +211,7 @@ async def test_write_proposal_without_permission_is_rejected(
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     _fake_stream(monkeypatch, [[
-        ProviderToolCall(id="a", name="propose_server_lifecycle", arguments={"operation": "stop"}),
+        ProviderToolCall(id="a", name="propose_server_lifecycle", arguments={"server_id": server.id, "operation": "stop"}),
     ]])
 
     events = await _collect(regular_user, conversation, provider)
@@ -233,7 +243,7 @@ async def test_log_content_reaches_the_model_only_as_untrusted_data(
     )
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
     seen = _fake_stream(monkeypatch, [[
-        ProviderToolCall(id="a", name="read_server_logs", arguments={"lines": 50}),
+        ProviderToolCall(id="a", name="read_server_logs", arguments={"server_id": server.id, "lines": 50}),
     ]])
 
     await _collect(regular_user, conversation, provider)
@@ -267,9 +277,10 @@ async def test_several_read_rounds_may_precede_a_write_round(
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
     monkeypatch.setattr("services.docker_service.logs", lambda *_a, **_k: "start ok")
     seen = _fake_stream(monkeypatch, [
-        [ProviderToolCall(id="a", name="read_server_status", arguments={})],
-        [ProviderToolCall(id="b", name="read_server_logs", arguments={"lines": 20})],
+        [ProviderToolCall(id="a", name="read_server_status", arguments={"server_id": server.id})],
+        [ProviderToolCall(id="b", name="read_server_logs", arguments={"server_id": server.id, "lines": 20})],
         [ProviderToolCall(id="c", name="propose_backup", arguments={
+            "server_id": server.id,
             "reason": "Vor der Analyse absichern.",
             "expected_effect": "Ein wiederherstellbarer Stand liegt vor.",
         })],
@@ -296,7 +307,7 @@ async def test_endless_read_rounds_are_cut_off(
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     _fake_stream(monkeypatch, [
-        [ProviderToolCall(id=f"r{index}", name="read_server_status", arguments={})]
+        [ProviderToolCall(id=f"r{index}", name="read_server_status", arguments={"server_id": server.id})]
         for index in range(ai_stream_service.MAX_TOOL_ROUNDS + 2)
     ])
 
@@ -321,7 +332,7 @@ async def test_read_results_survive_for_a_follow_up_question(
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     _fake_stream(monkeypatch, [
-        [ProviderToolCall(id="a", name="read_server_status", arguments={})],
+        [ProviderToolCall(id="a", name="read_server_status", arguments={"server_id": server.id})],
     ])
     await _collect(regular_user, conversation, provider)
 
@@ -374,6 +385,7 @@ async def test_an_autonomous_action_runs_immediately_and_is_reported_as_such(
     conversation = _conversation(db, regular_user, server)
     _fake_stream(monkeypatch, [[
         ProviderToolCall(id="a", name="propose_backup", arguments={
+            "server_id": server.id,
             "reason": "Taegliche Absicherung.",
             "expected_effect": "Ein aktueller Wiederherstellungspunkt liegt vor.",
         }),

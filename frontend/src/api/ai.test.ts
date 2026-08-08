@@ -20,10 +20,11 @@ describe('streamAiMessage', () => {
     vi.spyOn(global, 'fetch').mockResolvedValue(new Response(body, { status: 200 }))
     const events: string[] = []
 
-    await streamAiMessage('00000000-0000-0000-0000-000000000001', {
+    await streamAiMessage({
       content: 'Hi',
       provider_id: 1,
       request_id: '00000000-0000-0000-0000-000000000002',
+      reasoning: false,
     }, (event) => events.push(event.event))
 
     expect(events).toEqual(['message', 'delta', 'done'])
@@ -35,8 +36,8 @@ describe('streamAiMessage', () => {
       { status: 200 },
     ))
 
-    await expect(streamAiMessage('conversation', {
-      content: 'Hi', provider_id: 1, request_id: 'request',
+    await expect(streamAiMessage({
+      content: 'Hi', provider_id: 1, request_id: 'request', reasoning: false,
     }, () => undefined)).rejects.toThrow('AI_STREAM_INVALID')
   })
 
@@ -47,11 +48,29 @@ describe('streamAiMessage', () => {
     ))
     const events: string[] = []
 
-    await streamAiMessage('conversation', {
-      content: 'Backup', provider_id: 1, request_id: 'request',
+    await streamAiMessage({
+      content: 'Backup', provider_id: 1, request_id: 'request', reasoning: false,
     }, (event) => events.push(event.event))
 
     expect(events).toEqual(['proposal'])
+  })
+
+  it('passes reasoning and tool frames through as their own events', async () => {
+    // Denkschritte und Werkzeugaufrufe sind keine Antwort. Wuerden sie als
+    // `delta` ankommen, stuenden sie mitten im Antworttext.
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(
+      'event: reasoning\ndata: {"content":"Ich pruefe die Ports"}\n\n'
+      + 'event: tool\ndata: {"tool_name":"read_server_ports","server_id":4}\n\n'
+      + 'event: delta\ndata: {"content":"Port 25565 ist offen."}\n\n',
+      { status: 200 },
+    ))
+    const events: string[] = []
+
+    await streamAiMessage({
+      content: 'Ports?', provider_id: 1, request_id: 'request', reasoning: true,
+    }, (event) => events.push(event.event))
+
+    expect(events).toEqual(['reasoning', 'tool', 'delta'])
   })
 })
 

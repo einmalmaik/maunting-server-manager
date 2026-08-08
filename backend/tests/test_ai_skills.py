@@ -111,7 +111,7 @@ def test_running_skill_creates_proposal_and_never_executes_it(
 ) -> None:
     _grant_ai_budget(db, owner_user)
     conversation = AiConversation(
-        id=str(uuid4()), user_id=owner_user.id, server_id=test_server.id,
+        id=str(uuid4()), user_id=owner_user.id, server_id=None,
         title="Skill Run",
     )
     db.add(conversation)
@@ -133,7 +133,7 @@ def test_running_skill_creates_proposal_and_never_executes_it(
 
     run = client.post(
         f"/api/ai/skills/{created['id']}/run",
-        json={"conversation_id": conversation.id},
+        json={"server_id": test_server.id},
         cookies=owner_cookies, headers=_csrf(owner_cookies),
     )
 
@@ -150,6 +150,7 @@ def test_old_skill_version_cannot_run_after_latest_is_disabled(
     db: Session,
     owner_user: User,
     owner_cookies: dict,
+    test_server,
 ) -> None:
     conversation = AiConversation(
         id=str(uuid4()), user_id=owner_user.id, server_id=None, title="Version guard"
@@ -177,7 +178,7 @@ def test_old_skill_version_cannot_run_after_latest_is_disabled(
 
     response = client.post(
         f"/api/ai/skills/{created.json()['id']}/run",
-        json={"conversation_id": conversation.id},
+        json={"server_id": test_server.id},
         cookies=owner_cookies,
         headers=_csrf(owner_cookies),
     )
@@ -237,14 +238,14 @@ def test_skill_run_without_step_permission_returns_403_not_500(
         user_id=regular_user.id, server_id=server.id, permission_key="server.view"
     ))
     conversation = AiConversation(
-        id=str(uuid4()), user_id=regular_user.id, server_id=server.id, title="Skill"
+        id=str(uuid4()), user_id=regular_user.id, server_id=None, title="Skill"
     )
     db.add(conversation)
     db.commit()
 
     response = client.post(
         f"/api/ai/skills/{created.json()['id']}/run",
-        json={"conversation_id": conversation.id},
+        json={"server_id": server.id},
         cookies=user_cookies,
         headers={"X-CSRF-Token": user_csrf_token},
     )

@@ -1,15 +1,25 @@
-"""Ownership- und Recovery-Regeln fuer persistente AI-Gespraeche."""
+"""Ownership- und Recovery-Regeln fuer die eine persistente AI-Unterhaltung.
+
+Jeder Benutzer hat genau einen Chat. Es gibt keinen Weg, einen zweiten
+anzulegen: der Assistent soll wie ein Gespraechspartner funktionieren, nicht wie
+eine Ablage, in der man erst den richtigen Ordner suchen muss. Der Serverbezug
+haengt am einzelnen Werkzeugaufruf (`ai_action_service._resolve_server`) und
+nicht mehr an der Unterhaltung.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import AiConversation, AiMessage, AiUsageEvent, Server, User
+from models import AiConversation, AiMessage, AiUsageEvent, User
 from services.ai_usage_service import complete_ai_usage
-from services.permission_service import has_server_permission
+
+
+DEFAULT_TITLE = "KI-Assistent"
 
 
 def canonical_uuid(value: str | UUID) -> str | None:
@@ -24,11 +34,11 @@ def get_owned_conversation(
     conversation_id: str,
     user: User,
 ) -> AiConversation | None:
-    """Fremde oder inzwischen unberechtigte Chats bleiben als 404 verborgen."""
+    """Fremde Chats bleiben als 404 verborgen."""
     canonical = canonical_uuid(conversation_id)
     if canonical is None:
         return None
-    conversation = (
+    return (
         db.query(AiConversation)
         .filter(
             AiConversation.id == canonical,
@@ -36,56 +46,60 @@ def get_owned_conversation(
         )
         .first()
     )
-    if conversation is None:
-        return None
-    if conversation.server_id is not None and not has_server_permission(
-        db, user, conversation.server_id, "server.view"
-    ):
-        return None
-    return conversation
 
 
-def create_conversation(
-    db: Session,
-    *,
-    user: User,
-    title: str,
-    server_id: int | None,
-) -> AiConversation:
-    if server_id is not None:
-        if db.get(Server, server_id) is None or not has_server_permission(
-            db, user, server_id, "server.view"
-        ):
-            raise LookupError("Server nicht gefunden")
-    conversation = AiConversation(
-        id=str(uuid4()),
-        user_id=user.id,
-        server_id=server_id,
-        title=title.strip(),
+def get_or_create_primary_conversation(db: Session, user: User) -> AiConversation:
+    """Liefert die eine Unterhaltung des Benutzers und legt sie beim ersten Mal an.
+
+    Der eindeutige Index auf ``user_id`` ist die eigentliche Zusicherung. Zwei
+    gleichzeitige erste Aufrufe (zwei Browsertabs) rennen sonst in dieselbe
+    Luecke zwischen Pruefung und Insert; der Verlierer liest die Zeile des
+    Gewinners.
+    """
+    existing = (
+        db.query(AiConversation).filter(AiConversation.user_id == user.id).first()
     )
-    db.add(conversation)
-    db.flush()
+    if existing is not None:
+        return existing
+
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=user.id, server_id=None, title=DEFAULT_TITLE
+    )
+    try:
+        with db.begin_nested():
+            db.add(conversation)
+            db.flush()
+    except IntegrityError:
+        conversation = (
+            db.query(AiConversation).filter(AiConversation.user_id == user.id).one()
+        )
     return conversation
 
 
-def list_conversations(
-    db: Session,
-    *,
-    user: User,
-    server_id: int | None,
-) -> list[AiConversation]:
-    if server_id is not None and (
-        db.get(Server, server_id) is None
-        or not has_server_permission(db, user, server_id, "server.view")
-    ):
-        return []
-    query = db.query(AiConversation).filter(AiConversation.user_id == user.id)
-    if server_id is not None:
-        query = query.filter(AiConversation.server_id == server_id)
-    else:
-        # Globale und serverbezogene Arbeitsraeume bleiben strikt getrennt.
-        query = query.filter(AiConversation.server_id.is_(None))
-    return query.order_by(AiConversation.updated_at.desc()).limit(100).all()
+def clear_history(db: Session, conversation: AiConversation) -> int:
+    """Loescht den Verlauf, behaelt aber die Unterhaltung selbst.
+
+    Die Unterhaltung bleibt, weil sie die Identitaet des Chats ist — an ihr
+    haengen laufende Vorschlaege und die Idempotenz der Anfragen. Geloescht wird,
+    was der Benutzer sieht: Nachrichten, Werkzeugergebnisse und die
+    Zusammenfassung. Bereits ausgefuehrte Aktionen bleiben im Audit; ein
+    Chatverlauf ist kein Loeschknopf fuer die Nachvollziehbarkeit.
+    """
+    from models import AiToolResult
+
+    removed = (
+        db.query(AiMessage)
+        .filter(AiMessage.conversation_id == conversation.id)
+        .delete(synchronize_session=False)
+    )
+    db.query(AiToolResult).filter(
+        AiToolResult.conversation_id == conversation.id
+    ).delete(synchronize_session=False)
+    conversation.summary = None
+    conversation.summarized_until = None
+    conversation.updated_at = datetime.now(timezone.utc)
+    db.flush()
+    return int(removed)
 
 
 def reconcile_interrupted_ai_streams(db: Session) -> int:

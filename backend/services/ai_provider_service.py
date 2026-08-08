@@ -57,6 +57,24 @@ def _assert_addresses_allowed(
             raise AiProviderConfigurationError("Private Provider-Ziele benoetigen eine explizite Freigabe")
 
 
+# Endpunktpfade, die ein Anbieter in seiner Dokumentation als *vollstaendige*
+# URL zeigt. OpenRouter dokumentiert z. B. "https://openrouter.ai/api/v1/chat/
+# completions". Wird das als Basis-URL eingetragen, haengt der Adapter sein
+# eigenes "/chat/completions" an und jede Anfrage endet in einem 404 — sichtbar
+# nur als "ai.errors.provider". Der Eintrag ist ein naheliegender
+# Bedienfehler, kein Angriff, und wird deshalb still normalisiert.
+_ENDPOINT_SUFFIXES = ("/chat/completions", "/completions", "/responses")
+
+
+def _strip_endpoint_suffix(path: str) -> str:
+    """Schneidet einen versehentlich mitkopierten Endpunktpfad ab."""
+    lowered = path.lower()
+    for suffix in _ENDPOINT_SUFFIXES:
+        if lowered.endswith(suffix):
+            return path[: -len(suffix)]
+    return path
+
+
 def validate_provider_base_url(base_url: str, *, allow_private_network: bool) -> str:
     """Validiert und normalisiert einen OpenAI-kompatiblen Basis-Endpunkt.
 
@@ -80,7 +98,7 @@ def validate_provider_base_url(base_url: str, *, allow_private_network: bool) ->
         allow_private_network=allow_private_network,
     )
 
-    normalized_path = parsed.path.rstrip("/")
+    normalized_path = _strip_endpoint_suffix(parsed.path.rstrip("/")).rstrip("/")
     return urlunparse((parsed.scheme, parsed.netloc, normalized_path, "", "", ""))
 
 

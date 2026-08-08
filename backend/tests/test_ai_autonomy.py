@@ -56,27 +56,30 @@ def _setup(
     for key in server_keys:
         db.add(ServerPermission(user_id=user.id, server_id=server.id, permission_key=key))
     conversation = AiConversation(
-        id=str(uuid4()), user_id=user.id, server_id=server.id, title="Autonomie"
+        id=str(uuid4()), user_id=user.id, server_id=None, title="Autonomie"
     )
     db.add(conversation)
     db.commit()
     return server, conversation
 
 
-def _backup_arguments() -> dict:
+def _backup_arguments(server_id: int) -> dict:
     return {
+        "server_id": server_id,
         "reason": "Vor der Aenderung absichern.",
         "expected_effect": "Ein wiederherstellbarer Stand liegt vor.",
     }
 
 
-def _propose(db: Session, user: User, conversation: AiConversation) -> AiActionProposal:
+def _propose(
+    db: Session, user: User, conversation: AiConversation, server: Server
+) -> AiActionProposal:
     proposal = ai_action_service.create_proposal(
         db,
         user=user,
         conversation=conversation,
         tool_name="propose_backup",
-        arguments=_backup_arguments(),
+        arguments=_backup_arguments(server.id),
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -87,14 +90,14 @@ def test_without_a_grant_every_proposal_stays_confirmable(
     db: Session, regular_user: User
 ) -> None:
     """Der Standardmodus bleibt der unterstuetzte — auch mit der Berechtigung."""
-    _, conversation = _setup(
+    server, conversation = _setup(
         db,
         regular_user,
         global_keys=("ai.chat.use", "ai.autonomous.use"),
         server_keys=("server.view", "server.backups.create"),
     )
 
-    proposal = _propose(db, regular_user, conversation)
+    proposal = _propose(db, regular_user, conversation, server)
 
     assert proposal.autonomous is False
     assert proposal.requires_confirmation is True
@@ -116,7 +119,7 @@ def test_without_the_permission_a_grant_alone_does_nothing(
     )
     db.commit()
 
-    proposal = _propose(db, regular_user, conversation)
+    proposal = _propose(db, regular_user, conversation, server)
 
     assert proposal.autonomous is False
     assert proposal.requires_confirmation is True
@@ -137,7 +140,7 @@ def test_with_permission_and_grant_the_proposal_is_autonomous(
     )
     db.commit()
 
-    proposal = _propose(db, regular_user, conversation)
+    proposal = _propose(db, regular_user, conversation, server)
 
     assert proposal.autonomous is True
     assert proposal.requires_confirmation is False
@@ -156,7 +159,7 @@ def test_a_disabled_grant_does_not_count(db: Session, regular_user: User) -> Non
     )
     db.commit()
 
-    proposal = _propose(db, regular_user, conversation)
+    proposal = _propose(db, regular_user, conversation, server)
 
     assert proposal.autonomous is False
 
@@ -181,7 +184,7 @@ def test_a_server_grant_wins_over_the_panel_wide_one(
     )
     db.commit()
 
-    proposal = _propose(db, regular_user, conversation)
+    proposal = _propose(db, regular_user, conversation, server)
 
     assert proposal.autonomous is False
 
@@ -202,8 +205,8 @@ def test_the_hourly_budget_falls_back_to_confirmation(
     )
     db.commit()
 
-    first = _propose(db, regular_user, conversation)
-    second = _propose(db, regular_user, conversation)
+    first = _propose(db, regular_user, conversation, server)
+    second = _propose(db, regular_user, conversation, server)
 
     assert first.autonomous is True
     assert second.autonomous is False, "Das Stundenbudget muss greifen"
@@ -275,7 +278,7 @@ def test_autonomous_execution_still_rechecks_the_permission(
         max_actions_per_hour=10, granted_by=regular_user.id,
     )
     db.commit()
-    proposal = _propose(db, regular_user, conversation)
+    proposal = _propose(db, regular_user, conversation, server)
 
     db.query(ServerPermission).filter(
         ServerPermission.user_id == regular_user.id,
@@ -295,13 +298,13 @@ def test_a_confirmable_proposal_can_not_be_executed_autonomously(
     db: Session, regular_user: User
 ) -> None:
     """Sonst waere der autonome Pfad eine Umgehung der Bestaetigungspflicht."""
-    _, conversation = _setup(
+    server, conversation = _setup(
         db,
         regular_user,
         global_keys=("ai.chat.use", "ai.autonomous.use"),
         server_keys=("server.view", "server.backups.create"),
     )
-    proposal = _propose(db, regular_user, conversation)
+    proposal = _propose(db, regular_user, conversation, server)
 
     with pytest.raises(ai_action_service.AiActionStateError) as excinfo:
         ai_action_service.execute_autonomously(

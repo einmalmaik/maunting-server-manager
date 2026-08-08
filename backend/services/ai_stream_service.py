@@ -42,6 +42,7 @@ from services.ai_usage_service import (
 from services.ai_limit_service import TOKEN_LIMIT_MAX
 from services.dis_client import DisSidecarError
 from services.openai_compatible_adapter import (
+    MAX_REASONING_CHARS,
     AiProviderRequestError,
     StreamUsage,
     stream_chat_completion,
@@ -71,6 +72,7 @@ def _finalize_stream(
     failed: bool,
     had_output: bool,
     token_price_cents_per_million: int | None = None,
+    reasoning: str = "",
 ) -> None:
     with SessionLocal() as db:
         message = db.get(AiMessage, message_id)
@@ -81,6 +83,13 @@ def _finalize_stream(
             return
         if message is not None:
             message.content = content
+            # Denkschritte werden mitgespeichert, damit der aufklappbare Block
+            # nach einem Neuladen der Seite noch da ist. Redigiert wie jeder
+            # andere Modelltext auch: ein Modell kann in seinen Ueberlegungen
+            # genauso einen Key wiederholen wie in der Antwort.
+            message.reasoning = (
+                redact_sensitive_text(reasoning)[:MAX_REASONING_CHARS] or None
+            )
             message.status = "failed" if failed else "complete"
         else:
             # Die Nachricht wurde waehrend des Streams entfernt (z. B. Chat
@@ -119,7 +128,7 @@ def _finalize_stream(
 
 def _tool_followup_messages(
     *, user_id: int, conversation_id: str, tool_calls
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
     if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in READ_TOOLS for call in tool_calls):
         raise AiActionValidationError("Ungueltige Read-Tool-Sequenz")
     with SessionLocal() as db:
@@ -145,11 +154,14 @@ def _tool_followup_messages(
             ],
         }
         results: list[dict] = [assistant_call]
+        # Was der Benutzer im Chat sehen soll: welches Werkzeug lief und womit.
+        # Bewusst ohne das Ergebnis — ein Logausschnitt gehoert nicht ungefragt
+        # in den sichtbaren Verlauf, und die Antwort fasst ihn ohnehin zusammen.
+        display: list[dict] = []
         for call in tool_calls:
             value = execute_read_tool(
                 db,
                 user=user,
-                conversation=conversation,
                 tool_name=call.name,
                 arguments=call.arguments,
             )
@@ -177,8 +189,14 @@ def _tool_followup_messages(
                     separators=(",", ":"),
                 ),
             })
+            display.append({
+                "tool_name": call.name,
+                "server_id": call.arguments.get("server_id")
+                if isinstance(call.arguments.get("server_id"), int)
+                else None,
+            })
         db.commit()
-        return results
+        return results, display
 
 
 def _persist_write_proposals(
@@ -246,6 +264,7 @@ async def stream_conversation_reply(
     provider_id: int,
     request_id: UUID,
     content: str,
+    reasoning: bool = False,
 ) -> AsyncIterator[str]:
     """Persistiert zuerst, streamt ohne offene DB-Session und finalisiert kurz."""
     safe_content = redact_sensitive_text(content).strip()
@@ -258,7 +277,6 @@ async def stream_conversation_reply(
     provider: AiProvider | None = None
     provider_messages: list[dict[str, str]] = []
     api_key: str | None = None
-    server_id: int | None = None
     token_price_cents_per_million: int | None = None
     preparation_error: tuple[str, str] | None = None
     try:
@@ -272,7 +290,6 @@ async def stream_conversation_reply(
                 if conversation is None or provider is None or not provider.enabled:
                     preparation_error = ("AI_RESOURCE_NOT_FOUND", "ai.errors.notFound")
                 else:
-                    server_id = conversation.server_id
                     api_key = resolve_api_key(db, provider, user.id)
                     if provider.requires_api_key and not api_key:
                         preparation_error = ("AI_PROVIDER_KEY_MISSING", "ai.errors.keyMissing")
@@ -299,7 +316,10 @@ async def stream_conversation_reply(
                             estimated_cost_microunits=estimate_cost_microunits(
                                 provider, estimated_tokens
                             ),
-                            server_id=conversation.server_id,
+                            # Die Unterhaltung hat keinen Serverbezug mehr. Der
+                            # Verbrauch je Server entsteht ab jetzt an den
+                            # Aktionsvorschlaegen, die ihre `server_id` tragen.
+                            server_id=None,
                             provider_id=provider.id,
                             model=provider.default_model,
                         )
@@ -341,29 +361,32 @@ async def stream_conversation_reply(
         return
     yield sse_event("message", {"message_id": assistant_id, "request_id": str(request_id)})
     chunks: list[str] = []
+    thoughts: list[str] = []
     usage = StreamUsage()
     # Merkt sich, ob die Abrechnung bereits erfolgt ist. Der Abbruchpfad darf
     # eine schon erfolgreich abgeschlossene Antwort nicht nachtraeglich als
     # fehlgeschlagen ueberschreiben.
     finalized = False
     try:
-        # Auch der Panel-Chat bekommt Werkzeuge — dort die globalen. Vorher war
-        # `tools` ohne Serverbezug schlicht `None`, weshalb die in Zielpunkt 3.1
-        # geforderte Servererstellung nirgends andocken konnte.
-        tools = provider_tool_definitions(server_scoped=server_id is not None)
+        tools = provider_tool_definitions()
         current_usage = usage
         rounds = 0
         while True:
-            async for delta in stream_chat_completion(
+            async for chunk in stream_chat_completion(
                 client,
                 provider=provider,
                 api_key=api_key,
                 messages=provider_messages,
                 usage=current_usage,
                 tools=tools,
+                reasoning=reasoning,
             ):
-                chunks.append(delta)
-                yield sse_event("delta", {"content": delta})
+                if chunk.kind == "reasoning":
+                    thoughts.append(chunk.text)
+                    yield sse_event("reasoning", {"content": chunk.text})
+                    continue
+                chunks.append(chunk.text)
+                yield sse_event("delta", {"content": chunk.text})
             if current_usage is not usage:
                 usage.total_tokens = (
                     usage.total_tokens + current_usage.total_tokens
@@ -397,11 +420,16 @@ async def stream_conversation_reply(
             rounds += 1
             if rounds > MAX_TOOL_ROUNDS:
                 raise AiProviderRequestError("AI_PROVIDER_TOOL_ROUNDS_EXCEEDED")
-            provider_messages.extend(_tool_followup_messages(
+            followup, used_tools = _tool_followup_messages(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 tool_calls=current_usage.tool_calls,
-            ))
+            )
+            provider_messages.extend(followup)
+            # Sichtbar machen, was die KI gerade getan hat. Ohne das wirkt eine
+            # Antwort, die aus Logs und Ports entstanden ist, wie geraten.
+            for used in used_tools:
+                yield sse_event("tool", used)
             current_usage = StreamUsage()
         complete_content = "".join(chunks)
         estimated_actual = max(
@@ -418,6 +446,7 @@ async def stream_conversation_reply(
             failed=False,
             had_output=bool(chunks),
             token_price_cents_per_million=token_price_cents_per_million,
+            reasoning="".join(thoughts),
         )
         finalized = True
         yield sse_event("done", {"message_id": assistant_id})
@@ -437,6 +466,7 @@ async def stream_conversation_reply(
                 failed=True,
                 had_output=bool(chunks),
                 token_price_cents_per_million=token_price_cents_per_million,
+                reasoning="".join(thoughts),
             )
         raise
     except AiProviderRequestError as exc:
@@ -449,6 +479,7 @@ async def stream_conversation_reply(
             failed=True,
             had_output=bool(chunks),
             token_price_cents_per_million=token_price_cents_per_million,
+            reasoning="".join(thoughts),
         )
         yield sse_event("error", {"code": exc.code, "message_key": "ai.errors.provider"})
     except AiActionValidationError:
@@ -461,6 +492,7 @@ async def stream_conversation_reply(
             failed=True,
             had_output=bool(chunks),
             token_price_cents_per_million=token_price_cents_per_million,
+            reasoning="".join(thoughts),
         )
         yield sse_event("error", {"code": "AI_TOOL_REJECTED", "message_key": "ai.errors.toolRejected"})
     except Exception as exc:
@@ -474,5 +506,6 @@ async def stream_conversation_reply(
             failed=True,
             had_output=bool(chunks),
             token_price_cents_per_million=token_price_cents_per_million,
+            reasoning="".join(thoughts),
         )
         yield sse_event("error", {"code": "AI_STREAM_FAILED", "message_key": "ai.errors.unavailable"})

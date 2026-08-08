@@ -55,8 +55,14 @@ def _setup(db: Session, user: User, *, server_keys: tuple[str, ...]) -> tuple[Se
     return server, conversation
 
 
-def _install_arguments(**overrides) -> dict:
+def _install_arguments(server_id: int = 0, **overrides) -> dict:
+    """Argumente eines Mod-Vorschlags samt `server_id`.
+
+    Der Serverbezug haengt seit dem Einzelchat am Werkzeugaufruf und nicht mehr
+    an der Unterhaltung.
+    """
     values = {
+        "server_id": server_id,
         "workshop_id": "1559212036",
         "action": "install",
         "reason": "Der Server startet ohne diese Abhaengigkeit nicht.",
@@ -69,15 +75,14 @@ def _install_arguments(**overrides) -> dict:
 def test_reading_mods_requires_the_mod_read_permission(
     db: Session, regular_user: User
 ) -> None:
-    _, conversation = _setup(db, regular_user, server_keys=("server.view",))
+    server, conversation = _setup(db, regular_user, server_keys=("server.view",))
 
     with pytest.raises(ai_action_service.AiActionValidationError):
         ai_action_service.execute_read_tool(
             db,
             user=regular_user,
-            conversation=conversation,
             tool_name="read_server_mods",
-            arguments={},
+            arguments={"server_id": server.id},
         )
 
 
@@ -102,9 +107,8 @@ def test_reading_mods_returns_status_without_secrets(
     result = ai_action_service.execute_read_tool(
         db,
         user=regular_user,
-        conversation=conversation,
         tool_name="read_server_mods",
-        arguments={},
+        arguments={"server_id": server.id},
     )
 
     assert result["mods"][0]["workshop_id"] == "1559212036"
@@ -115,7 +119,7 @@ def test_reading_mods_returns_status_without_secrets(
 def test_mod_install_without_write_permission_is_rejected(
     db: Session, regular_user: User
 ) -> None:
-    _, conversation = _setup(
+    server, conversation = _setup(
         db, regular_user, server_keys=("server.view", "server.mods.read")
     )
 
@@ -125,7 +129,7 @@ def test_mod_install_without_write_permission_is_rejected(
             user=regular_user,
             conversation=conversation,
             tool_name="propose_mod_install",
-            arguments=_install_arguments(),
+            arguments=_install_arguments(server.id),
             correlation_id=str(uuid4()),
         )
     assert db.query(AiActionProposal).count() == 0
@@ -135,7 +139,7 @@ def test_a_non_numeric_workshop_id_is_rejected(
     db: Session, regular_user: User
 ) -> None:
     """Die Kennung geht in einen Downloadpfad — sie muss rein numerisch sein."""
-    _, conversation = _setup(
+    server, conversation = _setup(
         db, regular_user, server_keys=("server.view", "server.mods.read", "server.mods.write")
     )
 
@@ -146,7 +150,7 @@ def test_a_non_numeric_workshop_id_is_rejected(
                 user=regular_user,
                 conversation=conversation,
                 tool_name="propose_mod_install",
-                arguments=_install_arguments(workshop_id=bad),
+                arguments=_install_arguments(server.id, workshop_id=bad),
                 correlation_id=str(uuid4()),
             )
 
@@ -156,7 +160,7 @@ def test_mod_install_proposal_needs_confirmation_and_shows_a_preview(
 ) -> None:
     import json
 
-    _, conversation = _setup(
+    server, conversation = _setup(
         db, regular_user, server_keys=("server.view", "server.mods.read", "server.mods.write")
     )
 
@@ -165,7 +169,7 @@ def test_mod_install_proposal_needs_confirmation_and_shows_a_preview(
         user=regular_user,
         conversation=conversation,
         tool_name="propose_mod_install",
-        arguments=_install_arguments(),
+        arguments=_install_arguments(server.id),
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -204,7 +208,7 @@ def test_execution_uses_the_existing_install_path(
         user=regular_user,
         conversation=conversation,
         tool_name="propose_mod_install",
-        arguments=_install_arguments(),
+        arguments=_install_arguments(server.id),
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -248,7 +252,7 @@ def test_a_running_installation_blocks_a_second_one(
         user=regular_user,
         conversation=conversation,
         tool_name="propose_mod_install",
-        arguments=_install_arguments(action="update"),
+        arguments=_install_arguments(server.id, action="update"),
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -268,7 +272,7 @@ def test_workshop_search_reports_a_missing_api_key_honestly(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Eine leere Trefferliste waere hier eine falsche Aussage ueber den Workshop."""
-    _, conversation = _setup(
+    server, conversation = _setup(
         db, regular_user, server_keys=("server.view", "server.mods.read")
     )
     monkeypatch.setattr("services.steam_api_key_service.resolve_key", lambda: None)
@@ -276,9 +280,8 @@ def test_workshop_search_reports_a_missing_api_key_honestly(
     result = ai_action_service.execute_read_tool(
         db,
         user=regular_user,
-        conversation=conversation,
         tool_name="search_workshop_mods",
-        arguments={"query": "cf"},
+        arguments={"server_id": server.id, "query": "cf"},
     )
 
     assert result["available"] is False

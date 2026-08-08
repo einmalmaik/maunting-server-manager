@@ -29,6 +29,7 @@ from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
 from services.openai_compatible_adapter import (
     AiProviderRequestError,
     ProviderToolCall,
+    StreamChunk,
     StreamUsage,
     stream_chat_completion,
 )
@@ -232,7 +233,7 @@ async def test_adapter_normalizes_sse_and_never_exposes_provider_frames(
             )
         ]
 
-    assert chunks == ["Hallo ", "Welt"]
+    assert [chunk.text for chunk in chunks] == ["Hallo ", "Welt"]
     assert usage.total_tokens == 12
     assert captured["authorization"] == "Bearer test-key"
     assert captured["body"]["stream"] is True
@@ -336,24 +337,20 @@ def test_chat_stream_persists_usage_and_replays_without_second_provider_call(
     provider = _provider(db, monkeypatch)
     calls = 0
 
-    async def fake_stream(_client, *, provider, api_key, messages, usage, tools=None):
+    async def fake_stream(
+        _client, *, provider, api_key, messages, usage, tools=None, reasoning=False,
+    ):
         nonlocal calls
         calls += 1
         assert api_key == "operator-secret-value"
         assert messages[-1]["content"] == "Wie geht es?"
         usage.total_tokens = 42
-        yield "Alles "
-        yield "gut."
+        yield StreamChunk("content", "Alles ")
+        yield StreamChunk("content", "gut.")
 
     monkeypatch.setattr("services.ai_stream_service.stream_chat_completion", fake_stream)
-    created = client.post(
-        "/api/ai/conversations",
-        json={"title": "Runtime Chat"},
-        cookies=user_cookies,
-        headers={"X-CSRF-Token": user_csrf_token},
-    )
-    assert created.status_code == 201
-    conversation_id = created.json()["id"]
+    created = client.get("/api/ai/conversation", cookies=user_cookies)
+    assert created.status_code == 200
     request_id = str(uuid4())
     payload = {
         "content": "Wie geht es?",
@@ -362,13 +359,13 @@ def test_chat_stream_persists_usage_and_replays_without_second_provider_call(
     }
 
     first = client.post(
-        f"/api/ai/conversations/{conversation_id}/messages/stream",
+        "/api/ai/conversation/messages/stream",
         json=payload,
         cookies=user_cookies,
         headers={"X-CSRF-Token": user_csrf_token},
     )
     replay = client.post(
-        f"/api/ai/conversations/{conversation_id}/messages/stream",
+        "/api/ai/conversation/messages/stream",
         json=payload,
         cookies=user_cookies,
         headers={"X-CSRF-Token": user_csrf_token},
@@ -403,7 +400,7 @@ def test_server_stream_persists_write_tool_as_proposal_without_execution(
     _enable_chat(db, owner_user)
     provider = _provider(db, monkeypatch)
 
-    async def fake_stream(_client, *, usage, tools, **_kwargs):
+    async def fake_stream(_client, *, usage, tools=None, **_kwargs):
         assert tools and {item["function"]["name"] for item in tools} >= {
             "read_server_status", "propose_backup"
         }
@@ -414,23 +411,19 @@ def test_server_stream_persists_write_tool_as_proposal_without_execution(
             # Zielpunkt 3.6: jedes Schreib-Tool muss begruenden, warum es
             # vorschlaegt und was danach anders sein soll.
             arguments={
+                "server_id": test_server.id,
                 "reason": "Vor der Konfigurationsaenderung absichern",
                 "expected_effect": "Ein wiederherstellbarer Stand liegt vor",
             },
         )]
         if False:
-            yield ""
+            yield StreamChunk("content", "")
 
     monkeypatch.setattr("services.ai_stream_service.stream_chat_completion", fake_stream)
-    conversation = client.post(
-        "/api/ai/conversations",
-        json={"title": "Server Action", "server_id": test_server.id},
-        cookies=owner_cookies,
-        headers=_csrf(owner_cookies),
-    ).json()
+    conversation = client.get("/api/ai/conversation", cookies=owner_cookies).json()
 
     response = client.post(
-        f"/api/ai/conversations/{conversation['id']}/messages/stream",
+        "/api/ai/conversation/messages/stream",
         json={
             "content": "Erstelle ein Backup",
             "provider_id": provider.id,
@@ -449,15 +442,26 @@ def test_server_stream_persists_write_tool_as_proposal_without_execution(
     assert db.query(AuditLog).filter(AuditLog.action == "ai.action.executed").count() == 0
 
 
-def test_server_chat_is_hidden_after_view_permission_is_revoked(
+def test_a_tool_call_cannot_reach_a_server_the_user_may_not_see(
     client: TestClient,
     db: Session,
     regular_user: User,
     user_cookies: dict,
     user_csrf_token: str,
     test_server,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Die Rechtegrenze haengt am Werkzeugaufruf, nicht mehr am Gespraech.
+
+    Frueher schuetzte die serverbezogene Unterhaltung: wurde `server.view`
+    entzogen, verschwand sie. Mit dem Einzelchat gibt es diese Huelle nicht
+    mehr — das Modell nennt die `server_id` selbst. Genau deshalb muss
+    `_resolve_server` sie jeden einzelnen Aufruf lang pruefen. Ein Modell, das
+    eine fremde ID errraet oder aus einem manipulierten Logtext uebernimmt,
+    darf damit nichts erreichen.
+    """
     _enable_chat(db, regular_user)
+    provider = _provider(db, monkeypatch)
     permission = ServerPermission(
         user_id=regular_user.id,
         server_id=test_server.id,
@@ -465,21 +469,36 @@ def test_server_chat_is_hidden_after_view_permission_is_revoked(
     )
     db.add(permission)
     db.commit()
-    created = client.post(
-        "/api/ai/conversations",
-        json={"title": "Server Chat", "server_id": test_server.id},
-        cookies=user_cookies,
-        headers={"X-CSRF-Token": user_csrf_token},
-    )
-    assert created.status_code == 201
+
+    async def fake_stream(_client, *, usage, **_kwargs):
+        usage.total_tokens = 5
+        usage.tool_calls = [ProviderToolCall(
+            id="call-status",
+            name="read_server_status",
+            arguments={"server_id": test_server.id},
+        )]
+        if False:
+            yield StreamChunk("content", "")
+
+    monkeypatch.setattr("services.ai_stream_service.stream_chat_completion", fake_stream)
 
     db.delete(permission)
     db.commit()
-    hidden = client.get(
-        f"/api/ai/conversations/{created.json()['id']}",
+    response = client.post(
+        "/api/ai/conversation/messages/stream",
+        json={
+            "content": "Wie ist der Status?",
+            "provider_id": provider.id,
+            "request_id": str(uuid4()),
+        },
         cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
     )
-    assert hidden.status_code == 404
+
+    assert response.status_code == 200
+    assert "AI_TOOL_REJECTED" in response.text
+    # Kein Serverdatum darf durchgesickert sein.
+    assert test_server.name not in response.text
 
 
 def test_provider_catalog_hides_admin_metadata_from_chat_user(
@@ -501,39 +520,64 @@ def test_provider_catalog_hides_admin_metadata_from_chat_user(
     assert "operator-secret-value" not in serialized
 
 
-def test_global_and_server_conversation_lists_are_separate(
+def test_every_user_has_exactly_one_conversation_and_cannot_create_a_second(
     client: TestClient,
     db: Session,
     regular_user: User,
     user_cookies: dict,
     user_csrf_token: str,
-    test_server,
 ) -> None:
+    """Der Assistent ist ein Gespraech, keine Ablage.
+
+    Frueher gab es getrennte Listen fuer globale und serverbezogene Chats. Das
+    ist ersatzlos entfallen: wiederholte Aufrufe liefern dieselbe Unterhaltung,
+    und die Routen zum Anlegen und Auflisten existieren nicht mehr.
+    """
     _enable_chat(db, regular_user)
-    db.add(ServerPermission(
-        user_id=regular_user.id,
-        server_id=test_server.id,
-        permission_key="server.view",
+
+    first = client.get("/api/ai/conversation", cookies=user_cookies)
+    second = client.get("/api/ai/conversation", cookies=user_cookies)
+
+    assert first.status_code == 200
+    assert first.json()["id"] == second.json()["id"]
+    assert db.query(AiConversation).filter(
+        AiConversation.user_id == regular_user.id
+    ).count() == 1
+    # Die alten Routen sind weg — nicht nur im Frontend ausgeblendet.
+    assert client.post(
+        "/api/ai/conversations",
+        json={"title": "Zweiter Chat"},
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
+    ).status_code == 404
+
+
+def test_clearing_the_history_keeps_the_conversation_and_the_audit(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    user_csrf_token: str,
+) -> None:
+    """Geloescht wird der Verlauf, nicht die Nachvollziehbarkeit."""
+    _enable_chat(db, regular_user)
+    conversation_id = client.get("/api/ai/conversation", cookies=user_cookies).json()["id"]
+    db.add(AiMessage(
+        id=str(uuid4()), conversation_id=conversation_id, role="user",
+        content="Alte Nachricht", status="complete",
     ))
     db.commit()
-    for payload in (
-        {"title": "Global"},
-        {"title": "Server", "server_id": test_server.id},
-    ):
-        assert client.post(
-            "/api/ai/conversations",
-            json=payload,
-            cookies=user_cookies,
-            headers={"X-CSRF-Token": user_csrf_token},
-        ).status_code == 201
 
-    global_rows = client.get("/api/ai/conversations", cookies=user_cookies).json()
-    server_rows = client.get(
-        f"/api/ai/conversations?server_id={test_server.id}", cookies=user_cookies
-    ).json()
+    cleared = client.delete(
+        "/api/ai/conversation/messages",
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
+    )
 
-    assert [row["title"] for row in global_rows] == ["Global"]
-    assert [row["title"] for row in server_rows] == ["Server"]
+    assert cleared.status_code == 204
+    detail = client.get("/api/ai/conversation", cookies=user_cookies).json()
+    assert detail["id"] == conversation_id
+    assert detail["messages"] == []
 
 
 def test_quota_rejection_never_calls_provider_or_persists_message(
@@ -557,17 +601,12 @@ def test_quota_rejection_never_calls_provider_or_persists_message(
     async def forbidden_provider(*_args, **_kwargs):
         nonlocal calls
         calls += 1
-        yield "unexpected"
+        yield StreamChunk("content", "unexpected")
 
     monkeypatch.setattr("services.ai_stream_service.stream_chat_completion", forbidden_provider)
-    created = client.post(
-        "/api/ai/conversations",
-        json={"title": "Quota"},
-        cookies=user_cookies,
-        headers={"X-CSRF-Token": user_csrf_token},
-    ).json()
+    created = client.get("/api/ai/conversation", cookies=user_cookies).json()
     response = client.post(
-        f"/api/ai/conversations/{created['id']}/messages/stream",
+        "/api/ai/conversation/messages/stream",
         json={"content": "Hello", "provider_id": provider.id, "request_id": str(uuid4())},
         cookies=user_cookies,
         headers={"X-CSRF-Token": user_csrf_token},
@@ -592,18 +631,13 @@ def test_partial_provider_failure_is_persisted_and_accounted_conservatively(
     provider = _provider(db, monkeypatch)
 
     async def partial_stream(*_args, **_kwargs):
-        yield "partial"
+        yield StreamChunk("content", "partial")
         raise AiProviderRequestError("AI_PROVIDER_UNAVAILABLE")
 
     monkeypatch.setattr("services.ai_stream_service.stream_chat_completion", partial_stream)
-    conversation = client.post(
-        "/api/ai/conversations",
-        json={"title": "Partial"},
-        cookies=user_cookies,
-        headers={"X-CSRF-Token": user_csrf_token},
-    ).json()
+    conversation = client.get("/api/ai/conversation", cookies=user_cookies).json()
     response = client.post(
-        f"/api/ai/conversations/{conversation['id']}/messages/stream",
+        "/api/ai/conversation/messages/stream",
         json={"content": "Hello", "provider_id": provider.id, "request_id": str(uuid4())},
         cookies=user_cookies,
         headers={"X-CSRF-Token": user_csrf_token},
@@ -733,7 +767,7 @@ async def test_adapter_connects_to_the_validated_address(
             )
         ]
 
-    assert chunks == ["ok"]
+    assert [chunk.text for chunk in chunks] == ["ok"]
     assert seen["host_in_url"] == "93.184.216.34"
     assert seen["host_header"] == "api.example.invalid"
     assert seen["sni"] == "api.example.invalid"
@@ -899,17 +933,12 @@ def test_cost_limit_actually_blocks_once_a_token_price_is_configured(
     async def forbidden_provider(*_args, **_kwargs):
         nonlocal calls
         calls += 1
-        yield "unexpected"
+        yield StreamChunk("content", "unexpected")
 
     monkeypatch.setattr("services.ai_stream_service.stream_chat_completion", forbidden_provider)
-    created = client.post(
-        "/api/ai/conversations",
-        json={"title": "Kosten"},
-        cookies=user_cookies,
-        headers={"X-CSRF-Token": user_csrf_token},
-    ).json()
+    created = client.get("/api/ai/conversation", cookies=user_cookies).json()
     response = client.post(
-        f"/api/ai/conversations/{created['id']}/messages/stream",
+        "/api/ai/conversation/messages/stream",
         json={"content": "Hallo", "provider_id": provider.id, "request_id": str(uuid4())},
         cookies=user_cookies,
         headers={"X-CSRF-Token": user_csrf_token},

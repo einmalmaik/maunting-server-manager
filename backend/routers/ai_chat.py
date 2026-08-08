@@ -1,8 +1,13 @@
-"""Persistente globale und serverbezogene AI-Gespraeche mit POST-SSE."""
+"""Die eine persistente AI-Unterhaltung eines Benutzers mit POST-SSE.
+
+Es gibt bewusst keine Routen zum Auflisten, Anlegen oder Loeschen von
+Unterhaltungen mehr. Der Assistent hat genau einen Chat; geloescht wird der
+*Verlauf*, nicht die Unterhaltung.
+"""
 
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -11,7 +16,6 @@ from dependencies import require_global, verify_csrf
 from models import AiMessage, AiProvider, AiUserCredential, User
 from schemas.ai_chat import (
     AiChatRequest,
-    AiConversationCreate,
     AiConversationDetail,
     AiConversationResponse,
     AiMessageResponse,
@@ -21,13 +25,16 @@ from services.ai_context_service import redact_sensitive_text
 from services.ai_stream_service import sse_event, stream_conversation_reply
 
 
-router = APIRouter(prefix="/api/ai/conversations", tags=["ai-chat"])
+router = APIRouter(prefix="/api/ai/conversation", tags=["ai-chat"])
+
+# Der sichtbare Verlauf. Aeltere Nachrichten bleiben gespeichert und fliessen
+# ueber die Zusammenfassung weiter in den Kontext ein.
+HISTORY_LIMIT = 200
 
 
 def _conversation_response(conversation) -> AiConversationResponse:
     return AiConversationResponse(
         id=conversation.id,
-        server_id=conversation.server_id,
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
@@ -39,6 +46,7 @@ def _message_response(message: AiMessage) -> AiMessageResponse:
         id=message.id,
         role=message.role,
         content=message.content,
+        reasoning=message.reasoning,
         status=message.status,
         provider_id=message.provider_id,
         model=message.model,
@@ -46,52 +54,20 @@ def _message_response(message: AiMessage) -> AiMessageResponse:
     )
 
 
-@router.get("", response_model=list[AiConversationResponse])
-def list_conversations(
-    server_id: int | None = Query(default=None, ge=1),
-    db: Session = Depends(get_db),
-    user: User = Depends(require_global("ai.chat.use")),
-) -> list[AiConversationResponse]:
-    rows = ai_chat_service.list_conversations(db, user=user, server_id=server_id)
-    return [_conversation_response(row) for row in rows]
-
-
-@router.post("", response_model=AiConversationResponse, status_code=status.HTTP_201_CREATED)
-def create_conversation(
-    payload: AiConversationCreate,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_global("ai.chat.use")),
-    _: None = Depends(verify_csrf),
-) -> AiConversationResponse:
-    try:
-        conversation = ai_chat_service.create_conversation(
-            db,
-            user=user,
-            title=payload.title,
-            server_id=payload.server_id,
-        )
-        db.commit()
-        db.refresh(conversation)
-        return _conversation_response(conversation)
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=404, detail="Server nicht gefunden") from exc
-
-
-@router.get("/{conversation_id}", response_model=AiConversationDetail)
+@router.get("", response_model=AiConversationDetail)
 def get_conversation(
-    conversation_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> AiConversationDetail:
-    conversation = ai_chat_service.get_owned_conversation(db, conversation_id, user)
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden")
+    """Liefert die Unterhaltung des Benutzers und legt sie beim ersten Aufruf an."""
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    db.commit()
+    db.refresh(conversation)
     messages = (
         db.query(AiMessage)
         .filter(AiMessage.conversation_id == conversation.id)
         .order_by(AiMessage.created_at.desc())
-        .limit(100)
+        .limit(HISTORY_LIMIT)
         .all()
     )
     base = _conversation_response(conversation)
@@ -101,40 +77,38 @@ def get_conversation(
     )
 
 
-@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_conversation(
-    conversation_id: str,
+@router.delete("/messages", status_code=status.HTTP_204_NO_CONTENT)
+def clear_conversation_history(
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
     _: None = Depends(verify_csrf),
 ) -> Response:
-    conversation = ai_chat_service.get_owned_conversation(db, conversation_id, user)
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden")
-    db.delete(conversation)
+    """Leert den Verlauf. Die Unterhaltung und das Audit bleiben bestehen."""
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    ai_chat_service.clear_history(db, conversation)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 async def _replay_message(message: AiMessage) -> AsyncIterator[str]:
     yield sse_event("message", {"message_id": message.id, "request_id": message.request_id})
+    if message.reasoning:
+        yield sse_event("reasoning", {"content": message.reasoning})
     if message.content:
         yield sse_event("delta", {"content": message.content})
     yield sse_event("done", {"message_id": message.id, "replayed": True})
 
 
-@router.post("/{conversation_id}/messages/stream")
+@router.post("/messages/stream")
 def stream_message(
-    conversation_id: str,
     payload: AiChatRequest,
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
     _: None = Depends(verify_csrf),
 ) -> StreamingResponse:
-    conversation = ai_chat_service.get_owned_conversation(db, conversation_id, user)
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden")
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    db.commit()
     provider = db.get(AiProvider, payload.provider_id)
     if provider is None or not provider.enabled:
         raise HTTPException(status_code=404, detail="Provider nicht gefunden")
@@ -169,6 +143,7 @@ def stream_message(
             provider_id=provider.id,
             request_id=payload.request_id,
             content=safe_content,
+            reasoning=payload.reasoning,
         )
     return StreamingResponse(
         stream,

@@ -90,7 +90,7 @@ def run_skill(
     correlation_id = str(uuid4())
     try:
         reads, proposals = ai_skill_service.run_skill(
-            db, user=user, skill=skill, conversation_id=payload.conversation_id,
+            db, user=user, skill=skill, server_id=payload.server_id,
             correlation_id=correlation_id,
         )
     except AiQuotaExceeded as exc:

@@ -1,27 +1,13 @@
-"""API-Vertraege fuer persistente AI-Gespraeche."""
+"""API-Vertraege fuer die eine persistente AI-Unterhaltung."""
 
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
-
-
-class AiConversationCreate(BaseModel):
-    title: str = Field(default="Neue Unterhaltung", min_length=1, max_length=160)
-    server_id: int | None = Field(default=None, ge=1)
-
-    @field_validator("title")
-    @classmethod
-    def title_must_contain_text(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("Titel darf nicht leer sein")
-        return normalized
+from pydantic import BaseModel, Field
 
 
 class AiConversationResponse(BaseModel):
     id: str
-    server_id: int | None
     title: str
     created_at: datetime
     updated_at: datetime
@@ -31,6 +17,10 @@ class AiMessageResponse(BaseModel):
     id: str
     role: str
     content: str
+    # Denkschritte des Modells, sofern es welche geliefert hat. Getrennt von
+    # `content`, damit die Oberflaeche sie einklappen kann und niemand sie fuer
+    # die Antwort haelt.
+    reasoning: str | None = None
     status: str
     provider_id: int | None
     model: str | None
@@ -45,3 +35,7 @@ class AiChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=16_000)
     provider_id: int = Field(ge=1)
     request_id: UUID
+    # Bittet das Modell, seine Denkschritte mitzuliefern. Ein Anbieter oder
+    # Modell, das damit nichts anfangen kann, ignoriert das Feld — dann kommt
+    # schlicht kein Denkschritt zurueck und die Antwort bleibt unveraendert.
+    reasoning: bool = False

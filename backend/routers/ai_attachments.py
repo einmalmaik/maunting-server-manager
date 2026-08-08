@@ -29,21 +29,19 @@ def _require_chat(db: Session, user: User) -> None:
 
 
 @router.post(
-    "/conversations/{conversation_id}/attachments",
+    "/conversation/attachments",
     response_model=AiAttachmentResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_attachment(
-    conversation_id: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.attachments.use")),
     _: None = Depends(verify_csrf),
 ) -> AiAttachmentResponse:
     _require_chat(db, user)
-    conversation = ai_chat_service.get_owned_conversation(db, conversation_id, user)
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden")
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    db.commit()
     data = await file.read(ai_attachment_service.MAX_ATTACHMENT_BYTES + 1)
     try:
         return _response(ai_attachment_service.create_attachment(
@@ -60,18 +58,16 @@ async def upload_attachment(
         await file.close()
 
 
-@router.get(
-    "/conversations/{conversation_id}/attachments",
-    response_model=list[AiAttachmentResponse],
-)
+@router.get("/conversation/attachments", response_model=list[AiAttachmentResponse])
 def list_attachments(
-    conversation_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.attachments.use")),
 ) -> list[AiAttachmentResponse]:
     _require_chat(db, user)
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    db.commit()
     return [_response(row) for row in ai_attachment_service.list_owned(
-        db, user, conversation_id
+        db, user, conversation.id
     )]
 
 

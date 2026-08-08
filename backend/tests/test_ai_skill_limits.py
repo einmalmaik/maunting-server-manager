@@ -50,13 +50,18 @@ def _skill(client: TestClient, cookies: dict, key: str) -> str:
     return created.json()["id"]
 
 
-def _conversation(db: Session, user: User, server_id: int) -> str:
-    conversation = AiConversation(
-        id=str(uuid4()), user_id=user.id, server_id=server_id, title="Skill-Limit"
-    )
-    db.add(conversation)
+def _conversation(db: Session, user: User, server_id: int) -> int:
+    """Legt die eine Unterhaltung an und liefert die Server-ID des Laufs zurueck.
+
+    Ein Skill-Lauf braucht seit dem Einzelchat keine Unterhaltungs-ID mehr —
+    der Serverbezug steht im Aufruf. Die Unterhaltung wird trotzdem angelegt,
+    damit der Lauf denselben Zustand vorfindet wie im Panel.
+    """
+    db.add(AiConversation(
+        id=str(uuid4()), user_id=user.id, server_id=None, title="Skill-Limit"
+    ))
     db.commit()
-    return conversation.id
+    return server_id
 
 
 def test_skill_run_is_blocked_once_requests_per_minute_is_exhausted(
@@ -68,16 +73,16 @@ def test_skill_run_is_blocked_once_requests_per_minute_is_exhausted(
 ) -> None:
     _role_with_limits(db, owner_user, {"requests_per_minute": 1})
     skill_id = _skill(client, owner_cookies, "rate-limited")
-    conversation_id = _conversation(db, owner_user, test_server.id)
+    server_id = _conversation(db, owner_user, test_server.id)
 
     first = client.post(
         f"/api/ai/skills/{skill_id}/run",
-        json={"conversation_id": conversation_id},
+        json={"server_id": server_id},
         cookies=owner_cookies, headers=_csrf(owner_cookies),
     )
     second = client.post(
         f"/api/ai/skills/{skill_id}/run",
-        json={"conversation_id": conversation_id},
+        json={"server_id": server_id},
         cookies=owner_cookies, headers=_csrf(owner_cookies),
     )
 
@@ -100,11 +105,11 @@ def test_a_completed_skill_run_leaves_an_accounted_usage_event(
     """
     _role_with_limits(db, owner_user, {})
     skill_id = _skill(client, owner_cookies, "accounted")
-    conversation_id = _conversation(db, owner_user, test_server.id)
+    server_id = _conversation(db, owner_user, test_server.id)
 
     response = client.post(
         f"/api/ai/skills/{skill_id}/run",
-        json={"conversation_id": conversation_id},
+        json={"server_id": server_id},
         cookies=owner_cookies, headers=_csrf(owner_cookies),
     )
 
@@ -154,11 +159,11 @@ def test_a_rejected_skill_run_does_not_hold_a_reservation(
         user_id=regular_user.id, server_id=server.id, permission_key="server.view"
     ))
     db.commit()
-    conversation_id = _conversation(db, regular_user, server.id)
+    server_id = _conversation(db, regular_user, server.id)
 
     response = client.post(
         f"/api/ai/skills/{created.json()['id']}/run",
-        json={"conversation_id": conversation_id},
+        json={"server_id": server_id},
         cookies=user_cookies, headers={"X-CSRF-Token": user_csrf_token},
     )
 
@@ -189,11 +194,11 @@ def test_skill_run_without_any_configured_limit_is_allowed(
     sofort greift.
     """
     skill_id = _skill(client, owner_cookies, "no-budget")
-    conversation_id = _conversation(db, owner_user, test_server.id)
+    server_id = _conversation(db, owner_user, test_server.id)
 
     response = client.post(
         f"/api/ai/skills/{skill_id}/run",
-        json={"conversation_id": conversation_id},
+        json={"server_id": server_id},
         cookies=owner_cookies, headers=_csrf(owner_cookies),
     )
 
@@ -217,11 +222,11 @@ def test_owner_has_no_bypass_for_an_explicitly_configured_zero_limit(
     """
     _role_with_limits(db, owner_user, {"requests_per_minute": 0})
     skill_id = _skill(client, owner_cookies, "zero-budget")
-    conversation_id = _conversation(db, owner_user, test_server.id)
+    server_id = _conversation(db, owner_user, test_server.id)
 
     response = client.post(
         f"/api/ai/skills/{skill_id}/run",
-        json={"conversation_id": conversation_id},
+        json={"server_id": server_id},
         cookies=owner_cookies, headers=_csrf(owner_cookies),
     )
 

@@ -33,7 +33,6 @@ export interface AiCredentialStatus {
 
 export interface AiConversation {
   id: string
-  server_id: number | null
   title: string
   created_at: string
   updated_at: string
@@ -43,6 +42,8 @@ export interface AiMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  /** Denkschritte des Modells, sofern es welche geliefert hat. */
+  reasoning: string | null
   status: 'complete' | 'streaming' | 'failed'
   provider_id: number | null
   model: string | null
@@ -51,6 +52,18 @@ export interface AiMessage {
 
 export interface AiConversationDetail extends AiConversation {
   messages: AiMessage[]
+}
+
+/** Ein von der KI ausgefuehrtes Lesewerkzeug, sichtbar im Verlauf. */
+export interface AiToolUse {
+  tool_name: string
+  server_id: number | null
+}
+
+export interface AiProviderTestResult {
+  ok: boolean
+  code: string | null
+  detail: string | null
 }
 
 export type AiWriteTool =
@@ -141,12 +154,20 @@ export function latestAiSkillVersions(skills: AiSkill[]): AiSkill[] {
 export type AiStreamEvent =
   | { event: 'message'; data: { message_id: string; request_id: string } }
   | { event: 'delta'; data: { content: string } }
+  // Denkschritte. Eigenes Ereignis, damit die Oberflaeche sie einklappen kann
+  // und niemand sie fuer die Antwort haelt.
+  | { event: 'reasoning'; data: { content: string } }
+  // Ein gerade ausgefuehrtes Lesewerkzeug — macht sichtbar, worauf die Antwort
+  // beruht.
+  | { event: 'tool'; data: AiToolUse }
   | { event: 'proposal'; data: AiActionProposal }
   // Eine bereits ausgefuehrte autonome Aktion. Bewusst ein eigenes Ereignis:
   // sie ist keine Anfrage an den Benutzer, sondern eine Meldung.
   | { event: 'action'; data: AiActionProposal }
   | { event: 'done'; data: { message_id: string; replayed?: boolean } }
   | { event: 'error'; data: { code: string; message_key: string } }
+
+const STREAM_EVENTS = ['message', 'delta', 'reasoning', 'tool', 'proposal', 'action', 'done', 'error']
 
 export interface AiProviderWrite {
   name: string
@@ -177,16 +198,13 @@ export const aiApi = {
     body: JSON.stringify({ api_key: apiKey }),
   }),
   deleteCredential: (providerId: number) => api(`/ai/providers/${providerId}/credential`, { method: 'DELETE' }),
-  listConversations: (serverId?: number) => api<AiConversation[]>(
-    `/ai/conversations${serverId ? `?server_id=${serverId}` : ''}`,
-  ),
-  createConversation: (title: string, serverId?: number) => api<AiConversation>('/ai/conversations', {
+  testProvider: (id: number) => api<AiProviderTestResult>(`/ai/settings/providers/${id}/test`, {
     method: 'POST',
-    body: JSON.stringify({ title, server_id: serverId ?? null }),
   }),
-  getConversation: (id: string) => api<AiConversationDetail>(`/ai/conversations/${id}`),
-  deleteConversation: (id: string) => api(`/ai/conversations/${id}`, { method: 'DELETE' }),
-  listActions: (conversationId: string) => api<AiActionProposal[]>(`/ai/conversations/${conversationId}/actions`),
+  /** Die eine Unterhaltung. Wird beim ersten Aufruf serverseitig angelegt. */
+  getConversation: () => api<AiConversationDetail>('/ai/conversation'),
+  clearHistory: () => api('/ai/conversation/messages', { method: 'DELETE' }),
+  listActions: () => api<AiActionProposal[]>('/ai/conversation/actions'),
   getAction: (proposalId: string) => api<AiActionProposal>(`/ai/actions/${proposalId}`),
   confirmAction: (proposalId: string) => api<{ proposal_id: string; confirmation_token: string; expires_at: string }>(`/ai/actions/${proposalId}/confirm`, {
     method: 'POST',
@@ -217,26 +235,25 @@ export const aiApi = {
   updateSkill: (skillKey: string, payload: Omit<AiSkill, 'id' | 'version' | 'created_by' | 'created_at'>) => api<AiSkill>(`/ai/skills/${skillKey}`, {
     method: 'PUT', body: JSON.stringify(payload),
   }),
-  runSkill: (skillId: string, conversationId: string) => api<{ skill_id: string; version: number; read_results: Array<Record<string, unknown>>; proposals: Array<{ id: string; tool_name: string; preview: Record<string, unknown>; status: string }> }>(`/ai/skills/${skillId}/run`, {
-    method: 'POST', body: JSON.stringify({ conversation_id: conversationId }),
+  runSkill: (skillId: string, serverId: number) => api<{ skill_id: string; version: number; read_results: Array<Record<string, unknown>>; proposals: Array<{ id: string; tool_name: string; preview: Record<string, unknown>; status: string }> }>(`/ai/skills/${skillId}/run`, {
+    method: 'POST', body: JSON.stringify({ server_id: serverId }),
   }),
-  listAttachments: (conversationId: string) => api<AiAttachment[]>(`/ai/conversations/${conversationId}/attachments`),
-  uploadAttachment: (conversationId: string, file: File) => {
+  listAttachments: () => api<AiAttachment[]>('/ai/conversation/attachments'),
+  uploadAttachment: (file: File) => {
     const body = new FormData()
     body.append('file', file)
-    return api<AiAttachment>(`/ai/conversations/${conversationId}/attachments`, { method: 'POST', body })
+    return api<AiAttachment>('/ai/conversation/attachments', { method: 'POST', body })
   },
   deleteAttachment: (id: string) => api(`/ai/attachments/${id}`, { method: 'DELETE' }),
 }
 
 /** Liest einen fragmentierten SSE-Stream, ohne unbekannte Providerdaten auszugeben. */
 export async function streamAiMessage(
-  conversationId: string,
-  payload: { content: string; provider_id: number; request_id: string },
+  payload: { content: string; provider_id: number; request_id: string; reasoning: boolean },
   onEvent: (event: AiStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await apiStream(`/ai/conversations/${conversationId}/messages/stream`, {
+  const response = await apiStream('/ai/conversation/messages/stream', {
     method: 'POST',
     body: JSON.stringify(payload),
     signal,
@@ -261,7 +278,7 @@ export async function streamAiMessage(
     } catch {
       throw new Error('AI_STREAM_INVALID')
     }
-    if (!data || typeof data !== 'object' || !['message', 'delta', 'proposal', 'done', 'error'].includes(eventName)) {
+    if (!data || typeof data !== 'object' || !STREAM_EVENTS.includes(eventName)) {
       throw new Error('AI_STREAM_INVALID')
     }
     onEvent({ event: eventName, data } as AiStreamEvent)

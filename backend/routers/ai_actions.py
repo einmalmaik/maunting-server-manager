@@ -54,18 +54,14 @@ def _state_error(exc: ai_action_service.AiActionStateError) -> HTTPException:
     return HTTPException(status_code=409, detail={"code": exc.code})
 
 
-@router.get(
-    "/conversations/{conversation_id}/actions",
-    response_model=list[AiActionProposalResponse],
-)
+@router.get("/conversation/actions", response_model=list[AiActionProposalResponse])
 def list_conversation_actions(
-    conversation_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> list[AiActionProposalResponse]:
-    conversation = ai_chat_service.get_owned_conversation(db, conversation_id, user)
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden")
+    """Alle Vorschlaege der einen Unterhaltung, aeltester zuerst."""
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    db.commit()
     rows = db.query(AiActionProposal).filter(
         AiActionProposal.conversation_id == conversation.id,
         AiActionProposal.user_id == user.id,

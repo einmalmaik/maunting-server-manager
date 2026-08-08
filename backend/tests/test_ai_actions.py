@@ -68,7 +68,7 @@ def test_config_proposal_encrypts_payload_and_keeps_audit_content_free(
         conversation=conversation,
         tool_name="propose_config_update",
         arguments={
-            "path": "server.cfg",
+            "server_id": server.id,"path": "server.cfg",
             "content": "port=2402\nmaxPlayers=40\n",
             "expected_revision": content_revision(config.read_bytes()),
             "reason": "Testbegruendung",
@@ -108,7 +108,7 @@ def test_config_with_credentials_is_never_overwritten_by_ai(
             conversation=conversation,
             tool_name="propose_config_update",
             arguments={
-                "path": "server.cfg",
+                "server_id": server.id,"path": "server.cfg",
                 "content": "port=2402\n",
                 "expected_revision": content_revision(config.read_bytes()),
                 "reason": "Testbegruendung",
@@ -142,9 +142,8 @@ def test_read_config_withholds_revision_for_redacted_or_truncated_view(
     redacted_view = ai_action_service.execute_read_tool(
         db,
         user=owner_user,
-        conversation=conversation,
         tool_name="read_config",
-        arguments={"path": "secret.cfg"},
+        arguments={"server_id": server.id, "path": "secret.cfg"},
     )
     assert redacted_view["redacted"] is True
     assert redacted_view["editable"] is False
@@ -156,9 +155,8 @@ def test_read_config_withholds_revision_for_redacted_or_truncated_view(
     truncated_view = ai_action_service.execute_read_tool(
         db,
         user=owner_user,
-        conversation=conversation,
         tool_name="read_config",
-        arguments={"path": "big.cfg"},
+        arguments={"server_id": server.id, "path": "big.cfg"},
     )
     assert truncated_view["truncated"] is True
     assert truncated_view["editable"] is False
@@ -170,9 +168,8 @@ def test_read_config_withholds_revision_for_redacted_or_truncated_view(
     full_view = ai_action_service.execute_read_tool(
         db,
         user=owner_user,
-        conversation=conversation,
         tool_name="read_config",
-        arguments={"path": "plain.cfg"},
+        arguments={"server_id": server.id, "path": "plain.cfg"},
     )
     assert full_view["editable"] is True
     assert full_view["revision"] == content_revision(plain_config.read_bytes())
@@ -216,9 +213,8 @@ def test_read_log_tool_bounds_and_redacts_output(
     result = ai_action_service.execute_read_tool(
         db,
         user=owner_user,
-        conversation=conversation,
         tool_name="read_server_logs",
-        arguments={"lines": 50},
+        arguments={"server_id": server.id, "lines": 50},
     )
 
     assert result["redacted"] is True
@@ -228,9 +224,8 @@ def test_read_log_tool_bounds_and_redacts_output(
         ai_action_service.execute_read_tool(
             db,
             user=owner_user,
-            conversation=conversation,
             tool_name="read_server_logs",
-            arguments={"lines": 201},
+            arguments={"server_id": server.id, "lines": 201},
         )
     except ai_action_service.AiActionValidationError:
         pass
@@ -255,7 +250,7 @@ def test_confirmation_token_is_hashed_one_time_and_config_write_is_revision_boun
         conversation=conversation,
         tool_name="propose_config_update",
         arguments={
-            "path": "server.cfg",
+            "server_id": server.id,"path": "server.cfg",
             "content": "port=2402\n",
             "expected_revision": content_revision(config.read_bytes()),
             "reason": "Testbegruendung",
@@ -313,7 +308,7 @@ def test_execute_blocks_changed_revision_and_marks_proposal_failed(
         conversation=conversation,
         tool_name="propose_config_update",
         arguments={
-            "path": "server.cfg",
+            "server_id": server.id,"path": "server.cfg",
             "content": "port=2402\n",
             "expected_revision": content_revision(config.read_bytes()),
             "reason": "Testbegruendung",
@@ -353,7 +348,7 @@ def test_expired_confirmation_cannot_execute(
         user=owner_user,
         conversation=conversation,
         tool_name="propose_backup",
-        arguments={"reason": "Testbegruendung", "expected_effect": "Testwirkung"},
+        arguments={"server_id": server.id, "reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -385,7 +380,7 @@ def test_startup_recovery_fails_closed(db: Session, owner_user: User, tmp_path: 
         user=owner_user,
         conversation=conversation,
         tool_name="propose_backup",
-        arguments={"reason": "Testbegruendung", "expected_effect": "Testwirkung"},
+        arguments={"server_id": server.id, "reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     proposal.status = "executing"
@@ -427,7 +422,7 @@ def test_confirmation_rechecks_revoked_rbac(
         user=regular_user,
         conversation=conversation,
         tool_name="propose_backup",
-        arguments={"reason": "Testbegruendung", "expected_effect": "Testwirkung"},
+        arguments={"server_id": server.id, "reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -467,7 +462,7 @@ def test_lifecycle_proposal_stays_executing_until_the_task_finishes(
         user=owner_user,
         conversation=conversation,
         tool_name="propose_server_lifecycle",
-        arguments={"operation": "start", "reason": "Testbegruendung", "expected_effect": "Testwirkung"},
+        arguments={"server_id": server.id, "operation": "start", "reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     db.commit()
@@ -526,7 +521,7 @@ def test_lifecycle_proposal_becomes_succeeded_when_the_task_succeeds(
         user=owner_user,
         conversation=conversation,
         tool_name="propose_server_lifecycle",
-        arguments={"operation": "restart", "reason": "Testbegruendung", "expected_effect": "Testwirkung"},
+        arguments={"server_id": server.id, "operation": "restart", "reason": "Testbegruendung", "expected_effect": "Testwirkung"},
         correlation_id=str(uuid4()),
     )
     db.commit()

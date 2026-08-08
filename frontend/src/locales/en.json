@@ -141,7 +141,11 @@
         "delete": "AI provider could not be deleted."
       },
       "tokenPrice": "Price in cents per 1M tokens",
-      "tokenPriceHint": "Take this from the provider's price list. MSM does not guess a price: without this value costs are accounted as zero and the role-based cost limit has no effect."
+      "tokenPriceHint": "Take this from the provider's price list. MSM does not guess a price: without this value costs are accounted as zero and the role-based cost limit has no effect.",
+      "test": "Test connection",
+      "testOk": "Connection successful. The provider responded.",
+      "testFailed": "The test failed.",
+      "baseUrlHint": "Base URL only, e.g. https://openrouter.ai/api/v1 — without /chat/completions. MSM appends the endpoint itself; a pasted endpoint path is stripped on save."
     },
     "credentials": {
       "title": "Personal AI credentials",
@@ -238,7 +242,8 @@
       "errors": {
         "load": "AI skills could not be loaded.",
         "save": "AI skill could not be saved."
-      }
+      },
+      "selectServer": "Server for the skill"
     },
     "attachments": {
       "add": "Add safe attachment",
@@ -246,22 +251,16 @@
       "supported": "TXT, configuration, log, PNG, or JPEG · maximum 256 KiB",
       "list": "Attachments in this conversation",
       "remove": "Remove attachment",
-      "error": "Attachment could not be processed safely."
+      "error": "Attachment could not be processed safely.",
+      "drop": "Drop file here"
     },
     "chat": {
       "title": "AI Assistant",
       "description": "Persistent, quota-controlled assistance for panel and server tasks.",
       "status": "Controlled context",
-      "new": "New conversation",
-      "newTitle": "New conversation",
-      "emptyConversations": "No conversations yet.",
       "selectProvider": "Select provider",
-      "delete": "Delete conversation",
-      "deleteConfirm": "Really delete this conversation and all messages?",
       "emptyTitle": "How can I help?",
       "emptyDescription": "The assistant receives only approved, minimized context. Verify important statements before operational changes.",
-      "you": "You",
-      "assistant": "Assistant",
       "thinking": "Preparing response …",
       "noResponse": "No response received.",
       "failed": "This response could not be completed.",
@@ -285,6 +284,17 @@
         "unavailable": "The AI service is temporarily unavailable.",
         "provider": "The AI provider rejected the request.",
         "toolRejected": "The requested AI tool call was rejected for security reasons."
+      },
+      "clear": "Clear history",
+      "clearTitle": "Clear history?",
+      "clearConfirm": "Really delete all messages in this conversation? Actions that already ran stay in the audit log.",
+      "reasoning": "Thinking",
+      "thought": "Thought",
+      "noPermission": "No permission to use the AI assistant.",
+      "examples": {
+        "logs": "My server won't start — take a look at the logs.",
+        "network": "My Minecraft server is running but unreachable. Why?",
+        "mods": "Which mods are installed on my server and are there updates?"
       }
     },
     "actions": {
@@ -341,7 +351,41 @@
       "enable": "Enable",
       "save": "Save budget",
       "saved": "Grant saved.",
-      "error": "The grant could not be saved."
+      "error": "The grant could not be saved.",
+      "short": "Autonomous",
+      "scope": "Scope",
+      "scopePanel": "Panel-wide"
+    },
+    "tools": {
+      "list_my_servers": "Read server list",
+      "list_blueprints": "Read available server types",
+      "read_node_capacity": "Read host capacity",
+      "read_server_status": "Read server status",
+      "read_server_capacity": "Read server capacity",
+      "read_server_logs": "Read logs",
+      "read_config": "Read configuration file",
+      "read_server_ports": "Read ports",
+      "read_server_mods": "Read installed mods",
+      "read_server_backups": "Read backups",
+      "read_guardian_incidents": "Read autopilot incidents",
+      "read_ai_action_history": "Read earlier AI actions",
+      "read_mod_updates": "Check mod updates",
+      "search_workshop_mods": "Search the Workshop"
+    },
+    "errors": {
+      "codes": {
+        "AI_PROVIDER_AUTH_FAILED": "The provider rejected the API key. Check the operator key or your own key in your profile.",
+        "AI_PROVIDER_ENDPOINT_NOT_FOUND": "The provider does not know this address. The base URL ends in /v1 — not /chat/completions.",
+        "AI_PROVIDER_REQUEST_REJECTED": "The provider rejected the request. Usually the model name is wrong.",
+        "AI_PROVIDER_RATE_LIMITED": "The provider is rate limiting. Try again in a moment.",
+        "AI_PROVIDER_UNAVAILABLE": "The provider is unreachable.",
+        "AI_PROVIDER_KEY_MISSING": "No API key is configured for this provider.",
+        "AI_PROVIDER_URL_REJECTED": "The base URL was rejected for security reasons.",
+        "AI_PROVIDER_STREAM_TIMEOUT": "The provider took too long.",
+        "AI_PROVIDER_STREAM_INCOMPLETE": "The provider's response ended prematurely.",
+        "AI_PROVIDER_PROTOCOL_ERROR": "The provider returned an unexpected response.",
+        "AI_PROVIDER_RESPONSE_TOO_LARGE": "The provider's response was too large."
+      }
     }
   },
   "shell": {

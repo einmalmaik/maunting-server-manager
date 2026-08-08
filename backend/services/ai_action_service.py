@@ -61,8 +61,21 @@ SERVER_READ_TOOLS = {
     "read_mod_updates",
     "search_workshop_mods",
 }
-GLOBAL_READ_TOOLS = {"list_blueprints", "read_node_capacity"}
+GLOBAL_READ_TOOLS = {"list_my_servers", "list_blueprints", "read_node_capacity"}
 READ_TOOLS = SERVER_READ_TOOLS | GLOBAL_READ_TOOLS
+
+# Jedes serverbezogene Werkzeug traegt seit dem Einzelchat seine eigene
+# `server_id`. Vorher stand sie an der Unterhaltung — dadurch konnte der
+# Panel-Chat gar kein Server-Werkzeug anbieten und man musste erst wissen,
+# welcher Server gemeint ist, bevor man fragen durfte.
+_SERVER_ID_SCHEMA = {
+    "server_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "ID des Servers aus list_my_servers.",
+    }
+}
+MAX_LISTED_SERVERS = 60
 
 SERVER_WRITE_TOOLS = {
     "propose_server_lifecycle",
@@ -119,9 +132,29 @@ def _function(name: str, description: str, properties: dict, required: list[str]
     }
 
 
+def _server_function(
+    name: str, description: str, properties: dict | None = None, required: list[str] | None = None
+) -> dict:
+    """Wie ``_function``, aber mit verpflichtender ``server_id``."""
+    return _function(
+        name,
+        description,
+        {**_SERVER_ID_SCHEMA, **(properties or {})},
+        ["server_id", *(required or [])],
+    )
+
+
 def _global_tool_definitions() -> list[dict]:
-    """Werkzeuge des Panel-Chats: Blueprints, Kapazitaet, Servererstellung."""
+    """Werkzeuge ohne Serverbezug: Serverliste, Blueprints, Kapazitaet, Anlage."""
     return [
+        _function(
+            "list_my_servers",
+            "Listet alle Server, die der Benutzer sehen darf, mit ID, Name, Spiel "
+            "und Status. Immer zuerst aufrufen, wenn der Benutzer einen Server "
+            "nur mit Namen nennt oder gar nicht benennt.",
+            {},
+            [],
+        ),
         _function(
             "list_blueprints",
             "Listet verfuegbare Servertypen (Blueprints) mit Modunterstuetzung und Portrollen.",
@@ -159,95 +192,61 @@ def _global_tool_definitions() -> list[dict]:
     ]
 
 
-def provider_tool_definitions(*, server_scoped: bool = True) -> list[dict]:
+def provider_tool_definitions() -> list[dict]:
     """Feste OpenAI-Tool-Allowlist; keine freie Command-Ausfuehrung.
 
-    Der Panel-Chat bekam bisher gar keine Werkzeuge — `tools` war dort schlicht
-    `None`. Damit konnte die in Zielpunkt 3.1 geforderte Servererstellung gar
-    nicht andocken: ein Tool dafuer hat naturgemaess keinen Serverbezug.
+    Es gibt genau *einen* Werkzeugsatz. Die frueher noetige Unterscheidung
+    zwischen Panel-Chat und Server-Chat ist mit dem Einzelchat entfallen: der
+    Server steht jetzt in den Argumenten, nicht im Gespraech. Das Modell findet
+    ihn ueber `list_my_servers` und fragt bei Mehrdeutigkeit nach.
     """
-    if not server_scoped:
-        return _global_tool_definitions()
     return [
-        {
-            "type": "function",
-            "function": {
-                "name": "read_server_status",
-                "description": "Liest den minimierten Status des aktuellen Servers.",
-                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "read_server_capacity",
-                "description": "Liest minimierte, zuletzt bekannte Kapazitaetswerte des aktuellen Servers und Nodes.",
-                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "read_server_logs",
-                "description": "Liest einen begrenzten, redigierten Log-Ausschnitt des aktuellen Servers.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"lines": {"type": "integer", "minimum": 1, "maximum": 200}},
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "read_config",
-                "description": "Liest eine erlaubte Text-Konfigurationsdatei revisionssicher.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string", "maxLength": 256}},
-                    "required": ["path"],
-                    "additionalProperties": False,
-                },
-            },
-        },
+        *_global_tool_definitions(),
+        _server_function(
+            "read_server_status",
+            "Liest den minimierten Status eines Servers.",
+        ),
+        _server_function(
+            "read_server_capacity",
+            "Liest minimierte, zuletzt bekannte Kapazitaetswerte des Servers und seines Nodes.",
+        ),
+        _server_function(
+            "read_server_logs",
+            "Liest einen begrenzten, redigierten Log-Ausschnitt des Servers.",
+            {"lines": {"type": "integer", "minimum": 1, "maximum": 200}},
+        ),
+        _server_function(
+            "read_config",
+            "Liest eine erlaubte Text-Konfigurationsdatei revisionssicher.",
+            {"path": {"type": "string", "maxLength": 256}},
+            ["path"],
+        ),
         # ── Erweiterter Serverkontext (Zielpunkt 3.3) ──────────────────────
-        _function(
+        _server_function(
             "read_server_ports",
             "Liest die vergebenen Ports des Servers mit Rolle und Protokoll.",
-            {},
-            [],
         ),
-        _function(
+        _server_function(
             "read_server_mods",
             "Liest die installierten Mods mit Aktivierungs-, Installations- und Updatestatus.",
-            {},
-            [],
         ),
-        _function(
+        _server_function(
             "read_server_backups",
             "Liest die vorhandenen Backups mit Groesse und Zeitpunkt.",
-            {},
-            [],
         ),
-        _function(
+        _server_function(
             "read_guardian_incidents",
             "Liest die zuletzt erkannten Guardian-Vorfaelle dieses Servers.",
-            {},
-            [],
         ),
-        _function(
+        _server_function(
             "read_ai_action_history",
             "Liest frueher vorgeschlagene und ausgefuehrte KI-Aktionen dieses Servers.",
-            {},
-            [],
         ),
-        _function(
+        _server_function(
             "read_mod_updates",
             "Prueft, fuer welche Mods ein Update oder eine Nachinstallation aussteht.",
-            {},
-            [],
         ),
-        _function(
+        _server_function(
             "search_workshop_mods",
             "Sucht Mods im Steam Workshop fuer das Spiel dieses Servers. "
             "Liefert Kennung, Titel und Tags — keine Beschreibungstexte.",
@@ -258,7 +257,7 @@ def provider_tool_definitions(*, server_scoped: bool = True) -> list[dict]:
             ["query"],
         ),
         # ── Schreib-Tools: erzeugen ausschliesslich Vorschlaege ────────────
-        _function(
+        _server_function(
             "propose_server_lifecycle",
             "Schlaegt Start, Stop oder Neustart zur manuellen Bestaetigung vor.",
             {
@@ -267,13 +266,13 @@ def provider_tool_definitions(*, server_scoped: bool = True) -> list[dict]:
             },
             ["operation", *_RATIONALE_REQUIRED],
         ),
-        _function(
+        _server_function(
             "propose_backup",
             "Schlaegt ein Server-Backup zur manuellen Bestaetigung vor.",
             dict(_RATIONALE_SCHEMA),
             list(_RATIONALE_REQUIRED),
         ),
-        _function(
+        _server_function(
             "propose_config_update",
             "Schlaegt eine revisionsgebundene Config-Aenderung vor. Niemals Secrets einfuegen.",
             {
@@ -284,7 +283,7 @@ def provider_tool_definitions(*, server_scoped: bool = True) -> list[dict]:
             },
             ["path", "content", "expected_revision", *_RATIONALE_REQUIRED],
         ),
-        _function(
+        _server_function(
             "propose_mod_install",
             "Schlaegt Installation, Aktualisierung oder Neuinstallation einer Workshop-Mod vor. "
             "Der Download laeuft ueber den vorhandenen MSM-Installationspfad.",
@@ -303,14 +302,82 @@ def _require_no_arguments(tool_name: str, arguments: dict) -> None:
         raise AiActionValidationError(f"{tool_name} akzeptiert keine Argumente")
 
 
-def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, arguments: dict) -> dict:
-    """Werkzeuge des Panel-Chats. Rechtegrenze ist `servers.create`.
+def _visible_servers(db: Session, user: User) -> list[Server]:
+    """Alle Server, die der Benutzer sehen darf — die Grundlage von `list_my_servers`.
 
-    Blueprintliste und Hostkapazitaet sind fuer sich harmlos, aber sie sind die
-    Vorbereitung einer Servererstellung. Wer keine Server anlegen darf, hat auch
-    keinen Grund, die Kapazitaetsplanung des Betreibers zu sehen.
+    Die Pruefung laeuft je Zeile ueber `has_server_permission` und nicht ueber
+    eine gefilterte Abfrage: Sichtbarkeit entsteht aus Rollenrechten *und*
+    einzeln delegierten Serverrechten, und diese Aufloesung gehoert an genau
+    eine Stelle. Die Obergrenze verhindert, dass ein Betreiber mit hunderten
+    Servern die halbe Liste ins Kostenbudget des Benutzers schreibt.
+    """
+    rows = db.query(Server).order_by(Server.id).all()
+    visible: list[Server] = []
+    for server in rows:
+        if permission_service.has_server_permission(db, user, server.id, "server.view"):
+            visible.append(server)
+        if len(visible) >= MAX_LISTED_SERVERS:
+            break
+    return visible
+
+
+def _resolve_server(db: Session, user: User, arguments: dict) -> tuple[Server, dict]:
+    """Entnimmt ``server_id``, laedt den Server und prueft `server.view`.
+
+    Das ist die Stelle, an der "die KI erbt die Rechte des Benutzers" fuer jedes
+    serverbezogene Werkzeug tatsaechlich durchgesetzt wird — einmal, zentral,
+    fuer Lese- und Schreibwerkzeuge gleichermassen. Ein Modell, das eine fremde
+    ID errraet oder aus einem manipulierten Logtext uebernimmt, kommt hier nicht
+    vorbei.
+
+    Ein nicht sichtbarer Server ist bewusst nicht von einem nicht existierenden
+    zu unterscheiden: sonst waere die Fehlermeldung ein Existenzorakel.
+    """
+    rest = {key: value for key, value in arguments.items() if key != "server_id"}
+    raw = arguments.get("server_id")
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise AiActionValidationError(
+            "server_id fehlt oder ist ungueltig. Zuerst list_my_servers aufrufen."
+        )
+    server = db.get(Server, raw)
+    if server is None or not permission_service.has_server_permission(
+        db, user, raw, "server.view"
+    ):
+        raise AiActionValidationError("Server nicht gefunden")
+    return server, rest
+
+
+def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, arguments: dict) -> dict:
+    """Werkzeuge ohne Serverbezug.
+
+    `list_my_servers` ist die Einstiegsfrage jedes Gespraechs und deshalb an
+    kein zusaetzliches Recht gebunden — es zeigt ausschliesslich Server, die der
+    Benutzer ohnehin sieht, und ohne die Liste kann er den Assistenten gar nicht
+    sinnvoll benutzen.
+
+    Blueprintliste und Hostkapazitaet sind dagegen die Vorbereitung einer
+    Servererstellung. Wer keine Server anlegen darf, hat auch keinen Grund, die
+    Kapazitaetsplanung des Betreibers zu sehen.
     """
     _require_no_arguments(tool_name, arguments)
+
+    if tool_name == "list_my_servers":
+        servers = _visible_servers(db, user)
+        return {
+            "servers": [
+                {
+                    "server_id": server.id,
+                    # Der Name ist frei vom Benutzer gesetzt und wird redigiert.
+                    "name": redact_sensitive_text(str(server.name or ""))[:128],
+                    "game_type": server.game_type,
+                    "status": server.status,
+                }
+                for server in servers
+            ],
+            "count": len(servers),
+            "truncated": len(servers) >= MAX_LISTED_SERVERS,
+        }
+
     if not permission_service.has_global_permission(db, user, "servers.create"):
         raise AiActionValidationError("Serverplanung ist nicht erlaubt")
 
@@ -537,23 +604,23 @@ def execute_read_tool(
     db: Session,
     *,
     user: User,
-    conversation: AiConversation,
     tool_name: str,
     arguments: dict,
 ) -> dict:
+    """Fuehrt ein Lesewerkzeug im Namen des Benutzers aus.
+
+    Die Unterhaltung wird bewusst nicht mehr uebergeben: sie traegt keinen
+    Kontext mehr, der die Ausfuehrung beeinflusst. Alles, was ein Werkzeug
+    braucht, steht in seinen Argumenten und wird gegen die Rechte von ``user``
+    geprueft.
+    """
     if tool_name not in READ_TOOLS:
         raise AiActionValidationError("Read-Tool ist in diesem Kontext nicht erlaubt")
     if tool_name in GLOBAL_READ_TOOLS:
         return _execute_global_read_tool(
             db, user=user, tool_name=tool_name, arguments=arguments
         )
-    if conversation.server_id is None:
-        raise AiActionValidationError("Read-Tool ist in diesem Kontext nicht erlaubt")
-    server = db.get(Server, conversation.server_id)
-    if server is None or not permission_service.has_server_permission(
-        db, user, server.id, "server.view"
-    ):
-        raise AiActionValidationError("Server nicht gefunden")
+    server, arguments = _resolve_server(db, user, arguments)
     context = _execute_server_context_tool(
         db, user=user, server=server, tool_name=tool_name, arguments=arguments
     )
@@ -890,10 +957,11 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
 
 
 def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[dict, dict]:
+    """Erwartet die Argumente *ohne* Begruendung und ohne `server_id`."""
     from games import get_plugin
     from models import Mod
 
-    if set(arguments) != {"workshop_id", "action", "reason", "expected_effect"}:
+    if set(arguments) != {"workshop_id", "action"}:
         raise AiActionValidationError("Mod-Tool hat ungueltige Argumente")
     workshop_id = arguments["workshop_id"]
     if not isinstance(workshop_id, str) or not workshop_id.isdigit() or len(workshop_id) > 20:
@@ -944,11 +1012,10 @@ def create_proposal(
         payload, preview = _server_create_payload(db, arguments)
         expected_revision = None
     else:
-        if conversation.server_id is None:
-            raise AiActionValidationError("Tool ist in diesem Kontext nicht erlaubt")
-        server = db.get(Server, conversation.server_id)
-        if server is None:
-            raise AiActionValidationError("Server nicht gefunden")
+        # Dieselbe zentrale Rechtepruefung wie bei den Lesewerkzeugen. `rest`
+        # verliert dabei die `server_id`, damit die nachfolgenden
+        # Argumentpruefungen ihre exakten Schluesselmengen behalten.
+        server, rest = _resolve_server(db, user, rest)
 
         if tool_name == "propose_server_lifecycle":
             if set(rest) != {"operation"} or rest.get("operation") not in {"start", "stop", "restart"}:
@@ -971,7 +1038,7 @@ def create_proposal(
             }
             expected_revision = None
         elif tool_name == "propose_mod_install":
-            payload, preview = _mod_install_payload(db, server, arguments)
+            payload, preview = _mod_install_payload(db, server, rest)
             expected_revision = None
         else:
             payload, preview, expected_revision = _config_payload(db, server.id, rest)

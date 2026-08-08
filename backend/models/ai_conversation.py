@@ -9,12 +9,20 @@ from database import Base
 
 
 class AiConversation(Base):
-    """Globales oder serverbezogenes Gespraech eines einzelnen Benutzers."""
+    """Die eine, dauerhafte Unterhaltung eines Benutzers mit dem Assistenten.
+
+    Es gibt genau eine Zeile je Benutzer — erzwungen ueber den eindeutigen Index
+    ``uq_ai_conversations_user``. Der Serverbezug haengt nicht mehr hier, sondern
+    am einzelnen Werkzeugaufruf: ein Assistent, dem man erst sagen muss, welchen
+    Server er ansehen darf, bevor man ihn ueberhaupt fragen kann, ist keiner.
+    ``server_id`` bleibt nur als Spalte bestehen, damit die Migration nichts
+    loeschen muss; sie ist ab dieser Version immer ``NULL``.
+    """
 
     __tablename__ = "ai_conversations"
     __table_args__ = (
         Index("ix_ai_conversations_user_updated", "user_id", "updated_at"),
-        Index("ix_ai_conversations_server_updated", "server_id", "updated_at"),
+        Index("uq_ai_conversations_user", "user_id", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -27,6 +35,11 @@ class AiConversation(Base):
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     # Nur eine spaetere, explizit minimierte Zusammenfassung; nie Provider-Interna.
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Bis hierhin ist die Historie in `summary` zusammengefasst. Nachrichten
+    # davor fliessen nicht mehr einzeln in eine Anfrage (Kontextkompression).
+    summarized_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -60,6 +73,11 @@ class AiMessage(Base):
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Denkschritte des Modells, falls es welche geliefert hat. Bewusst eine
+    # eigene Spalte: sie sind eine Nebenausgabe, die der Benutzer aufklappen
+    # kann, und duerfen nicht in eine Folgeanfrage zurueckfliessen. In `content`
+    # waeren sie von der eigentlichen Antwort nicht mehr unterscheidbar.
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="complete")
     provider_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True

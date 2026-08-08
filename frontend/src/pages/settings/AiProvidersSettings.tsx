@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { KeyRound, Plus, Save, Trash2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, KeyRound, PlugZap, Plus, Save, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { aiApi, type AiProviderAdmin, type AiProviderWrite } from '@/api/ai'
+import { aiApi, type AiProviderAdmin, type AiProviderTestResult, type AiProviderWrite } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { Button, NumberStepper, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
@@ -149,6 +149,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
           onChange={(patch) => update(index, patch)}
           onSave={() => void save(provider, index)}
           onDelete={() => void remove(provider)}
+          onTest={provider.id === undefined ? undefined : () => aiApi.testProvider(provider.id as number)}
         />
       ))}
       {providers.length === 0 && !creating && (
@@ -179,6 +180,7 @@ function ProviderForm({
   onSaveDraft,
   onDelete,
   onCancel,
+  onTest,
 }: {
   draft: ProviderDraft
   disabled: boolean
@@ -189,10 +191,37 @@ function ProviderForm({
   onSaveDraft?: (draft: ProviderDraft) => void
   onDelete?: () => void
   onCancel?: () => void
+  onTest?: () => Promise<AiProviderTestResult>
 }) {
   const { t } = useTranslation()
   const [local, setLocal] = useState<ProviderDraft>({ ...initialDraft })
+  const [testResult, setTestResult] = useState<AiProviderTestResult | null>(null)
+  const [testing, setTesting] = useState(false)
   const draft = localDraft ? local : initialDraft
+
+  /**
+   * Schickt eine echte Mini-Anfrage an den Anbieter.
+   *
+   * Ohne das ist eine Fehlkonfiguration erst im Chat sichtbar — und dort sehen
+   * eine falsche Basis-URL, ein Tippfehler im Modellnamen und ein abgelaufener
+   * Key alle gleich aus.
+   */
+  const runTest = async () => {
+    if (!onTest || testing) return
+    setTesting(true)
+    setTestResult(null)
+    try {
+      setTestResult(await onTest())
+    } catch (error: unknown) {
+      setTestResult({
+        ok: false,
+        code: null,
+        detail: error instanceof Error ? error.message : null,
+      })
+    } finally {
+      setTesting(false)
+    }
+  }
   const change = (patch: Partial<ProviderDraft>) => {
     if (localDraft) setLocal((current) => ({ ...current, ...patch }))
     else onChange(patch)
@@ -208,7 +237,14 @@ function ProviderForm({
       <fieldset disabled={disabled} className="grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
         <ProviderInput label={t('ai.providers.name')} value={draft.name} onChange={(name) => change({ name })} />
         <ProviderInput label={t('ai.providers.model')} value={draft.default_model} onChange={(default_model) => change({ default_model })} />
-        <ProviderInput className="md:col-span-2" type="url" label={t('ai.providers.baseUrl')} value={draft.base_url} onChange={(base_url) => change({ base_url })} />
+        <div className="md:col-span-2">
+          <ProviderInput type="url" label={t('ai.providers.baseUrl')} value={draft.base_url} onChange={(base_url) => change({ base_url })} />
+          {/* Der haeufigste Konfigurationsfehler: die Doku vieler Anbieter zeigt
+              die vollstaendige Endpunkt-URL. MSM haengt "/chat/completions"
+              selbst an und schneidet es beim Speichern wieder ab — der Hinweis
+              erklaert, warum die gespeicherte URL kuerzer ist als die eingegebene. */}
+          <p className="mt-1.5 text-xs text-on-surface-variant">{t('ai.providers.baseUrlHint')}</p>
+        </div>
         <ProviderInput
           className="md:col-span-2"
           type="password"
@@ -244,8 +280,36 @@ function ProviderForm({
           <p className="mt-2 text-xs text-on-surface-variant">{t('ai.providers.tokenPriceHint')}</p>
         </div>
       </fieldset>
+      {testResult && (
+        <p
+          className={`flex items-start gap-2 rounded-lg border p-3 text-xs leading-5 ${
+            testResult.ok
+              ? 'border-status-success/30 bg-status-success/10 text-status-success'
+              : 'border-status-error/30 bg-status-error/10 text-status-error'
+          }`}
+          role="status"
+        >
+          {testResult.ok
+            ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />}
+          <span>
+            {testResult.ok
+              ? t('ai.providers.testOk')
+              : t(`ai.errors.codes.${testResult.code}`, { defaultValue: t('ai.providers.testFailed') })}
+            {/* Die Anbietermeldung im Original: sie benennt die Ursache
+                praeziser, als ein uebersetzter Code es je koennte. */}
+            {testResult.detail && <span className="mt-1 block font-mono text-[11px] opacity-80">{testResult.detail}</span>}
+          </span>
+        </p>
+      )}
       <div className="flex flex-wrap justify-end gap-2">
         {onDelete && <Button type="button" variant="destructive" disabled={disabled} onClick={onDelete}><Trash2 className="h-4 w-4" />{t('common.delete')}</Button>}
+        {onTest && (
+          <Button type="button" variant="secondary" disabled={disabled || testing} onClick={() => void runTest()}>
+            <PlugZap className="h-4 w-4" />
+            {testing ? t('common.loading') : t('ai.providers.test')}
+          </Button>
+        )}
         {onCancel && <Button type="button" variant="ghost" disabled={disabled} onClick={onCancel}>{t('common.cancel')}</Button>}
         <Button type="submit" disabled={disabled || !valid}><Save className="h-4 w-4" />{saving ? t('common.loading') : t('settings.save')}</Button>
       </div>

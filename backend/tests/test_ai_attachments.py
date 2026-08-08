@@ -45,7 +45,7 @@ def test_text_attachment_is_encrypted_and_added_as_untrusted_context(
     content = b"Server started successfully\n"
 
     response = client.post(
-        f"/api/ai/conversations/{conversation.id}/attachments",
+        "/api/ai/conversation/attachments",
         files={"file": ("latest.log", content, "text/plain")},
         cookies=user_cookies,
         headers=_csrf(user_cookies),
@@ -70,12 +70,12 @@ def test_secret_and_archive_payloads_are_rejected_without_storage(
     _enable_attachments(db, regular_user)
     conversation = _conversation(db, regular_user)
     secret = client.post(
-        f"/api/ai/conversations/{conversation.id}/attachments",
+        "/api/ai/conversation/attachments",
         files={"file": ("server.cfg", b"password=never-store-this", "text/plain")},
         cookies=user_cookies, headers=_csrf(user_cookies),
     )
     archive = client.post(
-        f"/api/ai/conversations/{conversation.id}/attachments",
+        "/api/ai/conversation/attachments",
         files={"file": ("disguised.txt", b"PK\x03\x04payload", "text/plain")},
         cookies=user_cookies, headers=_csrf(user_cookies),
     )
@@ -98,12 +98,12 @@ def test_attachment_filename_traversal_and_oversize_are_rejected(
     _enable_attachments(db, regular_user)
     conversation = _conversation(db, regular_user)
     traversal = client.post(
-        f"/api/ai/conversations/{conversation.id}/attachments",
+        "/api/ai/conversation/attachments",
         files={"file": ("../latest.log", b"safe", "text/plain")},
         cookies=user_cookies, headers=_csrf(user_cookies),
     )
     oversized = client.post(
-        f"/api/ai/conversations/{conversation.id}/attachments",
+        "/api/ai/conversation/attachments",
         files={"file": ("large.log", b"x" * (MAX_ATTACHMENT_BYTES + 1), "text/plain")},
         cookies=user_cookies, headers=_csrf(user_cookies),
     )

@@ -47,8 +47,6 @@ import { GuardianTab } from "@/features/guardian/GuardianTab";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
-import { AiChat } from "@/components/ai/AiChat";
-import { AiAutonomyPanel } from "@/components/ai/AiAutonomyPanel";
 
 type TabKey =
   | "files"
@@ -58,8 +56,7 @@ type TabKey =
   | "restarts"
   | "backups"
   | "databases" | "webhooks"
-  | "guardian"
-  | "ai";
+  | "guardian";
 
 const VALID_TABS: TabKey[] = [
   "files",
@@ -71,7 +68,6 @@ const VALID_TABS: TabKey[] = [
   "databases",
   "webhooks",
   "guardian",
-  "ai",
 ];
 
 interface ServerStatus {
@@ -279,17 +275,13 @@ export function ServerDetail() {
         icon: Shield,
       });
     }
-    if (canUseAi) {
-      list.push({ key: "ai", label: t("tabs.ai"), icon: Bot });
-    }
     return list;
-  }, [t, showModTab, gameInfo?.enable_exec, server?.guardian_enabled, canUseAi]);
+  }, [t, showModTab, gameInfo?.enable_exec, server?.guardian_enabled]);
 
   const rawTab = (searchParams.get("tab") || "files") as TabKey;
   const activeTab: TabKey =
     VALID_TABS.includes(rawTab)
       && (rawTab !== "mods" || showModTab)
-      && (rawTab !== "ai" || canUseAi)
       ? rawTab
       : "files";
 
@@ -602,6 +594,20 @@ export function ServerDetail() {
             <ArrowLeft className="w-4 h-4" />
             <span>{t("common.back", "Back")}</span>
           </button>
+          {/* Der KI-Chat lebt seit dem Einzelchat ausschliesslich unter /ai.
+              Der Verweis bleibt hier, damit der Weg dorthin nicht verloren
+              geht — die KI findet den Server dann selbst ueber list_my_servers. */}
+          {canUseAi && (
+            <button
+              type="button"
+              className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 py-2"
+              onClick={() => navigate("/ai")}
+              aria-label={t("tabs.ai")}
+            >
+              <Bot className="w-4 h-4" />
+              <span>{t("tabs.ai")}</span>
+            </button>
+          )}
           <button
             type="button"
             className="msm-btn-secondary inline-flex min-h-11 max-w-full items-center gap-2 px-3 py-2 text-left"
@@ -1022,14 +1028,6 @@ export function ServerDetail() {
         {activeTab === "webhooks" && <OutgoingWebhooksPanel serverId={serverId} />}
         {activeTab === "guardian" && (
           <GuardianTab server={server} onRefreshServer={fetchAll} />
-        )}
-        {activeTab === "ai" && canUseAi && (
-          <div className="space-y-4">
-            <AiChat serverId={serverId} />
-            {/* Die Freigabe gilt genau fuer diesen Server und steht deshalb hier,
-                nicht in den Panel-Einstellungen. */}
-            <AiAutonomyPanel serverId={serverId} />
-          </div>
         )}
       </div>
 

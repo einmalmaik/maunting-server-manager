@@ -31,7 +31,9 @@ class AiSkillResponse(BaseModel):
 
 
 class AiSkillRunRequest(BaseModel):
-    conversation_id: str = Field(min_length=36, max_length=36)
+    # Ein Skill ist ein Ablauf, kein Serverbezug. Der Server wird beim Start
+    # gewaehlt und anschliessend gegen die Rechte des Benutzers geprueft.
+    server_id: int = Field(ge=1)
 
 
 class AiSkillRunResponse(BaseModel):

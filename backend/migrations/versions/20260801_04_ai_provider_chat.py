@@ -141,7 +141,15 @@ def downgrade() -> None:
     op.drop_index("ix_ai_messages_conversation_created", table_name="ai_messages")
     op.drop_index("ix_ai_messages_conversation_id", table_name="ai_messages")
     op.drop_table("ai_messages")
-    op.drop_index("ix_ai_conversations_server_updated", table_name="ai_conversations")
+    # Bedingt: `20260808_02` entfernt diesen Index wieder, und das Modell fuehrt
+    # ihn seitdem nicht mehr. Eine Installation, deren Schema aus den Modellen
+    # erzeugt und anschliessend gestempelt wurde, hat ihn deshalb nie besessen —
+    # ein bedingungsloses DROP wuerde ihr Downgrade abbrechen.
+    if "ix_ai_conversations_server_updated" in {
+        index["name"]
+        for index in sa.inspect(op.get_bind()).get_indexes("ai_conversations")
+    }:
+        op.drop_index("ix_ai_conversations_server_updated", table_name="ai_conversations")
     op.drop_index("ix_ai_conversations_user_updated", table_name="ai_conversations")
     op.drop_index("ix_ai_conversations_server_id", table_name="ai_conversations")
     op.drop_index("ix_ai_conversations_user_id", table_name="ai_conversations")

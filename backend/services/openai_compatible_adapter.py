@@ -24,13 +24,32 @@ MAX_TOOL_ARGUMENT_CHARS = 128_000
 # nur je Chunk, nicht fuer die Gesamtdauer.
 MAX_STREAM_SECONDS = 300.0
 MAX_STREAM_FRAMES = 20_000
+# Fremdtext aus einem Fehler-Body. Bewusst knapp: er soll die Ursache benennen,
+# nicht eine fremde Seite in unsere Oberflaeche kopieren.
+MAX_PROVIDER_ERROR_BODY_BYTES = 4_096
+MAX_PROVIDER_DETAIL_CHARS = 200
+# Denkschritte koennen laenger werden als die Antwort selbst. Eigene Grenze,
+# damit ein endlos gruebelndes Modell nicht den Nachrichtenspeicher fuellt.
+MAX_REASONING_CHARS = 32_000
 
 
 class AiProviderRequestError(RuntimeError):
-    """Stabiler, secret-freier Providerfehler fuer den API-Rand."""
+    """Stabiler, secret-freier Providerfehler fuer den API-Rand.
 
-    def __init__(self, code: str) -> None:
+    ``detail`` ist eine stark gekuerzte, redigierte Fehlermeldung des Anbieters.
+    Ohne sie war jede Fehlkonfiguration im Panel dieselbe Sackgasse: eine falsche
+    Basis-URL, ein Tippfehler im Modellnamen und ein abgelaufener Key ergaben
+    alle dieselbe Meldung "Der KI-Anbieter hat die Anfrage abgelehnt". Die
+    Anbietermeldung sagt dagegen genau, was fehlt ("No endpoints found for
+    openrouter-free").
+
+    Der Text stammt von aussen und wird deshalb wie jeder Fremdtext behandelt:
+    redigiert, einzeilig und hart auf ``MAX_PROVIDER_DETAIL_CHARS`` gekuerzt.
+    """
+
+    def __init__(self, code: str, detail: str | None = None) -> None:
         self.code = code
+        self.detail = detail
         super().__init__(code)
 
 
@@ -39,6 +58,18 @@ class StreamUsage:
     total_tokens: int | None = None
     output_chars: int = 0
     tool_calls: list["ProviderToolCall"] = field(default_factory=list)
+    # Gesammelte Denkschritte des Modells. Getrennt von der Antwort, weil sie
+    # etwas anderes sind: eine Nebenausgabe, die der Benutzer aufklappen kann,
+    # aber die nie als Aussage des Panels gelesen werden darf.
+    reasoning_chars: int = 0
+
+
+@dataclass(frozen=True)
+class StreamChunk:
+    """Ein Stueck Providerausgabe — entweder Antwort oder Denkschritt."""
+
+    kind: str  # "content" | "reasoning"
+    text: str
 
 
 @dataclass(frozen=True)
@@ -76,11 +107,49 @@ async def _iter_sse_lines(
 def _error_code(status_code: int) -> str:
     if status_code in {401, 403}:
         return "AI_PROVIDER_AUTH_FAILED"
+    if status_code == 404:
+        # Getrennt von 400: ein 404 heisst so gut wie immer, dass die Basis-URL
+        # oder der Modellname nicht existiert. Das ist eine andere Handlung fuer
+        # den Betreiber als eine inhaltlich abgelehnte Anfrage.
+        return "AI_PROVIDER_ENDPOINT_NOT_FOUND"
     if status_code == 429:
         return "AI_PROVIDER_RATE_LIMITED"
     if status_code >= 500:
         return "AI_PROVIDER_UNAVAILABLE"
     return "AI_PROVIDER_REQUEST_REJECTED"
+
+
+async def _error_detail(response: httpx.Response) -> str | None:
+    """Zieht die Fehlermeldung des Anbieters aus einem Fehler-Body.
+
+    Der Body wird nur bei einem Fehlerstatus gelesen und nie gestreamt. Alles
+    daran ist Fremdtext: er wird redigiert, auf eine Zeile gebracht und gekuerzt.
+    """
+    try:
+        raw = await response.aread()
+    except (httpx.HTTPError, RuntimeError):
+        return None
+    text = raw[: MAX_PROVIDER_ERROR_BODY_BYTES].decode("utf-8", "replace")
+    message: str | None = None
+    try:
+        parsed = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        message = text
+    else:
+        if isinstance(parsed, dict):
+            error = parsed.get("error")
+            if isinstance(error, dict) and isinstance(error.get("message"), str):
+                message = error["message"]
+            elif isinstance(error, str):
+                message = error
+            elif isinstance(parsed.get("message"), str):
+                message = parsed["message"]
+        if message is None:
+            message = text
+    from services.ai_context_service import redact_sensitive_text
+
+    single_line = " ".join(redact_sensitive_text(message).split())
+    return single_line[:MAX_PROVIDER_DETAIL_CHARS] or None
 
 
 async def stream_chat_completion(
@@ -91,13 +160,24 @@ async def stream_chat_completion(
     messages: list[dict[str, Any]],
     usage: StreamUsage,
     tools: list[dict] | None = None,
-) -> AsyncIterator[str]:
-    """Normalisiert Provider-SSE zu reinen Text-Deltas.
+    reasoning: bool = False,
+) -> AsyncIterator[StreamChunk]:
+    """Normalisiert Provider-SSE zu Antwort- und Denkschritt-Stuecken.
 
     Providerframes, Response-Bodies und URLs verlassen diese Schicht nie. In
     Tool-Calls werden nur strukturell normalisiert. Ob ein Tool erlaubt ist
     und ob daraus lediglich ein Vorschlag entsteht, entscheidet die interne
     AI-Aktionsschicht; Providerdaten loesen hier niemals Aktionen aus.
+
+    ``reasoning`` schaltet die Ausgabe der Denkschritte an. Der Schalter ist
+    absichtlich generisch: gesendet wird ``{"reasoning": {"enabled": true}}``,
+    gelesen werden ``delta.reasoning`` und ``delta.reasoning_content``. Das
+    erste Feld nutzt OpenRouter, das zweite die meisten OpenAI-kompatiblen
+    Server (vLLM, DeepSeek, Ollama). Ein Anbieter, der beides nicht kennt,
+    ignoriert das zusaetzliche Feld — dann kommen schlicht keine Denkschritte,
+    und die Antwort funktioniert unveraendert. Genau deshalb wird hier kein
+    Modellkatalog gepflegt: eine Liste, welches Modell was kann, ist schneller
+    veraltet als sie gepflegt werden kann.
     """
     pinned_address = assert_provider_destination(provider)
     if provider.requires_api_key and not api_key:
@@ -114,6 +194,8 @@ async def stream_chat_completion(
     if tools:
         request_body["tools"] = tools
         request_body["tool_choice"] = "auto"
+    if reasoning:
+        request_body["reasoning"] = {"enabled": True}
     target = httpx.URL(provider.base_url.rstrip("/") + "/chat/completions")
     extensions: dict[str, Any] = {}
     if pinned_address is not None:
@@ -135,12 +217,15 @@ async def stream_chat_completion(
             extensions=extensions,
         ) as response:
             if response.status_code != 200:
+                detail = await _error_detail(response)
                 logger.warning(
                     "AI provider request failed provider_id=%s status=%s",
                     provider.id,
                     response.status_code,
                 )
-                raise AiProviderRequestError(_error_code(response.status_code))
+                raise AiProviderRequestError(
+                    _error_code(response.status_code), detail
+                )
 
             saw_done = False
             tool_buffers: dict[int, dict[str, str]] = {}
@@ -187,13 +272,28 @@ async def stream_chat_completion(
                                 buffer["arguments"] += function["arguments"]
                                 if len(buffer["arguments"]) > MAX_TOOL_ARGUMENT_CHARS:
                                     raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
+                if isinstance(delta, dict):
+                    # `reasoning` ist OpenRouter, `reasoning_content` der in
+                    # OpenAI-kompatiblen Servern verbreitete Name. Beide sind
+                    # reiner Text; die strukturierte Variante
+                    # (`reasoning_details`) wird bewusst nicht ausgewertet — sie
+                    # ist anbieterspezifisch und der Textstrom reicht fuer die
+                    # Anzeige vollstaendig aus.
+                    thought = delta.get("reasoning")
+                    if not isinstance(thought, str) or not thought:
+                        thought = delta.get("reasoning_content")
+                    if isinstance(thought, str) and thought:
+                        usage.reasoning_chars += len(thought)
+                        if usage.reasoning_chars <= MAX_REASONING_CHARS:
+                            yield StreamChunk("reasoning", thought)
+
                 content = delta.get("content") if isinstance(delta, dict) else None
                 if not isinstance(content, str) or not content:
                     continue
                 usage.output_chars += len(content)
                 if usage.output_chars > MAX_ASSISTANT_CHARS:
                     raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
-                yield content
+                yield StreamChunk("content", content)
             if not saw_done:
                 raise AiProviderRequestError("AI_PROVIDER_STREAM_INCOMPLETE")
             for index in sorted(tool_buffers):

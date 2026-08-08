@@ -56,6 +56,18 @@ class AiProviderAvailableResponse(BaseModel):
     available: bool
 
 
+class AiProviderTestResponse(BaseModel):
+    """Ergebnis eines echten Testaufrufs gegen den konfigurierten Endpunkt."""
+
+    ok: bool
+    # Stabiler MSM-Code, z. B. AI_PROVIDER_AUTH_FAILED. Uebersetzbar.
+    code: str | None = None
+    # Gekuerzte, redigierte Klartextmeldung des Anbieters. Sie sagt, *was*
+    # fehlt ("No endpoints found for openrouter-free") — genau das, was ein
+    # uebersetzter Code allein nicht leisten kann.
+    detail: str | None = None
+
+
 class AiUserCredentialUpdate(BaseModel):
     api_key: SecretStr = Field(min_length=1, max_length=4096)
 

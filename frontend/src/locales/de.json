@@ -141,7 +141,11 @@
         "delete": "KI-Provider konnte nicht gelöscht werden."
       },
       "tokenPrice": "Preis in Cent je 1 Mio. Tokens",
-      "tokenPriceHint": "Aus der Preisliste des Anbieters übernehmen. MSM schätzt keinen Preis: ohne diesen Wert werden Kosten mit null verbucht und das rollenbasierte Kostenlimit greift nicht."
+      "tokenPriceHint": "Aus der Preisliste des Anbieters übernehmen. MSM schätzt keinen Preis: ohne diesen Wert werden Kosten mit null verbucht und das rollenbasierte Kostenlimit greift nicht.",
+      "test": "Verbindung testen",
+      "testOk": "Verbindung erfolgreich. Der Anbieter hat geantwortet.",
+      "testFailed": "Der Test ist fehlgeschlagen.",
+      "baseUrlHint": "Nur die Basis-URL, z. B. https://openrouter.ai/api/v1 — ohne /chat/completions. MSM hängt den Endpunkt selbst an; ein mitkopierter Endpunktpfad wird beim Speichern entfernt."
     },
     "credentials": {
       "title": "Eigene KI-Zugangsdaten",
@@ -238,7 +242,8 @@
       "errors": {
         "load": "KI-Skills konnten nicht geladen werden.",
         "save": "KI-Skill konnte nicht gespeichert werden."
-      }
+      },
+      "selectServer": "Server für den Skill"
     },
     "attachments": {
       "add": "Sicheren Anhang hinzufügen",
@@ -246,22 +251,16 @@
       "supported": "TXT, Konfiguration, Log, PNG oder JPEG · maximal 256 KiB",
       "list": "Anhänge dieser Unterhaltung",
       "remove": "Anhang entfernen",
-      "error": "Anhang konnte nicht sicher verarbeitet werden."
+      "error": "Anhang konnte nicht sicher verarbeitet werden.",
+      "drop": "Datei hier ablegen"
     },
     "chat": {
       "title": "KI-Assistent",
       "description": "Persistente, kontingentierte Unterstützung für Panel- und Serveraufgaben.",
       "status": "Kontrollierter Kontext",
-      "new": "Neue Unterhaltung",
-      "newTitle": "Neue Unterhaltung",
-      "emptyConversations": "Noch keine Unterhaltungen.",
       "selectProvider": "Provider auswählen",
-      "delete": "Unterhaltung löschen",
-      "deleteConfirm": "Diese Unterhaltung und alle Nachrichten wirklich löschen?",
       "emptyTitle": "Womit kann ich helfen?",
       "emptyDescription": "Der Assistent erhält nur den freigegebenen, minimierten Kontext. Prüfe wichtige Aussagen vor operativen Änderungen.",
-      "you": "Du",
-      "assistant": "Assistent",
       "thinking": "Antwort wird erstellt …",
       "noResponse": "Keine Antwort erhalten.",
       "failed": "Diese Antwort konnte nicht abgeschlossen werden.",
@@ -285,6 +284,17 @@
         "unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar.",
         "provider": "Der KI-Provider hat die Anfrage abgelehnt.",
         "toolRejected": "Der angeforderte KI-Werkzeugaufruf wurde aus Sicherheitsgründen abgelehnt."
+      },
+      "clear": "Verlauf löschen",
+      "clearTitle": "Verlauf löschen?",
+      "clearConfirm": "Alle Nachrichten dieser Unterhaltung wirklich löschen? Bereits ausgeführte Aktionen bleiben im Audit-Log.",
+      "reasoning": "Nachdenken",
+      "thought": "Nachgedacht",
+      "noPermission": "Keine Berechtigung für den KI-Assistenten.",
+      "examples": {
+        "logs": "Mein Server startet nicht — schau dir mal die Logs an.",
+        "network": "Mein Minecraft-Server ist an, aber nicht erreichbar. Woran liegt das?",
+        "mods": "Welche Mods sind auf meinem Server installiert und gibt es Updates?"
       }
     },
     "actions": {
@@ -341,7 +351,41 @@
       "enable": "Einschalten",
       "save": "Kontingent speichern",
       "saved": "Freigabe gespeichert.",
-      "error": "Die Freigabe konnte nicht gespeichert werden."
+      "error": "Die Freigabe konnte nicht gespeichert werden.",
+      "short": "Autonom",
+      "scope": "Geltungsbereich",
+      "scopePanel": "Panelweit"
+    },
+    "tools": {
+      "list_my_servers": "Serverliste gelesen",
+      "list_blueprints": "Verfügbare Servertypen gelesen",
+      "read_node_capacity": "Hostkapazität gelesen",
+      "read_server_status": "Serverstatus gelesen",
+      "read_server_capacity": "Serverkapazität gelesen",
+      "read_server_logs": "Logs gelesen",
+      "read_config": "Konfigurationsdatei gelesen",
+      "read_server_ports": "Ports gelesen",
+      "read_server_mods": "Installierte Mods gelesen",
+      "read_server_backups": "Backups gelesen",
+      "read_guardian_incidents": "Autopilot-Vorfälle gelesen",
+      "read_ai_action_history": "Frühere KI-Aktionen gelesen",
+      "read_mod_updates": "Mod-Updates geprüft",
+      "search_workshop_mods": "Workshop durchsucht"
+    },
+    "errors": {
+      "codes": {
+        "AI_PROVIDER_AUTH_FAILED": "Der API-Key wurde vom Anbieter abgelehnt. Prüfe den Operator-Key oder deinen eigenen Key im Profil.",
+        "AI_PROVIDER_ENDPOINT_NOT_FOUND": "Der Anbieter kennt diese Adresse nicht. Die Basis-URL endet auf /v1 — nicht auf /chat/completions.",
+        "AI_PROVIDER_REQUEST_REJECTED": "Der Anbieter hat die Anfrage abgelehnt. Meist stimmt der Modellname nicht.",
+        "AI_PROVIDER_RATE_LIMITED": "Der Anbieter drosselt gerade. Versuche es in einem Moment erneut.",
+        "AI_PROVIDER_UNAVAILABLE": "Der Anbieter ist nicht erreichbar.",
+        "AI_PROVIDER_KEY_MISSING": "Für diesen Provider ist kein API-Key hinterlegt.",
+        "AI_PROVIDER_URL_REJECTED": "Die Basis-URL wurde aus Sicherheitsgründen abgelehnt.",
+        "AI_PROVIDER_STREAM_TIMEOUT": "Der Anbieter hat zu lange gebraucht.",
+        "AI_PROVIDER_STREAM_INCOMPLETE": "Die Antwort des Anbieters brach vorzeitig ab.",
+        "AI_PROVIDER_PROTOCOL_ERROR": "Der Anbieter hat eine unerwartete Antwort geliefert.",
+        "AI_PROVIDER_RESPONSE_TOO_LARGE": "Die Antwort des Anbieters war zu groß."
+      }
     }
   },
   "shell": {
