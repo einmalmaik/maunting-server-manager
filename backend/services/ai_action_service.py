@@ -37,9 +37,6 @@ MAX_DIFF_LINES = 200
 # Bewusst als Konstanten, weil dieselben Werte im Phase-4-Vertrag stehen.
 MAX_READ_CONFIG_CHARS = 24_000
 MAX_LOG_CHARS = 24_000
-CONFIG_EXTENSIONS = {
-    ".cfg", ".conf", ".ini", ".json", ".properties", ".toml", ".txt", ".yaml", ".yml"
-}
 # Obergrenzen fuer die Listen-Tools. Jede Zeile landet als unvertrauenswuerdiger
 # Text im Modellkontext und damit im Kostenbudget des Benutzers.
 MAX_LISTED_MODS = 60
@@ -439,8 +436,18 @@ def provider_tool_definitions() -> list[dict]:
             {"lines": {"type": "integer", "minimum": 1, "maximum": 200}},
         ),
         _server_function(
+            "list_server_files",
+            "Listet ein Verzeichnis im Serververzeichnis auf. Ohne `path` die "
+            "Wurzel. Nutze das, bevor du eine Datei liest — Dateinamen raten "
+            "fuehrt zu Fehlversuchen.",
+            {"path": {"type": "string", "maxLength": 256}},
+        ),
+        _server_function(
             "read_config",
-            "Liest eine erlaubte Text-Konfigurationsdatei revisionssicher.",
+            "Liest eine Textdatei des Servers revisionssicher — Konfigurationen, "
+            "Whitelists, Skripte, alles was der Dateimanager auch zeigt. "
+            "Antwortet mit `editable: false`, wenn die Datei nicht unveraendert "
+            "gelesen werden konnte; dann ist sie nicht automatisch aenderbar.",
             {"path": {"type": "string", "maxLength": 256}},
             ["path"],
         ),
@@ -1376,12 +1383,45 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
     return {"server_id": server.id, "available": True, "results": results}
 
 
+def is_binary_text(content: str) -> bool:
+    """Erkennt an, was `read_text` aus einer Nicht-Textdatei gemacht hat.
+
+    Der Dateizugriff dekodiert mit ``errors="replace"``: eine Binaerdatei kommt
+    als Folge von Ersatzzeichen (U+FFFD) zurueck, ein Nullbyte als solches. Beides
+    kann in einer echten Textdatei nicht in Menge auftreten.
+
+    Die Schwelle ist bewusst grosszuegig — eine einzelne kaputte Umlautstelle in
+    einer sonst brauchbaren Konfigurationsdatei soll nicht dazu fuehren, dass die
+    KI sie fuer binaer haelt und nicht mehr anfasst.
+    """
+    if "\x00" in content:
+        return True
+    if not content:
+        return False
+    return content.count("�") / len(content) > 0.02
+
+
 def _config_path(value: object) -> str:
+    """Prueft einen Pfad relativ zum Serververzeichnis.
+
+    **Keine Endungsliste mehr.** Frueher stand hier ein Filter auf neun
+    Erweiterungen, und alles andere war fuer die KI unsichtbar — Dateien **ohne**
+    Endung (`Dockerfile`, `.env`, `whitelist`, `banlist`), `.xml` (Ark, Unreal),
+    `.lua` (Garry's Mod, DayZ), `.sh`, `.md`. Ein Mensch bearbeitet die im
+    Dateimanager selbstverstaendlich; die Vorgabe des Betreibers ist, dass die
+    KI denselben Umfang hat und nicht "an einer anderen Stelle etwas anderes
+    einstellt".
+
+    Die Endung war ohnehin nie die Sicherheitsgrenze. Die liegt in `safe_path`,
+    das ueber `resolve()` und `relative_to()` auch Symlinks nach aussen abfaengt,
+    und in der Rechtepruefung. Was hier bleibt, ist die Formpruefung: relativ,
+    kein Ausbruch, keine Backslashes, begrenzte Laenge.
+    """
     if not isinstance(value, str) or not value or len(value) > 256 or "\\" in value:
-        raise AiActionValidationError("Ungueltiger Config-Pfad")
+        raise AiActionValidationError("Ungueltiger Dateipfad")
     path = PurePosixPath(value)
-    if path.is_absolute() or ".." in path.parts or path.suffix.lower() not in CONFIG_EXTENSIONS:
-        raise AiActionValidationError("Config-Pfad ist nicht erlaubt")
+    if path.is_absolute() or ".." in path.parts:
+        raise AiActionValidationError("Dateipfad ist nicht erlaubt")
     return path.as_posix()
 
 
@@ -1487,13 +1527,44 @@ def execute_read_tool(
             "truncated": len(redacted) > MAX_LOG_CHARS,
             "redacted": redacted != content,
         }
+    if tool_name == "list_server_files":
+        if set(arguments) - {"path"}:
+            raise AiActionValidationError("Datei-Auflistung hat ungueltige Argumente")
+        if not permission_service.has_server_permission(
+            db, user, server.id, "server.files.read"
+        ):
+            raise AiActionValidationError("Datei-Lesezugriff ist nicht erlaubt")
+        pfad = arguments.get("path") or ""
+        # Die Wurzel ist der leere Pfad; alles andere geht durch dieselbe
+        # Formpruefung wie beim Lesen.
+        geprueft = _config_path(pfad) if pfad else ""
+        from services.server_file_access_service import (
+            MAX_LISTED_ENTRIES,
+            list_server_directory,
+        )
+
+        return {
+            "server_id": server.id,
+            **list_server_directory(
+                db,
+                server_id=server.id,
+                relative_path=geprueft,
+                limit=MAX_LISTED_ENTRIES,
+            ),
+        }
+
     if set(arguments) != {"path"} or not permission_service.has_server_permission(
         db, user, server.id, "server.files.read"
     ):
-        raise AiActionValidationError("Config-Lesezugriff ist nicht erlaubt")
+        raise AiActionValidationError("Datei-Lesezugriff ist nicht erlaubt")
     path = _config_path(arguments["path"])
     result = read_server_text(db, server_id=server.id, relative_path=path)
     content = str(result["content"])
+    # Seit die Endungsliste weg ist, kann hier auch eine Binaerdatei landen —
+    # ein Mod-Jar, ein Weltdatei-Chunk. `read_text` dekodiert mit
+    # `errors="replace"`, aus einer solchen Datei wird also Ersatzzeichen-Salat.
+    # Wuerde das Modell ihn zurueckschreiben, waere die Datei zerstoert.
+    binaer = is_binary_text(content)
     redacted = redact_sensitive_text(content)
     truncated = len(redacted) > MAX_READ_CONFIG_CHARS
     was_redacted = redacted != content
@@ -1502,23 +1573,25 @@ def execute_read_tool(
     # nicht: ein darauf aufgebauter Vorschlag wuerde echte Zugangsdaten durch
     # den Platzhalter ersetzen bzw. die Datei hinter dem Limit abschneiden.
     # Ohne Revision kommt propose_config_update fuer diese Datei nicht durch.
-    editable = not (truncated or was_redacted)
+    editable = not (truncated or was_redacted or binaer)
+    grund = (
+        "Diese Datei ist keine Textdatei. Automatisch aendern wuerde sie "
+        "zerstoeren."
+        if binaer
+        else "Diese Datei kann nicht automatisch geaendert werden, weil sie "
+        "gekuerzt oder redigiert gelesen wurde. Bitte die Aenderung im "
+        "Dateimanager vornehmen."
+    )
     return {
         "path": path,
         "revision": result["revision"] if editable else None,
-        "content": redacted[:MAX_READ_CONFIG_CHARS],
+        # Von einer Binaerdatei geht nichts in den Kontext: der Salat kostet
+        # Tokens und sagt dem Modell nichts, was es nicht schon aus `binary`
+        # weiss.
+        "content": "" if binaer else redacted[:MAX_READ_CONFIG_CHARS],
         "truncated": truncated,
         "redacted": was_redacted,
+        "binary": binaer,
         "editable": editable,
-        **(
-            {}
-            if editable
-            else {
-                "edit_blocked_reason": (
-                    "Diese Datei kann nicht automatisch geaendert werden, weil sie "
-                    "gekuerzt oder redigiert gelesen wurde. Bitte die Aenderung im "
-                    "Dateimanager vornehmen."
-                )
-            }
-        ),
+        **({} if editable else {"edit_blocked_reason": grund}),
     }

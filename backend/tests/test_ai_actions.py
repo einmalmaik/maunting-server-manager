@@ -758,3 +758,140 @@ def test_the_backup_name_from_the_model_is_redacted_and_capped(
     vorschau = json.loads(proposal.preview_json)
     assert vorschau["name"].startswith("vor Mod-Update")
     assert len(vorschau["name"]) <= 64
+
+
+def test_the_ai_sees_the_same_files_a_human_sees_in_the_file_manager(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Die Endungsliste ist weg — das war die eigentliche Bitte des Betreibers.
+
+    Frueher liess `_config_path` nur neun Erweiterungen durch. Damit war fuer
+    die KI unsichtbar, was ein Mensch im Dateimanager selbstverstaendlich
+    bearbeitet: Dateien **ohne** Endung (`Dockerfile`, `.env`, `whitelist`),
+    `.xml` (Ark, Unreal), `.lua` (Garry's Mod, DayZ), `.sh`. Genau daraus
+    entstand die Sorge, die KI koenne "an einer anderen Stelle etwas anderes
+    einstellen".
+    """
+    server = _server(db, owner_user, tmp_path)
+    wurzel = Path(server.install_dir)
+    (wurzel / "server.properties").write_text("max-players=20\n", encoding="utf-8")
+    (wurzel / "whitelist").write_text("maik\n", encoding="utf-8")
+    (wurzel / "Game.ini").write_text("[/Script]\n", encoding="utf-8")
+    (wurzel / "start.sh").write_text("#!/bin/sh\necho los\n", encoding="utf-8")
+    (wurzel / "settings.xml").write_text("<config/>\n", encoding="utf-8")
+    (wurzel / "config").mkdir()
+
+    for pfad in ("whitelist", "start.sh", "settings.xml", "server.properties"):
+        gelesen = ai_action_service.execute_read_tool(
+            db, user=owner_user, tool_name="read_config",
+            arguments={"server_id": server.id, "path": pfad},
+        )
+        assert gelesen["editable"] is True, f"{pfad} muesste bearbeitbar sein"
+        assert gelesen["binary"] is False
+
+
+def test_listing_a_directory_replaces_guessing_file_names(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Ohne Verzeichnisbaum muesste die KI Namen raten.
+
+    Ein geratener Name ist entweder ein Treffer oder eine Fehlermeldung, aus der
+    man Namen abzaehlen kann — beides schlechter als eine Liste.
+    """
+    server = _server(db, owner_user, tmp_path)
+    wurzel = Path(server.install_dir)
+    (wurzel / "server.properties").write_text("x\n", encoding="utf-8")
+    (wurzel / "mods").mkdir()
+    # Das Chunk-Upload-Verzeichnis gehoert in keine Liste.
+    (wurzel / ".msm-uploads").mkdir()
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=owner_user, tool_name="list_server_files",
+        arguments={"server_id": server.id},
+    )
+
+    namen = {eintrag["name"] for eintrag in ergebnis["entries"]}
+    assert namen == {"server.properties", "mods"}
+    assert ergebnis["exists"] is True
+    assert any(e["is_dir"] for e in ergebnis["entries"])
+
+
+def test_a_binary_file_is_reported_as_such_instead_of_as_garbled_text(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Seit die Endungsliste weg ist, kann hier auch ein Mod-Jar landen.
+
+    Der Dateizugriff dekodiert mit `errors="replace"` — eine Binaerdatei kommt
+    als Ersatzzeichen-Salat zurueck. Wuerde das Modell ihn zurueckschreiben,
+    waere die Datei zerstoert. Der Salat kostet ausserdem Tokens und sagt nichts.
+    """
+    server = _server(db, owner_user, tmp_path)
+    (Path(server.install_dir) / "mod.jar").write_bytes(
+        b"PK\x03\x04" + bytes(range(256)) * 4
+    )
+
+    gelesen = ai_action_service.execute_read_tool(
+        db, user=owner_user, tool_name="read_config",
+        arguments={"server_id": server.id, "path": "mod.jar"},
+    )
+
+    assert gelesen["binary"] is True
+    assert gelesen["editable"] is False
+    assert gelesen["content"] == ""
+    assert gelesen["revision"] is None
+    assert "zerstoeren" in gelesen["edit_blocked_reason"]
+
+
+def test_a_write_proposal_with_binary_content_is_refused(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Zweite Schranke dort, wo der Schaden entstuende.
+
+    `read_config` kennzeichnet eine Binaerdatei bereits als nicht bearbeitbar.
+    Die Pruefung beim Vorschlagen greift auch dann, wenn der Inhalt auf einem
+    anderen Weg entstanden ist.
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+
+    with pytest.raises(ai_action_errors.AiActionValidationError, match="kein Text"):
+        ai_proposal_service.create_proposal(
+            db,
+            user=owner_user,
+            conversation=conversation,
+            tool_name="propose_config_update",
+            arguments={
+                "server_id": server.id,
+                "path": "irgendwas.dat",
+                "content": "\x00\x00binaer",
+                "expected_revision": None,
+                "reason": "Anpassen.",
+                "expected_effect": "Geaendert.",
+            },
+            correlation_id=str(uuid4()),
+        )
+
+
+def test_a_path_still_cannot_escape_the_server_directory(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Die Endung war nie die Sicherheitsgrenze — die ist unveraendert da.
+
+    Ihr Wegfall darf nicht mit einer Lockerung verwechselt werden: relativ,
+    kein `..`, keine Backslashes, begrenzte Laenge. Der Rest liegt in
+    `safe_path`, das ueber `resolve()` auch Symlinks nach aussen abfaengt.
+    """
+    server = _server(db, owner_user, tmp_path)
+
+    for boesartig in (
+        "../../etc/passwd",
+        "/etc/passwd",
+        "..\windows\system32\config",
+        "config/../../../etc/shadow",
+        "x" * 300 + ".cfg",
+    ):
+        with pytest.raises(ai_action_errors.AiActionValidationError):
+            ai_action_service.execute_read_tool(
+                db, user=owner_user, tool_name="read_config",
+                arguments={"server_id": server.id, "path": boesartig},
+            )

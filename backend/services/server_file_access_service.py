@@ -73,6 +73,95 @@ def _agent_error(exc: NodeClientError) -> HTTPException:
     return HTTPException(status_code=status_code, detail=exc.message or "Node-Agent Fehler")
 
 
+# Temporaeres Verzeichnis der Chunk-Uploads. Es gehoert nicht in eine
+# Dateiliste — weder fuer einen Menschen noch fuer die KI.
+CHUNK_TMP_DIRNAME = ".msm-uploads"
+
+# Wieviele Eintraege eine Auflistung hoechstens zurueckgibt. Fuer die
+# Oberflaeche gilt keine Grenze; fuer die KI schon, weil jeder Eintrag als
+# unvertrauenswuerdiger Text in den Modellkontext und damit ins Kostenbudget des
+# Benutzers geht. Ein Serververzeichnis mit tausenden Mod-Dateien wuerde eine
+# einzige Frage teuer machen.
+MAX_LISTED_ENTRIES = 200
+
+
+def list_server_directory(
+    db: Session, *, server_id: int, relative_path: str = "", limit: int | None = None
+) -> dict:
+    """Listet ein Verzeichnis im Serververzeichnis auf.
+
+    Dieselbe Logik, die der Dateimanager nutzt — lokaler Pfad oder Node-Agent,
+    dieselbe Pfadpruefung, dieselben Metadaten. Herausgeloest, weil die KI ohne
+    Verzeichnisbaum nicht wissen kann, welche Dateien es ueberhaupt gibt: sie
+    haette Namen raten muessen, und ein geratener Name ist entweder ein Treffer
+    oder eine Fehlermeldung, aus der man Namen abzaehlen kann.
+
+    ``limit`` kuerzt die Liste und meldet das ausdruecklich in ``truncated``.
+    Stillschweigend abzuschneiden waere schlimmer als gar nicht aufzulisten: das
+    Modell haelte die Datei, die es sucht, dann fuer nicht vorhanden.
+    """
+    server = _server(db, server_id)
+    agent = _agent(server, db)
+    if agent is not None:
+        try:
+            roh = agent.files_list(_agent_key(server), relative_path or "")
+        except NodeClientError as exc:
+            if exc.status_code == 404:
+                return {"path": relative_path, "entries": [], "exists": False}
+            raise _agent_error(exc) from exc
+        eintraege = [
+            {
+                "name": e.get("name", ""),
+                "is_dir": bool(e.get("is_dir")),
+                "size": int(e.get("size") or 0),
+                "modified": float(e.get("modified") or e.get("mtime") or 0),
+            }
+            for e in roh
+            if e.get("name") != CHUNK_TMP_DIRNAME
+        ]
+    else:
+        ziel = safe_path(server.install_dir, relative_path)
+        if not ziel.exists():
+            return {"path": relative_path, "entries": [], "exists": False}
+        if not ziel.is_dir():
+            raise HTTPException(status_code=400, detail="Pfad ist kein Verzeichnis")
+        wurzel = Path(server.install_dir).resolve(strict=False)
+        eintraege = []
+        try:
+            for item in sorted(
+                ziel.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())
+            ):
+                if item.name == CHUNK_TMP_DIRNAME and item.parent == wurzel:
+                    continue
+                try:
+                    daten = file_edit_service.metadata(item)
+                except (PermissionError, OSError):
+                    # Einzelne Eintraege ohne Leserechte ueberspringen, den Rest
+                    # zeigen — genau wie der Dateimanager.
+                    continue
+                eintraege.append({
+                    "name": item.name,
+                    "is_dir": item.is_dir(),
+                    "size": daten["size"],
+                    "modified": daten["modified"],
+                })
+        except PermissionError:
+            raise HTTPException(
+                status_code=403, detail="Keine Berechtigung für dieses Verzeichnis"
+            )
+
+    gesamt = len(eintraege)
+    if limit is not None and gesamt > limit:
+        eintraege = eintraege[:limit]
+    return {
+        "path": relative_path,
+        "entries": eintraege,
+        "exists": True,
+        "truncated": limit is not None and gesamt > limit,
+        "total": gesamt,
+    }
+
+
 def read_server_text(db: Session, *, server_id: int, relative_path: str) -> dict:
     server = _server(db, server_id)
     agent = _agent(server, db)

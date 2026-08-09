@@ -45,6 +45,7 @@ from services.ai_action_service import (
     _MUTEX_TOOLS,
     _config_path,
     _resolve_server,
+    is_binary_text,
 )
 from services.ai_redaction import redact_sensitive_text
 from services.ai_tool_registry import GLOBAL_WRITE_TOOLS, WERKZEUGE, WRITE_TOOLS
@@ -137,9 +138,16 @@ def _config_payload(db: Session, server_id: int, arguments: dict) -> tuple[dict,
     content = arguments["content"]
     expected = arguments["expected_revision"]
     if not isinstance(content, str) or len(content) > MAX_CONFIG_CHARS:
-        raise AiActionValidationError("Config-Inhalt ist zu gross oder ungueltig")
+        raise AiActionValidationError("Datei-Inhalt ist zu gross oder ungueltig")
     if redact_sensitive_text(content) != content:
-        raise AiActionValidationError("Config-Vorschlag enthaelt moegliche Zugangsdaten")
+        raise AiActionValidationError("Dateivorschlag enthaelt moegliche Zugangsdaten")
+    if is_binary_text(content):
+        # Zweite Schranke neben `read_config`. Dort ist eine Binaerdatei bereits
+        # als `editable: false` gekennzeichnet; hier wird sie auch dann
+        # abgewiesen, wenn der Vorschlag auf einem anderen Weg entstanden ist.
+        # Ein zurueckgeschriebener Ersatzzeichen-Salat ist Datenverlust, kein
+        # missglueckter Bearbeitungsversuch.
+        raise AiActionValidationError("Dateivorschlag ist kein Text")
     if expected is not None and (
         not isinstance(expected, str) or not expected.startswith("sha256:") or len(expected) != 71
     ):

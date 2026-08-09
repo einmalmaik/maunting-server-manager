@@ -41,7 +41,11 @@ from services.file_edit_service import FileRevisionConflict
 from services.dis_client import DisSidecarError
 from services.node_client import NodeClient, NodeClientError
 from services.node_service import resolve_server_node
-from services.server_file_access_service import read_server_text, write_server_text
+from services.server_file_access_service import (
+    CHUNK_TMP_DIRNAME,
+    read_server_text,
+    write_server_text,
+)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -60,8 +64,9 @@ MAX_CHUNKED_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024  # 10 GB
 MAX_SEARCH_RESULTS = 200
 # Verzeichnis fuer Chunked-Upload-Temp-Dateien, relativ zum Server-Root.
 # Liegt INNERHALB des Roots, damit `_safe_path` weiter greift und keine
-# externen Tempfile-Pfade entstehen.
-CHUNK_TMP_DIRNAME = ".msm-uploads"
+# externen Tempfile-Pfade entstehen. Der Name steht im Service, weil auch die
+# Auflistung fuer die KI ihn ausblenden muss — zwei Kopien waeren zwei Orte,
+# an denen er sich aendern kann.
 PERMISSION_REPAIR_CONTAINER_DIR = docker_service.PERMISSION_REPAIR_CONTAINER_DIR
 
 

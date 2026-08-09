@@ -82,6 +82,7 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "read_server_mods": Werkzeug("server_read"),
     "read_mod_updates": Werkzeug("server_read"),
     "search_workshop_mods": Werkzeug("server_read"),
+    "list_server_files": Werkzeug("server_read"),
     "read_server_backups": Werkzeug("server_read"),
     "read_guardian_incidents": Werkzeug("server_read"),
     "read_ai_action_history": Werkzeug("server_read"),
