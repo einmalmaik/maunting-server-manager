@@ -51,7 +51,23 @@ from services.openai_compatible_adapter import (
 
 
 logger = logging.getLogger(__name__)
-MAX_TOOL_CALLS = 4
+# Wieviel Ergebnistext eine Runde hoechstens erzeugen darf.
+#
+# Die Grenze war frueher eine feste Anzahl Aufrufe. Das war das falsche Mass:
+# zwanzig Statusabfragen sind zusammen kleiner als ein einziger Logauszug, und
+# `read_server_logs` liefert bis zu 24.000 Zeichen. Eine Zahl behandelt beide
+# gleich und wird dadurch entweder zu eng (die KI kann nicht durchfragen) oder
+# zu weit (ein halbes Kontextfenster in einer Runde).
+#
+# Gezaehlt wird deshalb das, was tatsaechlich knapp ist. Billige Aufrufe laufen
+# alle; sobald das Budget aufgebraucht ist, werden die restlichen vertagt statt
+# abgewiesen. Rund 48.000 Zeichen sind grob 12.000 Tokens — Platz fuer etwa
+# dreissig Statusabfragen oder zwei volle Logauszuege.
+MAX_TOOL_RESULT_CHARS_PER_ROUND = 48_000
+# Absolute Reissleine gegen ein durchgedrehtes Modell. Kein Mensch stellt eine
+# Frage, die mehr als das rechtfertigt; wer mehr schickt, antwortet nicht
+# gruendlich, sondern fehlerhaft.
+MAX_TOOL_CALLS = 32
 # Bis zu drei aufeinanderfolgende Read-Runden. Vorher war genau eine erlaubt:
 # ein Ablauf wie "Kapazitaet lesen → Blueprints lesen → Server vorschlagen" war
 # damit unmoeglich, weil die zweite Runde nur noch Write-Tools akzeptierte und
@@ -143,13 +159,20 @@ def _tool_followup_messages(
 ) -> tuple[list[dict], list[dict]]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
-    ``deferred`` sind Aufrufe, die in dieser Runde **nicht** ausgefuehrt werden
-    sollen — konkret Schreibwerkzeuge, die das Modell mit Lesewerkzeugen
-    vermischt hat. Sie bekommen trotzdem eine Antwort: das Protokoll verlangt
-    zu jeder `tool_call_id` genau ein Ergebnis, und ohne Begruendung wuesste
-    das Modell nicht, warum seine Aktion verschwunden ist.
+    ``deferred`` sind Paare aus Aufruf und Begruendung: Aufrufe, die in dieser
+    Runde bewusst **nicht** laufen — ein Schreibwerkzeug, das das Modell mit
+    Lesewerkzeugen vermischt hat, oder ein Aufruf ueber der Rundengrenze. Sie
+    bekommen trotzdem eine Antwort: das Protokoll verlangt zu jeder
+    `tool_call_id` genau ein Ergebnis, und ohne Begruendung wuesste das Modell
+    nicht, warum sein Aufruf verschwunden ist.
+
+    Ein **einzelner** fehlgeschlagener Aufruf beendet den Stream nicht. Fragt
+    das Modell nebenbei nach einem Server, den der Benutzer nicht sehen darf,
+    ist das eine Auskunft an das Modell — kein Grund, dem Benutzer die ganze
+    Antwort wegzunehmen. Die Rechtepruefung hat ihre Arbeit getan: ausgefuehrt
+    wurde nichts.
     """
-    deferred = list(deferred)
+    deferred = [(call, reason) for call, reason in deferred]
     if len(tool_calls) + len(deferred) > MAX_TOOL_CALLS:
         raise AiActionValidationError("Ungueltige Read-Tool-Sequenz")
     if any(call.name not in READ_TOOLS for call in tool_calls):
@@ -173,33 +196,40 @@ def _tool_followup_messages(
                         "arguments": json.dumps(call.arguments, ensure_ascii=True),
                     },
                 }
-                for call in [*tool_calls, *deferred]
+                for call in [*tool_calls, *(item[0] for item in deferred)]
             ],
         }
         results: list[dict] = [assistant_call]
-        for call in deferred:
-            results.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": json.dumps({
-                    "executed": False,
-                    "reason": (
-                        "Schreibaktionen laufen in einer eigenen Runde. Lies "
-                        "erst zu Ende und rufe die Aktion danach allein auf."
-                    ),
-                }, ensure_ascii=True, separators=(",", ":")),
-            })
         # Was der Benutzer im Chat sehen soll: welches Werkzeug lief und womit.
         # Bewusst ohne das Ergebnis — ein Logausschnitt gehoert nicht ungefragt
         # in den sichtbaren Verlauf, und die Antwort fasst ihn ohnehin zusammen.
         display: list[dict] = []
-        for call in tool_calls:
-            value = execute_read_tool(
-                db,
-                user=user,
-                tool_name=call.name,
-                arguments=call.arguments,
-            )
+        spent = 0
+        for index, call in enumerate(tool_calls):
+            # Budget statt Stueckzahl. Wer schon etwas bekommen hat und das
+            # Budget ausgeschoepft sieht, hoert auf — der Rest wird vertagt,
+            # nicht abgewiesen. Der erste Aufruf laeuft immer: sonst kaeme ein
+            # einzelner grosser Logauszug nie durch.
+            if index > 0 and spent >= MAX_TOOL_RESULT_CHARS_PER_ROUND:
+                deferred.append((call, (
+                    "Fuer diese Runde war kein Platz mehr. Der Aufruf lief "
+                    "nicht — stelle ihn in der naechsten Runde erneut."
+                )))
+                continue
+            failed_reason: str | None = None
+            try:
+                value = execute_read_tool(
+                    db,
+                    user=user,
+                    tool_name=call.name,
+                    arguments=call.arguments,
+                )
+            except AiActionValidationError as exc:
+                # Fehlendes Recht, fremde Server-ID, ungueltige Argumente. Das
+                # Modell soll es erfahren und weitermachen koennen; frueher riss
+                # ein solcher Aufruf die gesamte Antwort ab.
+                failed_reason = str(exc)
+                value = {"error": failed_reason}
             # Persistieren, damit eine Rueckfrage im selben Chat die gerade
             # gelesenen Daten noch sieht. Ohne das musste das Modell sie neu
             # holen — oder antwortete ohne sie, obwohl es sie selbst geholt hatte.
@@ -215,20 +245,25 @@ def _tool_followup_messages(
             # bis zu 24.000 Zeichen, die vollstaendig von aussen stammen koennen.
             # Anhaenge tragen dieses Label seit jeher (ai_attachment_service),
             # Tool-Ergebnisse bisher nicht — obwohl sie der offenere Kanal sind.
+            serialized = json.dumps(
+                {"untrusted": True, "tool": call.name, "data": value},
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            spent += len(serialized)
             results.append({
                 "role": "tool",
                 "tool_call_id": call.id,
-                "content": json.dumps(
-                    {"untrusted": True, "tool": call.name, "data": value},
-                    ensure_ascii=True,
-                    separators=(",", ":"),
-                ),
+                "content": serialized,
             })
             entry = {
                 "tool_name": call.name,
                 "server_id": call.arguments.get("server_id")
                 if isinstance(call.arguments.get("server_id"), int)
                 else None,
+                # Ein gescheiterter Aufruf gehoert sichtbar in den Verlauf.
+                # Sonst wirkt eine Antwort vollstaendig, der eine Auskunft fehlt.
+                **({"failed": True} if failed_reason else {}),
             }
             # Bei Skills gehoert der Name in den Verlauf, nicht nur "read_skill".
             # Der Betreiber will sehen, *welche* erlernte Vorgehensweise
@@ -242,6 +277,18 @@ def _tool_followup_messages(
                 entry["skill_status"] = value.get("status")
                 entry["skill_learned"] = bool(value.get("learned"))
             display.append(entry)
+        # Erst hier: die Ausfuehrungsschleife oben legt selbst weitere Aufrufe
+        # zurueck, sobald das Budget aufgebraucht ist. Wuerden die Absagen
+        # vorher erzeugt, blieben genau diese `tool_call_id` ohne Antwort — und
+        # manche Anbieter weisen die naechste Anfrage deswegen ab.
+        for call, reason in deferred:
+            results.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": json.dumps({
+                    "executed": False, "reason": reason,
+                }, ensure_ascii=True, separators=(",", ":")),
+            })
         db.commit()
         return results, display
 
@@ -585,7 +632,7 @@ async def stream_conversation_reply(
                 # nicht — das kann nur eine erfundene Antwort sein.
                 raise AiProviderRequestError("AI_PROVIDER_TOOL_SEQUENCE_INVALID")
 
-            deferred_writes: list = []
+            deferred_calls: list = []
             if kinds == {"read", "write"}:
                 # Gemischte Runde. Frueher riss das den ganzen Stream ab, und
                 # der Benutzer bekam statt einer Antwort einen Fehlercode — bei
@@ -596,8 +643,12 @@ async def stream_conversation_reply(
                 # bekommen eine Absage mit Begruendung zurueck. Das Modell holt
                 # sie dann in einer eigenen Runde nach. Die Trennung bleibt
                 # damit erhalten — sie wird nur erklaert statt erzwungen.
-                deferred_writes = [
-                    call for call in current_usage.tool_calls if call.name in WRITE_TOOLS
+                deferred_calls = [
+                    (call, (
+                        "Schreibaktionen laufen in einer eigenen Runde. Lies "
+                        "erst zu Ende und rufe die Aktion danach allein auf."
+                    ))
+                    for call in current_usage.tool_calls if call.name in WRITE_TOOLS
                 ]
                 current_usage.tool_calls = [
                     call for call in current_usage.tool_calls if call.name in READ_TOOLS
@@ -632,7 +683,7 @@ async def stream_conversation_reply(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 tool_calls=current_usage.tool_calls,
-                deferred=deferred_writes,
+                deferred=deferred_calls,
             )
             provider_messages.extend(followup)
             # Sichtbar machen, was die KI gerade getan hat. Ohne das wirkt eine

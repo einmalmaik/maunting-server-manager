@@ -28,6 +28,31 @@ Deshalb gilt:
 Kapazität wächst also weiterhin über **weitere MSM-Nodes**, nicht über weitere
 Panel-Replicas. Das Panel bleibt die zentrale Steuerung; die Nodes führen aus.
 
+### Rootless Docker ist der Grund für diesen Schnitt
+
+MSM läuft bewusst auf **rootless Docker**: Der Daemon gehört dem `msm`-User, der
+Socket liegt unter `/run/user/<uid>/docker.sock`, und Container starten mit
+`cap-drop`, `no-new-privileges` und ohne `--privileged` (siehe
+[`backend/services/docker_service.py`](../../backend/services/docker_service.py)).
+Das ist kein Detail der Installation, sondern die Sicherheitsgrundlage: ein
+ausgebrochener Gameserver-Container landet beim unprivilegierten `msm`-User,
+nicht bei `root`.
+
+Dieser Socket gehört zu einer User-Systemd-Session auf einem Host. **In einem Pod
+existiert er nicht** — und ihn per `hostPath` hineinzureichen würde genau die
+Trennung aufheben, für die er da ist.
+
+Deshalb setzt [`30-config.yaml`](30-config.yaml) `MSM_LOCAL_AGENT_ENABLED: "false"`.
+Das Panel ist im Cluster reine Steuerung und niemals selbst ein Node. Wer den
+Wert auf `true` dreht, bekommt beim Start Fehler aus dem internen
+PostgreSQL-Setup und der iptables-Baseline, die wie ein Docker-Problem aussehen,
+aber eine Fehlkonfiguration sind. `test_panel_pod_never_acts_as_a_node_itself`
+schreibt den Wert deshalb fest und prüft zusätzlich, dass kein Manifest einen
+Docker-Socket in den Pod mountet.
+
+Auf den Node-Hosts ändert sich nichts: dort läuft rootless Docker weiter wie in
+der klassischen Installation.
+
 ## Warum genau eine Panel-Replica
 
 `replicas: 1` und `strategy: Recreate` sind **keine Vorsichtsmaßnahme, sondern

@@ -196,17 +196,22 @@ async def test_unknown_tool_name_is_rejected(
 
 
 @pytest.mark.asyncio
-async def test_more_than_max_tool_calls_per_round_is_rejected(
+async def test_an_absurd_number_of_calls_is_still_rejected(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server = _server(db, "toomany")
+    """Nach oben bleibt ein Deckel.
+
+    Wer mehr schickt, als vier Runden je ausfuehren koennten, antwortet nicht
+    gruendlich, sondern fehlerhaft — das ist keine Vertagung wert.
+    """
+    server = _server(db, "absurd")
     _grant(db, regular_user, server=server, server_keys=("server.view",))
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
-    excess = ai_stream_service.MAX_TOOL_CALLS + 1
+    zuviel = ai_stream_service.MAX_TOOL_CALLS * ai_stream_service.MAX_TOOL_ROUNDS + 1
     _fake_stream(monkeypatch, [[
         ProviderToolCall(id=f"c{index}", name="read_server_status", arguments={"server_id": server.id})
-        for index in range(excess)
+        for index in range(zuviel)
     ]])
 
     events = await _collect(regular_user, conversation, provider)
@@ -639,3 +644,106 @@ async def test_a_second_write_round_follows_an_executed_action(
     # Beide Aktionen sind entstanden — die zweite konnte auf die erste folgen.
     assert db.query(AiActionProposal).count() == 2
     assert sum(1 for event in events if event.startswith("event: action")) == 2
+
+
+@pytest.mark.asyncio
+async def test_many_cheap_parallel_calls_all_run(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Fall aus dem Betrieb: "laufen alle Server und sind sie erreichbar?"
+
+    Ein starkes Modell stellt darauf je Server Status, Erreichbarkeit und Logs
+    nebeneinander — bei drei Servern sind das neun Aufrufe. Frueher endete das
+    mit `AI_TOOL_REJECTED`: der Benutzer bekam statt einer Antwort einen
+    Fehlercode, obwohl die KI nichts Unerlaubtes wollte.
+
+    Neun Statusabfragen sind zusammen kleiner als ein einziger Logauszug. Eine
+    Grenze, die beide gleich behandelt, ist das falsche Mass — deshalb zaehlt
+    jetzt der erzeugte Text und nicht die Stueckzahl. Billige Aufrufe laufen
+    alle.
+    """
+    server = _server(db, "viele")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(
+            id=f"c{index}", name="read_server_status", arguments={"server_id": server.id}
+        )
+        for index in range(9)
+    ]])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    ausgefuehrt = [event for event in events if event.startswith("event: tool")]
+    assert len(ausgefuehrt) == 9
+
+
+@pytest.mark.asyncio
+async def test_expensive_calls_stop_at_the_budget(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Teure Aufrufe hoeren auf, wenn das Kontextbudget aufgebraucht ist.
+
+    `read_server_logs` liefert bis zu 24.000 Zeichen. Zehn davon nebeneinander
+    waeren ein halbes Kontextfenster in einer einzigen Runde — die Antwort
+    wuerde daran scheitern, nicht an der Zahl der Aufrufe. Der Rest wird
+    vertagt, nicht abgewiesen: das Modell holt ihn in der naechsten Runde nach.
+    """
+    server = _server(db, "teuer")
+    _grant(db, regular_user, server=server, server_keys=(
+        "server.view", "server.console.read"
+    ))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    monkeypatch.setattr("services.docker_service.logs", lambda *_a, **_k: "x" * 30_000)
+    seen = _fake_stream(monkeypatch, [[
+        ProviderToolCall(
+            id=f"c{index}", name="read_server_logs",
+            arguments={"server_id": server.id, "lines": 200},
+        )
+        for index in range(10)
+    ]])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    ausgefuehrt = [event for event in events if event.startswith("event: tool")]
+    assert 0 < len(ausgefuehrt) < 10
+    # Und die uebrigen bekommen eine Begruendung, damit das Modell sie nachholt.
+    zurueck = [item for runde in seen for item in runde if item.get("role") == "tool"]
+    assert any("naechsten Runde" in str(item.get("content")) for item in zurueck)
+
+
+@pytest.mark.asyncio
+async def test_one_failing_call_does_not_kill_the_answer(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Aufruf auf einen fremden Server nimmt nicht die ganze Antwort mit.
+
+    Die Rechtepruefung hat ihre Arbeit getan — ausgefuehrt wurde nichts. Das
+    Modell erfaehrt es als Werkzeugergebnis und kann damit weiterarbeiten,
+    statt dass der Benutzer einen Fehlercode sieht.
+    """
+    meiner = _server(db, "meiner")
+    fremder = _server(db, "fremder")
+    _grant(db, regular_user, server=meiner, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, meiner)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    seen = _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="read_server_status", arguments={"server_id": meiner.id}),
+        ProviderToolCall(id="b", name="read_server_status", arguments={"server_id": fremder.id}),
+    ]])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    assert any(event.startswith("event: done") for event in events)
+    zurueck = [item for runde in seen for item in runde if item.get("role") == "tool"]
+    # Der eine Aufruf meldet einen Fehler, der andere ein Ergebnis.
+    assert any('"error"' in str(item.get("content")) for item in zurueck)
+    assert any(str(meiner.id) in str(item.get("content")) for item in zurueck)

@@ -77,6 +77,37 @@ def test_dis_sidecar_is_in_the_panel_pod_and_has_no_service() -> None:
             assert port.get("port") != 9100, "DIS-Port darf nicht exponiert werden"
 
 
+def test_panel_pod_never_acts_as_a_node_itself() -> None:
+    """Im Pod gibt es keinen Rootless-Docker-Socket — also auch keinen lokalen Agent.
+
+    MSM spricht auf dem Panel-Host mit dem Rootless-Docker-Socket des
+    Panel-Users (`/run/user/<uid>/docker.sock`, siehe `docker_service`). Genau
+    dieser Socket existiert in einem Pod nicht: er gehoert zu einer
+    User-Systemd-Session auf einem Host.
+
+    Steht `MSM_LOCAL_AGENT_ENABLED` auf `true`, versucht das Panel beim Start
+    unter anderem den internen PostgreSQL-Container und die
+    iptables-Baseline anzulegen — beides ueber genau diesen Socket. Der Fehler
+    faellt erst zur Laufzeit auf und sieht aus wie ein Docker-Problem, nicht
+    wie eine Fehlkonfiguration. Deshalb ist der Wert hier festgeschrieben.
+    """
+    config_maps = {
+        cm["metadata"]["name"]: cm.get("data", {}) for cm in _by_kind("ConfigMap")
+    }
+    assert config_maps.get("msm-config", {}).get("MSM_LOCAL_AGENT_ENABLED") == "false"
+
+    # Gegenprobe: kein Manifest darf einen Docker-Socket in den Pod mounten.
+    for doc in _documents():
+        spec = doc.get("spec", {}).get("template", {}).get("spec")
+        if not spec:
+            continue
+        for volume in spec.get("volumes", []):
+            host_path = (volume.get("hostPath") or {}).get("path", "")
+            assert "docker.sock" not in host_path, (
+                f"{volume['name']} mountet einen Docker-Socket in den Panel-Pod"
+            )
+
+
 def test_no_secret_value_is_inlined_in_any_manifest() -> None:
     """Geheimnisse kommen ausschliesslich per secretKeyRef aus dem Secret."""
     secret_names = {
