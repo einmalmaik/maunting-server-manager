@@ -134,21 +134,47 @@ export interface AiMemoryPreference {
   notice_hidden: boolean
 }
 
-export interface AiSkillStep {
-  tool_name: string
-  arguments: Record<string, unknown>
-}
-
-export interface AiSkill {
-  id: string
+/**
+ * Ein Skill ist Text, kein Programm.
+ *
+ * `scope` sagt, woher er kommt: `shipped` liegt als Datei im Repo und kommt mit
+ * jedem MSM-Update, `global` gilt panelweit, `team` nur im jeweiligen Team.
+ * Mitgelieferte Skills sind nicht änderbar — aber überschreibbar, indem man
+ * einen globalen mit demselben Schlüssel anlegt.
+ */
+export interface AiSkillSummary {
+  /** Nur bei Datenbank-Skills gesetzt; mitgelieferte haben keine Zeile. */
+  id: string | null
   skill_key: string
-  version: number
   name: string
   description: string
-  steps: AiSkillStep[]
+  scope: 'shipped' | 'global' | 'team'
+  origin: 'shipped' | 'operator' | 'ai'
+  team_id: number | null
+  status: 'active' | 'pending'
+  enabled: boolean
+  editable: boolean
+}
+
+export interface AiSkillDetail extends AiSkillSummary {
+  body: string
+}
+
+/** Eine Datenbankzeile in der Verwaltung — auch abgeschaltete und wartende. */
+export interface AiSkillManaged {
+  id: string
+  skill_key: string
+  name: string
+  description: string
+  body: string
+  scope: 'global' | 'team'
+  origin: 'operator' | 'ai'
+  team_id: number | null
+  status: 'active' | 'pending'
   enabled: boolean
   created_by: number | null
   created_at: string
+  updated_at: string
 }
 
 export interface AiAttachment {
@@ -160,16 +186,6 @@ export interface AiAttachment {
   status: 'quarantined' | 'ready' | 'rejected'
   rejection_code: string | null
   created_at: string
-}
-
-/** Verhindert, dass historische Skill-Versionen versehentlich auswählbar werden. */
-export function latestAiSkillVersions(skills: AiSkill[]): AiSkill[] {
-  const latest = new Map<string, AiSkill>()
-  for (const skill of skills) {
-    const current = latest.get(skill.skill_key)
-    if (!current || skill.version > current.version) latest.set(skill.skill_key, skill)
-  }
-  return [...latest.values()]
 }
 
 export type AiStreamEvent =
@@ -266,17 +282,22 @@ export const aiApi = {
   answerMemoryNotice: (enable: boolean, hideFuture: boolean) => api<AiMemoryPreference>('/ai/memory/notice', {
     method: 'POST', body: JSON.stringify({ enable, hide_future: hideFuture }),
   }),
-  listSkills: () => api<AiSkill[]>('/ai/skills'),
-  listManagedSkills: () => api<AiSkill[]>('/ai/skills/manage'),
-  createSkill: (payload: Omit<AiSkill, 'id' | 'version' | 'created_by' | 'created_at'> & { skill_key: string }) => api<AiSkill>('/ai/skills', {
-    method: 'POST', body: JSON.stringify(payload),
+  /** Das Verzeichnis ohne Texte — dasselbe, das auch die KI im Prompt sieht. */
+  listSkills: () => api<AiSkillSummary[]>('/ai/skills'),
+  listManagedSkills: () => api<AiSkillManaged[]>('/ai/skills/manage'),
+  listPendingSkills: () => api<AiSkillManaged[]>('/ai/skills/pending'),
+  readSkill: (skillKey: string) => api<AiSkillDetail>(`/ai/skills/${encodeURIComponent(skillKey)}`),
+  saveSkill: (payload: {
+    skill_key: string; name: string; description: string; body: string
+    team_id: number | null; enabled: boolean
+  }) => api<AiSkillManaged>('/ai/skills', { method: 'PUT', body: JSON.stringify(payload) }),
+  toggleSkill: (skillId: string, enabled: boolean) => api<AiSkillManaged>(`/ai/skills/${skillId}/enabled`, {
+    method: 'PUT', body: JSON.stringify({ enabled }),
   }),
-  updateSkill: (skillKey: string, payload: Omit<AiSkill, 'id' | 'version' | 'created_by' | 'created_at'>) => api<AiSkill>(`/ai/skills/${skillKey}`, {
-    method: 'PUT', body: JSON.stringify(payload),
+  approveSkill: (skillId: string) => api<AiSkillManaged>(`/ai/skills/${skillId}/approve`, {
+    method: 'POST',
   }),
-  runSkill: (skillId: string, serverId: number) => api<{ skill_id: string; version: number; read_results: Array<Record<string, unknown>>; proposals: Array<{ id: string; tool_name: string; preview: Record<string, unknown>; status: string }> }>(`/ai/skills/${skillId}/run`, {
-    method: 'POST', body: JSON.stringify({ server_id: serverId }),
-  }),
+  deleteSkill: (skillId: string) => api(`/ai/skills/${skillId}`, { method: 'DELETE' }),
   listAttachments: () => api<AiAttachment[]>('/ai/conversation/attachments'),
   uploadAttachment: (file: File) => {
     const body = new FormData()

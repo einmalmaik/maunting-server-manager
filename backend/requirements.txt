@@ -54,3 +54,10 @@ model2vec==0.8.2
 # Transitiv durch model2vec, hier gepinnt, weil ai_embedding_service direkt
 # damit rechnet (Normalisierung, Skalarprodukt).
 numpy==2.5.1
+# Ebenfalls transitiv (huggingface_hub verlangt pyyaml>=5.1), hier gepinnt,
+# weil ai_skill_service direkt damit den Frontmatter der mitgelieferten
+# Skill-Dateien liest. Ein eigener Miniparser waere weniger Abhaengigkeit,
+# aber er wuerde bei Doppelpunkten, Anfuehrungszeichen und mehrzeiligen Werten
+# still das Falsche tun — und genau solche Zeichen stehen in
+# Skill-Beschreibungen. Gelesen wird ausschliesslich mit `safe_load`.
+pyyaml==6.0.2

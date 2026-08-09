@@ -1,158 +1,416 @@
-"""Versionierte Skills, deren Schritte strikt auf MSM-Tools begrenzt sind."""
+"""Skills als Prosa: mitgeliefert, vom Betreiber gepflegt oder selbst gelernt.
+
+Ein Skill ist eine Textdatei mit zwei Pflichtangaben im Kopf (`name`,
+`description`) und beliebigem Fliesstext darunter. Das Modell liest den Text
+und entscheidet weiter selbst — es fuehrt ihn nicht aus.
+
+**Stufenweises Laden.** Dauerhaft im Systemprompt stehen nur Name und
+Beschreibung, rund hundert Tokens je Skill. Der Text kommt erst, wenn das
+Modell ihn mit `read_skill` anfordert. Fuenfzig Skills kosten damit nichts,
+solange keiner passt.
+
+**Drei Herkuenfte, ein Verzeichnis.**
+
+- *mitgeliefert* — Dateien in `backend/ai_skills/`. Sie liegen bewusst nicht in
+  der Datenbank: so verbessert ein MSM-Update die KI jeder Installation, ohne
+  Migration. Nicht aenderbar, aber abschaltbar.
+- *global* — vom Betreiber gepflegt oder von der KI gelernt. Eine globale
+  Datenbankzeile mit demselben Schluessel **ersetzt** die mitgelieferte Datei;
+  das ist der Weg, eine Vorgabe zu ueberschreiben, ohne sie zu verlieren.
+- *Team* — gehoert genau einem Team und erreicht nur dessen Mitglieder.
+
+Persoenliche Skills gibt es bewusst nicht: wer allein arbeitet, hat sein
+Ein-Mann-Team, und damit gilt ueberall dieselbe Regel.
+
+**Warum Prosa und kein Makro.** Der Vorgaenger war eine gespeicherte Folge von
+Tool-Aufrufen. Prosa fuehrt nichts aus — ein selbst gelernter Skill kann damit
+nichts, was das Modell nicht ohnehin duerfte, er aendert nur die
+Herangehensweise. Genau deshalb ist Selbstlernen hier vertretbar, waehrend das
+automatische Erzeugen ausfuehrbarer Schrittfolgen es nicht waere.
+"""
 
 from __future__ import annotations
 
 import json
-from pathlib import PurePosixPath
+import logging
+import re
+import threading
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID, uuid4
 
+import yaml
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import AiSkill, User
-from services import audit_service
-from services.ai_action_service import (
-    CONFIG_EXTENSIONS,
-    AiActionValidationError,
-    create_proposal,
-    execute_read_tool,
-)
-from services.ai_chat_service import get_or_create_primary_conversation
+from services import ai_embedding_service, audit_service, permission_service, team_service
+from services.ai_embedding_service import EMBEDDING_DIMENSIONS
 from services.ai_redaction import redact_sensitive_text
-from services.ai_usage_service import complete_ai_usage, fail_ai_usage, reserve_ai_usage
 
 
-# Bewusst eine eigene, engere Allowlist als der Chat. Ein Skill ist ein
-# gespeicherter Ablauf, der spaeter ohne erneute Pruefung des Inhalts laeuft —
-# `propose_config_update` und `propose_server_create` gehoeren deshalb nicht
-# hinein, `search_workshop_mods` ebenso wenig (eine gespeicherte Suchanfrage ist
-# kein wiederverwendbarer Ablauf).
-SKILL_READ_TOOLS = {
-    "read_server_status",
-    "read_server_capacity",
-    "read_server_logs",
-    "read_config",
-    "read_server_ports",
-    "read_server_mods",
-    "read_server_backups",
-    "read_guardian_incidents",
-    "read_ai_action_history",
-    "read_mod_updates",
-}
-SKILL_WRITE_TOOLS = {"propose_server_lifecycle", "propose_backup"}
-SKILL_TOOLS = SKILL_READ_TOOLS | SKILL_WRITE_TOOLS
-# Diese Schritte nehmen keine Argumente entgegen.
-SKILL_NO_ARGUMENT_TOOLS = (SKILL_READ_TOOLS - {"read_server_logs", "read_config"}) | {
-    "propose_backup"
-}
+logger = logging.getLogger(__name__)
+
+MAX_BODY_CHARS = 12_000
+MAX_NAME_CHARS = 100
+MAX_DESCRIPTION_CHARS = 500
+# So viele Skills stehen hoechstens gleichzeitig im Systemprompt. Darueber
+# entscheidet die Bedeutungsaehnlichkeit zur Frage, welche mitkommen.
+MAX_INDEXED_SKILLS = 25
+MAX_SKILLS_PER_SCOPE = 200
+_EMBEDDING_MODEL_TAG = "potion-multilingual-128M"
+_SKILL_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n(.*)\Z", re.DOTALL)
+
+_shipped_lock = threading.Lock()
+_shipped_cache: dict[str, "ShippedSkill"] | None = None
 
 
-def _validate_step(step: dict) -> dict:
-    if set(step) != {"tool_name", "arguments"}:
-        raise HTTPException(status_code=422, detail="Skill-Schritt ist ungueltig")
-    tool_name = step["tool_name"]
-    arguments = step["arguments"]
-    if tool_name not in SKILL_TOOLS or not isinstance(arguments, dict):
-        raise HTTPException(status_code=422, detail="Skill-Tool ist nicht erlaubt")
-    if redact_sensitive_text(json.dumps(arguments, ensure_ascii=True)) != json.dumps(
-        arguments, ensure_ascii=True
-    ):
-        raise HTTPException(status_code=422, detail="Skill darf keine Zugangsdaten enthalten")
-    if tool_name in SKILL_NO_ARGUMENT_TOOLS and arguments:
-        raise HTTPException(status_code=422, detail="Skill-Schritt akzeptiert keine Argumente")
-    if tool_name == "read_server_logs":
-        if set(arguments) - {"lines"}:
-            raise HTTPException(status_code=422, detail="Log-Schritt ist ungueltig")
-        lines = arguments.get("lines", 100)
-        if not isinstance(lines, int) or isinstance(lines, bool) or not 1 <= lines <= 200:
-            raise HTTPException(status_code=422, detail="Log-Schritt ist ungueltig")
-    if tool_name == "read_config":
-        path = arguments.get("path")
-        if set(arguments) != {"path"} or not isinstance(path, str) or len(path) > 256:
-            raise HTTPException(status_code=422, detail="Config-Schritt ist ungueltig")
-        if (
-            path.startswith(("/", "\\"))
-            or "\\" in path
-            or ".." in path.split("/")
-            or PurePosixPath(path).suffix.lower() not in CONFIG_EXTENSIONS
-        ):
-            raise HTTPException(status_code=422, detail="Config-Pfad ist nicht erlaubt")
-    if tool_name == "propose_server_lifecycle" and (
-        set(arguments) != {"operation"}
-        or arguments.get("operation") not in {"start", "stop", "restart"}
-    ):
-        raise HTTPException(status_code=422, detail="Lifecycle-Schritt ist ungueltig")
-    return {"tool_name": tool_name, "arguments": arguments}
+@dataclass(frozen=True)
+class ShippedSkill:
+    """Ein mit MSM ausgelieferter Skill. Liegt als Datei vor, nie in der DB."""
+
+    skill_key: str
+    name: str
+    description: str
+    body: str
 
 
-def _steps(value: list[dict]) -> list[dict]:
-    if not 1 <= len(value) <= 20:
-        raise HTTPException(status_code=422, detail="Skill benoetigt 1 bis 20 Schritte")
-    return [_validate_step(step) for step in value]
+@dataclass(frozen=True)
+class SkillView:
+    """Ein Skill, wie ihn Modell und Oberflaeche sehen — Datei oder Datenbank."""
+
+    skill_key: str
+    name: str
+    description: str
+    scope: str            # "shipped" | "global" | "team"
+    origin: str           # "shipped" | "operator" | "ai"
+    team_id: int | None
+    status: str           # "active" | "pending"
+    enabled: bool
+    editable: bool
+    id: str | None = None
 
 
-def response_steps(row: AiSkill) -> list[dict]:
+def shipped_directory() -> Path:
+    return Path(__file__).resolve().parent.parent / "ai_skills"
+
+
+def _parse_shipped(path: Path) -> ShippedSkill | None:
+    """Liest eine Skill-Datei. Bei Formfehlern ``None`` statt eines Absturzes.
+
+    Eine beschaedigte mitgelieferte Datei darf das Panel nicht am Start
+    hindern — sie faellt aus dem Verzeichnis, wird protokolliert, und alles
+    Uebrige laeuft weiter.
+    """
     try:
-        value = json.loads(row.steps_json)
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail="Skill ist nicht verfuegbar") from exc
-    if not isinstance(value, list):
-        raise HTTPException(status_code=500, detail="Skill ist nicht verfuegbar")
-    return _steps(value)
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Skill-Datei %s nicht lesbar (%s)", path.name, type(exc).__name__)
+        return None
 
+    match = _FRONTMATTER_RE.match(raw)
+    if match is None:
+        logger.warning("Skill-Datei %s hat keinen gueltigen Kopf", path.name)
+        return None
+    try:
+        meta = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        logger.warning("Skill-Datei %s hat einen ungueltigen Kopf", path.name)
+        return None
+    if not isinstance(meta, dict):
+        logger.warning("Skill-Datei %s hat einen ungueltigen Kopf", path.name)
+        return None
 
-def latest_skills(db: Session, *, include_disabled: bool) -> list[AiSkill]:
-    rows = db.query(AiSkill).order_by(AiSkill.skill_key, AiSkill.version.desc()).all()
-    latest: dict[str, AiSkill] = {}
-    for row in rows:
-        latest.setdefault(row.skill_key, row)
-    return [row for row in latest.values() if include_disabled or row.enabled]
-
-
-def create_version(
-    db: Session, *, user: User, skill_key: str, name: str, description: str,
-    steps: list[dict], enabled: bool, require_existing: bool,
-) -> AiSkill:
-    latest = db.query(AiSkill).filter(AiSkill.skill_key == skill_key).order_by(
-        AiSkill.version.desc()
-    ).first()
-    if require_existing and latest is None:
-        raise HTTPException(status_code=404, detail="Skill nicht gefunden")
-    if not require_existing and latest is not None:
-        raise HTTPException(status_code=409, detail="Skill-Key existiert bereits")
-    safe_name = name.strip()
-    safe_description = description.strip()
-    if (
-        not safe_name
-        or not safe_description
-        or redact_sensitive_text(safe_name) != safe_name
-        or redact_sensitive_text(safe_description) != safe_description
-    ):
-        raise HTTPException(status_code=422, detail="Skill-Metadaten sind ungueltig")
-    normalized_steps = _steps(steps)
-    row = AiSkill(
-        id=str(uuid4()), skill_key=skill_key, version=(latest.version + 1 if latest else 1),
-        name=safe_name, description=safe_description,
-        steps_json=json.dumps(normalized_steps, ensure_ascii=True, separators=(",", ":")),
-        enabled=enabled, created_by=user.id,
+    name = str(meta.get("name") or "").strip()
+    description = str(meta.get("description") or "").strip()
+    body = match.group(2).strip()
+    key = path.stem.lower()
+    if not name or not description or not body or not _SKILL_KEY_RE.match(key):
+        logger.warning("Skill-Datei %s ist unvollstaendig", path.name)
+        return None
+    return ShippedSkill(
+        skill_key=key,
+        name=name[:MAX_NAME_CHARS],
+        description=description[:MAX_DESCRIPTION_CHARS],
+        body=body[:MAX_BODY_CHARS],
     )
-    db.add(row)
+
+
+def shipped_skills() -> dict[str, ShippedSkill]:
+    """Alle mitgelieferten Skills, einmal gelesen und dann gehalten.
+
+    Die Dateien aendern sich nur bei einem Update, und ein Update startet den
+    Prozess neu. Ein Zwischenspeicher spart damit bei jeder Chatnachricht ein
+    halbes Dutzend Dateizugriffe, ohne je veraltet zu sein.
+    """
+    global _shipped_cache
+    if _shipped_cache is not None:
+        return _shipped_cache
+    with _shipped_lock:
+        if _shipped_cache is not None:
+            return _shipped_cache
+        directory = shipped_directory()
+        found: dict[str, ShippedSkill] = {}
+        if directory.is_dir():
+            for path in sorted(directory.glob("*.md")):
+                parsed = _parse_shipped(path)
+                if parsed is not None:
+                    found[parsed.skill_key] = parsed
+        else:
+            logger.warning("Skill-Verzeichnis %s fehlt", directory)
+        _shipped_cache = found
+        return found
+
+
+def reset_shipped_cache_for_tests() -> None:
+    global _shipped_cache
+    with _shipped_lock:
+        _shipped_cache = None
+
+
+# ── Sichtbarkeit ──────────────────────────────────────────────────────
+
+
+def _scope_identity(team_id: int | None) -> str:
+    return "global" if team_id is None else f"team:{team_id}"
+
+
+def visible_skills(db: Session, user: User) -> list[SkillView]:
+    """Das vollstaendige Skill-Verzeichnis fuer diesen Benutzer.
+
+    Reihenfolge der Ueberlagerung: mitgeliefert zuerst, danach die Datenbank.
+    Eine globale Zeile mit demselben Schluessel ersetzt die Datei — das ist der
+    Weg, eine MSM-Vorgabe zu ueberschreiben. Eine abgeschaltete oder noch nicht
+    freigegebene Zeile blendet die Datei aus, ohne selbst zu gelten: sonst
+    koennte man eine mitgelieferte Vorgabe nicht loswerden.
+
+    Teamgrenzen entstehen hier ueber `scope_identity`, nicht ueber eine
+    nachtraegliche Filterung — wer nicht im Team ist, dessen Abfrage fragt gar
+    nicht erst danach.
+    """
+    by_key: dict[str, SkillView] = {}
+    for skill in shipped_skills().values():
+        by_key[skill.skill_key] = SkillView(
+            skill_key=skill.skill_key, name=skill.name, description=skill.description,
+            scope="shipped", origin="shipped", team_id=None, status="active",
+            enabled=True, editable=False,
+        )
+
+    team_ids = team_service.user_team_ids(db, user)
+    scopes = ["global", *[f"team:{team_id}" for team_id in team_ids]]
+    rows = (
+        db.query(AiSkill)
+        .filter(AiSkill.scope_identity.in_(scopes))
+        .order_by(AiSkill.skill_key)
+        .all()
+    )
+    for row in rows:
+        if not row.enabled or row.status != "active":
+            if row.team_id is None:
+                by_key.pop(row.skill_key, None)
+            continue
+        by_key[row.skill_key] = SkillView(
+            id=row.id, skill_key=row.skill_key, name=row.name, description=row.description,
+            scope="global" if row.team_id is None else "team",
+            origin=row.origin, team_id=row.team_id, status=row.status,
+            enabled=row.enabled, editable=True,
+        )
+    return sorted(by_key.values(), key=lambda item: item.skill_key)
+
+
+def read_body(db: Session, user: User, skill_key: str) -> tuple[SkillView, str]:
+    """Laedt den Text eines Skills — Stufe zwei des schrittweisen Ladens."""
+    key = (skill_key or "").strip().lower()
+    view = next((item for item in visible_skills(db, user) if item.skill_key == key), None)
+    if view is None:
+        raise HTTPException(status_code=404, detail="Skill nicht gefunden")
+    if view.id is not None:
+        row = db.get(AiSkill, view.id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Skill nicht gefunden")
+        return view, row.body
+    shipped = shipped_skills().get(key)
+    if shipped is None:
+        raise HTTPException(status_code=404, detail="Skill nicht gefunden")
+    return view, shipped.body
+
+
+# ── Auswahl fuer den Systemprompt ─────────────────────────────────────
+
+
+def _index_source(view: SkillView) -> str:
+    readable = view.skill_key.replace("-", " ")
+    return f"{readable}: {view.name}. {view.description}"
+
+
+def refresh_embedding(row: AiSkill) -> None:
+    """Berechnet den Auswahlvektor neu, falls ein Modell geladen ist.
+
+    Schlaegt es fehl, bleibt der alte Wert stehen und der Skill wird eben
+    alphabetisch eingeordnet. Ein Skill darf nicht daran scheitern, dass ein
+    Modell fehlt.
+    """
+    readable = row.skill_key.replace("-", " ")
+    vectors = ai_embedding_service.encode([f"{readable}: {row.name}. {row.description}"])
+    if not vectors:
+        return
+    row.embedding_json = json.dumps(vectors[0], separators=(",", ":"))
+    row.embedding_model = _EMBEDDING_MODEL_TAG
+
+
+def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
+    """Die Skills, die in den Systemprompt kommen.
+
+    Passt alles ins Budget, kommt alles mit — der Normalfall. Erst darueber
+    entscheidet die Bedeutungsaehnlichkeit zur Frage, und zwar ueber dasselbe
+    mehrsprachige Modell wie beim Gedaechtnis: eine englische Frage findet damit
+    einen deutsch beschriebenen Skill.
+
+    Ohne Modell bleibt die alphabetische Reihenfolge. Schlechter als Bedeutung,
+    aber besser als gar kein Verzeichnis.
+    """
+    views = visible_skills(db, user)
+    if len(views) <= MAX_INDEXED_SKILLS or not query.strip():
+        return views[:MAX_INDEXED_SKILLS]
+
+    query_vectors = ai_embedding_service.encode([query])
+    if not query_vectors:
+        return views[:MAX_INDEXED_SKILLS]
+    candidates = ai_embedding_service.encode([_index_source(view) for view in views])
+    if not candidates or len(candidates) != len(views):
+        return views[:MAX_INDEXED_SKILLS]
+
+    scores = ai_embedding_service.similarity(query_vectors[0], candidates)
+    if len(scores) != len(views):
+        return views[:MAX_INDEXED_SKILLS]
+    ranked = sorted(zip(views, scores), key=lambda item: item[1], reverse=True)
+    selected = [view for view, _score in ranked[:MAX_INDEXED_SKILLS]]
+    # Lesbare Reihenfolge wiederherstellen statt die Rangfolge zu zeigen.
+    return sorted(selected, key=lambda item: item.skill_key)
+
+
+# ── Schreiben ─────────────────────────────────────────────────────────
+
+
+def _safe_text(value: str, limit: int, label: str) -> str:
+    text = (value or "").strip()
+    if not text or len(text) > limit:
+        raise HTTPException(status_code=422, detail=f"{label} ist leer oder zu lang")
+    if redact_sensitive_text(text) != text:
+        raise HTTPException(status_code=422, detail=f"{label} darf keine Zugangsdaten enthalten")
+    return text
+
+
+def _normalized_key(value: str) -> str:
+    key = (value or "").strip().lower()
+    if not _SKILL_KEY_RE.match(key):
+        raise HTTPException(
+            status_code=422,
+            detail="Skill-Schluessel: Kleinbuchstaben, Ziffern und Bindestriche, 2 bis 64 Zeichen",
+        )
+    return key
+
+
+def assert_may_write(db: Session, user: User, team_id: int | None) -> None:
+    """Wer diesen Bereich veraendern darf.
+
+    Global verlangt `ai.skills.manage` — ein globaler Skill wirkt fuer jeden
+    Benutzer des Panels, einschliesslich aller Kunden eines Hosters. Team
+    verlangt den Schalter in der Mitgliedschaft. In beiden Faellen gilt
+    derselbe Satz wie beim Gedaechtnis: **die KI kann nie mehr teilen, als der
+    Benutzer selbst teilen duerfte.**
+    """
+    if team_id is None:
+        if not permission_service.has_global_permission(db, user, "ai.skills.manage"):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung")
+        return
+    if not team_service.can_manage_team_skills(db, user, team_id):
+        raise HTTPException(
+            status_code=403, detail="Du darfst die Skills dieses Teams nicht veraendern"
+        )
+
+
+def upsert_skill(
+    db: Session, *, user: User, skill_key: str, name: str, description: str, body: str,
+    team_id: int | None, origin: str = "operator", status: str = "active",
+    enabled: bool = True, skip_permission_check: bool = False,
+) -> AiSkill:
+    """Legt einen Skill an oder ersetzt ihn unter demselben Schluessel.
+
+    Bewusst ohne Versionierung: ein Skill ist Text, kein Vertrag. Wer die
+    Entwicklung nachvollziehen will, findet sie im Audit-Log; wer eine aeltere
+    Fassung braucht, hat sie im Panel-Backup. Eine Versionstabelle haette dafuer
+    eine eigene Oberflaeche gebraucht, die niemand verlangt hat.
+
+    ``skip_permission_check`` gibt es fuer genau einen Fall: einen global
+    gelernten Skill, der ohne `ai.skills.manage` entsteht und deshalb als
+    `pending` in der Warteschlange landet. Der Aufrufer hat die Lage dort
+    bereits geprueft; ohne diesen Ausweg waere die Warteschlange unerreichbar.
+    """
+    if origin not in {"operator", "ai"}:
+        raise HTTPException(status_code=422, detail="Unbekannte Skill-Herkunft")
+    if status not in {"active", "pending"}:
+        raise HTTPException(status_code=422, detail="Unbekannter Skill-Status")
+    if not skip_permission_check:
+        assert_may_write(db, user, team_id)
+
+    key = _normalized_key(skill_key)
+    identity = _scope_identity(team_id)
+    safe_name = _safe_text(name, MAX_NAME_CHARS, "Skill-Name")
+    safe_description = _safe_text(description, MAX_DESCRIPTION_CHARS, "Skill-Beschreibung")
+    safe_body = _safe_text(body, MAX_BODY_CHARS, "Skill-Text")
+
+    row = (
+        db.query(AiSkill)
+        .filter(AiSkill.scope_identity == identity, AiSkill.skill_key == key)
+        .first()
+    )
+    action = "ai.skill.updated"
+    if row is None:
+        count = db.query(AiSkill).filter(AiSkill.scope_identity == identity).count()
+        if count >= MAX_SKILLS_PER_SCOPE:
+            raise HTTPException(status_code=409, detail="Skill-Bereich ist voll")
+        row = AiSkill(
+            id=str(uuid4()), scope_identity=identity, team_id=team_id, skill_key=key,
+            name=safe_name, description=safe_description, body=safe_body,
+            origin=origin, status=status, enabled=enabled, created_by=user.id,
+        )
+        db.add(row)
+        action = "ai.skill.created"
+    elif origin == "ai" and row.origin == "operator":
+        # Dieselbe Regel wie beim Gedaechtnis: was ein Mensch geschrieben hat,
+        # ueberschreibt die KI nicht stillschweigend.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Dieser Skill stammt von einem Menschen und wird nicht automatisch "
+                "ueberschrieben. Verwende einen anderen Schluessel."
+            ),
+        )
+    else:
+        row.name = safe_name
+        row.description = safe_description
+        row.body = safe_body
+        row.origin = origin
+        row.status = status
+        row.enabled = enabled
+    refresh_embedding(row)
+    row.updated_at = datetime.now(timezone.utc)
+
     audit_service.record_privileged_action(
-        db, user_id=user.id, action="ai.skill.version.created", target_type="ai_skill",
-        target_id=row.id, details={"skill_key": skill_key, "version": row.version},
-        origin="direct",
+        db, user_id=user.id, action=action, target_type="ai_skill", target_id=row.id,
+        details={"skill_key": key, "scope": identity, "origin": origin, "status": status},
+        origin="ai" if origin == "ai" else "direct",
     )
     try:
         db.commit()
     except IntegrityError as exc:
-        # Die Versionsnummer stammt aus einem ungesperrten SELECT. Legen zwei
-        # Verwalter gleichzeitig eine neue Version an, weist uq_ai_skills_key_version
-        # den Verlierer ab. Das ist ein Konflikt, kein Serverfehler.
         db.rollback()
         raise HTTPException(
-            status_code=409,
-            detail="Skill wurde parallel geaendert. Bitte erneut versuchen.",
+            status_code=409, detail="Skill wurde parallel geaendert. Bitte erneut versuchen.",
         ) from exc
     db.refresh(row)
     return row
@@ -169,114 +427,78 @@ def get_skill(db: Session, skill_id: str) -> AiSkill:
     return row
 
 
-def _release_reservation(db: Session, correlation_id: str) -> None:
-    """Gibt eine Reservierung frei, die einen Fehlschlag ueberlebt hat.
-
-    Nach einem Rollback ist die Zeile in aller Regel ohnehin verschwunden, weil
-    sie in derselben Transaktion entstand. Verlassen wollen wir uns darauf
-    nicht: sobald ein Tool-Schritt zwischendurch committet, bliebe die
-    Reservierung sonst dauerhaft auf `reserved` stehen und wuerde einen
-    Nebenlaeufigkeitsplatz des Benutzers bis zum Prozessneustart belegen.
-    """
-    from models import AiUsageEvent
-
-    try:
-        event = (
-            db.query(AiUsageEvent)
-            .filter(AiUsageEvent.request_id == correlation_id)
-            .first()
-        )
-        if event is not None and event.status == "reserved":
-            fail_ai_usage(db, event)
-            db.commit()
-    except Exception:
-        db.rollback()
-
-
-def run_skill(
-    db: Session, *, user: User, skill: AiSkill, server_id: int,
-    correlation_id: str,
-) -> tuple[list[dict], list[dict]]:
-    """Fuehrt einen Skill gegen genau einen Server aus.
-
-    Der Server kommt seit dem Einzelchat als Parameter und nicht mehr aus der
-    Unterhaltung. Die Rechtepruefung bleibt dieselbe: jeder Schritt laeuft
-    ueber `execute_read_tool` bzw. `create_proposal` und damit ueber
-    `_resolve_server`.
-    """
-    latest = db.query(AiSkill).filter(AiSkill.skill_key == skill.skill_key).order_by(
-        AiSkill.version.desc()
-    ).first()
-    if latest is None or latest.id != skill.id or not latest.enabled:
-        raise HTTPException(status_code=409, detail="Skill ist deaktiviert")
-    conversation = get_or_create_primary_conversation(db, user)
-
-    # Ein Skill-Lauf ruft keinen Provider auf, verbraucht also keine Tokens —
-    # er loest aber bis zu 20 Tool-Aufrufe gegen Docker, Dateisystem und Node
-    # aus. Ohne Reservierung liefe er komplett an den Rollenkontingenten vorbei:
-    # `requests_per_minute` und `concurrent_operations` haetten fuer Skills gar
-    # keine Wirkung, obwohl Zielpunkt 6 sie fuer KI-Vorgaenge fordert. Deshalb
-    # wird mit null Tokens reserviert: die Zaehl- und Nebenlaeufigkeitsgrenzen
-    # greifen, die Token- und Kostengrenzen bleiben korrekt unberuehrt.
-    usage_event = reserve_ai_usage(
-        db,
-        user,
-        request_id=correlation_id,
-        estimated_tokens=0,
-        estimated_cost_microunits=0,
-        server_id=server_id,
-    )
-    db.flush()
-
-    read_results: list[dict] = []
-    proposals = []
-    # Jeder Schritt durchlaeuft dieselbe RBAC- und Allowlist-Pruefung wie ein
-    # Chat-Tool-Call. Deren AiActionValidationError ist ein ValueError; ohne
-    # diese Umsetzung haette FastAPI daraus einen 500 gemacht, obwohl es ein
-    # regulaerer Berechtigungs- oder Validierungsfall ist.
-    try:
-        for index, step in enumerate(response_steps(skill), start=1):
-            # Der Skill selbst speichert keine Server-ID — er ist ein Ablauf,
-            # kein Serverbezug. Sie wird hier je Schritt eingesetzt und
-            # anschliessend von `_resolve_server` gegen die Rechte geprueft.
-            step_arguments = {**step["arguments"], "server_id": server_id}
-            if step["tool_name"] in SKILL_READ_TOOLS:
-                read_results.append({
-                    "tool_name": step["tool_name"],
-                    "result": execute_read_tool(
-                        db, user=user,
-                        tool_name=step["tool_name"], arguments=step_arguments,
-                    ),
-                })
-            else:
-                proposals.append(create_proposal(
-                    db, user=user, conversation=conversation, tool_name=step["tool_name"],
-                    arguments=step_arguments, correlation_id=correlation_id,
-                    # Ein Skill-Schritt braucht keine vom Modell formulierte
-                    # Begruendung — seine Herkunft ist die praezisere Angabe.
-                    rationale_fallback=(
-                        f"Schritt {index} aus Skill \"{skill.name}\" (Version {skill.version})",
-                        "Der Ablauf wurde vom Betreiber als Skill hinterlegt und geprueft.",
-                    ),
-                ))
-    except AiActionValidationError as exc:
-        db.rollback()
-        _release_reservation(db, correlation_id)
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        # Eine haengende Reservierung wuerde sonst dauerhaft einen
-        # Nebenlaeufigkeitsplatz des Benutzers blockieren.
-        _release_reservation(db, correlation_id)
-        raise
-    complete_ai_usage(db, usage_event, actual_tokens=0, actual_cost_microunits=0)
+def set_enabled(db: Session, *, user: User, skill_id: str, enabled: bool) -> AiSkill:
+    row = get_skill(db, skill_id)
+    assert_may_write(db, user, row.team_id)
+    row.enabled = enabled
+    row.updated_at = datetime.now(timezone.utc)
     audit_service.record_privileged_action(
-        db, user_id=user.id, action="ai.skill.run", target_type="ai_skill",
-        target_id=skill.id, details={"version": skill.version, "proposal_count": len(proposals)},
-        origin="ai", correlation_id=correlation_id,
+        db, user_id=user.id, action="ai.skill.toggled", target_type="ai_skill",
+        target_id=row.id, details={"skill_key": row.skill_key, "enabled": enabled},
+        origin="direct",
     )
     db.commit()
-    return read_results, [
-        {"id": row.id, "tool_name": row.tool_name, "preview": json.loads(row.preview_json), "status": row.status}
-        for row in proposals
-    ]
+    db.refresh(row)
+    return row
+
+
+def approve(db: Session, *, user: User, skill_id: str) -> AiSkill:
+    """Gibt einen global gelernten Skill frei, der auf Freigabe wartet."""
+    row = get_skill(db, skill_id)
+    if row.team_id is not None:
+        raise HTTPException(status_code=409, detail="Nur globale Skills brauchen eine Freigabe")
+    if not permission_service.has_global_permission(db, user, "ai.skills.manage"):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    row.status = "active"
+    row.updated_at = datetime.now(timezone.utc)
+    audit_service.record_privileged_action(
+        db, user_id=user.id, action="ai.skill.approved", target_type="ai_skill",
+        target_id=row.id, details={"skill_key": row.skill_key}, origin="direct",
+    )
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_skill(db: Session, *, user: User, skill_id: str) -> None:
+    row = get_skill(db, skill_id)
+    assert_may_write(db, user, row.team_id)
+    audit_service.record_privileged_action(
+        db, user_id=user.id, action="ai.skill.deleted", target_type="ai_skill",
+        target_id=row.id, details={"skill_key": row.skill_key}, origin="direct",
+    )
+    db.delete(row)
+    db.commit()
+
+
+def manageable_skills(db: Session, user: User) -> list[AiSkill]:
+    """Alle Zeilen, die dieser Benutzer verwalten darf — auch abgeschaltete.
+
+    Global nur mit `ai.skills.manage`; Teams nur die, in denen der Schalter
+    gesetzt ist. Wer nichts verwalten darf, bekommt eine leere Liste und keine
+    Fehlermeldung: die Oberflaeche zeigt den Bereich dann schlicht nicht.
+    """
+    scopes: list[str] = []
+    if permission_service.has_global_permission(db, user, "ai.skills.manage"):
+        scopes.append("global")
+    for team_id in team_service.user_team_ids(db, user):
+        if team_service.can_manage_team_skills(db, user, team_id):
+            scopes.append(f"team:{team_id}")
+    if not scopes:
+        return []
+    return (
+        db.query(AiSkill)
+        .filter(AiSkill.scope_identity.in_(scopes))
+        .order_by(AiSkill.scope_identity, AiSkill.skill_key)
+        .all()
+    )
+
+
+def pending_skills(db: Session) -> list[AiSkill]:
+    """Global gelernte Skills, die auf die Freigabe des Betreibers warten."""
+    return (
+        db.query(AiSkill)
+        .filter(AiSkill.scope_identity == "global", AiSkill.status == "pending")
+        .order_by(AiSkill.created_at.desc())
+        .all()
+    )

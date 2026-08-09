@@ -1,43 +1,71 @@
-"""Typisierte Skill-Vertraege ohne freie Programme oder Skripte."""
+"""API-Vertraege fuer Prosa-Skills.
+
+Ein Skill ist Text, kein Programm. Deshalb gibt es hier keinen Schritt-Typ
+mehr: die Allowlist, die frueher jeden Tool-Aufruf einzeln pruefen musste, ist
+mit dem Makro entfallen. Was bleibt, sind Laengengrenzen — und die
+Beschreibung, die das Modell zur Auswahl braucht.
+"""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 
-class AiSkillStep(BaseModel):
-    tool_name: str = Field(min_length=1, max_length=64)
-    arguments: dict = Field(default_factory=dict)
+SkillScope = Literal["shipped", "global", "team"]
+SkillOrigin = Literal["shipped", "operator", "ai"]
+SkillStatus = Literal["active", "pending"]
 
 
 class AiSkillWrite(BaseModel):
-    skill_key: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_.-]*$")
+    skill_key: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]{1,63}$")
     name: str = Field(min_length=1, max_length=100)
+    # Sie entscheidet, ob das Modell den Skill ueberhaupt anfasst — nur sie und
+    # der Name stehen dauerhaft im Prompt. Deshalb Pflicht und nicht optional.
     description: str = Field(min_length=1, max_length=500)
-    steps: list[AiSkillStep] = Field(min_length=1, max_length=20)
+    body: str = Field(min_length=1, max_length=12_000)
+    # NULL bedeutet global. Ein Team-Skill braucht die Nummer seines Teams.
+    team_id: int | None = Field(default=None, ge=1)
     enabled: bool = True
 
 
-class AiSkillResponse(BaseModel):
-    id: str
+class AiSkillToggle(BaseModel):
+    enabled: bool
+
+
+class AiSkillSummary(BaseModel):
+    """Verzeichniseintrag ohne Text — das, was auch das Modell zuerst sieht."""
+
+    id: str | None = None
     skill_key: str
-    version: int
     name: str
     description: str
-    steps: list[AiSkillStep]
+    scope: SkillScope
+    origin: SkillOrigin
+    team_id: int | None = None
+    status: SkillStatus = "active"
+    enabled: bool = True
+    # Mitgelieferte Skills sind nicht aenderbar, nur ueberschreibbar.
+    editable: bool = False
+
+
+class AiSkillDetail(AiSkillSummary):
+    body: str
+
+
+class AiSkillManaged(BaseModel):
+    """Eine Datenbankzeile in der Verwaltung, einschliesslich abgeschalteter."""
+
+    id: str
+    skill_key: str
+    name: str
+    description: str
+    body: str
+    scope: Literal["global", "team"]
+    origin: Literal["operator", "ai"]
+    team_id: int | None
+    status: SkillStatus
     enabled: bool
     created_by: int | None
     created_at: datetime
-
-
-class AiSkillRunRequest(BaseModel):
-    # Ein Skill ist ein Ablauf, kein Serverbezug. Der Server wird beim Start
-    # gewaehlt und anschliessend gegen die Rechte des Benutzers geprueft.
-    server_id: int = Field(ge=1)
-
-
-class AiSkillRunResponse(BaseModel):
-    skill_id: str
-    version: int
-    read_results: list[dict]
-    proposals: list[dict]
+    updated_at: datetime

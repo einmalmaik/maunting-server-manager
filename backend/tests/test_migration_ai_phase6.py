@@ -98,6 +98,44 @@ def test_memory_gains_team_scope_and_bound_encryption(tmp_path: Path) -> None:
         settings.database_url = previous_database_url
 
 
+def test_skills_table_is_rebuilt_for_prose(tmp_path: Path) -> None:
+    """Aus der Makro-Tabelle wird eine fuer Text.
+
+    Der Rueckbau stellt die alte Fassung wieder her, damit ein Downgrade das
+    Panel nicht mit einer Tabelle zurueecklaesst, die der aeltere Code nicht
+    kennt. Daten wandern in keine Richtung: es gibt keine sinnvolle
+    Uebersetzung zwischen einer Aufrufliste und Fliesstext.
+    """
+    db_url = f"sqlite:///{tmp_path / 'ai-phase6-skills.db'}"
+    previous_database_url = settings.database_url
+    settings.database_url = db_url
+    engine = create_engine(db_url)
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = _config(backend_dir)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "20260809_04")
+        command.downgrade(config, "20260809_03")
+
+        columns = {c["name"] for c in inspect(engine).get_columns("ai_skills")}
+        assert "steps_json" in columns
+        assert "body" not in columns
+
+        command.upgrade(config, "20260809_04")
+        inspector = inspect(engine)
+        columns = {c["name"] for c in inspector.get_columns("ai_skills")}
+        assert {"body", "scope_identity", "team_id", "origin", "status"}.issubset(columns)
+        assert "steps_json" not in columns
+
+        unique = {item["name"] for item in inspector.get_unique_constraints("ai_skills")}
+        assert "uq_ai_skills_scope_key" in unique
+        checks = {item["name"] for item in inspector.get_check_constraints("ai_skills")}
+        assert {"ck_ai_skills_origin", "ck_ai_skills_status"}.issubset(checks)
+    finally:
+        engine.dispose()
+        settings.database_url = previous_database_url
+
+
 def test_audit_target_id_becomes_text(tmp_path: Path) -> None:
     """Der Fehler, an dem `remember` auf PostgreSQL scheiterte.
 

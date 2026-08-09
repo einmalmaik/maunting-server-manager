@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { aiApi, type AiAttachment, type AiSkill } from '@/api/ai'
+import { aiApi, type AiAttachment, type AiSkillSummary } from '@/api/ai'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { usePermissionsStore } from '@/stores/permissionsStore'
@@ -20,7 +20,6 @@ vi.mock('@/api/ai', async (importOriginal) => {
       listSkills: vi.fn(),
       uploadAttachment: vi.fn(),
       deleteAttachment: vi.fn(),
-      runSkill: vi.fn(),
       listAutonomyGrants: vi.fn(),
       saveAutonomyGrant: vi.fn(),
     },
@@ -53,9 +52,8 @@ const attachment: AiAttachment = {
   created_at: '2026-08-01T12:00:00Z',
 }
 
-const skills: AiSkill[] = [
-  { id: 'old-skill', skill_key: 'safe.check', version: 1, name: 'Old check', description: 'Old synthetic version', steps: [], enabled: true, created_by: 1, created_at: '2026-08-01T12:00:00Z' },
-  { id: 'latest-skill', skill_key: 'safe.check', version: 2, name: 'Latest check', description: 'Latest synthetic version', steps: [{ tool_name: 'read_server_status', arguments: {} }], enabled: true, created_by: 1, created_at: '2026-08-01T12:00:00Z' },
+const skills: AiSkillSummary[] = [
+  { id: null, skill_key: 'server-nicht-erreichbar', name: 'Nicht erreichbar', description: 'Synthetische Beschreibung fuer den Test', scope: 'shipped', origin: 'shipped', team_id: null, status: 'active', enabled: true, editable: false },
 ]
 
 describe('AiChat', () => {
@@ -81,9 +79,6 @@ describe('AiChat', () => {
     vi.mocked(aiApi.listSkills).mockReset().mockResolvedValue(skills)
     vi.mocked(aiApi.uploadAttachment).mockReset().mockResolvedValue(attachment)
     vi.mocked(aiApi.clearHistory).mockReset().mockResolvedValue(undefined)
-    vi.mocked(aiApi.runSkill).mockReset().mockResolvedValue({
-      skill_id: 'latest-skill', version: 2, read_results: [], proposals: [],
-    })
   })
 
   it('offers exactly one conversation and no way to create another', async () => {
@@ -95,15 +90,6 @@ describe('AiChat', () => {
     expect(aiApi.getConversation).toHaveBeenCalledWith()
   })
 
-  it('never offers an outdated skill version', async () => {
-    render(<AiChat />)
-    await screen.findByText('synthetic-note.txt')
-
-    expect(screen.getByLabelText('Skill auswählen')).toHaveTextContent('Latest check')
-    fireEvent.click(screen.getByLabelText('Skill auswählen'))
-    expect(screen.queryByText('Old check')).not.toBeInTheDocument()
-  })
-
   it('uploads through the attachment endpoint of the single conversation', async () => {
     render(<AiChat />)
     await screen.findByText('synthetic-note.txt')
@@ -112,16 +98,6 @@ describe('AiChat', () => {
     fireEvent.change(screen.getByLabelText('Sicheren Anhang hinzufügen'), { target: { files: [file] } })
 
     await waitFor(() => expect(aiApi.uploadAttachment).toHaveBeenCalledWith(file))
-  })
-
-  it('runs a skill against the explicitly selected server, not the conversation', async () => {
-    render(<AiChat />)
-    await screen.findByText('synthetic-note.txt')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Skill starten' }))
-
-    // Der Serverbezug haengt seit dem Einzelchat am Aufruf, nicht am Gespraech.
-    await waitFor(() => expect(aiApi.runSkill).toHaveBeenCalledWith('latest-skill', 7))
   })
 
   it('sends the reasoning switch state along with the message', async () => {

@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, Brain, BrainCircuit, Loader2, Paperclip, Play, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
+import { Bot, Brain, BrainCircuit, Loader2, Paperclip, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
   aiApi,
-  latestAiSkillVersions,
   streamAiMessage,
   type AiActionProposal,
   type AiAttachment,
   type AiMessage,
   type AiProviderAvailable,
-  type AiSkill,
   type AiToolUse,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
@@ -52,7 +50,6 @@ const ATTACHMENT_ACCEPT = '.txt,.log,.cfg,.conf,.ini,.json,.properties,.toml,.ya
 export function AiChat() {
   const { t } = useTranslation()
   const canAttach = useHasPermission('ai.attachments.use')
-  const canUseSkills = useHasPermission('ai.skills.use')
   const canUseAutonomy = useHasPermission('ai.autonomous.use')
   const canUseMemory = useHasPermission('ai.memory.use')
 
@@ -60,10 +57,7 @@ export function AiChat() {
   const [providerId, setProviderId] = useState<number | null>(null)
   const [entries, setEntries] = useState<Entry[]>([])
   const [attachments, setAttachments] = useState<AiAttachment[]>([])
-  const [skills, setSkills] = useState<AiSkill[]>([])
-  const [skillId, setSkillId] = useState<string | null>(null)
   const [servers, setServers] = useState<ServerOption[]>([])
-  const [skillServerId, setSkillServerId] = useState<string | null>(null)
   const [reasoning, setReasoning] = useState(false)
   // Ob der Einwilligungshinweis faellig ist. Die 24-Stunden-Regel entscheidet
   // das Backend — hier steht nur das Ergebnis.
@@ -95,17 +89,14 @@ export function AiChat() {
       aiApi.getConversation(),
       aiApi.listActions(),
       canAttach ? aiApi.listAttachments() : Promise.resolve([] as AiAttachment[]),
-      canUseSkills ? aiApi.listSkills() : Promise.resolve([] as AiSkill[]),
-      canUseSkills
-        ? api<ServerOption[]>('/servers').catch(() => [] as ServerOption[])
-        : Promise.resolve([] as ServerOption[]),
+      api<ServerOption[]>('/servers').catch(() => [] as ServerOption[]),
       // Scheitert der Abruf, wird der Hinweis nicht gezeigt statt den ganzen
       // Chat scheitern zu lassen — er ist wichtig, aber nicht so wichtig.
       canUseMemory
         ? aiApi.getMemoryPreference().catch(() => null)
         : Promise.resolve(null),
     ])
-      .then(([providerRows, conversation, actions, attachmentRows, skillRows, serverRows, memoryPreference]) => {
+      .then(([providerRows, conversation, actions, attachmentRows, serverRows, memoryPreference]) => {
         if (!active) return
         setMemoryNoticeDue(Boolean(memoryPreference?.notice_due))
         setProviders(providerRows)
@@ -115,11 +106,7 @@ export function AiChat() {
         // sie gesammelt am Ende und wirkten losgeloest.
         setEntries(mergeEntries(conversation.messages, actions))
         setAttachments(attachmentRows)
-        const latest = latestAiSkillVersions(skillRows)
-        setSkills(latest)
-        setSkillId(latest[0]?.id ?? null)
         setServers(serverRows.map((row) => ({ id: row.id, name: row.name })))
-        setSkillServerId(serverRows[0] ? String(serverRows[0].id) : null)
       })
       .catch((error: unknown) => {
         if (active) toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.load'))
@@ -130,7 +117,7 @@ export function AiChat() {
     return () => {
       active = false
     }
-  }, [canAttach, canUseSkills, canUseMemory, t])
+  }, [canAttach, canUseMemory, t])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' })
@@ -178,27 +165,6 @@ export function AiChat() {
       setAttachments([])
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.delete'))
-    }
-  }
-
-  const runSkill = async () => {
-    if (!skillId || !skillServerId || streaming) return
-    setStreaming(true)
-    try {
-      const result = await aiApi.runSkill(skillId, Number(skillServerId))
-      setEntries((current) => [
-        ...current,
-        ...result.proposals.map((proposal) => ({
-          kind: 'proposal' as const,
-          id: proposal.id,
-          proposal: proposal as unknown as AiActionProposal,
-        })),
-      ])
-      toast.success(t('ai.skills.runCreated', { count: result.proposals.length }))
-    } catch (error: unknown) {
-      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.skills.error'))
-    } finally {
-      setStreaming(false)
     }
   }
 
@@ -376,38 +342,6 @@ export function AiChat() {
         {canUseAutonomy && <AiAutonomyButton servers={servers} disabled={busy} />}
 
         <div className="ml-auto flex items-center gap-2">
-          {canUseSkills && skills.length > 0 && (
-            <>
-              <div className="hidden min-w-[9rem] sm:block">
-                <Dropdown
-                  value={skillId}
-                  onChange={setSkillId}
-                  options={skills.map((skill) => ({ value: skill.id, label: skill.name, hint: `v${skill.version}` }))}
-                  placeholder={t('ai.skills.select')}
-                  disabled={busy}
-                  aria-label={t('ai.skills.select')}
-                />
-              </div>
-              <div className="hidden min-w-[9rem] md:block">
-                <Dropdown
-                  value={skillServerId}
-                  onChange={setSkillServerId}
-                  options={servers.map((server) => ({ value: String(server.id), label: server.name }))}
-                  placeholder={t('ai.skills.selectServer')}
-                  disabled={busy}
-                  aria-label={t('ai.skills.selectServer')}
-                />
-              </div>
-              <Button
-                type="button" variant="secondary" size="sm"
-                disabled={busy || !skillId || !skillServerId}
-                onClick={() => void runSkill()}
-              >
-                <Play className="h-4 w-4" aria-hidden="true" />
-                <span className="hidden sm:inline">{t('ai.skills.run')}</span>
-              </Button>
-            </>
-          )}
           <Button
             type="button" variant="ghost" size="sm"
             disabled={busy || empty}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { latestAiSkillVersions, streamAiMessage, type AiSkill } from './ai'
+import { streamAiMessage } from './ai'
 
 describe('streamAiMessage', () => {
   afterEach(() => vi.restoreAllMocks())
@@ -71,21 +71,5 @@ describe('streamAiMessage', () => {
     }, (event) => events.push(event.event))
 
     expect(events).toEqual(['reasoning', 'tool', 'delta'])
-  })
-})
-
-describe('latestAiSkillVersions', () => {
-  it('keeps only the newest immutable version for each skill key', () => {
-    const base = {
-      name: 'Status check', description: 'Synthetic test workflow', steps: [], enabled: true,
-      created_by: 1, created_at: '2026-08-01T12:00:00Z',
-    }
-    const rows: AiSkill[] = [
-      { ...base, id: 'old', skill_key: 'status.check', version: 1 },
-      { ...base, id: 'new', skill_key: 'status.check', version: 2 },
-      { ...base, id: 'other', skill_key: 'capacity.check', version: 1 },
-    ]
-
-    expect(latestAiSkillVersions(rows).map((skill) => skill.id)).toEqual(['new', 'other'])
   })
 })

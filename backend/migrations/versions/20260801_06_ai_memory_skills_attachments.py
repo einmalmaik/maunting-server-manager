@@ -90,14 +90,29 @@ def upgrade() -> None:
     op.create_index("ix_ai_attachments_conversation_created", "ai_attachments", ["conversation_id", "created_at"])
 
 
+def _drop_index_if_present(table: str, name: str) -> None:
+    """Entfernt einen Index nur, wenn er tatsaechlich existiert.
+
+    Neue Installationen erzeugen ihr Schema aus den Modellen und werden danach
+    gestempelt. Seit die Skill-Tabelle auf Prosa umgestellt wurde
+    (20260809_04), fuehrt das Modell die alten Skill-Indizes nicht mehr — ein
+    bedingungsloses DROP braeche deren Migrationslauf ab, obwohl nichts zu tun
+    ist. Dasselbe Muster steht bereits in 20260808_02.
+    """
+    connection = op.get_bind()
+    existing = {index["name"] for index in sa.inspect(connection).get_indexes(table)}
+    if name in existing:
+        op.drop_index(name, table_name=table)
+
+
 def downgrade() -> None:
     op.drop_index("ix_ai_attachments_conversation_created", table_name="ai_attachments")
     op.drop_index("ix_ai_attachments_status", table_name="ai_attachments")
     op.drop_index("ix_ai_attachments_user_id", table_name="ai_attachments")
     op.drop_table("ai_attachments")
-    op.drop_index("ix_ai_skills_key_created", table_name="ai_skills")
-    op.drop_index("ix_ai_skills_enabled", table_name="ai_skills")
-    op.drop_index("ix_ai_skills_skill_key", table_name="ai_skills")
+    _drop_index_if_present("ai_skills", "ix_ai_skills_key_created")
+    _drop_index_if_present("ai_skills", "ix_ai_skills_enabled")
+    _drop_index_if_present("ai_skills", "ix_ai_skills_skill_key")
     op.drop_table("ai_skills")
     op.drop_index("ix_ai_memory_owner_scope", table_name="ai_memory_entries")
     op.drop_index("ix_ai_memory_entries_server_id", table_name="ai_memory_entries")
