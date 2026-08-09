@@ -285,8 +285,12 @@ def clean_db():
     from services.install_update_lock_service import reset_install_update_lock_for_tests
     from services.server_lifecycle_service import reset_lifecycle_jobs_for_tests
     from services.panel_settings_service import PanelSettingsService
+    from services.port_check_service import reset_port_cache_for_tests
     reset_install_update_lock_for_tests()
     reset_lifecycle_jobs_for_tests()
+    # Der Listener-Schnappschuss lebt eine Sekunde — laenger als mancher Test.
+    # Ohne das Verwerfen entschiede die Laufzeit des vorigen Tests mit.
+    reset_port_cache_for_tests()
     # PanelSettingsService hat einen In-Memory-Cache — ohne invalidate_cache
     # leaken Werte zwischen Tests (z. B. oauth.allow_registration=true aus
     # einem frueheren Test).

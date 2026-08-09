@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import socket
 import subprocess
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -43,19 +44,73 @@ def _normalize_protocol(protocol: str) -> str:
     return proto
 
 
-def _port_in_use_via_ss(port: int, protocol: str) -> bool:
-    """Frage den Kernel via ``ss``, ob ein Listener auf ``port`` existiert.
+# Wie lange ein Listener-Schnappschuss wiederverwendet wird.
+#
+# Frueher fragte jeder einzelne Portcheck ``ss`` mit einem eigenen Prozess.
+# Gemessen an einer Servererstellung waren das **1181 Prozessstarts fuer einen
+# Server** — der Allokator laeuft einen Portbereich ab, und jeder Kandidat
+# kostete ein eigenes ``ss``. Auf einem Windows-Entwicklungsrechner sind das
+# ueber hundert Sekunden; auf einem Linux-Host ist es billiger, aber immer noch
+# tausend Prozesse fuer eine einzige Anlage.
+#
+# ``ss`` listet alle Listener in *einem* Aufruf. Der Schnappschuss darf kurz
+# altern, weil er ohnehin nur die Vorauswahl ist: verbindlich entscheidet
+# ``_can_bind`` unmittelbar vor der Verwendung. Eine Sekunde ist lang genug,
+# damit ein Allokationsdurchlauf mit einem Aufruf auskommt, und kurz genug,
+# dass ein frisch gestarteter Fremddienst nicht uebersehen wird.
+_LISTENER_SNAPSHOT_SECONDS = 1.0
 
-    ``ss`` zeigt Listener anderer User/Container und ist damit autoritativer
-    als ein reiner Bind-Versuch. Wenn ``ss`` nicht verfuegbar ist, fallen wir
-    auf False zurueck — der spaetere Bind-Versuch faengt das ab.
+# Protokoll -> (Zeitpunkt, lauschende Ports)
+_listener_snapshots: dict[str, tuple[float, frozenset[int]]] = {}
+
+
+def reset_port_cache_for_tests() -> None:
+    """Verwirft die Schnappschuesse — sonst leckt einer in den naechsten Test."""
+    _listener_snapshots.clear()
+
+
+def _parse_listening_ports(output: str) -> frozenset[int]:
+    """Liest die Portnummern aus der lokalen Adressspalte von ``ss``.
+
+    Erwartetes Format (``-H``, also ohne Kopfzeile)::
+
+        LISTEN 0 4096   0.0.0.0:22    0.0.0.0:*
+        LISTEN 0 511          *:80          *:*
+        LISTEN 0 128    [::1]:631       [::]:*
+
+    Die vierte Spalte traegt Adresse und Port. Der Port steht hinter dem
+    letzten ``:`` — das trennt auch IPv6-Adressen richtig, deren Adressteil
+    selbst Doppelpunkte enthaelt.
     """
+    ports: set[int] = set()
+    for line in output.splitlines():
+        felder = line.split()
+        if len(felder) < 4:
+            continue
+        _, _, port_teil = felder[3].rpartition(":")
+        try:
+            ports.add(int(port_teil))
+        except ValueError:
+            # Ein Portname statt einer Zahl kann hier nicht stehen (``-n``
+            # erzwingt numerisch); eine unerwartete Zeile wird uebergangen,
+            # statt den ganzen Schnappschuss zu verwerfen.
+            continue
+    return frozenset(ports)
+
+
+def _listening_ports(protocol: str) -> frozenset[int]:
+    """Alle lauschenden Ports dieses Protokolls, aus einem einzigen ``ss``-Aufruf."""
     proto = _normalize_protocol(protocol)
+    jetzt = time.monotonic()
+    gemerkt = _listener_snapshots.get(proto)
+    if gemerkt is not None and jetzt - gemerkt[0] < _LISTENER_SNAPSHOT_SECONDS:
+        return gemerkt[1]
+
     # -H: keine Header  -l: nur Listener  -n: numerisch  -t/-u: TCP/UDP
     flag = "-Hltn" if proto == "tcp" else "-Hlun"
     try:
         result = subprocess.run(
-            ["ss", flag, "sport", "=", f":{port}"],
+            ["ss", flag],
             capture_output=True,
             text=True,
             timeout=5,
@@ -63,11 +118,25 @@ def _port_in_use_via_ss(port: int, protocol: str) -> bool:
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
         logger.debug("ss-Aufruf fehlgeschlagen: %s", exc)
-        return False
-    if result.returncode != 0:
-        return False
-    # Jeder nicht-leere Output bedeutet: es gibt mindestens einen Listener.
-    return any(line.strip() for line in result.stdout.splitlines())
+        # Auch der Fehlschlag wird gemerkt. Sonst startet ein System **ohne**
+        # ``ss`` weiterhin fuer jeden Kandidaten einen Prozess, der sofort
+        # scheitert — genau der teure Fall, den diese Aenderung beseitigt.
+        ports = frozenset()
+    else:
+        ports = _parse_listening_ports(result.stdout) if result.returncode == 0 else frozenset()
+
+    _listener_snapshots[proto] = (jetzt, ports)
+    return ports
+
+
+def _port_in_use_via_ss(port: int, protocol: str) -> bool:
+    """Frage den Kernel via ``ss``, ob ein Listener auf ``port`` existiert.
+
+    ``ss`` zeigt Listener anderer User/Container und ist damit autoritativer
+    als ein reiner Bind-Versuch. Wenn ``ss`` nicht verfuegbar ist, fallen wir
+    auf False zurueck — der spaetere Bind-Versuch faengt das ab.
+    """
+    return port in _listening_ports(protocol)
 
 
 def _can_bind(port: int, protocol: str, bind_ip: str) -> bool:
