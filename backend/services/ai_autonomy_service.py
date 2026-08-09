@@ -72,7 +72,7 @@ def autonomy_allows(
     now: datetime | None = None,
 ) -> bool:
     """Entscheidet, ob dieser eine Vorschlag ohne Bestaetigung laufen darf."""
-    from services.ai_action_service import ALWAYS_CONFIRM_TOOLS
+    from services.ai_tool_registry import ALWAYS_CONFIRM_TOOLS
 
     if tool_name in ALWAYS_CONFIRM_TOOLS:
         return False

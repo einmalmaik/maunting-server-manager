@@ -20,7 +20,7 @@ from models import (
     ServerPermission,
     User,
 )
-from services import ai_action_service
+from services import ai_action_errors, ai_action_service, ai_proposal_service
 from services.dis_client import DisClient
 from services.file_edit_service import content_revision
 from services.role_service import set_user_roles
@@ -62,7 +62,7 @@ def test_config_proposal_encrypts_payload_and_keeps_audit_content_free(
     config = Path(server.install_dir) / "server.cfg"
     config.write_text("port=2302\nmaxPlayers=40\n", encoding="utf-8")
     conversation = _conversation(db, owner_user, server)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=owner_user,
         conversation=conversation,
@@ -102,7 +102,7 @@ def test_config_with_credentials_is_never_overwritten_by_ai(
     conversation = _conversation(db, owner_user, server)
 
     try:
-        ai_action_service.create_proposal(
+        ai_proposal_service.create_proposal(
             db,
             user=owner_user,
             conversation=conversation,
@@ -116,7 +116,7 @@ def test_config_with_credentials_is_never_overwritten_by_ai(
             },
             correlation_id=str(uuid4()),
         )
-    except ai_action_service.AiActionValidationError:
+    except ai_action_errors.AiActionValidationError:
         pass
     else:
         raise AssertionError("Config mit Zugangsdaten wurde zum Ueberschreiben akzeptiert")
@@ -182,7 +182,7 @@ def test_unregistered_tool_is_rejected_without_persistence(
     conversation = _conversation(db, owner_user, server)
 
     try:
-        ai_action_service.create_proposal(
+        ai_proposal_service.create_proposal(
             db,
             user=owner_user,
             conversation=conversation,
@@ -190,7 +190,7 @@ def test_unregistered_tool_is_rejected_without_persistence(
             arguments={"command": "ignored"},
             correlation_id=str(uuid4()),
         )
-    except ai_action_service.AiActionValidationError:
+    except ai_action_errors.AiActionValidationError:
         pass
     else:
         raise AssertionError("unregistered tool was accepted")
@@ -227,7 +227,7 @@ def test_read_log_tool_bounds_and_redacts_output(
             tool_name="read_server_logs",
             arguments={"server_id": server.id, "lines": 201},
         )
-    except ai_action_service.AiActionValidationError:
+    except ai_action_errors.AiActionValidationError:
         pass
     else:
         raise AssertionError("oversized log request was accepted")
@@ -244,7 +244,7 @@ def test_confirmation_token_is_hashed_one_time_and_config_write_is_revision_boun
     config = Path(server.install_dir) / "server.cfg"
     config.write_text("port=2302\n", encoding="utf-8")
     conversation = _conversation(db, owner_user, server)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=owner_user,
         conversation=conversation,
@@ -302,7 +302,7 @@ def test_execute_blocks_changed_revision_and_marks_proposal_failed(
     config = Path(server.install_dir) / "server.cfg"
     config.write_text("port=2302\n", encoding="utf-8")
     conversation = _conversation(db, owner_user, server)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=owner_user,
         conversation=conversation,
@@ -343,7 +343,7 @@ def test_expired_confirmation_cannot_execute(
 ) -> None:
     server = _server(db, owner_user, tmp_path)
     conversation = _conversation(db, owner_user, server)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=owner_user,
         conversation=conversation,
@@ -353,18 +353,18 @@ def test_expired_confirmation_cannot_execute(
     )
     db.commit()
     past = datetime.now(timezone.utc) - timedelta(minutes=10)
-    proposal, token = ai_action_service.confirm_proposal(
+    proposal, token = ai_proposal_service.confirm_proposal(
         db, proposal_id=proposal.id, user=owner_user, now=past
     )
 
     try:
-        ai_action_service.execute_proposal(
+        ai_proposal_service.execute_proposal(
             db,
             proposal_id=proposal.id,
             user=owner_user,
             confirmation_token=token,
         )
-    except ai_action_service.AiActionStateError as exc:
+    except ai_action_errors.AiActionStateError as exc:
         assert exc.code == "AI_ACTION_CONFIRMATION_EXPIRED"
     else:
         raise AssertionError("expired confirmation was accepted")
@@ -375,7 +375,7 @@ def test_expired_confirmation_cannot_execute(
 def test_startup_recovery_fails_closed(db: Session, owner_user: User, tmp_path: Path) -> None:
     server = _server(db, owner_user, tmp_path)
     conversation = _conversation(db, owner_user, server)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=owner_user,
         conversation=conversation,
@@ -386,7 +386,7 @@ def test_startup_recovery_fails_closed(db: Session, owner_user: User, tmp_path: 
     proposal.status = "executing"
     db.commit()
 
-    assert ai_action_service.reconcile_interrupted_actions(db) == 1
+    assert ai_proposal_service.reconcile_interrupted_actions(db) == 1
     db.refresh(proposal)
     assert proposal.status == "failed"
     assert proposal.error_code == "AI_ACTION_INTERRUPTED"
@@ -417,7 +417,7 @@ def test_confirmation_rechecks_revoked_rbac(
     db.add_all(grants)
     db.commit()
     conversation = _conversation(db, regular_user, server)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=regular_user,
         conversation=conversation,
@@ -457,7 +457,7 @@ def test_lifecycle_proposal_stays_executing_until_the_task_finishes(
 
     server = _server(db, owner_user, tmp_path)
     conversation = _conversation(db, owner_user, server)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=owner_user,
         conversation=conversation,
@@ -466,7 +466,7 @@ def test_lifecycle_proposal_stays_executing_until_the_task_finishes(
         correlation_id=str(uuid4()),
     )
     db.commit()
-    _, token = ai_action_service.confirm_proposal(
+    _, token = ai_proposal_service.confirm_proposal(
         db, proposal_id=proposal.id, user=owner_user
     )
 
@@ -485,7 +485,7 @@ def test_lifecycle_proposal_stays_executing_until_the_task_finishes(
         "services.server_action_service.request_lifecycle_operation",
         return_value={"status": "queued", "task_id": task.id},
     ):
-        executed, _result = ai_action_service.execute_proposal(
+        executed, _result = ai_proposal_service.execute_proposal(
             db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
         )
 
@@ -516,7 +516,7 @@ def test_lifecycle_proposal_becomes_succeeded_when_the_task_succeeds(
 
     server = _server(db, owner_user, tmp_path)
     conversation = _conversation(db, owner_user, server)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=owner_user,
         conversation=conversation,
@@ -525,7 +525,7 @@ def test_lifecycle_proposal_becomes_succeeded_when_the_task_succeeds(
         correlation_id=str(uuid4()),
     )
     db.commit()
-    _, token = ai_action_service.confirm_proposal(
+    _, token = ai_proposal_service.confirm_proposal(
         db, proposal_id=proposal.id, user=owner_user
     )
     task, _created = create_or_reuse_task(
@@ -543,7 +543,7 @@ def test_lifecycle_proposal_becomes_succeeded_when_the_task_succeeds(
         "services.server_action_service.request_lifecycle_operation",
         return_value={"status": "queued", "task_id": task.id},
     ):
-        ai_action_service.execute_proposal(
+        ai_proposal_service.execute_proposal(
             db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
         )
 

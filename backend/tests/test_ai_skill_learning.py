@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from models import AiConversation, AiSkill, Role, RolePermission, Team, User
 from services import ai_action_service, ai_learning_policy, ai_skill_service, team_service
-from services.ai_action_service import AiActionValidationError
+from services.ai_action_errors import AiActionValidationError
 from services.ai_context_service import build_provider_messages
 from services.auth_service import AuthService
 from services.role_service import set_user_roles

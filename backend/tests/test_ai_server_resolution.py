@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from models import AiConversation, Role, RolePermission, Server, ServerPermission, User
-from services import ai_action_service
+from services import ai_action_errors, ai_action_service, ai_proposal_service
 from services.role_service import set_user_roles
 
 
@@ -61,7 +61,7 @@ def test_a_foreign_server_id_is_rejected_for_every_read_tool(
     _allow(db, regular_user, mine, "server.view", "server.console.read")
 
     for tool in ("read_server_status", "read_server_ports", "read_server_backups"):
-        with pytest.raises(ai_action_service.AiActionValidationError):
+        with pytest.raises(ai_action_errors.AiActionValidationError):
             ai_action_service.execute_read_tool(
                 db, user=regular_user, tool_name=tool,
                 arguments={"server_id": foreign.id},
@@ -78,8 +78,8 @@ def test_a_foreign_server_id_is_rejected_for_a_write_proposal(
     _allow(db, regular_user, foreign, "server.backups.create")  # bewusst ohne server.view
     conversation = _conversation(db, regular_user)
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
-        ai_action_service.create_proposal(
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
             db,
             user=regular_user,
             conversation=conversation,
@@ -107,7 +107,7 @@ def test_a_missing_or_bogus_server_id_never_falls_back_to_a_default(
 
     for arguments in ({}, {"server_id": None}, {"server_id": "1"}, {"server_id": 0},
                       {"server_id": True}, {"server_id": -5}):
-        with pytest.raises(ai_action_service.AiActionValidationError):
+        with pytest.raises(ai_action_errors.AiActionValidationError):
             ai_action_service.execute_read_tool(
                 db, user=regular_user, tool_name="read_server_status",
                 arguments=dict(arguments),
@@ -160,7 +160,7 @@ def test_planning_tools_still_require_the_create_permission(
     set_user_roles(db, regular_user, [role.id])
 
     for tool in ("list_blueprints", "read_node_capacity"):
-        with pytest.raises(ai_action_service.AiActionValidationError):
+        with pytest.raises(ai_action_errors.AiActionValidationError):
             ai_action_service.execute_read_tool(
                 db, user=regular_user, tool_name=tool, arguments={},
             )

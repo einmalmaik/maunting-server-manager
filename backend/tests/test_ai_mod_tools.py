@@ -23,7 +23,7 @@ from models import (
     ServerPermission,
     User,
 )
-from services import ai_action_service
+from services import ai_action_errors, ai_action_service, ai_proposal_service
 from services.role_service import set_user_roles
 
 
@@ -77,7 +77,7 @@ def test_reading_mods_requires_the_mod_read_permission(
 ) -> None:
     server, conversation = _setup(db, regular_user, server_keys=("server.view",))
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
+    with pytest.raises(ai_action_errors.AiActionValidationError):
         ai_action_service.execute_read_tool(
             db,
             user=regular_user,
@@ -123,8 +123,8 @@ def test_mod_install_without_write_permission_is_rejected(
         db, regular_user, server_keys=("server.view", "server.mods.read")
     )
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
-        ai_action_service.create_proposal(
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
             db,
             user=regular_user,
             conversation=conversation,
@@ -144,8 +144,8 @@ def test_a_non_numeric_workshop_id_is_rejected(
     )
 
     for bad in ("../../etc/passwd", "12a", "", "1" * 21):
-        with pytest.raises(ai_action_service.AiActionValidationError):
-            ai_action_service.create_proposal(
+        with pytest.raises(ai_action_errors.AiActionValidationError):
+            ai_proposal_service.create_proposal(
                 db,
                 user=regular_user,
                 conversation=conversation,
@@ -164,7 +164,7 @@ def test_mod_install_proposal_needs_confirmation_and_shows_a_preview(
         db, regular_user, server_keys=("server.view", "server.mods.read", "server.mods.write")
     )
 
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=regular_user,
         conversation=conversation,
@@ -203,7 +203,7 @@ def test_execution_uses_the_existing_install_path(
     server, conversation = _setup(
         db, regular_user, server_keys=("server.view", "server.mods.read", "server.mods.write")
     )
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=regular_user,
         conversation=conversation,
@@ -214,10 +214,10 @@ def test_execution_uses_the_existing_install_path(
     db.commit()
     monkeypatch.setattr("threading.Thread", _Thread)
 
-    _, token = ai_action_service.confirm_proposal(
+    _, token = ai_proposal_service.confirm_proposal(
         db, proposal_id=proposal.id, user=regular_user
     )
-    executed, result = ai_action_service.execute_proposal(
+    executed, result = ai_proposal_service.execute_proposal(
         db, proposal_id=proposal.id, user=regular_user, confirmation_token=token
     )
 
@@ -247,7 +247,7 @@ def test_a_running_installation_blocks_a_second_one(
         install_status=INSTALL_RUNNING,
     ))
     db.commit()
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=regular_user,
         conversation=conversation,
@@ -257,11 +257,11 @@ def test_a_running_installation_blocks_a_second_one(
     )
     db.commit()
 
-    _, token = ai_action_service.confirm_proposal(
+    _, token = ai_proposal_service.confirm_proposal(
         db, proposal_id=proposal.id, user=regular_user
     )
-    with pytest.raises(ai_action_service.AiActionStateError) as excinfo:
-        ai_action_service.execute_proposal(
+    with pytest.raises(ai_action_errors.AiActionStateError) as excinfo:
+        ai_proposal_service.execute_proposal(
             db, proposal_id=proposal.id, user=regular_user, confirmation_token=token
         )
 

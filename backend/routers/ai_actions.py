@@ -14,7 +14,7 @@ from schemas.ai_action import (
     AiActionExecuteResponse,
     AiActionProposalResponse,
 )
-from services import ai_action_service, ai_chat_service
+from services import ai_action_errors, ai_chat_service, ai_proposal_service
 from services.dis_client import DisSidecarError
 
 
@@ -46,7 +46,7 @@ def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
     )
 
 
-def _state_error(exc: ai_action_service.AiActionStateError) -> HTTPException:
+def _state_error(exc: ai_action_errors.AiActionStateError) -> HTTPException:
     if exc.code == "AI_ACTION_NOT_FOUND":
         return HTTPException(status_code=404, detail="Aktionsvorschlag nicht gefunden")
     if exc.code == "AI_ACTION_ACCESS_REVOKED":
@@ -75,7 +75,7 @@ def get_action(
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> AiActionProposalResponse:
-    proposal = ai_action_service.owned_proposal(db, proposal_id, user)
+    proposal = ai_proposal_service.owned_proposal(db, proposal_id, user)
     if proposal is None:
         raise HTTPException(status_code=404, detail="Aktionsvorschlag nicht gefunden")
     return proposal_response(proposal)
@@ -92,7 +92,7 @@ def confirm_action(
     _: None = Depends(verify_csrf),
 ) -> AiActionConfirmationResponse:
     try:
-        proposal, token = ai_action_service.confirm_proposal(
+        proposal, token = ai_proposal_service.confirm_proposal(
             db, proposal_id=proposal_id, user=user
         )
         assert proposal.confirmation_expires_at is not None
@@ -101,7 +101,7 @@ def confirm_action(
             confirmation_token=token,
             expires_at=proposal.confirmation_expires_at,
         )
-    except ai_action_service.AiActionStateError as exc:
+    except ai_action_errors.AiActionStateError as exc:
         db.rollback()
         raise _state_error(exc) from exc
     except DisSidecarError as exc:
@@ -121,14 +121,14 @@ def execute_action(
     _: None = Depends(verify_csrf),
 ) -> AiActionExecuteResponse:
     try:
-        proposal, result = ai_action_service.execute_proposal(
+        proposal, result = ai_proposal_service.execute_proposal(
             db,
             proposal_id=proposal_id,
             user=user,
             confirmation_token=payload.confirmation_token.get_secret_value(),
         )
         return AiActionExecuteResponse(proposal=proposal_response(proposal), result=result)
-    except ai_action_service.AiActionStateError as exc:
+    except ai_action_errors.AiActionStateError as exc:
         db.rollback()
         raise _state_error(exc) from exc
     except DisSidecarError as exc:

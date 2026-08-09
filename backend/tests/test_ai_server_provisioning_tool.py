@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from models import AiActionProposal, AiConversation, Role, RolePermission, User
-from services import ai_action_service
+from services import ai_action_errors, ai_action_service, ai_proposal_service, ai_tool_registry
 from services.role_service import set_user_roles
 
 
@@ -73,7 +73,7 @@ def test_the_single_tool_catalog_covers_panel_and_server_work(db: Session) -> No
     # muesste raten — genau das darf es nie.
     for item in tools:
         function = item["function"]
-        if function["name"] in ai_action_service.GLOBAL_READ_TOOLS | ai_action_service.GLOBAL_WRITE_TOOLS:
+        if function["name"] in ai_tool_registry.GLOBAL_READ_TOOLS | ai_tool_registry.GLOBAL_WRITE_TOOLS:
             continue
         assert "server_id" in function["parameters"]["properties"], function["name"]
         assert "server_id" in function["parameters"]["required"], function["name"]
@@ -85,8 +85,8 @@ def test_creation_without_servers_create_is_rejected(
     _role(db, regular_user, ("ai.chat.use",))
     conversation = _conversation(db, regular_user)
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
-        ai_action_service.create_proposal(
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
             db,
             user=regular_user,
             conversation=conversation,
@@ -106,8 +106,8 @@ def test_creation_proposal_needs_a_reason_and_an_expected_effect(
     arguments = _arguments()
     del arguments["reason"]
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
-        ai_action_service.create_proposal(
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
             db,
             user=regular_user,
             conversation=conversation,
@@ -123,8 +123,8 @@ def test_unknown_game_type_is_rejected_before_a_proposal_exists(
     _role(db, regular_user, ("ai.chat.use", "servers.create"))
     conversation = _conversation(db, regular_user)
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
-        ai_action_service.create_proposal(
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
             db,
             user=regular_user,
             conversation=conversation,
@@ -143,7 +143,7 @@ def test_a_creation_proposal_carries_a_preview_and_stays_unconfirmed(
     _role(db, regular_user, ("ai.chat.use", "servers.create"))
     conversation = _conversation(db, regular_user)
 
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=regular_user,
         conversation=conversation,
@@ -179,7 +179,7 @@ def test_execution_goes_through_the_shared_provisioning_service(
 
     _role(db, regular_user, ("ai.chat.use", "servers.create"))
     conversation = _conversation(db, regular_user)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=regular_user,
         conversation=conversation,
@@ -217,10 +217,10 @@ def test_execution_goes_through_the_shared_provisioning_service(
         "services.server_provisioning_service.provision_server", fake_provision
     )
 
-    _, token = ai_action_service.confirm_proposal(
+    _, token = ai_proposal_service.confirm_proposal(
         db, proposal_id=proposal_id, user=regular_user
     )
-    executed, result = ai_action_service.execute_proposal(
+    executed, result = ai_proposal_service.execute_proposal(
         db, proposal_id=proposal_id, user=regular_user, confirmation_token=token
     )
 
@@ -248,7 +248,7 @@ def test_a_revoked_permission_blocks_execution_even_after_confirmation(
     """
     _role(db, regular_user, ("ai.chat.use", "servers.create"))
     conversation = _conversation(db, regular_user)
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=regular_user,
         conversation=conversation,
@@ -268,7 +268,7 @@ def test_a_revoked_permission_blocks_execution_even_after_confirmation(
         "services.server_provisioning_service.provision_server", fake_provision
     )
 
-    _, token = ai_action_service.confirm_proposal(
+    _, token = ai_proposal_service.confirm_proposal(
         db, proposal_id=proposal.id, user=regular_user
     )
     # Recht entziehen, nachdem bestaetigt wurde.
@@ -277,8 +277,8 @@ def test_a_revoked_permission_blocks_execution_even_after_confirmation(
     ).delete()
     db.commit()
 
-    with pytest.raises(ai_action_service.AiActionStateError) as excinfo:
-        ai_action_service.execute_proposal(
+    with pytest.raises(ai_action_errors.AiActionStateError) as excinfo:
+        ai_proposal_service.execute_proposal(
             db, proposal_id=proposal.id, user=regular_user, confirmation_token=token
         )
 

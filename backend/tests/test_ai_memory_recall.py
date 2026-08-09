@@ -17,7 +17,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, User
-from services import ai_action_service, ai_memory_service
+from services import ai_action_errors, ai_action_service, ai_memory_service
 from services.role_service import set_user_roles
 
 
@@ -220,7 +220,7 @@ def test_losing_access_to_a_server_removes_its_memory_from_the_context(
 
 def test_remember_requires_the_memory_permission(db: Session, regular_user: User) -> None:
     """Wer sein Memory nicht nutzen darf, bekommt auch keines geschrieben."""
-    with pytest.raises(ai_action_service.AiActionValidationError):
+    with pytest.raises(ai_action_errors.AiActionValidationError):
         ai_action_service.execute_read_tool(
             db, user=regular_user, tool_name="remember",
             arguments={"scope": "user", "key": "test", "value": "Wert"},
@@ -235,13 +235,13 @@ def test_remember_rejects_secrets_and_the_panel_scope(
 
     # Panelweites Memory gilt fuer alle Benutzer — das ist eine
     # Betreiberentscheidung und nicht die der KI.
-    with pytest.raises(ai_action_service.AiActionValidationError):
+    with pytest.raises(ai_action_errors.AiActionValidationError):
         ai_action_service.execute_read_tool(
             db, user=regular_user, tool_name="remember",
             arguments={"scope": "panel", "key": "regel", "value": "Wert"},
         )
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
+    with pytest.raises(ai_action_errors.AiActionValidationError):
         ai_action_service.execute_read_tool(
             db, user=regular_user, tool_name="remember",
             arguments={

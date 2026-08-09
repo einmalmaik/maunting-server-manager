@@ -24,7 +24,7 @@ from models import (
     ServerPermission,
     User,
 )
-from services import ai_action_service, ai_autonomy_service
+from services import ai_action_errors, ai_autonomy_service, ai_proposal_service, ai_tool_registry
 from services.role_service import set_user_roles
 
 
@@ -74,7 +74,7 @@ def _backup_arguments(server_id: int) -> dict:
 def _propose(
     db: Session, user: User, conversation: AiConversation, server: Server
 ) -> AiActionProposal:
-    proposal = ai_action_service.create_proposal(
+    proposal = ai_proposal_service.create_proposal(
         db,
         user=user,
         conversation=conversation,
@@ -257,7 +257,7 @@ def test_always_confirm_tools_are_never_autonomous(
     )
     db.commit()
 
-    for tool in sorted(ai_action_service.ALWAYS_CONFIRM_TOOLS):
+    for tool in sorted(ai_tool_registry.ALWAYS_CONFIRM_TOOLS):
         assert not ai_autonomy_service.autonomy_allows(
             db, user=regular_user, server_id=server.id, tool_name=tool
         ), f"{tool} darf niemals autonom laufen"
@@ -286,8 +286,8 @@ def test_autonomous_execution_still_rechecks_the_permission(
     ).delete()
     db.commit()
 
-    with pytest.raises(ai_action_service.AiActionStateError) as excinfo:
-        ai_action_service.execute_autonomously(
+    with pytest.raises(ai_action_errors.AiActionStateError) as excinfo:
+        ai_proposal_service.execute_autonomously(
             db, proposal_id=proposal.id, user=regular_user
         )
 
@@ -306,8 +306,8 @@ def test_a_confirmable_proposal_can_not_be_executed_autonomously(
     )
     proposal = _propose(db, regular_user, conversation, server)
 
-    with pytest.raises(ai_action_service.AiActionStateError) as excinfo:
-        ai_action_service.execute_autonomously(
+    with pytest.raises(ai_action_errors.AiActionStateError) as excinfo:
+        ai_proposal_service.execute_autonomously(
             db, proposal_id=proposal.id, user=regular_user
         )
 

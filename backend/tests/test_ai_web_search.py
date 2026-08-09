@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from models import Role, RolePermission, User
-from services import ai_action_service, ai_web_search_service
+from services import ai_action_errors, ai_action_service, ai_web_search_service
 from services.role_service import set_user_roles
 
 
@@ -51,7 +51,7 @@ def test_search_without_the_permission_is_rejected(
 ) -> None:
     _mock_response(monkeypatch, {"web": {"results": []}})
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
+    with pytest.raises(ai_action_errors.AiActionValidationError):
         ai_action_service.execute_read_tool(
             db, user=regular_user, tool_name="web_search",
             arguments={"query": "irgendwas"},
@@ -204,7 +204,7 @@ def test_too_many_results_are_capped(
     """Die KI soll nachschlagen koennen, nicht das Web einlesen."""
     _allow_search(db, regular_user)
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
+    with pytest.raises(ai_action_errors.AiActionValidationError):
         ai_action_service.execute_read_tool(
             db, user=regular_user, tool_name="web_search",
             arguments={"query": "test", "count": 50},

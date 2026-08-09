@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, Team, User
 from services import ai_action_service, ai_embedding_service, ai_memory_service, team_service
-from services.ai_action_service import AiActionValidationError
+from services.ai_action_errors import AiActionValidationError
 from services.auth_service import AuthService
 from services.role_service import set_user_roles
 

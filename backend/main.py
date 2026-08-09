@@ -543,7 +543,7 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).warning("OAuth-LoginChallenge-Cleanup fehlgeschlagen: %s", exc)
 
 
-    from services.ai_action_service import reconcile_interrupted_actions
+    from services.ai_proposal_service import reconcile_interrupted_actions
     from services.ai_chat_service import reconcile_interrupted_ai_streams
 
     _ai_recovery_db = SessionLocal()

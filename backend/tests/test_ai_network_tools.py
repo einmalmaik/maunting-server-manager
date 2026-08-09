@@ -22,7 +22,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from models import Node, Role, RolePermission, Server, ServerPermission, ServerPort, User
-from services import ai_action_service, server_network_diagnostics
+from services import ai_action_errors, ai_action_service, ai_proposal_service, server_network_diagnostics
 from services.role_service import set_user_roles
 
 
@@ -242,7 +242,7 @@ def test_network_tools_reject_a_server_the_user_may_not_see(
     foreign = _server(db, "fremd", bind_ip="192.168.1.50")
 
     for tool in ("read_server_network", "check_server_reachability"):
-        with pytest.raises(ai_action_service.AiActionValidationError):
+        with pytest.raises(ai_action_errors.AiActionValidationError):
             ai_action_service.execute_read_tool(
                 db, user=regular_user, tool_name=tool,
                 arguments={"server_id": foreign.id},
@@ -265,7 +265,7 @@ def _conversation(db: Session, user: User):
 def _propose_bind_ip(db: Session, user: User, server: Server, bind_ip: str):
     from uuid import uuid4
 
-    return ai_action_service.create_proposal(
+    return ai_proposal_service.create_proposal(
         db, user=user, conversation=_conversation(db, user),
         tool_name="propose_bind_ip_update",
         arguments={
@@ -292,7 +292,7 @@ def test_a_bind_ip_that_is_not_on_this_host_is_rejected(
         "services.network_interfaces_service.list_host_interfaces", lambda: []
     )
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
+    with pytest.raises(ai_action_errors.AiActionValidationError):
         _propose_bind_ip(db, regular_user, server, "192.168.99.99")
 
 
@@ -342,7 +342,7 @@ def test_a_bind_ip_update_needs_the_network_permission(
         "services.network_interfaces_service.list_host_interfaces", lambda: [_Interface()]
     )
 
-    with pytest.raises(ai_action_service.AiActionValidationError):
+    with pytest.raises(ai_action_errors.AiActionValidationError):
         _propose_bind_ip(db, regular_user, server, "192.168.1.50")
 
 
@@ -377,7 +377,7 @@ def test_the_preview_shows_both_addresses_and_the_restart(
 def test_node_health_needs_the_nodes_read_permission(
     db: Session, regular_user: User
 ) -> None:
-    with pytest.raises(ai_action_service.AiActionValidationError):
+    with pytest.raises(ai_action_errors.AiActionValidationError):
         ai_action_service.execute_read_tool(
             db, user=regular_user, tool_name="read_node_health", arguments={},
         )
