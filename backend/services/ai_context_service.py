@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -72,6 +73,37 @@ def _system_message(
     """
     del conversation  # Der Prompt haengt nicht mehr an der Unterhaltung.
     return ai_prompt.build(_skill_index_block(db, user, query))
+
+
+def _message_content_for_provider(row: AiMessage) -> str:
+    """Der Text einer Nachricht, wie das Modell ihn sehen soll.
+
+    Bei einer Rueckfrage steht der eigentliche Inhalt nicht in `content`,
+    sondern in `question_json`. Ohne diese Uebersetzung sah das Modell in der
+    Historie eine **leere eigene Nachricht**, gefolgt von der Antwort des
+    Benutzers — auf "Server.properties" konnte es dann nur mit derselben Frage
+    erneut reagieren, weil ihm nichts sagte, dass es gefragt hatte.
+
+    Der Fragetext geht mitsamt den angebotenen Vorschlaegen zurueck: welche
+    Auswahl zur Debatte stand, gehoert zum Verstaendnis der Antwort. Ein blosses
+    "ja" oder "die erste" ist sonst nicht aufloesbar.
+    """
+    text = row.content or ""
+    if row.role != "assistant" or not row.question_json:
+        return text
+    try:
+        frage = json.loads(row.question_json)
+    except (ValueError, TypeError):
+        # Eine unlesbare Zeile darf den Verlauf nicht sprengen. Ohne den
+        # Fragetext ist der Kontext duenner, aber der Chat laeuft weiter.
+        return text
+    zeilen = [f"Rueckfrage an den Benutzer: {frage.get('question', '')}"]
+    for option in frage.get("options") or []:
+        beschriftung = option.get("label", "")
+        hinweis = option.get("hint")
+        zeilen.append(f"- {beschriftung}" + (f" ({hinweis})" if hinweis else ""))
+    frageblock = "\n".join(zeilen)
+    return f"{text}\n{frageblock}" if text else frageblock
 
 
 def _recent_tool_results(db: Session, conversation_id: str) -> str | None:
@@ -187,7 +219,7 @@ def build_provider_messages(
     # 256 KB liefen so an der Kuerzung auf MAX_CONTEXT_CHARS vorbei.
     used = message_character_count(result)
     for row in rows:
-        content = redact_sensitive_text(row.content)
+        content = redact_sensitive_text(_message_content_for_provider(row))
         remaining = MAX_CONTEXT_CHARS - used
         if remaining <= 0:
             break

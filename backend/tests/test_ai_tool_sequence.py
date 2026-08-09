@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from models import (
     AiActionProposal,
     AiConversation,
+    AiMessage,
     AiProvider,
     Role,
     RolePermission,
@@ -25,6 +26,7 @@ from models import (
     User,
 )
 from services import ai_stream_service
+from services.ai_context_service import build_provider_messages
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
 from services.openai_compatible_adapter import ProviderToolCall, StreamChunk, StreamUsage
 from services.role_service import set_user_roles
@@ -779,9 +781,12 @@ async def test_a_question_ends_the_turn_and_reaches_the_user(
     frage = [event for event in events if event.startswith("event: question")]
     assert len(frage) == 1
     assert "1.20.1" in frage[0]
-    # Genau eine Abschlussrunde: das Modell darf den Grund nennen, aber nicht
-    # weiterarbeiten, solange die Antwort fehlt.
-    assert len(seen) == 2
+    # **Eine** Anbieterrunde. Frueher folgte noch eine ohne Werkzeuge, damit das
+    # Modell den Grund der Frage nennen kann. Gemessen am Betrieb war das ein
+    # Fehlgriff: der Prompt sagt dem Modell, die Frage stehe bereits im Chat,
+    # also lieferte diese Runde meist nichts — ein bezahlter Aufruf fuer eine
+    # leere Blase, unter der "Keine Antwort erhalten" stand.
+    assert len(seen) == 1
 
 
 @pytest.mark.asyncio
@@ -809,8 +814,10 @@ async def test_other_calls_in_the_question_round_are_dropped(
     # Der Lesezugriff lief nicht — er haette auf einer Frage aufgebaut, deren
     # Antwort noch aussteht.
     assert not any(event.startswith("event: tool") for event in events)
-    zurueck = [item for runde in seen for item in runde if item.get("role") == "tool"]
-    assert any("gegenstandslos" in str(item.get("content")) for item in zurueck)
+    # Und es gibt keine Folgerunde mehr, in der die uebrigen Aufrufe eine Absage
+    # bekaemen: der Zug endet mit der Frage. Die Werkzeugantworten waren nur
+    # noetig, solange der Verlauf dieser Runde in eine weitere Anfrage floss.
+    assert len(seen) == 1
 
 
 @pytest.mark.asyncio
@@ -832,3 +839,105 @@ async def test_a_malformed_question_is_refused(
     events = await _collect(regular_user, conversation, provider)
 
     assert "AI_TOOL_REJECTED" in _error_codes(events)
+
+
+@pytest.mark.asyncio
+async def test_the_model_sees_its_own_question_in_the_history(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Fehler, an dem der Chat im Betrieb scheiterte.
+
+    Beobachtet:
+
+        Benutzer:  Server.properties
+        KI:        Welche Minecraft-Einstellungen soll ich pruefen oder aendern?
+
+    Die KI stellte dieselbe Frage ein zweites Mal, weil die erste nirgends
+    gespeichert war. Sie lebte nur als SSE-Ereignis; in `ai_messages` stand eine
+    Assistenten-Zeile mit leerem `content`. Beim naechsten Aufruf sah das Modell
+    also eine leere eigene Nachricht, gefolgt von "Server.properties" — nichts
+    darin sagte ihm, dass es gefragt hatte, und schon gar nicht was.
+
+    Der Test prueft die Kette an ihrer schmalsten Stelle: was nach einer
+    Rueckfrage tatsaechlich in `build_provider_messages` landet.
+    """
+    server = _server(db, "frage-kontext")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="ask_user", arguments={
+            "question": "Welche Minecraft-Einstellungen soll ich anpassen?",
+            "options": [
+                {"label": "server.properties", "hint": "Spielregeln und Ports"},
+                {"label": "Forge-Version"},
+            ],
+        }),
+    ]])
+
+    await _collect(regular_user, conversation, provider)
+
+    # 1. Die Frage haengt an der Nachricht, die sie gestellt hat.
+    gestellt = (
+        db.query(AiMessage)
+        .filter(
+            AiMessage.conversation_id == conversation.id,
+            AiMessage.role == "assistant",
+        )
+        .order_by(AiMessage.created_at.desc())
+        .first()
+    )
+    assert gestellt is not None
+    assert gestellt.question_json, "Die Rueckfrage wurde nicht gespeichert"
+
+    # 2. Und sie steht im Kontext der naechsten Anfrage — hier bricht es sonst.
+    db.expire_all()
+    conversation = db.get(AiConversation, conversation.id)
+    kontext = build_provider_messages(db, conversation, query="server.properties")
+    vom_assistenten = "\n".join(
+        str(eintrag.get("content", ""))
+        for eintrag in kontext
+        if eintrag.get("role") == "assistant"
+    )
+    assert "Welche Minecraft-Einstellungen soll ich anpassen?" in vom_assistenten
+    # Auch die angebotene Auswahl, sonst waere ein "die erste" nicht aufloesbar.
+    assert "server.properties" in vom_assistenten
+    assert "Forge-Version" in vom_assistenten
+
+
+@pytest.mark.asyncio
+async def test_a_question_counts_as_output_and_is_not_an_empty_answer(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eine Rueckfrage ist eine Antwort, kein Fehlschlag.
+
+    Der Chat zeigte unter jeder gestellten Frage "Keine Antwort erhalten",
+    weil der Zug ohne Fliesstext endete und damit als "nichts geliefert" galt.
+    """
+    server = _server(db, "frage-ausgabe")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="ask_user", arguments={
+            "question": "Welchen Server meinst du?",
+            "options": [{"label": "Server A"}, {"label": "Server B"}],
+        }),
+    ]])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    nachricht = (
+        db.query(AiMessage)
+        .filter(
+            AiMessage.conversation_id == conversation.id,
+            AiMessage.role == "assistant",
+        )
+        .order_by(AiMessage.created_at.desc())
+        .first()
+    )
+    assert nachricht is not None
+    # Der Zug gilt als gelungen — nicht als leer gescheitert.
+    assert nachricht.status == "complete"
+    assert nachricht.question_json

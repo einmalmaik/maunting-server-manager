@@ -44,6 +44,15 @@ export interface AiMessage {
   content: string
   /** Denkschritte des Modells, sofern es welche geliefert hat. */
   reasoning: string | null
+  /**
+   * Die Rueckfrage, die diese Nachricht gestellt hat.
+   *
+   * Sie haengt an der Nachricht und nicht an einem fluechtigen Ereignis:
+   * frueher lebte sie nur im SSE-Strom, war nach einem Neuladen weg, und die
+   * KI sah ihre eigene Frage im Verlauf nicht mehr — auf eine Antwort folgte
+   * dieselbe Frage erneut.
+   */
+  question: AiQuestion | null
   status: 'complete' | 'streaming' | 'failed'
   provider_id: number | null
   model: string | null

@@ -109,6 +109,7 @@ def _finalize_stream(
     had_output: bool,
     token_price_cents_per_million: int | None = None,
     reasoning: str = "",
+    question: dict | None = None,
 ) -> None:
     with SessionLocal() as db:
         message = db.get(AiMessage, message_id)
@@ -126,6 +127,13 @@ def _finalize_stream(
             message.reasoning = (
                 redact_sensitive_text(reasoning)[:MAX_REASONING_CHARS] or None
             )
+            # Die Rueckfrage gehoert zur Nachricht. Sie ist bereits durch
+            # `question_payload()` geprueft, gekuerzt und redigiert — hier wird
+            # nur noch abgelegt.
+            if question is not None:
+                message.question_json = json.dumps(
+                    question, ensure_ascii=True, separators=(",", ":")
+                )
             message.status = "failed" if failed else "complete"
         else:
             # Die Nachricht wurde waehrend des Streams entfernt (z. B. Chat
@@ -358,52 +366,6 @@ def _persist_write_proposals(
         return results
 
 
-def _ask_followup_messages(*, tool_calls, asked) -> list[dict]:
-    """Bestaetigt die Rueckfrage und sagt allen anderen Aufrufen der Runde ab.
-
-    Das Protokoll verlangt zu jeder `tool_call_id` genau ein Ergebnis — auch zu
-    denen, die durch die Rueckfrage gegenstandslos geworden sind.
-    """
-    messages: list[dict] = [{
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {
-                    "name": call.name,
-                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
-                },
-            }
-            for call in tool_calls
-        ],
-    }]
-    for call in tool_calls:
-        if call.id == asked.id:
-            content = {
-                "asked": True,
-                "note": (
-                    "Die Frage steht als Karte im Chat. Warte auf die Antwort "
-                    "des Benutzers; sie kommt als naechste Nachricht."
-                ),
-            }
-        else:
-            content = {
-                "executed": False,
-                "reason": (
-                    "Durch die Rueckfrage gegenstandslos. Hole es nach, sobald "
-                    "die Antwort da ist."
-                ),
-            }
-        messages.append({
-            "role": "tool",
-            "tool_call_id": call.id,
-            "content": json.dumps(content, ensure_ascii=True, separators=(",", ":")),
-        })
-    return messages
-
-
 def _write_followup_messages(
     *, conversation_id: str, tool_calls, proposals: list[dict]
 ) -> list[dict]:
@@ -598,6 +560,10 @@ async def stream_conversation_reply(
         current_usage = usage
         rounds = 0
         write_rounds = 0
+        # Die Rueckfrage dieses Zuges, falls eine gestellt wurde. Sie wird an
+        # der Assistenten-Nachricht festgehalten, damit das Modell sie beim
+        # naechsten Aufruf in der Historie wiederfindet.
+        gestellte_frage: dict | None = None
         while True:
             async for chunk in stream_chat_completion(
                 client,
@@ -654,17 +620,19 @@ async def stream_conversation_reply(
                 None,
             )
             if frage is not None:
-                payload = question_payload(frage.arguments)
-                yield sse_event("question", payload)
-                provider_messages.extend(_ask_followup_messages(
-                    tool_calls=current_usage.tool_calls, asked=frage,
-                ))
-                # Eine letzte Runde ohne Werkzeuge: das Modell soll den Grund
-                # der Frage in einem Satz nennen duerfen. Die Frage selbst steht
-                # bereits als Karte im Chat und gehoert nicht wiederholt.
-                tools = None
-                current_usage = StreamUsage()
-                continue
+                gestellte_frage = question_payload(frage.arguments)
+                yield sse_event("question", gestellte_frage)
+                # Hier endet der Zug. Frueher folgte noch eine Runde ohne
+                # Werkzeuge, damit das Modell den Grund der Frage nennen kann.
+                # Gemessen am Betrieb war das ein Fehlgriff: der Prompt sagt dem
+                # Modell, die Frage stehe bereits im Chat, also lieferte diese
+                # Runde meist gar nichts — ein bezahlter Anbieteraufruf fuer
+                # eine leere Blase mit "Keine Antwort erhalten" darunter.
+                #
+                # Was das Modell erklaeren will, schreibt es ohnehin im selben
+                # Durchgang: Anbieter liefern Text und Werkzeugaufrufe zusammen,
+                # und dieser Text steht bereits in `chunks`.
+                break
 
             kinds = {
                 "read" if call.name in READ_TOOLS else "write" if call.name in WRITE_TOOLS else "unknown"
@@ -801,9 +769,13 @@ async def stream_conversation_reply(
             provider_total_tokens=usage.total_tokens,
             estimated_actual_tokens=estimated_actual,
             failed=False,
-            had_output=bool(chunks),
+            # Eine Rueckfrage ist eine vollwertige Antwort. Ohne dieses Flag
+            # gilt ein Zug ohne Fliesstext als "nichts geliefert" — genau der
+            # Fall, in dem der Chat "Keine Antwort erhalten" anzeigte.
+            had_output=bool(chunks) or gestellte_frage is not None,
             token_price_cents_per_million=token_price_cents_per_million,
             reasoning="".join(thoughts),
+            question=gestellte_frage,
         )
         finalized = True
         yield sse_event("done", {"message_id": assistant_id})

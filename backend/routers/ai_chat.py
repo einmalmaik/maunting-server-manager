@@ -21,6 +21,7 @@ from schemas.ai_chat import (
     AiMessageEdit,
     AiMessageEditResponse,
     AiMessageResponse,
+    AiQuestionPayload,
 )
 from services import ai_chat_service
 from services.ai_redaction import redact_sensitive_text
@@ -43,12 +44,28 @@ def _conversation_response(conversation) -> AiConversationResponse:
     )
 
 
+def _question(message: AiMessage) -> AiQuestionPayload | None:
+    """Die gespeicherte Rueckfrage, falls diese Nachricht eine gestellt hat.
+
+    Eine unlesbare Zeile wird uebergangen statt den ganzen Verlauf mitzureissen —
+    im schlimmsten Fall fehlt eine Frage aus der Vergangenheit, der Chat bleibt
+    benutzbar.
+    """
+    if not message.question_json:
+        return None
+    try:
+        return AiQuestionPayload.model_validate_json(message.question_json)
+    except ValueError:
+        return None
+
+
 def _message_response(message: AiMessage) -> AiMessageResponse:
     return AiMessageResponse(
         id=message.id,
         role=message.role,
         content=message.content,
         reasoning=message.reasoning,
+        question=_question(message),
         status=message.status,
         provider_id=message.provider_id,
         model=message.model,
@@ -129,6 +146,12 @@ async def _replay_message(message: AiMessage) -> AsyncIterator[str]:
         yield sse_event("reasoning", {"content": message.reasoning})
     if message.content:
         yield sse_event("delta", {"content": message.content})
+    # Endete der Zug mit einer Rueckfrage, gehoert sie auch in die Wiedergabe —
+    # sonst saehe der Benutzer nach einem erneuten Absenden derselben Anfrage
+    # eine Antwort ohne die Frage, auf die er antworten soll.
+    frage = _question(message)
+    if frage is not None:
+        yield sse_event("question", frage.model_dump())
     yield sse_event("done", {"message_id": message.id, "replayed": True})
 
 

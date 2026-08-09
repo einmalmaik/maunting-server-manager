@@ -6,6 +6,23 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+class AiQuestionOption(BaseModel):
+    label: str
+    hint: str | None = None
+
+
+class AiQuestionPayload(BaseModel):
+    """Eine Rueckfrage der KI, so wie sie im Chat erscheint.
+
+    Dieselbe Form, die `question_payload()` erzeugt und das SSE-Ereignis
+    `question` traegt — hier nur fuer den Weg ueber den Verlauf, damit die Frage
+    ein Neuladen der Seite ueberlebt.
+    """
+
+    question: str
+    options: list[AiQuestionOption] = Field(default_factory=list)
+
+
 class AiConversationResponse(BaseModel):
     id: str
     title: str
@@ -21,6 +38,10 @@ class AiMessageResponse(BaseModel):
     # `content`, damit die Oberflaeche sie einklappen kann und niemand sie fuer
     # die Antwort haelt.
     reasoning: str | None = None
+    # Die Rueckfrage, die diese Nachricht gestellt hat. Sie ist Teil der
+    # Nachricht und keine eigene Blase — im Chat erscheint sie unter dem Text
+    # derselben Antwort, so wie ein Mensch eine Frage an das Gesagte anhaengt.
+    question: AiQuestionPayload | None = None
     status: str
     provider_id: int | None
     model: str | None

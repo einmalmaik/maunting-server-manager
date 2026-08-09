@@ -78,6 +78,15 @@ class AiMessage(Base):
     # kann, und duerfen nicht in eine Folgeanfrage zurueckfliessen. In `content`
     # waeren sie von der eigentlichen Antwort nicht mehr unterscheidbar.
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Die Rueckfrage, die diese Nachricht gestellt hat — bereits geprueft und
+    # redigiert durch `question_payload()`, als {"question": ..., "options": [...]}.
+    #
+    # Sie gehoert an die Nachricht und nicht in ein fluechtiges Ereignis. Vorher
+    # lebte sie nur im SSE-Strom: der Chat zeigte eine leere Blase mit "Keine
+    # Antwort erhalten", nach einem Neuladen war die Frage weg, und — das
+    # Schwerste — **das Modell sah seine eigene Frage in der Historie nicht**.
+    # Auf die Antwort "Server.properties" folgte deshalb dieselbe Frage erneut.
+    question_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="complete")
     provider_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True

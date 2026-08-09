@@ -14,6 +14,12 @@ import type { AiQuestion } from '@/api/ai'
  * Beantwortete Fragen bleiben sichtbar, aber ohne Knöpfe. Sie zu entfernen
  * würde den Verlauf unlesbar machen — man sähe nur noch die Antwort und wüsste
  * nicht mehr, worauf sie sich bezieht.
+ *
+ * **Steht innerhalb der Antwortblase**, nicht daneben. Vorher war sie eine
+ * eigenständige Karte im Verlauf, und darunter erschien die leere Nachricht der
+ * KI mit „Keine Antwort erhalten" — die Frage wirkte wie ein Fremdkörper
+ * zwischen zwei Nachrichten statt wie ein Teil der Antwort. Deshalb hier kein
+ * eigener Rahmen und kein eigener Hintergrund mehr, nur ein Abstand nach oben.
  */
 export function AiQuestionCard({
   question, answered, disabled, onAnswer,
@@ -26,12 +32,9 @@ export function AiQuestionCard({
   const { t } = useTranslation()
 
   return (
-    <article
-      className="mx-auto w-full max-w-3xl rounded-2xl border border-tertiary/30 bg-tertiary/5 p-4"
-      aria-label={t('ai.question.title')}
-    >
-      <div className="flex items-start gap-3">
-        <HelpCircle className="mt-0.5 h-5 w-5 shrink-0 text-tertiary" aria-hidden="true" />
+    <section className="mt-3" aria-label={t('ai.question.title')}>
+      <div className="flex items-start gap-2">
+        <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="text-sm leading-6 text-on-surface">{question.question}</p>
 
@@ -64,6 +67,6 @@ export function AiQuestionCard({
           )}
         </div>
       </div>
-    </article>
+    </section>
   )
 }

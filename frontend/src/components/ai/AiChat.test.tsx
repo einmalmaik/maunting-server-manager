@@ -60,7 +60,7 @@ const skills: AiSkillSummary[] = [
 /** Eine bereits gesendete eigene Nachricht — die Grundlage fuers Bearbeiten. */
 const eigeneNachricht: AiMessage = {
   id: 'msg-user', role: 'user', content: 'urspruengliche Frage', reasoning: null,
-  status: 'complete', provider_id: null, model: null,
+  question: null, status: 'complete', provider_id: null, model: null,
   created_at: '2026-08-01T12:00:00Z',
 }
 

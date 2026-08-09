@@ -9,7 +9,6 @@ import {
   type AiAttachment,
   type AiMessage,
   type AiProviderAvailable,
-  type AiQuestion,
   type AiToolUse,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
@@ -32,10 +31,6 @@ type Entry =
   // wuerde die KI spaeter Dinge "vergessen", ohne dass jemand weiss warum.
   | { kind: 'compacted'; id: string }
   | { kind: 'proposal'; id: string; proposal: AiActionProposal }
-  // Rueckfrage der KI. `answered` schaltet die Knoepfe ab, ohne die Karte
-  // zu entfernen — sonst saehe man spaeter nur die Antwort und wuesste
-  // nicht mehr, worauf sie sich bezieht.
-  | { kind: 'question'; id: string; question: AiQuestion; answered: boolean }
 
 interface ServerOption {
   id: number
@@ -219,11 +214,11 @@ export function AiChat() {
     const now = new Date().toISOString()
     const assistantId = crypto.randomUUID()
     const optimisticUser: AiMessage = {
-      id: crypto.randomUUID(), role: 'user', content, reasoning: null,
+      id: crypto.randomUUID(), role: 'user', content, reasoning: null, question: null,
       status: 'complete', provider_id: null, model: null, created_at: now,
     }
     const optimisticAssistant: AiMessage = {
-      id: assistantId, role: 'assistant', content: '', reasoning: null,
+      id: assistantId, role: 'assistant', content: '', reasoning: null, question: null,
       status: 'streaming', provider_id: providerId, model: null, created_at: now,
     }
     setEntries((current) => [
@@ -275,9 +270,11 @@ export function AiChat() {
             kind: 'tool', id: `${data.tool_name}-${current.length}`, tool: data,
           }))
         } else if (name === 'question') {
-          setEntries((current) => insertBeforeStreaming(current, {
-            kind: 'question', id: `question-${current.length}`,
-            question: data, answered: false,
+          // Die Frage gehoert an die Antwort, nicht neben sie. Als eigener
+          // Eintrag stand sie frueher VOR der noch leeren Assistentenblase,
+          // unter der dann "Keine Antwort erhalten" erschien.
+          patchAssistantById(setEntries, undefined, assistantId, (message) => ({
+            ...message, question: data,
           }))
         } else if (name === 'compacted') {
           // Die Marke gehoert an den Anfang: sie beschreibt, was *vorher* war.
@@ -438,7 +435,7 @@ export function AiChat() {
           )}
 
           <div className="space-y-4">
-            {entries.map((entry) => {
+            {entries.map((entry, index) => {
               if (entry.kind === 'tool') {
                 const isMemory = entry.tool.tool_name === 'remember'
                 const skillKey = entry.tool.skill_key
@@ -468,26 +465,6 @@ export function AiChat() {
                     {skillLabel
                       ?? t(`ai.tools.${entry.tool.tool_name}`, { defaultValue: entry.tool.tool_name })}
                   </p>
-                )
-              }
-              if (entry.kind === 'question') {
-                return (
-                  <AiQuestionCard
-                    key={entry.id}
-                    question={entry.question}
-                    answered={entry.answered}
-                    disabled={busy}
-                    onAnswer={(label) => {
-                      // Erst die Karte stilllegen, dann senden: sonst koennte
-                      // ein zweiter Klick dieselbe Antwort doppelt schicken.
-                      setEntries((current) => current.map((item) => (
-                        item.kind === 'question' && item.id === entry.id
-                          ? { ...item, answered: true }
-                          : item
-                      )))
-                      void sendContent(label)
-                    }}
-                  />
                 )
               }
               if (entry.kind === 'compacted') {
@@ -600,8 +577,27 @@ export function AiChat() {
                         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                         {t('ai.chat.thinking')}
                       </p>
-                    ) : (
+                    ) : message.question ? null : (
+                      // Eine Rueckfrage *ist* die Antwort. Frueher stand hier
+                      // "Keine Antwort erhalten" unter jeder gestellten Frage,
+                      // weil die Frage in einer eigenen Karte lag und der
+                      // Nachrichtentext leer blieb.
                       <p className="text-sm text-on-surface-variant">{t('ai.chat.noResponse')}</p>
+                    )}
+                    {/* Die Rueckfrage gehoert in dieselbe Blase wie der Text
+                        davor — sie ist Teil dieser Antwort und keine neue
+                        Nachricht. Beantwortet ist sie, sobald irgendein
+                        spaeterer Eintrag existiert: dann hat der Benutzer
+                        geschrieben, ob per Knopf oder frei getippt. Damit
+                        ueberlebt der Zustand auch ein Neuladen der Seite, ohne
+                        dass er irgendwo gespeichert werden muesste. */}
+                    {message.question && (
+                      <AiQuestionCard
+                        question={message.question}
+                        answered={index < entries.length - 1}
+                        disabled={busy}
+                        onAnswer={(label) => void sendContent(label)}
+                      />
                     )}
                     {message.status === 'failed' && (
                       <p className="mt-2 text-xs text-status-error">{t('ai.chat.failed')}</p>
