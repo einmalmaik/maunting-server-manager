@@ -154,3 +154,92 @@ def test_reconcile_firewall_rules_cleans_stray_rules(db: Session) -> None:
 
     assert audit is not None
     assert "Audit-Reconciliation" in audit.details
+
+
+def test_reconcile_firewall_rules_keeps_starting_and_restarting_open(db: Session) -> None:
+    """Lifecycle öffnet UFW vor status=running — Reconcile darf starting/restarting nicht schließen.
+
+    Der Fehler war im Betrieb schwer zu greifen: der Container lief, das Panel
+    meldete "running", und trotzdem kam von aussen niemand drauf. Ursache war
+    dieses Zeitfenster — `open_ports` laeuft vor dem Status-Flip, und der
+    Reconcile-Job hielt den startenden Server fuer einen gestoppten.
+    """
+    starting = Server(
+        name="Starting Keep Open",
+        game_type="seven_days_to_die",
+        status="starting",
+        install_dir="/tmp/srv-starting",
+    )
+    restarting = Server(
+        name="Restarting Keep Open",
+        game_type="seven_days_to_die",
+        status="restarting",
+        install_dir="/tmp/srv-restarting",
+    )
+    running = Server(
+        name="Running Keep Open",
+        game_type="seven_days_to_die",
+        status="running",
+        install_dir="/tmp/srv-running",
+    )
+    stopped = Server(
+        name="Stopped Close Ok",
+        game_type="seven_days_to_die",
+        status="stopped",
+        install_dir="/tmp/srv-stopped",
+    )
+    db.add_all([starting, restarting, running, stopped])
+    db.commit()
+    for s in (starting, restarting, running, stopped):
+        db.refresh(s)
+
+    with patch("services.firewall_service._ufw_available", return_value=True), \
+         patch("services.firewall_service._run_ufw") as mock_ufw, \
+         patch("services.firewall_service.close_ports", wraps=firewall_service.close_ports) as mock_close:
+        mock_ufw.return_value = MagicMock(returncode=0, stdout="Rule deleted\n", stderr="")
+        firewall_service.reconcile_firewall_rules(db)
+
+    closed_ids = {
+        call.kwargs.get("server_id")
+        for call in mock_close.call_args_list
+        if call.kwargs.get("server_id") is not None
+    }
+    assert starting.id not in closed_ids
+    assert restarting.id not in closed_ids
+    assert running.id not in closed_ids
+    assert stopped.id in closed_ids
+
+
+def test_reconcile_firewall_rules_still_closes_stopping_and_queued(db: Session) -> None:
+    """Die Ausnahme gilt eng: `stopping` und `queued` bleiben Aufraeumfaelle.
+
+    Bei `stopping` sollen die Ports gerade zufallen — das ist der Zweck. Bei
+    `queued` sind sie noch gar nicht geoeffnet worden. Beide in die Ausnahme
+    aufzunehmen haette aus einem Fix ein Leck gemacht.
+    """
+    stopping = Server(
+        name="Stopping Close Ok", game_type="seven_days_to_die",
+        status="stopping", install_dir="/tmp/srv-stopping",
+    )
+    queued = Server(
+        name="Queued Close Ok", game_type="seven_days_to_die",
+        status="queued", install_dir="/tmp/srv-queued",
+    )
+    db.add_all([stopping, queued])
+    db.commit()
+    db.refresh(stopping)
+    db.refresh(queued)
+
+    with patch("services.firewall_service._ufw_available", return_value=True), \
+         patch("services.firewall_service._run_ufw") as mock_ufw, \
+         patch("services.firewall_service.close_ports", wraps=firewall_service.close_ports) as mock_close:
+        mock_ufw.return_value = MagicMock(returncode=0, stdout="Rule deleted\n", stderr="")
+        firewall_service.reconcile_firewall_rules(db)
+
+    closed_ids = {
+        call.kwargs.get("server_id")
+        for call in mock_close.call_args_list
+        if call.kwargs.get("server_id") is not None
+    }
+    assert stopping.id in closed_ids
+    assert queued.id in closed_ids

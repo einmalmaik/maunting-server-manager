@@ -325,10 +325,27 @@ def close_ports(
     return deleted_any
 
 
+# Status, in denen die Ports offen bleiben muessen.
+#
+# Der Grund ist eine Reihenfolge im Lifecycle: `open_ports` laeuft **bevor**
+# der Status auf `running` springt. Ein Server im Fenster `starting` oder
+# `restarting` hat also bereits offene Ports, sieht fuer eine Pruefung auf
+# `status != "running"` aber wie ein gestoppter aus. Der Reconcile-Job hat ihm
+# die Ports deshalb direkt nach dem Start wieder zugemacht: der Container lief,
+# aber niemand kam von aussen drauf — weder ueber die Serverliste noch per
+# Direktverbindung.
+#
+# Bewusst **nicht** enthalten sind `stopping` und `queued`. Bei `stopping`
+# sollen die Ports zufallen, das ist der Zweck; bei `queued` sind sie noch gar
+# nicht geoeffnet worden.
+_FIREWALL_KEEP_OPEN_STATUSES = frozenset({"running", "starting", "restarting"})
+
+
 def reconcile_firewall_rules(db) -> int:
     """Audit & Reconciliation: Schließt verwaiste Firewall-Regeln gestoppter/gecrashtes Server.
 
-    Prüft alle Server mit status != 'running' und ruft close_ports auf.
+    Schließt Ports nur für Server, die klar nicht aktiv sind. Die transienten
+    Startzustände bleiben unangetastet — siehe `_FIREWALL_KEEP_OPEN_STATUSES`.
     Ein AuditLog wird geschrieben, falls eine offene Regel geschlossen wird.
 
     Returns:
@@ -338,7 +355,11 @@ def reconcile_firewall_rules(db) -> int:
     from services.server_lifecycle_service import _ports
 
     try:
-        non_running = db.query(Server).filter(Server.status != "running").all()
+        non_running = (
+            db.query(Server)
+            .filter(Server.status.notin_(tuple(_FIREWALL_KEEP_OPEN_STATUSES)))
+            .all()
+        )
     except Exception as exc:
         logger.warning("Fehler beim Abfragen nicht-laufender Server fuer Firewall-Reconciliation: %s", exc)
         return 0
