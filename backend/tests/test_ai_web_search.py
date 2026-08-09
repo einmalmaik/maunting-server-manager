@@ -15,7 +15,7 @@ import httpx
 import pytest
 from sqlalchemy.orm import Session
 
-from models import Role, RolePermission, User
+from models import Role, RolePermission, Server, ServerPermission, User
 from services import ai_action_errors, ai_action_service, ai_web_search_service
 from services.role_service import set_user_roles
 
@@ -209,3 +209,120 @@ def test_too_many_results_are_capped(
             db, user=regular_user, tool_name="web_search",
             arguments={"query": "test", "count": 50},
         )
+
+
+# ── Die Abgrenzung: oeffentlich dokumentiert oder selbstgebaut ─────────────
+#
+# Vorgabe des Betreibers: die KI soll offizielle Dokumentation holen, wenn es um
+# ein Spiel geht — aber nicht, wenn der Server etwas Eigenes faehrt, "z.B. ein
+# Discord-Bot". Dann soll sie nachfragen.
+#
+# Entschieden wird das an einer Tatsache aus den Daten, nicht an der
+# Einschaetzung des Modells: mitgelieferte Blueprints beschreiben oeffentlich
+# dokumentierte Spiele, selbst importierte koennen alles sein.
+
+
+def _server_mit_typ(db: Session, user: User, game_type: str) -> Server:
+    row = Server(
+        name=f"Server {game_type}",
+        game_type=game_type,
+        install_dir=f"/tmp/{game_type}",
+        container_name=f"msm-{game_type}",
+        status="stopped",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    db.add(ServerPermission(
+        user_id=user.id, server_id=row.id, permission_key="server.view",
+    ))
+    db.commit()
+    return row
+
+
+def test_a_search_about_a_self_built_server_asks_instead_of_searching(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Name der privaten Software darf nicht nach draussen gehen."""
+    _allow_search(db, regular_user)
+    server = _server_mit_typ(db, regular_user, "mein_discord_bot")
+    gesucht: list[str] = []
+    monkeypatch.setattr(
+        ai_web_search_service, "search", lambda q, c: gesucht.append(q) or [],
+    )
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="web_search",
+        arguments={"query": "discord bot config", "server_id": server.id},
+    )
+
+    assert ergebnis["available"] is False
+    assert ergebnis["reason"] == "AI_WEB_SEARCH_PRIVATE_SOFTWARE"
+    assert gesucht == [], "Die Suchanfrage haette den Namen nach draussen getragen"
+
+
+def test_a_search_about_a_shipped_game_goes_through(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bei einem mitgelieferten Blueprint ist die Suche der richtige Weg."""
+    _allow_search(db, regular_user)
+    server = _server_mit_typ(db, regular_user, "minecraft_forge")
+    monkeypatch.setattr(
+        ai_web_search_service,
+        "search",
+        lambda q, c: [{"title": "Forge", "url": "https://x.invalid", "snippet": "s"}],
+    )
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="web_search",
+        arguments={"query": "forge server.properties", "server_id": server.id},
+    )
+
+    assert ergebnis["available"] is True
+    assert ergebnis["results"]
+
+
+def test_a_foreign_server_id_reveals_nothing(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die `server_id` laeuft ueber `_resolve_server`.
+
+    Sonst waere sie ein Orakel: wer keinen Zugriff hat, koennte an der Antwort
+    ablesen, ob ein Server existiert und was er faehrt.
+    """
+    _allow_search(db, regular_user)
+    fremd = Server(
+        name="Fremd", game_type="minecraft_forge",
+        install_dir="/tmp/fremd", container_name="msm-fremd", status="stopped",
+    )
+    db.add(fremd)
+    db.commit()
+    db.refresh(fremd)
+    monkeypatch.setattr(ai_web_search_service, "search", lambda q, c: [])
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="web_search",
+            arguments={"query": "irgendwas", "server_id": fremd.id},
+        )
+
+
+def test_the_server_list_says_whether_docs_may_be_searched(
+    db: Session, regular_user: User
+) -> None:
+    """Die Tatsache steht vor dem Modell, statt am Namen erraten zu werden.
+
+    "mein_bot" sieht privat aus, "minecraft_forge_1_20" nicht — und beide
+    koennen das Gegenteil sein.
+    """
+    _allow_search(db, regular_user)
+    _server_mit_typ(db, regular_user, "minecraft_forge")
+    _server_mit_typ(db, regular_user, "mein_discord_bot")
+
+    liste = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="list_my_servers", arguments={},
+    )
+
+    nach_typ = {row["game_type"]: row["docs_searchable"] for row in liste["servers"]}
+    assert nach_typ["minecraft_forge"] is True
+    assert nach_typ["mein_discord_bot"] is False

@@ -142,10 +142,18 @@ def _global_tool_definitions() -> list[dict]:
             "web_search",
             "Sucht im Web. Fuer aktuelle Informationen, die nicht aus dem "
             "Panel kommen — Fehlermeldungen, Modkompatibilitaet, "
-            "Spielversionen. Liefert Titel, Adresse und Kurztext.",
+            "Spielversionen. Liefert Titel, Adresse und Kurztext. **Geht es um "
+            "einen bestimmten Server, gib `server_id` mit**: bei selbst "
+            "importierten Vorlagen wird dann nicht gesucht, sondern nachgefragt "
+            "— was dort laeuft, steht in keiner oeffentlichen Dokumentation.",
             {
                 "query": {"type": "string", "maxLength": 200},
                 "count": {"type": "integer", "minimum": 1, "maximum": MAX_RESULTS},
+                "server_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Server, um den es geht — aus list_my_servers.",
+                },
             },
             ["query"],
         ))
@@ -1058,18 +1066,64 @@ def _execute_learn_skill(db: Session, *, user: User, arguments: dict) -> dict:
     }
 
 
+def docs_searchable(db: Session, game_type: str) -> bool:
+    """Ob zu dieser Software oeffentlich nachgeschlagen werden darf.
+
+    Die Vorgabe des Betreibers: die KI soll offizielle Dokumentation holen, wenn
+    es um ein Spiel geht — aber **nicht**, wenn der Server etwas Selbstgebautes
+    faehrt, etwa einen eigenen Discord-Bot. Dann soll sie nachfragen.
+
+    Entschieden wird das an einer Tatsache aus den Daten, nicht an der
+    Einschaetzung des Modells: **mitgelieferte Blueprints beschreiben oeffentlich
+    dokumentierte Software.** Die 27 nativen sind Minecraft, Valheim, Rust und
+    ihresgleichen — zu jedem gibt es ein Wiki. Was ein Benutzer selbst importiert
+    hat, kann alles sein.
+
+    Ein unbekannter `game_type` gilt als nicht durchsuchbar. Die vorsichtige
+    Richtung ist hier die richtige: eine unnoetige Rueckfrage kostet einen Klick,
+    eine unnoetige Suche traegt den Namen einer privaten Software nach draussen.
+    """
+    from blueprints.registry import BlueprintSourceOrigin, get_registry
+
+    eintrag = get_registry().get(game_type)
+    return eintrag is not None and eintrag.origin == BlueprintSourceOrigin.NATIVE
+
+
 def _execute_web_search(db: Session, *, user: User, arguments: dict) -> dict:
     """Websuche im Namen des Benutzers.
 
     Die Rechtegrenze ist `ai.web_search.use`. Bis hierher stand dieses Recht im
     Katalog, ohne an irgendeiner Stelle geprueft zu werden.
+
+    ``server_id`` ist freiwillig, aber der Prompt verlangt es fuer
+    serverbezogene Fragen. Ist es gesetzt und faehrt der Server etwas, das nicht
+    mitgeliefert ist, gibt es keine Treffer, sondern den Hinweis nachzufragen.
     """
     from services import ai_web_search_service
 
     if not permission_service.has_global_permission(db, user, "ai.web_search.use"):
         raise AiActionValidationError("Websuche ist fuer diesen Benutzer nicht freigegeben")
-    if set(arguments) - {"query", "count"}:
+    if set(arguments) - {"query", "count", "server_id"}:
         raise AiActionValidationError("Websuche hat ungueltige Argumente")
+
+    server_id = arguments.get("server_id")
+    if server_id is not None:
+        # Ueber `_resolve_server`, damit eine fremde Server-ID hier nicht zum
+        # Orakel wird: ohne `server.view` gibt es keine Auskunft, auch keine
+        # ueber die eingesetzte Software.
+        server, _ = _resolve_server(db, user, {"server_id": server_id})
+        if not docs_searchable(db, server.game_type):
+            return {
+                "available": False,
+                "reason": "AI_WEB_SEARCH_PRIVATE_SOFTWARE",
+                "results": [],
+                "note": (
+                    "Dieser Server nutzt keine mitgelieferte Vorlage. Was er "
+                    "faehrt, steht in keiner oeffentlichen Dokumentation — frag "
+                    "den Benutzer statt zu suchen."
+                ),
+            }
+
     query = arguments.get("query")
     if not isinstance(query, str) or not query.strip():
         raise AiActionValidationError("Suchanfrage ist leer")
@@ -1195,6 +1249,12 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
                     "name": redact_sensitive_text(str(server.name or ""))[:128],
                     "game_type": server.game_type,
                     "status": server.status,
+                    # Ob zu dieser Software oeffentlich nachgeschlagen werden
+                    # darf. Steht hier, damit das Modell die Tatsache vor sich
+                    # hat, statt sie am Namen erraten zu muessen — "mein_bot"
+                    # sieht privat aus, "minecraft_forge_1_20" nicht, und beide
+                    # koennen das Gegenteil sein.
+                    "docs_searchable": docs_searchable(db, server.game_type),
                 }
                 for server in servers
             ],
@@ -1537,6 +1597,10 @@ def execute_read_tool(
             "cpu_limit_percent": server.cpu_limit_percent,
             "ram_limit_mb": server.ram_limit_mb,
             "disk_limit_gb": server.disk_limit_gb,
+            # Mitgeliefert oder selbst importiert. Entscheidet, ob zu dieser
+            # Software oeffentlich nachgeschlagen werden darf — und die
+            # Spielversion steht ohnehin dort, nicht hier.
+            "docs_searchable": docs_searchable(db, server.game_type),
         }
     if tool_name == "read_server_capacity":
         if arguments:
