@@ -511,6 +511,15 @@ def provider_tool_definitions() -> list[dict]:
             list(_RATIONALE_REQUIRED),
         ),
         _server_function(
+            "propose_server_delete",
+            "Schlaegt vor, einen Server vollstaendig zu loeschen: Container, "
+            "Dateien, Backups und Ports. Das ist nicht rueckgaengig zu machen "
+            "und verlangt immer eine Bestaetigung durch den Benutzer, auch im "
+            "autonomen Modus. Nenne im Grund, was verlorengeht.",
+            dict(_RATIONALE_SCHEMA),
+            list(_RATIONALE_REQUIRED),
+        ),
+        _server_function(
             "propose_config_update",
             "Schlaegt eine revisionsgebundene Config-Aenderung vor. Niemals Secrets einfuegen.",
             {

@@ -553,3 +553,67 @@ def test_lifecycle_proposal_becomes_succeeded_when_the_task_succeeds(
     final = db.query(AiActionProposal).filter(AiActionProposal.id == proposal.id).one()
     assert final.status == "succeeded"
     assert final.executed_at is not None
+
+
+def test_a_confirmed_delete_uses_the_one_deletion_path_and_is_marked_as_ai(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Die KI bekommt keinen eigenen Loeschweg.
+
+    `delete_server_completely` ist laut eigenem Docstring "die eine
+    Implementierung; der Router ist nur noch ihr HTTP-Rand". Panel,
+    Hoster-Anbindung und KI muessen denselben Aufruf nehmen — sonst laufen
+    Postgres-Ressourcen, S3-Objekte, Firewall-Regeln und das Audit auf einem
+    Pfad anders als auf dem anderen.
+
+    Der Test haelt zweierlei fest: dass genau diese Funktion gerufen wird, und
+    dass sie erfaehrt, wer ausgeloest hat — `origin="ai"` landet im Audit und
+    ist spaeter der einzige Unterschied zu einem Klick im Panel.
+    """
+    from unittest.mock import patch
+
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="propose_server_delete",
+        arguments={
+            "server_id": server.id,
+            "reason": "Der Benutzer will den Server entfernen.",
+            "expected_effect": "Server, Dateien und Backups sind weg.",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    # Die Vorschau nennt den Namen — daran erkennt ein Mensch beim Bestaetigen,
+    # ob der richtige Server gemeint ist. Die ID allein sagt ihm nichts.
+    vorschau = json.loads(proposal.preview_json)
+    assert vorschau["server_name"] == server.name
+    assert vorschau["irreversible"] is True
+
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    gesehen: dict = {}
+
+    def _fake_delete(db_, *, server_id, actor):
+        gesehen["server_id"] = server_id
+        gesehen["origin"] = actor.origin
+        gesehen["user_id"] = actor.user.id
+        return {"message": "Server gelöscht"}
+
+    with patch(
+        "services.server_deletion_service.delete_server_completely",
+        _fake_delete,
+    ):
+        updated, _result = ai_proposal_service.execute_proposal(
+            db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+        )
+
+    assert updated.status == "succeeded"
+    assert gesehen == {
+        "server_id": server.id, "origin": "ai", "user_id": owner_user.id
+    }

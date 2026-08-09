@@ -80,6 +80,19 @@ behaupte keine Ausfuehrung. Schreib-Werkzeuge erzeugen nur einen sichtbaren \
 Vorschlag, den der Benutzer bestaetigt."""
 
 
+# Aus dem Betrieb: der Benutzer bat, einen Server zu stoppen und zu loeschen.
+# Gestoppt hat die KI ihn, dann schrieb sie "eine Funktion zum Loeschen von
+# Servern steht mir hier allerdings nicht zur Verfuegung". Das Werkzeug gibt es
+# jetzt — und mit ihm die Pflicht, den Umfang zu nennen, bevor jemand
+# bestaetigt. "Server loeschen" klingt nach weniger, als es ist.
+UNWIDERRUFLICHES = """\
+Unwiderrufliches: `propose_server_delete` entfernt Container, Dateien, \
+**Backups** und Ports. Nichts davon kommt zurueck. Sag im Grund ausdruecklich, \
+was verlorengeht, und schlage vor dem Loeschen ein Backup vor, wenn der Benutzer \
+die Daten noch braucht. Solche Vorschlaege laufen nie ohne Bestaetigung, auch \
+bei erteilter Freigabe — kuendige das an, statt Vollzug zu melden."""
+
+
 # Ohne diese Anweisung merkt sich das Modell entweder nichts oder alles. Beides
 # ist unbrauchbar. Der Ausloeser muss ein *beobachtbares Ereignis* sein, nicht
 # eine Kategorie, die das Modell erst auf den Satz anwenden muss. Gemessen: mit
@@ -151,6 +164,7 @@ BLOECKE = (
     KAPAZITAET,
     SERVERBEZUG,
     WERKZEUGE,
+    UNWIDERRUFLICHES,
     GEDAECHTNIS,
     GEDAECHTNIS_AUFRAEUMEN,
     SKILLS,

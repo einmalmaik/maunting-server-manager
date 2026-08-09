@@ -46,7 +46,7 @@ from services.ai_action_service import (
     _resolve_server,
 )
 from services.ai_redaction import redact_sensitive_text
-from services.ai_tool_registry import GLOBAL_WRITE_TOOLS, WRITE_TOOLS
+from services.ai_tool_registry import GLOBAL_WRITE_TOOLS, WERKZEUGE, WRITE_TOOLS
 from services.dis_client import DisClient
 from services.server_file_access_service import read_server_text, write_server_text
 
@@ -75,39 +75,53 @@ def _json_object(value: str) -> dict:
 
 
 def _permission_for(tool_name: str, payload: dict) -> str:
+    """Der Permission-Key, den dieses Werkzeug verlangt.
+
+    Er steht in `ai_tool_registry.WERKZEUGE` — dort, wo auch alles andere ueber
+    ein Werkzeug steht. Vorher war das hier eine if-Kette: ein zweiter Ort, an
+    dem ein neues Werkzeug eingetragen werden musste, und der Ort, an dem man
+    es am ehesten vergisst. Ein vergessener Eintrag lieferte den leeren String
+    und damit eine Ablehnung — immerhin die sichere Richtung, aber erst
+    bemerkbar, wenn ein Benutzer davorsteht.
+
+    Eine Ausnahme bleibt: der Lebenszyklus haengt am *Vorgang*, nicht am
+    Werkzeug. Starten, Stoppen und Neustarten sind drei verschiedene Rechte, und
+    das laesst sich in einer Tabellenzeile nicht ausdruecken.
+    """
     if tool_name == "propose_server_lifecycle":
         return {
             "start": "server.start",
             "stop": "server.stop",
             "restart": "server.restart",
         }.get(str(payload.get("operation")), "")
-    if tool_name == "propose_backup":
-        return "server.backups.create"
-    if tool_name == "propose_config_update":
-        return "server.files.write"
-    if tool_name == "propose_mod_install":
-        return "server.mods.write"
-    if tool_name == "propose_bind_ip_update":
-        return "server.network.manage"
-    return ""
+    werkzeug = WERKZEUGE.get(tool_name)
+    return werkzeug.recht if werkzeug and werkzeug.recht else ""
 
 
 def _require_tool_permission(
     db: Session, user: User, server_id: int | None, tool_name: str, payload: dict
 ) -> None:
-    if tool_name in GLOBAL_WRITE_TOOLS:
-        # Servererstellung ist global gerechtet, genau wie im Panel. Ein
-        # server-scoped Recht gibt es dafuer nicht — es gibt ja noch keinen
-        # Server, auf den es sich beziehen koennte.
-        if not permission_service.has_global_permission(db, user, "servers.create"):
+    permission = _permission_for(tool_name, payload)
+    if not permission:
+        raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
+
+    werkzeug = WERKZEUGE.get(tool_name)
+    if werkzeug is not None and werkzeug.recht_global:
+        # Manche Rechte sind bewusst global und nicht delegierbar: `servers.create`
+        # (es gibt noch keinen Server, auf den sich ein Recht beziehen koennte)
+        # und `servers.delete` (destruktiv, nur Admin/Owner).
+        #
+        # Bei `propose_server_delete` gilt trotzdem **beides**: `_resolve_server`
+        # hat vorher `server.view` geprueft, sonst waere die Server-ID ein Weg,
+        # die Existenz fremder Server zu erraten. Sehen duerfen und loeschen
+        # duerfen sind zwei Huerden, nicht eine.
+        if not permission_service.has_global_permission(db, user, permission):
             raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
         return
+
     if server_id is None:
         raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
-    permission = _permission_for(tool_name, payload)
-    if not permission or not permission_service.has_server_permission(
-        db, user, server_id, permission
-    ):
+    if not permission_service.has_server_permission(db, user, server_id, permission):
         raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
     if tool_name == "propose_config_update" and not permission_service.has_server_permission(
         db, user, server_id, "server.files.read"
@@ -383,6 +397,27 @@ def create_proposal(
                 "operation": "backup",
                 "current_status": server.status,
                 "restart_required": False,
+            }
+            expected_revision = None
+        elif tool_name == "propose_server_delete":
+            if rest:
+                raise AiActionValidationError("Loesch-Tool akzeptiert keine Argumente")
+            # Der Name steht in der Vorschau, nicht in der Nutzlast: er ist das
+            # Einzige, woran ein Mensch beim Bestaetigen erkennt, ob der
+            # richtige Server gemeint ist. Die Server-ID allein sagt ihm nichts.
+            payload = {}
+            preview = {
+                "operation": "delete",
+                "server_name": server.name,
+                "current_status": server.status,
+                "restart_required": False,
+                # Was tatsaechlich verschwindet. Ohne diese Aufzaehlung waere
+                # "Server loeschen" eine Zusage, deren Umfang der Bestaetigende
+                # raten muesste — Backups und S3-Objekte gehen mit.
+                "removes": [
+                    "container", "files", "backups", "ports", "database_resources",
+                ],
+                "irreversible": True,
             }
             expected_revision = None
         elif tool_name == "propose_bind_ip_update":
@@ -795,6 +830,24 @@ def execute_proposal(
 
                 backup = create_server_backup(server_id, db, name="AI-confirmed snapshot")
                 result = {"backup_id": backup.id}
+                task_id = None
+                queued = False
+            elif tool_name == "propose_server_delete":
+                # Derselbe Aufruf, den der Panel-Router und die Hoster-Anbindung
+                # nehmen. `delete_server_completely` prueft `servers.delete`
+                # selbst noch einmal — die dritte Pruefung nach `_resolve_server`
+                # beim Vorschlagen und `_require_tool_permission` beim
+                # Bestaetigen. Eine davon zu ueberspringen, waere ein eigener
+                # Loeschpfad fuer die KI, und genau den soll es nicht geben.
+                from services.server_deletion_service import delete_server_completely
+
+                result = delete_server_completely(
+                    db,
+                    server_id=server_id,
+                    actor=ActorContext.for_user(
+                        active_user, origin="ai", correlation_id=correlation_id
+                    ),
+                )
                 task_id = None
                 queued = False
             elif tool_name == "propose_config_update":

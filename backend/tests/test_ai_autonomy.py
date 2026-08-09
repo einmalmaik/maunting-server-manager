@@ -25,6 +25,7 @@ from models import (
     User,
 )
 from services import ai_action_errors, ai_autonomy_service, ai_proposal_service, ai_tool_registry
+from services.ai_action_errors import AiActionValidationError
 from services.role_service import set_user_roles
 
 
@@ -385,3 +386,118 @@ def test_grant_roundtrip_reports_the_used_budget(
     assert listed.status_code == 200 and len(listed.json()) == 1
     assert removed.status_code == 204
     assert empty.json() == []
+
+
+def test_a_delete_stays_confirmable_even_with_every_grant_in_place(
+    db: Session, regular_user: User
+) -> None:
+    """Loeschen ist nicht rueckgaengig zu machen — ausdrueckliche Vorgabe.
+
+    Die Sperre wird hier nicht an der Menge geprueft, sondern am Ergebnis: ein
+    Benutzer mit **allem**, was Autonomie sonst ausloest — `ai.autonomous.use`,
+    eine aktive Freigabe fuer diesen Server, freies Stundenbudget und das
+    globale `servers.delete` — bekommt trotzdem einen Vorschlag, der auf einen
+    Menschen wartet.
+
+    Anlass: der Betreiber bat die KI, einen Server zu stoppen und zu loeschen.
+    Gestoppt hat sie ihn autonom; loeschen konnte sie ihn nicht, weil es das
+    Werkzeug nicht gab. Jetzt gibt es das Werkzeug — und den Riegel dazu.
+    """
+    server, conversation = _setup(
+        db,
+        regular_user,
+        global_keys=("ai.chat.use", "ai.autonomous.use", "servers.delete"),
+        server_keys=("server.view",),
+    )
+    ai_autonomy_service.set_grant(
+        db, user=regular_user, server_id=server.id, enabled=True,
+        max_actions_per_hour=10, granted_by=regular_user.id,
+    )
+    db.commit()
+
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_server_delete",
+        arguments={
+            "server_id": server.id,
+            "reason": "Der Benutzer will den Server entfernen.",
+            "expected_effect": "Server, Dateien und Backups sind weg.",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    assert proposal.status == "proposed", "Ein Loeschvorschlag darf nie autonom laufen"
+    # Und der Server steht noch.
+    assert db.query(Server).filter(Server.id == server.id).first() is not None
+
+
+def test_a_delete_needs_the_global_permission_not_just_server_access(
+    db: Session, regular_user: User
+) -> None:
+    """`servers.delete` ist bewusst global und nicht delegierbar.
+
+    Wer einen Server nur sehen darf, darf ihn nicht ueber die KI loeschen — auch
+    dann nicht, wenn er auf diesem Server sonst alles darf. Ohne diese
+    Unterscheidung waere `propose_server_delete` ein Weg, das ausdrueckliche
+    "nicht delegierbar" aus dem Rechtekatalog zu umgehen.
+    """
+    server, conversation = _setup(
+        db,
+        regular_user,
+        global_keys=("ai.chat.use",),
+        server_keys=(
+            "server.view", "server.start", "server.stop", "server.restart",
+            "server.files.write", "server.backups.create",
+        ),
+    )
+
+    with pytest.raises(AiActionValidationError):
+        ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=conversation,
+            tool_name="propose_server_delete",
+            arguments={
+                "server_id": server.id,
+                "reason": "Aufraeumen.",
+                "expected_effect": "Weg.",
+            },
+            correlation_id=str(uuid4()),
+        )
+    assert db.query(Server).filter(Server.id == server.id).first() is not None
+
+
+def test_a_delete_still_needs_to_see_the_server(
+    db: Session, regular_user: User
+) -> None:
+    """Zwei Huerden, nicht eine.
+
+    Das globale Loeschrecht allein reicht nicht: `_resolve_server` verlangt
+    vorher `server.view`. Sonst waere eine geratene Server-ID ein Weg, die
+    Existenz fremder Server zu bestaetigen — und im schlimmsten Fall einen zu
+    treffen.
+    """
+    server, conversation = _setup(
+        db,
+        regular_user,
+        global_keys=("ai.chat.use", "servers.delete"),
+        server_keys=(),  # kein server.view
+    )
+
+    with pytest.raises(AiActionValidationError):
+        ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=conversation,
+            tool_name="propose_server_delete",
+            arguments={
+                "server_id": server.id,
+                "reason": "Aufraeumen.",
+                "expected_effect": "Weg.",
+            },
+            correlation_id=str(uuid4()),
+        )
+    assert db.query(Server).filter(Server.id == server.id).first() is not None

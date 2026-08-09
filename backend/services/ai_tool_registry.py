@@ -43,15 +43,31 @@ class Werkzeug:
 
     ``immer_bestaetigen`` schliesst ein Werkzeug vom autonomen Modus aus, auch
     bei erteilter Freigabe.
+
+    ``recht`` ist der Permission-Key, den ein Schreibwerkzeug verlangt. Er stand
+    frueher in einer if-Kette in `ai_proposal_service._permission_for` — ein
+    zweiter Ort, an dem ein neues Werkzeug eingetragen werden musste, und der
+    Ort, an dem man es am ehesten vergisst. Ein Schreibwerkzeug ohne `recht`
+    kommt gar nicht erst durch die Pruefung.
+
+    ``recht_global`` entscheidet, **wie** geprueft wird. Die meisten Rechte
+    haengen am Server; einige sind bewusst global und nicht delegierbar —
+    `servers.delete` etwa, weil es destruktiv ist. Ein serverbezogenes Werkzeug
+    kann also durchaus ein globales Recht verlangen: `propose_server_delete`
+    braucht eine `server_id` und trotzdem die globale Loeschbefugnis.
     """
 
     art: str
     gruppe: str | None = None
     immer_bestaetigen: bool = False
+    recht: str | None = None
+    recht_global: bool = False
 
     def __post_init__(self) -> None:
         if self.art not in ARTEN:
             raise ValueError(f"Unbekannte Werkzeugart: {self.art}")
+        if self.recht_global and not self.recht:
+            raise ValueError("recht_global ohne recht ist sinnlos")
 
 
 WERKZEUGE: dict[str, Werkzeug] = {
@@ -96,14 +112,36 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "ask_user": Werkzeug("ask"),
 
     # ── Schreiben: erzeugen ausschliesslich Vorschlaege ───────────────
+    #
+    # `propose_server_lifecycle` traegt kein `recht`: es haengt vom Vorgang ab
+    # (start/stop/restart sind drei verschiedene Rechte). Die Zuordnung steht
+    # als ausdrueckliche Ausnahme in `ai_proposal_service._permission_for`.
     "propose_server_lifecycle": Werkzeug("server_write"),
-    "propose_backup": Werkzeug("server_write"),
-    "propose_config_update": Werkzeug("server_write"),
-    "propose_mod_install": Werkzeug("server_write"),
+    "propose_backup": Werkzeug("server_write", recht="server.backups.create"),
+    "propose_config_update": Werkzeug("server_write", recht="server.files.write"),
+    "propose_mod_install": Werkzeug("server_write", recht="server.mods.write"),
     # Eine Netzwerkaenderung startet den Container neu und kann einen Server
     # unerreichbar machen, wenn die Adresse falsch ist.
-    "propose_bind_ip_update": Werkzeug("server_write", immer_bestaetigen=True),
-    "propose_server_create": Werkzeug("global_write"),
+    "propose_bind_ip_update": Werkzeug(
+        "server_write", immer_bestaetigen=True, recht="server.network.manage"
+    ),
+    # Loeschen ist nicht rueckgaengig zu machen — deshalb auch im autonomen
+    # Modus bestaetigungspflichtig, ausdrueckliche Vorgabe des Betreibers.
+    #
+    # `servers.delete` ist global und nicht delegierbar (permission_catalog:
+    # "BEWUSST global, destruktiv, nur Admin/Owner"). Das Werkzeug ist trotzdem
+    # serverbezogen: es braucht eine `server_id`, und `_resolve_server` stellt
+    # vorher sicher, dass der Benutzer diesen Server ueberhaupt sehen darf. Es
+    # gilt also beides — sehen duerfen **und** global loeschen duerfen.
+    "propose_server_delete": Werkzeug(
+        "server_write",
+        immer_bestaetigen=True,
+        recht="servers.delete",
+        recht_global=True,
+    ),
+    "propose_server_create": Werkzeug(
+        "global_write", recht="servers.create", recht_global=True
+    ),
 }
 
 
@@ -112,7 +150,6 @@ WERKZEUGE: dict[str, Werkzeug] = {
 # autonomiefaehig zu sein. Beim Bauen wandert der Name nach oben in `WERKZEUGE`
 # — mit `immer_bestaetigen=True`.
 GEPLANT_IMMER_BESTAETIGEN = frozenset({
-    "propose_server_delete",
     "propose_server_wipe",
     "propose_server_reinstall",
     "propose_backup_restore",
