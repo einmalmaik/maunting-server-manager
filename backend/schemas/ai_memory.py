@@ -6,12 +6,13 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-MemoryScope = Literal["user", "server", "panel"]
+MemoryScope = Literal["user", "server", "team", "panel"]
 
 
 class AiMemoryWrite(BaseModel):
     scope: MemoryScope
     server_id: int | None = Field(default=None, ge=1)
+    team_id: int | None = Field(default=None, ge=1)
     key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     value: str = Field(min_length=1, max_length=2000)
 
@@ -24,6 +25,7 @@ class AiMemoryResponse(BaseModel):
     id: str
     scope: MemoryScope
     server_id: int | None
+    team_id: int | None = None
     key: str
     value: str
     # "user" = du hast es hinterlegt, "ai" = die KI hat es sich gemerkt.

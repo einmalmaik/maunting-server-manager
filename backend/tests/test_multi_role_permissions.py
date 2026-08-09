@@ -128,7 +128,8 @@ def test_owner_can_assign_multiple_roles_via_api(
     assert response.json()["role_id"] == min(reader.id, observer.id)
     audit = db.query(AuditLog).filter(AuditLog.action == "user.roles.updated").one()
     assert audit.user_id is not None
-    assert audit.target_id == regular_user.id
+    # `target_id` ist Text — siehe Migration 20260809_02.
+    assert audit.target_id == str(regular_user.id)
     assert "role_ids" in (audit.details or "")
 
 

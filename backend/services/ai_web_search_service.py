@@ -27,7 +27,7 @@ import logging
 
 import httpx
 
-from services.ai_context_service import redact_sensitive_text
+from services.ai_redaction import redact_sensitive_text
 
 
 logger = logging.getLogger(__name__)

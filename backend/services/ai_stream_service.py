@@ -29,8 +29,8 @@ from services.ai_context_service import (
     build_provider_messages,
     estimate_reserved_tokens,
     message_character_count,
-    redact_sensitive_text,
 )
+from services.ai_redaction import redact_sensitive_text
 from services.ai_provider_service import estimate_cost_microunits, resolve_api_key
 from services.ai_usage_service import (
     AiQuotaExceeded,

@@ -60,9 +60,27 @@ def model_path() -> Path:
 
 
 def is_available() -> bool:
-    """Liegt ein ladbares Modell vor? Ohne es zu laden."""
+    """Laesst sich hier ein Vektor berechnen? Ohne das Modell zu laden.
+
+    Geprueft werden **beide** Voraussetzungen: die Gewichte auf der Platte und
+    die Bibliothek im Interpreter. Vorher zaehlten nur die Dateien — in einer
+    Umgebung mit heruntergeladenem Modell, aber fehlendem `model2vec` meldete
+    die Funktion "verfuegbar", und `encode` lieferte trotzdem nichts. Wer sich
+    darauf verliess (etwa eine Testvorbedingung), bekam einen Fehlschlag
+    gemeldet, wo ein sauberes Ueberspringen richtig gewesen waere.
+
+    `find_spec` importiert nicht, es sucht nur — die Kosten sind ein
+    Dateisystemblick, nicht das Laden der Bibliothek.
+    """
+    from importlib.util import find_spec
+
     path = model_path()
-    return (path / "config.json").is_file() and (path / "model.safetensors").is_file()
+    if not ((path / "config.json").is_file() and (path / "model.safetensors").is_file()):
+        return False
+    try:
+        return find_spec("model2vec") is not None
+    except (ImportError, ValueError):
+        return False
 
 
 def _load():

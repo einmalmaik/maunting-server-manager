@@ -21,7 +21,7 @@ from schemas.ai_chat import (
     AiMessageResponse,
 )
 from services import ai_chat_service
-from services.ai_context_service import redact_sensitive_text
+from services.ai_redaction import redact_sensitive_text
 from services.ai_stream_service import sse_event, stream_conversation_reply
 
 

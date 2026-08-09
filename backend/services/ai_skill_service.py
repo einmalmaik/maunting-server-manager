@@ -19,7 +19,7 @@ from services.ai_action_service import (
     execute_read_tool,
 )
 from services.ai_chat_service import get_or_create_primary_conversation
-from services.ai_context_service import redact_sensitive_text
+from services.ai_redaction import redact_sensitive_text
 from services.ai_usage_service import complete_ai_usage, fail_ai_usage, reserve_ai_usage
 
 

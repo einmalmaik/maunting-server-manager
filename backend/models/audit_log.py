@@ -13,7 +13,12 @@ class AuditLog(Base):
     user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     target_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    target_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Text statt Integer: nicht jedes Ziel hat eine Zahl als Kennung. Memory,
+    # Skills, Anhaenge und Aktionsvorschlaege sind UUIDs, und diese Aufrufe
+    # gibt es seit Phase C. Auf SQLite fiel das nicht auf — es speichert einen
+    # String klaglos in einer INTEGER-Spalte —, auf PostgreSQL scheiterte
+    # dagegen jeder `remember`-Aufruf am Audit-Eintrag.
+    target_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Herkunft ist keine Autorisierungsquelle, sondern reine Nachvollziehbarkeit.
     # Die eigentliche Berechtigungsprüfung findet weiterhin vor der Aktion statt.
     origin: Mapped[str] = mapped_column(String(16), default="direct", nullable=False)

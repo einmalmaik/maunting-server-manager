@@ -446,7 +446,7 @@ class AuditLogOut(BaseModel):
     user_id: int | None
     action: str
     target_type: str | None
-    target_id: int | None
+    target_id: str | None
     origin: str
     correlation_id: str | None
     details: str | None
@@ -470,7 +470,7 @@ def list_admin_audit_logs(
     limit: int = Query(50, ge=1, le=200),
     action: str | None = Query(None, max_length=64),
     target_type: str | None = Query(None, max_length=64),
-    target_id: int | None = Query(None, ge=1),
+    target_id: str | None = Query(None, max_length=64),
 ) -> list[AuditLog]:
     """Listet privilegierte Operator-Aktionen. Unberechtigt: 403 (kein leeres OK)."""
     try:

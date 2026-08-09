@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from models import AiAttachment, AiConversation, User
 from services import audit_service
 from services.ai_chat_service import get_owned_conversation
-from services.ai_context_service import redact_sensitive_text
+from services.ai_redaction import redact_sensitive_text
 from services.dis_client import DisClient
 
 

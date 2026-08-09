@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, AiMemoryPreference, User
 from services import ai_embedding_service, audit_service, permission_service
-from services.ai_context_service import redact_sensitive_text
+from services.ai_redaction import redact_sensitive_text
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
 from services.dis_client import DisClient
 
@@ -29,27 +29,66 @@ RECENCY_HALFLIFE_DAYS = 7.0
 _WORD_RE = re.compile(r"[\w]+", re.UNICODE)
 
 
-def _aad(entry_id: str) -> str:
-    return f"msm:ai:memory:{entry_id}"
+def _aad(row: AiMemoryEntry) -> str:
+    """Die Zusatzdaten, an die der Ciphertext gebunden ist.
+
+    Version 2 nimmt den Scope mit auf und bindet den Eintrag damit
+    kryptografisch an seinen Besitzer. Wer in der Datenbank `owner_user_id`
+    oder `scope_identity` umschreibt, um an fremde Notizen zu kommen, macht sie
+    damit **unlesbar**, statt sie zu uebernehmen — die Entschluesselung
+    scheitert an der nicht mehr passenden AAD.
+
+    Version 1 ist der Bestand aus Phase C, gebunden nur an die Eintrags-ID. Er
+    bleibt lesbar, bis der Eintrag das naechste Mal geschrieben wird. Eine
+    Neuverschluesselung waehrend der Migration schied aus: der DIS-Sidecar
+    laeuft zu diesem Zeitpunkt nicht garantiert, und eine Migration, die an
+    einem HTTP-Aufruf scheitern kann, ist keine.
+    """
+    if int(row.aad_version or 1) >= 2:
+        return f"msm:ai:memory:{row.scope_identity}:{row.id}"
+    return f"msm:ai:memory:{row.id}"
 
 
 def scope_identity(
-    db: Session, user: User, scope: str, server_id: int | None
-) -> tuple[str, int | None, int | None]:
+    db: Session, user: User, scope: str, server_id: int | None,
+    team_id: int | None = None,
+) -> tuple[str, int | None, int | None, int | None]:
+    """Loest einen Scope in seine Kennung und die zugehoerigen Fremdschluessel auf.
+
+    Die Kennung ist der Primaerfilter jeder Leseabfrage und damit die
+    eigentliche Trennlinie zwischen den Benutzern. Sie wird ausschliesslich
+    hier gebildet — jede Stelle, die selbst eine Zeichenkette zusammensetzt,
+    waere eine Stelle, an der die Trennung falsch sein kann.
+    """
     if scope == "user":
-        if server_id is not None:
-            raise HTTPException(status_code=422, detail="User-Memory akzeptiert keinen Server")
-        return f"user:{user.id}", user.id, None
+        if server_id is not None or team_id is not None:
+            raise HTTPException(status_code=422, detail="User-Memory akzeptiert keinen Bezug")
+        return f"user:{user.id}", user.id, None, None
     if scope == "server":
+        if team_id is not None:
+            raise HTTPException(status_code=422, detail="Server-Memory akzeptiert kein Team")
         if server_id is None or not permission_service.has_server_permission(
             db=db, user=user, server_id=server_id, key="server.view"
         ):
             raise HTTPException(status_code=404, detail="Server nicht gefunden")
-        return f"server:{server_id}:user:{user.id}", user.id, server_id
-    if scope == "panel":
+        return f"server:{server_id}:user:{user.id}", user.id, server_id, None
+    if scope == "team":
+        from services import team_service
+
         if server_id is not None:
-            raise HTTPException(status_code=422, detail="Panel-Memory akzeptiert keinen Server")
-        return "panel", None, None
+            raise HTTPException(status_code=422, detail="Team-Memory akzeptiert keinen Server")
+        if team_id is None or team_service.membership(db, team_id, user.id) is None:
+            # 404 statt 403: ob es ein Team mit dieser Nummer gibt, geht einen
+            # Aussenstehenden nichts an.
+            raise HTTPException(status_code=404, detail="Team nicht gefunden")
+        # Bewusst **ohne** Besitzer: Teamwissen gehoert dem Team. Es soll
+        # bestehen bleiben, wenn der Kollege geht, der es aufgeschrieben hat —
+        # und ein `ondelete="CASCADE"` auf den Benutzer wuerde es mitnehmen.
+        return f"team:{team_id}", None, None, team_id
+    if scope == "panel":
+        if server_id is not None or team_id is not None:
+            raise HTTPException(status_code=422, detail="Panel-Memory akzeptiert keinen Bezug")
+        return "panel", None, None, None
     raise HTTPException(status_code=422, detail="Unbekannter Memory-Scope")
 
 
@@ -79,15 +118,41 @@ def _safe_value(value: str) -> str:
     return normalized
 
 
-def list_entries(db: Session, user: User, scope: str, server_id: int | None) -> list[tuple[AiMemoryEntry, str]]:
-    identity, _, _ = scope_identity(db, user, scope, server_id)
+def list_entries(
+    db: Session, user: User, scope: str, server_id: int | None,
+    team_id: int | None = None,
+) -> list[tuple[AiMemoryEntry, str]]:
+    identity, _, _, _ = scope_identity(db, user, scope, server_id, team_id)
     rows = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).order_by(AiMemoryEntry.key).all()
-    return [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row.id))) for row in rows]
+    return [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
+
+
+def _assert_may_write(db: Session, user: User, scope: str, team_id: int | None) -> None:
+    """Wer einen geteilten Bereich veraendern darf.
+
+    Persoenliche Eintraege brauchen keine Pruefung — sie verlassen den Benutzer
+    nie. Alles Geteilte verlangt ein Recht, und zwar *dasselbe*, das ein Mensch
+    fuer denselben Schritt braeuchte. Genau darin liegt die Zusicherung, die
+    ueber jedem KI-Schreibvorgang steht: **die KI kann nie mehr teilen, als der
+    Benutzer selbst teilen duerfte.**
+    """
+    if scope == "panel":
+        if not permission_service.has_global_permission(db, user, "panel.settings.write"):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung")
+        return
+    if scope == "team":
+        from services import team_service
+
+        if team_id is None or not team_service.can_manage_team_memory(db, user, team_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Du darfst das Wissen dieses Teams nicht veraendern",
+            )
 
 
 def upsert_entry(
     db: Session, *, user: User, scope: str, server_id: int | None, key: str, value: str,
-    origin: str = "user",
+    origin: str = "user", team_id: int | None = None,
 ) -> tuple[AiMemoryEntry, str]:
     """Legt einen Eintrag an oder ueberschreibt ihn unter demselben Schluessel.
 
@@ -104,9 +169,10 @@ def upsert_entry(
     """
     if origin not in {"user", "ai"}:
         raise HTTPException(status_code=422, detail="Unbekannte Memory-Herkunft")
-    identity, owner_id, normalized_server_id = scope_identity(db, user, scope, server_id)
-    if scope == "panel" and not permission_service.has_global_permission(db, user, "panel.settings.write"):
-        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    identity, owner_id, normalized_server_id, normalized_team_id = scope_identity(
+        db, user, scope, server_id, team_id
+    )
+    _assert_may_write(db, user, scope, normalized_team_id)
     safe_value = _safe_value(value)
     row = db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == identity, AiMemoryEntry.key == key
@@ -117,8 +183,9 @@ def upsert_entry(
             raise HTTPException(status_code=409, detail="Memory-Scope ist voll")
         row = AiMemoryEntry(
             id=str(uuid4()), owner_user_id=owner_id, server_id=normalized_server_id,
+            team_id=normalized_team_id,
             scope=scope, scope_identity=identity, key=key, value_encrypted="",
-            origin=origin,
+            origin=origin, aad_version=2,
         )
         db.add(row)
         action = "ai.memory.created"
@@ -132,7 +199,11 @@ def upsert_entry(
         )
     else:
         row.origin = origin
-    row.value_encrypted = DisClient.encrypt(safe_value, aad=_aad(row.id))
+    # Jeder Schreibvorgang hebt den Eintrag auf die gebundene AAD. Bestandsdaten
+    # aus Phase C wandern damit von selbst mit, sobald sie angefasst werden —
+    # ohne Migrationsschritt, der den DIS-Sidecar voraussetzt.
+    row.aad_version = 2
+    row.value_encrypted = DisClient.encrypt(safe_value, aad=_aad(row))
     # Der Vektor entsteht aus dem Klartext, bevor er verschluesselt wird —
     # danach waere er nicht mehr zu haben, ohne erneut zu entschluesseln.
     refresh_embedding(row, safe_value)
@@ -168,6 +239,12 @@ def delete_entry(db: Session, user: User, entry_id: str) -> None:
         raise HTTPException(status_code=404, detail="Memory-Eintrag nicht gefunden")
     if row.scope == "panel":
         allowed = permission_service.has_global_permission(db, user, "panel.settings.write")
+    elif row.scope == "team":
+        from services import team_service
+
+        allowed = row.team_id is not None and team_service.can_manage_team_memory(
+            db, user, row.team_id
+        )
     else:
         allowed = row.owner_user_id == user.id and (
             row.server_id is None or permission_service.has_server_permission(db, user, row.server_id, "server.view")
@@ -277,23 +354,37 @@ def _utc(value: datetime) -> datetime:
 def _visible_scope_rows(db: Session, user: User) -> list[AiMemoryEntry]:
     """Alle Eintraege, die dieser Benutzer gerade sehen darf.
 
-    Panelweite und eigene Eintraege immer. Serverbezogene nur fuer Server, die
-    der Benutzer **jetzt** sehen darf — verliert er den Zugriff, verschwindet
-    auch seine Notiz dazu aus dem Kontext.
+    Vier Bereiche, drei Sichtbarkeitsregeln:
 
-    Die serverbezogenen kommen bewusst *alle* mit, nicht die eines bestimmten
-    Servers: der Assistent hat seit dem Einzelchat keinen festen Serverbezug
-    mehr. Vorher fehlten sie damit vollstaendig — die KI konnte sich etwas zu
-    einem Server merken und sah es nie wieder.
+    - **panelweit** und **eigene** immer.
+    - **serverbezogen** nur fuer Server, die der Benutzer *jetzt* sehen darf —
+      verliert er den Zugriff, verschwindet auch seine Notiz dazu aus dem
+      Kontext. Sie kommen bewusst alle mit, nicht die eines bestimmten Servers:
+      der Assistent hat seit dem Einzelchat keinen festen Serverbezug mehr.
+    - **teambezogen** fuer die Teams, in denen der Benutzer *jetzt* Mitglied
+      ist. Der Austritt wirkt damit sofort, ohne dass jemand Eintraege
+      nachpflegen muss.
+
+    Die Abfrage filtert ueber `scope_identity` beziehungsweise `team_id` — nie
+    ueber ein Kennzeichen im Text. Das ist die Stelle, an der die Trennung
+    zwischen zwei Benutzern tatsaechlich stattfindet.
     """
-    rows = db.query(AiMemoryEntry).filter(
-        or_(
-            AiMemoryEntry.scope_identity.in_(["panel", f"user:{user.id}"]),
-            and_(
-                AiMemoryEntry.scope == "server",
-                AiMemoryEntry.owner_user_id == user.id,
-            ),
+    from services import team_service
+
+    team_ids = team_service.user_team_ids(db, user)
+    conditions = [
+        AiMemoryEntry.scope_identity.in_(["panel", f"user:{user.id}"]),
+        and_(
+            AiMemoryEntry.scope == "server",
+            AiMemoryEntry.owner_user_id == user.id,
+        ),
+    ]
+    if team_ids:
+        conditions.append(
+            and_(AiMemoryEntry.scope == "team", AiMemoryEntry.team_id.in_(team_ids))
         )
+    rows = db.query(AiMemoryEntry).filter(
+        or_(*conditions)
     ).order_by(AiMemoryEntry.scope, AiMemoryEntry.key).all()
 
     visible: list[AiMemoryEntry] = []
@@ -318,8 +409,15 @@ def _memory_line(row: AiMemoryEntry, value: str) -> str:
     origin = "gesagt" if row.origin == "user" else "gemerkt"
     # Bei serverbezogenen Eintraegen muss die ID mit dran: sonst weiss das
     # Modell nicht, auf welchen der Server sich die Notiz bezieht, und wendet
-    # eine Eigenheit von Server 62 versehentlich auf Server 84 an.
-    scope = f"server:{row.server_id}" if row.scope == "server" else row.scope
+    # eine Eigenheit von Server 62 versehentlich auf Server 84 an. Bei Teams
+    # gilt dasselbe — wer in zwei Teams ist, hat womoeglich zwei verschiedene
+    # Antworten auf dieselbe Frage.
+    if row.scope == "server":
+        scope = f"server:{row.server_id}"
+    elif row.scope == "team":
+        scope = f"team:{row.team_id}"
+    else:
+        scope = row.scope
     return f"[{scope}/{origin}] {row.key}: {flattened}"
 
 
@@ -378,7 +476,7 @@ def provider_memory_context(
     if not rows:
         return None
 
-    decoded = [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row.id))) for row in rows]
+    decoded = [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
     lines = [_memory_line(row, value) for row, value in decoded]
     total = sum(len(line) + 1 for line in lines)
 

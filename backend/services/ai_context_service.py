@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from models import AiConversation, AiMessage, User
+from services.ai_redaction import redact_sensitive_text
 
 
 MAX_CONTEXT_CHARS = 24_000
@@ -20,30 +20,10 @@ RESERVED_OUTPUT_TOKENS = 2_048
 MAX_TOOL_RESULT_CONTEXT_CHARS = 8_000
 MAX_TOOL_RESULTS = 6
 
-_SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)\b(password|passwd|secret|token|api[_-]?key|authorization|credential)\b"
-    r"\s*[:=]\s*[^\s,;]+"
-)
-_AUTHORIZATION_BEARER_RE = re.compile(
-    r"(?i)\bauthorization\b\s*[:=]\s*bearer\s+[A-Za-z0-9._~+\-/]+=*"
-)
-_BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+\-/]+=*")
-_KNOWN_TOKEN_RE = re.compile(
-    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b"
-)
-_PRIVATE_KEY_RE = re.compile(
-    r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
-    re.DOTALL,
-)
-
-
-def redact_sensitive_text(value: str) -> str:
-    """Entfernt typische Credentials vor Persistenz und Providertransfer."""
-    text = _PRIVATE_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", value)
-    text = _AUTHORIZATION_BEARER_RE.sub("Authorization=[REDACTED]", text)
-    text = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", text)
-    text = _BEARER_RE.sub("Bearer [REDACTED]", text)
-    return _KNOWN_TOKEN_RE.sub("[REDACTED_TOKEN]", text)
+# `redact_sensitive_text` wird oben importiert und bleibt damit auch unter
+# `services.ai_context_service` erreichbar — das haelt aeltere Importpfade am
+# Leben. Neuer Code nimmt `services.ai_redaction` direkt: nur wer *dort*
+# importiert, ist vom frueheren Zyklus unabhaengig.
 
 
 def _system_message(db: Session, conversation: AiConversation) -> str:

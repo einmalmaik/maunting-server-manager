@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from models import AiActionProposal, AiConversation, Server, User
 from services import audit_service, permission_service
 from services.actor_context import ActorContext
-from services.ai_context_service import redact_sensitive_text
+from services.ai_redaction import redact_sensitive_text
 from services.dis_client import DisClient
 from services.server_file_access_service import read_server_text, write_server_text
 
@@ -197,17 +197,28 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "remember",
-            "Merkt sich eine dauerhafte Vorliebe oder Eigenheit des Benutzers "
-            "oder eines Servers. Nur fuer Dinge, die ueber dieses Gespraech "
-            "hinaus gelten — nicht fuer Zwischenergebnisse. Verwende einen "
-            "bereits vorhandenen Schluessel erneut, wenn du einen Fakt "
-            "aktualisierst, statt einen aehnlichen neuen anzulegen. Niemals "
-            "Passwoerter, Schluessel oder Tokens merken.",
+            "Merkt sich eine dauerhafte Vorliebe oder Eigenheit. Nur fuer "
+            "Dinge, die ueber dieses Gespraech hinaus gelten — nicht fuer "
+            "Zwischenergebnisse. Verwende einen bereits vorhandenen Schluessel "
+            "erneut, wenn du einen Fakt aktualisierst, statt einen aehnlichen "
+            "neuen anzulegen. Niemals Passwoerter, Schluessel oder Tokens "
+            "merken.\n"
+            "Wahl des Bereichs: Persoenlich ist, was jemand *will* "
+            "(\"ich nehme immer 8 GB\"). Team ist, wie etwas *ist* — eine "
+            "Eigenschaft der Anlage, die fuer alle Kollegen gilt "
+            "(\"dieser Server braucht mindestens 6 GB\"). Pruefsatz: ein "
+            "Team-Eintrag muss wahr bleiben, egal wer ihn liest. Steht \"ich\", "
+            "\"mein\" oder ein Name darin, ist er persoenlich. Im Zweifel "
+            "persoenlich.",
             {
                 "scope": {
                     "type": "string",
-                    "enum": ["user", "server"],
-                    "description": "user = gilt ueberall, server = gilt nur fuer diesen Server.",
+                    "enum": ["user", "server", "team"],
+                    "description": (
+                        "user = persoenlich, nur fuer diesen Benutzer. "
+                        "server = persoenlich, aber nur zu diesem Server. "
+                        "team = geteilt mit allen Kollegen im Team."
+                    ),
                 },
                 "server_id": {
                     "type": ["integer", "null"],
@@ -477,7 +488,7 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
         raise AiActionValidationError("Memory-Werkzeug hat ungueltige Argumente")
 
     scope = arguments.get("scope")
-    if scope not in {"user", "server"}:
+    if scope not in {"user", "server", "team"}:
         # "panel" ist bewusst nicht erreichbar: panelweites Memory gilt fuer
         # alle Benutzer und ist eine Betreiberentscheidung, keine der KI.
         raise AiActionValidationError("Unbekannter Memory-Bereich")
@@ -496,17 +507,39 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     elif server_id is not None:
         raise AiActionValidationError("Benutzer-Memory akzeptiert keinen Server")
 
+    # Das Team nennt nicht das Modell, sondern der Dienst: welchem Team ein
+    # Benutzer angehoert, ist eine Tatsache der Datenbank und keine Angabe, die
+    # aus einem Prompt stammen darf. Ist die Lage nicht eindeutig, bekommt das
+    # Modell die Rueckfrage als Ergebnis und fragt den Benutzer.
+    team_id = None
+    if scope == "team":
+        from services import team_service
+
+        target, question = team_service.learning_team(db, user)
+        if target is None:
+            return {"remembered": False, "ask_user": question}
+        if target.is_personal:
+            # Kein echtes Team vorhanden oder keine Verwaltungsberechtigung:
+            # der Eintrag wird persoenlich statt gar nicht. Lieber zu eng
+            # gespeichert als zu weit.
+            scope = "user"
+        else:
+            team_id = target.id
+
     try:
         row, stored = ai_memory_service.upsert_entry(
             db, user=user, scope=scope, server_id=server_id if scope == "server" else None,
-            key=key, value=value, origin="ai",
+            team_id=team_id, key=key, value=value, origin="ai",
         )
     except HTTPException as exc:
         # Volles Scope, Secret im Wert, fremder Server, geschuetzter Eintrag:
         # alles regulaere Faelle, die das Modell erfahren soll, statt dass der
         # Stream mit einem Serverfehler abbricht.
         raise AiActionValidationError(str(exc.detail)) from exc
-    return {"remembered": True, "scope": row.scope, "key": row.key, "value": stored}
+    return {
+        "remembered": True, "scope": row.scope, "key": row.key, "value": stored,
+        "team_id": row.team_id,
+    }
 
 
 def _execute_web_search(db: Session, *, user: User, arguments: dict) -> dict:

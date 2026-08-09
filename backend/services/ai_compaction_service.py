@@ -35,10 +35,8 @@ import httpx
 
 from database import SessionLocal
 from models import AiConversation, AiMessage, AiProvider, User
-from services.ai_context_service import (
-    MAX_SUMMARY_CHARS,
-    redact_sensitive_text,
-)
+from services.ai_context_service import MAX_SUMMARY_CHARS
+from services.ai_redaction import redact_sensitive_text
 from services.ai_provider_service import estimate_cost_microunits, resolve_api_key
 from services.ai_usage_service import (
     AiQuotaExceeded,

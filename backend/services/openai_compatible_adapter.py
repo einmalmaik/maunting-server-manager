@@ -12,6 +12,7 @@ import httpx
 
 from models import AiProvider
 from services.ai_provider_service import assert_provider_destination
+from services.ai_redaction import redact_sensitive_text
 
 
 logger = logging.getLogger(__name__)
@@ -146,8 +147,6 @@ async def _error_detail(response: httpx.Response) -> str | None:
                 message = parsed["message"]
         if message is None:
             message = text
-    from services.ai_context_service import redact_sensitive_text
-
     single_line = " ".join(redact_sensitive_text(message).split())
     return single_line[:MAX_PROVIDER_DETAIL_CHARS] or None
 

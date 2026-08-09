@@ -22,7 +22,8 @@ router = APIRouter(prefix="/api/ai/memory", tags=["ai-memory"])
 
 def _response(row: AiMemoryEntry, value: str) -> AiMemoryResponse:
     return AiMemoryResponse(
-        id=row.id, scope=row.scope, server_id=row.server_id, key=row.key,
+        id=row.id, scope=row.scope, server_id=row.server_id, team_id=row.team_id,
+        key=row.key,
         value=value, origin=row.origin, use_count=row.use_count,
         last_used_at=row.last_used_at,
         created_at=row.created_at, updated_at=row.updated_at,
@@ -33,12 +34,13 @@ def _response(row: AiMemoryEntry, value: str) -> AiMemoryResponse:
 def list_memory(
     scope: MemoryScope = Query(...),
     server_id: int | None = Query(default=None, ge=1),
+    team_id: int | None = Query(default=None, ge=1),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
 ) -> list[AiMemoryResponse]:
     try:
         return [_response(row, value) for row, value in ai_memory_service.list_entries(
-            db, user, scope, server_id
+            db, user, scope, server_id, team_id
         )]
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
@@ -54,7 +56,7 @@ def save_memory(
     try:
         row, value = ai_memory_service.upsert_entry(
             db, user=user, scope=payload.scope, server_id=payload.server_id,
-            key=payload.key, value=payload.value,
+            team_id=payload.team_id, key=payload.key, value=payload.value,
         )
         return _response(row, value)
     except DisSidecarError as exc:

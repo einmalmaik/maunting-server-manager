@@ -71,7 +71,7 @@ def record_privileged_action(
     user_id: int | None,
     action: str,
     target_type: str | None = None,
-    target_id: int | None = None,
+    target_id: str | int | None = None,
     details: str | dict[str, Any] | None = None,
     origin: str = "direct",
     correlation_id: str | UUID | None = None,
@@ -99,7 +99,9 @@ def record_privileged_action(
         user_id=user_id,
         action=action_clean,
         target_type=target_type,
-        target_id=target_id,
+        # Einheitlich als Text: die Aufrufer uebergeben teils Zahlen
+        # (Benutzer, Server), teils UUIDs (Memory, Skills, Anhaenge).
+        target_id=None if target_id is None else str(target_id),
         origin=origin_clean,
         correlation_id=correlation_clean,
         details=sanitize_audit_details(details),
@@ -121,7 +123,7 @@ def list_audit_logs(
     limit: int = 50,
     action: str | None = None,
     target_type: str | None = None,
-    target_id: int | None = None,
+    target_id: str | int | None = None,
 ) -> list[AuditLog]:
     """Listet die neuesten Audit-Eintraege mit optionalen Filtern."""
     limit = min(max(int(limit), 1), 200)
@@ -131,5 +133,5 @@ def list_audit_logs(
     if target_type:
         q = q.filter(AuditLog.target_type == target_type.strip())
     if target_id is not None:
-        q = q.filter(AuditLog.target_id == int(target_id))
+        q = q.filter(AuditLog.target_id == str(target_id))
     return q.limit(limit).all()

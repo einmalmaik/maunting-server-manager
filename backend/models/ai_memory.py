@@ -38,21 +38,34 @@ class AiMemoryEntry(Base):
 
     __tablename__ = "ai_memory_entries"
     __table_args__ = (
-        CheckConstraint("scope IN ('user', 'server', 'panel')", name="ck_ai_memory_entries_scope"),
+        CheckConstraint(
+            "scope IN ('user', 'server', 'team', 'panel')",
+            name="ck_ai_memory_entries_scope",
+        ),
         CheckConstraint("origin IN ('user', 'ai')", name="ck_ai_memory_entries_origin"),
         UniqueConstraint("scope_identity", "key", name="uq_ai_memory_scope_key"),
         Index("ix_ai_memory_owner_scope", "owner_user_id", "scope"),
+        Index("ix_ai_memory_team", "team_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     server_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=True, index=True)
+    # Gesetzt nur im Scope "team". Der Eintrag gehoert dann dem Team, nicht dem
+    # Benutzer, der ihn angelegt hat — er bleibt bestehen, wenn dieser geht.
+    team_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=True)
     scope: Mapped[str] = mapped_column(String(16), nullable=False)
     scope_identity: Mapped[str] = mapped_column(String(128), nullable=False)
     key: Mapped[str] = mapped_column(String(64), nullable=False)
     value_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     # "user" = ausdruecklich hinterlegt, "ai" = von der KI gemerkt.
     origin: Mapped[str] = mapped_column(String(8), nullable=False, default="user")
+    # Welche AAD beim Verschluesseln verwendet wurde. 1 = nur die Eintrags-ID,
+    # 2 = zusaetzlich der Scope. Version 2 macht das Umhaengen eines Eintrags
+    # auf einen anderen Besitzer per Datenbankzugriff unmoeglich: der Text
+    # liesse sich danach nicht mehr entschluesseln. Bestandszeilen bleiben auf
+    # 1, bis sie das naechste Mal geschrieben werden.
+    aad_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Lokal berechneter Vektor als JSON-Liste. Bewusst *nicht* verschluesselt:

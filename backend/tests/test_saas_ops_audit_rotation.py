@@ -45,7 +45,9 @@ def test_record_privileged_action_writes_row(db: Session, owner_user: User):
     assert row.origin == "direct"
     assert str(UUID(row.correlation_id or "")) == row.correlation_id
     assert row.action == "postgres.database.create"
-    assert row.target_id == 7
+    # `target_id` ist Text, seit Memory, Skills und Anhaenge UUIDs als Ziel
+    # uebergeben. Zahlen kommen weiterhin an, werden aber als Text abgelegt.
+    assert row.target_id == "7"
     assert row.details is not None
     assert "must-not-store" not in row.details
     assert "msm_s7_db1" in row.details
