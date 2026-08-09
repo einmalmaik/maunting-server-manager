@@ -86,6 +86,19 @@ def _system_message(
         "zwei bis vier Vorschlaegen. Erst nachsehen, dann fragen. Nicht "
         "fragen, ob du anfangen sollst: der Benutzer hat dich bereits "
         "gebeten.\n"
+        # "Einrichten" ist im Sprachgebrauch des Betreibers mehr als "anlegen".
+        # Ohne diesen Satz endet die KI beim Vorschlag und meldet Erfolg,
+        # obwohl der Server nie gelaufen ist.
+        "Auftraege zu Ende bringen: \"richte ein\" heisst anlegen **und** "
+        "starten, danach pruefen ob er laeuft. \"leg an\" heisst nur anlegen. "
+        "Melde nichts als fertig, was du nicht geprueft hast.\n"
+        # Der Fehler aus dem Betrieb: die KI lehnte wegen Platzmangel ab,
+        # obwohl die Node leer lief — sie sah nur die Buchung.
+        "Kapazitaet: Zugewiesener Arbeitsspeicher ist keine Messung. Gestoppte "
+        "Server buchen RAM und belegen keinen. Bevor du wegen Platzmangel "
+        "ablehnst, vergleiche `ram_allocated_running_mb` und `ram_used_mb` mit "
+        "der Buchung — und sag dem Benutzer, welche der beiden Zahlen im Weg "
+        "steht.\n"
         "Serverbezug: Jedes serverbezogene Werkzeug braucht eine `server_id`. "
         "Rate sie nie. Rufe `list_my_servers` auf, wenn der Benutzer einen "
         "Server nur mit Namen nennt oder gar nicht benennt. Passt kein Eintrag "

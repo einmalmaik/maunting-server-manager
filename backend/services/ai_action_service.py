@@ -425,7 +425,14 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "read_node_capacity",
-            "Liest freie und belegte Kapazitaet aller Hosts, um Ressourcen sinnvoll zu waehlen.",
+            "Liest die Kapazitaet aller Hosts. **Buchung und Verbrauch sind "
+            "zweierlei**: `ram_allocated_mb` ist die Summe aller zugewiesenen "
+            "Grenzen einschliesslich **gestoppter** Server — die belegen "
+            "nichts. Was tatsaechlich laeuft, steht in "
+            "`ram_allocated_running_mb`, was die Node misst in `ram_used_mb`. "
+            "Ist die Buchung voll, aber Server sind gestoppt, ist der Host "
+            "nicht ausgelastet: dann ist die Frage, ob ueberbucht werden darf, "
+            "und nicht ob Platz da ist.",
             {},
             [],
         ),
@@ -1162,25 +1169,35 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
         return {"blueprints": entries, "count": len(entries)}
 
     from models import Node
-    from services.node_capacity import allocatable_ram_mb, sum_allocated_ram_mb
+    from services.node_capacity import (
+        allocatable_ram_mb, sum_allocated_ram_mb, sum_running_ram_mb,
+    )
 
     nodes = db.query(Node).order_by(Node.id).limit(MAX_LISTED_NODES).all()
-    return {
-        "nodes": [
-            {
-                # Bewusst ohne Hostname und IP: das Modell soll Kapazitaet
-                # vergleichen koennen, nicht die Netzstruktur des Betreibers
-                # kennen. Die Auswahl trifft ohnehin MSM.
-                "node_id": node.id,
-                "status": node.status,
-                "is_local": bool(node.is_local),
-                "cpu_total": node.cpu_total,
-                "ram_allocated_mb": (allocated := sum_allocated_ram_mb(db, node.id)),
-                "ram_allocatable_mb": allocatable_ram_mb(node, allocated),
-            }
-            for node in nodes
-        ]
-    }
+    entries = []
+    for node in nodes:
+        allocated = sum_allocated_ram_mb(db, node.id)
+        entries.append({
+            # Bewusst ohne Hostname und IP: das Modell soll Kapazitaet
+            # vergleichen koennen, nicht die Netzstruktur des Betreibers
+            # kennen. Die Auswahl trifft ohnehin MSM.
+            "node_id": node.id,
+            "status": node.status,
+            "is_local": bool(node.is_local),
+            "cpu_total": node.cpu_total,
+            # Gebucht ueber **alle** Server, auch gestoppte. Das ist die
+            # Ueberbuchungsgrenze, nicht der Verbrauch.
+            "ram_allocated_mb": allocated,
+            # Gebucht von den Servern, die gerade wirklich laufen. Die
+            # Unterscheidung ist der Kern einer wiederkehrenden Fehlauskunft:
+            # vier gestoppte Server zu je 8 GB buchen 32 GB und belegen null.
+            "ram_allocated_running_mb": sum_running_ram_mb(db, node.id),
+            "ram_allocatable_mb": allocatable_ram_mb(node, allocated),
+            # Was die Node selbst meldet — die einzige echte Messung hier.
+            "ram_total_mb": int(node.ram_total / 1024 / 1024) if node.ram_total else None,
+            "ram_used_mb": int(node.ram_used / 1024 / 1024) if node.ram_used else None,
+        })
+    return {"nodes": entries}
 
 
 def _execute_server_context_tool(
@@ -1425,7 +1442,9 @@ def execute_read_tool(
         node = server.node
         if node is None:
             return {"server_id": server.id, "node_status": "unassigned"}
-        from services.node_capacity import allocatable_ram_mb, sum_allocated_ram_mb
+        from services.node_capacity import (
+            allocatable_ram_mb, sum_allocated_ram_mb, sum_running_ram_mb,
+        )
 
         allocated_ram_mb = sum_allocated_ram_mb(db, node.id)
         return {
@@ -1436,6 +1455,9 @@ def execute_read_tool(
             "ram_total_bytes": node.ram_total,
             "ram_used_bytes": node.ram_used,
             "ram_allocated_mb": allocated_ram_mb,
+            # Gestoppte Server buchen, belegen aber nichts. Ohne diese Zeile
+            # meldet das Modell "kein RAM frei", waehrend die Node leer laeuft.
+            "ram_allocated_running_mb": sum_running_ram_mb(db, node.id),
             "ram_allocatable_mb": allocatable_ram_mb(node, allocated_ram_mb),
             "disk_total_bytes": node.disk_total,
             "disk_used_bytes": node.disk_used,
