@@ -39,3 +39,21 @@ class AiChatRequest(BaseModel):
     # Modell, das damit nichts anfangen kann, ignoriert das Feld — dann kommt
     # schlicht kein Denkschritt zurueck und die Antwort bleibt unveraendert.
     reasoning: bool = False
+
+
+class AiMessageEdit(BaseModel):
+    """Eine bereits gesendete eigene Nachricht neu formulieren.
+
+    Der neue Text ersetzt die alte Nachricht nicht — sie und alles Spaetere
+    verschwinden, und der Text wird als neue Nachricht gesendet. Anders waere
+    der Verlauf widerspruechlich: die verworfene Fassung stuende weiter im
+    Kontext und das Modell wuerde sie beruecksichtigen.
+    """
+
+    content: str = Field(min_length=1, max_length=16_000)
+
+
+class AiMessageEditResponse(BaseModel):
+    # Wie viele Zeilen der Schnitt entfernt hat. Die Oberflaeche zeigt es an,
+    # damit niemand raetselt, wohin der halbe Verlauf verschwunden ist.
+    removed: int

@@ -350,3 +350,92 @@ def test_learning_requires_the_skill_permission(db: Session, regular_user: User)
                 "body": "Inhalt.", "scope": "team",
             },
         )
+
+
+# ── Skills verwalten ──────────────────────────────────────────────────
+
+
+def test_the_ai_can_delete_a_skill_it_learned(db: Session, regular_user: User) -> None:
+    """Was die KI angelegt hat, kann sie auch wieder wegnehmen."""
+    _allow(db, regular_user, "ai.skills.use")
+    ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="learn_skill",
+        arguments={
+            "skill_key": "ueberholt", "name": "Ueberholte Vorgehensweise",
+            "description": "Etwas, das sich als falsch herausgestellt hat und weg soll.",
+            "body": "Falsch.", "scope": "team",
+        },
+    )
+    assert "ueberholt" in {
+        view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+
+    result = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="forget_skill",
+        arguments={"skill_key": "ueberholt"},
+    )
+
+    assert result["forgotten"] is True
+    assert "ueberholt" not in {
+        view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+
+
+def test_a_shipped_skill_cannot_be_deleted(db: Session, regular_user: User) -> None:
+    """Eine Datei auf der Platte zu "loeschen" waere ein Versprechen, das das
+    naechste Update zuruecknimmt.
+
+    Stattdessen bekommt das Modell den richtigen Weg genannt: unter demselben
+    Schluessel einen eigenen anlegen. Der ueberschreibt die Vorgabe dauerhaft.
+    """
+    ai_skill_service.reset_shipped_cache_for_tests()
+    _allow(db, regular_user, "ai.skills.use")
+
+    result = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="forget_skill",
+        arguments={"skill_key": "portkonflikt"},
+    )
+
+    assert result["forgotten"] is False
+    assert "learn_skill" in result["reason"]
+    assert "portkonflikt" in {
+        view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+
+
+def test_a_foreign_team_skill_cannot_be_deleted(db: Session, regular_user: User) -> None:
+    """Ein erratener Schluessel darf auch nichts zerstoeren, nicht nur nichts oeffnen."""
+    stranger = _user(db, "fremder")
+    _allow(db, stranger, "ai.skills.use")
+    _allow(db, regular_user, "ai.skills.use", "teams.create")
+    team = _team(db, regular_user)
+    ai_skill_service.upsert_skill(
+        db, user=regular_user, skill_key="intern", name="Interne Vorgehensweise",
+        description="Etwas, das ausschliesslich dieses Team betrifft und sonst niemanden.",
+        body="Vertraulich.", team_id=team.id,
+    )
+
+    with pytest.raises(AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=stranger, tool_name="forget_skill",
+            arguments={"skill_key": "intern"},
+        )
+    assert db.query(AiSkill).filter(AiSkill.skill_key == "intern").count() == 1
+
+
+def test_changing_a_skill_keeps_a_single_entry(db: Session, regular_user: User) -> None:
+    """Aendern laeuft ueber denselben Schluessel, nicht ueber loeschen und neu."""
+    _allow(db, regular_user, "ai.skills.use")
+    for body in ("Erste Fassung.", "Zweite, bessere Fassung."):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="learn_skill",
+            arguments={
+                "skill_key": "wandelbar", "name": "Wandelbar",
+                "description": "Eine Vorgehensweise, die im Laufe der Zeit besser wird.",
+                "body": body, "scope": "team",
+            },
+        )
+
+    rows = db.query(AiSkill).filter(AiSkill.skill_key == "wandelbar").all()
+    assert len(rows) == 1
+    assert rows[0].body == "Zweite, bessere Fassung."

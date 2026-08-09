@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { aiApi, type AiAttachment, type AiSkillSummary } from '@/api/ai'
+import { aiApi, type AiAttachment, type AiMessage, type AiSkillSummary } from '@/api/ai'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { usePermissionsStore } from '@/stores/permissionsStore'
@@ -15,6 +15,7 @@ vi.mock('@/api/ai', async (importOriginal) => {
       listProviders: vi.fn(),
       getConversation: vi.fn(),
       clearHistory: vi.fn(),
+      editMessage: vi.fn(),
       listActions: vi.fn(),
       listAttachments: vi.fn(),
       listSkills: vi.fn(),
@@ -56,6 +57,13 @@ const skills: AiSkillSummary[] = [
   { id: null, skill_key: 'server-nicht-erreichbar', name: 'Nicht erreichbar', description: 'Synthetische Beschreibung fuer den Test', scope: 'shipped', origin: 'shipped', team_id: null, status: 'active', enabled: true, editable: false },
 ]
 
+/** Eine bereits gesendete eigene Nachricht — die Grundlage fuers Bearbeiten. */
+const eigeneNachricht: AiMessage = {
+  id: 'msg-user', role: 'user', content: 'urspruengliche Frage', reasoning: null,
+  status: 'complete', provider_id: null, model: null,
+  created_at: '2026-08-01T12:00:00Z',
+}
+
 describe('AiChat', () => {
   beforeEach(async () => {
     Element.prototype.scrollIntoView = vi.fn()
@@ -73,7 +81,7 @@ describe('AiChat', () => {
     vi.mocked(aiApi.listProviders).mockReset().mockResolvedValue([
       { id: 1, name: 'Synthetic AI', default_model: 'test-model', requires_api_key: false, user_key_configured: false, operator_key_available: true, available: true },
     ])
-    vi.mocked(aiApi.getConversation).mockReset().mockResolvedValue({ ...CONVERSATION, messages: [] })
+    vi.mocked(aiApi.getConversation).mockReset().mockResolvedValue({ ...CONVERSATION, messages: [eigeneNachricht] })
     vi.mocked(aiApi.listActions).mockReset().mockResolvedValue([])
     vi.mocked(aiApi.listAttachments).mockReset().mockResolvedValue([attachment])
     vi.mocked(aiApi.listSkills).mockReset().mockResolvedValue(skills)
@@ -154,5 +162,49 @@ describe('AiChat', () => {
 
     // Ohne diesen Zusatz haette der Benutzer den Eindruck, der Skill wirke bereits.
     await screen.findByText(/wartet auf Freigabe/)
+  })
+  it('nimmt beim Bearbeiten die alte Fassung zurueck, bevor neu gesendet wird', async () => {
+    // Der Verlaufsschnitt muss *vor* dem Senden passieren. Andersherum stuende
+    // die verworfene Fassung noch im Kontext, und die KI wuerde eine Frage
+    // beruecksichtigen, die der Benutzer gerade zurueckgenommen hat.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(aiApi.editMessage).mockResolvedValue({ removed: 2 })
+    vi.mocked(streamAiMessage).mockResolvedValue(undefined)
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nachricht bearbeiten' }))
+    fireEvent.change(screen.getByLabelText('Nachricht bearbeiten'), {
+      target: { value: 'so war es gemeint' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Neu senden' }))
+
+    await waitFor(() => expect(aiApi.editMessage).toHaveBeenCalledWith(
+      'msg-user', 'so war es gemeint',
+    ))
+    await waitFor(() => expect(streamAiMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'so war es gemeint' }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    ))
+  })
+
+  it('sendet nicht, wenn der Schnitt fehlschlaegt', async () => {
+    // Sonst haette der Benutzer eine neue Antwort auf einen Verlauf, der die
+    // alte Fassung noch enthaelt.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(aiApi.editMessage).mockRejectedValue(new Error('offline'))
+    vi.mocked(streamAiMessage).mockReset().mockResolvedValue(undefined)
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nachricht bearbeiten' }))
+    fireEvent.change(screen.getByLabelText('Nachricht bearbeiten'), {
+      target: { value: 'neuer Text' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Neu senden' }))
+
+    await waitFor(() => expect(aiApi.editMessage).toHaveBeenCalled())
+    expect(streamAiMessage).not.toHaveBeenCalled()
   })
 })

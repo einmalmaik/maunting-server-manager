@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -100,6 +101,79 @@ def clear_history(db: Session, conversation: AiConversation) -> int:
     conversation.updated_at = datetime.now(timezone.utc)
     db.flush()
     return int(removed)
+
+
+def truncate_from(db: Session, conversation: AiConversation, message: AiMessage) -> int:
+    """Schneidet den Verlauf ab dieser Nachricht ab — sie selbst eingeschlossen.
+
+    Das ist die Grundlage des Bearbeitens: wer eine Frage umformuliert, will
+    nicht, dass die alte Fassung und die darauf gegebene Antwort weiter im
+    Kontext stehen. Beides zusammen waere widerspruechlich, und das Modell
+    wuerde die verworfene Fassung weiter beruecksichtigen.
+
+    Abgeschnitten wird **alles Spaetere**, nicht nur die eine Antwort. Bearbeitet
+    jemand die dritte von zehn Nachrichten, beruhen die Nachrichten vier bis
+    zehn auf einer Praemisse, die es nicht mehr gibt.
+
+    Was mitgeht und warum:
+
+    - **Werkzeugergebnisse** — sie gehoeren zu den geloeschten Zuegen und wuerden
+      sonst als "frueher gelesene Daten" in einen Kontext fliessen, in dem
+      niemand mehr danach gefragt hat.
+    - **Offene Vorschlaege** — eine Rueckfrage zu einer zurueckgenommenen Bitte
+      ist gegenstandslos.
+
+    Was **nicht** mitgeht: bereits ausgefuehrte Aktionen. Ein gestoppter Server
+    bleibt gestoppt; den Verlauf umzuschreiben aendert daran nichts. Sie stehen
+    unveraendert im Audit-Log — das ist der bestaendige Nachweis, der Chat ist
+    eine Arbeitsflaeche.
+
+    Wurde der Verlauf davor bereits gefaltet, bleibt die Zusammenfassung
+    stehen: sie beschreibt aeltere Zuege, die von der Bearbeitung gar nicht
+    betroffen sind.
+    """
+    from models import AiActionProposal, AiToolResult
+
+    cutoff = message.created_at
+    removed = (
+        db.query(AiMessage)
+        .filter(
+            AiMessage.conversation_id == conversation.id,
+            AiMessage.created_at >= cutoff,
+        )
+        .delete(synchronize_session=False)
+    )
+    db.query(AiToolResult).filter(
+        AiToolResult.conversation_id == conversation.id,
+        AiToolResult.created_at >= cutoff,
+    ).delete(synchronize_session=False)
+    # Nur was noch niemand angefasst hat. Ein `executing` oder `succeeded`
+    # beschreibt etwas, das in der Welt passiert ist.
+    db.query(AiActionProposal).filter(
+        AiActionProposal.conversation_id == conversation.id,
+        AiActionProposal.created_at >= cutoff,
+        AiActionProposal.status == "proposed",
+    ).delete(synchronize_session=False)
+    conversation.updated_at = datetime.now(timezone.utc)
+    db.flush()
+    return int(removed)
+
+
+def owned_message(db: Session, conversation: AiConversation, message_id: str) -> AiMessage:
+    """Laedt eine eigene Benutzernachricht dieser Unterhaltung.
+
+    Nur eigene und nur `user`: eine Antwort des Modells umzuschreiben waere
+    keine Korrektur, sondern eine Faelschung des Verlaufs — und damit auch des
+    Kontexts, aus dem spaetere Antworten entstehen.
+    """
+    row = db.get(AiMessage, message_id)
+    if row is None or row.conversation_id != conversation.id:
+        raise HTTPException(status_code=404, detail="Nachricht nicht gefunden")
+    if row.role != "user":
+        raise HTTPException(
+            status_code=409, detail="Nur eigene Nachrichten lassen sich bearbeiten"
+        )
+    return row
 
 
 def reconcile_interrupted_ai_streams(db: Session) -> int:

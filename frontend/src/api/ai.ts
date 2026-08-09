@@ -271,6 +271,15 @@ export const aiApi = {
   /** Die eine Unterhaltung. Wird beim ersten Aufruf serverseitig angelegt. */
   getConversation: () => api<AiConversationDetail>('/ai/conversation'),
   clearHistory: () => api('/ai/conversation/messages', { method: 'DELETE' }),
+  /**
+   * Nimmt eine eigene Nachricht zurück: sie und alles Spätere verschwinden.
+   * Gesendet wird **nicht** — das übernimmt danach der gewohnte Streamweg.
+   * Zwei Schritte, weil das Senden Kontingent, Anbieterwahl und Stream braucht.
+   */
+  editMessage: (messageId: string, content: string) => api<{ removed: number }>(
+    `/ai/conversation/messages/${messageId}`,
+    { method: 'PUT', body: JSON.stringify({ content }) },
+  ),
   listActions: () => api<AiActionProposal[]>('/ai/conversation/actions'),
   getAction: (proposalId: string) => api<AiActionProposal>(`/ai/actions/${proposalId}`),
   confirmAction: (proposalId: string) => api<{ proposal_id: string; confirmation_token: string; expires_at: string }>(`/ai/actions/${proposalId}/confirm`, {

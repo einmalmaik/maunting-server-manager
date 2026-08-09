@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, Brain, BrainCircuit, Loader2, Paperclip, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
+import { Bot, Brain, BrainCircuit, Check, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -63,6 +63,9 @@ export function AiChat() {
   // das Backend — hier steht nur das Ergebnis.
   const [memoryNoticeDue, setMemoryNoticeDue] = useState(false)
   const [input, setInput] = useState('')
+  // Welche eigene Nachricht gerade umformuliert wird, und womit.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [streaming, setStreaming] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -172,6 +175,40 @@ export function AiChat() {
     event.preventDefault()
     const content = input.trim()
     if (!content || !providerId || streaming) return
+    setInput('')
+    await sendContent(content)
+  }
+
+  /**
+   * Nimmt eine bereits gesendete eigene Nachricht zurück und stellt sie neu.
+   *
+   * Zwei Schritte, weil sie zwei verschiedene Dinge sind: der Schnitt räumt
+   * den Verlauf ab dieser Nachricht auf — sie selbst eingeschlossen —, und
+   * erst danach geht der neue Text den gewohnten Weg. Die KI sieht von der
+   * alten Fassung nichts mehr; sie steht weder im Verlauf noch im Kontext.
+   */
+  const submitEdit = async (messageId: string) => {
+    const content = editDraft.trim()
+    if (!content || !providerId || streaming) return
+    try {
+      await aiApi.editMessage(messageId, content)
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.edit'))
+      return
+    }
+    // Erst wenn der Schnitt durch ist: sonst stünde die alte Fassung noch da,
+    // während der Server sie schon nicht mehr kennt.
+    setEntries((current) => {
+      const index = current.findIndex((item) => item.kind === 'message' && item.id === messageId)
+      return index === -1 ? current : current.slice(0, index)
+    })
+    setEditingId(null)
+    setEditDraft('')
+    await sendContent(content)
+  }
+
+  const sendContent = async (content: string) => {
+    if (!content || !providerId || streaming) return
 
     const now = new Date().toISOString()
     const assistantId = crypto.randomUUID()
@@ -188,7 +225,6 @@ export function AiChat() {
       { kind: 'message', id: optimisticUser.id, message: optimisticUser },
       { kind: 'message', id: assistantId, message: optimisticAssistant },
     ])
-    setInput('')
     setStreaming(true)
 
     const controller = new AbortController()
@@ -448,13 +484,67 @@ export function AiChat() {
 
               const { message } = entry
               if (message.role === 'user') {
+                const isEditing = editingId === message.id
                 return (
-                  <article key={entry.id} className="flex justify-end gap-3">
-                    <div className="max-w-[85%] rounded-2xl rounded-br-md border border-primary/25 bg-primary/10 px-4 py-2.5">
-                      <p className="whitespace-pre-wrap break-words text-sm leading-6 text-on-surface">
-                        {message.content}
-                      </p>
-                    </div>
+                  <article key={entry.id} className="group flex justify-end gap-3">
+                    {isEditing ? (
+                      <div className="w-full max-w-[85%] space-y-2">
+                        <textarea
+                          className="msm-input min-h-[4.5rem] w-full text-sm"
+                          value={editDraft}
+                          maxLength={16_000}
+                          autoFocus
+                          disabled={busy}
+                          onChange={(event) => setEditDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Escape') { setEditingId(null); setEditDraft('') }
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                              event.preventDefault()
+                              void submitEdit(message.id)
+                            }
+                          }}
+                          aria-label={t('ai.chat.edit')}
+                        />
+                        {/* Der Hinweis gehoert hierher, nicht in eine Rueckfrage
+                            danach: wer bearbeitet, soll vorher wissen, dass der
+                            Verlauf ab hier verschwindet. */}
+                        <p className="text-xs text-on-surface-variant">{t('ai.chat.editHint')}</p>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button" size="sm" variant="secondary" disabled={busy}
+                            onClick={() => { setEditingId(null); setEditDraft('') }}
+                          >
+                            <X className="h-4 w-4" aria-hidden="true" />
+                            {t('common.cancel')}
+                          </Button>
+                          <Button
+                            type="button" size="sm"
+                            disabled={busy || !editDraft.trim()}
+                            onClick={() => void submitEdit(message.id)}
+                          >
+                            <Check className="h-4 w-4" aria-hidden="true" />
+                            {t('ai.chat.editSend')}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => { setEditingId(message.id); setEditDraft(message.content) }}
+                          className="mt-1 self-start rounded-lg p-1.5 text-on-surface-variant opacity-0 transition-opacity hover:text-on-surface focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-0"
+                          aria-label={t('ai.chat.edit')}
+                        >
+                          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                        <div className="max-w-[85%] rounded-2xl rounded-br-md border border-primary/25 bg-primary/10 px-4 py-2.5">
+                          <p className="whitespace-pre-wrap break-words text-sm leading-6 text-on-surface">
+                            {message.content}
+                          </p>
+                        </div>
+                      </>
+                    )}
                     <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-surface-container-high text-on-surface-variant">
                       <User className="h-3.5 w-3.5" aria-hidden="true" />
                     </span>

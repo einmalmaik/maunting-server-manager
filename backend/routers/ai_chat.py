@@ -18,6 +18,8 @@ from schemas.ai_chat import (
     AiChatRequest,
     AiConversationDetail,
     AiConversationResponse,
+    AiMessageEdit,
+    AiMessageEditResponse,
     AiMessageResponse,
 )
 from services import ai_chat_service
@@ -88,6 +90,37 @@ def clear_conversation_history(
     ai_chat_service.clear_history(db, conversation)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/messages/{message_id}", response_model=AiMessageEditResponse)
+def edit_message(
+    message_id: str,
+    payload: AiMessageEdit,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+    _: None = Depends(verify_csrf),
+) -> AiMessageEditResponse:
+    """Nimmt eine eigene Nachricht zurueck, damit sie neu gestellt werden kann.
+
+    Der Endpunkt sendet **nicht**. Er raeumt nur auf: die Nachricht und alles
+    Spaetere verschwinden, danach schickt die Oberflaeche den neuen Text ueber
+    den gewohnten Streamweg. Zwei Schritte statt einem, weil das Senden eine
+    Kontingentreservierung, eine Anbieterwahl und einen Stream braucht — all
+    das haette hier nichts verloren.
+
+    Der neue Text wird trotzdem entgegengenommen und geprueft: eine Bearbeitung
+    abzulehnen, *nachdem* der halbe Verlauf weg ist, waere die schlechtere
+    Reihenfolge.
+    """
+    safe_content = redact_sensitive_text(payload.content).strip()
+    if not safe_content:
+        raise HTTPException(status_code=422, detail="Nachricht ist leer")
+
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    message = ai_chat_service.owned_message(db, conversation, message_id)
+    removed = ai_chat_service.truncate_from(db, conversation, message)
+    db.commit()
+    return AiMessageEditResponse(removed=removed)
 
 
 async def _replay_message(message: AiMessage) -> AsyncIterator[str]:

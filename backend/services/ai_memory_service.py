@@ -209,7 +209,7 @@ def _assert_may_write(db: Session, user: User, scope: str, team_id: int | None) 
 
 def upsert_entry(
     db: Session, *, user: User, scope: str, server_id: int | None, key: str, value: str,
-    origin: str = "user", team_id: int | None = None,
+    origin: str = "user", team_id: int | None = None, replace_user_entry: bool = False,
 ) -> tuple[AiMemoryEntry, str]:
     """Legt einen Eintrag an oder ueberschreibt ihn unter demselben Schluessel.
 
@@ -246,12 +246,17 @@ def upsert_entry(
         )
         db.add(row)
         action = "ai.memory.created"
-    elif origin == "ai" and row.origin == "user":
+    elif origin == "ai" and row.origin == "user" and not replace_user_entry:
+        # Der Schutz gilt gegen die *stillschweigende* Korrektur: die KI leitet
+        # nebenbei etwas ab und ueberschreibt damit, was der Benutzer selbst
+        # gesagt hat. Verlangt er die Korrektur ausdruecklich, ist genau das
+        # erwuenscht — dafuer gibt es `replace_user_entry`.
         raise HTTPException(
             status_code=409,
             detail=(
-                "Dieser Eintrag stammt vom Benutzer und wird nicht automatisch "
-                "ueberschrieben. Frage nach oder verwende einen anderen Schluessel."
+                "Dieser Eintrag stammt vom Benutzer. Ueberschreibe ihn nur, wenn "
+                "der Benutzer die Korrektur ausdruecklich verlangt hat — dann mit "
+                "replace_user_entry=true. Lege keinen zweiten aehnlichen Schluessel an."
             ),
         )
     else:
@@ -581,3 +586,89 @@ def provider_memory_context(
             "aus Platzgruenden ausgelassen."
         )
     return block
+
+
+# Wie viele Treffer eine Suche hoechstens meldet. Bewusst knapp: die Liste
+# landet im Chat und der Benutzer soll sie ueberblicken koennen, bevor er
+# ueber das Loeschen entscheidet.
+MAX_SEARCH_RESULTS = 15
+
+
+def search_entries(
+    db: Session, user: User, query: str, limit: int = MAX_SEARCH_RESULTS
+) -> list[tuple[AiMemoryEntry, str, float]]:
+    """Findet Eintraege nach Bedeutung, nicht nach Wortgleichheit.
+
+    Dieselbe Bewertung wie beim Abruf in den Kontext — Vektoraehnlichkeit,
+    Wortueberlappung, Nutzung, Aktualitaet. "alles ueber meinen Hund" findet
+    damit auch einen Eintrag, in dem das Wort "Hund" gar nicht vorkommt, weil
+    dort "Bello" steht.
+
+    Gesucht wird ausschliesslich in dem, was der Benutzer ohnehin sehen darf:
+    `_visible_scope_rows` ist derselbe Filter wie beim Lesen. Eine Suche kann
+    damit nichts aufdecken, was ohne sie verborgen waere.
+
+    Der Rueckgabewert enthaelt den Klartext. Er ist die Grundlage der
+    Entscheidung — wer loeschen soll, muss sehen was.
+    """
+    rows = _visible_scope_rows(db, user)
+    if not rows or not query.strip():
+        return []
+
+    decoded = [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
+    now = datetime.now(timezone.utc)
+    query_tokens = _tokens(query)
+    scores = _similarities(query, [row for row, _ in decoded])
+    ranked = sorted(
+        zip(decoded, scores),
+        key=lambda item: _relevance(item[0][0], item[0][1], query_tokens, now, item[1]),
+        reverse=True,
+    )
+    return [
+        (row, value, _relevance(row, value, query_tokens, now, score))
+        for (row, value), score in ranked[:limit]
+    ]
+
+
+def delete_by_keys(
+    db: Session, user: User, *, scope: str, keys: list[str], team_id: int | None = None,
+    server_id: int | None = None,
+) -> list[str]:
+    """Loescht genau die benannten Schluessel eines Bereichs.
+
+    Bewusst **nicht** nach Suchbegriff. Eine unscharfe Aehnlichkeit entscheidet
+    darueber, was ein Mensch zu sehen bekommt — sie darf nicht darueber
+    entscheiden, was verschwindet. Der Weg ist deshalb zweistufig: erst suchen
+    und zeigen, dann die gefundenen Schluessel ausdruecklich loeschen.
+
+    Rechte wie beim Schreiben: persoenliche Eintraege gehoeren dem Benutzer,
+    Team-Eintraege verlangen `can_manage_memory`, panelweite
+    `panel.settings.write`.
+    """
+    identity, _owner_id, _server_id, normalized_team_id = scope_identity(
+        db, user, scope, server_id, team_id
+    )
+    _assert_may_write(db, user, scope, normalized_team_id)
+
+    wanted = [key for key in keys if isinstance(key, str) and key.strip()]
+    if not wanted:
+        return []
+    rows = (
+        db.query(AiMemoryEntry)
+        .filter(
+            AiMemoryEntry.scope_identity == identity,
+            AiMemoryEntry.key.in_(wanted),
+        )
+        .all()
+    )
+    removed: list[str] = []
+    for row in rows:
+        audit_service.record_privileged_action(
+            db, user_id=user.id, action="ai.memory.deleted", target_type="ai_memory",
+            target_id=row.id, details={"scope": row.scope, "key": row.key},
+            origin="ai",
+        )
+        removed.append(row.key)
+        db.delete(row)
+    db.commit()
+    return sorted(removed)

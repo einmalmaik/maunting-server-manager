@@ -275,7 +275,8 @@
         "credential": "Der API-Key ist vorübergehend nicht verfügbar.",
         "unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar.",
         "provider": "Der KI-Provider hat die Anfrage abgelehnt.",
-        "toolRejected": "Der angeforderte KI-Werkzeugaufruf wurde aus Sicherheitsgründen abgelehnt."
+        "toolRejected": "Der angeforderte KI-Werkzeugaufruf wurde aus Sicherheitsgründen abgelehnt.",
+        "edit": "Nachricht konnte nicht bearbeitet werden."
       },
       "clear": "Verlauf löschen",
       "clearTitle": "Verlauf löschen?",
@@ -288,7 +289,10 @@
         "network": "Mein Minecraft-Server ist an, aber nicht erreichbar. Woran liegt das?",
         "mods": "Welche Mods sind auf meinem Server installiert und gibt es Updates?"
       },
-      "compacted": "Ältere Nachrichten wurden zusammengefasst"
+      "compacted": "Ältere Nachrichten wurden zusammengefasst",
+      "edit": "Nachricht bearbeiten",
+      "editHint": "Diese Nachricht und alles danach wird entfernt. Die KI kennt die alte Fassung dann nicht mehr.",
+      "editSend": "Neu senden"
     },
     "actions": {
       "title": "KI-Aktionsvorschlag",
@@ -370,7 +374,10 @@
       "read_node_health": "Node-Zustand gelesen",
       "web_search": "Im Web gesucht",
       "read_skill": "Skill nachgeschlagen",
-      "learn_skill": "Skill gelernt"
+      "learn_skill": "Skill gelernt",
+      "search_memory": "Gedächtnis durchsucht",
+      "forget_memory": "Erinnerungen gelöscht",
+      "forget_skill": "Skill gelöscht"
     },
     "errors": {
       "codes": {

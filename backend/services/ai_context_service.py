@@ -103,6 +103,15 @@ def _system_message(
         "gerade jetzt gilt. Aktualisierst du einen bekannten Fakt, verwende "
         "denselben Schluessel erneut, statt einen aehnlichen neuen anzulegen. "
         "Was bereits im Memory-Block steht, musst du nicht erneut merken.\n"
+        # Loeschen in zwei Schritten. Eine Aehnlichkeit von 0,4 ist eine
+        # brauchbare Grundlage dafuer, jemandem etwas anzuzeigen, und eine
+        # schlechte dafuer, es zu vernichten.
+        "Will der Benutzer etwas loeschen oder richtigstellen (\"vergiss was "
+        "ich ueber X gesagt habe\"), suche erst mit `search_memory`, **nenne "
+        "ihm was du gefunden hast**, und loesche danach mit `forget_memory` "
+        "genau diese Schluessel. Nie ohne vorherige Suche loeschen. Geht es nur "
+        "um eine Korrektur, ueberschreibe stattdessen mit `remember` unter "
+        "demselben Schluessel — das erhaelt den Zusammenhang.\n"
         # Der Ausloeser muss ein *beobachtbares Ereignis* sein, kein Zustand,
         # den das Modell erst aus dem Verlauf erschliessen muss. Gemessen an
         # einem freien OpenRouter-Modell: mit "hast du ein Problem geloest"

@@ -275,7 +275,8 @@
         "credential": "The API key is temporarily unavailable.",
         "unavailable": "The AI service is temporarily unavailable.",
         "provider": "The AI provider rejected the request.",
-        "toolRejected": "The requested AI tool call was rejected for security reasons."
+        "toolRejected": "The requested AI tool call was rejected for security reasons.",
+        "edit": "The message could not be edited."
       },
       "clear": "Clear history",
       "clearTitle": "Clear history?",
@@ -288,7 +289,10 @@
         "network": "My Minecraft server is running but unreachable. Why?",
         "mods": "Which mods are installed on my server and are there updates?"
       },
-      "compacted": "Older messages were summarized"
+      "compacted": "Older messages were summarized",
+      "edit": "Edit message",
+      "editHint": "This message and everything after it will be removed. The assistant will no longer know the earlier wording.",
+      "editSend": "Send again"
     },
     "actions": {
       "title": "AI action proposal",
@@ -370,7 +374,10 @@
       "read_node_health": "Read node health",
       "web_search": "Searched the web",
       "read_skill": "Looked up a skill",
-      "learn_skill": "Learned a skill"
+      "learn_skill": "Learned a skill",
+      "search_memory": "Searched memory",
+      "forget_memory": "Deleted memories",
+      "forget_skill": "Deleted a skill"
     },
     "errors": {
       "codes": {

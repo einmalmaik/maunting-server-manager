@@ -68,6 +68,7 @@ GLOBAL_READ_TOOLS = {
     "list_my_servers", "list_blueprints", "read_node_capacity",
     "read_node_health", "remember", "web_search",
     "read_skill", "learn_skill",
+    "search_memory", "forget_memory", "forget_skill",
 }
 READ_TOOLS = SERVER_READ_TOOLS | GLOBAL_READ_TOOLS
 
@@ -78,7 +79,7 @@ READ_TOOLS = SERVER_READ_TOOLS | GLOBAL_READ_TOOLS
 # aenderbar und loeschbar, beruehrt keinen Server und keine Datei. Als
 # Write-Tool wuerde jedes Merken den Chat unterbrechen und eine Rueckfrage
 # erzeugen — ein Gedaechtnis, das man einzeln bestaetigen muss, ist keines.
-MEMORY_TOOLS = {"remember"}
+MEMORY_TOOLS = {"remember", "search_memory", "forget_memory"}
 
 # `learn_skill` steht aus demselben Grund bei den Read-Tools wie `remember`,
 # und es gibt einen zweiten: **Prosa fuehrt nichts aus.** Ein gelernter Skill
@@ -86,7 +87,7 @@ MEMORY_TOOLS = {"remember"}
 # eine Aufgabe herangeht. Jeder daraus folgende Schritt laeuft weiterhin ueber
 # RBAC, `_resolve_server` und die Bestaetigungspflicht. Ein Skill, den man
 # einzeln bestaetigen muesste, waere kein Selbstlernen.
-SKILL_TOOLS = {"read_skill", "learn_skill"}
+SKILL_TOOLS = {"read_skill", "learn_skill", "forget_skill"}
 
 # Jedes serverbezogene Werkzeug traegt seit dem Einzelchat seine eigene
 # `server_id`. Vorher stand sie an der Unterhaltung — dadurch konnte der
@@ -302,8 +303,70 @@ def _global_tool_definitions() -> list[dict]:
                     "description": "Kurzer stabiler Bezeichner, z. B. ram.bevorzugt.",
                 },
                 "value": {"type": "string", "maxLength": 2_000},
+                "replace_user_entry": {
+                    "type": "boolean",
+                    "description": (
+                        "Nur setzen, wenn der Benutzer die Korrektur "
+                        "ausdruecklich verlangt hat (\"nein, er heisst Rex\"). "
+                        "Ueberschreibt dann einen Eintrag, den er selbst "
+                        "hinterlegt hat. Ohne ausdrueckliche Bitte weglassen."
+                    ),
+                },
             },
             ["scope", "key", "value"],
+        ),
+        _function(
+            "search_memory",
+            "Durchsucht das Gedaechtnis nach Bedeutung. Nutze es, bevor du "
+            "etwas loeschst oder korrigierst — und wenn der Benutzer wissen "
+            "will, was du ueber ein Thema gespeichert hast. Findet auch, was "
+            "anders formuliert ist: \"mein Hund\" findet einen Eintrag, in dem "
+            "nur der Name des Hundes steht. Liefert Bereich, Schluessel und "
+            "Inhalt.",
+            {
+                "query": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Wonach gesucht wird, in Worten des Benutzers.",
+                },
+            },
+            ["query"],
+        ),
+        _function(
+            "forget_memory",
+            "Loescht benannte Eintraege aus dem Gedaechtnis. Rufe **immer "
+            "zuerst** `search_memory` auf und nenne dem Benutzer, was du "
+            "gefunden hast — geloescht wird ausschliesslich, was du hier "
+            "namentlich auffuehrst, nie ein Suchbegriff. Eine unscharfe "
+            "Aehnlichkeit darf entscheiden, was jemand zu sehen bekommt, aber "
+            "nicht, was verschwindet.",
+            {
+                "scope": {
+                    "type": "string",
+                    "enum": ["user", "team"],
+                    "description": "Bereich aus dem Suchergebnis.",
+                },
+                "keys": {
+                    "type": "array",
+                    "maxItems": 25,
+                    "items": {"type": "string", "maxLength": 64},
+                    "description": "Die Schluessel aus dem Suchergebnis.",
+                },
+            },
+            ["scope", "keys"],
+        ),
+        _function(
+            "forget_skill",
+            "Loescht einen erlernten Skill. Nur eigene und Team-Skills — die "
+            "mit MSM ausgelieferten lassen sich nicht loeschen, sondern nur "
+            "ueberschreiben, indem du unter demselben Schluessel einen neuen "
+            "anlegst. Zum *Aendern* eines Skills nimm `learn_skill` mit "
+            "demselben Schluessel; loeschen und neu anlegen verliert die "
+            "Herkunft.",
+            {
+                "skill_key": {"type": "string", "maxLength": 64},
+            },
+            ["skill_key"],
         ),
         _function(
             "list_blueprints",
@@ -556,7 +619,7 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
 
     if not permission_service.has_global_permission(db, user, "ai.memory.use"):
         raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
-    if set(arguments) - {"scope", "server_id", "key", "value"}:
+    if set(arguments) - {"scope", "server_id", "key", "value", "replace_user_entry"}:
         raise AiActionValidationError("Memory-Werkzeug hat ungueltige Argumente")
 
     scope = arguments.get("scope")
@@ -602,6 +665,7 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
         row, stored = ai_memory_service.upsert_entry(
             db, user=user, scope=scope, server_id=server_id if scope == "server" else None,
             team_id=team_id, key=key, value=value, origin="ai",
+            replace_user_entry=bool(arguments.get("replace_user_entry")),
         )
     except HTTPException as exc:
         # Volles Scope, Secret im Wert, fremder Server, geschuetzter Eintrag:
@@ -612,6 +676,128 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
         "remembered": True, "scope": row.scope, "key": row.key, "value": stored,
         "team_id": row.team_id,
     }
+
+
+def _execute_search_memory(db: Session, *, user: User, arguments: dict) -> dict:
+    """Sucht im Gedaechtnis nach Bedeutung statt nach Wortgleichheit.
+
+    Gesucht wird ausschliesslich in dem, was der Benutzer ohnehin sehen darf —
+    `search_entries` nutzt denselben Sichtbarkeitsfilter wie der Abruf in den
+    Kontext. Eine Suche kann damit nichts aufdecken, was ohne sie verborgen
+    waere.
+    """
+    from services import ai_memory_service
+
+    if not permission_service.has_global_permission(db, user, "ai.memory.use"):
+        raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
+    if set(arguments) - {"query"}:
+        raise AiActionValidationError("Memory-Suche hat ungueltige Argumente")
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise AiActionValidationError("Suchbegriff fehlt")
+
+    try:
+        hits = ai_memory_service.search_entries(db, user, query)
+    except HTTPException as exc:
+        raise AiActionValidationError(str(exc.detail)) from exc
+    return {
+        "untrusted": True,
+        "query": query,
+        "results": [
+            {
+                "scope": row.scope,
+                "team_id": row.team_id,
+                "key": row.key,
+                "value": value,
+                "origin": row.origin,
+            }
+            for row, value, _score in hits
+        ],
+    }
+
+
+def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
+    """Loescht ausdruecklich benannte Eintraege — nie einen Suchbegriff.
+
+    Der zweistufige Weg ist Absicht. Eine Vektoraehnlichkeit von 0,4 ist eine
+    brauchbare Grundlage dafuer, jemandem etwas *anzuzeigen*, und eine
+    schlechte dafuer, etwas *zu vernichten*. Deshalb sucht das Modell zuerst,
+    nennt was es gefunden hat, und loescht danach die Schluessel.
+    """
+    from services import ai_memory_service, team_service
+
+    if not permission_service.has_global_permission(db, user, "ai.memory.use"):
+        raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
+    if set(arguments) - {"scope", "keys"}:
+        raise AiActionValidationError("Memory-Loeschung hat ungueltige Argumente")
+    scope = arguments.get("scope")
+    if scope not in {"user", "team"}:
+        # "panel" bleibt dem Betreiber vorbehalten: was fuer alle gilt, loescht
+        # die KI nicht auf Zuruf eines einzelnen Benutzers.
+        raise AiActionValidationError("Unbekannter Memory-Bereich")
+    keys = arguments.get("keys")
+    if not isinstance(keys, list) or not keys:
+        raise AiActionValidationError("Es wurde kein Schluessel genannt")
+
+    team_id = None
+    if scope == "team":
+        target, question = team_service.learning_team(db, user)
+        if target is None:
+            return {"forgotten": [], "ask_user": question}
+        if target.is_personal:
+            scope = "user"
+        else:
+            team_id = target.id
+
+    try:
+        removed = ai_memory_service.delete_by_keys(
+            db, user, scope=scope, keys=keys, team_id=team_id
+        )
+    except HTTPException as exc:
+        raise AiActionValidationError(str(exc.detail)) from exc
+    # Was nicht da war, wird ausdruecklich gemeldet: sonst berichtet das Modell
+    # ein Loeschen, das nie stattgefunden hat.
+    missing = sorted({key for key in keys if isinstance(key, str)} - set(removed))
+    return {
+        "forgotten": removed,
+        "scope": scope,
+        **({"not_found": missing} if missing else {}),
+    }
+
+
+def _execute_forget_skill(db: Session, *, user: User, arguments: dict) -> dict:
+    """Loescht einen erlernten Skill — mit denselben Rechten wie das Anlegen."""
+    from services import ai_skill_service
+
+    if not permission_service.has_global_permission(db, user, "ai.skills.use"):
+        raise AiActionValidationError("Skills sind fuer diesen Benutzer nicht freigegeben")
+    if set(arguments) - {"skill_key"}:
+        raise AiActionValidationError("Skill-Werkzeug hat ungueltige Argumente")
+    skill_key = arguments.get("skill_key")
+    if not isinstance(skill_key, str) or not skill_key.strip():
+        raise AiActionValidationError("Ungueltiger Skill-Schluessel")
+
+    try:
+        view, _body = ai_skill_service.read_body(db, user, skill_key)
+    except HTTPException as exc:
+        raise AiActionValidationError(str(exc.detail)) from exc
+    if view.id is None:
+        # Eine mitgelieferte Datei gibt es auf der Platte, nicht in der
+        # Datenbank. Sie zu "loeschen" waere ein Versprechen, das das naechste
+        # Update zurueckdreht.
+        return {
+            "forgotten": False,
+            "reason": (
+                "Dieser Skill wird mit MSM ausgeliefert und laesst sich nicht "
+                "loeschen. Lege mit `learn_skill` unter demselben Schluessel "
+                "einen eigenen an, um ihn zu ersetzen."
+            ),
+        }
+    try:
+        ai_skill_service.delete_skill(db, user=user, skill_id=view.id)
+    except HTTPException as exc:
+        raise AiActionValidationError(str(exc.detail)) from exc
+    return {"forgotten": True, "skill_key": view.skill_key, "name": view.name}
 
 
 def _execute_read_skill(db: Session, *, user: User, arguments: dict) -> dict:
@@ -826,6 +1012,15 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
 
     if tool_name == "learn_skill":
         return _execute_learn_skill(db, user=user, arguments=arguments)
+
+    if tool_name == "search_memory":
+        return _execute_search_memory(db, user=user, arguments=arguments)
+
+    if tool_name == "forget_memory":
+        return _execute_forget_memory(db, user=user, arguments=arguments)
+
+    if tool_name == "forget_skill":
+        return _execute_forget_skill(db, user=user, arguments=arguments)
 
     _require_no_arguments(tool_name, arguments)
 
