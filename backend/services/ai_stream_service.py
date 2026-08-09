@@ -18,9 +18,11 @@ from services.ai_chat_service import get_owned_conversation
 from services.ai_action_service import (
     AiActionStateError,
     AiActionValidationError,
+    ASK_TOOLS,
     READ_TOOLS,
     SKILL_TOOLS,
     WRITE_TOOLS,
+    question_payload,
     create_proposal,
     execute_autonomously,
     execute_read_tool,
@@ -350,6 +352,52 @@ def _persist_write_proposals(
         return results
 
 
+def _ask_followup_messages(*, tool_calls, asked) -> list[dict]:
+    """Bestaetigt die Rueckfrage und sagt allen anderen Aufrufen der Runde ab.
+
+    Das Protokoll verlangt zu jeder `tool_call_id` genau ein Ergebnis — auch zu
+    denen, die durch die Rueckfrage gegenstandslos geworden sind.
+    """
+    messages: list[dict] = [{
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
+                },
+            }
+            for call in tool_calls
+        ],
+    }]
+    for call in tool_calls:
+        if call.id == asked.id:
+            content = {
+                "asked": True,
+                "note": (
+                    "Die Frage steht als Karte im Chat. Warte auf die Antwort "
+                    "des Benutzers; sie kommt als naechste Nachricht."
+                ),
+            }
+        else:
+            content = {
+                "executed": False,
+                "reason": (
+                    "Durch die Rueckfrage gegenstandslos. Hole es nach, sobald "
+                    "die Antwort da ist."
+                ),
+            }
+        messages.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": json.dumps(content, ensure_ascii=True, separators=(",", ":")),
+        })
+    return messages
+
+
 def _write_followup_messages(
     *, conversation_id: str, tool_calls, proposals: list[dict]
 ) -> list[dict]:
@@ -568,6 +616,27 @@ async def stream_conversation_reply(
                 )
             if not current_usage.tool_calls:
                 break
+
+            # Eine Rueckfrage beendet den Zug: ab hier ist der Mensch dran,
+            # und seine Antwort kommt als gewoehnliche Nachricht zurueck. Alles
+            # andere aus derselben Runde waere verfrueht — die Antwort aendert
+            # ja gerade die Grundlage.
+            frage = next(
+                (call for call in current_usage.tool_calls if call.name in ASK_TOOLS),
+                None,
+            )
+            if frage is not None:
+                payload = question_payload(frage.arguments)
+                yield sse_event("question", payload)
+                provider_messages.extend(_ask_followup_messages(
+                    tool_calls=current_usage.tool_calls, asked=frage,
+                ))
+                # Eine letzte Runde ohne Werkzeuge: das Modell soll den Grund
+                # der Frage in einem Satz nennen duerfen. Die Frage selbst steht
+                # bereits als Karte im Chat und gehoert nicht wiederholt.
+                tools = None
+                current_usage = StreamUsage()
+                continue
 
             kinds = {
                 "read" if call.name in READ_TOOLS else "write" if call.name in WRITE_TOOLS else "unknown"

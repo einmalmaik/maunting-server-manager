@@ -747,3 +747,88 @@ async def test_one_failing_call_does_not_kill_the_answer(
     # Der eine Aufruf meldet einen Fehler, der andere ein Ergebnis.
     assert any('"error"' in str(item.get("content")) for item in zurueck)
     assert any(str(meiner.id) in str(item.get("content")) for item in zurueck)
+
+
+@pytest.mark.asyncio
+async def test_a_question_ends_the_turn_and_reaches_the_user(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eine Rueckfrage beendet den Zug — ab da ist der Mensch dran.
+
+    Sie ist weder lesend noch schreibend: es gibt kein Ergebnis, auf das das
+    Modell warten koennte. Die Antwort kommt als gewoehnliche naechste
+    Nachricht zurueck, ohne Sonderzustand im Backend.
+    """
+    server = _server(db, "frage")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    seen = _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="ask_user", arguments={
+            "question": "Welche Minecraft-Version soll es sein?",
+            "options": [
+                {"label": "1.20.1", "hint": "am weitesten verbreitet"},
+                {"label": "1.21.4"},
+            ],
+        }),
+    ]])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    frage = [event for event in events if event.startswith("event: question")]
+    assert len(frage) == 1
+    assert "1.20.1" in frage[0]
+    # Genau eine Abschlussrunde: das Modell darf den Grund nennen, aber nicht
+    # weiterarbeiten, solange die Antwort fehlt.
+    assert len(seen) == 2
+
+
+@pytest.mark.asyncio
+async def test_other_calls_in_the_question_round_are_dropped(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Was neben der Rueckfrage steht, ist verfrueht — die Antwort aendert die Grundlage."""
+    server = _server(db, "frage-mix")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    seen = _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="read_server_status", arguments={"server_id": server.id}),
+        ProviderToolCall(id="b", name="ask_user", arguments={
+            "question": "Welchen Server meinst du?",
+            "options": [{"label": "Server A"}, {"label": "Server B"}],
+        }),
+    ]])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    assert any(event.startswith("event: question") for event in events)
+    # Der Lesezugriff lief nicht — er haette auf einer Frage aufgebaut, deren
+    # Antwort noch aussteht.
+    assert not any(event.startswith("event: tool") for event in events)
+    zurueck = [item for runde in seen for item in runde if item.get("role") == "tool"]
+    assert any("gegenstandslos" in str(item.get("content")) for item in zurueck)
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_question_is_refused(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zwei gleich beschriftete Knoepfe sind keine Wahl."""
+    server = _server(db, "frage-kaputt")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="ask_user", arguments={
+            "question": "Welche Version?",
+            "options": [{"label": "gleich"}, {"label": "gleich"}],
+        }),
+    ]])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert "AI_TOOL_REJECTED" in _error_codes(events)

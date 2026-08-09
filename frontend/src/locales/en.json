@@ -377,7 +377,8 @@
       "learn_skill": "Learned a skill",
       "search_memory": "Searched memory",
       "forget_memory": "Deleted memories",
-      "forget_skill": "Deleted a skill"
+      "forget_skill": "Deleted a skill",
+      "ask_user": "Asked a question"
     },
     "errors": {
       "codes": {
@@ -438,6 +439,11 @@
         "load": "Learning setting could not be loaded.",
         "save": "Learning setting could not be saved."
       }
+    },
+    "question": {
+      "title": "Question from the assistant",
+      "freeText": "Or just type something else in the input field.",
+      "answered": "Answered."
     }
   },
   "shell": {

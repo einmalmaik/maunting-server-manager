@@ -199,6 +199,18 @@ export interface AiSkillManaged {
   updated_at: string
 }
 
+/**
+ * Eine Rückfrage der KI mit anklickbaren Vorschlägen.
+ *
+ * Sie beendet den Zug: das Modell wartet auf die nächste Nachricht. Ein Klick
+ * schickt die Beschriftung als ganz normale Benutzernachricht — kein
+ * Sonderweg, kein zweiter Zustand im Backend.
+ */
+export interface AiQuestion {
+  question: string
+  options: Array<{ label: string; hint: string | null }>
+}
+
 export interface AiAttachment {
   id: string
   conversation_id: string
@@ -219,6 +231,8 @@ export type AiStreamEvent =
   // Ein gerade ausgefuehrtes Lesewerkzeug — macht sichtbar, worauf die Antwort
   // beruht.
   | { event: 'tool'; data: AiToolUse }
+  // Rückfrage mit Vorschlägen. Beendet den Zug — ab hier ist der Mensch dran.
+  | { event: 'question'; data: AiQuestion }
   // Der aeltere Teil des Verlaufs wurde zu einer Zusammenfassung gefaltet.
   | { event: 'compacted'; data: { conversation_id: string } }
   | { event: 'proposal'; data: AiActionProposal }
@@ -228,7 +242,7 @@ export type AiStreamEvent =
   | { event: 'done'; data: { message_id: string; replayed?: boolean } }
   | { event: 'error'; data: { code: string; message_key: string } }
 
-const STREAM_EVENTS = ['message', 'delta', 'reasoning', 'tool', 'compacted', 'proposal', 'action', 'done', 'error']
+const STREAM_EVENTS = ['message', 'delta', 'reasoning', 'tool', 'question', 'compacted', 'proposal', 'action', 'done', 'error']
 
 export interface AiProviderWrite {
   name: string

@@ -77,6 +77,15 @@ def _system_message(
         "Dieser Chat laeuft dauerhaft und behandelt nacheinander unabhaengige "
         "Themen. Beziehe dich nicht automatisch auf den Server eines frueheren "
         "Themas.\n"
+        # Die Regel muss die *Schwelle* nennen, nicht nur die Moeglichkeit. Ein
+        # Modell, das fuer jede Kleinigkeit einen Dialog aufmacht, ist
+        # anstrengender als eines, das schreibt.
+        "Rueckfragen: Fehlt dir etwas, das du **nicht** aus den Werkzeugen "
+        "holen kannst — eine Version, welcher von mehreren Servern gemeint "
+        "ist, eine schlecht ruecknehmbare Entscheidung — nutze `ask_user` mit "
+        "zwei bis vier Vorschlaegen. Erst nachsehen, dann fragen. Nicht "
+        "fragen, ob du anfangen sollst: der Benutzer hat dich bereits "
+        "gebeten.\n"
         "Serverbezug: Jedes serverbezogene Werkzeug braucht eine `server_id`. "
         "Rate sie nie. Rufe `list_my_servers` auf, wenn der Benutzer einen "
         "Server nur mit Namen nennt oder gar nicht benennt. Passt kein Eintrag "

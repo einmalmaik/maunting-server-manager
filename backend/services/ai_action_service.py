@@ -69,6 +69,7 @@ GLOBAL_READ_TOOLS = {
     "read_node_health", "remember", "web_search",
     "read_skill", "learn_skill",
     "search_memory", "forget_memory", "forget_skill",
+    "ask_user",
 }
 READ_TOOLS = SERVER_READ_TOOLS | GLOBAL_READ_TOOLS
 
@@ -88,6 +89,16 @@ MEMORY_TOOLS = {"remember", "search_memory", "forget_memory"}
 # RBAC, `_resolve_server` und die Bestaetigungspflicht. Ein Skill, den man
 # einzeln bestaetigen muesste, waere kein Selbstlernen.
 SKILL_TOOLS = {"read_skill", "learn_skill", "forget_skill"}
+
+# `ask_user` ist weder lesend noch schreibend — es *beendet* den Zug. Danach
+# ist der Mensch dran, und seine Antwort kommt als gewoehnliche Nachricht
+# zurueck. Deshalb ein eigener Zweig im Stream statt eines Werkzeugs, das ein
+# Ergebnis liefert: ein Ergebnis gaebe es hier gar nicht.
+ASK_TOOLS = {"ask_user"}
+MAX_QUESTION_OPTIONS = 4
+MAX_QUESTION_CHARS = 300
+MAX_OPTION_CHARS = 60
+MAX_OPTION_HINT_CHARS = 120
 
 # Jedes serverbezogene Werkzeug traegt seit dem Einzelchat seine eigene
 # `server_id`. Vorher stand sie an der Unterhaltung — dadurch konnte der
@@ -314,6 +325,44 @@ def _global_tool_definitions() -> list[dict]:
                 },
             },
             ["scope", "key", "value"],
+        ),
+        _function(
+            "ask_user",
+            "Stellt dem Benutzer eine Frage mit anklickbaren Vorschlaegen. "
+            "Nutze das **nur**, wenn Raten teuer waere: eine Version, ein "
+            "Zielserver, eine Entscheidung, die sich schlecht zuruecknehmen "
+            "laesst. Nicht fuer \"soll ich anfangen?\" und nicht fuer etwas, "
+            "das du aus den Werkzeugen selbst herausfinden kannst — frag erst, "
+            "wenn du nachgesehen hast. "
+            "Der Benutzer kann immer auch frei antworten; die Vorschlaege sind "
+            "eine Abkuerzung, keine Einschraenkung. Nach dieser Frage endet "
+            "dein Zug.",
+            {
+                "question": {
+                    "type": "string",
+                    "maxLength": MAX_QUESTION_CHARS,
+                    "description": "Die Frage, vollstaendig und aus sich heraus verstaendlich.",
+                },
+                "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": MAX_QUESTION_OPTIONS,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "maxLength": MAX_OPTION_CHARS},
+                            "hint": {
+                                "type": "string",
+                                "maxLength": MAX_OPTION_HINT_CHARS,
+                                "description": "Was diese Wahl bedeutet. Kurz.",
+                            },
+                        },
+                        "required": ["label"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            ["question", "options"],
         ),
         _function(
             "search_memory",
@@ -675,6 +724,51 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     return {
         "remembered": True, "scope": row.scope, "key": row.key, "value": stored,
         "team_id": row.team_id,
+    }
+
+
+def question_payload(arguments: dict) -> dict:
+    """Prueft eine Rueckfrage und bringt sie in die Form fuer die Oberflaeche.
+
+    Bewusst streng: Der Text landet unveraendert als Knopfbeschriftung im Chat,
+    und ein Klick darauf wird zur naechsten Benutzernachricht. Ein Modell, das
+    hier eine Anweisung an sich selbst unterbringt, wuerde sie sich also vom
+    Benutzer bestaetigen lassen — deshalb laufen Frage und Beschriftungen durch
+    dieselbe Redigierung wie jeder andere Modelltext.
+    """
+    if set(arguments) - {"question", "options"}:
+        raise AiActionValidationError("Rueckfrage hat ungueltige Argumente")
+    question = arguments.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise AiActionValidationError("Rueckfrage ohne Text")
+    raw_options = arguments.get("options")
+    if not isinstance(raw_options, list) or not 2 <= len(raw_options) <= MAX_QUESTION_OPTIONS:
+        raise AiActionValidationError(
+            f"Eine Rueckfrage braucht zwei bis {MAX_QUESTION_OPTIONS} Vorschlaege"
+        )
+
+    options: list[dict] = []
+    for item in raw_options:
+        if not isinstance(item, dict):
+            raise AiActionValidationError("Vorschlag ist ungueltig")
+        label = item.get("label")
+        if not isinstance(label, str) or not label.strip():
+            raise AiActionValidationError("Vorschlag ohne Beschriftung")
+        hint = item.get("hint")
+        options.append({
+            "label": redact_sensitive_text(label.strip())[:MAX_OPTION_CHARS],
+            "hint": (
+                redact_sensitive_text(hint.strip())[:MAX_OPTION_HINT_CHARS]
+                if isinstance(hint, str) and hint.strip() else None
+            ),
+        })
+    # Zwei gleich beschriftete Knoepfe sind keine Wahl.
+    if len({option["label"] for option in options}) != len(options):
+        raise AiActionValidationError("Die Vorschlaege muessen sich unterscheiden")
+
+    return {
+        "question": redact_sensitive_text(question.strip())[:MAX_QUESTION_CHARS],
+        "options": options,
     }
 
 

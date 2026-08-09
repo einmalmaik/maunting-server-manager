@@ -207,4 +207,37 @@ describe('AiChat', () => {
     await waitFor(() => expect(aiApi.editMessage).toHaveBeenCalled())
     expect(streamAiMessage).not.toHaveBeenCalled()
   })
+  it('zeigt eine Rueckfrage als Karte und sendet den Klick als Nachricht', async () => {
+    // Ein Klick ist der geringere Widerstand als Tippen — deshalb sendet er
+    // sofort. Wer etwas dranschreiben will, nutzt weiterhin das Eingabefeld.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementationOnce(async (_p, onEvent) => {
+      onEvent({ event: 'question', data: {
+        question: 'Welche Minecraft-Version soll es sein?',
+        options: [
+          { label: '1.20.1', hint: 'am weitesten verbreitet' },
+          { label: '1.21.4', hint: null },
+        ],
+      } })
+    }).mockResolvedValue(undefined)
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'server anlegen' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    await screen.findByText('Welche Minecraft-Version soll es sein?')
+    expect(screen.getByText('am weitesten verbreitet')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /1\.20\.1/ }))
+
+    await waitFor(() => expect(streamAiMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: '1.20.1' }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    ))
+    // Die Karte bleibt stehen, aber ohne Knoepfe: sonst saehe man spaeter nur
+    // die Antwort und wuesste nicht mehr, worauf sie sich bezieht.
+    await screen.findByText('Beantwortet.')
+  })
 })

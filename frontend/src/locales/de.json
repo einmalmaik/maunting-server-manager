@@ -377,7 +377,8 @@
       "learn_skill": "Skill gelernt",
       "search_memory": "Gedächtnis durchsucht",
       "forget_memory": "Erinnerungen gelöscht",
-      "forget_skill": "Skill gelöscht"
+      "forget_skill": "Skill gelöscht",
+      "ask_user": "Nachgefragt"
     },
     "errors": {
       "codes": {
@@ -438,6 +439,11 @@
         "load": "Lerneinstellung konnte nicht geladen werden.",
         "save": "Lerneinstellung konnte nicht gespeichert werden."
       }
+    },
+    "question": {
+      "title": "Rückfrage der KI",
+      "freeText": "Oder schreib einfach etwas anderes ins Eingabefeld.",
+      "answered": "Beantwortet."
     }
   },
   "shell": {

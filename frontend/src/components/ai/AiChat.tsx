@@ -9,6 +9,7 @@ import {
   type AiAttachment,
   type AiMessage,
   type AiProviderAvailable,
+  type AiQuestion,
   type AiToolUse,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
@@ -19,6 +20,7 @@ import { AiActionProposalCard } from './AiActionProposalCard'
 import { AiAutonomyButton } from './AiAutonomyButton'
 import { AiMarkdown } from './AiMarkdown'
 import { AiMemoryNotice } from './AiMemoryNotice'
+import { AiQuestionCard } from './AiQuestionCard'
 import { AiReasoningBlock } from './AiReasoningBlock'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -30,6 +32,10 @@ type Entry =
   // wuerde die KI spaeter Dinge "vergessen", ohne dass jemand weiss warum.
   | { kind: 'compacted'; id: string }
   | { kind: 'proposal'; id: string; proposal: AiActionProposal }
+  // Rueckfrage der KI. `answered` schaltet die Knoepfe ab, ohne die Karte
+  // zu entfernen — sonst saehe man spaeter nur die Antwort und wuesste
+  // nicht mehr, worauf sie sich bezieht.
+  | { kind: 'question'; id: string; question: AiQuestion; answered: boolean }
 
 interface ServerOption {
   id: number
@@ -268,6 +274,11 @@ export function AiChat() {
           setEntries((current) => insertBeforeStreaming(current, {
             kind: 'tool', id: `${data.tool_name}-${current.length}`, tool: data,
           }))
+        } else if (name === 'question') {
+          setEntries((current) => insertBeforeStreaming(current, {
+            kind: 'question', id: `question-${current.length}`,
+            question: data, answered: false,
+          }))
         } else if (name === 'compacted') {
           // Die Marke gehoert an den Anfang: sie beschreibt, was *vorher* war.
           setEntries((current) => [
@@ -457,6 +468,26 @@ export function AiChat() {
                     {skillLabel
                       ?? t(`ai.tools.${entry.tool.tool_name}`, { defaultValue: entry.tool.tool_name })}
                   </p>
+                )
+              }
+              if (entry.kind === 'question') {
+                return (
+                  <AiQuestionCard
+                    key={entry.id}
+                    question={entry.question}
+                    answered={entry.answered}
+                    disabled={busy}
+                    onAnswer={(label) => {
+                      // Erst die Karte stilllegen, dann senden: sonst koennte
+                      // ein zweiter Klick dieselbe Antwort doppelt schicken.
+                      setEntries((current) => current.map((item) => (
+                        item.kind === 'question' && item.id === entry.id
+                          ? { ...item, answered: true }
+                          : item
+                      )))
+                      void sendContent(label)
+                    }}
+                  />
                 )
               }
               if (entry.kind === 'compacted') {
