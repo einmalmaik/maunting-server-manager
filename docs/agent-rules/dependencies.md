@@ -610,3 +610,45 @@ Exit-Plan:
   (`test_ai_memory_embeddings.py::test_without_a_model_nothing_breaks`).
   Entfernen heißt: zwei Zeilen aus requirements.txt, den Dienst löschen, die
   beiden Spalten per Migration fallen lassen.
+
+---
+
+## pyyaml — Frontmatter der mitgelieferten Skills
+
+Stand: 2026-08-09
+
+Problem:
+  Skills sind seit Phase E Textdateien mit einem YAML-Kopf (`name`,
+  `description`). Der Kopf muss gelesen werden, bevor ein Skill überhaupt im
+  Verzeichnis auftauchen kann.
+
+Warum nicht selbst parsen:
+  Der Kopf hat nur zwei flache Zeichenkettenfelder — ein Fünfzeiler mit
+  `split(":", 1)` läge nahe. Er würde aber bei Anführungszeichen, mehrzeiligen
+  Werten und doppelten Doppelpunkten still das Falsche tun, und genau solche
+  Zeichen stehen in Skill-Beschreibungen ("Nutzen bei: Timeouts, 'Server nicht
+  gefunden'"). Ein Parser, der in diesen Fällen ohne Fehlermeldung einen halben
+  Satz liefert, ist schlechter als eine Bibliothek.
+
+Warum diese:
+  `pyyaml` steckt ohnehin im Abhängigkeitsbaum — `huggingface_hub` verlangt
+  `pyyaml>=5.1`, und `huggingface_hub` kommt über `model2vec`. Es wird hier nur
+  ausdrücklich gepinnt, weil `ai_skill_service` es direkt benutzt: eine
+  Bibliothek, auf die man sich verlässt, gehört in requirements.txt und nicht
+  in den Zufall eines transitiven Baums.
+
+Security:
+  Ausschließlich `yaml.safe_load`. `yaml.load` kann beliebige Python-Objekte
+  erzeugen und ist damit eine Codeausführung; `safe_load` kennt nur
+  Grunddatentypen. Gelesen werden nur Dateien aus `backend/ai_skills/`, also
+  Repo-Inhalt — kein Benutzerupload, kein Netzwerkinhalt.
+
+Kapselung:
+  Ausschließlich `services/ai_skill_service.py::_parse_shipped`. Eine
+  beschädigte Datei fällt dort mit einer Logzeile aus dem Verzeichnis, statt
+  den Start des Panels zu verhindern.
+
+Exit-Plan:
+  Ein eigener Parser wäre möglich, wenn man den Kopf auf ein striktes Format
+  ohne Sonderzeichen festlegt. Solange das nicht entschieden ist, bleibt die
+  Bibliothek — und sie kostet nichts, weil sie ohnehin installiert wird.

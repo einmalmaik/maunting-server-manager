@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from models import AiSkill, Role, RolePermission, Team, User
-from services import ai_skill_service, team_service
+from services import ai_embedding_service, ai_skill_service, team_service
 from services.auth_service import AuthService
 from services.role_service import set_user_roles
 
@@ -329,3 +329,57 @@ def test_the_index_carries_no_bodies(db: Session, regular_user: User) -> None:
 
     for view in ai_skill_service.skill_index(db, regular_user):
         assert not hasattr(view, "body")
+
+
+# ── Sprachgrenzen der Auswahl ─────────────────────────────────────────
+
+
+@pytest.mark.skipif(
+    not ai_embedding_service.is_available(),
+    reason="Lokales Embeddingmodell nicht installiert",
+)
+def test_the_index_selection_crosses_the_language_barrier(
+    db: Session, regular_user: User
+) -> None:
+    """Die Auswahl bei vielen Skills traegt ueber Sprachgrenzen — teilweise.
+
+    **Gemessen, nicht behauptet.** Mit den sechs mitgelieferten Skills und je
+    einer Frage pro Sprache trifft die Vektoraehnlichkeit:
+
+    - Deutsch "nicht erreichbar"              -> richtig (0,61)
+    - Englisch "nobody can connect"           -> richtig (0,49)
+    - Franzoesisch "personne ne peut"         -> richtig (0,54)
+    - Tuerkisch "kimse baglanamiyor"          -> **falsch** (0,26)
+    - Deutsch "stuerzt ohne Fehlermeldung"    -> richtig (0,54)
+    - Englisch "crashes with no error"        -> **falsch** (0,42)
+
+    Vier von sechs. Statische Embeddings kennen keinen Satzkontext, und die
+    Sprachbruecke traegt ungleichmaessig — dasselbe Bild wie beim Gedaechtnis
+    in Phase D.
+
+    Das ist vertretbar, weil diese Auswahl **erst ueber 25 Skills** ueberhaupt
+    stattfindet. Darunter kommen alle in den Prompt und das Sprachmodell stellt
+    den Bezug selbst her — zuverlaessiger, als es ein statischer Vektor kann.
+    Der Test sichert deshalb die beiden Sprachen, in denen MSM seine Vorgaben
+    ausliefert, und haelt die Grenze schriftlich fest statt sie zu verschweigen.
+    """
+    ai_skill_service.reset_shipped_cache_for_tests()
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
+    # Ueber die Grenze druecken, damit ueberhaupt ausgewaehlt wird.
+    for index in range(ai_skill_service.MAX_INDEXED_SKILLS):
+        ai_skill_service.upsert_skill(
+            db, user=regular_user, skill_key=f"unbezogen-{index:02d}",
+            name=f"Unbezogener Eintrag {index}",
+            description=f"Etwas voellig anderes ohne Bezug zu Netzwerk oder Speicher, Nummer {index}.",
+            body="Inhalt.", team_id=None,
+        )
+
+    for question in (
+        "Mein Server laeuft, aber niemand kann sich verbinden",
+        "My server is running but nobody can connect to it",
+    ):
+        selected = {
+            view.skill_key
+            for view in ai_skill_service.skill_index(db, regular_user, question)
+        }
+        assert "server-nicht-erreichbar" in selected, question
