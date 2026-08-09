@@ -229,3 +229,32 @@ async def test_the_model_learns_after_solving_something(
         # Die Beschreibung entscheidet spaeter ueber Auffinden oder
         # Nichtauffinden — sie darf nicht leer bleiben.
         assert all(view.description for view in learned)
+
+
+@pytest.mark.asyncio
+async def test_the_model_remembers_without_being_asked(
+    db: Session, regular_user: User
+) -> None:
+    """Der Benutzer soll nie "merk dir das" sagen muessen.
+
+    Im Betrieb beobachtet: "Servus erstmal ich bin maik" wurde nicht gemerkt.
+    Erst ein spaeteres, ausdrueckliches "und merk dir das ich maik heisse"
+    loeste `remember` aus.
+
+    Die Ursache lag im Prompt, nicht am Modell. Er zaehlte auf, *was* zu merken
+    ist — "Vorlieben, wiederkehrende Einstellungen, Eigenheiten eines Servers" —
+    und ein Name passt in keine dieser Kategorien. Gemessen mit dem alten Text
+    rief das Modell `list_my_servers` auf; mit dem Ausloeser "sagt der Benutzer
+    etwas ueber sich, merke es sofort und ungefragt" ruft es `remember`.
+    """
+    ai_skill_service.reset_shipped_cache_for_tests()
+    _allow(db, regular_user, "ai.chat.use", "ai.skills.use", "ai.memory.use")
+
+    called = await _ask(db, regular_user, [
+        {"role": "user", "content": "Servus erstmal, ich bin Maik"},
+    ])
+
+    print(f"\n  Werkzeugaufrufe: {called}")
+    assert "remember" in called, (
+        f"Der Name wurde nicht ungefragt gemerkt, stattdessen: {called}"
+    )

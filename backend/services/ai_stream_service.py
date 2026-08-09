@@ -62,6 +62,12 @@ MAX_TOOL_CALLS = 4
 # ist die eigentliche Messung. Wird die Grenze erreicht, bricht der Stream
 # nicht ab — das Modell bekommt einen letzten Durchgang ohne Werkzeuge.
 MAX_TOOL_ROUNDS = 4
+# Wie viele Schreibrunden eine einzelne Nachricht ausloesen darf. Zwei,
+# damit "pass die Config an und starte danach" in zwei aufeinander
+# aufbauenden Schritten laufen kann. Mehr braucht keine Bitte, die ein
+# Mensch in einem Satz formuliert — und jede weitere waere eine Runde, in
+# der niemand mehr mitliest.
+MAX_WRITE_ROUNDS = 2
 
 
 def sse_event(event: str, payload: dict) -> str:
@@ -133,9 +139,20 @@ def _finalize_stream(
 
 
 def _tool_followup_messages(
-    *, user_id: int, conversation_id: str, tool_calls
+    *, user_id: int, conversation_id: str, tool_calls, deferred=()
 ) -> tuple[list[dict], list[dict]]:
-    if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in READ_TOOLS for call in tool_calls):
+    """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
+
+    ``deferred`` sind Aufrufe, die in dieser Runde **nicht** ausgefuehrt werden
+    sollen — konkret Schreibwerkzeuge, die das Modell mit Lesewerkzeugen
+    vermischt hat. Sie bekommen trotzdem eine Antwort: das Protokoll verlangt
+    zu jeder `tool_call_id` genau ein Ergebnis, und ohne Begruendung wuesste
+    das Modell nicht, warum seine Aktion verschwunden ist.
+    """
+    deferred = list(deferred)
+    if len(tool_calls) + len(deferred) > MAX_TOOL_CALLS:
+        raise AiActionValidationError("Ungueltige Read-Tool-Sequenz")
+    if any(call.name not in READ_TOOLS for call in tool_calls):
         raise AiActionValidationError("Ungueltige Read-Tool-Sequenz")
     with SessionLocal() as db:
         user = db.get(User, user_id)
@@ -156,10 +173,22 @@ def _tool_followup_messages(
                         "arguments": json.dumps(call.arguments, ensure_ascii=True),
                     },
                 }
-                for call in tool_calls
+                for call in [*tool_calls, *deferred]
             ],
         }
         results: list[dict] = [assistant_call]
+        for call in deferred:
+            results.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": json.dumps({
+                    "executed": False,
+                    "reason": (
+                        "Schreibaktionen laufen in einer eigenen Runde. Lies "
+                        "erst zu Ende und rufe die Aktion danach allein auf."
+                    ),
+                }, ensure_ascii=True, separators=(",", ":")),
+            })
         # Was der Benutzer im Chat sehen soll: welches Werkzeug lief und womit.
         # Bewusst ohne das Ergebnis — ein Logausschnitt gehoert nicht ungefragt
         # in den sichtbaren Verlauf, und die Antwort fasst ihn ohnehin zusammen.
@@ -467,6 +496,7 @@ async def stream_conversation_reply(
         tools = provider_tool_definitions()
         current_usage = usage
         rounds = 0
+        write_rounds = 0
         while True:
             async for chunk in stream_chat_completion(
                 client,
@@ -525,12 +555,53 @@ async def stream_conversation_reply(
                     tool_calls=current_usage.tool_calls,
                     proposals=proposals,
                 ))
-                tools = None
+                write_rounds += 1
+                # Eine zusammengesetzte Bitte braucht oft zwei Schritte, die
+                # aufeinander aufbauen: "pass die Config an und starte ihn
+                # danach". Mit nur einer Schreibrunde muesste das Modell beides
+                # gleichzeitig abgeben — und koennte den Start nicht davon
+                # abhaengig machen, ob die Aenderung durchging.
+                #
+                # Eine zweite Runde ist nur dann vertretbar, wenn die erste
+                # tatsaechlich **ausgefuehrt** wurde. Wartet ein Vorschlag auf
+                # den Menschen, ist der Mensch dran und nicht das Modell.
+                # `executing` zaehlt mit: ein Lifecycle-Start laeuft als
+                # Hintergrundjob und ist damit angestossen, nicht offen.
+                executed = bool(proposals) and all(
+                    proposal.get("autonomous")
+                    and proposal.get("status") in {"succeeded", "executing"}
+                    and not proposal.get("error_code")
+                    for proposal in proposals
+                )
+                if not (executed and write_rounds < MAX_WRITE_ROUNDS):
+                    # Ohne `tools = None` koennte das Modell endlos weiter
+                    # handeln — genau die Schleife, die der Rueckfluss oben
+                    # schliessen soll.
+                    tools = None
                 current_usage = StreamUsage()
                 continue
-            if kinds != {"read"}:
-                # Gemischt oder unbekannt: nicht entscheidbar, also gar nichts.
+            if "unknown" in kinds:
+                # Ein Werkzeug, das weder lesend noch schreibend ist, gibt es
+                # nicht — das kann nur eine erfundene Antwort sein.
                 raise AiProviderRequestError("AI_PROVIDER_TOOL_SEQUENCE_INVALID")
+
+            deferred_writes: list = []
+            if kinds == {"read", "write"}:
+                # Gemischte Runde. Frueher riss das den ganzen Stream ab, und
+                # der Benutzer bekam statt einer Antwort einen Fehlercode — bei
+                # einer zusammengesetzten Bitte ("lies die Config und pass sie
+                # an") war das der Normalfall, nicht die Ausnahme.
+                #
+                # Jetzt laufen die Lesewerkzeuge, und die Schreibaufrufe
+                # bekommen eine Absage mit Begruendung zurueck. Das Modell holt
+                # sie dann in einer eigenen Runde nach. Die Trennung bleibt
+                # damit erhalten — sie wird nur erklaert statt erzwungen.
+                deferred_writes = [
+                    call for call in current_usage.tool_calls if call.name in WRITE_TOOLS
+                ]
+                current_usage.tool_calls = [
+                    call for call in current_usage.tool_calls if call.name in READ_TOOLS
+                ]
 
             rounds += 1
             if rounds > MAX_TOOL_ROUNDS:
@@ -561,6 +632,7 @@ async def stream_conversation_reply(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 tool_calls=current_usage.tool_calls,
+                deferred=deferred_writes,
             )
             provider_messages.extend(followup)
             # Sichtbar machen, was die KI gerade getan hat. Ohne das wirkt eine

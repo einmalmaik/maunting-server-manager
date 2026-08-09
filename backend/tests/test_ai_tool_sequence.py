@@ -144,14 +144,25 @@ def _error_codes(events: list[str]) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_mixed_read_and_write_in_one_round_is_rejected(
+async def test_a_write_in_a_mixed_round_never_executes(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Eine gemischte Runde ist nicht entscheidbar und wird komplett verworfen."""
+    """Die Trennung bleibt: in einer gemischten Runde laeuft keine Aktion.
+
+    Frueher endete dieser Fall mit `AI_PROVIDER_TOOL_SEQUENCE_INVALID` — der
+    ganze Stream weg, der Benutzer bekam statt einer Antwort einen Fehlercode.
+    Bei einer zusammengesetzten Bitte ("lies die Config und pass sie an") war
+    das der Normalfall, nicht die Ausnahme.
+
+    Die Zusicherung dieses Tests ist unveraendert und bleibt die wichtige: die
+    Aktion entsteht **nicht**. Nur die Folge ist eine andere — das Modell
+    bekommt eine Begruendung statt eines Abbruchs.
+    """
     server = _server(db, "mixed")
     _grant(db, regular_user, server=server, server_keys=("server.view", "server.restart"))
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
     _fake_stream(monkeypatch, [[
         ProviderToolCall(id="a", name="read_server_status", arguments={"server_id": server.id}),
         ProviderToolCall(id="b", name="propose_server_lifecycle", arguments={"server_id": server.id, "operation": "restart"}),
@@ -159,8 +170,10 @@ async def test_mixed_read_and_write_in_one_round_is_rejected(
 
     events = await _collect(regular_user, conversation, provider)
 
-    assert "AI_PROVIDER_TOOL_SEQUENCE_INVALID" in _error_codes(events)
     assert db.query(AiActionProposal).count() == 0
+    # Und der Benutzer bekommt eine Antwort statt eines Fehlers.
+    assert _error_codes(events) == []
+    assert any(event.startswith("event: done") for event in events)
 
 
 @pytest.mark.asyncio
@@ -528,3 +541,101 @@ async def test_an_executed_action_leaves_a_trace_the_next_turn_can_see(
     db.expire_all()
     next_turn = build_provider_messages(db, conversation, "danke")
     assert any("propose_backup" in str(item.get("content")) for item in next_turn)
+
+
+@pytest.mark.asyncio
+async def test_a_mixed_round_defers_the_write_instead_of_aborting(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lesen und Schreiben in einer Runde reisst den Stream nicht mehr ab.
+
+    Bei einer zusammengesetzten Bitte ("lies die Config und pass sie an") ist
+    die gemischte Runde der Normalfall, nicht die Ausnahme. Vorher endete sie
+    mit `AI_PROVIDER_TOOL_SEQUENCE_INVALID` — der Benutzer bekam statt einer
+    Antwort einen Fehlercode.
+
+    Die Trennung bleibt: die Aktion laeuft in dieser Runde **nicht**. Sie wird
+    nur erklaert statt erzwungen, damit das Modell sie nachholen kann.
+    """
+    server = _server(db, "gemischt")
+    _grant(db, regular_user, server=server, server_keys=(
+        "server.view", "server.backups.create"
+    ))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    seen = _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="read_server_status", arguments={"server_id": server.id}),
+        ProviderToolCall(id="b", name="propose_backup", arguments={
+            "server_id": server.id,
+            "reason": "Gleich mit erledigen.",
+            "expected_effect": "Ein Sicherungsstand liegt vor.",
+        }),
+    ]])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    # Der Vorschlag ist in dieser Runde bewusst **nicht** entstanden.
+    assert db.query(AiActionProposal).count() == 0
+    # Aber das Modell erfaehrt warum — sonst wuesste es nicht, dass es die
+    # Aktion nachholen muss.
+    zurueck = [item for runde in seen for item in runde if item.get("role") == "tool"]
+    assert any("eigenen Runde" in str(item.get("content")) for item in zurueck)
+
+
+@pytest.mark.asyncio
+async def test_a_second_write_round_follows_an_executed_action(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """"Pass die Config an und starte danach" braucht zwei aufeinander folgende Schritte.
+
+    Mit nur einer Schreibrunde muesste das Modell beides gleichzeitig abgeben
+    und koennte den Start nicht davon abhaengig machen, ob die Aenderung
+    durchging. Eine zweite Runde ist vertretbar, weil das Ergebnis der ersten
+    inzwischen im Kontext steht — das Modell weiss also, was es schon getan hat.
+    """
+    from services import ai_autonomy_service
+
+    server = _server(db, "zweiakt")
+    _grant(db, regular_user, server=server, server_keys=(
+        "server.view", "server.backups.create", "server.start"
+    ))
+    role_id = db.query(Role).filter(Role.name == f"seq-{regular_user.id}").one().id
+    db.add(RolePermission(role_id=role_id, permission_key="ai.autonomous.use"))
+    db.commit()
+    ai_autonomy_service.set_grant(
+        db, user=regular_user, server_id=server.id, enabled=True,
+        max_actions_per_hour=5, granted_by=regular_user.id,
+    )
+    db.commit()
+    monkeypatch.setattr(
+        "services.backup_orchestrator.create_server_backup",
+        lambda server_id, _db, name=None: type("B", (), {"id": 99})(),
+    )
+    monkeypatch.setattr(
+        "services.server_action_service.request_lifecycle_operation",
+        lambda *_a, **_k: type("T", (), {"id": "task-1"})(),
+    )
+
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    _fake_stream(monkeypatch, [
+        [ProviderToolCall(id="a", name="propose_backup", arguments={
+            "server_id": server.id,
+            "reason": "Vor der Aenderung absichern.",
+            "expected_effect": "Ein Sicherungsstand liegt vor.",
+        })],
+        [ProviderToolCall(id="b", name="propose_server_lifecycle", arguments={
+            "server_id": server.id, "operation": "start",
+            "reason": "Danach direkt starten.",
+            "expected_effect": "Der Server laeuft wieder.",
+        })],
+    ])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    # Beide Aktionen sind entstanden — die zweite konnte auf die erste folgen.
+    assert db.query(AiActionProposal).count() == 2
+    assert sum(1 for event in events if event.startswith("event: action")) == 2

@@ -87,12 +87,22 @@ def _system_message(
         # Ohne diese Anweisung merkt sich das Modell entweder nichts oder alles.
         # Beides ist unbrauchbar: im ersten Fall gibt es kein Gedaechtnis, im
         # zweiten fuellt sich der Speicher mit Zwischenergebnissen.
-        "Gedaechtnis: Merke dir mit `remember` nur, was ueber dieses Gespraech "
-        "hinaus gilt — Vorlieben, wiederkehrende Einstellungen, Eigenheiten "
-        "eines Servers. Nicht merken: Zwischenergebnisse, Logauszuege, "
-        "Tagesform. Aktualisierst du einen bekannten Fakt, verwende denselben "
-        "Schluessel erneut, statt einen aehnlichen neuen anzulegen. Was bereits "
-        "im Memory-Block steht, musst du nicht erneut merken.\n"
+        # Der Ausloeser muss ein *beobachtbares Ereignis* sein, nicht eine
+        # Kategorie, die das Modell erst auf den Satz anwenden muss. Gemessen:
+        # mit der blossen Aufzaehlung "Vorlieben, Einstellungen, Eigenheiten"
+        # blieb "ich bin Maik" ungemerkt — ein Name passt in keine davon —, und
+        # gemerkt wurde erst, als der Benutzer ausdruecklich "merk dir das"
+        # sagte. Genau das soll er nicht muessen.
+        "Gedaechtnis: Sagt der Benutzer etwas ueber sich oder seine Arbeitsweise, "
+        "merke es dir sofort mit `remember` — **ungefragt**. Er soll nie "
+        "\"merk dir das\" sagen muessen. Ausloeser sind zum Beispiel: er nennt "
+        "seinen Namen, eine Vorliebe (\"ich nehme immer 8 GB\"), eine Gewohnheit "
+        "(\"ich zocke abends\"), eine wiederkehrende Vorgabe oder eine Eigenheit "
+        "eines Servers. Merke im selben Zug, in dem er es sagt, nicht spaeter.\n"
+        "Nicht merken: Zwischenergebnisse, Logauszuege, Tagesform, was nur "
+        "gerade jetzt gilt. Aktualisierst du einen bekannten Fakt, verwende "
+        "denselben Schluessel erneut, statt einen aehnlichen neuen anzulegen. "
+        "Was bereits im Memory-Block steht, musst du nicht erneut merken.\n"
         # Der Ausloeser muss ein *beobachtbares Ereignis* sein, kein Zustand,
         # den das Modell erst aus dem Verlauf erschliessen muss. Gemessen an
         # einem freien OpenRouter-Modell: mit "hast du ein Problem geloest"
