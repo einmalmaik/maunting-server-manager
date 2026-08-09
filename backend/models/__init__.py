@@ -17,6 +17,7 @@ from .node_enrollment import NodeEnrollment
 from .role import Role
 from .role_permission import RolePermission
 from .server_permission import ServerPermission
+from .team import Team, TeamMember, TeamServerGrant
 from .backup import Backup
 from .panel_backup import PanelBackup
 from .mod import Mod
@@ -60,6 +61,7 @@ __all__ = [
     "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
     "AiAutonomyGrant", "AiToolResult",
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
+    "Team", "TeamMember", "TeamServerGrant",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",

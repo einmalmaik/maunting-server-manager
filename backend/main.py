@@ -50,6 +50,7 @@ from routers import (
     ai_skills_router,
     ai_attachments_router,
     credentials_router,
+    teams_router,
     hoster_admin_router,
     hoster_api_router,
     hoster_handoff_router,
@@ -716,6 +717,7 @@ app.include_router(hoster_api_router)
 app.include_router(hoster_handoff_router)
 # Zugangsdaten auf Benutzer- und Serverebene (Phase 7).
 app.include_router(credentials_router)
+app.include_router(teams_router)
 
 
 

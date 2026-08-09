@@ -63,6 +63,10 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'Nodes verwalten',
     desc: 'Erlaubt das Hinzufügen, Editieren, Löschen und Registrieren von Nodes.',
   },
+  'teams.create': {
+    title: 'Teams gründen',
+    desc: 'Erlaubt das Gründen eigener Teams, um KI-Wissen und Serverrechte mit Kollegen zu teilen. Ein Team kann dabei nie mehr Rechte weitergeben, als sein Gründer selbst besitzt.',
+  },
   'ai.chat.use': {
     title: 'KI-Chat verwenden',
     desc: 'Erlaubt den KI-Chat. Rollenlimits und Tool-Rechte werden zusätzlich im Backend geprüft.',
@@ -245,7 +249,7 @@ const SUBGROUPS = [
   {
     id: 'users',
     title: 'Benutzer & Rollen',
-    keys: ['users.read', 'users.manage', 'users.permissions.manage', 'roles.manage'],
+    keys: ['users.read', 'users.manage', 'users.permissions.manage', 'roles.manage', 'teams.create'],
   },
   {
     id: 'panel',

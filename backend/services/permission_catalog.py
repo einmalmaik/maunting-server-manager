@@ -40,6 +40,11 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("system.secrets.rotate",     "system",  "Cluster-Secrets rotieren (Managed-Postgres-Admin)"),
     PermissionDef("nodes.read",                "system",  "Nodeliste sehen"),
     PermissionDef("nodes.manage",              "system",  "Nodes anlegen, bearbeiten, löschen"),
+    # Ein Team buendelt geteiltes KI-Wissen und gibt Serverrechte weiter. Die
+    # Weitergabe ist nach oben gedeckelt (services/permission_service.py):
+    # niemand kann ueber ein Team mehr vergeben, als er selbst direkt haelt.
+    # Deshalb ist dieses Recht auch fuer Kunden vertretbar.
+    PermissionDef("teams.create",              "users",   "Eigene Teams gründen und verwalten"),
     # AI-Rechte bleiben fein granular. Kein Recht impliziert freie Shell- oder
     # Host-Ausführung; spätere Tools prüfen zusätzlich ihr jeweiliges MSM-Recht.
     PermissionDef("ai.chat.use",               "ai",      "KI-Chat verwenden"),
