@@ -171,6 +171,17 @@ export interface AiSkillDetail extends AiSkillSummary {
   body: string
 }
 
+/**
+ * Ob und wie die KI panelweit gültige Skills anlegen darf.
+ *
+ * `off` = nur der Betreiber. `review` = Personal sofort, Kundengespräche in die
+ * Warteschlange. `instant` = jedes Gespräch wirkt sofort panelweit.
+ */
+export interface AiLearningPolicy {
+  policy: 'off' | 'review' | 'instant'
+  pending_count: number
+}
+
 /** Eine Datenbankzeile in der Verwaltung — auch abgeschaltete und wartende. */
 export interface AiSkillManaged {
   id: string
@@ -309,6 +320,10 @@ export const aiApi = {
     method: 'POST',
   }),
   deleteSkill: (skillId: string) => api(`/ai/skills/${skillId}`, { method: 'DELETE' }),
+  getLearningPolicy: () => api<AiLearningPolicy>('/ai/settings/learning'),
+  setLearningPolicy: (policy: AiLearningPolicy['policy']) => api<AiLearningPolicy>('/ai/settings/learning', {
+    method: 'PUT', body: JSON.stringify({ policy }),
+  }),
   listAttachments: () => api<AiAttachment[]>('/ai/conversation/attachments'),
   uploadAttachment: (file: File) => {
     const body = new FormData()

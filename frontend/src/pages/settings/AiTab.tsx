@@ -15,6 +15,7 @@ import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
+import { AiLearningSettings } from './AiLearningSettings'
 import { AiProvidersSettings } from './AiProvidersSettings'
 import { AiWebSearchSettings } from './AiWebSearchSettings'
 
@@ -138,6 +139,7 @@ export function AiTab() {
     <div className="space-y-5">
       <AiProvidersSettings canWrite={canWrite} />
       <AiWebSearchSettings canWrite={canWrite} />
+      <AiLearningSettings canWrite={canWrite} />
 
       <div className="msm-card p-6">
         <div className="mb-3 flex items-center gap-2">

@@ -15,7 +15,8 @@
     "panelDatabase": "Panel Database",
     "nodes": "Nodes",
     "audit": "Audit",
-    "ai": "AI Assistant"
+    "ai": "AI Assistant",
+    "teams": "Teams"
   },
   "navGroups": {
     "overview": "Overview",
@@ -186,7 +187,11 @@
       "originAi": "remembered by the AI",
       "usedCount": "used {{count}}×",
       "usedCount_one": "used {{count}}×",
-      "usedCount_other": "used {{count}}×"
+      "usedCount_other": "used {{count}}×",
+      "scope": "Scope",
+      "scopePersonal": "Personal",
+      "scopePersonalHint": "Only you can see this. Nobody else, regardless of permissions.",
+      "scopeTeamHint": "Every member of this team can see it."
     },
     "skills": {
       "title": "Skills",
@@ -406,6 +411,26 @@
       "hint": "You can change this any time under Profile → AI, where you can also review and delete individual entries.",
       "enabled": "Memory enabled.",
       "failed": "Your answer could not be saved."
+    },
+    "learning": {
+      "title": "Assistant self-learning",
+      "description": "The assistant records solved problems as skills. Team skills are always created automatically. For panel-wide skills you decide here — they affect every user, meaning every customer of a hosting operator.",
+      "policy": "Panel-wide learning",
+      "options": {
+        "off": "Off — only I create panel-wide skills",
+        "review": "Approval required for customer conversations",
+        "instant": "Effective immediately from any conversation"
+      },
+      "hints": {
+        "off": "The assistant learns only into the respective team, and knows it.",
+        "review": "Staff with “manage AI skills” take effect at once; everything else waits for you.",
+        "instant": "Smoothest. It also lets a customer talk the assistant into text that immediately reaches everyone else."
+      },
+      "saved": "Setting saved.",
+      "errors": {
+        "load": "Learning setting could not be loaded.",
+        "save": "Learning setting could not be saved."
+      }
     }
   },
   "shell": {
@@ -3387,6 +3412,43 @@
         "body": "MSM stores no shop password and no payment data. It stores the external customer and contract identifier plus, optionally, the email used to create the panel user."
       },
       "setupLink": "Setup in the panel"
+    }
+  },
+  "teams": {
+    "eyebrow": "Collaboration",
+    "title": "Teams",
+    "description": "A team shares AI knowledge — skills and memories — and can bundle server permissions. Everyone has a personal one-person team so the assistant always has somewhere to learn.",
+    "create": "Create team",
+    "created": "Team created.",
+    "name": "Team name",
+    "select": "Team",
+    "personal": "personal",
+    "personalHint": "Your personal team belongs to your account. It takes no members and cannot be deleted — it is where the assistant learns for you alone. To share, create a real team.",
+    "memberCount": "{{count}} member",
+    "memberCount_other": "{{count}} members",
+    "members": "Members",
+    "founder": "founder",
+    "addMember": "Add member",
+    "selectUser": "Choose user",
+    "memberAdded": "Member added.",
+    "memberSaved": "Saved.",
+    "memberRemoved": "Member removed.",
+    "removeMember": "Remove member",
+    "manageSkills": "Manage skills",
+    "manageMemory": "Manage memory",
+    "remove": "Delete team",
+    "removeTitle": "Delete team",
+    "removeConfirm": "Delete “{{name}}” along with all shared skills and memories?",
+    "removed": "Team deleted.",
+    "servers": "Team servers",
+    "serversHint": "Members receive the selected permissions on these servers. Only what you hold directly is offered — a team can never pass on more than its founder has. If you lose a permission, members lose it at the same moment.",
+    "serversSaved": "Server permissions saved.",
+    "noAssignableServers": "You currently hold no server permissions that could be passed on.",
+    "noAccess": "no access",
+    "permissions": "Permissions",
+    "errors": {
+      "load": "Teams could not be loaded.",
+      "save": "Change could not be saved."
     }
   }
 }

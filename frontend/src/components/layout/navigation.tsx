@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Archive, BookOpen, Bot, Boxes, Database, History, LayoutDashboard, Network, Server, Settings, Shield, Users } from 'lucide-react'
+import { Archive, BookOpen, Bot, Boxes, Database, History, LayoutDashboard, Network, Server, Settings, Shield, Users, UsersRound } from 'lucide-react'
 
 export type NavGroupName = 'Overview' | 'Infrastructure' | 'Administration' | 'Panel' | 'Help'
 export interface NavigationItem { to: string; icon: LucideIcon; label: string; group: NavGroupName }
@@ -27,6 +27,7 @@ export function buildNavigation(labels: Record<string, string>, access: Navigati
     ...(access.owner || access.canUseAi ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Overview' as const }] : []),
     { to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' },
     ...(access.owner || access.canViewNodes ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),
+    ...(access.owner || access.canUseAi ? [{ to: '/teams', icon: UsersRound, label: labels.teams, group: 'Infrastructure' as const }] : []),
     ...(access.owner || access.canManageUsers ? [{ to: '/users', icon: Users, label: labels.users, group: 'Administration' as const }] : []),
     ...(access.owner || access.canManageRoles ? [{ to: '/roles', icon: Shield, label: labels.roles, group: 'Administration' as const }] : []),
     ...(access.owner || access.canViewAudit ? [{ to: '/admin/audit', icon: History, label: labels.audit, group: 'Administration' as const }] : []),

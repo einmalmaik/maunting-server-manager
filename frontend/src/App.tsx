@@ -16,6 +16,7 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword').then(module =
 const ResetPassword = lazy(() => import('./pages/ResetPassword').then(module => ({ default: module.ResetPassword })))
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })))
 const Servers = lazy(() => import('./pages/Servers').then(module => ({ default: module.Servers })))
+const Teams = lazy(() => import('./pages/Teams').then(module => ({ default: module.Teams })))
 const ServerDetail = lazy(() => import('./pages/ServerDetail').then(module => ({ default: module.ServerDetail })))
 const Users = lazy(() => import('./pages/Users').then(module => ({ default: module.Users })))
 const Roles = lazy(() => import('./pages/Roles').then(module => ({ default: module.Roles })))
@@ -118,6 +119,7 @@ function App() {
           />
           <Route path="profile" element={<Profile />} />
           <Route path="ai" element={<RequirePermission routeKey="ai"><Ai /></RequirePermission>} />
+          <Route path="teams" element={<Teams />} />
           <Route path="docs" element={<Docs />} />
           <Route path="docs/blueprints" element={<BlueprintsDocs />} />
           <Route path="docs/oauth" element={<OAuthDocs />} />

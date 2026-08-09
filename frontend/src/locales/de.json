@@ -15,7 +15,8 @@
     "panelDatabase": "Panel-Datenbank",
     "nodes": "Nodes",
     "audit": "Audit",
-    "ai": "KI-Assistent"
+    "ai": "KI-Assistent",
+    "teams": "Teams"
   },
   "navGroups": {
     "overview": "Überblick",
@@ -186,7 +187,11 @@
       "originAi": "von der KI gemerkt",
       "usedCount": "{{count}}× verwendet",
       "usedCount_one": "{{count}}× verwendet",
-      "usedCount_other": "{{count}}× verwendet"
+      "usedCount_other": "{{count}}× verwendet",
+      "scope": "Bereich",
+      "scopePersonal": "Persönlich",
+      "scopePersonalHint": "Nur du siehst das. Niemand sonst, unabhängig von Rechten.",
+      "scopeTeamHint": "Alle Mitglieder dieses Teams sehen es."
     },
     "skills": {
       "title": "Skills",
@@ -406,6 +411,26 @@
       "hint": "Du kannst das jederzeit unter Profil → KI ändern und einzelne Einträge dort einsehen und löschen.",
       "enabled": "Gedächtnis aktiviert.",
       "failed": "Die Antwort konnte nicht gespeichert werden."
+    },
+    "learning": {
+      "title": "Selbstlernen der KI",
+      "description": "Die KI hält gelöste Probleme als Skills fest. Team-Skills entstehen immer automatisch. Für panelweite Skills entscheidest du hier — sie wirken für alle Benutzer, bei einem Hoster also für jeden Kunden.",
+      "policy": "Panelweites Lernen",
+      "options": {
+        "off": "Aus — nur ich lege panelweite Skills an",
+        "review": "Freigabe nötig für Kundengespräche",
+        "instant": "Sofort wirksam aus jedem Gespräch"
+      },
+      "hints": {
+        "off": "Die KI lernt ausschließlich ins jeweilige Team und weiß das.",
+        "review": "Personal mit „KI-Skills verwalten“ wirkt sofort, alles andere wartet auf dich.",
+        "instant": "Am flüssigsten. Ein Kunde kann die KI damit zu einem sofort wirksamen Text im Kontext aller anderen überreden."
+      },
+      "saved": "Einstellung gespeichert.",
+      "errors": {
+        "load": "Lerneinstellung konnte nicht geladen werden.",
+        "save": "Lerneinstellung konnte nicht gespeichert werden."
+      }
     }
   },
   "shell": {
@@ -3387,6 +3412,43 @@
         "body": "MSM speichert kein Shop-Passwort und keine Zahlungsdaten. Gespeichert werden die externe Kunden- und Vertragskennung sowie optional die E-Mail für die Erstanlage des Panel-Benutzers."
       },
       "setupLink": "Einrichtung im Panel"
+    }
+  },
+  "teams": {
+    "eyebrow": "Zusammenarbeit",
+    "title": "Teams",
+    "description": "Ein Team teilt KI-Wissen — Skills und Erinnerungen — und kann Serverrechte bündeln. Jeder hat ein persönliches Ein-Mann-Team, damit die KI immer einen Ort zum Lernen hat.",
+    "create": "Team gründen",
+    "created": "Team gegründet.",
+    "name": "Teamname",
+    "select": "Team",
+    "personal": "persönlich",
+    "personalHint": "Das persönliche Team gehört zu deinem Konto. Es nimmt keine Mitglieder auf und lässt sich nicht löschen — es ist der Ort, an dem die KI für dich allein lernt. Wer teilen möchte, gründet ein echtes Team.",
+    "memberCount": "{{count}} Mitglied",
+    "memberCount_other": "{{count}} Mitglieder",
+    "members": "Mitglieder",
+    "founder": "Gründer",
+    "addMember": "Mitglied aufnehmen",
+    "selectUser": "Benutzer wählen",
+    "memberAdded": "Mitglied aufgenommen.",
+    "memberSaved": "Gespeichert.",
+    "memberRemoved": "Mitglied entfernt.",
+    "removeMember": "Mitglied entfernen",
+    "manageSkills": "Skills verwalten",
+    "manageMemory": "Memory verwalten",
+    "remove": "Team löschen",
+    "removeTitle": "Team löschen",
+    "removeConfirm": "„{{name}}“ mit allen geteilten Skills und Erinnerungen löschen?",
+    "removed": "Team gelöscht.",
+    "servers": "Server des Teams",
+    "serversHint": "Mitglieder erhalten auf diesen Servern die ausgewählten Rechte. Angeboten wird nur, was du selbst direkt besitzt — ein Team kann nie mehr weitergeben als sein Gründer hat. Verlierst du ein Recht, verlieren es die Mitglieder im selben Moment.",
+    "serversSaved": "Serverrechte gespeichert.",
+    "noAssignableServers": "Du besitzt derzeit keine Serverrechte, die du weitergeben könntest.",
+    "noAccess": "kein Zugriff",
+    "permissions": "Rechte",
+    "errors": {
+      "load": "Teams konnten nicht geladen werden.",
+      "save": "Änderung konnte nicht gespeichert werden."
     }
   }
 }

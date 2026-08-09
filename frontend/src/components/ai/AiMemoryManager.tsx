@@ -4,8 +4,9 @@ import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiMemoryEntry } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
+import { teamsApi, type Team } from '@/api/teams'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Button, Switch } from '@/Singra/UI'
+import { Button, Dropdown, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -13,14 +14,22 @@ export function AiMemoryManager() {
   const { t } = useTranslation()
   const allowed = useHasPermission('ai.memory.use')
   const [entries, setEntries] = useState<AiMemoryEntry[]>([])
-  const [enabled, setEnabled] = useState(true)
+  const [enabled, setEnabled] = useState(false)
+  const [teams, setTeams] = useState<Team[]>([])
+  // `null` heisst persoenlich. Ein Team waehlen heisst: dieser Eintrag gilt
+  // fuer alle Mitglieder — deshalb steht die Auswahl direkt ueber der Liste
+  // und nicht versteckt im Formular.
+  const [teamId, setTeamId] = useState<number | null>(null)
   const [key, setKey] = useState('')
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const load = async () => {
+  const load = async (scopeTeamId: number | null = teamId) => {
     const [rows, preference] = await Promise.all([
-      aiApi.listMemory('user'), aiApi.getMemoryPreference(),
+      scopeTeamId === null
+        ? aiApi.listMemory('user')
+        : aiApi.listMemory('team', undefined, scopeTeamId),
+      aiApi.getMemoryPreference(),
     ])
     setEntries(rows)
     setEnabled(preference.enabled)
@@ -29,20 +38,39 @@ export function AiMemoryManager() {
   useEffect(() => {
     if (!allowed) return
     let active = true
-    Promise.all([aiApi.listMemory('user'), aiApi.getMemoryPreference()])
-      .then(([rows, preference]) => { if (active) { setEntries(rows); setEnabled(preference.enabled) } })
+    Promise.all([
+      aiApi.listMemory('user'),
+      aiApi.getMemoryPreference(),
+      // Nur Teams, in denen der Benutzer das Wissen auch pflegen darf — sonst
+      // liesse sich ein Bereich auswaehlen, in den nichts geschrieben werden kann.
+      teamsApi.list().then((rows) => rows.filter((row) => row.can_manage_memory)).catch(() => [] as Team[]),
+    ])
+      .then(([rows, preference, teamRows]) => {
+        if (!active) return
+        setEntries(rows)
+        setEnabled(preference.enabled)
+        setTeams(teamRows.filter((row) => !row.is_personal))
+      })
       .catch(() => { if (active) toast.error(t('ai.memory.errors.load')) })
     return () => { active = false }
   }, [allowed, t])
 
   if (!allowed) return null
 
+  const switchScope = (next: number | null) => {
+    setTeamId(next)
+    setBusy(true)
+    void load(next).catch(() => toast.error(t('ai.memory.errors.load'))).finally(() => setBusy(false))
+  }
+
   const save = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!key.trim() || !value.trim() || busy) return
     setBusy(true)
     try {
-      await aiApi.saveMemory({ scope: 'user', key: key.trim(), value: value.trim() })
+      await aiApi.saveMemory(teamId === null
+        ? { scope: 'user', key: key.trim(), value: value.trim() }
+        : { scope: 'team', team_id: teamId, key: key.trim(), value: value.trim() })
       setKey(''); setValue(''); await load()
       toast.success(t('ai.memory.saved'))
     } catch (error: unknown) {
@@ -62,6 +90,25 @@ export function AiMemoryManager() {
         <div><div className="flex items-center gap-2"><Brain className="h-5 w-5 text-secondary" /><h2 id="ai-memory-title" className="font-headline text-lg font-semibold text-on-surface">{t('ai.memory.title')}</h2></div><p className="mt-2 max-w-3xl text-sm text-on-surface-variant">{t('ai.memory.description')}</p></div>
         <label className="flex min-h-10 items-center gap-3 text-sm text-on-surface-variant"><span>{t('ai.memory.enabled')}</span><Switch checked={enabled} disabled={busy} onCheckedChange={(next) => { setBusy(true); void aiApi.setMemoryPreference(next).then(() => setEnabled(next)).catch(() => toast.error(t('ai.memory.errors.save'))).finally(() => setBusy(false)) }} aria-label={t('ai.memory.enabled')} /></label>
       </div>
+      {teams.length > 0 && (
+        <label className="block w-full max-w-sm space-y-1.5">
+          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+            {t('ai.memory.scope')}
+          </span>
+          <Dropdown
+            value={teamId === null ? 'user' : String(teamId)}
+            onChange={(next) => switchScope(next === 'user' ? null : Number(next))}
+            options={[
+              { value: 'user', label: t('ai.memory.scopePersonal'), hint: t('ai.memory.scopePersonalHint') },
+              ...teams.map((team) => ({
+                value: String(team.id), label: team.name, hint: t('ai.memory.scopeTeamHint'),
+              })),
+            ]}
+            disabled={busy}
+            aria-label={t('ai.memory.scope')}
+          />
+        </label>
+      )}
       <div className="space-y-2">
         {entries.map((entry) => (
           <div key={entry.id} className="flex items-start gap-3 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-3">
