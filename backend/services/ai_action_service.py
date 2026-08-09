@@ -80,8 +80,6 @@ _SERVER_ID_SCHEMA = {
 }
 MAX_LISTED_SERVERS = 60
 
-MAX_LISTED_SERVERS = 60
-
 # Diese Aktionen fassen Serverdateien an und teilen sich deshalb den
 # vorhandenen, nicht blockierenden Server-Lifecycle-Mutex. Lifecycle-Aktionen
 # brauchen ihn nicht: `request_lifecycle_operation` hat eine eigene Job-Sperre.

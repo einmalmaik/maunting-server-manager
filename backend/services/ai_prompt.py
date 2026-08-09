@@ -168,9 +168,19 @@ def build(skill_index: str = "") -> str:
     ``skill_index`` ist der einzige dynamische Teil — Name und Beschreibung der
     Skills, die dieser Benutzer sehen darf. Leer, wenn es keine gibt oder das
     Recht fehlt.
+
+    Der Index bekommt eine **Leerzeile** vor sich. Das ist keine Kosmetik: er
+    ist eine Liste inmitten von Fliesstext, und ohne Absatzgrenze klebt sie
+    unmittelbar an der Skill-Regel darueber. Genau daran erkennt ein Modell, wo
+    ein Block endet und der naechste beginnt.
+
+    Die Zeile war in der ersten Fassung dieser Datei verlorengegangen, weil
+    ``.strip()`` den fuehrenden Umbruch des Blocks mit entfernte. Aufgefallen
+    ist es erst, als jemand den Prompt **mit** hinterlegten Skills verglich —
+    ohne Skills war er zeichengleich, und genau so war er auch geprueft worden.
     """
     teile = list(BLOECKE)
     if skill_index:
-        teile.append(skill_index.strip())
+        teile.append("\n" + skill_index.strip())
     teile.extend(NACH_SKILL_INDEX)
     return "\n".join(teile)

@@ -30,10 +30,63 @@ def test_every_offered_tool_has_a_table_entry() -> None:
 
 
 def test_the_sets_are_derived_not_maintained() -> None:
-    """Was `ai_action_service` exportiert, kommt aus der Tabelle."""
-    assert ai_tool_registry.READ_TOOLS is ai_tool_registry.READ_TOOLS
-    assert ai_tool_registry.WRITE_TOOLS is ai_tool_registry.WRITE_TOOLS
-    assert ai_tool_registry.ALWAYS_CONFIRM_TOOLS is ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+    """Jede Menge muss sich aus der Tabelle nachrechnen lassen.
+
+    Diese Funktion pruefte urspruenglich, dass `ai_action_service` dieselben
+    Objekte exportiert wie die Registry. Beim Umhaengen der Aufrufer hat ein
+    Skript beide Seiten des Vergleichs auf dasselbe Modul gezogen, und uebrig
+    blieben drei `x is x` — immer wahr, nie fehlschlagend, unter einem Namen,
+    der eine Invariante verspricht. Ein Test, der nichts prueft, ist schlimmer
+    als keiner: er sieht in der Uebersicht nach Deckung aus.
+
+    Jetzt wird das nachgerechnet, was der Name behauptet. Wer eine Menge kuenftig
+    von Hand pflegt, statt sie abzuleiten, faellt hier auf.
+    """
+    aus_tabelle = {
+        name: spec.art for name, spec in ai_tool_registry.WERKZEUGE.items()
+    }
+    erwartet_lesend = {
+        name for name, art in aus_tabelle.items()
+        if art in {"server_read", "global_read", "ask"}
+    }
+    erwartet_schreibend = {
+        name for name, art in aus_tabelle.items()
+        if art in {"server_write", "global_write"}
+    }
+    assert ai_tool_registry.READ_TOOLS == erwartet_lesend
+    assert ai_tool_registry.WRITE_TOOLS == erwartet_schreibend
+    assert ai_tool_registry.SERVER_READ_TOOLS == {
+        name for name, art in aus_tabelle.items() if art == "server_read"
+    }
+    assert ai_tool_registry.SERVER_WRITE_TOOLS == {
+        name for name, art in aus_tabelle.items() if art == "server_write"
+    }
+    assert ai_tool_registry.MEMORY_TOOLS == {
+        name for name, spec in ai_tool_registry.WERKZEUGE.items()
+        if spec.gruppe == "memory"
+    }
+    assert ai_tool_registry.SKILL_TOOLS == {
+        name for name, spec in ai_tool_registry.WERKZEUGE.items()
+        if spec.gruppe == "skill"
+    }
+    assert ai_tool_registry.ALWAYS_CONFIRM_TOOLS == (
+        {
+            name for name, spec in ai_tool_registry.WERKZEUGE.items()
+            if spec.immer_bestaetigen
+        }
+        | set(ai_tool_registry.GEPLANT_IMMER_BESTAETIGEN)
+    )
+
+
+def test_the_two_halves_share_the_same_set_objects() -> None:
+    """Was `ai_action_service` fuehrt, ist die Registry-Menge selbst.
+
+    Das war die urspruengliche Absicht der Funktion darueber: keine Kopie, kein
+    zweiter Stand, der auseinanderlaufen kann. Hier steht sie ohne die Modulnamen
+    auf beiden Seiten, die ein Ersetzungsskript zusammenziehen konnte.
+    """
+    assert ai_action_service.READ_TOOLS is ai_tool_registry.READ_TOOLS
+    assert ai_action_service.GLOBAL_READ_TOOLS is ai_tool_registry.GLOBAL_READ_TOOLS
 
 
 def test_read_and_write_never_overlap() -> None:
