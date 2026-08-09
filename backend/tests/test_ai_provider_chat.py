@@ -24,6 +24,7 @@ from models import (
     User,
 )
 from services import ai_chat_service, ai_provider_service
+from services.ai_stream_service import MAX_TOOL_ROUNDS
 from services.ai_context_service import build_provider_messages, redact_sensitive_text
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
 from services.openai_compatible_adapter import (
@@ -459,6 +460,13 @@ def test_a_tool_call_cannot_reach_a_server_the_user_may_not_see(
     `_resolve_server` sie jeden einzelnen Aufruf lang pruefen. Ein Modell, das
     eine fremde ID errraet oder aus einem manipulierten Logtext uebernimmt,
     darf damit nichts erreichen.
+
+    Wie die Absage aussieht, hat sich seit dem Schreiben dieses Tests geaendert:
+    ein abgewiesener Lesezugriff riss frueher den ganzen Stream mit
+    `AI_TOOL_REJECTED` ab. Heute erfaehrt das Modell den Grund und macht weiter,
+    und der Verlauf zeigt den Aufruf als `failed`. Die Aussage des Tests ist
+    dieselbe geblieben — **es kommt nichts durch** —, nur die Form der Absage
+    ist eine bessere.
     """
     _enable_chat(db, regular_user)
     provider = _provider(db, monkeypatch)
@@ -496,9 +504,77 @@ def test_a_tool_call_cannot_reach_a_server_the_user_may_not_see(
     )
 
     assert response.status_code == 200
-    assert "AI_TOOL_REJECTED" in response.text
+    # Der Aufruf ist als gescheitert im Verlauf sichtbar — eine Antwort, der
+    # eine Auskunft fehlt, soll nicht vollstaendig wirken.
+    assert '"failed":true' in response.text.replace(" ", "")
     # Kein Serverdatum darf durchgesickert sein.
     assert test_server.name not in response.text
+    assert "AI_STREAM_FAILED" not in response.text
+
+
+def test_the_stream_ends_when_the_provider_calls_tools_that_were_never_offered(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    user_csrf_token: str,
+    test_server,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Die Abschlussrunde muss auch dann enden, wenn der Anbieter nicht mitspielt.
+
+    Vier Zweige der Schleife setzen `tools = None`, um zu sagen: das war die
+    letzte Runde, antworte jetzt. Das war eine Bitte an den Anbieter, keine
+    Grenze — ein Anbieter, der weiter Werkzeugaufrufe meldet, hielt den Stream
+    endlos offen und verbrannte bei jedem Durchgang Tokens.
+
+    Genau das lag hier: dieser Testaufbau — ein Anbieter, der unverdrossen
+    denselben Aufruf schickt — brachte die Testsuite zum Stillstand, statt
+    fehlzuschlagen. Ein Timeout in der Werkstatt, im Betrieb eine offene
+    Verbindung mit laufender Abrechnung.
+
+    Der Test haelt die Grenze auf unserer Seite fest: wer nichts anbietet,
+    nimmt auch nichts an.
+    """
+    _enable_chat(db, regular_user)
+    provider = _provider(db, monkeypatch)
+    runden = {"n": 0}
+
+    async def fake_stream(_client, *, usage, **_kwargs):
+        # Meldet in **jeder** Runde einen Werkzeugaufruf, auch wenn ihm keine
+        # Werkzeuge angeboten wurden. Ein wohlerzogener Anbieter tut das nicht;
+        # darauf darf sich der Server aber nicht verlassen.
+        runden["n"] += 1
+        usage.total_tokens = 5
+        usage.tool_calls = [ProviderToolCall(
+            id=f"call-{runden['n']}",
+            name="read_server_status",
+            arguments={"server_id": test_server.id},
+        )]
+        if False:
+            yield StreamChunk("content", "")
+
+    monkeypatch.setattr("services.ai_stream_service.stream_chat_completion", fake_stream)
+
+    response = client.post(
+        "/api/ai/conversation/messages/stream",
+        json={
+            "content": "Wie ist der Status?",
+            "provider_id": provider.id,
+            "request_id": str(uuid4()),
+        },
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
+    )
+
+    assert response.status_code == 200
+    # Die eigentliche Aussage: der Aufruf kehrt zurueck. Ohne die Grenze haenge
+    # dieser Test hier fuer immer.
+    assert "event: done" in response.text
+    # Und er endet begrenzt: die Werkzeugrunden plus die eine Abschlussrunde,
+    # in der die Aufrufe verworfen werden. Ein Anbieter kann die Zahl der
+    # Durchgaenge nicht selbst bestimmen.
+    assert runden["n"] <= MAX_TOOL_ROUNDS + 2, f"{runden['n']} Anbieterrunden"
 
 
 def test_provider_catalog_hides_admin_metadata_from_chat_user(

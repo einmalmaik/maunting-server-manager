@@ -15,18 +15,24 @@ from sqlalchemy.exc import IntegrityError
 from database import SessionLocal
 from models import AiActionProposal, AiMessage, AiProvider, AiToolResult, AiUsageEvent, User
 from services.ai_chat_service import get_owned_conversation
-from services.ai_action_service import (
+from services.ai_action_errors import (
     AiActionStateError,
     AiActionValidationError,
+)
+from services.ai_action_service import (
+    execute_read_tool,
+    provider_tool_definitions,
+    question_payload,
+)
+from services.ai_proposal_service import (
+    create_proposal,
+    execute_autonomously,
+)
+from services.ai_tool_registry import (
     ASK_TOOLS,
     READ_TOOLS,
     SKILL_TOOLS,
     WRITE_TOOLS,
-    question_payload,
-    create_proposal,
-    execute_autonomously,
-    execute_read_tool,
-    provider_tool_definitions,
 )
 from services.ai_context_service import (
     build_provider_messages,
@@ -615,6 +621,28 @@ async def stream_conversation_reply(
                     else usage.total_tokens or current_usage.total_tokens
                 )
             if not current_usage.tool_calls:
+                break
+            if tools is None:
+                # Diese Runde wurde ohne Werkzeugliste angefragt — sie ist die
+                # abschliessende. Meldet der Anbieter trotzdem Werkzeugaufrufe,
+                # ist das keine Anfrage, die wir erfuellen: wir haben nichts
+                # angeboten.
+                #
+                # Vier Zweige oben setzen `tools = None` und `continue`, um die
+                # Schleife zu beenden. Das funktionierte nur, solange sich der
+                # Anbieter daran hielt — es war eine Bitte, keine Grenze. Ein
+                # Anbieter, der weiter Aufrufe schickt, hielt den Stream endlos
+                # offen und verbrannte bei jedem Durchgang Tokens. Genau das
+                # passiert reproduzierbar im Test
+                # `test_a_tool_call_cannot_reach_a_server_the_user_may_not_see`,
+                # der die Suite zum Stillstand brachte.
+                #
+                # Hier steht die Grenze jetzt auf unserer Seite.
+                logger.warning(
+                    "Anbieter meldet Werkzeugaufrufe ohne angebotene Werkzeuge, "
+                    "werden verworfen conversation_id=%s anzahl=%d",
+                    conversation_id, len(current_usage.tool_calls),
+                )
                 break
 
             # Eine Rueckfrage beendet den Zug: ab hier ist der Mensch dran,
