@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -617,3 +618,143 @@ def test_a_confirmed_delete_uses_the_one_deletion_path_and_is_marked_as_ai(
     assert gesehen == {
         "server_id": server.id, "origin": "ai", "user_id": owner_user.id
     }
+
+
+def test_a_confirmed_restore_uses_the_one_restore_path(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Auch der Restore bekommt keinen eigenen Weg.
+
+    Die Vorgabe des Betreibers war ausdruecklich: die KI nutzt dieselbe Logik
+    wie der Benutzer, **wegen S3**. Ein Nachbau wuerde nicht nur den
+    S3-Download anders machen, sondern vor allem die Reihenfolge verlieren, auf
+    die es ankommt — herunterladen und entschluesseln, bevor der Container
+    faellt. Wer zuerst stoppt, hat bei falschem Passwort einen gestoppten Server
+    und kein Backup.
+    """
+    from unittest.mock import patch
+
+    from models import Backup
+
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    backup = Backup(server_id=server.id, filename=str(tmp_path / "b.tar.gz"), size_mb=3)
+    db.add(backup)
+    db.commit()
+    db.refresh(backup)
+
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="propose_backup_restore",
+        arguments={
+            "server_id": server.id,
+            "backup_id": backup.id,
+            "reason": "Der Benutzer will den Stand von vorhin zurueck.",
+            "expected_effect": "Die Serverdaten entsprechen wieder dem Backup.",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    # Die Vorschau nennt, *welchen* Stand man zurueckholt. "Backup einspielen"
+    # ohne Datum ist keine Grundlage fuer eine Zustimmung.
+    vorschau = json.loads(proposal.preview_json)
+    assert vorschau["backup_id"] == backup.id
+    assert vorschau["backup_created_at"] is not None
+    assert vorschau["irreversible"] is True
+
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    gesehen: dict = {}
+
+    def _fake_restore(db_, *, server_id, backup_id, actor):
+        gesehen.update(
+            server_id=server_id, backup_id=backup_id, origin=actor.origin
+        )
+        return {"message": "Backup wiederhergestellt"}
+
+    with patch(
+        "services.backup_restore_service.restore_server_backup", _fake_restore
+    ):
+        updated, _result = ai_proposal_service.execute_proposal(
+            db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+        )
+
+    assert updated.status == "succeeded"
+    assert gesehen == {
+        "server_id": server.id, "backup_id": backup.id, "origin": "ai"
+    }
+
+
+def test_a_restore_cannot_reach_a_backup_of_another_server(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Die Backup-ID wird gegen den Server aufgeloest, nicht blind uebernommen.
+
+    Ohne diese Bindung waere ein Vorschlag ein Weg, fremde Backup-IDs
+    abzuzaehlen — und im schlimmsten Fall den Stand eines fremden Servers ueber
+    den eigenen zu legen.
+    """
+    from models import Backup
+
+    server = _server(db, owner_user, tmp_path)
+    fremder = Server(
+        name="Fremd", game_type="dayz",
+        install_dir=str(tmp_path / "fremd"), container_name="msm-fremd",
+        status="stopped",
+    )
+    db.add(fremder)
+    db.commit()
+    db.refresh(fremder)
+    fremdes_backup = Backup(
+        server_id=fremder.id, filename=str(tmp_path / "f.tar.gz"), size_mb=1
+    )
+    db.add(fremdes_backup)
+    db.commit()
+    db.refresh(fremdes_backup)
+
+    conversation = _conversation(db, owner_user, server)
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
+            db,
+            user=owner_user,
+            conversation=conversation,
+            tool_name="propose_backup_restore",
+            arguments={
+                "server_id": server.id,
+                "backup_id": fremdes_backup.id,
+                "reason": "Zurueckholen.",
+                "expected_effect": "Alter Stand.",
+            },
+            correlation_id=str(uuid4()),
+        )
+
+
+def test_the_backup_name_from_the_model_is_redacted_and_capped(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Der Name ist Modelltext und landet in einer Liste, die Menschen lesen."""
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="propose_backup",
+        arguments={
+            "server_id": server.id,
+            "name": "vor Mod-Update " + "x" * 200,
+            "reason": "Absichern.",
+            "expected_effect": "Ein Stand liegt vor.",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    vorschau = json.loads(proposal.preview_json)
+    assert vorschau["name"].startswith("vor Mod-Update")
+    assert len(vorschau["name"]) <= 64

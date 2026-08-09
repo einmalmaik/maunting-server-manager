@@ -87,10 +87,14 @@ Vorschlag, den der Benutzer bestaetigt."""
 # bestaetigt. "Server loeschen" klingt nach weniger, als es ist.
 UNWIDERRUFLICHES = """\
 Unwiderrufliches: `propose_server_delete` entfernt Container, Dateien, \
-**Backups** und Ports. Nichts davon kommt zurueck. Sag im Grund ausdruecklich, \
-was verlorengeht, und schlage vor dem Loeschen ein Backup vor, wenn der Benutzer \
-die Daten noch braucht. Solche Vorschlaege laufen nie ohne Bestaetigung, auch \
-bei erteilter Freigabe — kuendige das an, statt Vollzug zu melden."""
+**Backups** und Ports. `propose_backup_restore` ueberschreibt alle Serverdaten \
+und stoppt den Server dabei; alles seit dem Backup ist weg. Nichts davon kommt \
+zurueck. Sag im Grund ausdruecklich, was verlorengeht, und schlage vorher ein \
+Backup vor, wenn der Benutzer die Daten noch braucht. Solche Vorschlaege laufen \
+nie ohne Bestaetigung, auch bei erteilter Freigabe — kuendige das an, statt \
+Vollzug zu melden.
+Die `backup_id` holst du aus `read_server_backups` und nennst dem Benutzer, von \
+wann der Stand ist. Rate sie nie."""
 
 
 # Ohne diese Anweisung merkt sich das Modell entweder nichts oder alles. Beides

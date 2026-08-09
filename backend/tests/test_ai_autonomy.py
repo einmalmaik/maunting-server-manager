@@ -429,7 +429,8 @@ def test_a_delete_stays_confirmable_even_with_every_grant_in_place(
     )
     db.commit()
 
-    assert proposal.status == "proposed", "Ein Loeschvorschlag darf nie autonom laufen"
+    assert proposal.autonomous is False, "Ein Loeschvorschlag darf nie autonom laufen"
+    assert proposal.requires_confirmation is True
     # Und der Server steht noch.
     assert db.query(Server).filter(Server.id == server.id).first() is not None
 
@@ -501,3 +502,53 @@ def test_a_delete_still_needs_to_see_the_server(
             correlation_id=str(uuid4()),
         )
     assert db.query(Server).filter(Server.id == server.id).first() is not None
+
+
+def test_a_restore_stays_confirmable_but_creating_a_backup_does_not(
+    db: Session, regular_user: User
+) -> None:
+    """Der Unterschied zwischen Anlegen und Einspielen, als Testfall.
+
+    Ein zusaetzliches Backup schadet nie — das darf autonom laufen. Ein
+    eingespieltes Backup ueberschreibt alles, was seither entstanden ist, und
+    holt niemand zurueck. Beide haengen am selben Bereich `server.backups.*`,
+    und ohne diese Unterscheidung wuerde eine Freigabe fuer das eine das andere
+    mitfreigeben.
+    """
+    from models import Backup
+
+    server, conversation = _setup(
+        db,
+        regular_user,
+        global_keys=("ai.chat.use", "ai.autonomous.use"),
+        server_keys=("server.view", "server.backups.create", "server.backups.restore"),
+    )
+    ai_autonomy_service.set_grant(
+        db, user=regular_user, server_id=server.id, enabled=True,
+        max_actions_per_hour=10, granted_by=regular_user.id,
+    )
+    backup = Backup(server_id=server.id, filename="/tmp/x.tar.gz", size_mb=1)
+    db.add(backup)
+    db.commit()
+    db.refresh(backup)
+
+    anlegen = _propose(db, regular_user, conversation, server)
+    einspielen = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_backup_restore",
+        arguments={
+            "server_id": server.id,
+            "backup_id": backup.id,
+            "reason": "Alter Stand gewuenscht.",
+            "expected_effect": "Daten wie im Backup.",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    assert anlegen.autonomous is True, "Ein Backup anzulegen darf autonom laufen"
+    assert anlegen.requires_confirmation is False
+    assert einspielen.autonomous is False, "Ein Restore darf nie autonom laufen"
+    assert einspielen.requires_confirmation is True

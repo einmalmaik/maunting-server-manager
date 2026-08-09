@@ -37,6 +37,7 @@ from services.actor_context import ActorContext
 from services.ai_action_errors import AiActionStateError, AiActionValidationError
 from services.ai_action_service import (
     CONFIRMATION_TTL,
+    MAX_BACKUP_NAME_CHARS,
     MAX_CONFIG_CHARS,
     MAX_DIFF_CHARS,
     MAX_DIFF_LINES,
@@ -318,6 +319,53 @@ def _bind_ip_payload(db: Session, server: Server, arguments: dict) -> tuple[dict
     }
 
 
+def _backup_restore_payload(
+    db: Session, server: Server, arguments: dict
+) -> tuple[dict, dict]:
+    """Prueft die Backup-ID und baut die Vorschau fuer die Bestaetigung.
+
+    Die ID wird **hier** gegen den Server aufgeloest, nicht erst beim
+    Ausfuehren. Zwei Gruende: ein Vorschlag auf ein Backup eines fremden Servers
+    darf gar nicht erst entstehen, und die Vorschau soll nennen, *welchen Stand*
+    der Benutzer gleich zurueckholt. "Backup einspielen" ohne Datum ist keine
+    Grundlage fuer eine Zustimmung — zwischen dem Backup von gestern und dem von
+    letztem Monat liegt der ganze Unterschied.
+    """
+    if set(arguments) != {"backup_id"}:
+        raise AiActionValidationError("Restore-Tool hat ungueltige Argumente")
+    backup_id = arguments["backup_id"]
+    if not isinstance(backup_id, int) or isinstance(backup_id, bool) or backup_id < 1:
+        raise AiActionValidationError("Ungueltige Backup-ID")
+
+    from models import Backup
+
+    backup = (
+        db.query(Backup)
+        .filter(Backup.id == backup_id, Backup.server_id == server.id)
+        .first()
+    )
+    if backup is None:
+        # Bewusst dieselbe Meldung fuer "gibt es nicht" und "gehoert zu einem
+        # anderen Server": sonst waere ein Vorschlag ein Weg, fremde Backup-IDs
+        # abzuzaehlen.
+        raise AiActionValidationError("Backup nicht gefunden")
+
+    payload = {"backup_id": backup.id}
+    preview = {
+        "operation": "backup_restore",
+        "backup_id": backup.id,
+        "backup_name": redact_sensitive_text(str(backup.name or ""))[:128] or None,
+        "backup_created_at": backup.created_at.isoformat() if backup.created_at else None,
+        "size_mb": backup.size_mb,
+        "current_status": server.status,
+        # Der Server wird gestoppt und **nicht** automatisch wieder gestartet —
+        # so verhaelt sich der Restore im Panel auch.
+        "restart_required": True,
+        "irreversible": True,
+    }
+    return payload, preview
+
+
 def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[dict, dict]:
     """Erwartet die Argumente *ohne* Begruendung und ohne `server_id`."""
     from games import get_plugin
@@ -390,14 +438,24 @@ def create_proposal(
             }
             expected_revision = None
         elif tool_name == "propose_backup":
-            if rest:
-                raise AiActionValidationError("Backup-Tool akzeptiert keine Argumente")
-            payload = {}
+            if set(rest) - {"name"}:
+                raise AiActionValidationError("Backup-Tool hat ungueltige Argumente")
+            name = rest.get("name")
+            if name is not None and not isinstance(name, str):
+                raise AiActionValidationError("Backup-Name ist ungueltig")
+            # Der Name ist Modelltext und landet in einer Liste, die Menschen
+            # lesen — also redigiert und gekuerzt wie jede andere Modellausgabe.
+            sauber = redact_sensitive_text(str(name).strip())[:MAX_BACKUP_NAME_CHARS] if name else ""
+            payload = {"name": sauber} if sauber else {}
             preview = {
                 "operation": "backup",
                 "current_status": server.status,
                 "restart_required": False,
+                "name": sauber or None,
             }
+            expected_revision = None
+        elif tool_name == "propose_backup_restore":
+            payload, preview = _backup_restore_payload(db, server, rest)
             expected_revision = None
         elif tool_name == "propose_server_delete":
             if rest:
@@ -828,8 +886,33 @@ def execute_proposal(
             elif tool_name == "propose_backup":
                 from services.backup_orchestrator import create_server_backup
 
-                backup = create_server_backup(server_id, db, name="AI-confirmed snapshot")
+                backup = create_server_backup(
+                    server_id,
+                    db,
+                    # Ohne eigenen Namen bleibt der bisherige Standard stehen:
+                    # er sagt in der Backup-Liste wenigstens, woher der Eintrag
+                    # stammt.
+                    name=str(payload.get("name") or "AI-confirmed snapshot"),
+                )
                 result = {"backup_id": backup.id}
+                task_id = None
+                queued = False
+            elif tool_name == "propose_backup_restore":
+                # Derselbe Aufruf wie der Panel-Endpunkt. Die Reihenfolge darin
+                # ist der Grund, warum die KI keinen eigenen Weg bekommt:
+                # S3-Download und Entschluesselung laufen **vor** dem
+                # Container-Stop, damit ein falsches Passwort den Server
+                # unberuehrt laesst.
+                from services.backup_restore_service import restore_server_backup
+
+                result = restore_server_backup(
+                    db,
+                    server_id=server_id,
+                    backup_id=int(payload["backup_id"]),
+                    actor=ActorContext.for_user(
+                        active_user, origin="ai", correlation_id=correlation_id
+                    ),
+                )
                 task_id = None
                 queued = False
             elif tool_name == "propose_server_delete":

@@ -118,6 +118,13 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # als ausdrueckliche Ausnahme in `ai_proposal_service._permission_for`.
     "propose_server_lifecycle": Werkzeug("server_write"),
     "propose_backup": Werkzeug("server_write", recht="server.backups.create"),
+    # Einspielen ueberschreibt alle Serverdaten und ist so wenig umkehrbar wie
+    # das Loeschen — ein falsch gewaehltes Backup holt niemand zurueck. Deshalb
+    # dieselbe Sperre, ausdrueckliche Vorgabe des Betreibers. Anlegen bleibt
+    # autonomiefaehig: ein zusaetzliches Backup schadet nie.
+    "propose_backup_restore": Werkzeug(
+        "server_write", immer_bestaetigen=True, recht="server.backups.restore"
+    ),
     "propose_config_update": Werkzeug("server_write", recht="server.files.write"),
     "propose_mod_install": Werkzeug("server_write", recht="server.mods.write"),
     # Eine Netzwerkaenderung startet den Container neu und kann einen Server
@@ -152,7 +159,6 @@ WERKZEUGE: dict[str, Werkzeug] = {
 GEPLANT_IMMER_BESTAETIGEN = frozenset({
     "propose_server_wipe",
     "propose_server_reinstall",
-    "propose_backup_restore",
     "propose_permission_change",
     "propose_secret_rotation",
     "propose_blueprint_change",

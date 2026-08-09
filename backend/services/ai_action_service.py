@@ -49,6 +49,9 @@ MAX_LISTED_ACTIONS = 20
 MAX_LISTED_BLUEPRINTS = 80
 MAX_LISTED_NODES = 30
 MAX_REASON_CHARS = 500
+# Ein Backup-Name ist eine Wiedererkennungshilfe in einer Liste, keine
+# Beschreibung. Was laenger ist, wird in der Oberflaeche ohnehin abgeschnitten.
+MAX_BACKUP_NAME_CHARS = 64
 # Grenzen der Rueckfrage. Vier Vorschlaege sind das Aeusserste, was man
 # nebeneinander noch vergleicht; darueber wird aus einer Wahl eine Liste.
 MAX_QUESTION_OPTIONS = 4
@@ -506,9 +509,31 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_backup",
-            "Schlaegt ein Server-Backup zur manuellen Bestaetigung vor.",
-            dict(_RATIONALE_SCHEMA),
+            "Schlaegt ein Server-Backup zur manuellen Bestaetigung vor. Der "
+            "Name hilft dem Benutzer, es spaeter wiederzuerkennen — nenne den "
+            "Anlass, nicht das Datum.",
+            {
+                **_RATIONALE_SCHEMA,
+                "name": {"type": "string", "maxLength": MAX_BACKUP_NAME_CHARS},
+            },
             list(_RATIONALE_REQUIRED),
+        ),
+        _server_function(
+            "propose_backup_restore",
+            "Schlaegt vor, ein vorhandenes Backup einzuspielen. Ueberschreibt "
+            "**alle** Serverdaten und stoppt den Server dabei; was seit dem "
+            "Backup entstanden ist, geht verloren. Verlangt immer eine "
+            "Bestaetigung, auch im autonomen Modus. Die backup_id stammt aus "
+            "read_server_backups — rate sie nie.",
+            {
+                **_RATIONALE_SCHEMA,
+                "backup_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "ID aus read_server_backups.",
+                },
+            },
+            ["backup_id", *_RATIONALE_REQUIRED],
         ),
         _server_function(
             "propose_server_delete",
