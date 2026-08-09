@@ -274,6 +274,80 @@ def _persist_write_proposals(
         return results
 
 
+def _write_followup_messages(
+    *, conversation_id: str, tool_calls, proposals: list[dict]
+) -> list[dict]:
+    """Gibt dem Modell zurueck, was aus seinen Schreib-Aufrufen geworden ist.
+
+    Ohne diesen Rueckfluss endete ein Schreibvorgang stumm: das Modell hatte
+    nur einen Werkzeugaufruf abgegeben und nie erfahren, ob er durchging. Die
+    Antwortnachricht blieb leer ("Keine Antwort erhalten"), und — schwerer
+    wiegend — der naechste Zug sah eine Historie ohne jede Spur der Aktion.
+    Ein blosses "danke" wirkte dort wie eine noch offene Bitte, und das Modell
+    stoppte denselben Server ein zweites Mal.
+
+    Der Ergebnistext wird zusaetzlich als `AiToolResult` abgelegt. Die
+    Abschlussrunde koennte auch ohne Text enden; die Zeile stellt sicher, dass
+    die Historie den Vorgang trotzdem kennt.
+    """
+    outcome_by_tool: dict[str, list[dict]] = {}
+    for proposal in proposals:
+        outcome_by_tool.setdefault(proposal["tool_name"], []).append({
+            "status": proposal.get("status"),
+            "autonomous": proposal.get("autonomous"),
+            "server_id": proposal.get("server_id"),
+            **({"error_code": proposal["error_code"]} if proposal.get("error_code") else {}),
+        })
+
+    assistant_call = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
+                },
+            }
+            for call in tool_calls
+        ],
+    }
+    messages: list[dict] = [assistant_call]
+    for call in tool_calls:
+        outcomes = outcome_by_tool.get(call.name, [])
+        # `succeeded` heisst ausgefuehrt, `proposed` heisst: wartet auf den
+        # Menschen. Die Unterscheidung muss beim Modell ankommen, sonst meldet
+        # es einen Vorschlag als erledigt.
+        payload = {"tool": call.name, "outcomes": outcomes}
+        messages.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+        })
+
+    try:
+        with SessionLocal() as db:
+            for tool_name, outcomes in outcome_by_tool.items():
+                db.add(AiToolResult(
+                    id=str(uuid4()),
+                    conversation_id=conversation_id,
+                    tool_name=tool_name,
+                    result_json=json.dumps(
+                        {"outcomes": outcomes}, ensure_ascii=True, separators=(",", ":")
+                    ),
+                ))
+            db.commit()
+    except Exception:
+        # Die Spur in der Historie ist wichtig, aber nicht wichtiger als die
+        # Antwort. Scheitert das Schreiben, laeuft die Abschlussrunde trotzdem.
+        logger.warning(
+            "Ergebnis der Schreibaktion nicht persistiert conversation_id=%s", conversation_id
+        )
+    return messages
+
+
 async def stream_conversation_reply(
     *,
     client: httpx.AsyncClient,
@@ -423,18 +497,37 @@ async def stream_conversation_reply(
                 for call in current_usage.tool_calls
             }
             if kinds == {"write"}:
-                # Schreib-Tools beenden die Schleife: ab hier entscheidet der
-                # Mensch (oder, bei erteilter Freigabe, die Autonomiegrenze).
-                for proposal in _persist_write_proposals(
+                # Ab hier entscheidet der Mensch (oder, bei erteilter Freigabe,
+                # die Autonomiegrenze) — es folgt also keine weitere Aktion.
+                proposals = _persist_write_proposals(
                     user_id=user_id,
                     conversation_id=conversation_id,
                     tool_calls=current_usage.tool_calls,
                     correlation_id=str(request_id),
-                ):
+                )
+                for proposal in proposals:
                     yield sse_event(
                         "action" if proposal.get("autonomous") else "proposal", proposal
                     )
-                break
+                # Frueher endete der Stream hier. Das hatte zwei Folgen, die im
+                # Betrieb beide auffielen: die Antwortnachricht blieb leer
+                # ("Keine Antwort erhalten"), und die Historie enthielt keine
+                # Spur der Aktion — ein blosses "danke" wirkte im naechsten Zug
+                # wie eine noch offene Bitte, und derselbe Server wurde ein
+                # zweites Mal gestoppt.
+                #
+                # Stattdessen bekommt das Modell das Ergebnis zurueck und eine
+                # letzte Runde **ohne Werkzeuge**, um den Vorgang abzuschliessen.
+                # Ohne `tools = None` koennte es in dieser Runde erneut eine
+                # Aktion ausloesen — genau die Schleife, die wir schliessen.
+                provider_messages.extend(_write_followup_messages(
+                    conversation_id=conversation_id,
+                    tool_calls=current_usage.tool_calls,
+                    proposals=proposals,
+                ))
+                tools = None
+                current_usage = StreamUsage()
+                continue
             if kinds != {"read"}:
                 # Gemischt oder unbekannt: nicht entscheidbar, also gar nichts.
                 raise AiProviderRequestError("AI_PROVIDER_TOOL_SEQUENCE_INVALID")

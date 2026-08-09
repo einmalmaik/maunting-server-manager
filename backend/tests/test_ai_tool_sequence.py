@@ -294,10 +294,20 @@ async def test_several_read_rounds_may_precede_a_write_round(
     events = await _collect(regular_user, conversation, provider)
 
     assert _error_codes(events) == []
-    # Zwei Lese-Durchlaeufe plus der Durchlauf, der den Vorschlag erzeugt. Ein
-    # vierter Aufruf waere falsch: mit dem Vorschlag endet der Austausch, danach
-    # ist der Mensch dran.
-    assert len(seen) == 3
+    # Zwei Lese-Durchlaeufe, der Durchlauf mit dem Vorschlag — und eine
+    # Abschlussrunde, in der das Modell den Vorgang in Worte fasst.
+    #
+    # Frueher endete der Stream nach dem dritten Aufruf. Das hatte zwei Folgen,
+    # die im Betrieb beide auffielen: die Antwortnachricht blieb leer ("Keine
+    # Antwort erhalten"), und die Historie enthielt keine Spur der Aktion — ein
+    # blosses "danke" wirkte im naechsten Zug wie eine noch offene Bitte, und
+    # derselbe Server wurde ein zweites Mal gestoppt.
+    assert len(seen) == 4
+    # Und das Modell hat das Ergebnis tatsaechlich zu sehen bekommen: die
+    # letzte Runde enthaelt eine Werkzeugantwort mit dem Ausgang des
+    # Vorschlags. Ohne sie waere die Abschlussrunde eine Runde ins Blaue.
+    last_tool_messages = [item for item in seen[-1] if item.get("role") == "tool"]
+    assert any("propose_backup" in str(item.get("content")) for item in last_tool_messages)
     assert any(event.startswith("event: proposal") for event in events)
     assert db.query(AiActionProposal).count() == 1
 
@@ -441,3 +451,80 @@ async def test_system_prompt_names_untrusted_data_as_data(
     assert system["role"] == "system"
     assert "untrusted" in system["content"]
     assert "niemals" in system["content"]
+
+
+@pytest.mark.asyncio
+async def test_an_executed_action_leaves_a_trace_the_next_turn_can_see(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Fall aus dem Betrieb: "stoppe den Server" — "danke" — und es passiert nochmal.
+
+    Beobachtet mit einer echten autonomen Aktion: nach dem Stoppen kam keine
+    Abschlussnachricht ("Keine Antwort erhalten"), und das folgende "danke"
+    loeste denselben Stop ein zweites Mal aus.
+
+    Die Ursache lag nicht am Modell. Der Stream endete frueher direkt nach dem
+    Schreibwerkzeug, ohne dem Modell das Ergebnis zurueckzugeben. Die
+    Antwortnachricht blieb dadurch leer — und eine leere Assistentenzeile sagt
+    im naechsten Zug nichts darueber aus, dass die Bitte bereits erfuellt ist.
+    Das Modell sah eine offene Aufforderung und handelte erneut.
+
+    Geprueft wird deshalb beides: dass eine Antwort entsteht **und** dass der
+    Vorgang in der Historie auftaucht.
+    """
+    from services import ai_autonomy_service
+    from services.ai_context_service import build_provider_messages
+
+    server = _server(db, "spur")
+    _grant(db, regular_user, server=server, server_keys=(
+        "server.view", "server.backups.create"
+    ))
+    role_id = db.query(Role).filter(Role.name == f"seq-{regular_user.id}").one().id
+    db.add(RolePermission(role_id=role_id, permission_key="ai.autonomous.use"))
+    db.commit()
+    ai_autonomy_service.set_grant(
+        db, user=regular_user, server_id=server.id, enabled=True,
+        max_actions_per_hour=5, granted_by=regular_user.id,
+    )
+    db.commit()
+    monkeypatch.setattr(
+        "services.backup_orchestrator.create_server_backup",
+        lambda server_id, _db, name=None: type("B", (), {"id": 99})(),
+    )
+
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    seen = _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="propose_backup", arguments={
+            "server_id": server.id,
+            "reason": "Vom Benutzer angefragt.",
+            "expected_effect": "Ein Sicherungsstand liegt vor.",
+        }),
+    ]])
+
+    events = await _collect(regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    assert any(event.startswith("event: action") for event in events)
+
+    # 1. Es gibt eine Abschlussrunde — das Modell kam ueberhaupt dazu, etwas
+    #    zu sagen. Vorher endete der Stream hier.
+    assert len(seen) == 2
+
+    # 2. Die Antwortnachricht ist nicht leer. Genau das stand im Chat als
+    #    "Keine Antwort erhalten".
+    from models import AiMessage
+
+    assistant = (
+        db.query(AiMessage)
+        .filter(AiMessage.conversation_id == conversation.id, AiMessage.role == "assistant")
+        .order_by(AiMessage.created_at.desc())
+        .first()
+    )
+    assert assistant is not None and assistant.content.strip()
+
+    # 3. Der naechste Zug sieht den Vorgang. Ohne diese Spur wirkt ein "danke"
+    #    wie eine noch offene Bitte.
+    db.expire_all()
+    next_turn = build_provider_messages(db, conversation, "danke")
+    assert any("propose_backup" in str(item.get("content")) for item in next_turn)
