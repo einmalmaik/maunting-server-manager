@@ -35,6 +35,11 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("panel.database.admin",      "panel",   "Panel-Datenbank verwalten"),
     PermissionDef("servers.create",            "servers", "Neuen Server anlegen"),
     PermissionDef("servers.delete",            "servers", "Server löschen (global, nicht delegierbar)"),
+    # Blueprints hingen bisher an `panel.settings.write` — dem Recht, das auch
+    # Steam-Zugangsdaten und E-Mail-Versand öffnet. Ein Hoster, der jemandem
+    # erlauben will, eine Spielversion zu pflegen, musste ihm damit das halbe
+    # Panel geben. Eigenes Recht, weil es eine eigene Aufgabe ist.
+    PermissionDef("blueprints.manage",         "servers", "Blueprints anlegen, ändern, löschen"),
     PermissionDef("system.view",               "system",  "System-Ressourcen, Interfaces, Version"),
     PermissionDef("system.audit.read",         "system",  "Admin-Audit-Log lesen (privilegierte Aktionen)"),
     PermissionDef("system.secrets.rotate",     "system",  "Cluster-Secrets rotieren (Managed-Postgres-Admin)"),

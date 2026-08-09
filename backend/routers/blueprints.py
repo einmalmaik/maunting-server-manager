@@ -1,9 +1,14 @@
 """Blueprint-Router — Listing, Template-Download, Import + Loeschen.
 
-RBAC: Import + Loeschen erfordern ``panel.settings.write`` (KISS: keine neue
-Permission, wer Settings darf, darf auch Blueprints managen). Listing + Template
+RBAC: Import + Loeschen erfordern ``blueprints.manage``. Das war frueher
+``panel.settings.write`` mit der Begruendung "wer Settings darf, darf auch
+Blueprints managen" — im Hoster-Betrieb zu grob: wer eine Spielversion pflegen
+soll, bekam damit auch Steam-Zugangsdaten und E-Mail-Versand. Listing + Template
 sind fuer alle eingeloggten User offen, damit die UI Doku/Server-Erstellen
 darstellen kann.
+
+Geschrieben wird in `services/blueprint_service.py` — die eine Implementierung,
+die auch die KI nutzt, wenn sie einen Blueprint ableitet.
 
 CSRF-Schutz auf allen state-changing Endpunkten (Import + Delete).
 """
@@ -16,19 +21,13 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
+from services import blueprint_service
+
 from blueprints import (
     Blueprint,
-    BlueprintValidationError,
     COMMENTED_TEMPLATE_DE,
     COMMENTED_TEMPLATE_EN,
     get_registry,
-    load_blueprint_dict,
-    reload_registry,
-)
-from blueprints.registry import (
-    BlueprintSourceOrigin,
-    community_blueprint_path,
-    ensure_community_dir,
 )
 from dependencies import get_current_user, require_global, verify_csrf
 from models import User
@@ -117,20 +116,25 @@ def get_blueprint(
 @router.post("/import", status_code=201)
 async def import_blueprint(
     request: Request,
-    _user: User = Depends(require_global("panel.settings.write")),
+    _user: User = Depends(require_global("blueprints.manage")),
     __=Depends(verify_csrf),
 ) -> JSONResponse:
     """Importiert eine Community-Blueprint via Roh-JSON-Body.
 
-    Sicherheitsregeln:
-    - Body wird strikt ueber das Pydantic-Schema validiert (kein ``extra``).
-    - ID darf nicht mit nativer Blueprint kollidieren — native gewinnt immer.
-    - Ueberschreiben vorhandener Community-Blueprint ist erlaubt (Update-Workflow).
+    HTTP-Rand: Body lesen und dekodieren. Pruefen und Speichern stehen in
+    `services/blueprint_service.py`, weil auch die KI Blueprints ableiten kann
+    und dabei denselben Weg nehmen muss — Schemapruefung, Native-Kollision und
+    Registry-Neuladen inklusive.
+
+    Das Recht ist seit dieser Aenderung `blueprints.manage` statt
+    `panel.settings.write`. Wer eine Spielversion pflegen darf, musste dafuer
+    nicht auch Steam-Zugangsdaten und E-Mail-Versand bekommen.
     """
     try:
         raw_bytes = await request.body()
         raw_str = raw_bytes.decode("utf-8")
         from blueprints.schema import _strip_json_comments
+
         clean_str = _strip_json_comments(raw_str)
         raw = json.loads(clean_str)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -139,87 +143,19 @@ async def import_blueprint(
             detail=f"Body ist kein gueltiges JSON (oder falsches Encoding): {str(exc)}",
         ) from exc
 
-    if not isinstance(raw, dict):
-        raise HTTPException(
-            status_code=400, detail="Body muss ein JSON-Objekt sein."
-        )
-
-    try:
-        blueprint = load_blueprint_dict(raw)
-    except BlueprintValidationError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"message": "Blueprint-Validierung fehlgeschlagen", "errors": exc.errors},
-        ) from exc
-
-    # Native-Kollision -> 409: Wir ueberschreiben niemals native Blueprints.
-    registry = get_registry()
-    existing = registry.get(blueprint.meta.id)
-    if existing is not None and existing.origin == BlueprintSourceOrigin.NATIVE:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Blueprint-ID '{blueprint.meta.id}' kollidiert mit einer "
-                "nativen Blueprint und darf nicht ueberschrieben werden."
-            ),
-        )
-
-    ensure_community_dir()
-    try:
-        target = community_blueprint_path(blueprint.meta.id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    payload = blueprint.model_dump(mode="json", by_alias=True)
-    try:
-        target.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        logger.error("Konnte Blueprint %s nicht schreiben: %s", target.name, exc)
-        raise HTTPException(
-            status_code=500, detail="Blueprint konnte nicht gespeichert werden."
-        ) from exc
-
-    reload_registry()
+    blueprint_id = blueprint_service.save_community_blueprint(raw)
     return JSONResponse(
         status_code=201,
-        content={
-            "message": "Blueprint importiert",
-            "id": blueprint.meta.id,
-        },
+        content={"message": "Blueprint importiert", "id": blueprint_id},
     )
 
 
 @router.delete("/{blueprint_id}", status_code=204)
 def delete_blueprint(
     blueprint_id: str,
-    _user: User = Depends(require_global("panel.settings.write")),
+    _user: User = Depends(require_global("blueprints.manage")),
     __=Depends(verify_csrf),
 ) -> Response:
     """Loescht eine Community-Blueprint. Native-IDs sind hart geschuetzt (400)."""
-    entry = get_registry().get(blueprint_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Blueprint nicht gefunden")
-    if entry.origin == BlueprintSourceOrigin.NATIVE:
-        raise HTTPException(
-            status_code=400,
-            detail="Native Blueprints sind read-only und koennen nicht geloescht werden.",
-        )
-
-    try:
-        target = community_blueprint_path(blueprint_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
-        target.unlink(missing_ok=True)
-    except OSError as exc:
-        logger.error("Konnte Blueprint %s nicht loeschen: %s", target.name, exc)
-        raise HTTPException(
-            status_code=500, detail="Blueprint konnte nicht geloescht werden."
-        ) from exc
-
-    reload_registry()
+    blueprint_service.delete_community_blueprint(blueprint_id)
     return Response(status_code=204)

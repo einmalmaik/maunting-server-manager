@@ -90,6 +90,7 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # ── Global lesen ──────────────────────────────────────────────────
     "list_my_servers": Werkzeug("global_read"),
     "list_blueprints": Werkzeug("global_read"),
+    "read_blueprint": Werkzeug("global_read"),
     "read_node_capacity": Werkzeug("global_read"),
     "read_node_health": Werkzeug("global_read"),
     "web_search": Werkzeug("global_read"),
@@ -147,6 +148,26 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="servers.delete",
         recht_global=True,
     ),
+    # Ein Blueprint ist die Vorlage **aller** Server seines Typs. Eine Ableitung
+    # legt zwar nur eine neue Datei an, aber sie wird sofort auswaehlbar — und
+    # ein Fehler darin fuehrt zu Servern, die nicht starten. Deshalb
+    # bestaetigungspflichtig, wie der Betreiber es fuer Blueprints verlangt hat
+    # ("nur Vorschlaege, immer Bestaetigung").
+    "propose_blueprint_change": Werkzeug(
+        "global_write",
+        immer_bestaetigen=True,
+        recht="blueprints.manage",
+        recht_global=True,
+    ),
+    # Der Wechsel selbst: `game_type` eines bestehenden Servers. Serverbezogen,
+    # aber mit dem globalen Blueprint-Recht — wer Blueprints nicht pflegen darf,
+    # soll auch keinen Server auf einen anderen umstellen.
+    "propose_server_blueprint_switch": Werkzeug(
+        "server_write",
+        immer_bestaetigen=True,
+        recht="blueprints.manage",
+        recht_global=True,
+    ),
     "propose_server_create": Werkzeug(
         "global_write", recht="servers.create", recht_global=True
     ),
@@ -162,7 +183,6 @@ GEPLANT_IMMER_BESTAETIGEN = frozenset({
     "propose_server_reinstall",
     "propose_permission_change",
     "propose_secret_rotation",
-    "propose_blueprint_change",
 })
 
 

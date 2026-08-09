@@ -327,6 +327,100 @@ def _bind_ip_payload(db: Session, server: Server, arguments: dict) -> tuple[dict
     }
 
 
+def _blueprint_change_payload(arguments: dict) -> tuple[dict, dict]:
+    """Baut den abgeleiteten Blueprint **schon beim Vorschlagen**.
+
+    Nicht erst beim Ausfuehren, und das ist der Punkt: der Mensch soll sehen,
+    was herauskommt, bevor er zustimmt — nicht eine Liste von Aenderungen, deren
+    Zusammenwirken er im Kopf nachvollziehen muesste. Ein Vorschlag, dessen
+    Ergebnis das Schema verletzt, entsteht damit gar nicht erst; sonst
+    scheiterte er nach der Bestaetigung, und jemand haette einer Aenderung
+    zugestimmt, die es nicht gibt.
+    """
+    from services import blueprint_service
+
+    if set(arguments) != {"source_id", "new_id", "changes"}:
+        raise AiActionValidationError("Blueprint-Tool hat ungueltige Argumente")
+    aenderungen = arguments["changes"]
+    if not isinstance(aenderungen, dict) or not aenderungen:
+        raise AiActionValidationError("Ein Blueprint-Vorschlag ohne Aenderung ist keiner")
+    try:
+        nutzlast = blueprint_service.derived_payload(
+            str(arguments["source_id"]),
+            new_id=str(arguments["new_id"]),
+            changes=aenderungen,
+        )
+    except HTTPException as exc:
+        raise AiActionValidationError(str(exc.detail)) from exc
+
+    quelle = blueprint_service.blueprint_view(str(arguments["source_id"]))["blueprint"]
+    payload = {"blueprint": nutzlast}
+    preview = {
+        "operation": "blueprint_change",
+        "source_id": arguments["source_id"],
+        "new_id": arguments["new_id"],
+        # Was sich wirklich unterscheidet — die Zeile, die der Bestaetigende
+        # liest. `changes` allein waere die Absicht, nicht das Ergebnis.
+        "env_before": (quelle.get("runtime") or {}).get("env") or {},
+        "env_after": (nutzlast.get("runtime") or {}).get("env") or {},
+        "image_before": (quelle.get("runtime") or {}).get("image"),
+        "image_after": (nutzlast.get("runtime") or {}).get("image"),
+        "restart_required": False,
+    }
+    return payload, preview
+
+
+def _blueprint_switch_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
+    """Prueft, ob dieser Server auf diesen Blueprint umgestellt werden kann.
+
+    Zwei Bedingungen, beide aus dem Betrieb begruendet:
+
+    **Der Server muss gestoppt sein.** Ein laufender Container haengt am alten
+    Image; ein Wechsel unter ihm weg fuehrt zu einem Zustand, den weder Panel
+    noch Guardian einordnen koennen.
+
+    **Die Portrollen muessen uebereinstimmen.** Die vergebenen Ports haengen an
+    den Namen (`game`, `query`, `rcon`). Passen sie nicht, bliebe ein belegter
+    Port ohne Zuordnung oder ein verlangter ohne Vergabe.
+    """
+    from services import blueprint_service
+
+    if set(arguments) != {"blueprint_id"}:
+        raise AiActionValidationError("Umstell-Tool hat ungueltige Argumente")
+    ziel_id = str(arguments["blueprint_id"])
+    if ziel_id == server.game_type:
+        raise AiActionValidationError("Der Server nutzt diesen Blueprint bereits")
+    if server.status != "stopped":
+        raise AiActionValidationError(
+            "Der Server muss gestoppt sein, bevor er umgestellt werden kann"
+        )
+    try:
+        ziel = blueprint_service.blueprint_view(ziel_id)
+        alt = blueprint_service.blueprint_view(server.game_type)
+    except HTTPException as exc:
+        raise AiActionValidationError(str(exc.detail)) from exc
+
+    hindernis = blueprint_service.switch_incompatibility(
+        alt["blueprint"], ziel["blueprint"]
+    )
+    if hindernis:
+        raise AiActionValidationError(hindernis)
+
+    payload = {"blueprint_id": ziel_id}
+    preview = {
+        "operation": "blueprint_switch",
+        "from_blueprint": server.game_type,
+        "to_blueprint": ziel_id,
+        "env_before": (alt["blueprint"].get("runtime") or {}).get("env") or {},
+        "env_after": (ziel["blueprint"].get("runtime") or {}).get("env") or {},
+        "current_status": server.status,
+        # Der Server bleibt gestoppt. Ihn automatisch zu starten waere ein
+        # zweiter Vorgang, den niemand bestaetigt hat.
+        "restart_required": True,
+    }
+    return payload, preview
+
+
 def _backup_restore_payload(
     db: Session, server: Server, arguments: dict
 ) -> tuple[dict, dict]:
@@ -426,7 +520,10 @@ def create_proposal(
     rest = {key: value for key, value in arguments.items() if key not in {"reason", "expected_effect"}}
 
     server: Server | None = None
-    if tool_name in GLOBAL_WRITE_TOOLS:
+    if tool_name == "propose_blueprint_change":
+        payload, preview = _blueprint_change_payload(rest)
+        expected_revision = None
+    elif tool_name in GLOBAL_WRITE_TOOLS:
         payload, preview = _server_create_payload(db, arguments)
         expected_revision = None
     else:
@@ -464,6 +561,9 @@ def create_proposal(
             expected_revision = None
         elif tool_name == "propose_backup_restore":
             payload, preview = _backup_restore_payload(db, server, rest)
+            expected_revision = None
+        elif tool_name == "propose_server_blueprint_switch":
+            payload, preview = _blueprint_switch_payload(server, rest)
             expected_revision = None
         elif tool_name == "propose_server_delete":
             if rest:
@@ -923,6 +1023,36 @@ def execute_proposal(
                 )
                 task_id = None
                 queued = False
+            elif tool_name == "propose_server_blueprint_switch":
+                # Der eigentliche Wechsel ist eine Zeile. Alles, was ihn
+                # gefaehrlich machen koennte — laufender Container, nicht
+                # passende Ports — wurde beim Vorschlagen geprueft und wird
+                # hier erneut geprueft: zwischen Vorschlag und Bestaetigung
+                # koennen Minuten liegen, und der Server kann inzwischen
+                # gestartet worden sein.
+                from services import blueprint_service
+
+                ziel_id = str(payload["blueprint_id"])
+                server_row = db.query(Server).filter(Server.id == server_id).first()
+                if server_row is None:
+                    raise AiActionStateError("AI_ACTION_TARGET_MISSING")
+                if server_row.status != "stopped":
+                    raise AiActionStateError("AI_ACTION_SERVER_BUSY")
+                try:
+                    ziel = blueprint_service.blueprint_view(ziel_id)
+                    alt = blueprint_service.blueprint_view(server_row.game_type)
+                except HTTPException as exc:
+                    raise AiActionStateError("AI_ACTION_TARGET_MISSING") from exc
+                if blueprint_service.switch_incompatibility(
+                    alt["blueprint"], ziel["blueprint"]
+                ):
+                    raise AiActionStateError("AI_ACTION_BLUEPRINT_INCOMPATIBLE")
+                vorher = server_row.game_type
+                server_row.game_type = ziel_id
+                db.flush()
+                result = {"from_blueprint": vorher, "to_blueprint": ziel_id}
+                task_id = None
+                queued = False
             elif tool_name == "propose_server_delete":
                 # Derselbe Aufruf, den der Panel-Router und die Hoster-Anbindung
                 # nehmen. `delete_server_completely` prueft `servers.delete`
@@ -979,6 +1109,23 @@ def execute_proposal(
                     proposal_id=row_id,
                 )
                 server_id = created_server_id
+                queued = False
+            elif tool_name == "propose_blueprint_change":
+                # Gespeichert wird die Nutzlast, die beim **Vorschlagen**
+                # entstanden ist — nicht eine neu berechnete. Der Mensch hat
+                # genau dieses Ergebnis gesehen und bestaetigt; zwischenzeitlich
+                # geaenderte Vorlagen duerfen daran nichts mehr drehen.
+                from services import blueprint_service
+
+                try:
+                    blueprint_id = blueprint_service.save_community_blueprint(
+                        dict(payload["blueprint"])
+                    )
+                except HTTPException as exc:
+                    logger.info("Blueprint-Vorschlag abgelehnt: %s", exc.detail)
+                    raise AiActionStateError("AI_ACTION_BLUEPRINT_REJECTED") from exc
+                result = {"blueprint_id": blueprint_id}
+                task_id = None
                 queued = False
             else:
                 raise AiActionStateError("AI_ACTION_TOOL_NOT_ALLOWED")

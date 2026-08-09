@@ -367,6 +367,16 @@ def _global_tool_definitions() -> list[dict]:
             [],
         ),
         _function(
+            "read_blueprint",
+            "Liest einen Blueprint vollstaendig — Image, Startbefehl, Ports und "
+            "Umgebungsvariablen. **Die Spielversion steht hier, nicht am "
+            "Server**: bei Minecraft in runtime.env.VERSION, bei Steam-Titeln in "
+            "source.steam.branch, sonst im Image-Tag. `origin: native` bedeutet "
+            "mitgeliefert und schreibgeschuetzt.",
+            {"blueprint_id": {"type": "string", "maxLength": 64}},
+            ["blueprint_id"],
+        ),
+        _function(
             "read_node_capacity",
             "Liest die Kapazitaet aller Hosts. **Buchung und Verbrauch sind "
             "zweierlei**: `ram_allocated_mb` ist die Summe aller zugewiesenen "
@@ -386,6 +396,36 @@ def _global_tool_definitions() -> list[dict]:
             "Fuer Fragen wie 'bei einer meiner Nodes stimmt etwas nicht'.",
             {},
             [],
+        ),
+        _function(
+            "propose_blueprint_change",
+            "Leitet aus einem vorhandenen Blueprint einen neuen ab — so aendert "
+            "man eine Spielversion, ohne die Vorlage aller anderen Server "
+            "anzufassen. Die Quelle bleibt unveraendert. Aenderbar sind "
+            "meta.name, meta.description, runtime.image und runtime.env; "
+            "runtime.env wird gemischt, vorhandene Variablen bleiben also "
+            "erhalten.",
+            {
+                **_RATIONALE_SCHEMA,
+                "source_id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Vorlage aus list_blueprints, auch eine native.",
+                },
+                "new_id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Neue ID, nur a-z, 0-9 und _.",
+                },
+                "changes": {
+                    "type": "object",
+                    "description": (
+                        'Punktpfade auf Werte, z. B. {"runtime.env": '
+                        '{"VERSION": "1.20.1"}}.'
+                    ),
+                },
+            },
+            ["source_id", "new_id", "changes", *_RATIONALE_REQUIRED],
         ),
         _function(
             "propose_server_create",
@@ -541,6 +581,23 @@ def provider_tool_definitions() -> list[dict]:
                 },
             },
             ["backup_id", *_RATIONALE_REQUIRED],
+        ),
+        _server_function(
+            "propose_server_blueprint_switch",
+            "Schlaegt vor, einen bestehenden Server auf einen anderen Blueprint "
+            "umzustellen — so aendert man die Spielversion, denn sie steht im "
+            "Blueprint und nicht am Server. Der Server muss gestoppt sein, und "
+            "die Portrollen beider Blueprints muessen uebereinstimmen. Leite "
+            "vorher mit propose_blueprint_change einen passenden ab.",
+            {
+                **_RATIONALE_SCHEMA,
+                "blueprint_id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Ziel-Blueprint aus list_blueprints.",
+                },
+            },
+            ["blueprint_id", *_RATIONALE_REQUIRED],
         ),
         _server_function(
             "propose_server_delete",
@@ -1106,6 +1163,25 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
 
     if tool_name == "forget_skill":
         return _execute_forget_skill(db, user=user, arguments=arguments)
+
+    if tool_name == "read_blueprint":
+        # Ein Blueprint ist eine Vorlage, kein Betriebsgeheimnis: wer Server
+        # anlegen **oder** Blueprints pflegen darf, darf ihn lesen. Ohne den
+        # zweiten Fall koennte jemand mit `blueprints.manage` seine eigene
+        # Vorlage nicht ansehen.
+        if not (
+            permission_service.has_global_permission(db, user, "servers.create")
+            or permission_service.has_global_permission(db, user, "blueprints.manage")
+        ):
+            raise AiActionValidationError("Blueprint-Einsicht ist nicht erlaubt")
+        if set(arguments) != {"blueprint_id"}:
+            raise AiActionValidationError("Blueprint-Tool hat ungueltige Argumente")
+        from services import blueprint_service
+
+        try:
+            return blueprint_service.blueprint_view(str(arguments["blueprint_id"]))
+        except HTTPException as exc:
+            raise AiActionValidationError(str(exc.detail)) from exc
 
     _require_no_arguments(tool_name, arguments)
 

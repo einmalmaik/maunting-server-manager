@@ -43,6 +43,10 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'Server löschen',
     desc: 'Erlaubt das dauerhafte Löschen von Gameservern aus dem System (global, destruktiv).',
   },
+  'blueprints.manage': {
+    title: 'Blueprints verwalten',
+    desc: 'Erlaubt das Anlegen, Ändern und Löschen von Blueprints — den Vorlagen, aus denen Server entstehen. Damit lässt sich zum Beispiel eine andere Spielversion bereitstellen. Mitgelieferte Blueprints bleiben unveränderbar; man leitet eigene davon ab.',
+  },
   'system.view': {
     title: 'Systemstatus anzeigen',
     desc: 'Erlaubt das Betrachten der Systemauslastung, Log-Dateien und Netzwerkschnittstellen des Host-Systems.',
@@ -289,6 +293,7 @@ const SUBGROUPS = [
     keys: [
       'servers.create',
       'servers.delete',
+      'blueprints.manage',
       'nodes.read',
       'nodes.manage',
       'system.view',
