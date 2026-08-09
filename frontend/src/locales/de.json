@@ -411,6 +411,16 @@
         "load": "Zustand der Websuche konnte nicht geladen werden.",
         "save": "Suchschlüssel konnte nicht gespeichert werden."
       }
+    },
+    "memoryNotice": {
+      "title": "Die KI kann sich Dinge über dich merken",
+      "body": "Wenn du es erlaubst, merkt sich der Assistent dauerhaft Vorlieben und Eigenheiten — auch Persönliches. Diese Notizen werden bei jeder Anfrage an den KI-Anbieter übertragen. Achte darauf, was du teilst. Derzeit ist das Gedächtnis deaktiviert.",
+      "enable": "Aktivieren",
+      "later": "Später",
+      "never": "Nicht mehr fragen",
+      "hint": "Du kannst das jederzeit unter Profil → KI ändern und einzelne Einträge dort einsehen und löschen.",
+      "enabled": "Gedächtnis aktiviert.",
+      "failed": "Die Antwort konnte nicht gespeichert werden."
     }
   },
   "shell": {
@@ -2328,7 +2338,8 @@
           "context": "Übertragen werden die eingegebene Nachricht, begrenzte vorherige Nachrichten und ausschließlich freigegebene Servermetadaten; IP-Adressen, Installationspfade, vollständige Konfigurationen und erkannte Secrets werden nicht in den Modellkontext aufgenommen",
           "credentials": "Persönliche und zentrale Provider-API-Keys werden über DIS kontextgebunden verschlüsselt und nach dem Speichern nur als Konfigurationsstatus beziehungsweise Maske angezeigt",
           "usage": "Provider, Modell, Tokenreservierung, tatsächlicher oder konservativ geschätzter Verbrauch und Zeitpunkte werden zur Kontingentdurchsetzung gespeichert; Preiswerte werden ohne belastbare Preisquelle nicht behauptet",
-          "memory": "Optionale persönliche, serverbezogene und panelweite Memory-Einträge werden verschlüsselt gespeichert, sind einsehbar und löschbar und werden nur bei aktivierter Memory-Nutzung als nicht vertrauenswürdiger Kontext übertragen",
+          "memory": "Optionale Memory-Eintraege (persoenlich, serverbezogen, teambezogen oder panelweit) werden verschluesselt und an ihren Besitzer gebunden gespeichert, sind jederzeit einsehbar und loeschbar; teambezogene Eintraege sehen alle Mitglieder des jeweiligen Teams, persoenliche niemand ausser dem Nutzer selbst",
+          "memoryConsent": "Das Gedaechtnis ist standardmaessig ausgeschaltet und wird erst nach ausdruecklicher Zustimmung im Chat aktiv; die Zustimmung ist jederzeit widerrufbar. Die Verschluesselung schuetzt die Datenbank im Ruhezustand — der Klartext gemerkter Eintraege wird bei jeder Anfrage an den gewaehlten Modellanbieter uebertragen",
           "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
           "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht"

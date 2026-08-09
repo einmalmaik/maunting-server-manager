@@ -20,6 +20,7 @@ import { toast } from '@/stores/toastStore'
 import { AiActionProposalCard } from './AiActionProposalCard'
 import { AiAutonomyButton } from './AiAutonomyButton'
 import { AiMarkdown } from './AiMarkdown'
+import { AiMemoryNotice } from './AiMemoryNotice'
 import { AiReasoningBlock } from './AiReasoningBlock'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -53,6 +54,7 @@ export function AiChat() {
   const canAttach = useHasPermission('ai.attachments.use')
   const canUseSkills = useHasPermission('ai.skills.use')
   const canUseAutonomy = useHasPermission('ai.autonomous.use')
+  const canUseMemory = useHasPermission('ai.memory.use')
 
   const [providers, setProviders] = useState<AiProviderAvailable[]>([])
   const [providerId, setProviderId] = useState<number | null>(null)
@@ -63,6 +65,9 @@ export function AiChat() {
   const [servers, setServers] = useState<ServerOption[]>([])
   const [skillServerId, setSkillServerId] = useState<string | null>(null)
   const [reasoning, setReasoning] = useState(false)
+  // Ob der Einwilligungshinweis faellig ist. Die 24-Stunden-Regel entscheidet
+  // das Backend — hier steht nur das Ergebnis.
+  const [memoryNoticeDue, setMemoryNoticeDue] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [streaming, setStreaming] = useState(false)
@@ -94,9 +99,15 @@ export function AiChat() {
       canUseSkills
         ? api<ServerOption[]>('/servers').catch(() => [] as ServerOption[])
         : Promise.resolve([] as ServerOption[]),
+      // Scheitert der Abruf, wird der Hinweis nicht gezeigt statt den ganzen
+      // Chat scheitern zu lassen — er ist wichtig, aber nicht so wichtig.
+      canUseMemory
+        ? aiApi.getMemoryPreference().catch(() => null)
+        : Promise.resolve(null),
     ])
-      .then(([providerRows, conversation, actions, attachmentRows, skillRows, serverRows]) => {
+      .then(([providerRows, conversation, actions, attachmentRows, skillRows, serverRows, memoryPreference]) => {
         if (!active) return
+        setMemoryNoticeDue(Boolean(memoryPreference?.notice_due))
         setProviders(providerRows)
         setProviderId(providerRows.find((item) => item.available)?.id ?? null)
         // Vorschlaege werden chronologisch zwischen die Nachrichten einsortiert,
@@ -119,7 +130,7 @@ export function AiChat() {
     return () => {
       active = false
     }
-  }, [canAttach, canUseSkills, t])
+  }, [canAttach, canUseSkills, canUseMemory, t])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' })
@@ -534,6 +545,12 @@ export function AiChat() {
 
       {/* ── Eingabe ───────────────────────────────────────────────────── */}
       <form className="border-t border-outline-variant/40 px-3 py-3 sm:px-4" onSubmit={send}>
+        {/* Der Hinweis steht ueber dem Eingabefeld, nicht in einer
+            Einstellungsseite: er soll dort auftauchen, wo die Entscheidung
+            Folgen hat — bevor jemand etwas Persoenliches tippt. */}
+        {memoryNoticeDue && (
+          <AiMemoryNotice onAnswered={() => setMemoryNoticeDue(false)} />
+        )}
         <div className="mx-auto w-full max-w-3xl">
           {attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2" aria-label={t('ai.attachments.list')}>

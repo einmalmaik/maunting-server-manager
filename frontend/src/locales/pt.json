@@ -880,5 +880,17 @@
     "s3ItemPassword": "A descriptografia só é possível com a senha de backup definida nesta instância",
     "s3ItemLocalOnly": "Sem configuração: os backups permanecem locais — nenhum dado é transmitido a terceiros",
     "section4Updated": "Nenhum dado pessoal é compartilhado com terceiros. Por razões técnicas, dados criptografados de backup podem ser armazenados em armazenamento externo compatível com S3 se o administrador o configurar (ver seção 6). Nesse caso, o provedor de armazenamento recebe apenas dados criptografados."
+  },
+  "ai": {
+    "memoryNotice": {
+      "title": "A IA pode lembrar coisas sobre você",
+      "body": "Se você permitir, o assistente guarda de forma duradoura preferências e particularidades — inclusive pessoais. Essas notas são enviadas ao provedor de IA em cada solicitação. Tenha cuidado com o que compartilha. A memória está desativada no momento.",
+      "enable": "Ativar",
+      "later": "Mais tarde",
+      "never": "Não perguntar mais",
+      "hint": "Você pode alterar isso a qualquer momento em Perfil → IA, onde também pode ver e excluir entradas.",
+      "enabled": "Memória ativada.",
+      "failed": "Não foi possível salvar sua resposta."
+    }
   }
 }

@@ -110,8 +110,9 @@ export interface AiAutonomyGrant {
 
 export interface AiMemoryEntry {
   id: string
-  scope: 'user' | 'server' | 'panel'
+  scope: 'user' | 'server' | 'team' | 'panel'
   server_id: number | null
+  team_id: number | null
   key: string
   value: string
   /** "user" = selbst hinterlegt, "ai" = von der KI gemerkt. */
@@ -120,6 +121,17 @@ export interface AiMemoryEntry {
   last_used_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface AiMemoryPreference {
+  enabled: boolean
+  /**
+   * Ob der Hinweis vor der naechsten Nachricht gezeigt werden soll. Die
+   * 24-Stunden-Regel entscheidet das Backend — sonst muesste jeder Client sie
+   * nachbauen, und zwei Nachbauten weichen irgendwann voneinander ab.
+   */
+  notice_due: boolean
+  notice_hidden: boolean
 }
 
 export interface AiSkillStep {
@@ -235,14 +247,24 @@ export const aiApi = {
     api<AiAutonomyGrant>('/ai/autonomy', { method: 'PUT', body: JSON.stringify(payload) }),
   deleteAutonomyGrant: (serverId: number | null) =>
     api(`/ai/autonomy${serverId === null ? '' : `?server_id=${serverId}`}`, { method: 'DELETE' }),
-  listMemory: (scope: AiMemoryEntry['scope'], serverId?: number) => api<AiMemoryEntry[]>(`/ai/memory?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}`),
-  saveMemory: (payload: { scope: AiMemoryEntry['scope']; server_id?: number; key: string; value: string }) => api<AiMemoryEntry>('/ai/memory', {
+  listMemory: (scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number) => api<AiMemoryEntry[]>(
+    `/ai/memory?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}${teamId ? `&team_id=${teamId}` : ''}`,
+  ),
+  saveMemory: (payload: { scope: AiMemoryEntry['scope']; server_id?: number; team_id?: number; key: string; value: string }) => api<AiMemoryEntry>('/ai/memory', {
     method: 'PUT', body: JSON.stringify(payload),
   }),
   deleteMemory: (id: string) => api(`/ai/memory/${id}`, { method: 'DELETE' }),
-  getMemoryPreference: () => api<{ enabled: boolean }>('/ai/memory/preference'),
-  setMemoryPreference: (enabled: boolean) => api<{ enabled: boolean }>('/ai/memory/preference', {
+  getMemoryPreference: () => api<AiMemoryPreference>('/ai/memory/preference'),
+  setMemoryPreference: (enabled: boolean) => api<AiMemoryPreference>('/ai/memory/preference', {
     method: 'PUT', body: JSON.stringify({ enabled }),
+  }),
+  /**
+   * Antwort auf den Hinweis vor der ersten Nachricht. Bewusst getrennt von
+   * `setMemoryPreference`: ein "Nein" ist hier keine Einstellung, sondern eine
+   * Terminverschiebung — es setzt nur den Zeitpunkt, ab dem wieder gefragt wird.
+   */
+  answerMemoryNotice: (enable: boolean, hideFuture: boolean) => api<AiMemoryPreference>('/ai/memory/notice', {
+    method: 'POST', body: JSON.stringify({ enable, hide_future: hideFuture }),
   }),
   listSkills: () => api<AiSkill[]>('/ai/skills'),
   listManagedSkills: () => api<AiSkill[]>('/ai/skills/manage'),

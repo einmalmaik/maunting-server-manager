@@ -880,5 +880,17 @@
     "s3ItemPassword": "Le déchiffrement n'est possible qu'avec le mot de passe de sauvegarde défini sur cette instance",
     "s3ItemLocalOnly": "Aucune configuration : les sauvegardes restent locales — aucune donnée n'est transmise à des tiers",
     "section4Updated": "Aucune donnée personnelle n'est partagée avec des tiers. Pour des raisons techniques, les données chiffrées de sauvegarde peuvent être stockées sur un stockage externe compatible S3 si l'administrateur le configure (voir section 6). Dans ce cas, le fournisseur de stockage reçoit uniquement des données chiffrées."
+  },
+  "ai": {
+    "memoryNotice": {
+      "title": "L'IA peut retenir des choses sur vous",
+      "body": "Si vous l'autorisez, l'assistant conserve durablement vos préférences et habitudes — y compris personnelles. Ces notes sont transmises au fournisseur d'IA à chaque requête. Faites attention à ce que vous partagez. La mémoire est actuellement désactivée.",
+      "enable": "Activer",
+      "later": "Plus tard",
+      "never": "Ne plus demander",
+      "hint": "Vous pouvez modifier cela à tout moment sous Profil → IA, où vous pouvez aussi consulter et supprimer les entrées.",
+      "enabled": "Mémoire activée.",
+      "failed": "Votre réponse n'a pas pu être enregistrée."
+    }
   }
 }

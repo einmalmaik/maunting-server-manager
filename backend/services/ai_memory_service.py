@@ -92,21 +92,78 @@ def scope_identity(
     raise HTTPException(status_code=422, detail="Unbekannter Memory-Scope")
 
 
+# So lange nach einem "Nein" Ruhe ist, bevor erneut gefragt wird.
+NOTICE_REPEAT_HOURS = 24
+
+
 def preference(db: Session, user_id: int) -> bool:
+    """Darf sich die KI fuer diesen Benutzer etwas merken?
+
+    Ohne Zeile: **nein**. Frueher stand hier `True` — das Gedaechtnis war also
+    fuer jeden neuen Benutzer stillschweigend eingeschaltet. Das ist bei einer
+    Funktion, deren Inhalt an einen externen Anbieter geht, die falsche
+    Voreinstellung, unabhaengig davon, wie nuetzlich sie ist.
+    """
     row = db.get(AiMemoryPreference, user_id)
-    return True if row is None else row.enabled
+    return False if row is None else row.enabled
 
 
-def set_preference(db: Session, user: User, enabled: bool) -> bool:
-    row = db.get(AiMemoryPreference, user.id)
+def _preference_row(db: Session, user_id: int) -> AiMemoryPreference:
+    row = db.get(AiMemoryPreference, user_id)
     if row is None:
-        row = AiMemoryPreference(user_id=user.id, enabled=enabled)
+        row = AiMemoryPreference(user_id=user_id, enabled=False)
         db.add(row)
-    else:
-        row.enabled = enabled
-        row.updated_at = datetime.now(timezone.utc)
+        db.flush()
+    return row
+
+
+def set_preference(db: Session, user: User, enabled: bool) -> AiMemoryPreference:
+    row = _preference_row(db, user.id)
+    row.enabled = enabled
+    row.updated_at = datetime.now(timezone.utc)
     db.commit()
-    return row.enabled
+    db.refresh(row)
+    return row
+
+
+def notice_due(db: Session, user_id: int) -> bool:
+    """Soll dem Benutzer der Hinweis vor der naechsten Nachricht gezeigt werden?
+
+    Drei Bedingungen, alle noetig: das Gedaechtnis ist aus, der Benutzer hat
+    den Hinweis nicht dauerhaft abbestellt, und seit dem letzten Mal ist genug
+    Zeit vergangen. Ist das Gedaechtnis an, gibt es nichts zu fragen.
+    """
+    row = db.get(AiMemoryPreference, user_id)
+    if row is None:
+        return True
+    if row.enabled or row.notice_hidden:
+        return False
+    if row.notice_last_shown_at is None:
+        return True
+    shown = _utc(row.notice_last_shown_at)
+    return (datetime.now(timezone.utc) - shown).total_seconds() >= NOTICE_REPEAT_HOURS * 3600
+
+
+def record_notice_answer(
+    db: Session, user: User, *, enable: bool, hide_future: bool
+) -> AiMemoryPreference:
+    """Verarbeitet die Antwort auf den Hinweis.
+
+    "Ja" schaltet ein. "Nein" laesst es aus und merkt sich den Zeitpunkt, damit
+    in 24 Stunden erneut gefragt wird. "Nicht mehr anzeigen" beendet das
+    Fragen — aber nicht die Moeglichkeit: unter Profil > Memory bleibt der
+    Schalter erreichbar.
+    """
+    row = _preference_row(db, user.id)
+    if enable:
+        row.enabled = True
+    if hide_future:
+        row.notice_hidden = True
+    row.notice_last_shown_at = datetime.now(timezone.utc)
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 def _safe_value(value: str) -> str:

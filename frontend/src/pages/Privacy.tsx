@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-08-02',
-    version: '2.2',
+    lastUpdated: '2026-08-09',
+    version: '2.3',
     meta: 'Maunting Server Manager',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -63,6 +63,11 @@ export function Privacy() {
           t('privacyPolicy.sections.ai.items.credentials'),
           t('privacyPolicy.sections.ai.items.usage'),
           t('privacyPolicy.sections.ai.items.memory'),
+          // Phase E: Das Gedaechtnis ist standardmaessig aus und braucht eine
+          // ausdrueckliche Zustimmung. Der Punkt benennt zugleich die Grenze
+          // der Verschluesselung — sie schuetzt die Datenbank, nicht die
+          // Uebertragung an den Modellanbieter.
+          t('privacyPolicy.sections.ai.items.memoryConsent'),
           t('privacyPolicy.sections.ai.items.attachments'),
           // Zielpunkt 17: der autonome Modus veraendert, wer eine Aktion
           // ausloest. Das gehoert ausdruecklich in den Datenschutzhinweis.

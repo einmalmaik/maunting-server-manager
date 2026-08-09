@@ -46,6 +46,11 @@ def _allow(db: Session, user: User, *keys: str) -> None:
     db.commit()
     set_user_roles(db, user, [role.id])
     db.commit()
+    if "ai.memory.use" in keys:
+        # Das Gedaechtnis ist standardmaessig aus; diese Tests pruefen den
+        # eingeschalteten Zustand, weil nur dort ueberhaupt etwas auslaufen
+        # koennte.
+        ai_memory_service.set_preference(db, user, True)
 
 
 def _team(db: Session, owner: User, *members: User) -> Team:

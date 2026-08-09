@@ -106,6 +106,15 @@ def test_disabled_memory_is_not_added_to_provider_context(
     user_cookies: dict,
 ) -> None:
     _enable_memory(db, regular_user)
+    # `_enable_memory` vergibt das Recht. Eingeschaltet ist das Gedaechtnis
+    # damit noch nicht — das ist seit dem Einwilligungsschritt die Entscheidung
+    # des Benutzers, und der Test nimmt sie hier ausdruecklich vorweg.
+    assert client.put(
+        "/api/ai/memory/preference",
+        json={"enabled": True},
+        cookies=user_cookies,
+        headers=_csrf(user_cookies),
+    ).status_code == 200
     assert client.put(
         "/api/ai/memory",
         json={"scope": "user", "key": "language", "value": "Deutsch bevorzugt"},

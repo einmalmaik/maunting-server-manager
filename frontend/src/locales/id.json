@@ -880,5 +880,17 @@
     "s3ItemPassword": "Dekripsi hanya dimungkinkan dengan kata sandi backup yang ditetapkan pada instansi ini",
     "s3ItemLocalOnly": "Tanpa konfigurasi: backup tetap lokal — tidak ada data yang dikirim ke pihak ketiga",
     "section4Updated": "Tidak ada data pribadi yang dibagikan dengan pihak ketiga. Karena alasan teknis, data backup terenkripsi mungkin disimpan di penyimpanan eksternal yang kompatibel dengan S3 jika administrator mengonfigurasinya (lihat bagian 6). Dalam kasus tersebut, penyedia penyimpanan hanya menerima data terenkripsi."
+  },
+  "ai": {
+    "memoryNotice": {
+      "title": "AI dapat mengingat hal-hal tentang Anda",
+      "body": "Jika Anda mengizinkan, asisten menyimpan catatan tetap tentang preferensi dan kebiasaan Anda — termasuk yang bersifat pribadi. Catatan ini dikirim ke penyedia AI pada setiap permintaan. Perhatikan apa yang Anda bagikan. Memori saat ini nonaktif.",
+      "enable": "Aktifkan",
+      "later": "Nanti",
+      "never": "Jangan tanya lagi",
+      "hint": "Anda dapat mengubahnya kapan saja di Profil → AI, tempat entri juga bisa dilihat dan dihapus.",
+      "enabled": "Memori diaktifkan.",
+      "failed": "Jawaban Anda tidak dapat disimpan."
+    }
   }
 }

@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import require_global, verify_csrf
-from models import AiMemoryEntry, User
+from models import AiMemoryEntry, AiMemoryPreference, User
 from schemas.ai_memory import (
+    AiMemoryNoticeAnswer,
     AiMemoryPreferenceResponse,
     AiMemoryPreferenceWrite,
     AiMemoryResponse,
@@ -74,12 +75,21 @@ def delete_memory(
     ai_memory_service.delete_entry(db, user, entry_id)
 
 
+def _preference_response(db: Session, user: User) -> AiMemoryPreferenceResponse:
+    row = db.get(AiMemoryPreference, user.id)
+    return AiMemoryPreferenceResponse(
+        enabled=ai_memory_service.preference(db, user.id),
+        notice_due=ai_memory_service.notice_due(db, user.id),
+        notice_hidden=bool(row.notice_hidden) if row is not None else False,
+    )
+
+
 @router.get("/preference", response_model=AiMemoryPreferenceResponse)
 def get_memory_preference(
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
 ) -> AiMemoryPreferenceResponse:
-    return AiMemoryPreferenceResponse(enabled=ai_memory_service.preference(db, user.id))
+    return _preference_response(db, user)
 
 
 @router.put("/preference", response_model=AiMemoryPreferenceResponse)
@@ -89,6 +99,24 @@ def update_memory_preference(
     user: User = Depends(require_global("ai.memory.use")),
     _: None = Depends(verify_csrf),
 ) -> AiMemoryPreferenceResponse:
-    return AiMemoryPreferenceResponse(
-        enabled=ai_memory_service.set_preference(db, user, payload.enabled)
+    ai_memory_service.set_preference(db, user, payload.enabled)
+    return _preference_response(db, user)
+
+
+@router.post("/notice", response_model=AiMemoryPreferenceResponse)
+def answer_memory_notice(
+    payload: AiMemoryNoticeAnswer,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+    _: None = Depends(verify_csrf),
+) -> AiMemoryPreferenceResponse:
+    """Nimmt die Antwort auf den Hinweis entgegen, den der Chat vorab zeigt.
+
+    Bewusst ein eigener Endpunkt und nicht `PUT /preference`: ein "Nein" ist
+    hier keine Einstellung, sondern eine Terminverschiebung. Es aendert nichts
+    am Zustand ausser dem Zeitpunkt, ab dem wieder gefragt werden darf.
+    """
+    ai_memory_service.record_notice_answer(
+        db, user, enable=payload.enable, hide_future=payload.hide_future
     )
+    return _preference_response(db, user)

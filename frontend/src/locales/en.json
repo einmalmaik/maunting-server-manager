@@ -411,6 +411,16 @@
         "load": "Web search status could not be loaded.",
         "save": "Search key could not be saved."
       }
+    },
+    "memoryNotice": {
+      "title": "The assistant can remember things about you",
+      "body": "If you allow it, the assistant keeps lasting notes on your preferences and habits — including personal ones. These notes are sent to the AI provider with every request. Be mindful of what you share. Memory is currently disabled.",
+      "enable": "Enable",
+      "later": "Later",
+      "never": "Stop asking",
+      "hint": "You can change this any time under Profile → AI, where you can also review and delete individual entries.",
+      "enabled": "Memory enabled.",
+      "failed": "Your answer could not be saved."
     }
   },
   "shell": {
@@ -2328,7 +2338,8 @@
           "context": "The submitted message, limited prior messages, and approved server metadata are transferred; IP addresses, installation paths, complete configurations, and detected secrets are excluded from model context",
           "credentials": "Personal and central provider API keys are context-bound and encrypted through DIS, then shown only as configuration status or a mask",
           "usage": "Provider, model, token reservation, actual or conservatively estimated usage, and timestamps are stored to enforce quotas; monetary cost is not claimed without an authoritative price source",
-          "memory": "Optional personal, server-specific, and panel-wide memory entries are encrypted, visible and deletable, and are transferred as untrusted context only when memory use is enabled",
+          "memory": "Optional memory entries (personal, server-scoped, team-scoped or panel-wide) are stored encrypted and cryptographically bound to their owner, and can be reviewed and deleted at any time; team entries are visible to every member of that team, personal entries to nobody but the user",
+          "memoryConsent": "Memory is disabled by default and only becomes active after explicit consent in the chat; consent can be withdrawn at any time. Encryption protects the database at rest — the plaintext of remembered entries is transmitted to the chosen model provider with every request",
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat"

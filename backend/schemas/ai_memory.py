@@ -21,6 +21,18 @@ class AiMemoryPreferenceWrite(BaseModel):
     enabled: bool
 
 
+class AiMemoryNoticeAnswer(BaseModel):
+    """Antwort auf den Hinweis vor der ersten Nachricht.
+
+    Zwei unabhaengige Angaben statt dreier Knoepfe: "Nein, nicht mehr anzeigen"
+    ist `enable=False, hide_future=True`. So bleibt auch "Ja, und frag mich nie
+    wieder" darstellbar, ohne dass die API eine vierte Variante braucht.
+    """
+
+    enable: bool
+    hide_future: bool = False
+
+
 class AiMemoryResponse(BaseModel):
     id: str
     scope: MemoryScope
@@ -39,3 +51,8 @@ class AiMemoryResponse(BaseModel):
 
 class AiMemoryPreferenceResponse(BaseModel):
     enabled: bool
+    # Ob die Oberflaeche den Hinweis vor der naechsten Nachricht zeigen soll.
+    # Die Entscheidung faellt im Backend, damit die 24-Stunden-Regel nicht in
+    # jedem Client noch einmal nachgebaut werden muss.
+    notice_due: bool = False
+    notice_hidden: bool = False

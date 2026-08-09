@@ -28,6 +28,10 @@ def _allow_memory(db: Session, user: User) -> None:
     db.add(RolePermission(role_id=role.id, permission_key="ai.memory.use"))
     db.commit()
     set_user_roles(db, user, [role.id])
+    # Seit dem Einwilligungsschritt ist das Gedaechtnis standardmaessig aus.
+    # Ein Test, der Erinnerungen im Kontext erwartet, muss es einschalten —
+    # genau wie ein Benutzer es tun muesste.
+    ai_memory_service.set_preference(db, user, True)
 
 
 def _write(db: Session, user: User, key: str, value: str, origin: str = "user") -> AiMemoryEntry:

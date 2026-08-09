@@ -22,6 +22,7 @@ const entry: AiMemoryEntry = {
   id: '00000000-0000-0000-0000-000000000101',
   scope: 'user',
   server_id: null,
+  team_id: null,
   key: 'response.language',
   value: 'Synthetic test preference',
   origin: 'user',
@@ -51,8 +52,8 @@ describe('AiMemoryManager', () => {
       error: null,
     })
     vi.mocked(aiApi.listMemory).mockReset().mockResolvedValue([entry])
-    vi.mocked(aiApi.getMemoryPreference).mockReset().mockResolvedValue({ enabled: true })
-    vi.mocked(aiApi.setMemoryPreference).mockReset().mockResolvedValue({ enabled: false })
+    vi.mocked(aiApi.getMemoryPreference).mockReset().mockResolvedValue({ enabled: true, notice_due: false, notice_hidden: false })
+    vi.mocked(aiApi.setMemoryPreference).mockReset().mockResolvedValue({ enabled: false, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.saveMemory).mockReset().mockResolvedValue(entry)
   })
 

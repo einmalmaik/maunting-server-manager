@@ -902,5 +902,17 @@
     "s3ItemPassword": "El descifrado solo es posible con la contraseña de copia configurada en esta instancia",
     "s3ItemLocalOnly": "Sin configuración: las copias permanecen localmente — no se transmiten datos a terceros",
     "section4Updated": "No se comparten datos personales con terceros. Por razones técnicas, los datos cifrados de copias pueden almacenarse en almacenamiento externo compatible con S3 si el administrador lo configura (ver sección 6). En ese caso, el proveedor de almacenamiento recibe únicamente datos cifrados."
+  },
+  "ai": {
+    "memoryNotice": {
+      "title": "La IA puede recordar cosas sobre ti",
+      "body": "Si lo permites, el asistente guardará de forma duradera tus preferencias y particularidades, incluidas las personales. Estas notas se envían al proveedor de IA en cada solicitud. Ten cuidado con lo que compartes. La memoria está desactivada actualmente.",
+      "enable": "Activar",
+      "later": "Más tarde",
+      "never": "No preguntar más",
+      "hint": "Puedes cambiarlo en cualquier momento en Perfil → IA, donde también puedes ver y eliminar entradas.",
+      "enabled": "Memoria activada.",
+      "failed": "No se pudo guardar tu respuesta."
+    }
   }
 }

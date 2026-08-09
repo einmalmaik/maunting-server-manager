@@ -9,10 +9,23 @@ from database import Base
 
 
 class AiMemoryPreference(Base):
+    """Ob die KI sich etwas merken darf — und ob noch danach gefragt wird.
+
+    Standard ist **aus**. Ein Gedaechtnis, das ungefragt mitschreibt, ist keine
+    Einstellung, sondern eine Zumutung: der Inhalt geht bei jeder Anfrage an
+    einen externen KI-Anbieter, und das muss jemand wissen, bevor es passiert
+    und nicht danach.
+    """
+
     __tablename__ = "ai_memory_preferences"
 
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Wann der Hinweis zuletzt gezeigt wurde. NULL heisst: noch nie.
+    notice_last_shown_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # "Nicht mehr anzeigen". Schaltet den Hinweis ab, nicht das Gedaechtnis —
+    # aktivieren laesst es sich danach weiterhin unter Profil > Memory.
+    notice_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
