@@ -98,16 +98,6 @@ SERVER_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("server.config.write",     "server", "Server-Einstellungen ändern (Name, Auto-Restart, Backup-Schedule)"),
     PermissionDef("server.update",           "server", "Server updaten (Reinstall/Update, Outbound-Webhooks)"),
     PermissionDef("server.network.manage",   "server", "Ports und Bind-IP ändern"),
-    # Einen bestehenden Server auf einen anderen Blueprint umstellen — so ändert
-    # man die Spielversion, denn die steht im Blueprint und nicht am Server.
-    #
-    # Bewusst server-scoped und getrennt von `blueprints.manage`: das sind zwei
-    # verschiedene Aufgaben. Der Betreiber pflegt die Vorlagen (global), der
-    # Kunde wechselt seinen eigenen Server zwischen vorhandenen (je Server).
-    # Zusammengelegt wäre beides falsch — entweder dürfte jemand mit
-    # Blueprint-Rechten fremde Server umbauen, oder ein Kunde käme an die
-    # Version seines eigenen Servers nicht heran.
-    PermissionDef("server.blueprint.switch", "server", "Server auf einen anderen Blueprint umstellen"),
     PermissionDef("server.resources.manage", "server", "CPU-/RAM-/Disk-Limits ändern"),
     PermissionDef("server.console.read",     "server", "Konsole und Logs lesen"),
     PermissionDef("server.console.write",    "server", "Befehle an die Konsole senden"),

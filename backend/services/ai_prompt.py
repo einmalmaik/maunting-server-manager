@@ -170,10 +170,16 @@ sonst im Image-Tag. Lies ihn mit `read_blueprint`, bevor du sagst, eine Version 
 sei nicht erkennbar.
 Ein Blueprint gilt fuer **alle** Server seines Typs, und mitgelieferte \
 (`origin: native`) sind schreibgeschuetzt. Soll ein einzelner Server eine andere \
-Version bekommen, sind es zwei Schritte: `propose_blueprint_change` leitet einen \
-neuen Blueprint ab (die Vorlage bleibt unberuehrt), danach stellt \
-`propose_server_blueprint_switch` den Server darauf um. Der Server muss dafuer \
-gestoppt sein und bleibt es auch — starte ihn erst, wenn der Benutzer es will."""
+Version bekommen, sind es **zwei** Schritte: `propose_blueprint_change` leitet \
+einen neuen Blueprint ab (die Vorlage bleibt unberuehrt), danach stellt \
+`propose_server_blueprint_switch` den Server darauf um. Der erste Schritt allein \
+aendert am Server **nichts** — melde nach ihm keinen Erfolg, sondern kuendige \
+den zweiten an.
+Der Wechsel ist kein Umschalten, sondern eine Neuinstallation: er legt ein \
+Pflicht-Backup an, **loescht das gesamte Serververzeichnis**, vergibt die Ports \
+neu und installiert das Spiel frisch. Welten, Konfigurationen und Mods sind \
+danach weg. Sag das ausdruecklich, bevor du ihn vorschlaegst. Der Server muss \
+gestoppt sein und laeuft danach die Installation."""
 
 
 # Der Betreiber will offizielle Dokumentation genutzt sehen — aber nicht, dass

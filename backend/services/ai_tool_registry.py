@@ -159,20 +159,21 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="blueprints.manage",
         recht_global=True,
     ),
-    # Der Wechsel selbst: `game_type` eines bestehenden Servers.
+    # Der Wechsel des Spiels bzw. Blueprints eines bestehenden Servers.
     #
-    # Haengt am **serverbezogenen** `server.blueprint.switch`, nicht am globalen
-    # `blueprints.manage`. Der erste Entwurf hatte es umgekehrt, und das war in
-    # beide Richtungen falsch: wer Blueprints pflegen darf, haette damit jeden
-    # Server umbauen koennen, den er nur *sehen* darf — und der Besitzer seines
-    # eigenen Servers haette die Spielversion nicht aendern koennen.
+    # `server.config.write` — dasselbe Recht wie am Panel-Knopf "Spiel /
+    # Blueprint wechseln" (`routers/servers.py::switch_server_blueprint_endpoint`).
     #
-    # Vorlagen pflegen und einen Server zwischen ihnen wechseln sind zwei
-    # Aufgaben. Der Betreiber macht die eine, der Kunde die andere.
+    # Zwei Entwuerfe davor waren falsch: erst das globale `blueprints.manage`,
+    # dann ein eigens erfundenes `server.blueprint.switch`. Beide erzeugten
+    # dasselbe Problem in verschiedener Form — eine Handlung mit **zwei**
+    # Rechten. Jemand haette sie ueber die KI gedurft und ueber das Panel nicht,
+    # oder umgekehrt. Das Recht, nach dem der Betreiber gefragt hat, gab es
+    # bereits; es fehlte nur die Verbindung dorthin.
     "propose_server_blueprint_switch": Werkzeug(
         "server_write",
         immer_bestaetigen=True,
-        recht="server.blueprint.switch",
+        recht="server.config.write",
     ),
     "propose_server_create": Werkzeug(
         "global_write", recht="servers.create", recht_global=True

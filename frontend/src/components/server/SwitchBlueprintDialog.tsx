@@ -27,9 +27,16 @@ export function SwitchBlueprintDialog({
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    api<BlueprintListEntry[]>("/blueprints")
+    // `GET /blueprints` antwortet mit `{ blueprints: [...] }`, nicht mit einem
+    // nackten Array — so liest es auch die Blueprint-Seite (Blueprints.tsx:62).
+    //
+    // Hier stand `Array.isArray(data) ? data : []`. Das war immer der leere
+    // Fall: das Dropdown blieb ohne Eintraege, ohne Fehler, ohne Hinweis. Ein
+    // stiller Rueckfall auf "nichts" ist schlimmer als ein Fehler — man sieht
+    // eine leere Auswahl und haelt sie fuer die Wahrheit.
+    api<{ blueprints: BlueprintListEntry[] }>("/blueprints")
       .then((data) => {
-        const list = Array.isArray(data) ? data : [];
+        const list = data?.blueprints ?? [];
         setBlueprints(list);
         if (list.length > 0) {
           const firstOther = list.find((b) => b.id !== server.game_type);

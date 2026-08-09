@@ -22,6 +22,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from unittest.mock import patch
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -148,26 +150,6 @@ def test_an_id_that_belongs_to_a_native_blueprint_is_refused(db: Session) -> Non
     assert fehler.value.status_code == 409
 
 
-def test_switching_a_server_needs_matching_port_roles(db: Session) -> None:
-    """Die Ports haengen an ihren Rollennamen.
-
-    Passt die Form nicht, bliebe ein belegter Port ohne Zuordnung oder ein
-    verlangter ohne Vergabe. Der Vergleich ist bewusst auf die Form beschraenkt:
-    ein Wechsel von Forge auf Vanilla ist eine legitime Absicht.
-    """
-    forge = blueprint_service.blueprint_view("minecraft_forge")["blueprint"]
-    abgeleitet = blueprint_service.derived_payload(
-        "minecraft_forge", new_id="mc_1_20",
-        changes={"runtime.env": {"VERSION": "1.20.1"}},
-    )
-    assert blueprint_service.switch_incompatibility(forge, abgeleitet) is None
-
-    fremd = dict(forge)
-    fremd["ports"] = [{"name": "game", "protocol": "udp"}]
-    grund = blueprint_service.switch_incompatibility(forge, fremd)
-    assert grund is not None and "Ports" in grund
-
-
 def test_a_running_server_cannot_be_switched(
     db: Session, regular_user: User, tmp_path: Path
 ) -> None:
@@ -179,7 +161,7 @@ def test_a_running_server_cannot_be_switched(
     _rechte(db, regular_user, global_keys=("ai.chat.use",))
     server = _server(
         db, regular_user, tmp_path, "minecraft_forge",
-        server_keys=("server.view", "server.blueprint.switch"),
+        server_keys=("server.view", "server.config.write"),
     )
     server.status = "running"
     db.commit()
@@ -201,20 +183,27 @@ def test_a_running_server_cannot_be_switched(
         )
 
 
-def test_switching_needs_its_own_server_scoped_permission(
+def test_switching_needs_the_same_permission_as_the_panel_button(
     db: Session, regular_user: User, tmp_path: Path
 ) -> None:
-    """Sehen und sonstige Serverrechte reichen nicht.
+    """Dasselbe Recht wie am Knopf "Spiel / Blueprint wechseln".
 
-    Der Wechsel braucht `server.blueprint.switch` an **diesem** Server. Wer den
-    Server sonst weitgehend verwalten darf, aendert damit noch lange nicht,
-    welche Software er faehrt.
+    Das ist der eigentliche Punkt. Zwei Entwuerfe davor hatten hier ein anderes
+    Recht — erst das globale `blueprints.manage`, dann ein eigens erfundenes
+    `server.blueprint.switch`. Beide erzeugten dieselbe Krankheit in
+    verschiedener Form: **eine Handlung mit zwei Rechten**. Jemand haette sie
+    ueber die KI gedurft und ueber das Panel nicht, oder umgekehrt.
+
+    Das Recht, nach dem der Betreiber gefragt hat, gab es bereits
+    (`routers/servers.py::switch_server_blueprint_endpoint`); es fehlte nur die
+    Verbindung dorthin.
     """
-    _rechte(db, regular_user, global_keys=("ai.chat.use",))
+    _rechte(db, regular_user, global_keys=("ai.chat.use", "blueprints.manage"))
     server = _server(
         db, regular_user, tmp_path, "minecraft_forge",
+        # Viele Serverrechte — aber nicht das eine, das der Panel-Knopf verlangt.
         server_keys=(
-            "server.view", "server.config.write", "server.start", "server.stop",
+            "server.view", "server.start", "server.stop",
             "server.files.write", "server.backups.create",
         ),
     )
@@ -279,7 +268,7 @@ def test_the_whole_minecraft_case_end_to_end(
     )
     server = _server(
         db, regular_user, tmp_path, "minecraft_forge",
-        server_keys=("server.view", "server.blueprint.switch"),
+        server_keys=("server.view", "server.config.write"),
     )
     conversation = _conversation(db, regular_user)
     try:
@@ -323,7 +312,8 @@ def test_the_whole_minecraft_case_end_to_end(
         assert neuer["origin"] == "community"
         assert neuer["blueprint"]["runtime"]["env"]["VERSION"] == "1.20.1"
 
-        # 4. Und der Server laesst sich darauf umstellen.
+        # 4. Und der Server laesst sich darauf umstellen — ueber **denselben**
+        #    Aufruf, den der Panel-Knopf "Spiel / Blueprint wechseln" nimmt.
         umstellung = ai_proposal_service.create_proposal(
             db,
             user=regular_user,
@@ -338,19 +328,47 @@ def test_the_whole_minecraft_case_end_to_end(
             correlation_id=str(uuid4()),
         )
         db.commit()
+
+        # Die Vorschau sagt, was wirklich passiert. Der erste Entwurf nannte nur
+        # die geaenderten Umgebungsvariablen und "Server bleibt gestoppt" — und
+        # verschwieg damit, dass ein Wechsel das Serververzeichnis loescht.
+        vorschau2 = json.loads(umstellung.preview_json)
+        assert vorschau2["creates_backup"] is True
+        assert vorschau2["wipes_server_files"] is True
+        assert vorschau2["reinstalls"] is True
+        assert vorschau2["irreversible"] is True
+
         _, token2 = ai_proposal_service.confirm_proposal(
             db, proposal_id=umstellung.id, user=regular_user
         )
-        ai_proposal_service.execute_proposal(
-            db, proposal_id=umstellung.id, user=regular_user,
-            confirmation_token=token2,
-        )
+        gesehen: dict = {}
 
+        def _fake_switch(db_, server_, blueprint_id, *, user_id=None):
+            gesehen.update(
+                server_id=server_.id, blueprint_id=blueprint_id, user_id=user_id
+            )
+            server_.game_type = blueprint_id
+            return {"message": "gewechselt", "new_blueprint": blueprint_id}
+
+        with patch(
+            "services.server_lifecycle_service.switch_server_blueprint", _fake_switch
+        ):
+            ai_proposal_service.execute_proposal(
+                db, proposal_id=umstellung.id, user=regular_user,
+                confirmation_token=token2,
+            )
+
+        # Der eigentliche Beweis: die KI hat den Panel-Weg genommen. Ein eigener
+        # Weg wuerde das Pflicht-Backup, den Datei-Wipe, die Portneuvergabe und
+        # die Neuinstallation ueberspringen — und einen Server hinterlassen,
+        # dessen Datenbankeintrag nicht mehr zu seinen Dateien passt.
+        assert gesehen == {
+            "server_id": server.id,
+            "blueprint_id": "minecraft_forge_1_20_1",
+            "user_id": regular_user.id,
+        }
         db.refresh(server)
         assert server.game_type == "minecraft_forge_1_20_1"
-        # Der Server bleibt gestoppt — ihn zu starten waere ein zweiter Vorgang,
-        # den niemand bestaetigt hat.
-        assert server.status == "stopped"
     finally:
         # Blueprints sind Dateien auf der Platte, keine Datenbankzeilen: die
         # `clean_db`-Fixture raeumt sie nicht mit weg.
@@ -406,14 +424,14 @@ def test_the_owner_can_switch_without_panel_wide_blueprint_rights(
 ) -> None:
     """Die andere Haelfte: der Kunde kommt an seine eigene Version.
 
-    Ohne panelweite Blueprint-Rechte, nur mit `server.blueprint.switch` an
+    Ohne panelweite Blueprint-Rechte, nur mit `server.config.write` an
     seinem Server. Genau das Hoster-Modell — der Betreiber stellt die Vorlagen
     bereit, der Kunde waehlt zwischen ihnen.
     """
     _rechte(db, regular_user, global_keys=("ai.chat.use",))
     server = _server(
         db, regular_user, tmp_path, "minecraft_forge",
-        server_keys=("server.view", "server.blueprint.switch"),
+        server_keys=("server.view", "server.config.write"),
     )
     conversation = _conversation(db, regular_user)
 
@@ -434,3 +452,43 @@ def test_the_owner_can_switch_without_panel_wide_blueprint_rights(
 
     assert vorschlag.requires_confirmation is True
     assert vorschlag.autonomous is False
+
+
+def test_a_server_on_a_deleted_blueprint_can_still_be_switched_away(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Genau der Fall, in dem man umstellen **will**.
+
+    Wird eine Community-Vorlage geloescht, laufen die Server darauf ins Leere.
+    Wuerde der Vorschlag daran scheitern, dass der **alte** Blueprint nicht mehr
+    lesbar ist, waere die Falle zugeschnappt: der Server liesse sich ueber die
+    KI nie mehr retten, obwohl der Panel-Knopf es kann — der prueft nur das Ziel.
+    """
+    _rechte(db, regular_user, global_keys=("ai.chat.use",))
+    server = _server(
+        db, regular_user, tmp_path, "gibt_es_nicht_mehr",
+        server_keys=("server.view", "server.config.write"),
+    )
+    conversation = _conversation(db, regular_user)
+
+    vorschlag = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_server_blueprint_switch",
+        arguments={
+            "server_id": server.id,
+            "blueprint_id": "minecraft_vanilla",
+            "reason": "Die alte Vorlage gibt es nicht mehr.",
+            "expected_effect": "Der Server laeuft wieder auf einer gueltigen Vorlage.",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    vorschau = json.loads(vorschlag.preview_json)
+    assert vorschau["from_blueprint"] == "gibt_es_nicht_mehr"
+    assert vorschau["to_blueprint"] == "minecraft_vanilla"
+    # Unbekannt statt leer: ein leeres Objekt haette behauptet, die alte Vorlage
+    # habe keine Umgebungsvariablen gehabt.
+    assert vorschau["env_before"] is None

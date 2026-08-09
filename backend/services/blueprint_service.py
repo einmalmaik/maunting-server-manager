@@ -166,49 +166,6 @@ def delete_community_blueprint(blueprint_id: str) -> None:
     reload_registry()
 
 
-def port_signature(nutzlast: dict[str, Any]) -> tuple[tuple[str, str], ...]:
-    """Name und Protokoll aller Ports — die Form, die ein Server belegt.
-
-    Die vergebenen Ports eines Servers haengen an diesen Namen (`game`, `query`,
-    `rcon`). Ein Blueprint mit anderen Namen oder Protokollen passt nicht auf
-    einen bestehenden Server: entweder bliebe ein belegter Port ohne Zuordnung
-    oder ein verlangter ohne Vergabe.
-    """
-    return tuple(
-        sorted(
-            (str(p.get("name", "")), str(p.get("protocol", "")))
-            for p in (nutzlast.get("ports") or [])
-        )
-    )
-
-
-def switch_incompatibility(alt: dict[str, Any], neu: dict[str, Any]) -> str | None:
-    """Warum ein Server **nicht** auf diesen Blueprint umgestellt werden kann.
-
-    Gibt ``None`` zurueck, wenn nichts dagegenspricht.
-
-    Geprueft wird die Form, nicht der Inhalt: dieselben Portrollen mit denselben
-    Protokollen. Alles andere — Image, Version, Startbefehl — darf sich
-    unterscheiden, das ist ja gerade der Zweck des Wechsels.
-
-    Bewusst **keine** Pruefung auf dasselbe Spiel: ein Wechsel von Forge auf
-    Vanilla ist eine legitime Absicht, und ein Verbot waere eine Bevormundung,
-    die sich nicht begruenden laesst. Was die Weltdaten davon halten, weiss der
-    Benutzer besser als das Panel — deshalb steht die Bestaetigungspflicht davor.
-    """
-    alt_ports = port_signature(alt)
-    neu_ports = port_signature(neu)
-    if alt_ports != neu_ports:
-        return (
-            "Die Ports passen nicht zusammen: bisher "
-            + ", ".join(f"{n}/{p}" for n, p in alt_ports)
-            + " — im Ziel "
-            + ", ".join(f"{n}/{p}" for n, p in neu_ports)
-            + ". Ein Wechsel wuerde die Portvergabe des Servers ungueltig machen."
-        )
-    return None
-
-
 def _setze(ziel: dict, pfad: str, wert: Any) -> None:
     teile = pfad.split(".")
     knoten = ziel

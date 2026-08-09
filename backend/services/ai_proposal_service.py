@@ -371,17 +371,29 @@ def _blueprint_change_payload(arguments: dict) -> tuple[dict, dict]:
 
 
 def _blueprint_switch_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
-    """Prueft, ob dieser Server auf diesen Blueprint umgestellt werden kann.
+    """Bereitet den Wechsel vor — mit dem, was dabei wirklich passiert.
 
-    Zwei Bedingungen, beide aus dem Betrieb begruendet:
+    Der erste Entwurf hat hier zwei schwere Fehler gemacht, beide aus derselben
+    Ursache: er kannte den vorhandenen Panel-Weg nicht
+    (`server_lifecycle_service.switch_server_blueprint`) und hat einen zweiten
+    erfunden.
 
-    **Der Server muss gestoppt sein.** Ein laufender Container haengt am alten
-    Image; ein Wechsel unter ihm weg fuehrt zu einem Zustand, den weder Panel
-    noch Guardian einordnen koennen.
+    **Erstens war die Vorschau unwahr.** Sie nannte nur die geaenderten
+    Umgebungsvariablen und "Server bleibt gestoppt". In Wirklichkeit ist ein
+    Wechsel der destruktivste Vorgang neben dem Loeschen: er legt ein
+    Pflicht-Backup an, **loescht das gesamte Serververzeichnis**, vergibt die
+    Ports neu und installiert das neue Spiel. Der Server steht danach auf
+    "installing", nicht auf "stopped". Wer eine Bestaetigungskarte liest, die
+    das verschweigt, stimmt etwas zu, das er nicht kennt.
 
-    **Die Portrollen muessen uebereinstimmen.** Die vergebenen Ports haengen an
-    den Namen (`game`, `query`, `rcon`). Passen sie nicht, bliebe ein belegter
-    Port ohne Zuordnung oder ein verlangter ohne Vergabe.
+    **Zweitens verlangte er uebereinstimmende Portrollen.** Der Panel-Weg
+    vergibt die Ports neu, kennt also keine solche Bedingung. Die Pruefung hat
+    Wechsel abgelehnt, die ueber den Knopf funktionieren — eine erfundene
+    Einschraenkung.
+
+    Geblieben sind die Vorbedingungen, die der Panel-Weg selbst prueft; sie
+    stehen hier nur frueher, damit ein aussichtsloser Vorschlag gar nicht erst
+    im Chat landet. Verbindlich geprueft werden sie weiterhin dort.
     """
     from services import blueprint_service
 
@@ -396,26 +408,36 @@ def _blueprint_switch_payload(server: Server, arguments: dict) -> tuple[dict, di
         )
     try:
         ziel = blueprint_service.blueprint_view(ziel_id)
-        alt = blueprint_service.blueprint_view(server.game_type)
     except HTTPException as exc:
         raise AiActionValidationError(str(exc.detail)) from exc
-
-    hindernis = blueprint_service.switch_incompatibility(
-        alt["blueprint"], ziel["blueprint"]
-    )
-    if hindernis:
-        raise AiActionValidationError(hindernis)
+    try:
+        alt = blueprint_service.blueprint_view(server.game_type)
+    except HTTPException:
+        # Der **alte** Blueprint darf fehlen. Ein Server, dessen Community-
+        # Vorlage geloescht wurde, ist genau der Fall, in dem man ihn umstellen
+        # will — ihn deswegen abzuweisen waere die Falle zugeschnappt. Der
+        # Panel-Knopf prueft die Quelle ebenfalls nicht, nur das Ziel.
+        alt = None
 
     payload = {"blueprint_id": ziel_id}
     preview = {
         "operation": "blueprint_switch",
         "from_blueprint": server.game_type,
         "to_blueprint": ziel_id,
-        "env_before": (alt["blueprint"].get("runtime") or {}).get("env") or {},
+        "env_before": (
+            (alt["blueprint"].get("runtime") or {}).get("env") or {}
+        ) if alt is not None else None,
         "env_after": (ziel["blueprint"].get("runtime") or {}).get("env") or {},
         "current_status": server.status,
-        # Der Server bleibt gestoppt. Ihn automatisch zu starten waere ein
-        # zweiter Vorgang, den niemand bestaetigt hat.
+        # Was tatsaechlich geschieht. Ohne diese Aufzaehlung waere "Blueprint
+        # wechseln" eine Zusage, deren Umfang der Bestaetigende raten muesste.
+        "creates_backup": True,
+        "wipes_server_files": True,
+        "reallocates_ports": True,
+        "reinstalls": True,
+        "irreversible": True,
+        # Der Server bleibt **nicht** gestoppt: die Neuinstallation startet
+        # sofort und setzt den Status auf "installing".
         "restart_required": True,
     }
     return payload, preview
@@ -1024,33 +1046,46 @@ def execute_proposal(
                 task_id = None
                 queued = False
             elif tool_name == "propose_server_blueprint_switch":
-                # Der eigentliche Wechsel ist eine Zeile. Alles, was ihn
-                # gefaehrlich machen koennte — laufender Container, nicht
-                # passende Ports — wurde beim Vorschlagen geprueft und wird
-                # hier erneut geprueft: zwischen Vorschlag und Bestaetigung
-                # koennen Minuten liegen, und der Server kann inzwischen
-                # gestartet worden sein.
-                from services import blueprint_service
+                # Derselbe Aufruf, den der Panel-Knopf "Spiel / Blueprint
+                # wechseln" nimmt.
+                #
+                # Der erste Entwurf setzte hier `server.game_type = ziel_id` und
+                # war damit fertig. Das war kein vereinfachter Weg, sondern ein
+                # kaputter: der echte Wechsel legt ein Pflicht-Backup an,
+                # **loescht das Serververzeichnis**, vergibt die Ports neu und
+                # installiert das neue Spiel. Ein Server, bei dem nur die Spalte
+                # umgeschrieben wird, traegt danach das Image des neuen
+                # Blueprints ueber den Dateien des alten — Datenbank und
+                # Wirklichkeit laufen auseinander, und niemand merkt es bis zum
+                # naechsten Start.
+                from services.server_lifecycle_service import switch_server_blueprint
 
-                ziel_id = str(payload["blueprint_id"])
                 server_row = db.query(Server).filter(Server.id == server_id).first()
                 if server_row is None:
                     raise AiActionStateError("AI_ACTION_TARGET_MISSING")
-                if server_row.status != "stopped":
-                    raise AiActionStateError("AI_ACTION_SERVER_BUSY")
                 try:
-                    ziel = blueprint_service.blueprint_view(ziel_id)
-                    alt = blueprint_service.blueprint_view(server_row.game_type)
+                    result = switch_server_blueprint(
+                        db,
+                        server_row,
+                        str(payload["blueprint_id"]),
+                        user_id=active_user.id,
+                    )
                 except HTTPException as exc:
-                    raise AiActionStateError("AI_ACTION_TARGET_MISSING") from exc
-                if blueprint_service.switch_incompatibility(
-                    alt["blueprint"], ziel["blueprint"]
-                ):
-                    raise AiActionStateError("AI_ACTION_BLUEPRINT_INCOMPATIBLE")
-                vorher = server_row.game_type
-                server_row.game_type = ziel_id
-                db.flush()
-                result = {"from_blueprint": vorher, "to_blueprint": ziel_id}
+                    # Die Vorbedingungen werden dort verbindlich geprueft —
+                    # zwischen Vorschlag und Bestaetigung koennen Minuten
+                    # liegen, und der Server kann inzwischen gestartet worden
+                    # sein. Ein fehlgeschlagenes Pflicht-Backup bricht ebenfalls
+                    # hier ab, **bevor** Dateien geloescht werden.
+                    kennung = exc.detail.get("code") if isinstance(exc.detail, dict) else None
+                    logger.info(
+                        "Blueprint-Wechsel abgelehnt server_id=%s code=%s",
+                        server_id, kennung,
+                    )
+                    raise AiActionStateError(
+                        "AI_ACTION_SERVER_BUSY"
+                        if kennung == "server_must_be_stopped"
+                        else "AI_ACTION_BLUEPRINT_SWITCH_FAILED"
+                    ) from exc
                 task_id = None
                 queued = False
             elif tool_name == "propose_server_delete":
