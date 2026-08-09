@@ -58,6 +58,17 @@ export interface AiConversationDetail extends AiConversation {
 export interface AiToolUse {
   tool_name: string
   server_id: number | null
+  /**
+   * Bei `read_skill` und `learn_skill` gesetzt. Ohne diese Felder stünde im
+   * Verlauf nur „read_skill" — der Betreiber will aber sehen, *welche*
+   * erlernte Vorgehensweise gegriffen hat, sonst wirkt eine daraus entstandene
+   * Antwort wie geraten.
+   */
+  skill_key?: string | null
+  skill_name?: string | null
+  /** „pending" heißt: gelernt, aber bis zur Freigabe des Betreibers wirkungslos. */
+  skill_status?: string | null
+  skill_learned?: boolean
 }
 
 /** Nur der Zustand — der Suchschluessel verlaesst das Backend nie. */

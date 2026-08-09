@@ -1,7 +1,7 @@
 """API-Verträge für rollenbasierte KI-Kontingente."""
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, SecretStr
 
@@ -63,3 +63,21 @@ class AiWebSearchStatus(BaseModel):
     """Nur der Zustand — der Schluessel verlaesst das Backend nie."""
 
     configured: bool
+
+
+class AiLearningPolicyUpdate(BaseModel):
+    """Wie die KI global gueltige Skills anlegen darf.
+
+    ``off`` = nur der Betreiber. ``review`` = Personal sofort, Kunden in die
+    Warteschlange. ``instant`` = jedes Gespraech wirkt sofort panelweit.
+    """
+
+    policy: Literal["off", "review", "instant"]
+
+
+class AiLearningPolicyStatus(BaseModel):
+    policy: Literal["off", "review", "instant"]
+    # Wie viele global gelernte Skills gerade auf Freigabe warten. Steht hier,
+    # damit die Einstellungsseite den Handlungsbedarf zeigt, ohne dass die
+    # Oberflaeche eine zweite Abfrage braucht.
+    pending_count: int = 0

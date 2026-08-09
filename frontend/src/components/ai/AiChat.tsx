@@ -394,15 +394,32 @@ export function AiChat() {
             {entries.map((entry) => {
               if (entry.kind === 'tool') {
                 const isMemory = entry.tool.tool_name === 'remember'
+                const skillKey = entry.tool.skill_key
+                // Ein Skill bekommt seinen Namen in den Verlauf, nicht den
+                // Werkzeugnamen: "Skill *Valheim braucht 6 GB* gelernt" sagt
+                // etwas, "learn_skill" sagt nichts.
+                const skillLabel = skillKey
+                  ? t(
+                      entry.tool.skill_learned
+                        ? (entry.tool.skill_status === 'pending'
+                            ? 'ai.skills.learnedPending'
+                            : 'ai.skills.learned')
+                        : 'ai.skills.used',
+                      { name: entry.tool.skill_name || skillKey },
+                    )
+                  : null
                 return (
                   <p
                     key={entry.id}
                     className="flex items-center gap-2 text-xs text-on-surface-variant"
                   >
-                    {isMemory
-                      ? <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-                      : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
-                    {t(`ai.tools.${entry.tool.tool_name}`, { defaultValue: entry.tool.tool_name })}
+                    {skillKey
+                      ? <Sparkles className="h-3.5 w-3.5 shrink-0 text-tertiary" aria-hidden="true" />
+                      : isMemory
+                        ? <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                        : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
+                    {skillLabel
+                      ?? t(`ai.tools.${entry.tool.tool_name}`, { defaultValue: entry.tool.tool_name })}
                   </p>
                 )
               }

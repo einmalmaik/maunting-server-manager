@@ -19,6 +19,7 @@ from services.ai_action_service import (
     AiActionStateError,
     AiActionValidationError,
     READ_TOOLS,
+    SKILL_TOOLS,
     WRITE_TOOLS,
     create_proposal,
     execute_autonomously,
@@ -194,12 +195,24 @@ def _tool_followup_messages(
                     separators=(",", ":"),
                 ),
             })
-            display.append({
+            entry = {
                 "tool_name": call.name,
                 "server_id": call.arguments.get("server_id")
                 if isinstance(call.arguments.get("server_id"), int)
                 else None,
-            })
+            }
+            # Bei Skills gehoert der Name in den Verlauf, nicht nur "read_skill".
+            # Der Betreiber will sehen, *welche* erlernte Vorgehensweise
+            # gegriffen hat — sonst wirkt eine Antwort, die aus einem Skill
+            # entstanden ist, wie geraten. Der Schluessel kommt aus dem
+            # Ergebnis und nicht aus den Argumenten: dort ist er bereits
+            # normalisiert und gegen die Sichtbarkeit geprueft.
+            if call.name in SKILL_TOOLS and isinstance(value, dict):
+                entry["skill_key"] = value.get("skill_key")
+                entry["skill_name"] = value.get("name")
+                entry["skill_status"] = value.get("status")
+                entry["skill_learned"] = bool(value.get("learned"))
+            display.append(entry)
         db.commit()
         return results, display
 

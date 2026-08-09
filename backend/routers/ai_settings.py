@@ -13,6 +13,8 @@ from database import SessionLocal, get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from models import Role, User
 from schemas.ai_settings import (
+    AiLearningPolicyStatus,
+    AiLearningPolicyUpdate,
     AiRoleLimitsResponse,
     AiRoleLimitsUpdate,
     AiWebSearchKeyUpdate,
@@ -150,6 +152,54 @@ def set_web_search_key(
         )
         audit_db.commit()
     return AiWebSearchStatus(configured=configured)
+
+
+@router.get("/settings/learning", response_model=AiLearningPolicyStatus)
+def get_learning_policy(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiLearningPolicyStatus:
+    from services import ai_learning_policy, ai_skill_service
+
+    return AiLearningPolicyStatus(
+        policy=ai_learning_policy.policy(),
+        pending_count=len(ai_skill_service.pending_skills(db)),
+    )
+
+
+@router.put("/settings/learning", response_model=AiLearningPolicyStatus)
+def set_learning_policy(
+    payload: AiLearningPolicyUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiLearningPolicyStatus:
+    """Legt fest, ob und wie die KI global gueltige Skills anlegen darf.
+
+    Ein globaler Skill wirkt fuer jeden Benutzer des Panels, bei einem Hoster
+    also fuer alle Kunden. Das ist die einzige Stelle, an der ein Gespraech
+    Text in den Kontext fremder Gespraeche bringen kann — deshalb eine eigene
+    Entscheidung des Betreibers und keine Voreinstellung im Code.
+    """
+    from services import ai_learning_policy, ai_skill_service
+
+    try:
+        current = ai_learning_policy.set_policy(payload.policy)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Unbekannte Lernpolitik") from exc
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="ai.learning.policy.updated",
+        target_type="panel_setting",
+        target_id=None,
+        details={"policy": current},
+    )
+    db.commit()
+    return AiLearningPolicyStatus(
+        policy=current, pending_count=len(ai_skill_service.pending_skills(db))
+    )
 
 
 @router.get("/limits/me", response_model=EffectiveAiLimitsResponse)

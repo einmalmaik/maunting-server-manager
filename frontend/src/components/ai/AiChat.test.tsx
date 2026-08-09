@@ -116,4 +116,43 @@ describe('AiChat', () => {
       expect.any(AbortSignal),
     ))
   })
+  it('nennt im Verlauf den Skill-Namen statt des Werkzeugnamens', async () => {
+    // "read_skill" sagt niemandem etwas. Der Betreiber will sehen, *welche*
+    // erlernte Vorgehensweise gegriffen hat — sonst wirkt eine daraus
+    // entstandene Antwort wie geraten.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'tool', data: {
+        tool_name: 'read_skill', server_id: null,
+        skill_key: 'server-nicht-erreichbar', skill_name: 'Nicht erreichbar',
+        skill_status: null, skill_learned: false,
+      } })
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Hilfe' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    await screen.findByText('Skill „Nicht erreichbar“ genutzt')
+  })
+
+  it('macht sichtbar, dass ein gelernter Skill noch auf Freigabe wartet', async () => {
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'tool', data: {
+        tool_name: 'learn_skill', server_id: null,
+        skill_key: 'valheim-ram', skill_name: 'Valheim braucht 6 GB',
+        skill_status: 'pending', skill_learned: true,
+      } })
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Hilfe' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    // Ohne diesen Zusatz haette der Benutzer den Eindruck, der Skill wirke bereits.
+    await screen.findByText(/wartet auf Freigabe/)
+  })
 })
