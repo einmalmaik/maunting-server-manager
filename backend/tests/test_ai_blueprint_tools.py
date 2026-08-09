@@ -47,7 +47,10 @@ def _rechte(db: Session, user: User, *, global_keys: tuple[str, ...]) -> None:
     set_user_roles(db, user, [role.id])
 
 
-def _server(db: Session, user: User, tmp_path: Path, game_type: str) -> Server:
+def _server(
+    db: Session, user: User, tmp_path: Path, game_type: str,
+    *, server_keys: tuple[str, ...] = ("server.view",),
+) -> Server:
     row = Server(
         name="MaickCraft Public",
         game_type=game_type,
@@ -58,7 +61,8 @@ def _server(db: Session, user: User, tmp_path: Path, game_type: str) -> Server:
     db.add(row)
     db.commit()
     db.refresh(row)
-    db.add(ServerPermission(user_id=user.id, server_id=row.id, permission_key="server.view"))
+    for key in server_keys:
+        db.add(ServerPermission(user_id=user.id, server_id=row.id, permission_key=key))
     db.commit()
     return row
 
@@ -172,8 +176,11 @@ def test_a_running_server_cannot_be_switched(
     Ein Wechsel unter ihm weg fuehrt zu einem Zustand, den weder Panel noch
     Guardian einordnen koennen.
     """
-    _rechte(db, regular_user, global_keys=("ai.chat.use", "blueprints.manage"))
-    server = _server(db, regular_user, tmp_path, "minecraft_forge")
+    _rechte(db, regular_user, global_keys=("ai.chat.use",))
+    server = _server(
+        db, regular_user, tmp_path, "minecraft_forge",
+        server_keys=("server.view", "server.blueprint.switch"),
+    )
     server.status = "running"
     db.commit()
     conversation = _conversation(db, regular_user)
@@ -194,16 +201,23 @@ def test_a_running_server_cannot_be_switched(
         )
 
 
-def test_switching_needs_the_blueprint_permission_not_just_server_access(
+def test_switching_needs_its_own_server_scoped_permission(
     db: Session, regular_user: User, tmp_path: Path
 ) -> None:
-    """Wer Blueprints nicht pflegen darf, stellt auch keinen Server um."""
+    """Sehen und sonstige Serverrechte reichen nicht.
+
+    Der Wechsel braucht `server.blueprint.switch` an **diesem** Server. Wer den
+    Server sonst weitgehend verwalten darf, aendert damit noch lange nicht,
+    welche Software er faehrt.
+    """
     _rechte(db, regular_user, global_keys=("ai.chat.use",))
-    server = _server(db, regular_user, tmp_path, "minecraft_forge")
-    db.add(ServerPermission(
-        user_id=regular_user.id, server_id=server.id, permission_key="server.config.write",
-    ))
-    db.commit()
+    server = _server(
+        db, regular_user, tmp_path, "minecraft_forge",
+        server_keys=(
+            "server.view", "server.config.write", "server.start", "server.stop",
+            "server.files.write", "server.backups.create",
+        ),
+    )
     conversation = _conversation(db, regular_user)
 
     with pytest.raises(ai_action_errors.AiActionValidationError):
@@ -263,7 +277,10 @@ def test_the_whole_minecraft_case_end_to_end(
         db, regular_user,
         global_keys=("ai.chat.use", "blueprints.manage", "servers.create"),
     )
-    server = _server(db, regular_user, tmp_path, "minecraft_forge")
+    server = _server(
+        db, regular_user, tmp_path, "minecraft_forge",
+        server_keys=("server.view", "server.blueprint.switch"),
+    )
     conversation = _conversation(db, regular_user)
     try:
         # 1. Die KI liest die Version.
@@ -341,3 +358,79 @@ def test_the_whole_minecraft_case_end_to_end(
             blueprint_service.delete_community_blueprint("minecraft_forge_1_20_1")
         except HTTPException:
             pass
+
+
+def test_managing_blueprints_does_not_let_you_restructure_foreign_servers(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Der Fehler des ersten Entwurfs, als Testfall.
+
+    Zuerst hing der Wechsel am **globalen** `blueprints.manage`. Das war in
+    beide Richtungen falsch:
+
+    - Wer Blueprints pflegen darf, haette jeden Server umbauen koennen, den er
+      nur *sehen* darf — auch den eines Kunden.
+    - Und der Besitzer seines eigenen Servers haette die Spielversion nicht
+      aendern koennen, ohne panelweite Blueprint-Rechte zu bekommen.
+
+    Vorlagen pflegen und einen Server zwischen ihnen wechseln sind zwei
+    Aufgaben. Der Betreiber macht die eine, der Kunde die andere.
+    """
+    _rechte(db, regular_user, global_keys=("ai.chat.use", "blueprints.manage"))
+    fremder = _server(
+        db, regular_user, tmp_path, "minecraft_forge",
+        server_keys=("server.view",),  # nur sehen
+    )
+    conversation = _conversation(db, regular_user)
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=conversation,
+            tool_name="propose_server_blueprint_switch",
+            arguments={
+                "server_id": fremder.id,
+                "blueprint_id": "minecraft_vanilla",
+                "reason": "Umbauen.",
+                "expected_effect": "Anderer Blueprint.",
+            },
+            correlation_id=str(uuid4()),
+        )
+    db.refresh(fremder)
+    assert fremder.game_type == "minecraft_forge"
+
+
+def test_the_owner_can_switch_without_panel_wide_blueprint_rights(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Die andere Haelfte: der Kunde kommt an seine eigene Version.
+
+    Ohne panelweite Blueprint-Rechte, nur mit `server.blueprint.switch` an
+    seinem Server. Genau das Hoster-Modell — der Betreiber stellt die Vorlagen
+    bereit, der Kunde waehlt zwischen ihnen.
+    """
+    _rechte(db, regular_user, global_keys=("ai.chat.use",))
+    server = _server(
+        db, regular_user, tmp_path, "minecraft_forge",
+        server_keys=("server.view", "server.blueprint.switch"),
+    )
+    conversation = _conversation(db, regular_user)
+
+    vorschlag = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_server_blueprint_switch",
+        arguments={
+            "server_id": server.id,
+            "blueprint_id": "minecraft_vanilla",
+            "reason": "Der Kunde will Vanilla statt Forge.",
+            "expected_effect": "Naechster Start nutzt Vanilla.",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    assert vorschlag.requires_confirmation is True
+    assert vorschlag.autonomous is False

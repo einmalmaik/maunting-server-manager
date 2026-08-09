@@ -175,6 +175,10 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'Netzwerk bearbeiten',
     desc: 'Erlaubt das Zuweisen von Ports und Ändern der Bind-IP.',
   },
+  'server.blueprint.switch': {
+    title: 'Blueprint wechseln',
+    desc: 'Erlaubt es, diesen Server auf einen anderen Blueprint umzustellen — so ändert man die Spielversion, denn sie steht im Blueprint und nicht am Server. Der Server muss dafür gestoppt sein, und die Portrollen beider Blueprints müssen übereinstimmen. Neue Blueprints anzulegen ist ein eigenes Recht (Blueprints verwalten).',
+  },
   'server.resources.manage': {
     title: 'Ressourcen anpassen',
     desc: 'Erlaubt das Festlegen von CPU-, RAM- und Festplatten-Limits.',
@@ -320,6 +324,7 @@ const SUBGROUPS = [
     keys: [
       'server.config.write',
       'server.network.manage',
+      'server.blueprint.switch',
       'server.resources.manage',
       'server.credentials.manage',
     ],

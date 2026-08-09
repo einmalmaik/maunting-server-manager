@@ -159,14 +159,20 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="blueprints.manage",
         recht_global=True,
     ),
-    # Der Wechsel selbst: `game_type` eines bestehenden Servers. Serverbezogen,
-    # aber mit dem globalen Blueprint-Recht — wer Blueprints nicht pflegen darf,
-    # soll auch keinen Server auf einen anderen umstellen.
+    # Der Wechsel selbst: `game_type` eines bestehenden Servers.
+    #
+    # Haengt am **serverbezogenen** `server.blueprint.switch`, nicht am globalen
+    # `blueprints.manage`. Der erste Entwurf hatte es umgekehrt, und das war in
+    # beide Richtungen falsch: wer Blueprints pflegen darf, haette damit jeden
+    # Server umbauen koennen, den er nur *sehen* darf — und der Besitzer seines
+    # eigenen Servers haette die Spielversion nicht aendern koennen.
+    #
+    # Vorlagen pflegen und einen Server zwischen ihnen wechseln sind zwei
+    # Aufgaben. Der Betreiber macht die eine, der Kunde die andere.
     "propose_server_blueprint_switch": Werkzeug(
         "server_write",
         immer_bestaetigen=True,
-        recht="blueprints.manage",
-        recht_global=True,
+        recht="server.blueprint.switch",
     ),
     "propose_server_create": Werkzeug(
         "global_write", recht="servers.create", recht_global=True
