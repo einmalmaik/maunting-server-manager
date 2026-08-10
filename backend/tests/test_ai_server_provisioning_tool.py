@@ -249,11 +249,13 @@ def test_a_revoked_permission_blocks_execution_even_after_confirmation(
 ) -> None:
     """Die Rechtepruefung laeuft erneut unmittelbar vor der Ausfuehrung.
 
-    Gemeldet wird `AI_ACTION_NOT_FOUND` und nicht `AI_ACTION_ACCESS_REVOKED`:
-    bei einem Erstellungsvorschlag ist `servers.create` gleichzeitig das
-    Sichtbarkeits- und das Ausfuehrungsrecht, weshalb der Vorschlag ohne dieses
-    Recht schon nicht mehr adressierbar ist. Entscheidend ist nicht der Code,
-    sondern dass die Provisionierung nicht erreicht wird.
+    Gemeldet wird `AI_ACTION_ACCESS_REVOKED` — hier stand vorher, es sei
+    `AI_ACTION_NOT_FOUND`, und der Test liess beides gelten. Das war ehrlich
+    beschrieben, aber es war eine Auskunft, die in die Irre fuehrt: der
+    Vorschlag ist da, dem Benutzer fehlt nur das Recht. Wer daraufhin sucht,
+    sucht nach einer verschwundenen Zeile statt nach einem entzogenen Recht.
+
+    Entscheidend bleibt daneben, dass die Provisionierung nicht erreicht wird.
     """
     _role(db, regular_user, ("ai.chat.use", "servers.create"))
     conversation = _conversation(db, regular_user)
@@ -291,5 +293,5 @@ def test_a_revoked_permission_blocks_execution_even_after_confirmation(
             db, proposal_id=proposal.id, user=regular_user, confirmation_token=token
         )
 
-    assert excinfo.value.code in {"AI_ACTION_NOT_FOUND", "AI_ACTION_ACCESS_REVOKED"}
+    assert excinfo.value.code == "AI_ACTION_ACCESS_REVOKED"
     assert called["count"] == 0, "Die Provisionierung darf ohne Recht nicht laufen"

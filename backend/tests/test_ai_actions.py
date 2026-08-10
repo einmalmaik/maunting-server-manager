@@ -1157,3 +1157,166 @@ def test_a_geloeschter_server_bleibt_bestaetigungspflichtig(
     assert "propose_server_delete" in ALWAYS_CONFIRM_TOOLS
     assert proposal.requires_confirmation is True
     assert proposal.autonomous is False
+
+
+def test_a_entzogenes_recht_ist_kein_fehlender_vorschlag(
+    client: TestClient,
+    db: Session,
+    owner_user: User,
+    owner_cookies: dict,
+    regular_user: User,
+    tmp_path: Path,
+) -> None:
+    """404 und 403 sagen zwei verschiedene Dinge — und beide muessen stimmen.
+
+    Vier Sachverhalte liefen frueher in dasselbe "Aktionsvorschlag nicht
+    gefunden": kaputte Kennung, fremde Zeile, fehlendes globales Recht,
+    fehlendes `server.view`. Fuer den Betreiber sah ein entzogenes Recht damit
+    aus wie ein verschwundener Vorschlag, und die Fehlersuche begann an der
+    falschen Stelle. Genau darauf ist er bei diesem Fehler hereingefallen.
+
+    Was **nicht** aufweicht: die Existenz fremder Zeilen. Die `user_id` steht
+    schon in der Abfrage, geworfen wird nur fuer Vorschlaege, die dem Anrufer
+    ohnehin gehoeren — ein fremder bleibt "gibt es nicht".
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _panel_unterhaltung(db, owner_user)
+    proposal = _loeschvorschlag(db, owner_user, conversation, server)
+    db.commit()
+    proposal_id = proposal.id
+
+    # Solange alles steht: sichtbar.
+    assert client.get(
+        f"/api/ai/actions/{proposal_id}", cookies=owner_cookies
+    ).status_code == 200
+
+    # Recht entziehen, ohne den Vorschlag anzufassen.
+    db.query(AiActionProposal).filter(AiActionProposal.id == proposal_id).update(
+        {AiActionProposal.user_id: regular_user.id}
+    )
+    db.commit()
+    # Jetzt gehoert er einem anderen — das bleibt "gibt es nicht", sonst waere
+    # die blosse Antwort schon eine Auskunft ueber fremde Vorgaenge.
+    fremd = client.get(f"/api/ai/actions/{proposal_id}", cookies=owner_cookies)
+    assert fremd.status_code == 404
+
+    # Und eine unbrauchbare Kennung ebenfalls.
+    assert client.get(
+        "/api/ai/actions/kein-uuid", cookies=owner_cookies
+    ).status_code == 404
+
+
+def test_a_entzogene_sicht_meldet_403_und_nicht_404(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    tmp_path: Path,
+) -> None:
+    """Die andere Haelfte: der Vorschlag ist da, die Sicht auf den Server ist weg.
+
+    `test_confirmation_rechecks_revoked_rbac` haelt dasselbe fuer das
+    Bestaetigen fest — dort kam schon immer 403, weil `confirm_proposal` den
+    Fall ausdruecklich kennt. Das blosse Nachschlagen antwortete dagegen 404 und
+    behauptete damit etwas Falsches ueber eine Zeile, die es sehr wohl gibt.
+    """
+    role = Role(name=f"ai-sicht-{regular_user.id}", is_system=False)
+    db.add(role)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_key="ai.chat.use"))
+    set_user_roles(db, regular_user, [role.id])
+    server = _server(db, regular_user, tmp_path)
+    sicht = ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view",
+    )
+    db.add_all([
+        sicht,
+        ServerPermission(
+            user_id=regular_user.id, server_id=server.id,
+            permission_key="server.backups.create",
+        ),
+    ])
+    db.commit()
+    conversation = _panel_unterhaltung(db, regular_user)
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_backup",
+        arguments={
+            "server_id": server.id,
+            "reason": "Vor der Umstellung sichern.",
+            "expected_effect": "Ein Backup liegt vor.",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+    proposal_id = proposal.id
+
+    assert client.get(
+        f"/api/ai/actions/{proposal_id}", cookies=user_cookies
+    ).status_code == 200
+
+    db.delete(sicht)
+    db.commit()
+
+    ohne_sicht = client.get(f"/api/ai/actions/{proposal_id}", cookies=user_cookies)
+
+    assert ohne_sicht.status_code == 403, ohne_sicht.text
+    assert ohne_sicht.json()["detail"] == "Berechtigung wurde entzogen"
+    # Und die Zeile ist wirklich noch da — der 403 ist keine hoefliche Umschrift
+    # fuer "geloescht".
+    assert db.get(AiActionProposal, proposal_id) is not None
+
+
+def test_a_wer_loeschen_darf_sieht_seinen_loeschvorschlag_auch_danach(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Welches Recht gilt, steht in der Werkzeugtabelle — nicht in einer Konstante.
+
+    Nach dem Loeschen traegt der Vorschlag kein `server_id` mehr, es gibt also
+    keinen Server, gegen den sich `server.view` pruefen liesse. Frueher verlangte
+    dieser Zweig fest `servers.create`: wer loeschen darf, aber nicht erstellen,
+    haette seinen eigenen, gerade erledigten Loeschvorschlag nicht mehr sehen
+    duerfen. Dieselbe Grenze zieht `_require_tool_permission` beim Vorschlagen
+    laengst richtig — zwei Orte mit zwei Antworten sind genau die Abweichung,
+    die niemand bemerkt.
+
+    Deshalb hier ausdruecklich ein Benutzer mit `servers.delete` und **ohne**
+    `servers.create`.
+    """
+    _loeschbar(monkeypatch)
+    role = Role(name=f"ai-loescher-{regular_user.id}", is_system=False)
+    db.add(role)
+    db.flush()
+    db.add_all([
+        RolePermission(role_id=role.id, permission_key="ai.chat.use"),
+        RolePermission(role_id=role.id, permission_key="servers.delete"),
+    ])
+    set_user_roles(db, regular_user, [role.id])
+    server = _server(db, regular_user, tmp_path)
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view",
+    ))
+    db.commit()
+    conversation = _panel_unterhaltung(db, regular_user)
+    proposal = _loeschvorschlag(db, regular_user, conversation, server)
+    db.commit()
+    proposal_id = proposal.id
+
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal_id, user=regular_user
+    )
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal_id, user=regular_user, confirmation_token=token
+    )
+
+    danach = client.get(f"/api/ai/actions/{proposal_id}", cookies=user_cookies)
+
+    assert danach.status_code == 200, danach.text
+    assert danach.json()["status"] == "succeeded"

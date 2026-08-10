@@ -84,7 +84,12 @@ def get_action(
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> AiActionProposalResponse:
-    proposal = ai_proposal_service.owned_proposal(db, proposal_id, user)
+    try:
+        proposal = ai_proposal_service.owned_proposal(db, proposal_id, user)
+    except ai_action_errors.AiActionStateError as exc:
+        # Ein entzogenes Recht ist etwas anderes als ein verschwundener
+        # Vorschlag. `_state_error` kennt den Unterschied und macht 403 daraus.
+        raise _state_error(exc) from exc
     if proposal is None:
         raise HTTPException(status_code=404, detail="Aktionsvorschlag nicht gefunden")
     return proposal_response(proposal)
@@ -158,12 +163,20 @@ def execute_action(
     user: User = Depends(require_global("ai.chat.use")),
     _: None = Depends(verify_csrf),
 ) -> AiActionExecuteResponse:
-    # Den Lauf **vorher** merken: scheitert die Ausfuehrung, ist die Zeile
-    # danach zurueckgerollt und neu geladen, und der Verweis waere umstaendlich
-    # wiederzubeschaffen.
-    vorab = ai_proposal_service.owned_proposal(db, proposal_id, user)
-    run_id = vorab.run_id if vorab is not None else None
+    # Vor dem `try` gesetzt, weil der `except`-Zweig ihn liest — und der kann
+    # jetzt schon beim Nachschlagen greifen.
+    run_id: str | None = None
     try:
+        # Den Lauf **vorher** merken: scheitert die Ausfuehrung, ist die Zeile
+        # danach zurueckgerollt und neu geladen, und der Verweis waere
+        # umstaendlich wiederzubeschaffen.
+        #
+        # Das Nachschlagen steht ausdruecklich **im** `try`. Solange
+        # `owned_proposal` bei fehlendem Recht nur `None` zurueckgab, war es
+        # davor gefahrlos; seit es `AI_ACTION_ACCESS_REVOKED` wirft, waere das
+        # ein ungefangener Fehler und aus einer 403 wuerde eine 500.
+        vorab = ai_proposal_service.owned_proposal(db, proposal_id, user)
+        run_id = vorab.run_id if vorab is not None else None
         proposal, result = ai_proposal_service.execute_proposal(
             db,
             proposal_id=proposal_id,

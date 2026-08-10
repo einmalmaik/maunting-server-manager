@@ -668,6 +668,25 @@ def create_proposal(
 
 
 def owned_proposal(db: Session, proposal_id: str, user: User) -> AiActionProposal | None:
+    """Der Vorschlag, sofern es ihn gibt und er diesem Benutzer gehoert.
+
+    Zwei Ausgaenge, und die Unterscheidung ist der Punkt:
+
+    - ``None`` heisst **gibt es nicht** — unbrauchbare Kennung, oder die Zeile
+      gehoert jemand anderem. Beides fuehrt zu 404, und das ist richtig so: ob
+      ein fremder Vorschlag existiert, ist selbst schon eine Auskunft.
+    - ``AI_ACTION_ACCESS_REVOKED`` heisst **darfst du nicht mehr** — die Zeile
+      ist da und gehoert dem Anrufer, ihm fehlt nur das Recht zur Sache.
+
+    Frueher lief beides in dasselbe ``None`` und damit in dieselbe Meldung
+    "Aktionsvorschlag nicht gefunden". Wer daraufhin suchte, suchte an der
+    falschen Stelle: nach einer verschwundenen Zeile statt nach einem entzogenen
+    Recht. Das Vokabular dafuer gibt es laengst, `confirm_proposal` benutzt es.
+
+    Die Existenz fremder Zeilen bleibt geschuetzt, weil die ``user_id``-Bedingung
+    schon in der Abfrage steht — geworfen wird nur fuer Zeilen, die der Anrufer
+    ohnehin besitzt.
+    """
     try:
         canonical = str(UUID(proposal_id))
     except (TypeError, ValueError, AttributeError):
@@ -679,16 +698,29 @@ def owned_proposal(db: Session, proposal_id: str, user: User) -> AiActionProposa
     if proposal is None:
         return None
     if proposal.server_id is None:
-        # Ein Erstellungsvorschlag hat noch keinen Server, gegen den sich
-        # `server.view` pruefen liesse. Die Grenze ist hier das globale Recht —
-        # dasselbe, das die Ausfuehrung spaeter erneut verlangt.
-        if not permission_service.has_global_permission(db, user, "servers.create"):
-            return None
+        # Kein Server, gegen den sich `server.view` pruefen liesse. Das trifft
+        # zwei Faelle: ein Erstellungsvorschlag, dessen Server noch nicht
+        # existiert — und seit dem `SET NULL` auch ein erledigter Vorschlag,
+        # dessen Server es nicht mehr gibt.
+        #
+        # Welches Recht dann gilt, steht in der Werkzeugtabelle und nicht hier.
+        # Fest verdrahtet stand hier `servers.create`; fuer einen abgeschlossenen
+        # Loeschvorschlag waere das sachfremd gewesen. `_require_tool_permission`
+        # zieht dieselbe Grenze beim Vorschlagen — zwei Orte mit zwei Antworten
+        # sind genau die Sorte Abweichung, die niemand bemerkt.
+        werkzeug = WERKZEUGE.get(proposal.tool_name)
+        if werkzeug is not None and werkzeug.recht_global and werkzeug.recht:
+            if not permission_service.has_global_permission(db, user, werkzeug.recht):
+                raise AiActionStateError("AI_ACTION_ACCESS_REVOKED")
+        # Ein serverbezogenes Werkzeug ohne globales Recht — etwa ein
+        # Konfigvorschlag, dessen Server spaeter geloescht wurde. Es gibt kein
+        # Recht mehr zu pruefen und nichts mehr zu verraten; der Beleg der
+        # eigenen Unterhaltung bleibt sichtbar.
         return proposal
     if not permission_service.has_server_permission(
         db, user, proposal.server_id, "server.view"
     ):
-        return None
+        raise AiActionStateError("AI_ACTION_ACCESS_REVOKED")
     return proposal
 
 
