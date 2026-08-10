@@ -530,3 +530,65 @@ async def test_the_snapshot_is_a_still_picture_not_the_living_state(
     ai_run_broker.veroeffentlichen("lauf-1", "delta", {"content": "danach"})
 
     assert abzug.inhalt == ""
+
+
+@pytest.mark.asyncio
+async def test_a_failed_action_still_lets_the_run_speak(
+    db: Session,
+    regular_user: User,
+    client,
+    user_cookies: dict,
+    user_csrf_token: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein gescheiterter Vorgang ist genau der Moment, in dem eine Aussage zaehlt.
+
+    Gefunden beim lokalen Durchlauf gegen ein echtes uvicorn, nicht hier: der
+    Serverstart scheiterte (kein Docker), ``execute`` antwortete mit 409 — und
+    der Lauf blieb fuer immer geparkt. Die Karte im Chat wurde rot, und die KI
+    sagte kein Wort dazu. Der Benutzer haette raten muessen, ob noch etwas
+    kommt.
+
+    Der Grund war eine Reihenfolge: der Lauf wurde nur im Erfolgspfad geweckt.
+    Jetzt weckt ihn **jede** Entscheidung — die Ausfuehrung hat stattgefunden,
+    ihr Ausgang ist ein Ergebnis, und Ergebnisse gehoeren zurueck ins Gespraech.
+
+    Geprueft wird ueber den HTTP-Endpunkt, weil genau dort der Fehler sass.
+    """
+    from services import ai_proposal_service
+
+    server = _server(db, "fehlschlag")
+    _grant(db, regular_user, server=server,
+           server_keys=("server.view", "server.backups.create"))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    _fake_stream(monkeypatch, [[_backup_aufruf(server)]])
+
+    run = await _lauf(db, regular_user, conversation, provider)
+    assert run.status == "waiting_confirmation"
+
+    vorschlag = db.query(AiActionProposal).one()
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=vorschlag.id, user=regular_user
+    )
+    db.commit()
+
+    # Das Backup scheitert — so wie der Serverstart ohne Docker scheiterte.
+    def platzt(*_args, **_kwargs):
+        raise RuntimeError("Docker ist nicht erreichbar")
+
+    monkeypatch.setattr("services.backup_orchestrator.create_server_backup", platzt)
+
+    antwort = client.post(
+        f"/api/ai/actions/{vorschlag.id}/execute",
+        json={"confirmation_token": token},
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
+    )
+    assert antwort.status_code == 409, antwort.text
+
+    db.expire_all()
+    assert db.query(AiActionProposal).one().status == "failed"
+    # **Der Kern:** der Lauf steht nicht mehr auf "wartet auf einen Menschen".
+    # Er wurde geweckt und darf dem Benutzer sagen, dass es schiefging.
+    assert db.get(AiRun, run.id).status != "waiting_confirmation"

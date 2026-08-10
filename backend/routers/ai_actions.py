@@ -118,6 +118,35 @@ def confirm_action(
         raise HTTPException(status_code=503, detail="Aktionsvorschlag ist nicht verfuegbar") from exc
 
 
+def _lauf_wecken(db: Session, run_id: str | None) -> None:
+    """Weckt den Lauf, der auf diesen Vorschlag gewartet hat.
+
+    **Hier ging es frueher nicht weiter.** Der Mensch hatte zugestimmt, die
+    Aktion lief — und der Zug, der sie vorgeschlagen hatte, existierte nicht
+    mehr. Man musste eine neue Nachricht schreiben, damit die KI erfuhr, wie ihr
+    eigener Vorschlag ausgegangen ist.
+
+    Gerufen wird das bei **Erfolg und bei Fehlschlag**. Ein gescheiterter
+    Neustart ist genau der Moment, in dem der Benutzer eine Aussage braucht;
+    bliebe der Lauf dann geparkt, waere die Karte rot und der Chat stumm.
+    Ob ueberhaupt geweckt wird, entscheidet `darf_fortsetzen`: solange noch ein
+    Vorschlag derselben Runde offen ist, passiert nichts.
+
+    Scheitert das Wecken selbst (kein laufendes Panel, Lauf ueberholt), bleibt
+    es bei der ausgefuehrten Aktion — die Zustimmung des Menschen darf nicht
+    daran haengen, ob die KI danach noch etwas vorhat.
+    """
+    if not run_id:
+        return
+    try:
+        ai_run_service.lauf_fortsetzen(db, run_id=run_id)
+    except Exception:
+        logger.warning(
+            "AI-Lauf konnte nach der Entscheidung nicht fortgesetzt werden run_id=%s",
+            run_id,
+        )
+
+
 @router.post(
     "/actions/{proposal_id}/execute",
     response_model=AiActionExecuteResponse,
@@ -129,6 +158,11 @@ def execute_action(
     user: User = Depends(require_global("ai.chat.use")),
     _: None = Depends(verify_csrf),
 ) -> AiActionExecuteResponse:
+    # Den Lauf **vorher** merken: scheitert die Ausfuehrung, ist die Zeile
+    # danach zurueckgerollt und neu geladen, und der Verweis waere umstaendlich
+    # wiederzubeschaffen.
+    vorab = ai_proposal_service.owned_proposal(db, proposal_id, user)
+    run_id = vorab.run_id if vorab is not None else None
     try:
         proposal, result = ai_proposal_service.execute_proposal(
             db,
@@ -139,29 +173,14 @@ def execute_action(
         antwort = AiActionExecuteResponse(
             proposal=proposal_response(proposal), result=result
         )
-        # **Hier ging es frueher nicht weiter.** Der Mensch hatte zugestimmt, die
-        # Aktion lief — und der Zug, der sie vorgeschlagen hatte, existierte
-        # nicht mehr. Man musste eine neue Nachricht schreiben, damit die KI
-        # erfuhr, wie ihr eigener Vorschlag ausgegangen ist.
-        #
-        # Jetzt wird der Lauf geweckt, sobald **alle** Vorschlaege seiner Runde
-        # entschieden sind. Er bekommt das Ergebnis als Werkzeugantwort und
-        # arbeitet weiter, wo er stehengeblieben ist.
-        #
-        # Scheitert das Wecken (kein laufendes Panel, Lauf ueberholt), bleibt es
-        # bei der ausgefuehrten Aktion — die Zustimmung des Menschen darf nicht
-        # daran haengen, ob die KI danach noch etwas vorhat.
-        if proposal.run_id:
-            try:
-                ai_run_service.lauf_fortsetzen(db, run_id=proposal.run_id)
-            except Exception:
-                logger.warning(
-                    "AI-Lauf konnte nach Bestaetigung nicht fortgesetzt werden run_id=%s",
-                    proposal.run_id,
-                )
+        _lauf_wecken(db, proposal.run_id or run_id)
         return antwort
     except ai_action_errors.AiActionStateError as exc:
         db.rollback()
+        # Der Fehlschlag ist bereits an der Vorschlagszeile festgehalten
+        # (`execute_proposal` committet ihn, bevor es wirft). Der Lauf darf ihn
+        # deshalb erfahren und den Benutzer unterrichten.
+        _lauf_wecken(db, run_id)
         raise _state_error(exc) from exc
     except DisSidecarError as exc:
         db.rollback()
