@@ -149,13 +149,38 @@ schon in einem Skill stehen."""
 # im Dateimanager. Damit sie sie auch findet, muss sie schauen statt zu raten —
 # ohne diesen Hinweis probiert ein Modell Dateinamen durch, die es aus dem
 # Training kennt, und schliesst aus einem Fehlversuch auf "gibt es nicht".
+#
+# Der zweite Teil hat einen eigenen Betriebsanlass: "aendere die Ausdauerwerte".
+# Die KI fand `Data/Config/buffs.xml`, las den Anfang, sah `editable: false` —
+# und sagte dem Benutzer, er muesse es im Dateimanager tun. Genau das stand hier
+# frueher woertlich, und es war richtig, solange es nur die Vollersetzung gab:
+# eine Datei ganz zu ersetzen, die man nur zum Teil kennt, loescht den Rest.
+#
+# Mit `propose_config_patch` gibt es den Weg. Der Block beschreibt ihn deshalb
+# als Ablauf und nicht als Erlaubnis — ein Modell, dem man nur sagt "du darfst",
+# faengt trotzdem beim Anfang der Datei an zu lesen.
 DATEIEN = """\
 Dateien: `list_server_files` zeigt, was da ist — nutze es, bevor du eine Datei \
 liest, statt Namen zu raten. `read_config` liest jede Textdatei des Servers, \
-nicht nur Konfigurationen. Meldet es `editable: false`, aendere sie **nicht** \
-ueber einen Vorschlag, sondern sag dem Benutzer, dass er das im Dateimanager tun \
-muss; der Grund steht daneben. Bei `binary: true` ist es keine Textdatei — \
-Finger weg."""
+nicht nur Konfigurationen.
+Grosse Dateien liest du nicht von vorne durch. Der Weg ist: \
+`search_server_files` nach dem Begriff, den du suchst → `read_config` mit \
+`offset` auf die gefundene Zeile, um die Umgebung zu sehen → \
+`propose_config_patch` fuer die Aenderung. Eine Spielkonfiguration hat \
+tausende Zeilen; `total_lines` sagt dir, woran du bist.
+Aendern: `propose_config_patch` ersetzt einzelne Stellen und laesst den Rest \
+unberuehrt — das ist der Normalfall. `propose_config_update` ersetzt die \
+**ganze** Datei und passt nur, wenn du sie ganz gelesen hast (`editable: true`) \
+oder sie neu anlegst.
+`editable: false` heisst **nicht** "nicht aenderbar". Es heisst nur, dass du \
+sie nicht als Ganzes ersetzen darfst, weil du sie nicht ganz gesehen hast — mit \
+`patchable: true` aenderst du sie trotzdem, per Patch. Schick den Benutzer \
+deswegen **nicht** in den Dateimanager. Erst bei `patchable: false` \
+(`binary: true`) ist eine Datei fuer dich tabu.
+Im `find` eines Patches muss genug Umgebung stehen, dass er in der ganzen Datei \
+genau einmal vorkommt — eine ganze Zeile oder das umschliessende Element, nicht \
+nur der Wert. Wird der Vorschlag als nicht eindeutig abgewiesen, nimm mehr \
+Umgebung dazu und versuch es erneut, statt aufzugeben."""
 
 
 # Der Betriebsanlass: "kannst du die Minecraft-Version aendern?" — die KI sah

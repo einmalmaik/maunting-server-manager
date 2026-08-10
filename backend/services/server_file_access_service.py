@@ -291,6 +291,182 @@ def list_server_directory(
     }
 
 
+# Grenzen der Inhaltssuche. Sie stehen als Vorgabe hier und nicht beim Aufrufer,
+# damit ein neuer Aufrufer nicht versehentlich ohne Deckel sucht — die Suche
+# liest im Zweifel jede Datei des Servers.
+#
+# Eine Zeile wird hart bei 2000 Zeichen gekappt: eine minifizierte Datei besteht
+# aus einer einzigen Zeile von mehreren hundert Kilobyte, und die gehoert in
+# keine Antwort. Auf ein Anzeigemass kuerzt der Aufrufer selbst — die KI erst
+# **nach** der Redaktion, sonst zerschnitte die Kuerzung ein Geheimnis und die
+# Redaktion faende es nicht mehr.
+SEARCH_MAX_FILES = 200
+SEARCH_MAX_DEPTH = 8
+SEARCH_MAX_MATCHES = 200
+SEARCH_MAX_LINE_CHARS = 2_000
+SEARCH_MAX_CONTEXT_LINES = 5
+
+
+def search_file_contents(
+    db: Session,
+    *,
+    server_id: int,
+    query: str,
+    relative_path: str = "",
+    context: int = 0,
+    max_files: int = SEARCH_MAX_FILES,
+    max_depth: int = SEARCH_MAX_DEPTH,
+    max_matches: int = SEARCH_MAX_MATCHES,
+) -> dict:
+    """Sucht einen Text **in** den Dateien — nicht in ihren Namen.
+
+    Der Dateimanager konnte bisher nur Namen vergleichen
+    (`routers/files.py::search_files`). Wer wissen wollte, in welcher Datei ein
+    Wert steht, musste ihn selbst suchen — bei einer Spielkonfiguration mit
+    dreizehntausend Zeilen heisst das: von Hand durchscrollen.
+
+    Bewusst **eine** Implementierung fuer Panel und KI. Ein zweiter Suchpfad
+    waere ein zweiter Ort mit eigenen Grenzen, eigener Pfadpruefung und eigenem
+    Verhalten am Node-Agenten — und die Zusage "die KI sieht dasselbe wie der
+    Benutzer" waere dann eine Behauptung ueber zwei verschiedene Programme.
+
+    **Ohne Rechtepruefung und ohne Redaktion.** Beides gehoert zum Aufrufer: der
+    Endpunkt prueft `server.files.read` wie beim Lesen einer Datei, und ob eine
+    Trefferzeile redigiert werden muss, haengt vom Empfaenger ab — ein Mensch
+    mit Leserecht sieht seine Zugangsdaten ohnehin im Editor, ein Modell nie.
+
+    Gebaut auf `list_server_directory` und `read_server_text`, weil beide den
+    Node-Agenten schon beherrschen. Damit sucht dieselbe Funktion auf einem
+    lokalen wie auf einem entfernten Server.
+    """
+    from services.ai_action_service import is_binary_text
+
+    def auflisten(pfad: str) -> dict | None:
+        """Das Verzeichnis unter ``pfad`` — oder ``None``, wenn es keines ist.
+
+        Die beiden Zugriffswege antworten auf einen *Datei*pfad verschieden: der
+        lokale wirft 400 "Pfad ist kein Verzeichnis", der Node-Agent meldet
+        nichts Auflistbares. Beides bedeutet dasselbe und wird hier auf dieselbe
+        Antwort gebracht, damit der Aufrufer den Unterschied nicht kennen muss.
+        """
+        try:
+            ergebnis = list_server_directory(
+                db, server_id=server_id, relative_path=pfad, limit=MAX_LISTED_ENTRIES
+            )
+        except HTTPException as exc:
+            if exc.status_code not in (400, 404):
+                raise
+            return None
+        if not ergebnis.get("exists", True) or not ergebnis.get("entries"):
+            return None
+        return ergebnis
+
+    leer = {
+        "path": relative_path,
+        "query": query,
+        "matches": [],
+        "files_searched": 0,
+        "truncated": False,
+    }
+
+    gekuerzt = False
+    # Breitensuche statt Rekursion: so gehen die Deckel auf Dateizahl und Tiefe
+    # zuerst in die Breite und nicht in den ersten Unterordner, den es findet.
+    # Wer in `Data/` sucht, will nicht, dass das Budget in `Data/Bundles/`
+    # aufgebraucht ist, bevor `Data/Config/` an die Reihe kommt.
+    dateien: list[str] = []
+    verzeichnisse: list[tuple[str, int]] = []
+    wurzelliste = auflisten(relative_path)
+    if wurzelliste is None:
+        if not relative_path:
+            return leer
+        # Kein Verzeichnis — dann ist der Pfad eine Datei, und die Suche gilt
+        # genau ihr. Der haeufigste Fall ueberhaupt.
+        dateien.append(relative_path)
+    else:
+        verzeichnisse.append((relative_path, 0))
+
+    # Die Wurzel ist bereits aufgelistet; ein zweiter Abruf dafuer waere beim
+    # Node-Agenten eine Netzrunde umsonst.
+    vorgemerkt: dict | None = wurzelliste
+    while verzeichnisse and len(dateien) < max_files:
+        pfad, tiefe = verzeichnisse.pop(0)
+        if vorgemerkt is not None:
+            auflistung, vorgemerkt = vorgemerkt, None
+        else:
+            auflistung = auflisten(pfad)
+        if auflistung is None:
+            continue
+        if auflistung.get("truncated"):
+            gekuerzt = True
+        for eintrag in auflistung.get("entries", []):
+            name = str(eintrag.get("name") or "")
+            if not name:
+                continue
+            voll = f"{pfad}/{name}" if pfad else name
+            if eintrag.get("is_dir"):
+                if tiefe + 1 <= max_depth:
+                    verzeichnisse.append((voll, tiefe + 1))
+                else:
+                    gekuerzt = True
+            elif len(dateien) < max_files:
+                dateien.append(voll)
+            else:
+                gekuerzt = True
+
+    nadel = query.casefold()
+    kontext = max(0, min(context, SEARCH_MAX_CONTEXT_LINES))
+    treffer: list[dict] = []
+    gelesen = 0
+    gekuerzt = gekuerzt or bool(verzeichnisse)
+    for datei in dateien:
+        if len(treffer) >= max_matches:
+            gekuerzt = True
+            break
+        try:
+            inhalt = str(read_server_text(
+                db, server_id=server_id, relative_path=datei
+            )["content"])
+        except HTTPException:
+            # Zu gross, verschwunden, keine Datei — kein Grund, die ganze Suche
+            # scheitern zu lassen.
+            continue
+        if is_binary_text(inhalt):
+            continue
+        # Erst hier gezaehlt: `files_searched` soll sagen, worin wirklich gesucht
+        # wurde. Uebersprungene Binaerdateien mitzuzaehlen waere eine Auskunft,
+        # auf die sich niemand verlassen kann.
+        gelesen += 1
+        zeilen = inhalt.splitlines()
+        for nummer, text in enumerate(zeilen, start=1):
+            if nadel not in text.casefold():
+                continue
+            if len(treffer) >= max_matches:
+                gekuerzt = True
+                break
+            eintragszeile: dict = {
+                "path": datei,
+                "line": nummer,
+                "text": text.strip()[:SEARCH_MAX_LINE_CHARS],
+            }
+            if kontext:
+                von = max(0, nummer - 1 - kontext)
+                bis = min(len(zeilen), nummer + kontext)
+                eintragszeile["context"] = [
+                    zeile.strip()[:SEARCH_MAX_LINE_CHARS] for zeile in zeilen[von:bis]
+                ]
+                eintragszeile["context_first_line"] = von + 1
+            treffer.append(eintragszeile)
+
+    return {
+        "path": relative_path,
+        "query": query,
+        "matches": treffer,
+        "files_searched": gelesen,
+        "truncated": gekuerzt,
+    }
+
+
 def read_server_text(db: Session, *, server_id: int, relative_path: str) -> dict:
     server = _server(db, server_id)
     agent = _agent(server, db)

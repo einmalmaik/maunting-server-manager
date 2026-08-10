@@ -92,6 +92,7 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "read_mod_updates": Werkzeug("server_read"),
     "search_workshop_mods": Werkzeug("server_read"),
     "list_server_files": Werkzeug("server_read"),
+    "search_server_files": Werkzeug("server_read"),
     "read_server_backups": Werkzeug("server_read"),
     "read_guardian_incidents": Werkzeug("server_read"),
     "read_ai_action_history": Werkzeug("server_read"),
@@ -138,6 +139,17 @@ WERKZEUGE: dict[str, Werkzeug] = {
         "server_write", immer_bestaetigen=True, recht="server.backups.restore"
     ),
     "propose_config_update": Werkzeug("server_write", recht="server.files.write"),
+    # Dieselbe Sache wie `propose_config_update`, nur nicht die ganze Datei —
+    # und deshalb dasselbe Recht. Die Trennung ist keine Rechtefrage, sondern
+    # eine der Reichweite: die Vollersetzung setzt voraus, dass das Modell die
+    # Datei vollstaendig gesehen hat, die Teilaenderung nur die eine Stelle.
+    # Ueber 24.000 Zeichen ist die erste unerreichbar; die zweite bleibt es
+    # nicht. Ohne sie war jede echte Spielkonfiguration fuer die KI nur lesbar.
+    #
+    # Umkehrbar und damit autonomiefaehig: `write_server_text` legt vor jedem
+    # Schreiben einen Versionsschnappschuss an, aus dem der Dateimanager den
+    # alten Stand zurueckholt.
+    "propose_config_patch": Werkzeug("server_write", recht="server.files.write"),
     "propose_mod_install": Werkzeug("server_write", recht="server.mods.write"),
     # Eine falsche Bind-IP macht den Server unerreichbar — aber nur, bis jemand
     # sie zurueckstellt, und das kann die KI selbst. Kein Datenverlust, also

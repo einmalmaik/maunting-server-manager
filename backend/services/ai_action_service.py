@@ -37,6 +37,29 @@ MAX_DIFF_LINES = 200
 # Bewusst als Konstanten, weil dieselben Werte im Phase-4-Vertrag stehen.
 MAX_READ_CONFIG_CHARS = 24_000
 MAX_LOG_CHARS = 24_000
+# Das Fenster von `read_config`. Der Zeichendeckel allein reicht nicht mehr,
+# seit eine Datei auch stueckweise gelesen werden kann: eine Megabyte grosse
+# Spielkonfiguration hat gut dreizehntausend Zeilen, und ohne Startzeile kaeme
+# immer nur derselbe Anfang zurueck. Die Zeilenzahl ist die Groesse, in der ein
+# Mensch eine Fundstelle beschreibt ("ab Zeile 4200"), deshalb zaehlt das
+# Fenster in Zeilen und nicht in Zeichen. Der Zeichendeckel bleibt als harte
+# Obergrenze darueber liegen.
+MAX_READ_CONFIG_LINES = 400
+# Grenzen der Dateisuche. Jede gelesene Datei ist bei einem entfernten Server
+# ein eigener Abruf ueber den Node-Agenten, jede Trefferzeile ein Stueck
+# unvertrauenswuerdiger Text im Kontext des Modells. Beides will begrenzt sein,
+# und zwar aus verschiedenen Gruenden: das eine kostet Zeit, das andere Geld.
+MAX_SEARCH_QUERY_CHARS = 128
+MAX_SEARCH_FILES = 40
+MAX_SEARCH_DEPTH = 4
+MAX_SEARCH_MATCHES = 40
+MAX_SEARCH_LINE_CHARS = 200
+MAX_SEARCH_CONTEXT_LINES = 5
+# Grenzen der Teilaenderung. Zwanzig Ersetzungen sind mehr, als eine
+# nachvollziehbare Aenderung braucht; wer mehr will, macht zwei Vorschlaege und
+# der Mensch sieht zweimal, was passiert.
+MAX_PATCH_EDITS = 20
+MAX_PATCH_CHUNK_CHARS = 8_000
 # Obergrenzen fuer die Listen-Tools. Jede Zeile landet als unvertrauenswuerdiger
 # Text im Modellkontext und damit im Kostenbudget des Benutzers.
 MAX_LISTED_MODS = 60
@@ -84,7 +107,7 @@ MAX_LISTED_SERVERS = 60
 # vorhandenen, nicht blockierenden Server-Lifecycle-Mutex. Lifecycle-Aktionen
 # brauchen ihn nicht: `request_lifecycle_operation` hat eine eigene Job-Sperre.
 # Mod-Installation ebenso wenig: `install_mod_bg` haelt den Install-Lock selbst.
-_MUTEX_TOOLS = {"propose_backup", "propose_config_update"}
+_MUTEX_TOOLS = {"propose_backup", "propose_config_update", "propose_config_patch"}
 
 
 # Ein "reason" beschreibt, warum die KI die Aenderung vorschlaegt, ein
@@ -491,12 +514,51 @@ def provider_tool_definitions() -> list[dict]:
             {"path": {"type": "string", "maxLength": 256}},
         ),
         _server_function(
+            "search_server_files",
+            "Sucht einen Text in den Dateien des Servers und liefert Pfad und "
+            "Zeilennummer jedes Treffers. **Der erste Schritt bei jeder grossen "
+            "Datei** — eine Spielkonfiguration hat tausende Zeilen, und "
+            "read_config zeigt immer nur ein Fenster davon. Mit `path` auf eine "
+            "Datei suchst du in genau ihr, mit `path` auf ein Verzeichnis "
+            "darunter, ohne `path` im ganzen Serververzeichnis. Exakter "
+            "Teilstring, Gross- und Kleinschreibung egal.",
+            {
+                "query": {"type": "string", "maxLength": MAX_SEARCH_QUERY_CHARS},
+                "path": {"type": "string", "maxLength": 256},
+                "context": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": MAX_SEARCH_CONTEXT_LINES,
+                    "description": "Zeilen vor und nach jedem Treffer.",
+                },
+            },
+            ["query"],
+        ),
+        _server_function(
             "read_config",
             "Liest eine Textdatei des Servers revisionssicher — Konfigurationen, "
-            "Whitelists, Skripte, alles was der Dateimanager auch zeigt. "
-            "Antwortet mit `editable: false`, wenn die Datei nicht unveraendert "
-            "gelesen werden konnte; dann ist sie nicht automatisch aenderbar.",
-            {"path": {"type": "string", "maxLength": 256}},
+            "Whitelists, Skripte, alles was der Dateimanager auch zeigt. Ohne "
+            f"`offset` die ersten {MAX_READ_CONFIG_LINES} Zeilen; `total_lines` "
+            "sagt dir, wie lang die Datei wirklich ist. Zu einer Fundstelle aus "
+            "search_server_files springst du mit `offset`. "
+            "`editable: false` heisst **nur**, dass du die Datei nicht als "
+            "Ganzes ersetzen darfst, weil du sie nicht ganz gesehen hast — mit "
+            "`patchable: true` kannst du sie trotzdem per propose_config_patch "
+            "aendern. Erst `patchable: false` (Binaerdatei) heisst Finger weg.",
+            {
+                "path": {"type": "string", "maxLength": 256},
+                "offset": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Erste Zeile des Fensters, 1-basiert.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_READ_CONFIG_LINES,
+                    "description": "Zeilen im Fenster.",
+                },
+            },
             ["path"],
         ),
         # ── Erweiterter Serverkontext (Zielpunkt 3.3) ──────────────────────
@@ -622,7 +684,11 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_config_update",
-            "Schlaegt eine revisionsgebundene Config-Aenderung vor. Niemals Secrets einfuegen.",
+            "Ersetzt eine Datei **vollstaendig** — fuer neue Dateien und fuer "
+            "kleine, die du ganz gelesen hast (`editable: true`). Bei allem "
+            "anderen nimm propose_config_patch: eine Datei, die du nur "
+            "ausschnittsweise kennst, ganz zu ersetzen wuerde alles Ungesehene "
+            "loeschen, und genau das wird abgewiesen. Niemals Secrets einfuegen.",
             {
                 "path": {"type": "string", "maxLength": 256},
                 "content": {"type": "string", "maxLength": MAX_CONFIG_CHARS},
@@ -630,6 +696,48 @@ def provider_tool_definitions() -> list[dict]:
                 **_RATIONALE_SCHEMA,
             },
             ["path", "content", "expected_revision", *_RATIONALE_REQUIRED],
+        ),
+        _server_function(
+            "propose_config_patch",
+            "Aendert **einzelne Stellen** einer Datei und laesst den Rest "
+            "unberuehrt — der Weg fuer jede grosse Datei, auch wenn sie "
+            "`editable: false` meldet. Je Eintrag wird `find` durch `replace` "
+            "ersetzt. `find` muss **genau einmal** in der Datei vorkommen: nimm "
+            "so viel Umgebung mit, dass es eindeutig ist (nicht `value=\"1\"`, "
+            "sondern die ganze Zeile oder das Element drumherum). Kommt es "
+            "keinmal oder mehrfach vor, wird der Vorschlag abgewiesen und du "
+            "musst `find` genauer fassen. `expected_revision` stammt aus "
+            "read_config. Weder `find` noch `replace` duerfen Zugangsdaten "
+            "enthalten.",
+            {
+                **_RATIONALE_SCHEMA,
+                "path": {"type": "string", "maxLength": 256},
+                "expected_revision": {"type": "string", "maxLength": 71},
+                "edits": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": MAX_PATCH_EDITS,
+                    "description": "Ersetzungen, der Reihe nach angewandt.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "find": {
+                                "type": "string",
+                                "maxLength": MAX_PATCH_CHUNK_CHARS,
+                                "description": "Exakter Text, genau einmal vorhanden.",
+                            },
+                            "replace": {
+                                "type": "string",
+                                "maxLength": MAX_PATCH_CHUNK_CHARS,
+                                "description": "Was stattdessen dastehen soll; leer loescht.",
+                            },
+                        },
+                        "required": ["find", "replace"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            ["path", "expected_revision", "edits", *_RATIONALE_REQUIRED],
         ),
         _server_function(
             "propose_bind_ip_update",
@@ -1697,11 +1805,24 @@ def execute_read_tool(
             ),
         }
 
-    if set(arguments) != {"path"} or not permission_service.has_server_permission(
+    if tool_name == "search_server_files":
+        return _execute_file_search(db, user=user, server=server, arguments=arguments)
+
+    if set(arguments) - {"path", "offset", "limit"} or "path" not in arguments:
+        raise AiActionValidationError("Datei-Lesewerkzeug hat ungueltige Argumente")
+    if not permission_service.has_server_permission(
         db, user, server.id, "server.files.read"
     ):
         raise AiActionValidationError("Datei-Lesezugriff ist nicht erlaubt")
     path = _config_path(arguments["path"])
+    offset = _positive_int(arguments.get("offset"), name="offset", default=1, minimum=1)
+    limit = _positive_int(
+        arguments.get("limit"),
+        name="limit",
+        default=MAX_READ_CONFIG_LINES,
+        minimum=1,
+        maximum=MAX_READ_CONFIG_LINES,
+    )
     result = read_server_text(db, server_id=server.id, relative_path=path)
     content = str(result["content"])
     # Seit die Endungsliste weg ist, kann hier auch eine Binaerdatei landen —
@@ -1710,32 +1831,166 @@ def execute_read_tool(
     # Wuerde das Modell ihn zurueckschreiben, waere die Datei zerstoert.
     binaer = is_binary_text(content)
     redacted = redact_sensitive_text(content)
-    truncated = len(redacted) > MAX_READ_CONFIG_CHARS
     was_redacted = redacted != content
-    # Die Revision ist die Zusage "du hast den aktuellen Stand vollstaendig und
-    # unveraendert gesehen". Eine redigierte oder gekuerzte Ansicht ist das
-    # nicht: ein darauf aufgebauter Vorschlag wuerde echte Zugangsdaten durch
-    # den Platzhalter ersetzen bzw. die Datei hinter dem Limit abschneiden.
-    # Ohne Revision kommt propose_config_update fuer diese Datei nicht durch.
-    editable = not (truncated or was_redacted or binaer)
+
+    zeilen = redacted.splitlines(keepends=True)
+    fenster = zeilen[offset - 1 : offset - 1 + limit]
+    sicht = "".join(fenster)
+    zeichen_gekuerzt = len(sicht) > MAX_READ_CONFIG_CHARS
+    sicht = sicht[:MAX_READ_CONFIG_CHARS]
+    # "Vollstaendig" heisst: dieses Fenster **ist** die Datei. Nur dann hat das
+    # Modell den ganzen Stand gesehen.
+    vollstaendig = offset == 1 and len(fenster) == len(zeilen) and not zeichen_gekuerzt
+
+    # Zwei Fragen, die frueher eine waren — und dass sie eine waren, war der
+    # Grund, warum eine grosse Spielkonfiguration fuer die KI nur lesbar war:
+    #
+    # `editable`  — darf die Datei **ganz** ersetzt werden? Nur wenn das Modell
+    #               sie ganz und unveraendert gesehen hat. Sonst wuerde der
+    #               Vollersatz alles hinter dem Fenster loeschen bzw. echte
+    #               Zugangsdaten durch den Platzhalter ersetzen.
+    # `patchable` — darf **eine Stelle** darin ersetzt werden? Dafuer genuegt,
+    #               dass es Text ist. Wer eine Stelle austauscht, laesst den
+    #               Rest Byte fuer Byte stehen; was er nie gesehen hat, kann er
+    #               auch nicht zerstoeren.
+    #
+    # Die Revision ist damit wieder das, was sie ist: die Kennung *dieses
+    # Dateistands*. Sie zurueckzuhalten war frueher die Absicherung der
+    # Vollersetzung; die steht jetzt serverseitig in `ai_proposal_service` und
+    # haengt nicht mehr daran, was das Modell gesehen zu haben behauptet.
+    editable = vollstaendig and not was_redacted and not binaer
+    patchable = not binaer
     grund = (
         "Diese Datei ist keine Textdatei. Automatisch aendern wuerde sie "
-        "zerstoeren."
+        "zerstoeren. Bitte nicht anfassen."
         if binaer
-        else "Diese Datei kann nicht automatisch geaendert werden, weil sie "
-        "gekuerzt oder redigiert gelesen wurde. Bitte die Aenderung im "
-        "Dateimanager vornehmen."
+        else "Diese Datei wurde gekuerzt oder redigiert gelesen und kann "
+        "deshalb nicht als Ganzes ersetzt werden. Aendere sie mit "
+        "propose_config_patch — dabei bleibt alles Ungesehene unberuehrt."
     )
     return {
         "path": path,
-        "revision": result["revision"] if editable else None,
+        "revision": result["revision"] if patchable else None,
         # Von einer Binaerdatei geht nichts in den Kontext: der Salat kostet
         # Tokens und sagt dem Modell nichts, was es nicht schon aus `binary`
         # weiss.
-        "content": "" if binaer else redacted[:MAX_READ_CONFIG_CHARS],
-        "truncated": truncated,
+        "content": "" if binaer else sicht,
+        # Wo das Fenster liegt und wie gross die Datei ist — ohne diese beiden
+        # Zahlen kann das Modell nicht weiterblaettern und weiss auch nicht, ob
+        # es noch etwas zu blaettern gibt.
+        "offset": offset,
+        "lines": 0 if binaer else len(fenster),
+        "total_lines": 0 if binaer else len(zeilen),
+        "truncated": not vollstaendig,
         "redacted": was_redacted,
         "binary": binaer,
         "editable": editable,
+        "patchable": patchable,
         **({} if editable else {"edit_blocked_reason": grund}),
+    }
+
+
+def _positive_int(
+    value: object,
+    *,
+    name: str,
+    default: int,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    """Ein optionales Zahlenargument, oder der Vorgabewert.
+
+    ``None`` ist ausdruecklich erlaubt: manche Modelle setzen ein weggelassenes
+    Argument auf null, statt es wegzulassen. Das als Fehler zu behandeln waere
+    eine Huerde ohne Zweck.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise AiActionValidationError(f"'{name}' muss eine ganze Zahl sein")
+    if value < minimum or (maximum is not None and value > maximum):
+        grenze = f"{minimum}..{maximum}" if maximum is not None else f"ab {minimum}"
+        raise AiActionValidationError(f"'{name}' liegt ausserhalb von {grenze}")
+    return value
+
+
+def _execute_file_search(
+    db: Session, *, user: User, server: Server, arguments: dict
+) -> dict:
+    """Sucht einen Text in einer Datei oder unterhalb eines Verzeichnisses.
+
+    Der Anlass ist eine Datei von einem Megabyte: `read_config` zeigt ein
+    Fenster von vierhundert Zeilen, die Datei hat dreizehntausend. Ohne Suche
+    muesste das Modell dreissigmal blaettern, um eine Einstellung zu finden —
+    also blaettert es nicht, sondern raet oder gibt auf. Genau das war der
+    Betriebsfall: die KI fand die Datei, sah den Anfang und erklaerte dem
+    Benutzer, er muesse es von Hand tun.
+
+    Gesucht wird mit `search_file_contents`, derselben Funktion, die auch der
+    Dateimanager benutzt. Was hier dazukommt, ist genau das, was die KI von
+    einem Menschen unterscheidet: die Rechtepruefung davor und die Redaktion
+    danach. Enger sind auch die Deckel — bei einem entfernten Server ist jede
+    gelesene Datei ein eigener Abruf, und jede Trefferzeile ist Text aus einer
+    Quelle, der man nicht traut, im Kontext des Modells. Das erste kostet Zeit,
+    das zweite Geld.
+    """
+    if set(arguments) - {"path", "query", "context"} or "query" not in arguments:
+        raise AiActionValidationError("Datei-Suche hat ungueltige Argumente")
+    if not permission_service.has_server_permission(
+        db, user, server.id, "server.files.read"
+    ):
+        raise AiActionValidationError("Datei-Lesezugriff ist nicht erlaubt")
+
+    query = arguments["query"]
+    if not isinstance(query, str) or not query.strip():
+        raise AiActionValidationError("Suchbegriff fehlt")
+    if len(query) > MAX_SEARCH_QUERY_CHARS:
+        raise AiActionValidationError("Suchbegriff ist zu lang")
+    query = query.strip()
+    kontext = _positive_int(
+        arguments.get("context"),
+        name="context",
+        default=0,
+        minimum=0,
+        maximum=MAX_SEARCH_CONTEXT_LINES,
+    )
+    wurzel = _config_path(arguments["path"]) if arguments.get("path") else ""
+
+    from services.server_file_access_service import search_file_contents
+
+    ergebnis = search_file_contents(
+        db,
+        server_id=server.id,
+        query=query,
+        relative_path=wurzel,
+        context=kontext,
+        max_files=MAX_SEARCH_FILES,
+        max_depth=MAX_SEARCH_DEPTH,
+        max_matches=MAX_SEARCH_MATCHES,
+    )
+
+    def sichtbar(zeile: str) -> str:
+        # Redigieren **vor** dem Kuerzen: andersherum schnitte die Kuerzung ein
+        # Geheimnis mitten durch, und die Redaktion erkennt es dann nicht mehr.
+        return redact_sensitive_text(zeile)[:MAX_SEARCH_LINE_CHARS]
+
+    treffer = []
+    for roh in ergebnis["matches"]:
+        eintrag = {
+            "path": roh["path"],
+            "line": roh["line"],
+            "text": sichtbar(str(roh["text"])),
+        }
+        if "context" in roh:
+            eintrag["context"] = [sichtbar(str(z)) for z in roh["context"]]
+            eintrag["context_first_line"] = roh["context_first_line"]
+        treffer.append(eintrag)
+
+    return {
+        "server_id": server.id,
+        "path": wurzel,
+        "query": query,
+        "matches": treffer,
+        "files_searched": ergebnis["files_searched"],
+        "truncated": ergebnis["truncated"],
     }

@@ -127,16 +127,27 @@ def test_config_with_credentials_is_never_overwritten_by_ai(
     assert config.read_text(encoding="utf-8") == "api_key=old-secret-value\nport=2302\n"
 
 
-def test_read_config_withholds_revision_for_redacted_or_truncated_view(
+def test_read_config_separates_full_replacement_from_partial_change(
     db: Session, owner_user: User, tmp_path: Path
 ) -> None:
-    """Ohne vollstaendige Sicht gibt es keine Revision — und damit keinen Write.
+    """Eine unvollstaendige Sicht sperrt die Vollersetzung — nicht die Datei.
 
-    Die Revision ist die Zusage "du hast den aktuellen Stand vollstaendig
-    gesehen". Redigierte oder gekuerzte Ansichten sind das nicht.
+    Frueher waren das eine Frage: keine vollstaendige Sicht, keine Revision,
+    kein Schreiben. Damit war jede Datei ueber 24.000 Zeichen fuer die KI
+    dauerhaft nur lesbar — und genau das war der Betriebsfall, aus dem diese
+    Aenderung entstand.
+
+    Es sind zwei Fragen. `editable` heisst "darf ganz ersetzt werden" und
+    verlangt weiterhin die vollstaendige, unredigierte Sicht. `patchable` heisst
+    "darf an einer Stelle geaendert werden" und verlangt nur, dass es Text ist:
+    was nicht durchlaeuft, kann auch nicht kaputtgehen.
+
+    Die Revision ist dadurch wieder das, was sie ist — die Kennung dieses
+    Dateistands. Die Vollersetzung haengt nicht mehr an ihrem Fehlen, sondern an
+    einer Messung der Datei selbst (siehe
+    `test_oversized_file_is_rejected_for_full_replacement`).
     """
     server = _server(db, owner_user, tmp_path)
-    conversation = _conversation(db, owner_user, server)
 
     secret_config = Path(server.install_dir) / "secret.cfg"
     secret_config.write_text("api_key=super-secret-value\nport=2302\n", encoding="utf-8")
@@ -148,7 +159,8 @@ def test_read_config_withholds_revision_for_redacted_or_truncated_view(
     )
     assert redacted_view["redacted"] is True
     assert redacted_view["editable"] is False
-    assert redacted_view["revision"] is None
+    assert redacted_view["patchable"] is True
+    assert redacted_view["revision"] == content_revision(secret_config.read_bytes())
     assert "super-secret-value" not in redacted_view["content"]
 
     big_config = Path(server.install_dir) / "big.cfg"
@@ -161,8 +173,24 @@ def test_read_config_withholds_revision_for_redacted_or_truncated_view(
     )
     assert truncated_view["truncated"] is True
     assert truncated_view["editable"] is False
-    assert truncated_view["revision"] is None
+    assert truncated_view["patchable"] is True
     assert len(truncated_view["content"]) == ai_action_service.MAX_READ_CONFIG_CHARS
+
+    binary = Path(server.install_dir) / "world.bin"
+    binary.write_bytes(b"\x00\x01\x02" * 100)
+    binary_view = ai_action_service.execute_read_tool(
+        db,
+        user=owner_user,
+        tool_name="read_config",
+        arguments={"server_id": server.id, "path": "world.bin"},
+    )
+    # Eine Binaerdatei bleibt auf beiden Wegen gesperrt, und ihr Inhalt geht gar
+    # nicht erst in den Kontext des Modells.
+    assert binary_view["binary"] is True
+    assert binary_view["editable"] is False
+    assert binary_view["patchable"] is False
+    assert binary_view["revision"] is None
+    assert binary_view["content"] == ""
 
     plain_config = Path(server.install_dir) / "plain.cfg"
     plain_config.write_text("port=2302\n", encoding="utf-8")
@@ -173,7 +201,578 @@ def test_read_config_withholds_revision_for_redacted_or_truncated_view(
         arguments={"server_id": server.id, "path": "plain.cfg"},
     )
     assert full_view["editable"] is True
+    assert full_view["patchable"] is True
     assert full_view["revision"] == content_revision(plain_config.read_bytes())
+
+
+def test_read_config_window_reaches_beyond_the_first_screen(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Ohne Fenster kaeme aus einer grossen Datei immer nur derselbe Anfang."""
+    server = _server(db, owner_user, tmp_path)
+    gross = Path(server.install_dir) / "buffs.xml"
+    # Ausdruecklich ohne Zeilenendenuebersetzung: Serverdateien liegen auf
+    # Linux, und der Test soll nicht davon abhaengen, worauf er laeuft.
+    gross.write_text(
+        "".join(f"<zeile nr=\"{i}\"/>\n" for i in range(1, 5001)),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    fenster = ai_action_service.execute_read_tool(
+        db,
+        user=owner_user,
+        tool_name="read_config",
+        arguments={"server_id": server.id, "path": "buffs.xml", "offset": 4200, "limit": 3},
+    )
+    assert fenster["offset"] == 4200
+    assert fenster["lines"] == 3
+    assert fenster["total_lines"] == 5000
+    assert fenster["content"] == (
+        '<zeile nr="4200"/>\n<zeile nr="4201"/>\n<zeile nr="4202"/>\n'
+    )
+    # Ein Fenster ist per Definition nicht die ganze Datei — also keine
+    # Vollersetzung, aber sehr wohl eine Teilaenderung.
+    assert fenster["truncated"] is True
+    assert fenster["editable"] is False
+    assert fenster["patchable"] is True
+
+    # Hinter dem Ende ist kein Fehler, sondern ein leeres Fenster: `total_lines`
+    # sagt dem Modell, dass es zu weit gesprungen ist.
+    dahinter = ai_action_service.execute_read_tool(
+        db,
+        user=owner_user,
+        tool_name="read_config",
+        arguments={"server_id": server.id, "path": "buffs.xml", "offset": 9000},
+    )
+    assert dahinter["content"] == ""
+    assert dahinter["total_lines"] == 5000
+
+
+def test_oversized_file_is_rejected_for_full_replacement(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Die Vollersetzung misst die Datei — nicht das, was das Modell vorzeigt.
+
+    Frueher lag der Schutz darin, dass `read_config` fuer eine gekuerzte Sicht
+    keine Revision ausgab. Diese Absicherung glaubte dem Modell, dass es die
+    Datei gesehen hat, sobald es eine gueltige Revision nennen konnte. Jetzt
+    wird die Datei selbst gemessen: eine gueltige Revision hilft nicht.
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    gross = Path(server.install_dir) / "big.cfg"
+    gross.write_text("x" * (ai_action_service.MAX_READ_CONFIG_CHARS + 10), encoding="utf-8")
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
+            db,
+            user=owner_user,
+            conversation=conversation,
+            tool_name="propose_config_update",
+            arguments={
+                "server_id": server.id,
+                "path": "big.cfg",
+                "content": "kurz\n",
+                "expected_revision": content_revision(gross.read_bytes()),
+                "reason": "Testbegruendung",
+                "expected_effect": "Testwirkung",
+            },
+            correlation_id=str(uuid4()),
+        )
+
+    db.rollback()
+    assert db.query(AiActionProposal).count() == 0
+    assert len(gross.read_text(encoding="utf-8")) == ai_action_service.MAX_READ_CONFIG_CHARS + 10
+
+
+# ── Teilaenderung ─────────────────────────────────────────────────────────
+#
+# Der Anlass in einem Satz: eine `buffs.xml` von rund einem Megabyte, ein
+# Benutzer der zwei Werte darin geaendert haben will, und eine KI die ihm
+# erklaert, er muesse das im Dateimanager tun. Die folgenden Tests halten fest,
+# dass genau das jetzt geht — und dass es dabei nichts kaputt macht.
+
+
+def _grosse_konfiguration(server: Server) -> Path:
+    """Eine Datei jenseits jeder Vollersetzung, mit einer eindeutigen Stelle."""
+    ziel = Path(server.install_dir) / "buffs.xml"
+    fueller = "".join(f'  <buff name="fueller{i}" value="1"/>\n' for i in range(4000))
+    ziel.write_text(
+        "<buffs>\n"
+        f"{fueller}"
+        '  <buff name="staminaLoss" value="1.0"/>\n'
+        '  <buff name="staminaRegen" value="1.0"/>\n'
+        "</buffs>\n",
+        encoding="utf-8",
+    )
+    assert len(ziel.read_text(encoding="utf-8")) > ai_action_service.MAX_READ_CONFIG_CHARS
+    return ziel
+
+
+def _patch(db: Session, user: User, conversation: AiConversation, server: Server, **rest):
+    return ai_proposal_service.create_proposal(
+        db,
+        user=user,
+        conversation=conversation,
+        tool_name="propose_config_patch",
+        arguments={
+            "server_id": server.id,
+            "reason": "Testbegruendung",
+            "expected_effect": "Testwirkung",
+            **rest,
+        },
+        correlation_id=str(uuid4()),
+    )
+
+
+def test_patch_changes_only_the_matched_passage_of_a_large_file(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Der Fall, an dem die Vollersetzung scheitert — und die Teilaenderung nicht.
+
+    Entscheidend ist nicht, dass die Aenderung ankommt, sondern dass der Rest
+    der Datei sie ueberlebt: das Modell hat den Fueller nie gesehen, und genau
+    deshalb darf er danach unveraendert dastehen.
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = _grosse_konfiguration(server)
+    vorher = datei.read_text(encoding="utf-8")
+
+    proposal = _patch(
+        db, owner_user, conversation, server,
+        path="buffs.xml",
+        expected_revision=content_revision(datei.read_bytes()),
+        edits=[
+            {
+                "find": '<buff name="staminaLoss" value="1.0"/>',
+                "replace": '<buff name="staminaLoss" value="0.35"/>',
+            },
+            {
+                "find": '<buff name="staminaRegen" value="1.0"/>',
+                "replace": '<buff name="staminaRegen" value="3.0"/>',
+            },
+        ],
+    )
+    db.commit()
+    assert proposal.preview_json is not None
+    vorschau = json.loads(proposal.preview_json)
+    assert vorschau["edits"] == 2
+    # Die Vorschau zeigt die Stelle, nicht die Datei — sonst waere sie so lang
+    # wie die Datei und niemand liest sie.
+    assert '+  <buff name="staminaLoss" value="0.35"/>' in vorschau["diff"]
+    assert "fueller0" not in vorschau["diff"]
+
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+    )
+
+    nachher = datei.read_text(encoding="utf-8")
+    assert '<buff name="staminaLoss" value="0.35"/>' in nachher
+    assert '<buff name="staminaRegen" value="3.0"/>' in nachher
+    # Byte fuer Byte derselbe Rest: nur die zwei Zeilen unterscheiden sich.
+    assert nachher == vorher.replace(
+        '<buff name="staminaLoss" value="1.0"/>',
+        '<buff name="staminaLoss" value="0.35"/>',
+    ).replace(
+        '<buff name="staminaRegen" value="1.0"/>',
+        '<buff name="staminaRegen" value="3.0"/>',
+    )
+
+
+def test_patch_refuses_a_search_text_that_is_not_unique(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Mehrdeutig heisst abgewiesen, nicht "die erste Stelle".
+
+    `value="1"` steht in einer Spielkonfiguration hundertfach. Wuerde die erste
+    Fundstelle gewinnen, aendert der Vorschlag etwas anderes als das, was in
+    der Vorschau steht — und der Mensch bestaetigt eine Zusage, die nicht gilt.
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = _grosse_konfiguration(server)
+    revision = content_revision(datei.read_bytes())
+    vorher = datei.read_text(encoding="utf-8")
+
+    with pytest.raises(ai_action_errors.AiActionValidationError) as mehrfach:
+        _patch(
+            db, owner_user, conversation, server,
+            path="buffs.xml",
+            expected_revision=revision,
+            edits=[{"find": 'value="1"', "replace": 'value="2"'}],
+        )
+    assert "eindeutig" in str(mehrfach.value)
+    db.rollback()
+
+    with pytest.raises(ai_action_errors.AiActionValidationError) as gar_nicht:
+        _patch(
+            db, owner_user, conversation, server,
+            path="buffs.xml",
+            expected_revision=revision,
+            edits=[{"find": "gibtesnicht", "replace": "egal"}],
+        )
+    assert "nicht vor" in str(gar_nicht.value)
+    db.rollback()
+
+    assert db.query(AiActionProposal).count() == 0
+    assert datei.read_text(encoding="utf-8") == vorher
+
+
+def test_patch_touches_a_clean_passage_in_a_file_that_holds_credentials(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Die Lockerung gegenueber der Vollersetzung — und ihre Grenze.
+
+    `propose_config_update` weist jede Datei ab, in der irgendwo Zugangsdaten
+    stehen, und das bleibt richtig: sie schriebe die ganze Datei neu und
+    ersetzte das echte Passwort durch den Platzhalter, den das Modell gesehen
+    hat. Eine Teilaenderung fasst diese Zeile nicht an. Verlangt wird deshalb
+    nur, dass die **beruehrte** Stelle sauber ist — sonst waere eine
+    `serverconfig.xml` dauerhaft nur von Hand aenderbar.
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = Path(server.install_dir) / "serverconfig.xml"
+    datei.write_text(
+        'password="super-secret-value"\n<property name="StaminaLoss" value="1.0"/>\n',
+        encoding="utf-8",
+    )
+    revision = content_revision(datei.read_bytes())
+
+    proposal = _patch(
+        db, owner_user, conversation, server,
+        path="serverconfig.xml",
+        expected_revision=revision,
+        edits=[{
+            "find": '<property name="StaminaLoss" value="1.0"/>',
+            "replace": '<property name="StaminaLoss" value="0.35"/>',
+        }],
+    )
+    db.commit()
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+    )
+    nachher = datei.read_text(encoding="utf-8")
+    assert '<property name="StaminaLoss" value="0.35"/>' in nachher
+    # Das Geheimnis steht unveraendert da — weder ersetzt noch durch den
+    # Platzhalter ueberschrieben, den das Modell gesehen hat.
+    assert 'password="super-secret-value"' in nachher
+
+    # Die Grenze: ein Geheimnis *in* der Ersetzung wird nicht geschrieben.
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        _patch(
+            db, owner_user, conversation, server,
+            path="serverconfig.xml",
+            expected_revision=content_revision(datei.read_bytes()),
+            edits=[{
+                "find": '<property name="StaminaLoss" value="0.35"/>',
+                "replace": 'password="neues-geheimnis-hier"',
+            }],
+        )
+    db.rollback()
+    assert 'neues-geheimnis-hier' not in datei.read_text(encoding="utf-8")
+
+
+def test_patch_requires_the_current_revision(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Wer eine Stelle ersetzt, muss sagen, in welchem Stand er sie gesehen hat."""
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = Path(server.install_dir) / "server.cfg"
+    datei.write_text("port=2302\n", encoding="utf-8")
+    veraltet = content_revision(datei.read_bytes())
+    datei.write_text("port=2302\nmaxPlayers=40\n", encoding="utf-8")
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        _patch(
+            db, owner_user, conversation, server,
+            path="server.cfg",
+            expected_revision=veraltet,
+            edits=[{"find": "port=2302", "replace": "port=2402"}],
+        )
+    db.rollback()
+    assert db.query(AiActionProposal).count() == 0
+    assert datei.read_text(encoding="utf-8") == "port=2302\nmaxPlayers=40\n"
+
+
+def test_patch_refuses_binary_files(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Eine Binaerdatei kommt als Ersatzzeichen-Salat an; zurueckgeschrieben ist sie hin."""
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = Path(server.install_dir) / "world.bin"
+    datei.write_bytes(b"\x00\x01\x02" * 100)
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        _patch(
+            db, owner_user, conversation, server,
+            path="world.bin",
+            expected_revision=content_revision(datei.read_bytes()),
+            edits=[{"find": "�", "replace": "x"}],
+        )
+    db.rollback()
+    assert datei.read_bytes() == b"\x00\x01\x02" * 100
+
+
+def test_patch_runs_without_confirmation_when_autonomy_is_granted(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Die zweite Haelfte der Anforderung: im autonomen Modus wird nicht gefragt.
+
+    Das Kriterium der Sperrliste ist Unumkehrbarkeit, nicht Risiko. Eine
+    Dateiaenderung ist umkehrbar — `write_server_text` legt vorher einen
+    Versionsschnappschuss an —, also gehoert sie nicht dorthin.
+    """
+    from services import ai_autonomy_service
+    from services.ai_tool_registry import ALWAYS_CONFIRM_TOOLS
+
+    assert "propose_config_patch" not in ALWAYS_CONFIRM_TOOLS
+
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = _grosse_konfiguration(server)
+    ai_autonomy_service.set_grant(
+        db, user=owner_user, server_id=server.id, enabled=True,
+        max_actions_per_hour=10, granted_by=owner_user.id,
+    )
+    db.commit()
+
+    proposal = _patch(
+        db, owner_user, conversation, server,
+        path="buffs.xml",
+        expected_revision=content_revision(datei.read_bytes()),
+        edits=[{
+            "find": '<buff name="staminaLoss" value="1.0"/>',
+            "replace": '<buff name="staminaLoss" value="0.35"/>',
+        }],
+    )
+    db.commit()
+    assert proposal.autonomous is True
+    assert proposal.requires_confirmation is False
+
+    ausgefuehrt, _ = ai_proposal_service.execute_autonomously(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    assert ausgefuehrt.status == "succeeded"
+    assert '<buff name="staminaLoss" value="0.35"/>' in datei.read_text(encoding="utf-8")
+
+
+def test_a_rejected_patch_reveals_nothing_about_the_file(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Auch der *Versuch* darf nichts verraten.
+
+    Der Payload-Bau liest den Zustand, ueber den er urteilt: um zu sagen, ob ein
+    Suchtext eindeutig ist, muss er die Datei lesen und zaehlen. Lief die
+    Rechtepruefung erst danach, war die Ablehnung selbst eine Auskunft — ein
+    Benutzer mit `server.view` und ohne `server.files.read` bekam auf einen
+    erfundenen Patch "kommt 3-mal vor" zurueck. Damit laesst sich der Inhalt
+    einer Datei erraten, ohne sie je lesen zu duerfen.
+
+    Gespeichert oder geschrieben wurde dabei nie etwas. Das Leck lag allein in
+    der Reihenfolge — und genau deshalb faellt es ohne diesen Test nicht auf.
+    """
+    role = Role(name="nur-sehen", description=None, is_system=False)
+    db.add(role)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_key="ai.chat.use"))
+    db.commit()
+    set_user_roles(db, regular_user, [role.id])
+
+    server = _server(db, regular_user, tmp_path)
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+    ))
+    conversation = _conversation(db, regular_user, server)
+    db.commit()
+
+    datei = Path(server.install_dir) / "server.cfg"
+    datei.write_text("maxPlayers=40\nmaxPlayers=40\nmaxPlayers=40\n", encoding="utf-8")
+
+    with pytest.raises(ai_action_errors.AiActionValidationError) as exc:
+        _patch(
+            db, regular_user, conversation, server,
+            path="server.cfg",
+            expected_revision=content_revision(datei.read_bytes()),
+            edits=[{"find": "maxPlayers=40", "replace": "maxPlayers=60"}],
+        )
+
+    meldung = str(exc.value)
+    assert meldung == "AI-Aktion ist nicht erlaubt"
+    # Keine Trefferzahl, kein Hinweis auf Groesse, Existenz oder Inhalt.
+    assert "3" not in meldung
+    db.rollback()
+    assert db.query(AiActionProposal).count() == 0
+
+
+def test_ai_file_tools_need_the_same_permissions_as_the_file_manager(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Die Zusage in einem Test: die KI kann nur, was der Benutzer selbst kann.
+
+    Der Dateimanager verlangt `server.files.read` zum Lesen
+    (`routers/files.py::read_file`) und `server.files.write` zum Schreiben
+    (`routers/files.py::write_file`). Beide Wege muenden in dieselben Funktionen
+    `read_server_text` / `write_server_text`. Wenn die KI mit weniger
+    durchkaeme, waere sie ein zweiter Zugang mit eigenen Regeln — und die
+    Rechtevergabe des Betreibers waere an ihr vorbei umgangen.
+    """
+    role = Role(name="nur-chat", description=None, is_system=False)
+    db.add(role)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_key="ai.chat.use"))
+    db.commit()
+    set_user_roles(db, regular_user, [role.id])
+
+    server = _server(db, regular_user, tmp_path)
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+    ))
+    conversation = _conversation(db, regular_user, server)
+    db.commit()
+    datei = Path(server.install_dir) / "server.cfg"
+    datei.write_text("maxPlayers=40\n", encoding="utf-8", newline="\n")
+
+    # Ohne `server.files.read`: kein Lesen, kein Auflisten, kein Suchen.
+    for werkzeug, argumente in (
+        ("read_config", {"path": "server.cfg"}),
+        ("list_server_files", {}),
+        ("search_server_files", {"query": "maxPlayers"}),
+    ):
+        with pytest.raises(ai_action_errors.AiActionValidationError):
+            ai_action_service.execute_read_tool(
+                db,
+                user=regular_user,
+                tool_name=werkzeug,
+                arguments={"server_id": server.id, **argumente},
+            )
+
+    # Mit Leserecht geht das Lesen — aber noch immer kein Schreiben.
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.files.read"
+    ))
+    db.commit()
+    gelesen = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="read_config",
+        arguments={"server_id": server.id, "path": "server.cfg"},
+    )
+    assert gelesen["content"] == "maxPlayers=40\n"
+
+    for werkzeug, argumente in (
+        ("propose_config_patch", {
+            "expected_revision": gelesen["revision"],
+            "edits": [{"find": "maxPlayers=40", "replace": "maxPlayers=60"}],
+        }),
+        ("propose_config_update", {
+            "content": "maxPlayers=60\n",
+            "expected_revision": gelesen["revision"],
+        }),
+    ):
+        with pytest.raises(ai_action_errors.AiActionValidationError):
+            ai_proposal_service.create_proposal(
+                db,
+                user=regular_user,
+                conversation=conversation,
+                tool_name=werkzeug,
+                arguments={
+                    "server_id": server.id, "path": "server.cfg",
+                    "reason": "r", "expected_effect": "e", **argumente,
+                },
+                correlation_id=str(uuid4()),
+            )
+        db.rollback()
+
+    assert db.query(AiActionProposal).count() == 0
+    assert datei.read_text(encoding="utf-8") == "maxPlayers=40\n"
+
+    # Und mit Schreibrecht geht es. Sonst waere der Test oben auch dann gruen,
+    # wenn das Werkzeug schlicht kaputt ist.
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.files.write"
+    ))
+    db.commit()
+    vorschlag = _patch(
+        db, regular_user, conversation, server,
+        path="server.cfg",
+        expected_revision=gelesen["revision"],
+        edits=[{"find": "maxPlayers=40", "replace": "maxPlayers=60"}],
+    )
+    assert vorschlag.tool_name == "propose_config_patch"
+
+
+# ── Suche ─────────────────────────────────────────────────────────────────
+
+
+def test_file_search_finds_the_line_in_a_file_and_below_a_directory(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Ohne Suche waere das Fenster von `read_config` nutzlos.
+
+    Eine Konfiguration mit viertausend Zeilen durchblaettert kein Modell. Es
+    braucht die Zeilennummer, um mit `offset` dorthin zu springen — das ist der
+    Schritt, der den Betriebsfall ueberhaupt loesbar macht.
+    """
+    server = _server(db, owner_user, tmp_path)
+    datei = _grosse_konfiguration(server)
+    unterordner = Path(server.install_dir) / "Data" / "Config"
+    unterordner.mkdir(parents=True)
+    (unterordner / "gamestages.xml").write_text(
+        "<gamestages>\n  <stage staminaLoss=\"1.0\"/>\n</gamestages>\n", encoding="utf-8"
+    )
+
+    in_datei = ai_action_service.execute_read_tool(
+        db,
+        user=owner_user,
+        tool_name="search_server_files",
+        arguments={"server_id": server.id, "path": "buffs.xml", "query": "staminaLoss"},
+    )
+    assert [t["line"] for t in in_datei["matches"]] == [4002]
+    assert in_datei["matches"][0]["path"] == "buffs.xml"
+
+    # Gross- und Kleinschreibung egal: das Modell kennt die Schreibweise nicht,
+    # bevor es gesucht hat.
+    im_baum = ai_action_service.execute_read_tool(
+        db,
+        user=owner_user,
+        tool_name="search_server_files",
+        arguments={"server_id": server.id, "query": "STAMINALOSS", "context": 1},
+    )
+    gefunden = {t["path"] for t in im_baum["matches"]}
+    assert gefunden == {"buffs.xml", "Data/Config/gamestages.xml"}
+    assert all("context" in t for t in im_baum["matches"])
+
+    assert datei.exists()
+
+
+def test_file_search_redacts_credentials_it_stumbles_over(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Trefferzeilen gehen in den Kontext des Modells — also durch dieselbe Redaktion."""
+    server = _server(db, owner_user, tmp_path)
+    (Path(server.install_dir) / "server.cfg").write_text(
+        "port=2302\napi_key=super-secret-value\n", encoding="utf-8"
+    )
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db,
+        user=owner_user,
+        tool_name="search_server_files",
+        arguments={"server_id": server.id, "query": "api_key"},
+    )
+    assert ergebnis["matches"], "die Zeile selbst soll auffindbar bleiben"
+    assert all("super-secret-value" not in t["text"] for t in ergebnis["matches"])
 
 
 def test_unregistered_tool_is_rejected_without_persistence(

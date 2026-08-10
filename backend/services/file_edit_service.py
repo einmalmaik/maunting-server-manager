@@ -20,6 +20,21 @@ class FileRevisionConflict(Exception):
         self.current_revision = current_revision
 
 
+class EditNotApplicable(Exception):
+    """Ein Suchtext passt nicht genau einmal.
+
+    ``index`` ist die Nummer des Edits in der uebergebenen Liste, ``count`` die
+    tatsaechliche Trefferzahl. Beides gehoert in die Fehlermeldung, weil der
+    Aufrufer daraus eine brauchbare Auskunft bauen kann: bei null Treffern
+    stimmt der Suchtext nicht, bei mehreren fehlt ihm Kontext.
+    """
+
+    def __init__(self, index: int, count: int) -> None:
+        super().__init__(f"Edit {index} matched {count} times, expected exactly 1")
+        self.index = index
+        self.count = count
+
+
 _locks_guard = threading.Lock()
 _locks: dict[str, threading.Lock] = {}
 
@@ -67,6 +82,39 @@ def read_text(target: Path) -> dict[str, Any]:
         "revision": content_revision(data),
         **metadata(target),
     }
+
+
+def apply_edits(content: str, edits: list[tuple[str, str]]) -> str:
+    """Ersetzt Textstellen der Reihe nach; jede muss genau einmal vorkommen.
+
+    Das Gegenstueck zur Vollersetzung. Wer eine Datei ganz zurueckschreibt, muss
+    sie ganz gesehen haben — bei einer Megabyte grossen Spielkonfiguration ist
+    das unmoeglich. Wer eine Stelle ersetzt, muss nur diese Stelle kennen; alles
+    uebrige bleibt Byte fuer Byte stehen, gerade weil es hier nicht durchlaeuft.
+
+    **Genau einmal** ist die eigentliche Zusage, nicht "mindestens einmal".
+    ``value="1"`` kommt in einer XML-Konfiguration hundertfach vor; ein
+    ``replace`` darauf traefe neunundneunzig unbeteiligte Stellen mit. Die
+    Eindeutigkeit muss deshalb der Suchtext selbst herstellen, indem er genug
+    Umgebung mitbringt — und ob er das tut, ist hier pruefbar. Bei mehreren
+    Treffern wird abgebrochen, nicht geraten.
+
+    Die Edits laufen **nacheinander**, jeder auf dem Ergebnis des vorigen. Das
+    ist die Reihenfolge, die ein Mensch erwartet, und sie macht aufeinander
+    aufbauende Aenderungen an derselben Stelle moeglich. Es heisst aber auch:
+    die Eindeutigkeit gilt zum Zeitpunkt des jeweiligen Edits, nicht gegen den
+    Ausgangstext.
+
+    Kein regulaerer Ausdruck. Exakter Text ist nicht nur einfacher, sondern die
+    Voraussetzung dafuer, dass "genau einmal" ueberhaupt zaehlbar bleibt.
+    """
+    result = content
+    for index, (find, replace) in enumerate(edits):
+        count = result.count(find)
+        if count != 1:
+            raise EditNotApplicable(index, count)
+        result = result.replace(find, replace, 1)
+    return result
 
 
 def write_text(

@@ -17,6 +17,7 @@ describe('FileTree keyboard navigation', () => {
         loadingPaths={new Set()}
         activePath={null}
         searchResults={null}
+        contentMatches={null}
         searchTruncated={false}
         emptyLabel="Empty"
         searchEmptyLabel="No matches"

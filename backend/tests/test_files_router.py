@@ -650,6 +650,81 @@ class TestSearch:
         assert res.json()["results"] == []
 
 
+class TestContentSearch:
+    """Suche **im** Dateiinhalt — das Gegenstueck zur Namenssuche darueber.
+
+    Sie kam aus dem KI-Werkzeug: die KI konnte in Dateien hineinsuchen, ein
+    Mensch am Panel nicht. Beide gehen jetzt durch dieselbe Funktion
+    `server_file_access_service.search_file_contents`; unterschiedlich ist nur,
+    was der Aufrufer damit macht.
+    """
+
+    def test_content_search_returns_path_and_line(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server
+    ):
+        root = Path(server_with_dir.install_dir)
+        (root / "Data").mkdir()
+        (root / "Data" / "buffs.xml").write_text(
+            "<buffs>\n  <buff name=\"other\"/>\n  <buff name=\"staminaLoss\" value=\"1.0\"/>\n</buffs>\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=staminaloss",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        treffer = res.json()["matches"]
+        assert len(treffer) == 1
+        # Pfad **und** Zeilennummer: ohne die Zeile waere die Antwort nur
+        # "irgendwo in dieser Datei" und damit kaum besser als die Namenssuche.
+        assert treffer[0]["path"] == "Data/buffs.xml"
+        assert treffer[0]["line"] == 3
+        assert "staminaLoss" in treffer[0]["text"]
+
+    def test_content_search_does_not_leak_outside_the_server_root(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server, tmp_path: Path
+    ):
+        nachbar = tmp_path / "nachbar"
+        nachbar.mkdir()
+        (nachbar / "geheim.cfg").write_text("streng-geheim\n", encoding="utf-8")
+        for pfad in ("../nachbar", "../nachbar/geheim.cfg", "/etc"):
+            res = client.get(
+                f"/api/files/{server_with_dir.id}/search-content?q=geheim&path={pfad}",
+                cookies=owner_cookies,
+            )
+            assert res.status_code in (200, 400)
+            if res.status_code == 200:
+                assert res.json()["matches"] == []
+
+    def test_content_search_requires_the_read_permission(
+        self,
+        client: TestClient,
+        user_cookies: dict,
+        db: Session,
+        regular_user: User,
+        server_with_dir: Server,
+    ):
+        """Dasselbe Recht wie beim Lesen einer Datei — sonst waere die Suche ein
+        Weg, Inhalte zu sehen, die man nicht oeffnen darf."""
+        (Path(server_with_dir.install_dir) / "server.cfg").write_text(
+            "maxPlayers=40\n", encoding="utf-8"
+        )
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=maxPlayers",
+            cookies=user_cookies,
+        )
+        assert res.status_code == 403
+
+        _grant(db, regular_user, server_with_dir, ["server.view", "server.files.read"])
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=maxPlayers",
+            cookies=user_cookies,
+        )
+        assert res.status_code == 200
+        assert [m["path"] for m in res.json()["matches"]] == ["server.cfg"]
+
+
 class TestFileHistoryEndpoints:
     def test_history_list_requires_read_permission(
         self,

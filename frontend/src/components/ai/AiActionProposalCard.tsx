@@ -26,6 +26,7 @@ export function AiActionProposalCard({
   const diff = previewText(proposal.preview.diff)
   const Icon = {
     propose_config_update: FilePenLine,
+    propose_config_patch: FilePenLine,
     propose_backup: HardDriveDownload,
     propose_mod_install: Package,
     propose_server_create: ServerCog,

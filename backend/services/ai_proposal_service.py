@@ -41,12 +41,16 @@ from services.ai_action_service import (
     MAX_CONFIG_CHARS,
     MAX_DIFF_CHARS,
     MAX_DIFF_LINES,
+    MAX_PATCH_CHUNK_CHARS,
+    MAX_PATCH_EDITS,
+    MAX_READ_CONFIG_CHARS,
     MAX_REASON_CHARS,
     _MUTEX_TOOLS,
     _config_path,
     _resolve_server,
     is_binary_text,
 )
+from services.file_edit_service import EditNotApplicable, apply_edits
 from services.ai_redaction import redact_sensitive_text
 from services.ai_tool_registry import GLOBAL_WRITE_TOOLS, WERKZEUGE, WRITE_TOOLS
 from services.dis_client import DisClient
@@ -125,7 +129,10 @@ def _require_tool_permission(
         raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
     if not permission_service.has_server_permission(db, user, server_id, permission):
         raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
-    if tool_name == "propose_config_update" and not permission_service.has_server_permission(
+    if tool_name in {
+        "propose_config_update",
+        "propose_config_patch",
+    } and not permission_service.has_server_permission(
         db, user, server_id, "server.files.read"
     ):
         raise AiActionValidationError("Config-Vorschlag benoetigt Lese- und Schreibrecht")
@@ -161,16 +168,30 @@ def _config_payload(db: Session, server_id: int, arguments: dict) -> tuple[dict,
         current = None
     current_revision = str(current["revision"]) if current is not None else None
     if expected is None and current is not None:
-        # read_config gibt fuer gekuerzte oder redigierte Dateien bewusst keine
-        # Revision aus. Ein Vorschlag ohne Revision auf eine existierende Datei
-        # kann daher nur aus einer unvollstaendigen Sicht stammen.
+        # Eine vorhandene Datei zu ersetzen, ohne zu sagen, welchen Stand man
+        # ersetzt, ist immer ein Fehler — egal wie der Vorschlag entstanden ist.
         raise AiActionValidationError(
-            "Diese Datei kann nicht automatisch geaendert werden, weil sie nicht "
-            "vollstaendig gelesen werden konnte"
+            "Fuer eine vorhandene Datei ist expected_revision Pflicht"
         )
     if current_revision != expected:
         raise AiActionValidationError("Config wurde seit der Analyse veraendert")
     old_content = str(current["content"]) if current is not None else ""
+    # **Die Schranke der Vollersetzung.** Sie steht hier und nicht mehr indirekt
+    # darin, dass `read_config` fuer eine gekuerzte Sicht die Revision
+    # zurueckhielt.
+    #
+    # Der Unterschied ist der Punkt: die alte Absicherung glaubte dem Modell,
+    # dass es die Datei gesehen hat, sobald es eine Revision vorzeigen konnte.
+    # Diese hier misst die Datei selbst. Was das Modell gesehen zu haben
+    # behauptet, spielt keine Rolle mehr — und dadurch darf `read_config` die
+    # Revision jetzt ehrlich immer ausgeben, was die Teilaenderung ueberhaupt
+    # erst moeglich macht.
+    if len(redact_sensitive_text(old_content)) > MAX_READ_CONFIG_CHARS:
+        raise AiActionValidationError(
+            "Diese Datei ist zu gross, um sie als Ganzes zu ersetzen — der "
+            "Vorschlag wuerde alles loeschen, was nicht gelesen werden konnte. "
+            "Nutze propose_config_patch fuer die einzelne Stelle."
+        )
     # Unabhaengige zweite Schranke: eine Datei mit erkennbaren Zugangsdaten wird
     # nie durch einen KI-Vorschlag ueberschrieben. Das gilt auch dann, wenn der
     # Vorschlag auf einem anderen Weg als read_config entstanden ist.
@@ -203,6 +224,192 @@ def _config_payload(db: Session, server_id: int, arguments: dict) -> tuple[dict,
         "content": content,
         "create_only": current is None,
     }, preview, current_revision
+
+
+# Zeilen Umgebung je Ersetzung in der Vorschau. Drei sind genug, um zu erkennen,
+# *wo* in einer Datei etwas passiert — bei einer XML-Konfiguration steht das
+# umschliessende Element dann mit da.
+_PATCH_CONTEXT_LINES = 3
+
+
+def _zeilenbereich(text: str, start: int, ende: int, umgebung: int) -> tuple[int, int, int]:
+    """Dehnt einen Zeichenbereich auf ganze Zeilen samt Umgebung aus.
+
+    Liefert Anfang, Ende und die Nummer der ersten Zeile — letztere ist das,
+    woran ein Mensch in der Vorschau erkennt, an welcher Stelle der Datei er
+    gerade schaut.
+    """
+    zeilenanfang = text.rfind("\n", 0, start) + 1
+    zeilenende = text.find("\n", ende)
+    if zeilenende < 0:
+        zeilenende = len(text)
+    nummer = text.count("\n", 0, zeilenanfang) + 1
+    for _ in range(umgebung):
+        if zeilenanfang == 0:
+            break
+        zeilenanfang = text.rfind("\n", 0, zeilenanfang - 1) + 1
+        nummer -= 1
+    for _ in range(umgebung):
+        if zeilenende >= len(text):
+            break
+        weiter = text.find("\n", zeilenende + 1)
+        zeilenende = len(text) if weiter < 0 else weiter
+    return zeilenanfang, zeilenende, nummer
+
+
+def _patch_diff(content: str, edits: list[tuple[str, str]], path: str) -> tuple[str, bool]:
+    """Baut die Vorschau einer Teilaenderung aus den Ersetzungen selbst.
+
+    Bewusst **kein** `difflib`-Lauf ueber die ganze Datei. Der wuerde hier zwei
+    Megabyte-Strings vergleichen, um am Ende drei geaenderte Zeilen zu zeigen —
+    und das an der Stelle, an der ein Mensch auf eine Bestaetigung wartet. Wo
+    etwas passiert, ist ohnehin genau bekannt: `find` steht laut Pruefung genau
+    einmal in der Datei. Aus dieser Fundstelle und ein paar Zeilen Umgebung
+    entsteht dieselbe Darstellung in linearer Zeit.
+
+    Die Zeilennummer gilt zum Zeitpunkt der jeweiligen Ersetzung. Aendert ein
+    frueherer Eintrag die Zeilenzahl, verschiebt sich die Nummer der spaeteren —
+    dieselbe Reihenfolgeabhaengigkeit, die auch `apply_edits` hat.
+    """
+    zeilen = [f"--- {path}:vorher", f"+++ {path}:nachher"]
+    arbeitsstand = content
+    for find, replace in edits:
+        stelle = arbeitsstand.find(find)
+        if stelle < 0:
+            # Kann nach `apply_edits` nicht vorkommen; eine stillschweigend
+            # falsche Vorschau waere aber schlimmer als eine fehlende Zeile.
+            continue
+        ende = stelle + len(find)
+        von, bis, nummer = _zeilenbereich(arbeitsstand, stelle, ende, _PATCH_CONTEXT_LINES)
+        vorher = arbeitsstand[von:bis]
+        nachher = arbeitsstand[von:stelle] + replace + arbeitsstand[ende:bis]
+        zeilen.append(f"@@ ab Zeile {nummer} @@")
+        zeilen.extend(f"-{z}" for z in redact_sensitive_text(vorher).splitlines())
+        zeilen.extend(f"+{z}" for z in redact_sensitive_text(nachher).splitlines())
+        arbeitsstand = arbeitsstand[:stelle] + replace + arbeitsstand[ende:]
+
+    gekuerzt = len(zeilen) > MAX_DIFF_LINES
+    diff = "\n".join(zeilen[:MAX_DIFF_LINES])
+    return diff[:MAX_DIFF_CHARS], gekuerzt or len(diff) > MAX_DIFF_CHARS
+
+
+def _config_patch_payload(
+    db: Session, server_id: int, arguments: dict
+) -> tuple[dict, dict, str]:
+    """Prueft eine Teilaenderung und baut Nutzlast und Vorschau.
+
+    Der Unterschied zu `_config_payload` ist nicht die Berechtigung — es ist
+    dasselbe `server.files.write` — sondern die Reichweite. Eine Vollersetzung
+    setzt voraus, dass das Modell die Datei ganz gesehen hat, und scheitert
+    deshalb an jeder Datei ueber 24.000 Zeichen. Eine Teilaenderung setzt nur
+    voraus, dass es *die eine Stelle* kennt: alles Uebrige bleibt Byte fuer Byte
+    stehen, weil es hier gar nicht durchlaeuft.
+
+    Daraus folgt auch die gelockerte Geheimnisregel. `_config_payload` weist
+    jede Datei ab, in der irgendwo Zugangsdaten stehen — richtig, denn sie
+    schreibt die ganze Datei neu und wuerde das echte Passwort durch den
+    Platzhalter ersetzen, den das Modell gesehen hat. Hier genuegt, dass
+    **die beruehrte Stelle** geheimnisfrei ist. Ein Passwort drei Zeilen weiter
+    wird nicht angefasst, und getroffen werden kann es auch nicht: das Modell
+    kennt von dort nur den Platzhalter, und der steht so nicht in der Datei.
+    Ohne diese Lockerung waere eine `serverconfig.xml` dauerhaft nur von Hand
+    aenderbar — der Fall, aus dem die ganze Aenderung entstanden ist.
+    """
+    if set(arguments) != {"path", "expected_revision", "edits"}:
+        raise AiActionValidationError("Patch-Tool hat ungueltige Argumente")
+    path = _config_path(arguments["path"])
+    expected = arguments["expected_revision"]
+    if (
+        not isinstance(expected, str)
+        or not expected.startswith("sha256:")
+        or len(expected) != 71
+    ):
+        raise AiActionValidationError(
+            "expected_revision fehlt oder ist ungueltig. Zuerst read_config aufrufen."
+        )
+
+    roh = arguments["edits"]
+    if not isinstance(roh, list) or not roh:
+        raise AiActionValidationError("Es fehlt mindestens eine Ersetzung")
+    if len(roh) > MAX_PATCH_EDITS:
+        raise AiActionValidationError(
+            f"Hoechstens {MAX_PATCH_EDITS} Ersetzungen je Vorschlag"
+        )
+    edits: list[tuple[str, str]] = []
+    for nummer, eintrag in enumerate(roh, start=1):
+        if not isinstance(eintrag, dict) or set(eintrag) != {"find", "replace"}:
+            raise AiActionValidationError(
+                f"Ersetzung {nummer} braucht genau 'find' und 'replace'"
+            )
+        find, replace = eintrag["find"], eintrag["replace"]
+        if not isinstance(find, str) or not find:
+            raise AiActionValidationError(f"Ersetzung {nummer} hat keinen Suchtext")
+        if not isinstance(replace, str):
+            raise AiActionValidationError(f"Ersetzung {nummer} hat keinen Ersatztext")
+        if len(find) > MAX_PATCH_CHUNK_CHARS or len(replace) > MAX_PATCH_CHUNK_CHARS:
+            raise AiActionValidationError(f"Ersetzung {nummer} ist zu gross")
+        # Die Umsetzung der gelockerten Geheimnisregel, und zugleich der Schutz
+        # davor, dass ein Vorschlag ein Passwort *einbaut*.
+        if redact_sensitive_text(find) != find or redact_sensitive_text(replace) != replace:
+            raise AiActionValidationError(
+                f"Ersetzung {nummer} enthaelt moegliche Zugangsdaten und wird "
+                "nicht angewandt"
+            )
+        edits.append((find, replace))
+
+    try:
+        current = read_server_text(db, server_id=server_id, relative_path=path)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        raise AiActionValidationError(
+            "Diese Datei gibt es nicht. Eine Teilaenderung braucht eine "
+            "vorhandene Datei; zum Anlegen ist propose_config_update da."
+        ) from exc
+    if str(current["revision"]) != expected:
+        raise AiActionValidationError("Datei wurde seit dem Lesen veraendert")
+
+    old_content = str(current["content"])
+    if is_binary_text(old_content):
+        raise AiActionValidationError("Diese Datei ist kein Text und wird nicht geaendert")
+
+    try:
+        new_content = apply_edits(old_content, edits)
+    except EditNotApplicable as exc:
+        # Die Trefferzahl gehoert in die Meldung: bei null stimmt der Suchtext
+        # nicht, bei mehreren fehlt ihm Kontext. Das Modell kann daraus im
+        # naechsten Zug etwas machen — aus "hat nicht geklappt" nicht.
+        nummer = exc.index + 1
+        grund = (
+            f"Der Suchtext von Ersetzung {nummer} kommt in der Datei nicht vor"
+            if exc.count == 0
+            else f"Der Suchtext von Ersetzung {nummer} kommt {exc.count}-mal vor "
+            "und ist damit nicht eindeutig. Nimm mehr Umgebung mit hinein."
+        )
+        raise AiActionValidationError(grund) from exc
+    if new_content == old_content:
+        raise AiActionValidationError("Die Ersetzungen aendern nichts an der Datei")
+    if is_binary_text(new_content):
+        raise AiActionValidationError("Das Ergebnis waere keine Textdatei mehr")
+
+    diff, diff_gekuerzt = _patch_diff(old_content, edits, path)
+    preview = {
+        "path": path,
+        "change": "patch",
+        "diff": diff,
+        "diff_truncated": diff_gekuerzt,
+        "edits": len(edits),
+        "restart_required": True,
+    }
+    # Die Nutzlast sind die Ersetzungen, nicht der fertige Inhalt: bei einer
+    # Datei von einem Megabyte laege der sonst verschluesselt in der Datenbank,
+    # fuer eine Aenderung von drei Zeilen. Angewandt wird beim Ausfuehren erneut
+    # — auf denselben Stand, denn `expected_revision` laesst keinen anderen zu.
+    return (
+        {"path": path, "edits": [{"find": f, "replace": r} for f, r in edits]},
+        preview,
+        expected,
+    )
 
 
 def _rationale(arguments: dict, *, fallback: tuple[str, str] | None) -> tuple[str, str]:
@@ -554,6 +761,30 @@ def create_proposal(
         # Argumentpruefungen ihre exakten Schluesselmengen behalten.
         server, rest = _resolve_server(db, user, rest)
 
+        # **Das Recht vor der Nutzlast.** Frueher stand diese Pruefung erst
+        # hinter dem Payload-Bau — und der liest den Zustand, ueber den er
+        # urteilt: `_config_patch_payload` holt den Dateiinhalt, um zu zaehlen,
+        # wie oft der Suchtext darin vorkommt.
+        #
+        # Damit war die Ablehnung selbst eine Auskunft. Ein Benutzer mit
+        # `server.view` und ohne `server.files.read` bekam auf einen erfundenen
+        # Patch die Antwort "kommt 3-mal vor" — ein Orakel, mit dem sich der
+        # Inhalt einer Datei Zeichen fuer Zeichen erraten laesst, ohne sie je
+        # lesen zu duerfen. Der Vorschlag wurde nie gespeichert und nichts
+        # geschrieben; das Leck lag allein in der Reihenfolge.
+        #
+        # Die Zusage ist "die KI kann nur, was der Benutzer kann". Sie gilt erst,
+        # wenn schon der *Versuch* nichts verraet.
+        #
+        # Fuer den Lebenszyklus haengt das Recht am Vorgang, deshalb wird der
+        # hier vorgezogen — sonst bekaeme ein ungueltiger Vorgang die
+        # Rechte-Ablehnung statt der Formmeldung, die dem Modell weiterhilft.
+        if tool_name == "propose_server_lifecycle" and rest.get("operation") not in {
+            "start", "stop", "restart",
+        }:
+            raise AiActionValidationError("Ungueltige Lifecycle-Aktion")
+        _require_tool_permission(db, user, server.id, tool_name, rest)
+
         if tool_name == "propose_server_lifecycle":
             if set(rest) != {"operation"} or rest.get("operation") not in {"start", "stop", "restart"}:
                 raise AiActionValidationError("Ungueltige Lifecycle-Aktion")
@@ -614,12 +845,17 @@ def create_proposal(
         elif tool_name == "propose_mod_install":
             payload, preview = _mod_install_payload(db, server, rest)
             expected_revision = None
+        elif tool_name == "propose_config_patch":
+            payload, preview, expected_revision = _config_patch_payload(db, server.id, rest)
         else:
             payload, preview, expected_revision = _config_payload(db, server.id, rest)
 
     preview["reason"] = reason
     preview["expected_effect"] = expected_effect
     server_id = server.id if server is not None else None
+    # Fuer serverbezogene Werkzeuge die zweite Pruefung — die erste lief vor dem
+    # Payload-Bau. Sie bleibt trotzdem stehen: hier steht die kanonische
+    # Nutzlast, und die globalen Werkzeuge kommen nur an dieser Stelle vorbei.
     _require_tool_permission(db, user, server_id, tool_name, payload)
     proposal_id = str(uuid4())
     encrypted = DisClient.encrypt(
@@ -1147,6 +1383,32 @@ def execute_proposal(
                     content=str(payload["content"]),
                     expected_revision=expected_revision,
                     create_only=bool(payload.get("create_only")),
+                )
+                task_id = None
+                queued = False
+            elif tool_name == "propose_config_patch":
+                # Erneut anwenden statt den fertigen Inhalt mitzuschleppen. Es
+                # kommt dasselbe heraus: `expected_revision` laesst nur genau
+                # den Stand zu, auf dem die Ersetzungen beim Vorschlagen schon
+                # einmal aufgegangen sind — und dieselbe Revision geht gleich
+                # noch einmal in `write_server_text`, das den Schreibvorgang
+                # unter der Dateisperre gegen sie prueft.
+                pfad = str(payload["path"])
+                aktuell = read_server_text(db, server_id=server_id, relative_path=pfad)
+                try:
+                    neu = apply_edits(
+                        str(aktuell["content"]),
+                        [(str(e["find"]), str(e["replace"])) for e in payload["edits"]],
+                    )
+                except EditNotApplicable as exc:
+                    raise AiActionStateError("AI_ACTION_FILE_CHANGED") from exc
+                result = write_server_text(
+                    db,
+                    user=active_user,
+                    server_id=server_id,
+                    relative_path=pfad,
+                    content=neu,
+                    expected_revision=expected_revision,
                 )
                 task_id = None
                 queued = False

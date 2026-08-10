@@ -44,6 +44,7 @@ from services.node_service import resolve_server_node
 from services.server_file_access_service import (
     CHUNK_TMP_DIRNAME,
     read_server_text,
+    search_file_contents,
     write_server_text,
 )
 
@@ -418,6 +419,32 @@ def search_paths(
             break
 
     return {"q": q, "results": results, "truncated": truncated}
+
+
+@router.get("/{server_id}/search-content")
+def search_contents(
+    server_id: int,
+    q: str = Query(..., min_length=1, max_length=128),
+    path: str = Query("", max_length=256),
+    context: int = Query(0, ge=0, le=5),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Sucht **in** den Dateien, nicht in ihren Namen.
+
+    `search_paths` daneben vergleicht nur Datei- und Ordnernamen. Wer wissen
+    will, in welcher Datei ein Wert steht, war damit auf Scrollen angewiesen —
+    bei einer Spielkonfiguration mit dreizehntausend Zeilen keine Antwort.
+
+    Dasselbe `server.files.read` wie beim Lesen einer Datei, und dieselbe
+    Funktion, die auch das KI-Werkzeug `search_server_files` benutzt. Der
+    Unterschied liegt allein im Empfaenger: hier geht die Trefferzeile
+    unredigiert an einen Menschen, der die Datei ohnehin im Editor oeffnen darf.
+    """
+    require_server_permission(user, server_id, db, "server.files.read")
+    return search_file_contents(
+        db, server_id=server_id, query=q, relative_path=path, context=context
+    )
 
 
 @router.get("/{server_id}/read")

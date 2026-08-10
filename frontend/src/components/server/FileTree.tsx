@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, File as FileIcon, Folder, Server } from 'lucide-react'
-import type { FileEntry, SearchResult } from './fileWorkspaceTypes'
+import type { ContentMatch, FileEntry, SearchResult } from './fileWorkspaceTypes'
 import { formatBytes, joinPath, sortEntries } from './fileHelpers'
 
 interface FileTreeProps {
@@ -9,6 +9,8 @@ interface FileTreeProps {
   loadingPaths: Set<string>
   activePath: string | null
   searchResults: SearchResult[] | null
+  /** Treffer der Inhaltssuche. Liegen welche vor, verdraengen sie den Baum. */
+  contentMatches: ContentMatch[] | null
   searchTruncated: boolean
   emptyLabel: string
   searchEmptyLabel: string
@@ -33,6 +35,7 @@ export function FileTree({
   loadingPaths,
   activePath,
   searchResults,
+  contentMatches,
   searchTruncated,
   emptyLabel,
   searchEmptyLabel,
@@ -47,6 +50,9 @@ export function FileTree({
   const [focusedKey, setFocusedKey] = useState(activePath ?? ROOT_KEY)
 
   const visibleKeys = useMemo(() => {
+    // Zeile im Schluessel: dieselbe Datei kann mehrfach treffen, und zwei
+    // Eintraege mit demselben Schluessel brechen Fokus und Tastaturnavigation.
+    if (contentMatches) return contentMatches.map((match) => `${match.path}:${match.line}`)
     if (searchResults) return searchResults.map((result) => result.path)
     const keys = [ROOT_KEY]
     const collect = (parent: string) => {
@@ -58,7 +64,7 @@ export function FileTree({
     }
     collect('')
     return keys
-  }, [expanded, nodes, searchResults])
+  }, [contentMatches, expanded, nodes, searchResults])
 
   useEffect(() => {
     if (activePath && visibleKeys.includes(activePath)) setFocusedKey(activePath)
@@ -190,6 +196,41 @@ export function FileTree({
         </div>
       )
     })
+  }
+
+  if (contentMatches) {
+    return (
+      <div role="tree" aria-label="Content search results" className="py-1">
+        {searchTruncated && <p className="border-b border-outline-variant px-3 py-2 text-xs text-status-warning">{searchTruncatedLabel}</p>}
+        {contentMatches.length === 0 ? (
+          <p className="px-4 py-10 text-center text-xs text-on-surface-variant">{searchEmptyLabel}</p>
+        ) : contentMatches.map((match) => {
+          const key = `${match.path}:${match.line}`
+          return (
+            <button
+              ref={registerItem(key)}
+              key={key}
+              type="button"
+              role="treeitem"
+              tabIndex={focusedKey === key ? 0 : -1}
+              onFocus={() => setFocusedKey(key)}
+              onClick={() => onOpenFile(match.path)}
+              onKeyDown={(event) => handleTreeKeyDown(event, key, { name: match.path, is_dir: false, size: 0, modified: 0, mode: null, owner: null, group: null })}
+              className="flex min-h-11 w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-surface-container-highest focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary"
+            >
+              <span className="flex w-full items-center gap-2 text-xs text-on-surface-variant">
+                <FileIcon className="h-4 w-4 shrink-0" />
+                <span className="truncate font-mono">{match.path}</span>
+                <span className="ml-auto shrink-0 font-mono text-[10px] text-secondary">:{match.line}</span>
+              </span>
+              {/* Die Trefferzeile selbst — sie ist der Grund, warum jemand nach
+                  Inhalt sucht statt nach Namen. */}
+              <span className="w-full truncate pl-6 font-mono text-[10px] text-on-surface">{match.text}</span>
+            </button>
+          )
+        })}
+      </div>
+    )
   }
 
   if (searchResults) {

@@ -42,6 +42,7 @@ import {
 } from '@/components/server/fileHelpers'
 import type {
   BrowseResponse,
+  ContentSearchResponse,
   EditorTab,
   FileEntry,
   FileMetadata,
@@ -127,7 +128,11 @@ export function FileManager({ serverId }: FileManagerProps) {
   const [currentPath, setCurrentPath] = useState('')
   const [selectedEntry, setSelectedEntry] = useState<SelectedEntry | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  // Namen oder Inhalt. Zwei verschiedene Fragen: "wie heisst die Datei" und
+  // "wo steht dieser Wert". Die zweite ging bisher gar nicht.
+  const [searchMode, setSearchMode] = useState<'name' | 'content'>('name')
   const [searchResults, setSearchResults] = useState<SearchResponse['results'] | null>(null)
+  const [contentMatches, setContentMatches] = useState<ContentSearchResponse['matches'] | null>(null)
   const [searchTruncated, setSearchTruncated] = useState(false)
   const [tabs, setTabs] = useState<EditorTab[]>([])
   const [versions, setVersions] = useState<Record<string, FileVersion[]>>({})
@@ -187,20 +192,32 @@ export function FileManager({ serverId }: FileManagerProps) {
     const query = searchQuery.trim()
     if (!query) {
       setSearchResults(null)
+      setContentMatches(null)
       setSearchTruncated(false)
       return
     }
+    // Die Inhaltssuche liest Dateien und ist deshalb spuerbar teurer als der
+    // Namensvergleich. Etwas mehr Ruhe vor dem Abschicken, damit nicht jeder
+    // Tastendruck den halben Serverbaum durchliest.
     const handle = window.setTimeout(async () => {
       try {
+        if (searchMode === 'content') {
+          const response = await api<ContentSearchResponse>(`/files/${serverId}/search-content?q=${encodeURIComponent(query)}`)
+          setSearchResults(null)
+          setContentMatches(response.matches ?? [])
+          setSearchTruncated(response.truncated)
+          return
+        }
         const response = await api<SearchResponse>(`/files/${serverId}/search?q=${encodeURIComponent(query)}`)
+        setContentMatches(null)
         setSearchResults(response.results ?? [])
         setSearchTruncated(response.truncated)
       } catch (error) {
         toast.error(safeErrorMessage(error, t('files.searchFailed')))
       }
-    }, 300)
+    }, searchMode === 'content' ? 500 : 300)
     return () => window.clearTimeout(handle)
-  }, [searchQuery, serverId, t])
+  }, [searchMode, searchQuery, serverId, t])
 
   useEffect(() => {
     if (!contextMenu) return
@@ -724,7 +741,20 @@ export function FileManager({ serverId }: FileManagerProps) {
         {(treeOpen || inspectorOpen) && <button type="button" aria-label={t('common.close')} onClick={() => { if (treeOpen) { setTreeOpen(false); window.requestAnimationFrame(() => treeTriggerRef.current?.focus()) } else { setInspectorOpen(false); window.requestAnimationFrame(() => inspectorTriggerRef.current?.focus()) } }} className="fixed inset-0 z-30 cursor-default bg-black/55 backdrop-blur-sm xl:hidden" />}
         <aside ref={treePanelRef} tabIndex={treeOpen ? -1 : undefined} aria-label={t('files.filesDrawer')} className={`${treeOpen ? 'fixed inset-x-3 bottom-3 top-24 z-40 flex shadow-panel-strong' : 'hidden'} min-h-0 flex-col border-r border-outline-variant bg-surface-container-low/95 outline-none lg:static lg:flex lg:shadow-none`}>
           <div className="flex min-h-11 items-center gap-2 border-b border-outline-variant p-2.5">
-            <div className="relative min-w-0 flex-1"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" /><input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('files.searchPlaceholder')} className="msm-input h-8 pl-8 text-xs" /></div>
+            <div className="relative min-w-0 flex-1"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" /><input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={searchMode === 'content' ? t('files.searchContentPlaceholder') : t('files.searchPlaceholder')} className="msm-input h-8 pl-8 text-xs" /></div>
+            <div role="group" aria-label={t('files.searchMode')} className="flex shrink-0 overflow-hidden rounded-lg border border-outline-variant">
+              {(['name', 'content'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={searchMode === mode}
+                  onClick={() => setSearchMode(mode)}
+                  className={`px-2 py-1 text-[10px] ${searchMode === mode ? 'bg-secondary text-on-secondary' : 'text-on-surface-variant hover:bg-surface-container-highest'}`}
+                >
+                  {mode === 'name' ? t('files.searchByName') : t('files.searchByContent')}
+                </button>
+              ))}
+            </div>
             {treeOpen && <button type="button" onClick={() => { setTreeOpen(false); window.requestAnimationFrame(() => treeTriggerRef.current?.focus()) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs lg:hidden" aria-label={t('common.close')}><X className="h-4 w-4" /><span>{t('common.close')}</span></button>}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -734,6 +764,7 @@ export function FileManager({ serverId }: FileManagerProps) {
               loadingPaths={loadingPaths}
               activePath={activePath}
               searchResults={searchResults}
+              contentMatches={contentMatches}
               searchTruncated={searchTruncated}
               emptyLabel={t('files.empty')}
               searchEmptyLabel={t('files.searchEmpty')}
