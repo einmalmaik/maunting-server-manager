@@ -150,7 +150,9 @@
     },
     "profile": {
       "title": "AI assistant",
-      "description": "The panel operator provides the API key, the model and the providers. Here you manage what the assistant knows about you."
+      "description": "The panel operator provides the API key, the model and the providers. Here you manage what the assistant knows about you.",
+      "skillsMoved": "Skills no longer live here: a skill applies either to a team or panel-wide, never “to this profile”. You will find your own under",
+      "skillsMovedLink": "Teams → Personal"
     },
     "memory": {
       "title": "Personal AI memory",
@@ -187,7 +189,20 @@
       "clearAll": "Delete all",
       "clearTitle": "Delete the entire memory?",
       "clearConfirm": "Really delete all {{count}} entries? This cannot be undone.",
-      "cleared": "Deleted {{count}} entries."
+      "cleared": "Deleted {{count}} entries.",
+      "teamTitle": "This team's knowledge",
+      "enabledScopeHint": "This switch covers your own memory, including notes about individual servers. Your teams' knowledge is unaffected — it belongs to the team and lives under Teams.",
+      "titles": {
+        "user": "Personal AI memory",
+        "team": "This team's knowledge",
+        "panel": "Panel-wide AI memory"
+      },
+      "descriptions": {
+        "user": "What the assistant knows about you — in general and about individual servers. Nobody else sees it.",
+        "team": "What the assistant knows for this team. Every member can read it; changing it requires the “maintain knowledge” switch.",
+        "panel": "Applies to every user of this panel and travels with every conversation. Nothing personal — everyone sees it."
+      },
+      "forServer": "Server: {{name}}"
     },
     "skills": {
       "title": "Skills",
@@ -198,7 +213,9 @@
       "scopes": {
         "shipped": "bundled",
         "global": "panel-wide",
-        "team": "team"
+        "team": "team",
+        "personal": "personal",
+        "namedTeam": "Team: {{name}}"
       },
       "origins": {
         "shipped": "ships with MSM",
@@ -235,7 +252,12 @@
       "teamDescription": "The procedures this team has learned. Every member can see them; changing them needs the “manage skills” switch.",
       "search": "Search skills",
       "noMatches": "No skill matches the search.",
-      "manage": "Yours to edit"
+      "manage": "Yours to edit",
+      "panelDescription": "Procedures that apply panel-wide. Whatever is listed here, the assistant reads in every conversation of every user.",
+      "personalDescription": "Your own procedures. Nobody else sees them, and the AI reads them only in your conversations.",
+      "directoryTitle": "Assistant skills",
+      "directoryDescription": "Everything that currently applies to you — bundled, panel-wide, personal and from your teams.",
+      "directoryManageHint": "A skill is edited where it applies: personal and team skills under Teams, panel-wide ones in Settings."
     },
     "attachments": {
       "add": "Add safe attachment",
@@ -1728,7 +1750,7 @@
       "password": "Password",
       "2fa": "Two-Factor",
       "linked": "Linked Accounts",
-      "ai": "AI Credentials",
+      "ai": "AI memory",
       "danger": "Danger Zone",
       "credentials": "Credentials"
     },
@@ -3500,6 +3522,12 @@
     },
     "knowledge": "AI knowledge",
     "knowledgeHint": "What the assistant remembers for this team and which procedures it has learned here. Every member can read it; changing it needs the switches above.",
-    "personalKnowledgeHint": "Your personal AI knowledge. Nobody else sees it, regardless of permissions."
+    "personalKnowledgeHint": "Your personal AI knowledge. Nobody else sees it, regardless of permissions.",
+    "areaLabel": "Area",
+    "areaPersonal": "Personal",
+    "areaTeams": "Teams",
+    "personalMemoryElsewhere": "Your personal memories are not here but in your profile — they are none of a team's business.",
+    "personalMemoryLink": "Profile → AI",
+    "noTeams": "You are not a member of any team yet. A team shares skills, memories and server permissions with other users."
   }
 }

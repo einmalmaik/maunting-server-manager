@@ -150,7 +150,9 @@
     },
     "profile": {
       "title": "KI-Assistent",
-      "description": "API-Key, Modell und Anbieter legt der Betreiber des Panels fest. Hier verwaltest du, was der Assistent über dich weiß."
+      "description": "API-Key, Modell und Anbieter legt der Betreiber des Panels fest. Hier verwaltest du, was der Assistent über dich weiß.",
+      "skillsMoved": "Skills stehen nicht mehr hier: ein Skill gilt entweder für ein Team oder panelweit, nie „für dieses Profil“. Deine eigenen findest du unter",
+      "skillsMovedLink": "Teams → Persönlich"
     },
     "memory": {
       "title": "Persönliches KI-Memory",
@@ -187,7 +189,20 @@
       "clearAll": "Alle löschen",
       "clearTitle": "Gesamtes Gedächtnis löschen?",
       "clearConfirm": "Wirklich alle {{count}} Einträge löschen? Das lässt sich nicht rückgängig machen.",
-      "cleared": "{{count}} Einträge gelöscht."
+      "cleared": "{{count}} Einträge gelöscht.",
+      "teamTitle": "Wissen dieses Teams",
+      "enabledScopeHint": "Der Schalter gilt für dein eigenes Gedächtnis, einschließlich der Notizen zu einzelnen Servern. Das Wissen deiner Teams ist davon nicht betroffen — es gehört dem Team und steht unter Teams.",
+      "titles": {
+        "user": "Persönliches KI-Memory",
+        "team": "Wissen dieses Teams",
+        "panel": "Panelweites KI-Gedächtnis"
+      },
+      "descriptions": {
+        "user": "Was der Assistent über dich weiß — allgemein und zu einzelnen Servern. Niemand sonst sieht es.",
+        "team": "Was der Assistent für dieses Team weiß. Alle Mitglieder sehen es; ändern darf es, wer den Schalter „Wissen pflegen“ hat.",
+        "panel": "Gilt für jeden Benutzer dieses Panels und läuft in jedem Gespräch mit. Nichts Persönliches — es sieht jeder."
+      },
+      "forServer": "Server: {{name}}"
     },
     "skills": {
       "title": "Skills",
@@ -198,7 +213,9 @@
       "scopes": {
         "shipped": "mitgeliefert",
         "global": "panelweit",
-        "team": "Team"
+        "team": "Team",
+        "personal": "persönlich",
+        "namedTeam": "Team: {{name}}"
       },
       "origins": {
         "shipped": "mit MSM ausgeliefert",
@@ -235,7 +252,12 @@
       "teamDescription": "Die Vorgehensweisen, die dieses Team gelernt hat. Alle Mitglieder sehen sie; ändern darf sie, wer den Schalter „Skills pflegen“ hat.",
       "search": "Skills durchsuchen",
       "noMatches": "Kein Skill passt zur Suche.",
-      "manage": "Von dir änderbar"
+      "manage": "Von dir änderbar",
+      "panelDescription": "Vorgehensweisen, die auf diesem Panel für alle gelten. Was hier steht, liest der Assistent in jedem Gespräch jedes Benutzers.",
+      "personalDescription": "Deine eigenen Vorgehensweisen. Niemand sonst sieht sie, und die KI liest sie nur in deinen Gesprächen.",
+      "directoryTitle": "Skills des Assistenten",
+      "directoryDescription": "Alles, was für dich gerade gilt — mitgeliefert, panelweit, persönlich und aus deinen Teams.",
+      "directoryManageHint": "Geändert wird ein Skill dort, wo er gilt: persönliche und Team-Skills unter Teams, panelweite in den Einstellungen."
     },
     "attachments": {
       "add": "Sicheren Anhang hinzufügen",
@@ -1728,7 +1750,7 @@
       "password": "Passwort",
       "2fa": "2-Faktor",
       "linked": "Verknüpfte Konten",
-      "ai": "KI-Zugangsdaten",
+      "ai": "KI-Gedächtnis",
       "danger": "Gefahrenzone",
       "credentials": "Zugangsdaten"
     },
@@ -3500,6 +3522,12 @@
     },
     "knowledge": "KI-Wissen",
     "knowledgeHint": "Was sich der Assistent für dieses Team merkt und welche Vorgehensweisen er hier gelernt hat. Lesen darf jedes Mitglied; ändern nur, wer die Schalter oben hat.",
-    "personalKnowledgeHint": "Dein persönliches KI-Wissen. Niemand sonst sieht es, unabhängig von Rechten."
+    "personalKnowledgeHint": "Dein persönliches KI-Wissen. Niemand sonst sieht es, unabhängig von Rechten.",
+    "areaLabel": "Bereich",
+    "areaPersonal": "Persönlich",
+    "areaTeams": "Teams",
+    "personalMemoryElsewhere": "Deine persönlichen Erinnerungen stehen nicht hier, sondern in deinem Profil — sie gehen kein Team etwas an.",
+    "personalMemoryLink": "Profil → KI",
+    "noTeams": "Du gehörst noch keinem Team an. Ein Team teilt Skills, Erinnerungen und Serverrechte mit anderen Benutzern."
   }
 }

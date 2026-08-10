@@ -290,3 +290,212 @@ def test_an_explicit_correction_overwrites_instead_of_duplicating(
     assert len(rows) == 1
     _row, value = ai_memory_service.list_entries(db, regular_user, "user", None)[0]
     assert "Rex" in value
+
+
+def test_ein_zweites_team_macht_das_merken_nicht_unmoeglich(
+    db: Session, regular_user: User
+) -> None:
+    """Der Fall, in dem Teamwissen bisher gar nicht entstehen konnte.
+
+    Bei zwei verwaltbaren Teams gab `learning_team` nur den Rueckfragetext
+    zurueck — und `remember` hatte kein Argument, mit dem sich die Antwort
+    haette einloesen lassen. Das Modell fragte, bekam eine Antwort, fragte
+    wieder. Teamwissen war ab dem zweiten Team unerreichbar.
+    """
+    _allow(db, regular_user, "ai.memory.use", "teams.create")
+    eins = team_service.create_team(db, user=regular_user, name="Ops")
+    team_service.create_team(db, user=regular_user, name="Support")
+
+    ohne = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="remember",
+        arguments={"scope": "team", "key": "ram.minimum", "value": "Mindestens 6 GB"},
+    )
+    assert ohne["remembered"] is False
+    assert "Ops" in ohne["ask_user"] and "Support" in ohne["ask_user"]
+
+    mit = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="remember",
+        arguments={
+            "scope": "team", "key": "ram.minimum",
+            "value": "Mindestens 6 GB", "team": "Ops",
+        },
+    )
+    assert mit["remembered"] is True
+    assert mit["scope"] == "team" and mit["team_id"] == eins.id
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"team:{eins.id}"
+    ).count() == 1
+
+
+def test_ein_erfundenes_team_landet_nirgends(db: Session, regular_user: User) -> None:
+    """Der Name waehlt aus, er berechtigt nicht.
+
+    Trifft er keinen Kandidaten, gibt es dieselbe Rueckfrage wie ohne ihn — und
+    vor allem keinen Eintrag irgendwo. Ein stiller Rueckfall ins persoenliche
+    Gedaechtnis waere hier das Schlimmste: der Benutzer glaubt, es steht im
+    Team, und niemand ausser ihm sieht es.
+    """
+    _allow(db, regular_user, "ai.memory.use", "teams.create")
+    team_service.create_team(db, user=regular_user, name="Ops")
+    team_service.create_team(db, user=regular_user, name="Support")
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="remember",
+        arguments={
+            "scope": "team", "key": "ram.minimum",
+            "value": "Mindestens 6 GB", "team": "Gibt-Es-Nicht",
+        },
+    )
+    assert ergebnis["remembered"] is False
+    assert "Gibt-Es-Nicht" not in ergebnis["ask_user"]
+    assert db.query(AiMemoryEntry).count() == 0
+
+
+def test_wer_wissen_pflegen_darf_schreibt_ins_team_und_nicht_zu_sich(
+    db: Session, regular_user: User
+) -> None:
+    """Der Schalter am Mitglied entscheidet — und zwar der richtige.
+
+    Der Weg dorthin fragte fest `can_manage_skills` ab, obwohl fuer
+    Erinnerungen `can_manage_memory` gilt. Ein Mitglied mit
+    `memory=True, skills=False` bekam sein „merk dir fuers Team" still ins
+    persoenliche Gedaechtnis geschrieben: kein Fehler, keine Meldung, nur der
+    falsche Ort — und niemand im Team sah es je.
+    """
+    colleague = _user(db, "kollege")
+    _allow(db, regular_user, "ai.memory.use", "teams.create")
+    _allow(db, colleague, "ai.memory.use")
+    team = team_service.create_team(db, user=regular_user, name="Betrieb")
+    team_service.add_member(
+        db, team=team, user=regular_user, new_user_id=colleague.id,
+        can_manage_skills=False, can_manage_memory=True,
+    )
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=colleague, tool_name="remember",
+        arguments={
+            "scope": "team", "key": "valheim.ram",
+            "value": "Valheim braucht mindestens 6 GB",
+        },
+    )
+
+    assert ergebnis["remembered"] is True
+    assert ergebnis["scope"] == "team", "Der Eintrag darf nicht persoenlich werden"
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"team:{team.id}"
+    ).count() == 1
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"user:{colleague.id}"
+    ).count() == 0
+
+
+def test_servernotizen_stehen_im_persoenlichen_bereich(
+    db: Session, regular_user: User
+) -> None:
+    """Serverbezogene Notizen sind persoenlich — und waren nirgends sichtbar.
+
+    Die KI schreibt sie (`remember` mit scope='server'), sie fliessen in jedes
+    Gespraech und zaehlen gegen die 100er-Grenze. `list_entries` fragt aber
+    genau eine Scope-Kennung ab und braucht dafuer eine konkrete `server_id` —
+    wer alle seine Notizen sehen wollte, haette die Server raten muessen. In der
+    Oberflaeche gab es sie deshalb nicht.
+    """
+    from models import Server, ServerPermission
+
+    _allow(db, regular_user, "ai.memory.use")
+    server = Server(
+        name="Notizserver", game_type="dayz",
+        install_dir="/tmp/notizserver", status="stopped",
+    )
+    db.add(server)
+    db.commit()
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view",
+    ))
+    db.commit()
+
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="user", server_id=None,
+        key="ram.bevorzugt", value="Ich nehme immer 8 GB",
+    )
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="server", server_id=server.id,
+        key="startzeit", value="Startet nur mit erhoehtem Timeout",
+    )
+    db.commit()
+
+    zeilen = ai_memory_service.personal_entries(db, regular_user)
+    nach_scope = {row.scope: (row, wert) for row, wert in zeilen}
+    assert set(nach_scope) == {"user", "server"}
+    assert nach_scope["server"][0].server_id == server.id
+    assert "Timeout" in nach_scope["server"][1]
+
+
+def test_ein_entzogener_server_sperrt_die_eigene_notiz_nicht_ein(
+    db: Session, regular_user: User
+) -> None:
+    """Wer den Zugriff verliert, muss seine eigene Notiz trotzdem loeschen koennen.
+
+    Vorher verlangte `delete_entry` auch bei der eigenen Servernotiz weiterhin
+    `server.view`. Die Zeile blieb damit in der Datenbank, zaehlte gegen das
+    Kontingent des Benutzers und war fuer ihn unerreichbar — eigene Daten, die
+    man nicht loeschen kann.
+
+    Was das Modell zu sehen bekommt, ist davon unberuehrt: der Kontextaufbau
+    prueft `server.view` weiterhin bei jedem Abruf.
+    """
+    from models import Server, ServerPermission
+
+    _allow(db, regular_user, "ai.memory.use")
+    server = Server(
+        name="Entzogen", game_type="dayz",
+        install_dir="/tmp/entzogen-mgmt", status="stopped",
+    )
+    db.add(server)
+    db.commit()
+    recht = ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view",
+    )
+    db.add(recht)
+    db.commit()
+    eintrag, _ = ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="server", server_id=server.id,
+        key="startzeit", value="Startet nur mit erhoehtem Timeout",
+    )
+    eintrag_id = eintrag.id
+    db.commit()
+
+    db.delete(recht)
+    db.commit()
+
+    assert "Timeout" not in (
+        ai_memory_service.provider_memory_context(db, regular_user) or ""
+    )
+    ai_memory_service.delete_entry(db, regular_user, eintrag_id)
+    assert db.get(AiMemoryEntry, eintrag_id) is None
+
+
+def test_ein_persoenliches_team_nimmt_kein_teamwissen(
+    db: Session, regular_user: User
+) -> None:
+    """Sonst entstuende ein Eintrag, den niemand je zu sehen bekaeme.
+
+    Er laege unter `team:{persoenlich}`: die persoenliche Ansicht zeigt
+    `scope='user'`, und eine Teamansicht gibt es fuer das Ein-Mann-Team nicht.
+    Der KI-Weg stuft laengst auf `scope='user'` herunter — die Regel gehoert
+    deshalb an den Dienst und nicht in die Aufrufer.
+    """
+    _allow(db, regular_user, "ai.memory.use")
+    persoenlich = team_service.personal_team(db, regular_user)
+    db.commit()
+
+    with pytest.raises(Exception) as exc:
+        ai_memory_service.upsert_entry(
+            db, user=regular_user, scope="team", server_id=None,
+            team_id=persoenlich.id, key="irgendwas", value="Gehoert hier nicht hin",
+        )
+    assert getattr(exc.value, "status_code", None) == 422
+    db.rollback()
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"team:{persoenlich.id}"
+    ).count() == 0

@@ -387,3 +387,93 @@ def test_member_without_the_switch_is_no_learning_target(
     db.commit()
     assert question is None
     assert target is not None and target.is_personal
+
+
+def test_a_memory_target_follows_the_memory_switch(db: Session, regular_user: User) -> None:
+    """Welcher Schalter zaehlt, entscheidet die Art des Wissens.
+
+    `learning_team` fragte fest `can_manage_skills` ab, wurde aber von beiden
+    Erinnerungswerkzeugen benutzt. Ein Mitglied, das Teamwissen pflegen darf
+    aber keine Skills, bekam sein „merk dir fuers Team" still ins persoenliche
+    Gedaechtnis geschrieben — kein Fehler, keine Meldung, nur der falsche Ort.
+    """
+    _grant_global(db, regular_user, "teams.create")
+    team = team_service.create_team(db, user=regular_user, name="Nur Wissen")
+    colleague = _user(db, "kollege")
+    team_service.add_member(
+        db, team=team, user=regular_user, new_user_id=colleague.id,
+        can_manage_skills=False, can_manage_memory=True,
+    )
+
+    ziel, frage = team_service.learning_team(db, colleague, schalter="memory")
+    assert frage is None
+    assert ziel is not None and ziel.id == team.id
+
+    # Die Gegenprobe: fuer Skills bleibt derselbe Benutzer beim persoenlichen.
+    ziel_skills, _ = team_service.learning_team(db, colleague, schalter="skills")
+    db.commit()
+    assert ziel_skills is not None and ziel_skills.is_personal
+
+
+def test_a_named_team_ends_the_dead_end_with_several_teams(
+    db: Session, regular_user: User
+) -> None:
+    """Mit zwei Teams war Teamlernen bisher unmoeglich.
+
+    Die Rueckfrage kam, aber kein Werkzeug nahm die Antwort entgegen — das
+    Modell fragte erneut, und der Benutzer sah die Frage in Schleife. Der Name
+    aus der Antwort darf jetzt **auswaehlen**, was der Dienst ohnehin ermittelt
+    hat.
+    """
+    colleague = _user(db, "kollege")
+    other_owner = _user(db, "zweiter")
+    erstes = _team_with_member(db, regular_user, colleague)
+    _team_with_member(db, other_owner, colleague)
+
+    ziel, frage = team_service.learning_team(db, colleague, wunsch=erstes.name)
+    assert frage is None
+    assert ziel is not None and ziel.id == erstes.id
+
+    # Gross- und Kleinschreibung sind keine Huerde: das Modell gibt den Namen
+    # so wieder, wie der Benutzer ihn gesagt hat.
+    gross, _ = team_service.learning_team(db, colleague, wunsch=erstes.name.upper())
+    assert gross is not None and gross.id == erstes.id
+
+
+def test_a_foreign_team_cannot_be_named(db: Session, regular_user: User) -> None:
+    """Der Name ist ein Auswahlmittel, keine Berechtigung.
+
+    Ein Team, in dem der Benutzer nicht ist, bleibt unerreichbar — und die
+    Antwort verraet auch nicht, dass es dieses Team gibt. Sie ist Wort fuer Wort
+    dieselbe wie ohne jede Nennung.
+    """
+    colleague = _user(db, "kollege")
+    other_owner = _user(db, "zweiter")
+    _team_with_member(db, regular_user, colleague)
+    _team_with_member(db, other_owner, colleague)
+
+    fremder = _user(db, "dritter")
+    _grant_global(db, fremder, "teams.create")
+    fremdes = team_service.create_team(db, user=fremder, name="Geheimprojekt")
+
+    ziel, frage = team_service.learning_team(db, colleague, wunsch=fremdes.name)
+    assert ziel is None
+    assert frage is not None
+    assert "Geheimprojekt" not in frage
+    _, ohne_nennung = team_service.learning_team(db, colleague)
+    assert frage == ohne_nennung
+
+
+def test_the_personal_team_is_never_a_candidate(db: Session, regular_user: User) -> None:
+    """Das Ein-Mann-Team ist der Rueckfall, kein Ziel unter mehreren.
+
+    Es hier aufzunehmen hiesse, den Benutzer zwischen „meinem eigenen Bereich"
+    und einem echten Team waehlen zu lassen, als waeren das dieselbe Art Sache.
+    """
+    colleague = _user(db, "kollege")
+    team = _team_with_member(db, regular_user, colleague)
+    team_service.personal_team(db, colleague)
+    db.commit()
+
+    kandidaten = team_service.learning_teams(db, colleague, schalter="skills")
+    assert [row.id for row in kandidaten] == [team.id]

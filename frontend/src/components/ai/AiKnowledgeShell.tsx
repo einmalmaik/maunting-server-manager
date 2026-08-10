@@ -14,6 +14,8 @@ interface Props {
   filters?: ReactNode
   /** Wieviel von wievielem gerade sichtbar ist. */
   count?: string
+  /** Ein Satz unter der Kopfzeile — was dieser Bereich umfasst und was nicht. */
+  note?: string
   children: ReactNode
 }
 
@@ -30,7 +32,7 @@ interface Props {
  * gleichzumachen hieße, beides schlechter zu machen.
  */
 export function AiKnowledgeShell({
-  icon: Icon, title, description, headerAction, search, filters, count, children,
+  icon: Icon, title, description, headerAction, search, filters, count, note, children,
 }: Props) {
   return (
     <section className="msm-card space-y-5 p-6" aria-label={title}>
@@ -44,6 +46,12 @@ export function AiKnowledgeShell({
         </div>
         {headerAction}
       </div>
+
+      {note && (
+        <p className="max-w-3xl rounded-lg border border-outline-variant/40 bg-surface-container-low/45 p-3 text-xs leading-5 text-on-surface-variant">
+          {note}
+        </p>
+      )}
 
       {(search || filters) && (
         <div className="flex flex-wrap items-center gap-3">

@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Plus, Server, Trash2, UserPlus, Users } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Plus, Server, Trash2, User, UserPlus, Users, UsersRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 
 import { api, SanitizedApiError } from '@/api/client'
 import { teamsApi, type Team, type TeamDetail, type TeamServer } from '@/api/teams'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiSkillManager } from '@/components/ai/AiSkillManager'
-import type { AiKnowledgeScope } from '@/components/ai/knowledgeScope'
+import type { AiKnowledgeScope, AiSkillScope } from '@/components/ai/knowledgeScope'
+import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { Button, Dropdown, MultiSelect, Switch } from '@/Singra/UI'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -18,24 +20,39 @@ interface UserOption {
   username: string
 }
 
+type Bereich = 'personal' | 'teams'
+
+const BEREICHE: TabDef<Bereich>[] = [
+  { id: 'personal', labelKey: 'teams.areaPersonal', icon: User },
+  { id: 'teams', labelKey: 'teams.areaTeams', icon: UsersRound },
+]
+
 /**
- * Welcher Wissensbereich zu einem Team gehört.
+ * Erinnerungen eines **echten** Teams.
  *
- * Das persönliche Ein-Mann-Team ist kein Team im Sinne des Backends: sein
- * Wissen liegt unter `scope=user` und verlässt den Benutzer nie. Es hier auf
- * `team` abzubilden hieße, persönliche Einträge in eine geteilte Ablage zu
- * schreiben — genau die Grenze, die `scope_identity` zieht.
- *
- * Ändern darf, wer den jeweiligen Schalter am Mitgliedseintrag hat. Die Angabe
- * kommt aus derselben Antwort, die das Backend ohnehin liefert; sie hier erneut
- * abzufragen wäre eine zweite Wahrheit.
+ * Für das persönliche Team gibt es hier bewusst keinen Fall: persönliche
+ * Erinnerungen stehen im Profil und nirgends sonst. Bis eben bildete diese
+ * Funktion `is_personal` auf `{kind:'user'}` ab — die Teamseite zeigte dann
+ * dasselbe persönliche Gedächtnis wie das Profil.
  */
-function knowledgeScope(detail: TeamDetail, art: 'memory' | 'skills'): AiKnowledgeScope {
-  if (detail.is_personal) return { kind: 'user' }
+function memoryScope(detail: TeamDetail): AiKnowledgeScope {
+  return { kind: 'team', teamId: detail.id, canManage: detail.can_manage_memory }
+}
+
+/**
+ * Skills eines Bereichs — auch das persönliche Team ist hier ein Team.
+ *
+ * Anders als beim Gedächtnis ist das kein Kompromiss, sondern die Bauart:
+ * `scope_identity` kennt für Skills nur `"global"` und `"team:{id}"`. Das
+ * Ein-Mann-Team ist ihr persönlicher Ort, und weil es eine echte Teamzeile mit
+ * beiden Verwaltungsschaltern ist, stimmt `can_manage_skills` dort ohnehin.
+ */
+function skillScope(detail: TeamDetail): AiSkillScope {
   return {
     kind: 'team',
     teamId: detail.id,
-    canManage: art === 'memory' ? detail.can_manage_memory : detail.can_manage_skills,
+    personal: detail.is_personal,
+    canManage: detail.can_manage_skills,
   }
 }
 
@@ -52,7 +69,9 @@ export function Teams() {
   const { t } = useTranslation()
   const canCreate = useHasPermission('teams.create')
   const canReadUsers = useHasPermission('users.read')
+  const canUseSkills = useHasPermission('ai.skills.use')
 
+  const [bereich, setBereich] = useState<Bereich>('personal')
   const [teams, setTeams] = useState<Team[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [detail, setDetail] = useState<TeamDetail | null>(null)
@@ -63,10 +82,16 @@ export function Teams() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
+  // Die beiden Welten sauber getrennt: das Ein-Mann-Team gehört nicht in eine
+  // Liste, aus der man „ein Team auswählt". Es ist keins.
+  const persoenlich = useMemo(() => teams.find((team) => team.is_personal) ?? null, [teams])
+  const echte = useMemo(() => teams.filter((team) => !team.is_personal), [teams])
+  const aktiveId = bereich === 'personal' ? persoenlich?.id ?? null : selectedId
+
   const reloadTeams = useCallback(async () => {
     const rows = await teamsApi.list()
     setTeams(rows)
-    setSelectedId((current) => current ?? rows[0]?.id ?? null)
+    setSelectedId((current) => current ?? rows.find((row) => !row.is_personal)?.id ?? null)
     return rows
   }, [])
 
@@ -82,7 +107,7 @@ export function Teams() {
       .then(([rows, userRows]) => {
         if (!active) return
         setTeams(rows)
-        setSelectedId(rows[0]?.id ?? null)
+        setSelectedId(rows.find((row) => !row.is_personal)?.id ?? null)
         setUsers(userRows.map((row) => ({ id: row.id, username: row.username })))
       })
       .catch((error: unknown) => {
@@ -95,12 +120,12 @@ export function Teams() {
   }, [canReadUsers, t])
 
   useEffect(() => {
-    if (selectedId === null) {
+    if (aktiveId === null) {
       setDetail(null)
       return
     }
     let active = true
-    teamsApi.get(selectedId)
+    teamsApi.get(aktiveId)
       .then((row) => {
         if (!active) return
         setDetail(row)
@@ -118,7 +143,7 @@ export function Teams() {
         if (active) toast.error(error instanceof SanitizedApiError ? error.message : t('teams.errors.load'))
       })
     return () => { active = false }
-  }, [selectedId, t])
+  }, [aktiveId, t])
 
   const run = async (action: () => Promise<unknown>, successKey?: string) => {
     if (busy) return
@@ -200,7 +225,48 @@ export function Teams() {
         description={t('teams.description')}
       />
 
-      {canCreate && (
+      {/* ── Zwei Welten, sichtbar getrennt ────────────────────────────
+          Vorher stand das persönliche Ein-Mann-Team als ein Eintrag unter den
+          anderen im selben Dropdown, unterschieden nur durch den Zusatz
+          „persönlich". Es ist aber kein Team, dem man beitritt — es ist der
+          eigene Bereich, und man kann daneben beliebig vielen echten Teams
+          angehören. Diese Unterscheidung gehört an den Anfang der Seite. */}
+      <TabBar
+        tabs={BEREICHE}
+        active={bereich}
+        onChange={setBereich}
+        ariaLabel={t('teams.areaLabel')}
+      />
+
+      {bereich === 'personal' && (
+        <>
+          <section className="msm-card p-6" aria-labelledby="personal-title">
+            <div className="flex items-center gap-2">
+              <User className="h-5 w-5 text-secondary" aria-hidden="true" />
+              <h2 id="personal-title" className="font-headline text-lg font-semibold text-on-surface">
+                {t('teams.areaPersonal')}
+              </h2>
+            </div>
+            <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">
+              {t('teams.personalKnowledgeHint')}
+            </p>
+            {/* Persönliche Erinnerungen stehen im Profil und nur dort. Hier
+                steht der Weg dorthin, nicht eine zweite Ansicht derselben
+                Liste — die gab es bis eben, und sie war der Grund, warum
+                persönliches Wissen unter „Teams" auftauchte. */}
+            <p className="mt-3 max-w-2xl rounded-lg border border-outline-variant/40 bg-surface-container-low/45 p-3 text-xs leading-5 text-on-surface-variant">
+              {t('teams.personalMemoryElsewhere')}{' '}
+              <Link to="/profile" className="text-primary underline underline-offset-2">
+                {t('teams.personalMemoryLink')}
+              </Link>
+            </p>
+          </section>
+
+          {detail?.is_personal && canUseSkills && <AiSkillManager scope={skillScope(detail)} />}
+        </>
+      )}
+
+      {bereich === 'teams' && canCreate && (
         <section className="msm-card p-6" aria-labelledby="team-create">
           <h2 id="team-create" className="mb-3 font-headline text-lg font-semibold text-on-surface">
             {t('teams.create')}
@@ -227,55 +293,52 @@ export function Teams() {
         </section>
       )}
 
-      <section className="msm-card p-6" aria-labelledby="team-select">
-        <label className="block w-full max-w-sm space-y-1.5">
-          <span id="team-select" className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-            {t('teams.select')}
-          </span>
-          <Dropdown
-            value={selectedId === null ? null : String(selectedId)}
-            onChange={(value) => setSelectedId(Number(value))}
-            options={teams.map((team) => ({
-              value: String(team.id),
-              label: team.name,
-              hint: team.is_personal ? t('teams.personal') : t('teams.memberCount', { count: team.member_count }),
-            }))}
-            disabled={busy}
-            aria-label={t('teams.select')}
-          />
-        </label>
-        {detail?.is_personal && (
-          <p className="mt-3 max-w-2xl rounded-lg border border-outline-variant/40 bg-surface-container-low/45 p-3 text-xs leading-5 text-on-surface-variant">
-            {t('teams.personalHint')}
-          </p>
-        )}
-      </section>
+      {bereich === 'teams' && echte.length === 0 && (
+        <section className="msm-card p-6 text-sm text-on-surface-variant">
+          {t('teams.noTeams')}
+        </section>
+      )}
 
-      {/* ── Das KI-Wissen dieses Bereichs ─────────────────────────────
-          Für das persönliche Team ist das das eigene Wissen; für ein echtes
-          das geteilte. Bis eben zeigte diese Seite für das persönliche Team
-          gar nichts — dabei ist es genau der Ort, an dem man nachsieht, was
-          der Assistent über einen weiß.
+      {bereich === 'teams' && echte.length > 0 && (
+        <section className="msm-card p-6" aria-labelledby="team-select">
+          <label className="block w-full max-w-sm space-y-1.5">
+            <span id="team-select" className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('teams.select')}
+            </span>
+            <Dropdown
+              value={selectedId === null ? null : String(selectedId)}
+              onChange={(value) => setSelectedId(Number(value))}
+              options={echte.map((team) => ({
+                value: String(team.id),
+                label: team.name,
+                hint: t('teams.memberCount', { count: team.member_count }),
+              }))}
+              disabled={busy}
+              aria-label={t('teams.select')}
+            />
+          </label>
+        </section>
+      )}
 
-          Dieselben Panels wie im Profil, nur mit anderem Bereich. Eine zweite
-          Ansicht daneben zu bauen hätte bedeutet, dass sie auseinanderlaufen,
+      {/* ── Das geteilte KI-Wissen dieses Teams ───────────────────────
+          Erinnerungen und Skills des Teams, nicht die des Benutzers. Dieselben
+          Panels wie im Profil bzw. unter „Persönlich", nur mit anderem
+          Bereich — eine zweite Ansicht daneben wäre auseinandergelaufen,
           sobald jemand nur eine davon anfasst. */}
-      {detail && (
+      {bereich === 'teams' && detail && !detail.is_personal && (
         <section className="space-y-4" aria-labelledby="team-knowledge">
           <div className="msm-card p-6">
             <h2 id="team-knowledge" className="font-headline text-lg font-semibold text-on-surface">
               {t('teams.knowledge')}
             </h2>
-            <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">
-              {detail.is_personal ? t('teams.personalKnowledgeHint') : t('teams.knowledgeHint')}
-            </p>
+            <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">{t('teams.knowledgeHint')}</p>
           </div>
-          <AiMemoryManager scope={knowledgeScope(detail, 'memory')} />
-          <AiSkillManager scope={knowledgeScope(detail, 'skills')} />
+          <AiMemoryManager scope={memoryScope(detail)} />
+          {canUseSkills && <AiSkillManager scope={skillScope(detail)} />}
         </section>
       )}
 
-      {detail && !detail.is_personal && (
+      {bereich === 'teams' && detail && !detail.is_personal && (
         <>
           <section className="msm-card p-6" aria-labelledby="team-members">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

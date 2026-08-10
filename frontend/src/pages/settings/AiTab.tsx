@@ -12,6 +12,8 @@ import { useTranslation } from 'react-i18next'
 import { Bot, Save } from 'lucide-react'
 
 import { api } from '@/api/client'
+import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
+import { AiSkillManager } from '@/components/ai/AiSkillManager'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
@@ -63,6 +65,7 @@ export function AiTab() {
   const { t } = useTranslation()
   const canRead = useHasPermission('panel.settings.read')
   const canWrite = useHasPermission('panel.settings.write')
+  const canManageSkills = useHasPermission('ai.skills.manage')
   const [rows, setRows] = useState<AiRoleLimits[]>([])
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null)
   const [loading, setLoading] = useState(canRead)
@@ -140,6 +143,18 @@ export function AiTab() {
       <AiProvidersSettings canWrite={canWrite} />
       <AiWebSearchSettings canWrite={canWrite} />
       <AiLearningSettings canWrite={canWrite} />
+
+      {/* Panelweite Skills gehören zum Betreiber, nicht ins Profil eines
+          Benutzers — und damit neben die Freigabe der KI-gelernten oben.
+          Bis eben wurden sie über dasselbe Panel angelegt, das im Profil
+          stand; wer dort etwas eintrug, schrieb unbemerkt für alle. */}
+      {canManageSkills && <AiSkillManager scope={{ kind: 'panel', canManage: canWrite }} />}
+
+      {/* Panelweites Gedaechtnis gilt fuer **jeden** Benutzer und lief bisher in
+          jedem Gespraech mit, ohne dass es irgendwo sichtbar war — erreichbar
+          nur ueber die API. Was fuer alle gilt, gehoert dorthin, wo der
+          Betreiber es sieht. */}
+      <AiMemoryManager scope={{ kind: 'panel', canManage: canWrite }} />
 
       <div className="msm-card p-6">
         <div className="mb-3 flex items-center gap-2">

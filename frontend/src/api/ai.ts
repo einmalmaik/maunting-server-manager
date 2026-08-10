@@ -378,6 +378,14 @@ export const aiApi = {
   listMemory: (scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number) => api<AiMemoryEntry[]>(
     `/ai/memory?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}${teamId ? `&team_id=${teamId}` : ''}`,
   ),
+  /**
+   * Alles, was einem selbst gehört: persönlich **und** serverbezogen.
+   *
+   * `listMemory('server', …)` verlangt eine konkrete Server-ID — wer alle seine
+   * Notizen sehen wollte, hätte die Server raten müssen. Genau deshalb waren
+   * sie in der Oberfläche nicht auffindbar, obwohl die KI sie schreibt.
+   */
+  listPersonalMemory: () => api<AiMemoryEntry[]>('/ai/memory/personal'),
   saveMemory: (payload: { scope: AiMemoryEntry['scope']; server_id?: number; team_id?: number; key: string; value: string }) => api<AiMemoryEntry>('/ai/memory', {
     method: 'PUT', body: JSON.stringify(payload),
   }),

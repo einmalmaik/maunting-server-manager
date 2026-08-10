@@ -142,3 +142,65 @@ def test_notice_requires_the_memory_permission(
         headers={"X-CSRF-Token": user_csrf_token} if user_csrf_token else {},
     )
     assert response.status_code == 403
+
+
+def test_teamwissen_haengt_nicht_am_persoenlichen_schalter(
+    db: Session, regular_user: User
+) -> None:
+    """Die Einwilligung gilt dem eigenen Gedaechtnis, nicht dem des Teams.
+
+    Vorher endete `provider_memory_context` bei fehlender Einwilligung sofort,
+    und `_visible_scope_rows` enthaelt auch die Teamzeilen. Wer sein eigenes
+    Gedaechtnis abschaltete, nahm dem Assistenten damit still das Wissen aller
+    seiner Teams — an einer Stelle, an der niemand danach sucht.
+
+    Der Betreiber hat die Trennung ausdruecklich so entschieden: Teamwissen ist
+    Firmeninhalt, nicht der eines Mitglieds. Fuer ihn sind Mitgliedschaft und
+    die Anbieterwahl des Betreibers die Einwilligung.
+    """
+    from services import team_service
+
+    _allow(db, regular_user)
+    rolle = db.query(Role).filter(Role.name == f"mem-{regular_user.id}").first()
+    db.add(RolePermission(role_id=rolle.id, permission_key="teams.create"))
+    db.commit()
+    team = team_service.create_team(db, user=regular_user, name="Betrieb")
+
+    ai_memory_service.set_preference(db, regular_user, True)
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="user", server_id=None,
+        key="ram.bevorzugt", value="Ich nehme immer 8 GB",
+    )
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="team", server_id=None, team_id=team.id,
+        key="valheim.ram", value="Valheim braucht mindestens 6 GB",
+    )
+    db.commit()
+
+    ai_memory_service.set_preference(db, regular_user, False)
+    block = ai_memory_service.provider_memory_context(db, regular_user) or ""
+    assert "Valheim" in block, "Teamwissen darf nicht am eigenen Schalter haengen"
+    assert "8 GB" not in block, "Persoenliches bleibt ohne Einwilligung draussen"
+
+
+def test_die_suche_findet_ohne_einwilligung_nichts_persoenliches(
+    db: Session, regular_user: User
+) -> None:
+    """Derselbe Massstab fuer die Suche.
+
+    `search_entries` prueft die Einwilligung bisher **gar nicht**. `search_memory`
+    legte dem Modell damit persoenliche Eintraege vor, denen nie jemand
+    zugestimmt hatte — waehrend derselbe Eintrag ueber den Kontextaufbau
+    richtigerweise draussen blieb. Zwei Massstaebe fuer dieselbe Frage.
+    """
+    _allow(db, regular_user)
+    ai_memory_service.set_preference(db, regular_user, True)
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="user", server_id=None,
+        key="hund.name", value="Mein Hund heisst Bello",
+    )
+    db.commit()
+    assert ai_memory_service.search_entries(db, regular_user, "Hund")
+
+    ai_memory_service.set_preference(db, regular_user, False)
+    assert ai_memory_service.search_entries(db, regular_user, "Hund") == []
