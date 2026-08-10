@@ -1,7 +1,7 @@
 /**
- * Der Dialog "Spiel / Blueprint wechseln" zeigte ein leeres Dropdown.
+ * Der Dialog "Spiel / Blueprint wechseln" hatte zwei Fehler hintereinander.
  *
- * Die Ursache war eine falsche Annahme über die Antwortform:
+ * **Erst blieb die Liste leer.** Die Antwortform war falsch angenommen:
  *
  *     api<BlueprintListEntry[]>("/blueprints")
  *       .then((data) => {
@@ -11,9 +11,16 @@
  * also **immer** den leeren Fall — ohne Fehler, ohne Hinweis. Man sah eine
  * leere Auswahl und hielt sie für die Wahrheit.
  *
- * Genau das prüft dieser Test: die echte Antwortform muss Einträge ergeben.
+ * **Dann klappte sie nach oben.** Ein natives `<select>` mit 27 Einträgen ist
+ * höher als der Platz unter dem Feld, und der Browser entscheidet die Richtung
+ * selbst. Im mittig stehenden Dialog klappte es nach oben. Seitdem benutzt der
+ * Dialog `Dropdown` — dieselbe Auswahl wie der Rest des Panels, die nach unten
+ * aufklappt und ihre Höhe selbst begrenzt.
+ *
+ * Beides prüft dieser Test: die echte Antwortform muss Einträge ergeben, und
+ * die Einträge müssen über die Panel-Auswahl erreichbar sein.
  */
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as client from '@/api/client'
@@ -48,33 +55,43 @@ const server = {
   status: 'stopped',
 } as unknown as Server
 
+const zweiBlueprints = {
+  blueprints: [
+    blueprint('minecraft_forge', 'Minecraft Forge'),
+    blueprint('minecraft_vanilla', 'Minecraft Vanilla'),
+  ],
+}
+
+function zeichnen() {
+  render(
+    <SwitchBlueprintDialog open onClose={() => {}} server={server} onSwitched={() => {}} />,
+  )
+}
+
+/**
+ * Der Auswahlknopf des Dropdowns — nicht der "Spiel wechseln"-Knopf.
+ *
+ * Bewusst ueber die Testkennung und nicht ueber die Beschriftung: die Suite
+ * laeuft auf Englisch, der Dialog schreibt Deutsch als Rueckfalltext. Ein Test,
+ * der an der Beschriftung haengt, prueft dann die Sprache statt das Verhalten.
+ */
+function auswahlKnopf() {
+  return screen.getByTestId('switch-blueprint-select')
+}
+
 describe('SwitchBlueprintDialog', () => {
   beforeEach(() => {
     vi.mocked(client.api).mockReset()
   })
 
-  it('füllt das Dropdown aus der tatsächlichen Antwortform', async () => {
-    vi.mocked(client.api).mockResolvedValue({
-      blueprints: [
-        blueprint('minecraft_forge', 'Minecraft Forge'),
-        blueprint('minecraft_vanilla', 'Minecraft Vanilla'),
-      ],
-    })
+  it('füllt die Auswahl aus der tatsächlichen Antwortform', async () => {
+    vi.mocked(client.api).mockResolvedValue(zweiBlueprints)
+    zeichnen()
 
-    render(
-      <SwitchBlueprintDialog
-        open
-        onClose={() => {}}
-        server={server}
-        onSwitched={() => {}}
-      />,
-    )
+    await waitFor(() => expect(auswahlKnopf()).toBeEnabled())
+    fireEvent.click(auswahlKnopf())
 
-    await waitFor(() => {
-      expect(screen.getByRole('combobox')).toBeInTheDocument()
-    })
-    const optionen = screen.getAllByRole('option')
-    expect(optionen).toHaveLength(2)
+    const optionen = await screen.findAllByRole('option')
     expect(optionen.map((o) => o.textContent)).toEqual([
       'Minecraft Forge (Minecraft)',
       'Minecraft Vanilla (Minecraft)',
@@ -84,42 +101,20 @@ describe('SwitchBlueprintDialog', () => {
   it('wählt vor, was nicht der aktuelle Blueprint ist', async () => {
     // Sonst steht der Knopf auf "schon aktiv" und der Benutzer muss erst
     // umstellen, bevor er umstellen kann.
-    vi.mocked(client.api).mockResolvedValue({
-      blueprints: [
-        blueprint('minecraft_forge', 'Minecraft Forge'),
-        blueprint('minecraft_vanilla', 'Minecraft Vanilla'),
-      ],
-    })
-
-    render(
-      <SwitchBlueprintDialog
-        open
-        onClose={() => {}}
-        server={server}
-        onSwitched={() => {}}
-      />,
-    )
+    vi.mocked(client.api).mockResolvedValue(zweiBlueprints)
+    zeichnen()
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox')).toHaveValue('minecraft_vanilla')
+      expect(auswahlKnopf()).toHaveTextContent('Minecraft Vanilla (Minecraft)')
     })
   })
 
   it('bleibt bei einer leeren Liste bedienbar', async () => {
     vi.mocked(client.api).mockResolvedValue({ blueprints: [] })
+    zeichnen()
 
-    render(
-      <SwitchBlueprintDialog
-        open
-        onClose={() => {}}
-        server={server}
-        onSwitched={() => {}}
-      />,
-    )
-
-    await waitFor(() => {
-      expect(screen.getByRole('combobox')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(auswahlKnopf()).toBeInTheDocument())
+    fireEvent.click(auswahlKnopf())
     expect(screen.queryAllByRole('option')).toHaveLength(0)
   })
 })

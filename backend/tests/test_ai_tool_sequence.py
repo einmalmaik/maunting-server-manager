@@ -19,17 +19,21 @@ from models import (
     AiConversation,
     AiMessage,
     AiProvider,
+    AiRun,
     Role,
     RolePermission,
     Server,
     ServerPermission,
     User,
 )
-from services import ai_stream_service
+from services import ai_run_broker, ai_run_service, ai_stream_service
 from services.ai_context_service import build_provider_messages
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
 from services.openai_compatible_adapter import ProviderToolCall, StreamChunk, StreamUsage
 from services.role_service import set_user_roles
+
+
+_KEIN_CLIENT = object()
 
 
 def _provider(db: Session) -> AiProvider:
@@ -121,18 +125,65 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, rounds: list[list[ProviderTool
     return seen
 
 
-async def _collect(user: User, conversation: AiConversation, provider: AiProvider) -> list[str]:
-    return [
-        event
-        async for event in ai_stream_service.stream_conversation_reply(
-            client=None,
-            user_id=user.id,
-            conversation_id=conversation.id,
-            provider_id=provider.id,
-            request_id=uuid4(),
-            content="Was ist los?",
-        )
-    ]
+async def _collect(
+    db: Session,
+    user: User,
+    conversation: AiConversation,
+    provider: AiProvider,
+    *,
+    content: str = "Was ist los?",
+) -> list[str]:
+    """Startet einen Lauf, fuehrt ihn sofort aus und sammelt seine Ereignisse.
+
+    Frueher stand hier `stream_conversation_reply` — ein Generator, der Arbeit
+    und Anzeige in einem war. Beides ist jetzt getrennt: der Lauf arbeitet
+    (`segment_ausfuehren`), der Vermittler verteilt (`ai_run_broker`). Der Test
+    haengt sich deshalb erst an und wartet dann die Arbeit ab; in der Anwendung
+    laeuft sie im Hintergrund weiter, hier synchron.
+
+    Abonniert wird **vor** dem Ausfuehren: sonst waeren die ersten Ereignisse
+    schon durch, bevor jemand zuhoert.
+    """
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db,
+        user=user,
+        conversation=conversation,
+        provider=provider,
+        request_id=uuid4(),
+        content=content,
+        reasoning=False,
+    )
+    if run is None:
+        code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.errors.unavailable")
+        return [ai_stream_service.sse_event("error", {"code": code, "message_key": message_key})]
+
+    ai_run_broker.eroeffnen(run.id)
+    _, warteschlange = ai_run_broker.abonnieren(run.id)
+    # Ein Platzhalter genuegt: der gefaelschte Anbieter unten ruecht ihn nie an.
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+    db.expire_all()
+    return _abholen(warteschlange)
+
+
+def _abholen(warteschlange) -> list[str]:
+    ereignisse: list[str] = []
+    while not warteschlange.empty():
+        name, daten = warteschlange.get_nowait()
+        if name is None:
+            break
+        ereignisse.append(ai_stream_service.sse_event(name, daten))
+    return ereignisse
+
+
+async def _fortsetzen(db: Session, run_id: str) -> list[str]:
+    """Weckt einen geparkten Lauf, so wie es die Bestaetigung tut."""
+    _, warteschlange = ai_run_broker.abonnieren(run_id)
+    run = db.get(AiRun, run_id)
+    run.status = "running"
+    db.commit()
+    await ai_stream_service.segment_ausfuehren(run_id, client=_KEIN_CLIENT)
+    db.expire_all()
+    return _abholen(warteschlange)
 
 
 def _error_codes(events: list[str]) -> list[str]:
@@ -170,7 +221,7 @@ async def test_a_write_in_a_mixed_round_never_executes(
         ProviderToolCall(id="b", name="propose_server_lifecycle", arguments={"server_id": server.id, "operation": "restart"}),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert db.query(AiActionProposal).count() == 0
     # Und der Benutzer bekommt eine Antwort statt eines Fehlers.
@@ -191,7 +242,7 @@ async def test_unknown_tool_name_is_rejected(
         ProviderToolCall(id="a", name="execute_shell", arguments={"cmd": "rm -rf /"}),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert "AI_PROVIDER_TOOL_SEQUENCE_INVALID" in _error_codes(events)
     assert db.query(AiActionProposal).count() == 0
@@ -216,7 +267,7 @@ async def test_an_absurd_number_of_calls_is_still_rejected(
         for index in range(zuviel)
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert "AI_TOOL_REJECTED" in _error_codes(events)
 
@@ -239,7 +290,7 @@ async def test_write_proposal_without_permission_is_rejected(
         ProviderToolCall(id="a", name="propose_server_lifecycle", arguments={"server_id": server.id, "operation": "stop"}),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert "AI_TOOL_REJECTED" in _error_codes(events)
     assert db.query(AiActionProposal).count() == 0
@@ -271,7 +322,7 @@ async def test_log_content_reaches_the_model_only_as_untrusted_data(
         ProviderToolCall(id="a", name="read_server_logs", arguments={"server_id": server.id, "lines": 50}),
     ]])
 
-    await _collect(regular_user, conversation, provider)
+    await _collect(db, regular_user, conversation, provider)
 
     assert len(seen) == 2, "Nach der Read-Runde muss ein zweiter Providerlauf folgen"
     tool_messages = [item for item in seen[1] if item.get("role") == "tool"]
@@ -311,7 +362,7 @@ async def test_several_read_rounds_may_precede_a_write_round(
         })],
     ])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     # Zwei Lese-Durchlaeufe, der Durchlauf mit dem Vorschlag — und eine
@@ -349,15 +400,24 @@ async def test_endless_read_rounds_are_cut_off(
     Stream. Das Kostenbudget kann damit nicht leerlaufen.
     """
     server = _server(db, "endless")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view", "server.console.read"))
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    monkeypatch.setattr("services.docker_service.logs", lambda *_a, **_k: "zeile")
+    # Jede Runde fragt etwas **anderes** — sonst greift die Schleifenerkennung
+    # und der Test pruefte sie statt der Rundengrenze. Die beiden Grenzen sind
+    # verschiedene Dinge und werden getrennt geprueft
+    # (siehe test_the_same_call_over_and_over_is_refused).
     _fake_stream(monkeypatch, [
-        [ProviderToolCall(id=f"r{index}", name="read_server_status", arguments={"server_id": server.id})]
+        [ProviderToolCall(
+            id=f"r{index}", name="read_server_logs",
+            arguments={"server_id": server.id, "lines": 10 + index},
+        )]
         for index in range(ai_stream_service.MAX_TOOL_ROUNDS + 3)
     ])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     assert any(event.startswith("event: done") for event in events)
@@ -366,6 +426,41 @@ async def test_endless_read_rounds_are_cut_off(
     # Ausfuehrungen, danach ist Schluss.
     executed = [event for event in events if event.startswith("event: tool")]
     assert len(executed) == ai_stream_service.MAX_TOOL_ROUNDS
+
+
+@pytest.mark.asyncio
+async def test_the_same_call_over_and_over_is_refused(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dieselbe Frage zum vierten Mal ist kein Fleiss, sondern eine Schleife.
+
+    Die Rundengrenze allein reicht dafuer nicht: sie laesst sechzehn Runden zu,
+    und ein Modell, das haengt, verbrennt sie alle mit derselben Abfrage. Die
+    Signaturzaehlung greift frueher — und sie zaehlt **je Runde**, nicht je
+    Aufruf. Neun Statusabfragen nebeneinander sind eine Bestandsaufnahme,
+    dieselbe Abfrage in der vierten Runde hintereinander ist Stillstand.
+    """
+    server = _server(db, "schleife")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    seen = _fake_stream(monkeypatch, [
+        [ProviderToolCall(
+            id=f"s{index}", name="read_server_status", arguments={"server_id": server.id}
+        )]
+        for index in range(8)
+    ])
+
+    events = await _collect(db, regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    ausgefuehrt = [event for event in events if event.startswith("event: tool")]
+    assert len(ausgefuehrt) == ai_stream_service.MAX_GLEICHE_AUFRUFE
+    # Und das Modell erfaehrt, warum nichts mehr kommt — sonst wiederholt es
+    # sich weiter, bis die Rundengrenze es stumm abschneidet.
+    zurueck = [item for runde in seen for item in runde if item.get("role") == "tool"]
+    assert any("liefert nichts Neues" in str(item.get("content")) for item in zurueck)
 
 
 @pytest.mark.asyncio
@@ -386,7 +481,7 @@ async def test_read_results_survive_for_a_follow_up_question(
     _fake_stream(monkeypatch, [
         [ProviderToolCall(id="a", name="read_server_status", arguments={"server_id": server.id})],
     ])
-    await _collect(regular_user, conversation, provider)
+    await _collect(db, regular_user, conversation, provider)
 
     assert db.query(AiToolResult).filter(
         AiToolResult.conversation_id == conversation.id
@@ -394,7 +489,7 @@ async def test_read_results_survive_for_a_follow_up_question(
 
     # Zweite Nachricht: der Kontext traegt das Ergebnis wieder herein.
     seen = _fake_stream(monkeypatch, [[]])
-    await _collect(regular_user, conversation, provider)
+    await _collect(db, regular_user, conversation, provider)
 
     joined = "\n".join(
         str(item.get("content")) for item in seen[0] if item.get("role") == "user"
@@ -443,7 +538,7 @@ async def test_an_autonomous_action_runs_immediately_and_is_reported_as_such(
         }),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     assert any(event.startswith("event: action") for event in events)
@@ -465,7 +560,7 @@ async def test_system_prompt_names_untrusted_data_as_data(
     conversation = _conversation(db, regular_user, server)
     seen = _fake_stream(monkeypatch, [[]])
 
-    await _collect(regular_user, conversation, provider)
+    await _collect(db, regular_user, conversation, provider)
 
     system = seen[0][0]
     assert system["role"] == "system"
@@ -522,7 +617,7 @@ async def test_an_executed_action_leaves_a_trace_the_next_turn_can_see(
         }),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     assert any(event.startswith("event: action") for event in events)
@@ -580,7 +675,7 @@ async def test_a_mixed_round_defers_the_write_instead_of_aborting(
         }),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     # Der Vorschlag ist in dieser Runde bewusst **nicht** entstanden.
@@ -640,7 +735,7 @@ async def test_a_second_write_round_follows_an_executed_action(
         })],
     ])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     # Beide Aktionen sind entstanden — die zweite konnte auf die erste folgen.
@@ -676,7 +771,7 @@ async def test_many_cheap_parallel_calls_all_run(
         for index in range(9)
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     ausgefuehrt = [event for event in events if event.startswith("event: tool")]
@@ -710,7 +805,7 @@ async def test_expensive_calls_stop_at_the_budget(
         for index in range(10)
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     ausgefuehrt = [event for event in events if event.startswith("event: tool")]
@@ -741,7 +836,7 @@ async def test_one_failing_call_does_not_kill_the_answer(
         ProviderToolCall(id="b", name="read_server_status", arguments={"server_id": fremder.id}),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     assert any(event.startswith("event: done") for event in events)
@@ -775,7 +870,7 @@ async def test_a_question_ends_the_turn_and_reaches_the_user(
         }),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     frage = [event for event in events if event.startswith("event: question")]
@@ -807,7 +902,7 @@ async def test_other_calls_in_the_question_round_are_dropped(
         }),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     assert any(event.startswith("event: question") for event in events)
@@ -836,7 +931,7 @@ async def test_a_malformed_question_is_refused(
         }),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert "AI_TOOL_REJECTED" in _error_codes(events)
 
@@ -875,7 +970,7 @@ async def test_the_model_sees_its_own_question_in_the_history(
         }),
     ]])
 
-    await _collect(regular_user, conversation, provider)
+    await _collect(db, regular_user, conversation, provider)
 
     # 1. Die Frage haengt an der Nachricht, die sie gestellt hat.
     gestellt = (
@@ -925,7 +1020,7 @@ async def test_a_question_counts_as_output_and_is_not_an_empty_answer(
         }),
     ]])
 
-    events = await _collect(regular_user, conversation, provider)
+    events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
     nachricht = (

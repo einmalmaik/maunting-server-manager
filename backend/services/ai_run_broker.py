@@ -1,0 +1,235 @@
+"""Verteilt die Ereignisse eines Laufs an alle, die gerade zusehen.
+
+Der Lauf arbeitet im Hintergrund; wer zusieht, ist seine Sache. Dieser Vermittler
+ist die Trennlinie zwischen beidem: der Lauf **veroeffentlicht**, ein Client
+**abonniert**, und keiner von beiden kennt den anderen.
+
+Der entscheidende Teil ist der **Abzug** (``Abzug``): der vollstaendige Stand
+eines Laufs zu dem Zeitpunkt, an dem sich jemand anhaengt. Ohne ihn haette ein
+Client, der spaeter dazukommt, nur den Rest der Antwort — die ersten Absaetze
+waeren fuer ihn nie passiert.
+
+Warum der Abzug hier gehalten wird und nicht aus der Datenbank kommt: die
+Datenbank hinkt zwangslaeufig hinterher (sie wird nicht bei jedem einzelnen
+Zeichen geschrieben). Ein Abzug aus der Datenbank plus ein danach eroeffnetes
+Abonnement haette ein Loch genau zwischen beidem. Hier entstehen Abzug und
+Abonnement in *einem* Ausdruck ohne ``await`` dazwischen — es gibt kein Loch.
+
+Das Vorbild ist die Server-Konsole (``console_stream_service``): auch dort
+ueberlebt der Inhalt die Verbindung, und beim Wiederverbinden wird nachgeliefert.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections import OrderedDict
+from dataclasses import dataclass, field
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+# Wie viele Laeufe gleichzeitig im Speicher gehalten werden. Ein Kanal traegt
+# den Text *einer* Antwort — ein paar Kilobyte. Die Grenze ist keine
+# Speicherfrage, sondern eine Reissleine gegen unbegrenztes Wachstum in einem
+# Prozess, der monatelang laeuft.
+MAX_KANAELE = 256
+# Wie viele Ereignisse ein langsamer Zuhoerer aufstauen darf, bevor er
+# uebergangen wird. Ein haengender Client darf den Lauf nicht ausbremsen —
+# fuer ihn ist der Abzug beim Wiederanhaengen die Rettung, nicht der Rueckstau.
+MAX_RUECKSTAU = 512
+
+
+@dataclass
+class Abzug:
+    """Der vollstaendige Stand eines Laufs — alles, was ein Zuschauer braucht."""
+
+    run_id: str
+    status: str = "running"
+    message_id: str | None = None
+    inhalt: str = ""
+    denken: str = ""
+    werkzeuge: list[dict] = field(default_factory=list)
+    frage: dict | None = None
+    vorschlaege: list[dict] = field(default_factory=list)
+    stop_reason: str | None = None
+
+    def kopie(self) -> "Abzug":
+        """Ein Standbild — **nicht** der weiterlaufende Abzug selbst.
+
+        Wichtig genug fuer eigenen Code: gaebe ``abonnieren`` das lebende Objekt
+        heraus, waechst es zwischen Abonnement und Serialisierung weiter. Der
+        Client bekaeme denselben Text zweimal — einmal im Abzug und einmal als
+        Ereignis aus der Warteschlange.
+        """
+        return Abzug(
+            run_id=self.run_id,
+            status=self.status,
+            message_id=self.message_id,
+            inhalt=self.inhalt,
+            denken=self.denken,
+            werkzeuge=list(self.werkzeuge),
+            frage=self.frage,
+            vorschlaege=list(self.vorschlaege),
+            stop_reason=self.stop_reason,
+        )
+
+    def als_ereignis(self) -> dict:
+        return {
+            "run_id": self.run_id,
+            "status": self.status,
+            "message_id": self.message_id,
+            "content": self.inhalt,
+            "reasoning": self.denken,
+            "tools": list(self.werkzeuge),
+            "question": self.frage,
+            "proposals": list(self.vorschlaege),
+            "stop_reason": self.stop_reason,
+        }
+
+
+@dataclass
+class _Kanal:
+    abzug: Abzug
+    zuhoerer: set[asyncio.Queue] = field(default_factory=set)
+    # Ein beendeter Kanal bleibt liegen, damit ein Client, der eine Sekunde zu
+    # spaet kommt, noch den Schlussstand bekommt statt ins Leere zu greifen.
+    beendet: bool = False
+
+
+_KANAELE: "OrderedDict[str, _Kanal]" = OrderedDict()
+
+
+def _kanal(run_id: str) -> _Kanal:
+    kanal = _KANAELE.get(run_id)
+    if kanal is None:
+        kanal = _Kanal(abzug=Abzug(run_id=run_id))
+        _KANAELE[run_id] = kanal
+        _aufraeumen()
+    _KANAELE.move_to_end(run_id)
+    return kanal
+
+
+def _aufraeumen() -> None:
+    """Wirft die aeltesten beendeten Kanaele weg, wenn es zu viele werden."""
+    while len(_KANAELE) > MAX_KANAELE:
+        for run_id, kanal in list(_KANAELE.items()):
+            if kanal.beendet and not kanal.zuhoerer:
+                del _KANAELE[run_id]
+                break
+        else:
+            # Nur noch laufende oder beobachtete Kanaele: dann ist der aelteste
+            # dran. Lieber ein Lauf ohne Live-Bild als ein Prozess ohne Speicher —
+            # der Verlauf steht ohnehin in der Datenbank.
+            aeltester, _ = next(iter(_KANAELE.items()))
+            logger.warning(
+                "AI-Kanalgrenze erreicht, aeltester laufender Kanal verworfen run_id=%s",
+                aeltester,
+            )
+            del _KANAELE[aeltester]
+
+
+def eroeffnen(run_id: str) -> None:
+    """Legt den Kanal an, **bevor** der Lauf zu arbeiten beginnt.
+
+    Ohne das gaebe es ein Wettrennen: der Streamendpunkt abonniert, waehrend der
+    Lauf noch nichts veroeffentlicht hat — dann existiert kein Kanal, und der
+    Client bekaeme faelschlich "laeuft hier nicht" zu hoeren, obwohl der Lauf
+    gerade erst anlaeuft.
+    """
+    _kanal(run_id)
+
+
+def veroeffentlichen(run_id: str, ereignis: str, daten: dict) -> None:
+    """Schreibt ein Ereignis in den Abzug und an alle Zuhoerer.
+
+    Wird ausschliesslich aus dem Lauf heraus gerufen, also auf der Ereignis-
+    schleife der Anwendung. Deshalb reicht eine gewoehnliche ``asyncio.Queue``
+    ohne Schloss: es gibt keinen zweiten Schreiber.
+    """
+    kanal = _kanal(run_id)
+    abzug = kanal.abzug
+
+    # Den Abzug fortschreiben. Genau diese Buchfuehrung macht das spaetere
+    # Anhaengen vollstaendig statt bruchstueckhaft.
+    if ereignis == "message":
+        abzug.message_id = daten.get("message_id")
+    elif ereignis == "delta":
+        abzug.inhalt += str(daten.get("content") or "")
+    elif ereignis == "reasoning":
+        abzug.denken += str(daten.get("content") or "")
+    elif ereignis == "tool":
+        abzug.werkzeuge.append(daten)
+    elif ereignis == "question":
+        abzug.frage = daten
+    elif ereignis in {"proposal", "action"}:
+        abzug.vorschlaege = [
+            vorhandener for vorhandener in abzug.vorschlaege
+            if vorhandener.get("id") != daten.get("id")
+        ] + [daten]
+    elif ereignis == "run":
+        abzug.status = str(daten.get("status") or abzug.status)
+        abzug.stop_reason = daten.get("stop_reason")
+
+    # Ein neues Segment schreibt eine neue Nachricht — der bisherige Text gehoert
+    # zur vorherigen und darf nicht in die neue hineinlaufen.
+    if ereignis == "segment":
+        abzug.inhalt = ""
+        abzug.denken = ""
+        abzug.frage = None
+
+    for warteschlange in list(kanal.zuhoerer):
+        if warteschlange.qsize() >= MAX_RUECKSTAU:
+            # Der Zuhoerer kommt nicht mit. Ihn hier zu bedienen hiesse, den Lauf
+            # an sein Tempo zu binden.
+            continue
+        warteschlange.put_nowait((ereignis, daten))
+
+
+def abonnieren(run_id: str) -> tuple[Abzug, asyncio.Queue] | None:
+    """Haengt einen Zuschauer an. Gibt Abzug **und** Abonnement zusammen zurueck.
+
+    Zusammen, weil getrennt ein Loch entstuende: zwischen "Stand holen" und
+    "ab jetzt zuhoeren" duerfen keine Ereignisse verlorengehen. Hier liegt kein
+    ``await`` dazwischen, also kann die Ereignisschleife nicht dazwischenfunken.
+
+    ``None`` heisst: dieser Lauf laeuft in diesem Prozess nicht (mehr). Der
+    Aufrufer muss dann aus der Datenbank antworten.
+    """
+    kanal = _KANAELE.get(run_id)
+    if kanal is None:
+        return None
+    warteschlange: asyncio.Queue = asyncio.Queue()
+    kanal.zuhoerer.add(warteschlange)
+    _KANAELE.move_to_end(run_id)
+    return kanal.abzug.kopie(), warteschlange
+
+
+def abmelden(run_id: str, warteschlange: asyncio.Queue) -> None:
+    kanal = _KANAELE.get(run_id)
+    if kanal is not None:
+        kanal.zuhoerer.discard(warteschlange)
+
+
+def beenden(run_id: str) -> None:
+    """Meldet: hier kommt nichts mehr. Weckt alle Zuhoerer ein letztes Mal."""
+    kanal = _KANAELE.get(run_id)
+    if kanal is None:
+        return
+    kanal.beendet = True
+    for warteschlange in list(kanal.zuhoerer):
+        warteschlange.put_nowait((None, None))
+
+
+def laeuft(run_id: str) -> bool:
+    kanal = _KANAELE.get(run_id)
+    return kanal is not None and not kanal.beendet
+
+
+def neues_segment(run_id: str) -> None:
+    """Setzt Text und Frage zurueck, weil eine neue Nachricht beginnt."""
+    veroeffentlichen(run_id, "segment", {"run_id": run_id})
+
+
+def zuruecksetzen_fuer_tests() -> None:
+    _KANAELE.clear()

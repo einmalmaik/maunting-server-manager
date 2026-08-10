@@ -5,6 +5,7 @@ from .ai_usage_event import AiUsageEvent
 from .operation_task import OperationTask
 from .ai_provider import AiProvider, AiUserCredential
 from .ai_conversation import AiConversation, AiMessage
+from .ai_run import AiRun
 from .ai_action_proposal import AiActionProposal
 from .ai_autonomy_grant import AiAutonomyGrant
 from .ai_tool_result import AiToolResult
@@ -59,7 +60,7 @@ __all__ = [
     "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
     "AiProvider", "AiUserCredential", "AiConversation", "AiMessage", "AiActionProposal",
     "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
-    "AiAutonomyGrant", "AiToolResult",
+    "AiAutonomyGrant", "AiToolResult", "AiRun",
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Team", "TeamMember", "TeamServerGrant",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",

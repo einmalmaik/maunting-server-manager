@@ -1,6 +1,7 @@
 """Bestaetigung und Ausfuehrung persistenter AI-Aktionsvorschlaege."""
 
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -14,9 +15,16 @@ from schemas.ai_action import (
     AiActionExecuteResponse,
     AiActionProposalResponse,
 )
-from services import ai_action_errors, ai_chat_service, ai_proposal_service
+from services import (
+    ai_action_errors,
+    ai_chat_service,
+    ai_proposal_service,
+    ai_run_service,
+)
 from services.dis_client import DisSidecarError
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai", tags=["ai-actions"])
 
@@ -127,7 +135,30 @@ def execute_action(
             user=user,
             confirmation_token=payload.confirmation_token.get_secret_value(),
         )
-        return AiActionExecuteResponse(proposal=proposal_response(proposal), result=result)
+        antwort = AiActionExecuteResponse(
+            proposal=proposal_response(proposal), result=result
+        )
+        # **Hier ging es frueher nicht weiter.** Der Mensch hatte zugestimmt, die
+        # Aktion lief — und der Zug, der sie vorgeschlagen hatte, existierte
+        # nicht mehr. Man musste eine neue Nachricht schreiben, damit die KI
+        # erfuhr, wie ihr eigener Vorschlag ausgegangen ist.
+        #
+        # Jetzt wird der Lauf geweckt, sobald **alle** Vorschlaege seiner Runde
+        # entschieden sind. Er bekommt das Ergebnis als Werkzeugantwort und
+        # arbeitet weiter, wo er stehengeblieben ist.
+        #
+        # Scheitert das Wecken (kein laufendes Panel, Lauf ueberholt), bleibt es
+        # bei der ausgefuehrten Aktion — die Zustimmung des Menschen darf nicht
+        # daran haengen, ob die KI danach noch etwas vorhat.
+        if proposal.run_id:
+            try:
+                ai_run_service.lauf_fortsetzen(db, run_id=proposal.run_id)
+            except Exception:
+                logger.warning(
+                    "AI-Lauf konnte nach Bestaetigung nicht fortgesetzt werden run_id=%s",
+                    proposal.run_id,
+                )
+        return antwort
     except ai_action_errors.AiActionStateError as exc:
         db.rollback()
         raise _state_error(exc) from exc

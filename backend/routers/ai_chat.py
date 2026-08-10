@@ -7,7 +7,7 @@ Unterhaltungen mehr. Der Assistent hat genau einen Chat; geloescht wird der
 
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -22,10 +22,11 @@ from schemas.ai_chat import (
     AiMessageEditResponse,
     AiMessageResponse,
     AiQuestionPayload,
+    AiRunResponse,
 )
-from services import ai_chat_service
+from services import ai_chat_service, ai_run_broker, ai_run_service
 from services.ai_redaction import redact_sensitive_text
-from services.ai_stream_service import sse_event, stream_conversation_reply
+from services.ai_stream_service import lauf_beginnen, lauf_verfolgen, sse_event
 
 
 router = APIRouter(prefix="/api/ai/conversation", tags=["ai-chat"])
@@ -155,10 +156,60 @@ async def _replay_message(message: AiMessage) -> AsyncIterator[str]:
     yield sse_event("done", {"message_id": message.id, "replayed": True})
 
 
+async def _fehlerstrom(code: str, message_key: str) -> AsyncIterator[str]:
+    """Ein Fehler, der vor dem Lauf auftrat — es gibt nichts zu verfolgen."""
+    yield sse_event("error", {"code": code, "message_key": message_key})
+
+
+@router.get("/run")
+def get_active_run(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+) -> AiRunResponse | None:
+    """Der Lauf, der gerade noch etwas vorhat — oder nichts.
+
+    Die Oberflaeche fragt das beim Oeffnen: laeuft da noch etwas von vorhin?
+    Damit haengt sie sich nach einem Seitenwechsel oder einem Neustart des
+    Browsers wieder an, statt eine abgebrochene Antwort zu zeigen.
+    """
+    run = ai_run_service.aktiver_lauf(db, user_id=user.id)
+    if run is None:
+        return None
+    return AiRunResponse(
+        id=run.id,
+        status=run.status,
+        stop_reason=run.stop_reason,
+        message_id=run.message_id,
+        live=ai_run_broker.laeuft(run.id),
+        created_at=run.created_at,
+    )
+
+
+@router.get("/run/{run_id}/stream")
+def attach_run(
+    run_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+) -> StreamingResponse:
+    """Haengt sich an einen laufenden Lauf an — auch Minuten spaeter.
+
+    Kein CSRF-Schutz noetig und keiner moeglich: das ist ein GET, der nichts
+    veraendert. Die Zugehoerigkeit wird ueber ``eigener_lauf`` geprueft, ein
+    fremder Lauf ist schlicht nicht zu finden.
+    """
+    run = ai_run_service.eigener_lauf(db, run_id, user)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Lauf nicht gefunden")
+    return StreamingResponse(
+        lauf_verfolgen(run.id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/messages/stream")
 def stream_message(
     payload: AiChatRequest,
-    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
     _: None = Depends(verify_csrf),
@@ -192,15 +243,30 @@ def stream_message(
         safe_content = redact_sensitive_text(payload.content).strip()
         if not safe_content:
             raise HTTPException(status_code=400, detail="Nachricht ist nach Sicherheitsfilter leer")
-        stream = stream_conversation_reply(
-            client=request.app.state.ai_http_client,
-            user_id=user.id,
-            conversation_id=conversation.id,
-            provider_id=provider.id,
+        run, fehler = lauf_beginnen(
+            db,
+            user=user,
+            conversation=conversation,
+            provider=provider,
             request_id=payload.request_id,
             content=safe_content,
             reasoning=payload.reasoning,
         )
+        if run is None:
+            code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.errors.unavailable")
+            stream = _fehlerstrom(code, message_key)
+        else:
+            # Reihenfolge ist hier alles: Kanal auf, **abonnieren**, dann erst
+            # die Arbeit starten.
+            #
+            # Der Rumpf einer StreamingResponse laeuft erst an, wenn Starlette
+            # ihn zu lesen beginnt — der Lauf arbeitet da laengst. Wuerde erst
+            # dort abonniert, waeren die ersten Zeichen schon durch. Abonniert
+            # wird deshalb hier, synchron, vor dem Start.
+            ai_run_broker.eroeffnen(run.id)
+            abo = ai_run_broker.abonnieren(run.id)
+            ai_run_service.lauf_starten(run.id)
+            stream = lauf_verfolgen(run.id, abo=abo)
     return StreamingResponse(
         stream,
         media_type="text/event-stream",

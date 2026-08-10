@@ -3,6 +3,13 @@ import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
 import { cx } from '@/utils/classNames'
 
+// Unter dieser Hoehe lohnt sich "nach unten" nicht mehr — dann sieht man eine
+// Zeile und scrollt. Darueber bleibt es unten, auch wenn oben mehr Platz waere.
+const MIN_MENUE_HOEHE = 180
+// Obergrenze, damit eine lange Liste (27 native Blueprints) das Fenster nicht
+// von oben bis unten ausfuellt.
+const MAX_MENUE_HOEHE = 320
+
 export interface DropdownOption {
   value: string
   label: string
@@ -83,12 +90,32 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
       const updatePosition = () => {
         const rect = rootRef.current?.getBoundingClientRect()
         if (!rect) return
+        // Nach unten ist die Regel, nicht die Ausnahme. Ein natives <select>
+        // entscheidet das selbst und klappt in einem mittig stehenden Dialog
+        // regelmaessig nach oben — das liest sich wie ein Fehler, obwohl es
+        // Browserverhalten ist. Hier liegt die Entscheidung bei uns.
+        //
+        // Nach oben wird nur ausgewichen, wenn unten wirklich kein Platz ist
+        // **und** oben mehr Platz waere. Und die Hoehe wird auf den tatsaechlich
+        // verfuegbaren Raum begrenzt: eine Liste, die unten aus dem Fenster
+        // laeuft, ist genauso unbrauchbar wie eine, die nach oben aufklappt.
+        const RAND = 8
+        const platzUnten = window.innerHeight - rect.bottom - RAND * 2
+        const platzOben = rect.top - RAND * 2
+        const nachOben = platzUnten < MIN_MENUE_HOEHE && platzOben > platzUnten
+        const maxHeight = Math.max(
+          MIN_MENUE_HOEHE,
+          Math.min(MAX_MENUE_HOEHE, nachOben ? platzOben : platzUnten),
+        )
         setMenuStyle({
           position: 'fixed',
-          top: rect.bottom + 8,
+          ...(nachOben
+            ? { bottom: Math.max(RAND, window.innerHeight - rect.top + RAND) }
+            : { top: rect.bottom + RAND }),
           left: align === 'end' ? undefined : rect.left,
           right: align === 'end' ? Math.max(0, window.innerWidth - rect.right) : undefined,
           width: rect.width,
+          maxHeight,
           zIndex: 100,
         })
       }
@@ -143,9 +170,12 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
                 <div
                   ref={menuRef}
                   style={menuStyle}
-                  className="overflow-hidden rounded-lg border border-outline-variant bg-surface-container-high shadow-panel"
+                  className="flex flex-col overflow-hidden rounded-lg border border-outline-variant bg-surface-container-high shadow-panel"
                 >
-                  <ul id={listId} role="listbox" className="max-h-64 overflow-y-auto p-1">
+                  {/* `max-h-64` stand hier fest verdrahtet und ueberstimmte die
+                      gemessene Hoehe. Jetzt erbt die Liste den Platz, den die
+                      Positionierung oben tatsaechlich ermittelt hat. */}
+                  <ul id={listId} role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1">
                     {options.map((option) => {
                       const active = option.value === value
                       return (

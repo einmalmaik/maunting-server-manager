@@ -1,8 +1,22 @@
-"""Kurzlebige DB-Transaktionen rund um einen externen AI-Stream."""
+"""Die Schleife eines Laufs: Anbieter fragen, Werkzeuge fahren, Vorschlaege anlegen.
+
+Der Zug der KI hing frueher an einem HTTP-Request — er war ein Generator, den
+der Browser am Leben hielt. Hier ist er ein **Segment eines Laufs**
+(``segment_ausfuehren``): er holt seinen Zustand aus der Datenbank, arbeitet, und
+legt ihn wieder ab. Wer zusieht, geht ihn nichts an; dafuer ist
+``ai_run_broker`` da.
+
+Damit die Aufgabenteilung nicht wieder verschwimmt:
+
+* ``ai_run_service``   — wann ein Segment laeuft und was zwischen zweien ueberlebt.
+* ``ai_stream_service`` — was **in** einem Segment passiert. Kennt keinen Zeitplan.
+* ``ai_run_broker``    — wer zusehen darf. Kennt keines von beiden.
+"""
 
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
@@ -13,8 +27,12 @@ import httpx
 from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
-from models import AiActionProposal, AiMessage, AiProvider, AiToolResult, AiUsageEvent, User
+from models import (
+    AiActionProposal, AiMessage, AiProvider, AiRun, AiToolResult, AiUsageEvent, User,
+)
+from models.ai_run import BEENDET as AUSGELAUFEN
 from services.ai_chat_service import get_owned_conversation
+from services import ai_run_broker, ai_run_service
 from services.ai_action_errors import (
     AiActionStateError,
     AiActionValidationError,
@@ -76,22 +94,32 @@ MAX_TOOL_RESULT_CHARS_PER_ROUND = 48_000
 # Frage, die mehr als das rechtfertigt; wer mehr schickt, antwortet nicht
 # gruendlich, sondern fehlerhaft.
 MAX_TOOL_CALLS = 32
-# Bis zu drei aufeinanderfolgende Read-Runden. Vorher war genau eine erlaubt:
-# ein Ablauf wie "Kapazitaet lesen → Blueprints lesen → Server vorschlagen" war
-# damit unmoeglich, weil die zweite Runde nur noch Write-Tools akzeptierte und
-# ein legitimer zweiter Lesezugriff den ganzen Stream abbrach.
-# Vier Leserunden. Gemessen an einer echten Netzwerkdiagnose reichen drei
-# nicht: das Modell geht list_my_servers → read_server_network →
-# read_server_status → check_server_reachability, und erst der letzte Schritt
-# ist die eigentliche Messung. Wird die Grenze erreicht, bricht der Stream
-# nicht ab — das Modell bekommt einen letzten Durchgang ohne Werkzeuge.
-MAX_TOOL_ROUNDS = 4
-# Wie viele Schreibrunden eine einzelne Nachricht ausloesen darf. Zwei,
-# damit "pass die Config an und starte danach" in zwei aufeinander
-# aufbauenden Schritten laufen kann. Mehr braucht keine Bitte, die ein
-# Mensch in einem Satz formuliert — und jede weitere waere eine Runde, in
-# der niemand mehr mitliest.
-MAX_WRITE_ROUNDS = 2
+# Leserunden **je Lauf**, nicht je Nachricht.
+#
+# Hier standen vier. Das war die Zahl aus der Zeit, in der ein Zug eine Frage
+# beantwortete: lesen, lesen, antworten. Fuer einen Auftrag wie "richte den
+# Server ein, stell das ein, starte ihn und sag Bescheid" ist sie zu klein —
+# die KI kam bis zur Haelfte und musste aufhoeren, obwohl sie wusste, was noch
+# fehlte. Genau die Beschwerde: *"die muss das wirklich komplett bis zum Ende
+# machen, Aufgaben zu Ende bringen, Ende zu Ende."*
+#
+# Sechzehn ist keine Beliebigkeit, sondern die Obergrenze der Anbieteraufrufe
+# eines Laufs: mehr als sechzehn Leserunden hat noch keine Diagnose gebraucht,
+# und die Grenze bricht nicht ab, sondern nimmt die Werkzeuge weg. Das Modell
+# antwortet dann aus dem, was es hat.
+MAX_TOOL_ROUNDS = 16
+# Schreibrunden je Lauf. Zwei reichten fuer "pass die Config an und starte
+# danach" — aber nicht fuer eine Einrichtung aus Anlegen, Konfigurieren,
+# Starten und Melden. Acht deckt jede Bitte ab, die ein Mensch in einem Absatz
+# formuliert, und bleibt weit unter dem, was ein durchgedrehtes Modell braeuchte,
+# um Schaden anzurichten — jede einzelne Aktion durchlaeuft weiterhin
+# Rechtepruefung und, wo noetig, die Bestaetigung eines Menschen.
+MAX_WRITE_ROUNDS = 8
+# Wie oft derselbe Lesewerkzeugaufruf mit **denselben** Argumenten laufen darf.
+# Ein Modell, das die gleiche Auskunft zum dritten Mal holt, bekommt keine neue
+# Antwort — es haengt. Der Aufruf wird dann nicht ausgefuehrt, sondern begruendet
+# abgelehnt: eine Grenze, die erklaert, statt einer, die abbricht.
+MAX_GLEICHE_AUFRUFE = 3
 
 
 def sse_event(event: str, payload: dict) -> str:
@@ -310,7 +338,7 @@ def _tool_followup_messages(
 
 
 def _persist_write_proposals(
-    *, user_id: int, conversation_id: str, tool_calls, correlation_id: str
+    *, user_id: int, conversation_id: str, tool_calls, correlation_id: str, run_id: str | None = None
 ) -> list[dict]:
     if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in WRITE_TOOLS for call in tool_calls):
         raise AiActionValidationError("Ungueltige Write-Tool-Sequenz")
@@ -332,6 +360,10 @@ def _persist_write_proposals(
             )
             for call in tool_calls
         ]
+        # Der Rueckweg: welcher Lauf wartet auf diesen Vorschlag. Ohne ihn
+        # wuesste der Bestaetigungsknopf spaeter nicht, wen er aufwecken soll.
+        for proposal in proposals:
+            proposal.run_id = run_id
         db.commit()
         results: list[dict] = []
         # Feste Kopien: `execute_autonomously` committet und rollt bei einem
@@ -440,146 +472,290 @@ def _write_followup_messages(
     return messages
 
 
-async def stream_conversation_reply(
-    *,
-    client: httpx.AsyncClient,
-    user_id: int,
-    conversation_id: str,
-    provider_id: int,
-    request_id: UUID,
-    content: str,
-    reasoning: bool = False,
-) -> AsyncIterator[str]:
-    """Persistiert zuerst, streamt ohne offene DB-Session und finalisiert kurz."""
-    safe_content = redact_sensitive_text(content).strip()
-    if not safe_content:
-        yield sse_event("error", {"code": "AI_MESSAGE_EMPTY", "message_key": "ai.errors.empty"})
+@dataclass(frozen=True)
+class _Vorbereitung:
+    """Alles, was ein Segment braucht — in einer kurzen Transaktion geholt."""
+
+    run_id: str
+    user_id: int
+    conversation_id: str
+    provider: AiProvider
+    api_key: str | None
+    message_id: str
+    usage_event_id: int
+    request_id: str
+    reasoning: bool
+    token_price_cents_per_million: int | None
+    zustand: dict
+
+
+def _vorschlag_ergebnisse(db, proposal_ids: list[str]) -> list[dict]:
+    """Was aus den Vorschlaegen einer geparkten Runde geworden ist.
+
+    Genau die Auskunft, die das Modell beim Aufwecken braucht: hat der Mensch
+    zugestimmt, ist die Aktion gelaufen, ist sie gescheitert. Ohne sie wuesste
+    es nur, dass es etwas vorgeschlagen hat.
+    """
+    ergebnisse: list[dict] = []
+    for proposal_id in proposal_ids:
+        row = db.get(AiActionProposal, proposal_id)
+        if row is None:
+            ergebnisse.append({
+                "tool_name": "unknown",
+                "status": "failed",
+                "autonomous": False,
+                "server_id": None,
+                "error_code": "AI_ACTION_NOT_FOUND",
+            })
+            continue
+        ergebnisse.append({
+            "tool_name": row.tool_name,
+            "status": row.status,
+            "autonomous": bool(row.autonomous),
+            "server_id": row.server_id,
+            **({"error_code": row.error_code} if row.error_code else {}),
+        })
+    return ergebnisse
+
+
+def _aktionsmeldung(ergebnisse: list[dict]) -> dict:
+    """Die Entscheidung des Menschen, als Meldung des Panels an das Modell.
+
+    Ausdruecklich als Panel-Meldung beschriftet und nicht als Satz des
+    Benutzers: das Modell soll nicht glauben, jemand haette ihm das getippt.
+    """
+    return {
+        "role": "user",
+        "content": (
+            "Meldung des Panels (nicht vom Benutzer geschrieben): Der Benutzer "
+            "hat ueber die vorgeschlagenen Aktionen entschieden. Ergebnis:\n"
+            + json.dumps(ergebnisse, ensure_ascii=True, separators=(",", ":"))
+            + "\n\nArbeite die Aufgabe von hier aus weiter. Ist sie damit "
+            "erledigt, sag es kurz; fehlt noch ein Schritt, mach ihn."
+        ),
+    }
+
+
+def _segment_beginnen(db, run: AiRun, zustand: dict) -> tuple[str, int, str] | None:
+    """Legt Nachricht und Verbrauchszeile fuer ein neues Segment an.
+
+    Jede Fortsetzung nach einer Bestaetigung schreibt eine **eigene** Nachricht.
+    Das ist Absicht: "ich stelle um, bitte bestaetigen" und "erledigt, der
+    Server laeuft" sind zwei Aussagen. Sie in eine Blase zu zwingen haette
+    bedeutet, den Text nachtraeglich zu veraendern — und den Zeitpunkt zu
+    verwischen, an dem der Mensch zugestimmt hat.
+    """
+    provider = db.get(AiProvider, run.provider_id) if run.provider_id else None
+    if provider is None:
+        return None
+    request_id = str(uuid4())
+    usage_event = reserve_ai_usage(
+        db,
+        db.get(User, run.user_id),
+        request_id=UUID(request_id),
+        estimated_tokens=estimate_reserved_tokens(zustand["provider_messages"]),
+        estimated_cost_microunits=estimate_cost_microunits(
+            provider, estimate_reserved_tokens(zustand["provider_messages"])
+        ),
+        server_id=None,
+        provider_id=provider.id,
+        model=provider.default_model,
+    )
+    message_id = str(uuid4())
+    db.add(AiMessage(
+        id=message_id,
+        conversation_id=run.conversation_id,
+        role="assistant",
+        content="",
+        status="streaming",
+        provider_id=provider.id,
+        model=provider.default_model,
+        request_id=request_id,
+    ))
+    db.flush()
+    return message_id, usage_event.id, request_id
+
+
+def _segment_vorbereiten(run_id: str) -> tuple[_Vorbereitung | None, tuple[str, str] | None]:
+    """Holt den Lauf aus der Datenbank und macht ihn lauffaehig.
+
+    Die Sitzung ist absichtlich kurz: waehrend der Anbieter streamt, darf keine
+    Transaktion offen stehen. Genau dafuer ist der Zustand persistiert.
+    """
+    with SessionLocal() as db:
+        run = db.get(AiRun, run_id)
+        if run is None:
+            return None, ("AI_RUN_NOT_FOUND", "ai.errors.notFound")
+        if run.status not in {"running"}:
+            # Zwischen Planung und Ausfuehrung hat sich etwas geaendert — etwa
+            # eine neue Nachricht, die den Lauf ueberholt hat.
+            return None, None
+        user = db.get(User, run.user_id)
+        if user is None or not user.is_active:
+            return None, ("AI_ACCESS_REVOKED", "ai.errors.access")
+        provider = db.get(AiProvider, run.provider_id) if run.provider_id else None
+        if provider is None or not provider.enabled:
+            return None, ("AI_RESOURCE_NOT_FOUND", "ai.errors.notFound")
+
+        zustand = ai_run_service.zustand_lesen(run)
+
+        # Fortsetzung: der Lauf erfaehrt, wie der Mensch entschieden hat.
+        #
+        # Bewusst **kein** zweites Werkzeugergebnis: die `tool_call_id` der
+        # geparkten Runde hat ihre Antwort schon bekommen ("wartet auf
+        # Bestaetigung"), und das Protokoll erlaubt nur eine je Aufruf. Die
+        # Entscheidung ist auch kein Werkzeugergebnis, sondern eine Meldung des
+        # Panels — und genau als solche gekennzeichnet. Dasselbe Muster nutzt
+        # `ai_context_service` bereits fuer frueher gelesene Werkzeugergebnisse.
+        pending = zustand.get("pending")
+        if pending:
+            ergebnisse = _vorschlag_ergebnisse(db, list(pending.get("proposal_ids", [])))
+            zustand["provider_messages"].append(_aktionsmeldung(ergebnisse))
+            zustand["pending"] = None
+
+        try:
+            api_key = resolve_api_key(db, provider, user.id)
+        except DisSidecarError:
+            return None, ("AI_CREDENTIAL_UNAVAILABLE", "ai.errors.credential")
+        if provider.requires_api_key and not api_key:
+            return None, ("AI_PROVIDER_KEY_MISSING", "ai.errors.keyMissing")
+
+        if run.message_id:
+            nachricht = db.get(AiMessage, run.message_id)
+            message_id = run.message_id
+            usage_event_id = zustand.get("usage_event_id")
+            request_id = zustand.get("request_id") or (
+                nachricht.request_id if nachricht is not None else str(uuid4())
+            )
+            if usage_event_id is None:
+                # Der Startpfad legt beides an; fehlt die Verbuchung, ist der
+                # Zustand kaputt und ein neues Segment ehrlicher als raten.
+                run.message_id = None
+        if not run.message_id:
+            begonnen = _segment_beginnen(db, run, zustand)
+            if begonnen is None:
+                return None, ("AI_RESOURCE_NOT_FOUND", "ai.errors.notFound")
+            message_id, usage_event_id, request_id = begonnen
+            run.message_id = message_id
+            zustand["usage_event_id"] = usage_event_id
+            zustand["request_id"] = request_id
+
+        ai_run_service.zustand_schreiben(run, zustand)
+        db.commit()
+        db.refresh(provider)
+        db.expunge(provider)
+        return _Vorbereitung(
+            run_id=run_id,
+            user_id=run.user_id,
+            conversation_id=run.conversation_id,
+            provider=provider,
+            api_key=api_key,
+            message_id=message_id,
+            usage_event_id=int(usage_event_id),
+            request_id=str(request_id),
+            reasoning=bool(run.reasoning),
+            token_price_cents_per_million=provider.token_price_cents_per_million,
+            zustand=zustand,
+        ), None
+
+
+def _lauf_abschliessen(
+    run_id: str, *, status: str, stop_reason: str, zustand: dict | None = None
+) -> None:
+    with SessionLocal() as db:
+        run = db.get(AiRun, run_id)
+        if run is None:
+            return
+        run.status = status
+        run.stop_reason = stop_reason
+        if zustand is not None:
+            ai_run_service.zustand_schreiben(run, zustand)
+        if status != "running":
+            # Ein geparkter oder beendeter Lauf hat kein laufendes Segment mehr.
+            # Die naechste Fortsetzung legt eine neue Nachricht an.
+            run.message_id = None
+        run.updated_at = datetime.now(timezone.utc)
+        db.commit()
+    ai_run_broker.veroeffentlichen(
+        run_id, "run", {"run_id": run_id, "status": status, "stop_reason": stop_reason}
+    )
+    if status in AUSGELAUFEN:
+        ai_run_broker.beenden(run_id)
+
+
+def _werkzeug_signatur(name: str, argumente: dict) -> str:
+    return name + "|" + json.dumps(argumente, ensure_ascii=True, sort_keys=True)
+
+
+async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = None) -> None:
+    """Fuehrt einen Lauf aus, bis er fertig ist, fragt oder auf einen Menschen wartet.
+
+    Das ist der frueher `stream_conversation_reply` genannte Ablauf — mit dem
+    einen Unterschied, der alles aendert: er haengt an keinem Request mehr.
+    Ergebnisse gehen an den Vermittler (``ai_run_broker``), nicht an einen
+    Generator. Wer zusieht, ist dem Lauf gleichgueltig.
+    """
+    vorbereitung, fehler = _segment_vorbereiten(run_id)
+    if vorbereitung is None:
+        if fehler is not None:
+            code, message_key = fehler
+            ai_run_broker.veroeffentlichen(
+                run_id, "error", {"code": code, "message_key": message_key}
+            )
+            _lauf_abschliessen(run_id, status="failed", stop_reason=code)
         return
 
-    assistant_id = str(uuid4())
-    usage_event_id: int | None = None
-    provider: AiProvider | None = None
-    provider_messages: list[dict[str, str]] = []
-    api_key: str | None = None
-    token_price_cents_per_million: int | None = None
-    preparation_error: tuple[str, str] | None = None
-    try:
-        with SessionLocal() as db:
-            user = db.get(User, user_id)
-            if user is None or not user.is_active:
-                preparation_error = ("AI_ACCESS_REVOKED", "ai.errors.access")
-            else:
-                conversation = get_owned_conversation(db, conversation_id, user)
-                provider = db.get(AiProvider, provider_id)
-                if conversation is None or provider is None or not provider.enabled:
-                    preparation_error = ("AI_RESOURCE_NOT_FOUND", "ai.errors.notFound")
-                else:
-                    api_key = resolve_api_key(db, provider, user.id)
-                    if provider.requires_api_key and not api_key:
-                        preparation_error = ("AI_PROVIDER_KEY_MISSING", "ai.errors.keyMissing")
-                    else:
-                        user_message = AiMessage(
-                            id=str(uuid4()),
-                            conversation_id=conversation.id,
-                            role="user",
-                            content=safe_content,
-                            status="complete",
-                        )
-                        db.add(user_message)
-                        db.flush()
-                        # Die gerade gestellte Frage steuert mit, welche
-                        # Memory-Eintraege bei knappem Platz ueberleben.
-                        provider_messages = build_provider_messages(
-                            db, conversation, query=safe_content
-                        )
-                        estimated_tokens = estimate_reserved_tokens(provider_messages)
-                        # Kosten werden aus dem vom Betreiber gepflegten
-                        # Providerpreis abgeleitet. Ohne Preis bleibt der Wert
-                        # null — dann greift auch das Kostenlimit bewusst nicht.
-                        usage_event = reserve_ai_usage(
-                            db,
-                            user,
-                            request_id=request_id,
-                            estimated_tokens=estimated_tokens,
-                            estimated_cost_microunits=estimate_cost_microunits(
-                                provider, estimated_tokens
-                            ),
-                            # Die Unterhaltung hat keinen Serverbezug mehr. Der
-                            # Verbrauch je Server entsteht ab jetzt an den
-                            # Aktionsvorschlaegen, die ihre `server_id` tragen.
-                            server_id=None,
-                            provider_id=provider.id,
-                            model=provider.default_model,
-                        )
-                        token_price_cents_per_million = provider.token_price_cents_per_million
-                        assistant = AiMessage(
-                            id=assistant_id,
-                            conversation_id=conversation.id,
-                            role="assistant",
-                            content="",
-                            status="streaming",
-                            provider_id=provider.id,
-                            model=provider.default_model,
-                            request_id=str(request_id),
-                        )
-                        db.add(assistant)
-                        conversation.updated_at = datetime.now(timezone.utc)
-                        db.commit()
-                        usage_event_id = usage_event.id
-                        db.refresh(provider)
-                        db.expunge(provider)
-    except IntegrityError:
-        preparation_error = ("AI_REQUEST_CONFLICT", "ai.errors.requestConflict")
-    except AiUsageConflict:
-        preparation_error = ("AI_REQUEST_CONFLICT", "ai.errors.requestConflict")
-    except AiQuotaExceeded as exc:
-        preparation_error = (f"AI_QUOTA_{exc.reason.upper()}", "ai.errors.quota")
-    except DisSidecarError:
-        preparation_error = ("AI_CREDENTIAL_UNAVAILABLE", "ai.errors.credential")
-    except Exception as exc:
-        logger.warning("AI stream preparation failed error=%s", type(exc).__name__)
-        preparation_error = ("AI_PREPARATION_FAILED", "ai.errors.unavailable")
-
-    if preparation_error is not None:
-        code, message_key = preparation_error
-        yield sse_event("error", {"code": code, "message_key": message_key})
+    # Der Client kommt normalerweise aus dem Prozess (beim Start gesetzt). Als
+    # Parameter ist er ueberreichbar, damit ein Test das Segment ausfuehren kann,
+    # ohne eine ganze Anwendung hochzufahren.
+    client = client or ai_run_service.http_client()
+    if client is None:
+        logger.error("Kein AI-HTTP-Client, Lauf kann nicht arbeiten run_id=%s", run_id)
+        ai_run_broker.veroeffentlichen(
+            run_id, "error", {"code": "AI_RUNTIME_UNAVAILABLE", "message_key": "ai.errors.unavailable"}
+        )
+        _lauf_abschliessen(run_id, status="failed", stop_reason="AI_RUNTIME_UNAVAILABLE")
         return
 
-    if provider is None or usage_event_id is None:
-        return
-    yield sse_event("message", {"message_id": assistant_id, "request_id": str(request_id)})
+    zustand = vorbereitung.zustand
+    provider_messages: list[dict] = zustand["provider_messages"]
+    conversation_id = vorbereitung.conversation_id
+    user_id = vorbereitung.user_id
+    message_id = vorbereitung.message_id
+
+    ai_run_broker.neues_segment(run_id)
+    ai_run_broker.veroeffentlichen(
+        run_id,
+        "message",
+        {"message_id": message_id, "request_id": vorbereitung.request_id, "run_id": run_id},
+    )
+
     chunks: list[str] = []
     thoughts: list[str] = []
     usage = StreamUsage()
-    # Merkt sich, ob die Abrechnung bereits erfolgt ist. Der Abbruchpfad darf
-    # eine schon erfolgreich abgeschlossene Antwort nicht nachtraeglich als
-    # fehlgeschlagen ueberschreiben.
-    finalized = False
+    abgerechnet = False
+    gestellte_frage: dict | None = None
+    geparkt = False
     try:
         tools = provider_tool_definitions()
         current_usage = usage
-        rounds = 0
-        write_rounds = 0
-        # Die Rueckfrage dieses Zuges, falls eine gestellt wurde. Sie wird an
-        # der Assistenten-Nachricht festgehalten, damit das Modell sie beim
-        # naechsten Aufruf in der Historie wiederfindet.
-        gestellte_frage: dict | None = None
+        signaturen: dict[str, int] = dict(zustand.get("tool_signatures") or {})
         while True:
             async for chunk in stream_chat_completion(
                 client,
-                provider=provider,
-                api_key=api_key,
+                provider=vorbereitung.provider,
+                api_key=vorbereitung.api_key,
                 messages=provider_messages,
                 usage=current_usage,
                 tools=tools,
-                reasoning=reasoning,
+                reasoning=vorbereitung.reasoning,
             ):
                 if chunk.kind == "reasoning":
                     thoughts.append(chunk.text)
-                    yield sse_event("reasoning", {"content": chunk.text})
+                    ai_run_broker.veroeffentlichen(run_id, "reasoning", {"content": chunk.text})
                     continue
                 chunks.append(chunk.text)
-                yield sse_event("delta", {"content": chunk.text})
+                ai_run_broker.veroeffentlichen(run_id, "delta", {"content": chunk.text})
             if current_usage is not usage:
                 usage.total_tokens = (
                     usage.total_tokens + current_usage.total_tokens
@@ -592,46 +768,25 @@ async def stream_conversation_reply(
                 # Diese Runde wurde ohne Werkzeugliste angefragt — sie ist die
                 # abschliessende. Meldet der Anbieter trotzdem Werkzeugaufrufe,
                 # ist das keine Anfrage, die wir erfuellen: wir haben nichts
-                # angeboten.
-                #
-                # Vier Zweige oben setzen `tools = None` und `continue`, um die
-                # Schleife zu beenden. Das funktionierte nur, solange sich der
-                # Anbieter daran hielt — es war eine Bitte, keine Grenze. Ein
-                # Anbieter, der weiter Aufrufe schickt, hielt den Stream endlos
-                # offen und verbrannte bei jedem Durchgang Tokens. Genau das
-                # passiert reproduzierbar im Test
-                # `test_a_tool_call_cannot_reach_a_server_the_user_may_not_see`,
-                # der die Suite zum Stillstand brachte.
-                #
-                # Hier steht die Grenze jetzt auf unserer Seite.
+                # angeboten. Frueher war `tools = None` nur eine Bitte, und ein
+                # Anbieter, der sich nicht daran hielt, hielt den Lauf endlos
+                # offen. Hier steht die Grenze auf unserer Seite.
                 logger.warning(
                     "Anbieter meldet Werkzeugaufrufe ohne angebotene Werkzeuge, "
-                    "werden verworfen conversation_id=%s anzahl=%d",
-                    conversation_id, len(current_usage.tool_calls),
+                    "werden verworfen run_id=%s anzahl=%d",
+                    run_id, len(current_usage.tool_calls),
                 )
                 break
 
-            # Eine Rueckfrage beendet den Zug: ab hier ist der Mensch dran,
-            # und seine Antwort kommt als gewoehnliche Nachricht zurueck. Alles
-            # andere aus derselben Runde waere verfrueht — die Antwort aendert
-            # ja gerade die Grundlage.
+            # Eine Rueckfrage beendet das Segment: ab hier ist der Mensch dran,
+            # und seine Antwort kommt als gewoehnliche Nachricht zurueck.
             frage = next(
                 (call for call in current_usage.tool_calls if call.name in ASK_TOOLS),
                 None,
             )
             if frage is not None:
                 gestellte_frage = question_payload(frage.arguments)
-                yield sse_event("question", gestellte_frage)
-                # Hier endet der Zug. Frueher folgte noch eine Runde ohne
-                # Werkzeuge, damit das Modell den Grund der Frage nennen kann.
-                # Gemessen am Betrieb war das ein Fehlgriff: der Prompt sagt dem
-                # Modell, die Frage stehe bereits im Chat, also lieferte diese
-                # Runde meist gar nichts — ein bezahlter Anbieteraufruf fuer
-                # eine leere Blase mit "Keine Antwort erhalten" darunter.
-                #
-                # Was das Modell erklaeren will, schreibt es ohnehin im selben
-                # Durchgang: Anbieter liefern Text und Werkzeugaufrufe zusammen,
-                # und dieser Text steht bereits in `chunks`.
+                ai_run_broker.veroeffentlichen(run_id, "question", gestellte_frage)
                 break
 
             kinds = {
@@ -639,75 +794,70 @@ async def stream_conversation_reply(
                 for call in current_usage.tool_calls
             }
             if kinds == {"write"}:
-                # Ab hier entscheidet der Mensch (oder, bei erteilter Freigabe,
-                # die Autonomiegrenze) — es folgt also keine weitere Aktion.
                 proposals = _persist_write_proposals(
                     user_id=user_id,
                     conversation_id=conversation_id,
                     tool_calls=current_usage.tool_calls,
-                    correlation_id=str(request_id),
+                    correlation_id=vorbereitung.request_id,
+                    run_id=run_id,
                 )
                 for proposal in proposals:
-                    yield sse_event(
-                        "action" if proposal.get("autonomous") else "proposal", proposal
+                    ai_run_broker.veroeffentlichen(
+                        run_id, "action" if proposal.get("autonomous") else "proposal", proposal
                     )
-                # Frueher endete der Stream hier. Das hatte zwei Folgen, die im
-                # Betrieb beide auffielen: die Antwortnachricht blieb leer
-                # ("Keine Antwort erhalten"), und die Historie enthielt keine
-                # Spur der Aktion — ein blosses "danke" wirkte im naechsten Zug
-                # wie eine noch offene Bitte, und derselbe Server wurde ein
-                # zweites Mal gestoppt.
-                #
-                # Stattdessen bekommt das Modell das Ergebnis zurueck und eine
-                # letzte Runde **ohne Werkzeuge**, um den Vorgang abzuschliessen.
-                # Ohne `tools = None` koennte es in dieser Runde erneut eine
-                # Aktion ausloesen — genau die Schleife, die wir schliessen.
+                # Das Ergebnis geht **immer** zurueck ans Modell, auch wenn es
+                # nur "wartet auf den Menschen" lautet. Das Protokoll verlangt zu
+                # jeder `tool_call_id` genau eine Antwort — und das Modell soll
+                # den Vorgang in Worte fassen koennen, statt eine leere Blase
+                # ueber der Bestaetigungskarte zu hinterlassen.
                 provider_messages.extend(_write_followup_messages(
                     conversation_id=conversation_id,
                     tool_calls=current_usage.tool_calls,
                     proposals=proposals,
                 ))
-                write_rounds += 1
-                # Eine zusammengesetzte Bitte braucht oft zwei Schritte, die
-                # aufeinander aufbauen: "pass die Config an und starte ihn
-                # danach". Mit nur einer Schreibrunde muesste das Modell beides
-                # gleichzeitig abgeben — und koennte den Start nicht davon
-                # abhaengig machen, ob die Aenderung durchging.
+                zustand["write_rounds"] = int(zustand.get("write_rounds", 0)) + 1
+
+                # **Der Punkt, an dem der Lauf frueher endete.** Wartet auch nur
+                # ein Vorschlag auf einen Menschen, wird geparkt statt
+                # aufgegeben: der Zustand geht in die Datenbank, und die
+                # Bestaetigung weckt genau hier wieder auf.
                 #
-                # Eine zweite Runde ist nur dann vertretbar, wenn die erste
-                # tatsaechlich **ausgefuehrt** wurde. Wartet ein Vorschlag auf
-                # den Menschen, ist der Mensch dran und nicht das Modell.
-                # `executing` zaehlt mit: ein Lifecycle-Start laeuft als
-                # Hintergrundjob und ist damit angestossen, nicht offen.
-                executed = bool(proposals) and all(
-                    proposal.get("autonomous")
-                    and proposal.get("status") in {"succeeded", "executing"}
+                # Geparkt wird aber erst **nach** einer letzten Runde ohne
+                # Werkzeuge. Sonst stuende die Karte im Chat und darueber
+                # nichts — der Benutzer soll lesen, was da bestaetigt werden
+                # will und warum.
+                offen = [
+                    proposal["id"] for proposal in proposals
+                    if proposal.get("status") in {"proposed", "confirmed"}
+                ]
+                if offen:
+                    zustand["pending"] = {
+                        "proposal_ids": [proposal["id"] for proposal in proposals],
+                    }
+                    geparkt = True
+                    tools = None
+                    current_usage = StreamUsage()
+                    continue
+                # Alles ausgefuehrt? Dann darf der Lauf weiterarbeiten. Das ist
+                # der Unterschied zwischen "eine Aktion abgeben" und "eine
+                # Aufgabe erledigen": erst wenn Schritt eins nachweislich lief,
+                # ergibt Schritt zwei ueberhaupt Sinn.
+                ausgefuehrt = bool(proposals) and all(
+                    proposal.get("status") in {"succeeded", "executing"}
                     and not proposal.get("error_code")
                     for proposal in proposals
                 )
-                if not (executed and write_rounds < MAX_WRITE_ROUNDS):
-                    # Ohne `tools = None` koennte das Modell endlos weiter
-                    # handeln — genau die Schleife, die der Rueckfluss oben
-                    # schliessen soll.
+                if not (ausgefuehrt and zustand["write_rounds"] < MAX_WRITE_ROUNDS):
                     tools = None
                 current_usage = StreamUsage()
                 continue
             if "unknown" in kinds:
-                # Ein Werkzeug, das weder lesend noch schreibend ist, gibt es
-                # nicht — das kann nur eine erfundene Antwort sein.
                 raise AiProviderRequestError("AI_PROVIDER_TOOL_SEQUENCE_INVALID")
 
             deferred_calls: list = []
             if kinds == {"read", "write"}:
-                # Gemischte Runde. Frueher riss das den ganzen Stream ab, und
-                # der Benutzer bekam statt einer Antwort einen Fehlercode — bei
-                # einer zusammengesetzten Bitte ("lies die Config und pass sie
-                # an") war das der Normalfall, nicht die Ausnahme.
-                #
-                # Jetzt laufen die Lesewerkzeuge, und die Schreibaufrufe
-                # bekommen eine Absage mit Begruendung zurueck. Das Modell holt
-                # sie dann in einer eigenen Runde nach. Die Trennung bleibt
-                # damit erhalten — sie wird nur erklaert statt erzwungen.
+                # Gemischte Runde: die Lesewerkzeuge laufen, die Schreibaufrufe
+                # bekommen eine Absage mit Begruendung und werden nachgeholt.
                 deferred_calls = [
                     (call, (
                         "Schreibaktionen laufen in einer eigenen Runde. Lies "
@@ -719,31 +869,46 @@ async def stream_conversation_reply(
                     call for call in current_usage.tool_calls if call.name in READ_TOOLS
                 ]
 
-            rounds += 1
-            if rounds > MAX_TOOL_ROUNDS:
-                # Frueher endete das hier mit einem Fehler. Gemessen an einer
-                # echten Netzwerkdiagnose war das falsch: die Kette
-                # list_my_servers → read_server_network → read_server_status →
-                # check_server_reachability ist voellig legitim und riss dem
-                # Benutzer die Antwort weg, obwohl die KI bereits genug wusste.
+            # Schleifenerkennung — **ueber Runden hinweg**, nicht innerhalb einer.
+            #
+            # Das ist der ganze Unterschied: neun Statusabfragen nebeneinander
+            # sind eine gruendliche Bestandsaufnahme ("laufen alle Server?"),
+            # dieselbe Abfrage in der vierten Runde hintereinander ist ein
+            # haengendes Modell. Gezaehlt wird deshalb je Runde einmal je
+            # Signatur, und geprueft wird gegen die Runden davor.
+            wiederholt: list = []
+            frisch: list = []
+            for call in current_usage.tool_calls:
+                gezaehlt = signaturen.get(_werkzeug_signatur(call.name, call.arguments), 0)
+                if gezaehlt >= MAX_GLEICHE_AUFRUFE:
+                    wiederholt.append((call, (
+                        "Dieser Aufruf lief mit genau diesen Argumenten bereits in "
+                        f"{gezaehlt} Runden und liefert nichts Neues. Arbeite mit dem, "
+                        "was du hast, oder frage den Benutzer."
+                    )))
+                    continue
+                frisch.append(call)
+            for signatur in {
+                _werkzeug_signatur(call.name, call.arguments) for call in frisch
+            }:
+                signaturen[signatur] = signaturen.get(signatur, 0) + 1
+            current_usage.tool_calls = frisch
+            deferred_calls.extend(wiederholt)
+
+            zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+            if zustand["rounds"] > MAX_TOOL_ROUNDS:
                 # Ein Assistent, der abbricht *weil* er gruendlich war, ist
-                # schlechter als einer, der mit dem Vorhandenen antwortet.
-                #
-                # Die Grenze bleibt: ab hier gibt es keine Werkzeuge mehr. Das
-                # Modell bekommt einen letzten Durchgang ohne `tools` und muss
-                # aus dem antworten, was es hat.
-                # Die Aufrufe dieser Runde werden bewusst **nicht** mehr
-                # ausgefuehrt: sonst waere die Grenze um eins verschoben. Sie
-                # landen auch nicht in der Historie — ohne zugehoerige
-                # Werkzeugantwort wuerden manche Anbieter die naechste Anfrage
-                # ablehnen.
+                # schlechter als einer, der mit dem Vorhandenen antwortet. Ab
+                # hier gibt es keine Werkzeuge mehr, aber eine Antwort.
                 logger.info(
-                    "AI-Werkzeugrunden erschoepft, letzte Antwort ohne Werkzeuge "
-                    "conversation_id=%s", conversation_id,
+                    "AI-Werkzeugrunden erschoepft, letzte Antwort ohne Werkzeuge run_id=%s",
+                    run_id,
                 )
                 tools = None
                 current_usage = StreamUsage()
                 continue
+            if not current_usage.tool_calls and not deferred_calls:
+                break
             followup, used_tools = _tool_followup_messages(
                 user_id=user_id,
                 conversation_id=conversation_id,
@@ -751,38 +916,52 @@ async def stream_conversation_reply(
                 deferred=deferred_calls,
             )
             provider_messages.extend(followup)
-            # Sichtbar machen, was die KI gerade getan hat. Ohne das wirkt eine
-            # Antwort, die aus Logs und Ports entstanden ist, wie geraten.
             for used in used_tools:
-                yield sse_event("tool", used)
+                ai_run_broker.veroeffentlichen(run_id, "tool", used)
             current_usage = StreamUsage()
+
+        zustand["tool_signatures"] = signaturen
+        zustand["provider_messages"] = provider_messages
         complete_content = "".join(chunks)
         estimated_actual = max(
             1,
-            (message_character_count(provider_messages) + len(complete_content) + 3)
-            // 4,
+            (message_character_count(provider_messages) + len(complete_content) + 3) // 4,
         )
         _finalize_stream(
-            message_id=assistant_id,
-            usage_event_id=usage_event_id,
+            message_id=message_id,
+            usage_event_id=vorbereitung.usage_event_id,
             content=complete_content,
             provider_total_tokens=usage.total_tokens,
             estimated_actual_tokens=estimated_actual,
             failed=False,
-            # Eine Rueckfrage ist eine vollwertige Antwort. Ohne dieses Flag
-            # gilt ein Zug ohne Fliesstext als "nichts geliefert" — genau der
+            # Eine Rueckfrage ist eine vollwertige Antwort, und ein Vorschlag
+            # ebenso. Ohne das galten sie als "nichts geliefert" — genau der
             # Fall, in dem der Chat "Keine Antwort erhalten" anzeigte.
-            had_output=bool(chunks) or gestellte_frage is not None,
-            token_price_cents_per_million=token_price_cents_per_million,
+            had_output=bool(chunks) or gestellte_frage is not None or geparkt,
+            token_price_cents_per_million=vorbereitung.token_price_cents_per_million,
             reasoning="".join(thoughts),
             question=gestellte_frage,
         )
-        finalized = True
-        yield sse_event("done", {"message_id": assistant_id})
+        abgerechnet = True
+        ai_run_broker.veroeffentlichen(run_id, "done", {"message_id": message_id})
 
-        # Erst jetzt falten — der Benutzer hat seine Antwort und wartet nicht
-        # auf die Zusammenfassung. Scheitert sie, bleibt der Chat unveraendert
-        # und der naechste Durchlauf versucht es erneut.
+        if geparkt:
+            _lauf_abschliessen(
+                run_id,
+                status="waiting_confirmation",
+                stop_reason="awaiting_confirmation",
+                zustand=zustand,
+            )
+            return
+        if gestellte_frage is not None:
+            _lauf_abschliessen(
+                run_id, status="waiting_user", stop_reason="question", zustand=zustand
+            )
+            return
+        _lauf_abschliessen(run_id, status="completed", stop_reason="done", zustand=zustand)
+
+        # Erst jetzt falten — der Benutzer hat seine Antwort und wartet nicht auf
+        # die Zusammenfassung.
         try:
             from services.ai_compaction_service import compact_conversation
 
@@ -790,67 +969,192 @@ async def stream_conversation_reply(
                 client=client,
                 user_id=user_id,
                 conversation_id=conversation_id,
-                provider_id=provider.id,
+                provider_id=vorbereitung.provider.id,
             ):
-                yield sse_event("compacted", {"conversation_id": conversation_id})
+                ai_run_broker.veroeffentlichen(
+                    run_id, "compacted", {"conversation_id": conversation_id}
+                )
         except Exception as exc:
             logger.info("AI-Kompression uebersprungen error=%s", type(exc).__name__)
-    except (asyncio.CancelledError, GeneratorExit):
-        # Bricht der Browser die Verbindung ab, wirft Python beim Aufraeumen des
-        # Generators ein GeneratorExit. Das ist kein `Exception` und lief bisher
-        # durch alle Handler hindurch: Nachricht blieb "streaming", Reservierung
-        # blieb "reserved" und belegte bis zum Prozessneustart Kontingent und
-        # einen Nebenlaeufigkeitsplatz.
-        if not finalized:
+    except asyncio.CancelledError:
+        # Der Prozess faehrt herunter. Nicht mehr als ehrlich abschliessen.
+        if not abgerechnet:
             _finalize_stream(
-                message_id=assistant_id,
-                usage_event_id=usage_event_id,
+                message_id=message_id,
+                usage_event_id=vorbereitung.usage_event_id,
                 content="".join(chunks),
                 provider_total_tokens=usage.total_tokens,
                 estimated_actual_tokens=0,
                 failed=True,
                 had_output=bool(chunks),
-                token_price_cents_per_million=token_price_cents_per_million,
+                token_price_cents_per_million=vorbereitung.token_price_cents_per_million,
                 reasoning="".join(thoughts),
             )
+            _lauf_abschliessen(run_id, status="cancelled", stop_reason="cancelled")
         raise
-    except AiProviderRequestError as exc:
-        _finalize_stream(
-            message_id=assistant_id,
-            usage_event_id=usage_event_id,
-            content="".join(chunks),
-            provider_total_tokens=usage.total_tokens,
-            estimated_actual_tokens=0,
-            failed=True,
-            had_output=bool(chunks),
-            token_price_cents_per_million=token_price_cents_per_million,
-            reasoning="".join(thoughts),
-        )
-        yield sse_event("error", {"code": exc.code, "message_key": "ai.errors.provider"})
-    except AiActionValidationError:
-        _finalize_stream(
-            message_id=assistant_id,
-            usage_event_id=usage_event_id,
-            content="".join(chunks),
-            provider_total_tokens=usage.total_tokens,
-            estimated_actual_tokens=0,
-            failed=True,
-            had_output=bool(chunks),
-            token_price_cents_per_million=token_price_cents_per_million,
-            reasoning="".join(thoughts),
-        )
-        yield sse_event("error", {"code": "AI_TOOL_REJECTED", "message_key": "ai.errors.toolRejected"})
     except Exception as exc:
-        logger.warning("AI stream finalization failed error=%s", type(exc).__name__)
-        _finalize_stream(
-            message_id=assistant_id,
-            usage_event_id=usage_event_id,
-            content="".join(chunks),
-            provider_total_tokens=usage.total_tokens,
-            estimated_actual_tokens=0,
-            failed=True,
-            had_output=bool(chunks),
-            token_price_cents_per_million=token_price_cents_per_million,
-            reasoning="".join(thoughts),
+        if isinstance(exc, AiProviderRequestError):
+            code, message_key = exc.code, "ai.errors.provider"
+        elif isinstance(exc, AiActionValidationError):
+            code, message_key = "AI_TOOL_REJECTED", "ai.errors.toolRejected"
+        else:
+            logger.warning("AI-Lauf fehlgeschlagen error=%s", type(exc).__name__)
+            code, message_key = "AI_STREAM_FAILED", "ai.errors.unavailable"
+        if not abgerechnet:
+            _finalize_stream(
+                message_id=message_id,
+                usage_event_id=vorbereitung.usage_event_id,
+                content="".join(chunks),
+                provider_total_tokens=usage.total_tokens,
+                estimated_actual_tokens=0,
+                failed=True,
+                had_output=bool(chunks),
+                token_price_cents_per_million=vorbereitung.token_price_cents_per_million,
+                reasoning="".join(thoughts),
+            )
+        ai_run_broker.veroeffentlichen(run_id, "error", {"code": code, "message_key": message_key})
+        _lauf_abschliessen(run_id, status="failed", stop_reason=code)
+
+
+def lauf_beginnen(
+    db,
+    *,
+    user: User,
+    conversation,
+    provider: AiProvider,
+    request_id: UUID,
+    content: str,
+    reasoning: bool,
+) -> tuple[AiRun | None, tuple[str, str] | None]:
+    """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
+
+    Bewusst **synchron im Request** und nicht im Hintergrund. Ein
+    ueberschrittenes Kontingent, ein fehlender Schluessel oder eine doppelt
+    gesendete Anfrage sind Dinge, die der Benutzer sofort erfahren soll — nicht
+    Sekunden spaeter aus einem Ereignisstrom. Erst wenn all das durch ist,
+    beginnt die eigentliche Arbeit, und ab da haengt sie an nichts mehr.
+    """
+    safe_content = redact_sensitive_text(content).strip()
+    if not safe_content:
+        return None, ("AI_MESSAGE_EMPTY", "ai.errors.empty")
+    try:
+        # Wer eine neue Nachricht schreibt, statt einen Vorschlag zu bestaetigen,
+        # hat die Richtung gewechselt. Ein alter, geparkter Lauf darf danach
+        # nicht mehr in denselben Chat weiterschreiben.
+        ai_run_service.offene_laeufe_abbrechen(db, conversation_id=conversation.id)
+
+        db.add(AiMessage(
+            id=str(uuid4()),
+            conversation_id=conversation.id,
+            role="user",
+            content=safe_content,
+            status="complete",
+        ))
+        db.flush()
+        provider_messages = build_provider_messages(db, conversation, query=safe_content)
+        estimated_tokens = estimate_reserved_tokens(provider_messages)
+        usage_event = reserve_ai_usage(
+            db,
+            user,
+            request_id=request_id,
+            estimated_tokens=estimated_tokens,
+            estimated_cost_microunits=estimate_cost_microunits(provider, estimated_tokens),
+            server_id=None,
+            provider_id=provider.id,
+            model=provider.default_model,
         )
-        yield sse_event("error", {"code": "AI_STREAM_FAILED", "message_key": "ai.errors.unavailable"})
+        message_id = str(uuid4())
+        db.add(AiMessage(
+            id=message_id,
+            conversation_id=conversation.id,
+            role="assistant",
+            content="",
+            status="streaming",
+            provider_id=provider.id,
+            model=provider.default_model,
+            request_id=str(request_id),
+        ))
+        conversation.updated_at = datetime.now(timezone.utc)
+
+        zustand = ai_run_service.leerer_zustand(provider_messages, request_id=str(request_id))
+        zustand["usage_event_id"] = usage_event.id
+        run = ai_run_service.lauf_anlegen(
+            db,
+            conversation_id=conversation.id,
+            user_id=user.id,
+            provider_id=provider.id,
+            message_id=message_id,
+            reasoning=reasoning,
+            zustand=zustand,
+        )
+        db.commit()
+        return run, None
+    except IntegrityError:
+        db.rollback()
+        return None, ("AI_REQUEST_CONFLICT", "ai.errors.requestConflict")
+    except AiUsageConflict:
+        db.rollback()
+        return None, ("AI_REQUEST_CONFLICT", "ai.errors.requestConflict")
+    except AiQuotaExceeded as exc:
+        db.rollback()
+        return None, (f"AI_QUOTA_{exc.reason.upper()}", "ai.errors.quota")
+    except DisSidecarError:
+        db.rollback()
+        return None, ("AI_CREDENTIAL_UNAVAILABLE", "ai.errors.credential")
+    except Exception as exc:
+        db.rollback()
+        logger.warning("AI-Lauf konnte nicht beginnen error=%s", type(exc).__name__)
+        return None, ("AI_PREPARATION_FAILED", "ai.errors.unavailable")
+
+
+async def lauf_verfolgen(run_id: str, *, abo=None) -> AsyncIterator[str]:
+    """Der Datenstrom zum Browser — ein **Fenster** auf den Lauf, nicht sein Motor.
+
+    Bricht diese Verbindung ab, passiert dem Lauf nichts. Genau das war die
+    Beschwerde: *"wenn ich den Browser schliesse, bricht die Anfrage ab."* Sie
+    bricht jetzt nur noch die Anzeige ab.
+
+    Wer sich spaeter wieder anhaengt, bekommt zuerst einen ``snapshot`` mit dem
+    vollstaendigen bisherigen Stand und danach die Fortsetzung live.
+    """
+    # ``abo`` kommt vom Endpunkt, wenn dieser bereits **vor** dem Start des Laufs
+    # abonniert hat. Das schliesst ein Wettrennen, das sonst unvermeidbar waere:
+    # der Lauf arbeitet auf der Ereignisschleife los, waehrend der Rumpf der
+    # Antwort erst beim ersten Lesen anlaeuft — die ersten Zeichen waeren durch,
+    # bevor jemand zuhoert.
+    abo = abo or ai_run_broker.abonnieren(run_id)
+    if abo is None:
+        # Der Lauf arbeitet in diesem Prozess nicht (mehr). Der Verlauf steht in
+        # der Datenbank; die Oberflaeche laedt ihn ohnehin beim Oeffnen.
+        yield sse_event("run", {"run_id": run_id, "status": _lauf_status(run_id), "live": False})
+        return
+    abzug, warteschlange = abo
+    yield sse_event("snapshot", abzug.als_ereignis())
+    try:
+        while True:
+            # Erst leerlaufen lassen, dann aufhoeren. Die Reihenfolge ist der
+            # ganze Punkt: der Rumpf einer StreamingResponse laeuft oft erst an,
+            # wenn der Lauf schon fertig ist. Ein "laeuft der noch?" vor dem
+            # Auslesen wuerde dann eine volle Warteschlange wegwerfen und nur
+            # den (leeren) Abzug vom Zeitpunkt des Abonnements zeigen.
+            if warteschlange.empty() and not ai_run_broker.laeuft(run_id):
+                break
+            ereignis, daten = await warteschlange.get()
+            if ereignis is None:
+                break
+            if ereignis == "segment":
+                # Ein neues Segment beginnt: der Text davor gehoert zur
+                # abgeschlossenen Nachricht und darf nicht weiterwachsen.
+                yield sse_event("segment", daten)
+                continue
+            yield sse_event(ereignis, daten)
+            if ereignis == "run" and daten.get("status") in AUSGELAUFEN:
+                break
+    finally:
+        ai_run_broker.abmelden(run_id, warteschlange)
+
+
+def _lauf_status(run_id: str) -> str:
+    with SessionLocal() as db:
+        run = db.get(AiRun, run_id)
+        return run.status if run is not None else "failed"

@@ -78,3 +78,20 @@ class AiMessageEditResponse(BaseModel):
     # Wie viele Zeilen der Schnitt entfernt hat. Die Oberflaeche zeigt es an,
     # damit niemand raetselt, wohin der halbe Verlauf verschwunden ist.
     removed: int
+
+
+class AiRunResponse(BaseModel):
+    """Ein Lauf der KI, so wie die Oberflaeche ihn sieht.
+
+    `live` ist die ehrliche Auskunft, ob dieser Prozess dem Lauf gerade beim
+    Arbeiten zusehen kann. Nach einem Neustart des Panels steht ein geparkter
+    Lauf weiterhin in der Datenbank, aber niemand haelt ihn im Speicher — die
+    Oberflaeche soll dann keinen Ladebalken zeigen, der sich nie bewegt.
+    """
+
+    id: str
+    status: str
+    stop_reason: str | None = None
+    message_id: str | None = None
+    live: bool = False
+    created_at: datetime

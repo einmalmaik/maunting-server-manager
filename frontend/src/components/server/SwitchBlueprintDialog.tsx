@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "@/api/client";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { toast } from "@/stores/toastStore";
 import type { BlueprintListEntry, Server } from "@/types";
 
@@ -123,18 +124,23 @@ export function SwitchBlueprintDialog({
                 {t("common.loading", "Laden...")}
               </div>
             ) : (
-              <select
-                className="msm-input w-full"
-                value={selectedId}
-                onChange={(e) => setSelectedId(e.target.value)}
+              // Vorher ein natives <select>. Bei 27 nativen Blueprints ist die
+              // Liste hoeher als der Platz unter dem Feld, und der Browser
+              // klappte sie nach oben auf — im Dialog wirkt das wie ein Fehler.
+              // `Dropdown` ist die Auswahl, die das Panel ohnehin ueberall
+              // benutzt: sie klappt nach unten und begrenzt ihre Hoehe selbst.
+              <Dropdown
+                data-testid="switch-blueprint-select"
+                value={selectedId || null}
+                onChange={setSelectedId}
                 disabled={submitting || server.status !== "stopped"}
-              >
-                {blueprints.map((bp) => (
-                  <option key={bp.id} value={bp.id}>
-                    {bp.name} ({bp.category || "Native"})
-                  </option>
-                ))}
-              </select>
+                placeholder={t("servers.selectNewBlueprint", "Neues Spiel / Blueprint auswählen")}
+                aria-label={t("servers.selectNewBlueprint", "Neues Spiel / Blueprint auswählen")}
+                options={blueprints.map((bp) => ({
+                  value: bp.id,
+                  label: `${bp.name} (${bp.category || "Native"})`,
+                }))}
+              />
             )}
           </div>
         </div>

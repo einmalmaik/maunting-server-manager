@@ -61,6 +61,27 @@ class AiActionProposal(Base):
     task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    # Der Lauf, der diesen Vorschlag erzeugt hat — und der weiterlaeuft, sobald
+    # er bestaetigt oder verworfen ist.
+    #
+    # `correlation_id` konnte das nicht leisten: sie ist die `request_id` **eines
+    # Segments**, und ein Lauf hat nach jeder Unterbrechung ein neues. Zwei
+    # Schreibrunden desselben Zuges teilten sie sich sogar. Ein echter
+    # Fremdschluessel auf den Lauf beantwortet dagegen genau die eine Frage, die
+    # der Bestaetigungsknopf stellt: *wen wecke ich jetzt auf?*
+    #
+    # Nullable, weil Vorschlaege aus der Zeit vor den Laeufen keinen haben — und
+    # weil ein Vorschlag ohne Lauf gueltig bleibt, er weckt dann eben niemanden.
+    #
+    # Bewusst **ohne** Fremdschluessel. Die Tests bauen ihr Schema mit
+    # `Base.metadata.create_all`, der Betrieb mit Alembic; eine Beziehung, die
+    # nur eine der beiden Seiten kennt, waere ein Unterschied zwischen Test und
+    # Betrieb — die unangenehmste Sorte Fehler. Ein Fremdschluessel liesse sich
+    # nachtraeglich auch nur durch eine Kopie der gesamten Vorschlagstabelle
+    # anlegen (SQLite kennt kein ADD CONSTRAINT), und das ist die Tabelle mit
+    # den verschluesselten Nutzlasten. Beide Seiten kaskadieren ohnehin ueber
+    # `conversation_id`, ein verwaister Verweis ist damit praktisch ausgeschlossen.
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

@@ -101,6 +101,22 @@ async def lifespan(app: FastAPI):
         follow_redirects=False,
     )
 
+    # Ein KI-Lauf haengt nicht mehr am Request, der ihn ausgeloest hat. Damit er
+    # ueberhaupt irgendwo arbeiten kann, braucht er zwei Dinge aus dem Prozess:
+    # die Ereignisschleife der Anwendung (auf der er geplant wird — auch aus
+    # einem synchronen Endpunkt heraus, wenn ein Mensch eine Aktion bestaetigt)
+    # und den HTTP-Client fuer den Anbieter.
+    #
+    # Ohne diesen Aufruf plant `ai_run_service` nichts und sagt das auch — der
+    # Zustand in der Testsuite, in der es keine Anwendung gibt.
+    import asyncio as _asyncio
+
+    from services import ai_run_service as _ai_run_service
+
+    _ai_run_service.laufzeit_setzen(
+        _asyncio.get_running_loop(), app.state.ai_http_client
+    )
+
     os.makedirs(settings.servers_dir, exist_ok=True)
     os.makedirs("/opt/msm/backups", exist_ok=True)
 
@@ -546,10 +562,26 @@ async def lifespan(app: FastAPI):
     from services.ai_proposal_service import reconcile_interrupted_actions
     from services.ai_chat_service import reconcile_interrupted_ai_streams
 
+    from services.ai_run_service import unterbrochene_laeufe_abgleichen
+
     _ai_recovery_db = SessionLocal()
     try:
         reconcile_interrupted_ai_streams(_ai_recovery_db)
         reconcile_interrupted_actions(_ai_recovery_db)
+        # Ein Lauf im Zustand `running` hat den Neustart nicht ueberlebt: sein
+        # Arbeitsgedaechtnis endet mitten in einer Anbieterantwort, und ob ein
+        # Werkzeug schon lief, ist nicht mehr feststellbar. Ein halber
+        # Werkzeugaufruf, blind wiederholt, waere schlimmer als ein ehrlicher
+        # Abbruch. Geparkte Laeufe bleiben unangetastet — die warten auf einen
+        # Menschen und haben nichts in der Luft.
+        unterbrochene = unterbrochene_laeufe_abgleichen(_ai_recovery_db)
+        if unterbrochene:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "%d unterbrochene(r) KI-Lauf/Laeufe nach Panel-Start abgeschlossen.",
+                unterbrochene,
+            )
     finally:
         _ai_recovery_db.close()
 
