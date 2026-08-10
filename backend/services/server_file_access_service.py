@@ -85,6 +85,135 @@ CHUNK_TMP_DIRNAME = ".msm-uploads"
 MAX_LISTED_ENTRIES = 200
 
 
+def wipe_server_root(db: Session, server: Server) -> int | None:
+    """Leert das Serververzeichnis und **weist nach**, dass es leer ist.
+
+    Gebaut fuer den Blueprint-Wechsel, und zwar wegen eines Betriebsfalls: ein
+    Minecraft-Server wurde auf eine andere Version umgestellt, der Wechsel
+    meldete Erfolg — und der Start scheiterte daran, dass die alte Welt noch
+    dalag.
+
+    Der Vorgaenger in `switch_server_blueprint` benutzte `os` und `shutil`, ohne
+    dass sein Modul beides je importiert haette. Der lokale Zweig warf deshalb
+    `NameError`, ein `except Exception` schluckte ihn, und der Wechsel lief
+    weiter. Auf lokalen Nodes wurde damit **nie** eine Datei geloescht — vier
+    Zeilen darunter stand trotzdem "erfolgreich gewechselt".
+
+    Der zweite, echte Grund fuer misslingende Loeschungen bleibt bestehen:
+    `itzg/minecraft-server` und viele andere Images legen ihre Daten unter der
+    **Container-UID** an, und der Panel-Prozess kommt an `world/` nicht heran.
+    Dafuer gibt es `repair_bind_mount_permissions` — der Loeschpfad
+    (`server_deletion_service`) ruft es seit jeher, der Wechsel tat es nie.
+
+    Drei Zusicherungen, die der alte Code nicht gab:
+
+    1. **Der Container ist vorher weg.** Ein gestoppter Container haelt den
+       Bind-Mount weiterhin; erst ohne ihn ist das Verzeichnis wirklich frei.
+    2. **Kein Fehler wird verschluckt.** Weder `ignore_errors` noch ein blankes
+       `except: pass`. Bleibt nach dem Rechte-Reparaturversuch etwas uebrig,
+       fliegt `HTTPException` — und der Aufrufer bricht ab, statt Erfolg zu
+       melden.
+    3. **Das Ergebnis wird geprueft, nicht angenommen.** Zum Schluss steht ein
+       `os.listdir`. Was dort noch liegt, steht in der Fehlermeldung.
+
+    Der lokale Node ohne direkt sichtbares Verzeichnis geht ueber den Agenten —
+    dieselbe Entscheidung, die `_agent` fuer jeden anderen Dateizugriff dieses
+    Moduls trifft. Der Wechsel war die einzige Stelle im Projekt, die den
+    Agenten nur bei *entfernten* Nodes kannte und lokal stillschweigend nichts
+    tat.
+
+    Rueckgabe ist die Zahl der entfernten Eintraege auf oberster Ebene, oder
+    ``None``, wenn der Agent geleert hat — der meldet keine Anzahl zurueck, und
+    eine erfundene Null waere schlechter als ein ehrliches "unbekannt".
+    """
+    from games.base import container_name_for
+
+    node = resolve_server_node(server, db)
+    entfernt = docker_service.remove(container_name_for(server.id), force=True, node=node)
+    if not entfernt.get("ok"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "server_container_remove_failed",
+                "message": "Der Container konnte nicht entfernt werden; das Serververzeichnis bleibt unangetastet.",
+            },
+        )
+
+    agent = _agent(server, db)
+    if agent is not None:
+        try:
+            agent.files_delete_server_root(_agent_key(server))
+            agent.files_ensure_server_root(_agent_key(server))
+        except NodeClientError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "server_root_wipe_failed",
+                    "message": exc.message or "Der Node-Agent konnte das Serververzeichnis nicht leeren.",
+                },
+            ) from exc
+        return None
+
+    wurzel = (server.install_dir or "").strip()
+    if not wurzel:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "server_root_wipe_failed",
+                "message": "Der Server hat kein Installationsverzeichnis.",
+            },
+        )
+    if not os.path.isdir(wurzel):
+        # Nichts zu leeren, aber der Bind-Mount braucht das Verzeichnis. Wuerde
+        # Docker es selbst anlegen, gehoerte es root — und der Spielprozess
+        # koennte nicht hineinschreiben.
+        os.makedirs(wurzel, mode=0o750, exist_ok=True)
+        return 0
+
+    geloescht = _leeren(wurzel)
+    if geloescht is None:
+        docker_service.repair_bind_mount_permissions(wurzel)
+        geloescht = _leeren(wurzel)
+    rest = sorted(os.listdir(wurzel))[:10]
+    if rest:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "server_root_wipe_failed",
+                "message": (
+                    "Das Serververzeichnis konnte nicht geleert werden. Uebrig: "
+                    + ", ".join(rest)
+                ),
+            },
+        )
+    return geloescht or 0
+
+
+def _leeren(wurzel: str) -> int | None:
+    """Loescht den Inhalt eines Verzeichnisses. ``None`` heisst: etwas ging schief.
+
+    Bewusst ohne `ignore_errors` — der ganze Zweck dieses Moduls ist, dass ein
+    misslungenes Loeschen sichtbar wird. Der Aufrufer repariert dann die Rechte
+    und laesst es erneut laufen, so wie `write_server_text` es bei einem
+    `PermissionError` schon immer tut.
+    """
+    import shutil
+
+    anzahl = 0
+    fehler = False
+    for name in os.listdir(wurzel):
+        pfad = os.path.join(wurzel, name)
+        try:
+            if os.path.isdir(pfad) and not os.path.islink(pfad):
+                shutil.rmtree(pfad)
+            else:
+                os.remove(pfad)
+            anzahl += 1
+        except OSError:
+            fehler = True
+    return None if fehler else anzahl
+
+
 def list_server_directory(
     db: Session, *, server_id: int, relative_path: str = "", limit: int | None = None
 ) -> dict:

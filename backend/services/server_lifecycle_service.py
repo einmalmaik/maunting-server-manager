@@ -1179,7 +1179,8 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
     2. Neuer Blueprint MUSS existieren.
     3. MANDATORY CENTRAL BACKUP: Erstellt IMMER ein Backup ueber backup_orchestrator.create_server_backup().
        Schlaegt das Backup fehl, wird abgebrochen.
-    4. Alte Spieldateien in install_dir bereinigen (Clean Wipe).
+    4. Alte Spieldateien bereinigen — **nachweislich**. Bleibt etwas liegen,
+       bricht der Wechsel ab, statt Erfolg zu melden (siehe `wipe_server_root`).
     5. Blueprint / game_type in DB aktualisieren & Ports neu zuweisen.
     6. Re-Installation des neuen Blueprints ausloesen.
     """
@@ -1230,24 +1231,28 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
             },
         )
 
-    # 2. Alte Spieldateien in install_dir reinigen
-    try:
-        target_node = server.node
-        if target_node is not None and not target_node.is_local:
-            from services.node_client import NodeClient
-            NodeClient.from_node(target_node).files_delete_server_root(server.id)
-        elif server.install_dir and os.path.exists(server.install_dir):
-            for item in os.listdir(server.install_dir):
-                item_path = os.path.join(server.install_dir, item)
-                if os.path.isdir(item_path):
-                    shutil.rmtree(item_path, ignore_errors=True)
-                else:
-                    try:
-                        os.remove(item_path)
-                    except Exception:
-                        pass
-    except Exception as exc:
-        logger.warning("Datei-Reinigung vor Blueprint-Wechsel fuer Server ID=%s: %s", server.id, exc)
+    # 2. Alte Spieldateien reinigen — und zwar nachweislich.
+    #
+    # Hier stand frueher ein Block, der `os.path.exists`, `os.listdir`,
+    # `os.remove` und `shutil.rmtree` benutzte. **Dieses Modul hat `os` und
+    # `shutil` nie importiert.** Der lokale Zweig lief also in einen `NameError`,
+    # noch bevor er die erste Datei ansah — und ein `except Exception` darum
+    # herum machte daraus eine Zeile im Log. Der Wechsel meldete danach
+    # "Blueprint erfolgreich gewechselt".
+    #
+    # Auf jedem lokalen Node hat der Wechsel damit **noch nie** eine Datei
+    # geloescht. Aufgefallen ist es erst, als ein Minecraft-Server nach dem
+    # Versionswechsel den Start mit "world was created in a different version"
+    # verweigerte: die alte Welt lag unberuehrt da.
+    #
+    # `wipe_server_root` raeumt den Container ab, loescht ohne
+    # Fehlerunterdrueckung, repariert bei Bedarf die Dateirechte (Container legen
+    # ihre Daten unter eigener UID an) und prueft zum Schluss nach. Scheitert es,
+    # endet der Wechsel hier — gefahrlos, denn das Pflicht-Backup aus Schritt 1
+    # liegt bereits vor und `game_type` ist noch unveraendert.
+    from services.server_file_access_service import wipe_server_root
+
+    files_removed = wipe_server_root(db, server)
 
     # 3. Game Type / Blueprint ID im Server Model aktualisieren
     server.game_type = new_blueprint_id
@@ -1300,5 +1305,10 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
         "old_blueprint": old_game_type,
         "new_blueprint": new_blueprint_id,
         "backup_id": getattr(backup_record, "id", None),
+        # Wieviele Eintraege der oberen Ebene entfernt wurden — `None`, wenn der
+        # Node-Agent geleert hat und keine Zahl meldet. Steht hier, damit die
+        # Oberflaeche und die KI das Aufraeumen **belegen** koennen statt es zu
+        # behaupten: genau diese Behauptung war der Betriebsfehler.
+        "files_removed": files_removed,
         "status": server.status,
     }
