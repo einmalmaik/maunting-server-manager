@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, Brain, BrainCircuit, Check, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
+import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -154,12 +155,40 @@ export function AiChat() {
     [providers],
   )
 
+  /** Hochgeladen, aber noch nicht abgeschickt — die Chips über dem Eingabefeld. */
+  const offeneAnhaenge = useMemo(
+    () => attachments.filter((item) => item.message_id === null),
+    [attachments],
+  )
+
+  /** Anhänge nach der Nachricht, mit der sie gesendet wurden. */
+  const anhaengeJeNachricht = useMemo(() => {
+    const karte = new Map<string, AiAttachment[]>()
+    for (const item of attachments) {
+      if (!item.message_id) continue
+      const liste = karte.get(item.message_id)
+      if (liste) liste.push(item)
+      else karte.set(item.message_id, [item])
+    }
+    return karte
+  }, [attachments])
+
   const uploadAttachment = useCallback(async (file: File | undefined) => {
     if (!file || streaming || uploading) return
     setUploading(true)
     try {
       const created = await aiApi.uploadAttachment(file)
-      if (mountedRef.current) setAttachments((current) => [...current, created])
+      // Nach Kennung einsetzen statt anhaengen: das Nachladen nach dem Absenden
+      // (siehe `message`-Ereignis) kann eine Antwort ueberholen, die noch
+      // unterwegs war. Beim blossen Anhaengen stuende die Datei dann zweimal in
+      // der Liste — React beschwert sich ueber den doppelten Key, und der
+      // Benutzer sieht einen Anhang, den er nur einmal hochgeladen hat.
+      if (mountedRef.current) {
+        setAttachments((current) => [
+          ...current.filter((item) => item.id !== created.id),
+          created,
+        ])
+      }
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.attachments.error'))
     } finally {
@@ -261,9 +290,13 @@ export function AiChat() {
    * `optimistischeId` ist die Blase, die beim Senden schon steht, bevor der
    * Server seine eigene ID vergeben hat. Beim Anhaengen gibt es sie nicht.
    */
-  const machVerarbeiter = useCallback((optimistischeId: string | null) => {
+  const machVerarbeiter = useCallback((
+    optimistischeId: string | null,
+    optimistischeBenutzerId: string | null = null,
+  ) => {
     let aktuell: string | null = optimistischeId
     let offeneOptimistische = optimistischeId !== null
+    let offeneBenutzerblase = optimistischeBenutzerId
     let gescheitert = false
 
     const verarbeite = ({ event: name, data }: AiStreamEvent) => {
@@ -331,6 +364,27 @@ export function AiChat() {
         return
       }
       if (name === 'message') {
+        // Die Benutzerblase steht optimistisch mit einer erfundenen ID da.
+        // Sie hier zu berichtigen ist keine Kosmetik: die Anhaenge dieser Frage
+        // sind serverseitig an die **echte** Nachricht gebunden und fanden ihre
+        // Blase sonst nie.
+        if (offeneBenutzerblase && data.user_message_id) {
+          const echteId = data.user_message_id
+          const alteId = offeneBenutzerblase
+          setEntries((current) => current.map((entry) => (
+            entry.kind === 'message' && entry.id === alteId
+              ? { ...entry, id: echteId, message: { ...entry.message, id: echteId } }
+              : entry
+          )))
+          offeneBenutzerblase = null
+          // Jetzt tragen die Anhaenge eine Nachricht — nachladen, damit sie aus
+          // der Chipleiste in ihre Blase wandern.
+          if (canAttach) {
+            void aiApi.listAttachments()
+              .then((rows) => { if (mountedRef.current) setAttachments(rows) })
+              .catch(() => undefined)
+          }
+        }
         if (offeneOptimistische && optimistischeId) {
           // Ab hier kennt der Server die Nachricht unter seiner eigenen ID.
           const neueId = data.message_id
@@ -398,7 +452,7 @@ export function AiChat() {
       }
     }
     return { verarbeite, istGescheitert: () => gescheitert }
-  }, [aendere, merkeVorschlag, providerId, t])
+  }, [aendere, canAttach, merkeVorschlag, providerId, t])
 
   /**
    * Verfolgt einen Lauf, bis er ruht — oder bis der Benutzer weggeht.
@@ -409,10 +463,11 @@ export function AiChat() {
   const verfolge = useCallback(async (
     beginne: (verarbeite: (event: AiStreamEvent) => void, signal: AbortSignal) => Promise<void>,
     optimistischeId: string | null,
+    optimistischeBenutzerId: string | null = null,
   ) => {
     const controller = new AbortController()
     abortRef.current = controller
-    const { verarbeite, istGescheitert } = machVerarbeiter(optimistischeId)
+    const { verarbeite, istGescheitert } = machVerarbeiter(optimistischeId, optimistischeBenutzerId)
     let abgebrochen = false
     try {
       await beginne(verarbeite, controller.signal)
@@ -486,6 +541,7 @@ export function AiChat() {
           reasoning,
         }, verarbeite, signal),
         assistantId,
+        optimisticUser.id,
       )
     } finally {
       streamingRef.current = false
@@ -744,6 +800,14 @@ export function AiChat() {
                           <p className="whitespace-pre-wrap break-words text-sm leading-6 text-on-surface">
                             {message.content}
                           </p>
+                          {/* Die Anhaenge stehen **in** der Nachricht, mit der
+                              sie gesendet wurden. Vorher hingen sie nur an der
+                              Unterhaltung: nach einem Neuladen war nicht mehr
+                              erkennbar, zu welcher Frage sie gehoerten. */}
+                          <AnhangListe
+                            anhaenge={anhaengeJeNachricht.get(message.id) ?? []}
+                            t={t}
+                          />
                         </div>
                       </>
                     )}
@@ -814,9 +878,12 @@ export function AiChat() {
           <AiMemoryNotice onAnswered={() => setMemoryNoticeDue(false)} />
         )}
         <div className="mx-auto w-full max-w-3xl">
-          {attachments.length > 0 && (
+          {/* Nur Ungesendetes: alles Uebrige steht in seiner Nachricht. Vorher
+              blieb jeder Anhang hier stehen und ging bei jeder Folgefrage
+              erneut an den Anbieter. */}
+          {offeneAnhaenge.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2" aria-label={t('ai.attachments.list')}>
-              {attachments.map((attachment) => (
+              {offeneAnhaenge.map((attachment) => (
                 <span
                   key={attachment.id}
                   className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container-high px-2.5 py-1 text-xs text-on-surface-variant"
@@ -914,6 +981,33 @@ export function AiChat() {
  * Beide Listen sind bereits nach `created_at` sortiert; hier werden sie nur
  * zusammengefuehrt. Ein Vorschlag steht damit dort, wo er entstanden ist.
  */
+/**
+ * Die Anhänge einer Nachricht, unter ihrem Text.
+ *
+ * Zeigt auch, wenn beim Aufnehmen etwas unkenntlich gemacht wurde. Vorher wurde
+ * eine Datei mit einem Tokenmuster komplett abgewiesen — bei echten Serverlogs
+ * passiert das ständig. Jetzt wird redigiert, und der Hinweis hier ist der
+ * Grund, warum niemand sich über ein `[REDACTED]` im eigenen Log wundern muss.
+ */
+function AnhangListe({ anhaenge, t }: { anhaenge: AiAttachment[]; t: TFunction }) {
+  if (anhaenge.length === 0) return null
+  return (
+    <ul className="mt-2 space-y-1 border-t border-primary/20 pt-2">
+      {anhaenge.map((anhang) => (
+        <li key={anhang.id} className="flex items-center gap-1.5 text-xs text-on-surface-variant">
+          <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span className="truncate">{anhang.original_name}</span>
+          {anhang.redacted_spans ? (
+            <span className="shrink-0 rounded-full border border-outline-variant/50 px-1.5 py-0.5 text-[10px]">
+              {t('ai.attachments.redacted', { count: anhang.redacted_spans })}
+            </span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function mergeEntries(messages: AiMessage[], proposals: AiActionProposal[]): Entry[] {
   const merged: Entry[] = [
     ...messages.map((message) => ({ kind: 'message' as const, id: message.id, message })),

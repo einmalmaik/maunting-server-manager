@@ -5,7 +5,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from models import AiAttachment, AiConversation, Role, RolePermission, User
+from models import AiAttachment, AiConversation, AiMessage, Role, RolePermission, User
 from services.ai_context_service import build_provider_messages
 from services.role_service import set_user_roles
 
@@ -61,27 +61,79 @@ def test_text_attachment_is_encrypted_and_added_as_untrusted_context(
     assert "Server started successfully" in context
 
 
-def test_secret_and_archive_payloads_are_rejected_without_storage(
+def test_a_secret_is_redacted_instead_of_refusing_the_whole_file(
     client: TestClient,
     db: Session,
     regular_user: User,
     user_cookies: dict,
 ) -> None:
+    """Ein Log mit einem Tokenmuster wird angenommen — redigiert.
+
+    Hier stand vorher das Gegenteil: die Datei wurde komplett mit
+    `AI_ATTACHMENT_SECRET_DETECTED` zurueckgewiesen. Bei echten Serverlogs
+    passiert das staendig, und der Benutzer stand vor einer Datei, die er von
+    Hand haette saeubern muessen, um Hilfe zu bekommen.
+
+    Am Schutz aendert sich nichts: gespeichert wird ausschliesslich der
+    redigierte Text — das Geheimnis erreicht weder die Datenbank noch den
+    Anbieter. Der Unterschied ist, dass der Benutzer davon **erfaehrt**
+    (`redacted_spans`), statt abgewiesen zu werden.
+    """
+    import base64
+
+    from services.ai_attachment_service import _aad
+    from services.dis_client import DisClient
+
     _enable_attachments(db, regular_user)
     conversation = _conversation(db, regular_user)
-    secret = client.post(
+    del conversation
+    antwort = client.post(
         "/api/ai/conversation/attachments",
-        files={"file": ("server.cfg", b"password=never-store-this", "text/plain")},
+        files={"file": (
+            "latest.log",
+            b"[12:00:00] Server gestartet\n[12:00:01] password=never-store-this\n",
+            "text/plain",
+        )},
         cookies=user_cookies, headers=_csrf(user_cookies),
     )
+
+    assert antwort.status_code == 201
+    assert antwort.json()["redacted_spans"] == 1
+    row = db.query(AiAttachment).one()
+    text = DisClient.decrypt(row.extracted_text_encrypted, aad=_aad(row.id, "text"))
+    assert "never-store-this" not in text
+    assert "[REDACTED]" in text
+    # Auch der Rohinhalt traegt das Geheimnis nicht mehr — es waere sonst nur an
+    # einer Stelle abgelegt, an die niemand mehr denkt.
+    roh = base64.b64decode(
+        DisClient.decrypt(row.content_encrypted, aad=_aad(row.id, "content"))
+    ).decode("utf-8")
+    assert "never-store-this" not in roh
+    # Und der Rest des Logs ist unbeschaedigt da — genau dafuer wurde er
+    # hochgeladen.
+    assert "Server gestartet" in text
+
+
+def test_archive_payloads_are_still_rejected_without_storage(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+) -> None:
+    """Ein als Text getarntes Archiv bleibt abgewiesen.
+
+    Anders als ein Geheimnis laesst sich ein Archiv nicht redigieren — hier gibt
+    es nichts, was man dem Modell zeigen koennte.
+    """
+    _enable_attachments(db, regular_user)
+    conversation = _conversation(db, regular_user)
+    del conversation
     archive = client.post(
         "/api/ai/conversation/attachments",
         files={"file": ("disguised.txt", b"PK\x03\x04payload", "text/plain")},
         cookies=user_cookies, headers=_csrf(user_cookies),
     )
 
-    assert secret.status_code == 422
-    assert secret.json()["detail"]["code"] == "AI_ATTACHMENT_SECRET_DETECTED"
     assert archive.status_code == 422
     assert archive.json()["detail"]["code"] == "AI_ATTACHMENT_ARCHIVE_BLOCKED"
     assert db.query(AiAttachment).count() == 0
@@ -218,3 +270,124 @@ def test_attachment_text_is_never_sent_with_system_authority(
     assert len(messages) == 1
     assert messages[0]["role"] == "user"
     assert "Unvertrauenswuerdiger Textanhang" in messages[0]["content"]
+
+
+def _message(db: Session, conversation: AiConversation, role: str, content: str) -> AiMessage:
+    row = AiMessage(
+        id=str(uuid4()),
+        conversation_id=conversation.id,
+        role=role,
+        content=content,
+        status="complete",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def test_an_attachment_belongs_to_exactly_one_message(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+) -> None:
+    """Ein Anhang wird beim Absenden festgenagelt — und bleibt dort.
+
+    Vorher hing er nur an der Unterhaltung. Wer ein Log anhaengte und danach
+    drei Dinge fragte, schickte dieselbe Datei viermal an den Anbieter, und nach
+    dem Neuladen war nicht mehr erkennbar, zu welcher Frage sie gehoert hatte.
+
+    Zwei Zusagen zusammen: das Binden nimmt genau die ungebundenen mit, und ein
+    zweites Binden findet nichts mehr vor.
+    """
+    from services.ai_attachment_service import bind_to_message, provider_attachment_messages
+
+    _enable_attachments(db, regular_user)
+    conversation = _conversation(db, regular_user)
+    client.post(
+        "/api/ai/conversation/attachments",
+        files={"file": ("latest.log", b"Server started successfully\n", "text/plain")},
+        cookies=user_cookies, headers=_csrf(user_cookies),
+    )
+
+    frage = _message(db, conversation, "user", "Warum startet der Server nicht?")
+    assert bind_to_message(
+        db, conversation_id=conversation.id, user_id=regular_user.id, message_id=frage.id
+    ) == 1
+    db.commit()
+    _message(db, conversation, "assistant", "Der Port ist belegt.")
+    zweite = _message(db, conversation, "user", "Und wie behebe ich das?")
+    # Die zweite Frage findet nichts Ungebundenes mehr vor: der Anhang ist
+    # vergeben, nicht wieder freigegeben.
+    assert bind_to_message(
+        db, conversation_id=conversation.id, user_id=regular_user.id, message_id=zweite.id
+    ) == 0
+    db.commit()
+
+    row = db.query(AiAttachment).one()
+    assert row.message_id == frage.id
+    # Solange die Frage im Kontextfenster steht, geht ihr Anhang mit — das
+    # Modell soll die Datei ja weiter vor sich haben.
+    context = str(build_provider_messages(db, conversation))
+    assert "Server started successfully" in context
+    # Faellt sie heraus, geht er mit. Frueher blieb er als eine der letzten
+    # fuenf der Unterhaltung haengen, losgeloest von jeder Nachricht.
+    ohne_frage = provider_attachment_messages(
+        db, conversation.id, regular_user.id, [zweite.id]
+    )
+    assert ohne_frage == []
+
+
+def test_truncating_the_history_takes_the_attachments_with_it(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+) -> None:
+    """Wer eine Frage zurueckzieht, zieht ihre Datei mit zurueck.
+
+    Bliebe der Anhang liegen, waere er wieder ungebunden — und ein ungebundener
+    Anhang gilt als "noch nicht gesendet". Die Datei aus der verworfenen Frage
+    haengte sich an die naechste und tauchte in einem Zusammenhang auf, in dem
+    sie niemand angefordert hat.
+    """
+    from services.ai_attachment_service import bind_to_message
+    from services.ai_chat_service import truncate_from
+
+    _enable_attachments(db, regular_user)
+    conversation = _conversation(db, regular_user)
+
+    client.post(
+        "/api/ai/conversation/attachments",
+        files={"file": ("alt.log", b"Erste Datei\n", "text/plain")},
+        cookies=user_cookies, headers=_csrf(user_cookies),
+    )
+    bleibt = _message(db, conversation, "user", "Erste Frage")
+    bind_to_message(
+        db, conversation_id=conversation.id, user_id=regular_user.id, message_id=bleibt.id
+    )
+    db.commit()
+    _message(db, conversation, "assistant", "Erste Antwort")
+
+    client.post(
+        "/api/ai/conversation/attachments",
+        files={"file": ("neu.log", b"Zweite Datei\n", "text/plain")},
+        cookies=user_cookies, headers=_csrf(user_cookies),
+    )
+    zurueckgenommen = _message(db, conversation, "user", "Zweite Frage")
+    bind_to_message(
+        db, conversation_id=conversation.id, user_id=regular_user.id,
+        message_id=zurueckgenommen.id,
+    )
+    db.commit()
+    _message(db, conversation, "assistant", "Zweite Antwort")
+    assert db.query(AiAttachment).count() == 2
+
+    truncate_from(db, conversation, zurueckgenommen)
+    db.commit()
+
+    uebrig = db.query(AiAttachment).all()
+    # Nur der Anhang der weggeschnittenen Frage ist weg — der davor gehoert zu
+    # einer Nachricht, die es weiterhin gibt.
+    assert [row.message_id for row in uebrig] == [bleibt.id]

@@ -35,10 +35,26 @@ _PRIVATE_KEY_RE = re.compile(
 )
 
 
+def redact_and_count(value: str) -> tuple[str, int]:
+    """Wie `redact_sensitive_text`, aber sagt auch, wie oft es zugeschlagen hat.
+
+    Die Zahl braucht, wer den Benutzer unterrichten will statt ihn abzuweisen.
+    Bei Anhaengen ist genau das der Unterschied: ein Serverlog enthaelt fast
+    immer irgendwo ein Tokenmuster, und "abgelehnt" hilft niemandem weiter —
+    "drei Stellen unkenntlich gemacht" schon.
+
+    Gezaehlt werden Ersetzungen, nicht Geheimnisse. Ein und dasselbe Passwort,
+    das zehnmal im Log steht, zaehlt zehnmal; das ist fuer den Zweck — "hier
+    wurde etwas veraendert, sieh es dir an" — die brauchbarere Zahl.
+    """
+    text, a = _PRIVATE_KEY_RE.subn("[REDACTED_PRIVATE_KEY]", value)
+    text, b = _AUTHORIZATION_BEARER_RE.subn("Authorization=[REDACTED]", text)
+    text, c = _SECRET_ASSIGNMENT_RE.subn(lambda match: f"{match.group(1)}=[REDACTED]", text)
+    text, d = _BEARER_RE.subn("Bearer [REDACTED]", text)
+    text, e = _KNOWN_TOKEN_RE.subn("[REDACTED_TOKEN]", text)
+    return text, a + b + c + d + e
+
+
 def redact_sensitive_text(value: str) -> str:
     """Entfernt typische Credentials vor Persistenz und Providertransfer."""
-    text = _PRIVATE_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", value)
-    text = _AUTHORIZATION_BEARER_RE.sub("Authorization=[REDACTED]", text)
-    text = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", text)
-    text = _BEARER_RE.sub("Bearer [REDACTED]", text)
-    return _KNOWN_TOKEN_RE.sub("[REDACTED_TOKEN]", text)
+    return redact_and_count(value)[0]

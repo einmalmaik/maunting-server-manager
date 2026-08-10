@@ -296,14 +296,46 @@ def test_a_bind_ip_that_is_not_on_this_host_is_rejected(
         _propose_bind_ip(db, regular_user, server, "192.168.99.99")
 
 
-def test_a_bind_ip_update_is_never_autonomous(
+def test_a_bind_ip_update_asks_when_no_grant_was_given(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Auch mit erteilter Freigabe bleibt eine Netzwerkaenderung bestaetigungspflichtig.
+    """Ohne Freigabe fragt die Netzwerkaenderung — das ist der Normalfall.
 
     Sie startet den Container neu und kann bei falscher Adresse dazu fuehren,
-    dass niemand mehr auf den Server kommt — das ist keine Aktion, die ohne
-    einen Menschen laufen darf.
+    dass niemand mehr auf den Server kommt. Autonomie ist deshalb nichts, was
+    ein Werkzeug an sich hat, sondern etwas, das ein Mensch fuer diesen
+    Benutzer und diesen Server ausdruecklich erteilt.
+    """
+    server = _server(db, "ohne-freigabe", bind_ip="172.17.0.9")
+    _allow(db, regular_user, server, "server.view", "server.network.manage")
+
+    class _Interface:
+        ip = "192.168.1.50"
+
+    monkeypatch.setattr(
+        "services.network_interfaces_service.list_host_interfaces", lambda: [_Interface()]
+    )
+
+    proposal = _propose_bind_ip(db, regular_user, server, "192.168.1.50")
+
+    assert proposal.autonomous is False
+    assert proposal.requires_confirmation is True
+
+
+def test_a_bind_ip_update_runs_through_under_a_grant(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mit Freigabe laeuft sie durch — hier stand vorher das Gegenteil.
+
+    Vorgabe des Betreibers: im autonomen Modus wird alles bestaetigt ausser
+    Loeschvorgaengen. Das Kriterium der Sperre ist **Unumkehrbarkeit**, nicht
+    Risiko. Eine falsche Bind-IP stellt man zurueck — und das kann die KI im
+    selben Zug selbst; ein ueberschriebener Spielstand ist weg.
+
+    Die Gegenprobe steht bewusst hier am vollen Vorschlagspfad und nicht nur an
+    `autonomy_allows`: zwischen Werkzeugtabelle und fertigem Vorschlag liegen
+    Rechtepruefung, Kontingent und Vorschau, und jede davon koennte die
+    Freigabe wieder einkassieren.
     """
     from services import ai_autonomy_service
 
@@ -325,8 +357,8 @@ def test_a_bind_ip_update_is_never_autonomous(
 
     proposal = _propose_bind_ip(db, regular_user, server, "192.168.1.50")
 
-    assert proposal.autonomous is False
-    assert proposal.requires_confirmation is True
+    assert proposal.autonomous is True
+    assert proposal.requires_confirmation is False
 
 
 def test_a_bind_ip_update_needs_the_network_permission(

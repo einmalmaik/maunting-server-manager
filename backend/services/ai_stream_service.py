@@ -32,7 +32,7 @@ from models import (
 )
 from models.ai_run import BEENDET as AUSGELAUFEN
 from services.ai_chat_service import get_owned_conversation
-from services import ai_run_broker, ai_run_service, audit_service
+from services import ai_attachment_service, ai_run_broker, ai_run_service, audit_service
 from services.ai_action_errors import (
     AiActionStateError,
     AiActionValidationError,
@@ -774,7 +774,17 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     ai_run_broker.veroeffentlichen(
         run_id,
         "message",
-        {"message_id": message_id, "request_id": vorbereitung.request_id, "run_id": run_id},
+        {
+            "message_id": message_id,
+            "request_id": vorbereitung.request_id,
+            "run_id": run_id,
+            # Die Kennung der **Benutzer**nachricht dieses Laufs. Die Oberflaeche
+            # stellt eine Blase optimistisch dar, bevor der Server eine ID
+            # vergeben hat; ohne diesen Wert traegt sie fuer immer eine
+            # erfundene, und die Anhaenge dieser Frage fanden ihre Nachricht
+            # nicht.
+            "user_message_id": zustand.get("user_message_id"),
+        },
     )
 
     chunks: list[str] = []
@@ -1119,13 +1129,22 @@ def lauf_beginnen(
             db, conversation_id=conversation.id
         )
 
+        benutzernachricht_id = str(uuid4())
         db.add(AiMessage(
-            id=str(uuid4()),
+            id=benutzernachricht_id,
             conversation_id=conversation.id,
             role="user",
             content=safe_content,
             status="complete",
         ))
+        # Hochgeladene Anhaenge gehoeren ab jetzt zu **dieser** Frage. Vorher
+        # hingen sie nur an der Unterhaltung: sie blieben als Chip stehen und
+        # gingen bei jeder weiteren Frage erneut mit, bis sie aus den letzten
+        # fuenf herausfielen.
+        ai_attachment_service.bind_to_message(
+            db, conversation_id=conversation.id, user_id=user.id,
+            message_id=benutzernachricht_id,
+        )
         db.flush()
         provider_messages = build_provider_messages(db, conversation, query=safe_content)
         estimated_tokens = estimate_reserved_tokens(provider_messages)
@@ -1152,7 +1171,11 @@ def lauf_beginnen(
         ))
         conversation.updated_at = datetime.now(timezone.utc)
 
-        zustand = ai_run_service.leerer_zustand(provider_messages, request_id=str(request_id))
+        zustand = ai_run_service.leerer_zustand(
+            provider_messages,
+            request_id=str(request_id),
+            user_message_id=benutzernachricht_id,
+        )
         zustand["usage_event_id"] = usage_event.id
         zustand["tool_signatures"] = geerbte_signaturen
         run = ai_run_service.lauf_anlegen(

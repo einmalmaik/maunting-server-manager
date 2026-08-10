@@ -67,9 +67,17 @@ def _jetzt() -> datetime:
 # eigentliche Grund, warum eine Fortsetzung unmoeglich war.
 
 
-def leerer_zustand(provider_messages: list[dict], *, request_id: str) -> dict:
+def leerer_zustand(
+    provider_messages: list[dict], *, request_id: str, user_message_id: str | None = None
+) -> dict:
     return {
         "provider_messages": provider_messages,
+        # Die Nachricht des Menschen, die diesen Lauf ausgeloest hat. Sie steht
+        # hier, weil die Oberflaeche ihre Blase optimistisch zeichnet, bevor der
+        # Server eine Kennung vergeben hat — ohne diesen Wert traegt sie fuer
+        # immer eine erfundene, und die Anhaenge dieser Frage finden ihre
+        # Nachricht nicht.
+        "user_message_id": user_message_id,
         # Budgetzaehler ueber den **ganzen** Lauf, nicht je Segment. Sonst
         # bekaeme ein Lauf durch jede Bestaetigung ein frisches Budget geschenkt.
         "rounds": 0,

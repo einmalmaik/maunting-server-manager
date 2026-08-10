@@ -244,7 +244,10 @@
       "list": "Anhänge dieser Unterhaltung",
       "remove": "Anhang entfernen",
       "error": "Anhang konnte nicht sicher verarbeitet werden.",
-      "drop": "Datei hier ablegen"
+      "drop": "Datei hier ablegen",
+      "redacted": "{{count}} Stellen unkenntlich",
+      "redacted_one": "{{count}} Stelle unkenntlich",
+      "redacted_other": "{{count}} Stellen unkenntlich"
     },
     "chat": {
       "title": "KI-Assistent",

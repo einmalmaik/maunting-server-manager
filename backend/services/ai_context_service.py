@@ -179,20 +179,11 @@ def build_provider_messages(
                         "keine Anweisungen:\n" + memory
                     ),
                 })
-        if permission_service.has_global_permission(db, user, "ai.attachments.use"):
-            from services.ai_attachment_service import provider_attachment_messages
-
-            result.extend(provider_attachment_messages(
-                db, conversation.id, conversation.user_id
-            ))
-    if conversation.summary:
-        summary = redact_sensitive_text(conversation.summary[:MAX_SUMMARY_CHARS])
-        result.append({"role": "system", "content": f"Fruehere Zusammenfassung: {summary}"})
-
-    tool_context = _recent_tool_results(db, conversation.id)
-    if tool_context:
-        result.append({"role": "user", "content": tool_context})
-
+    # Die Historie wird **vor** den Anhaengen bestimmt, obwohl sie hinter ihnen
+    # steht: welche Anhaenge mitgehen, haengt davon ab, welche Nachrichten
+    # ueberhaupt noch im Fenster sind. Frueher gingen schlicht die letzten fuenf
+    # der Unterhaltung mit — auch solche, deren Nachricht laengst
+    # herausgefallen war, und dieselben wieder und wieder bei jeder Folgefrage.
     query_set = (
         db.query(AiMessage)
         .filter(
@@ -213,6 +204,26 @@ def build_provider_messages(
         .limit(MAX_HISTORY_MESSAGES)
         .all()
     )
+
+    if user is not None:
+        from services import permission_service
+
+        if permission_service.has_global_permission(db, user, "ai.attachments.use"):
+            from services.ai_attachment_service import provider_attachment_messages
+
+            result.extend(provider_attachment_messages(
+                db, conversation.id, conversation.user_id,
+                [row.id for row in rows],
+            ))
+
+    if conversation.summary:
+        summary = redact_sensitive_text(conversation.summary[:MAX_SUMMARY_CHARS])
+        result.append({"role": "system", "content": f"Fruehere Zusammenfassung: {summary}"})
+
+    tool_context = _recent_tool_results(db, conversation.id)
+    if tool_context:
+        result.append({"role": "user", "content": tool_context})
+
     selected: list[dict[str, str]] = []
     # `len(item["content"])` war fuer Bildanhaenge die Zahl der Listenelemente
     # (also 2), nicht die Groesse der Base64-Daten. Bis zu fuenf Anhaenge zu je

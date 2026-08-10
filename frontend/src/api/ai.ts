@@ -229,11 +229,29 @@ export interface AiAttachment {
   size_bytes: number
   status: 'quarantined' | 'ready' | 'rejected'
   rejection_code: string | null
+  /**
+   * Die Nachricht, mit der dieser Anhang abgeschickt wurde.
+   *
+   * `null` heißt: hochgeladen, aber noch nicht gesendet. Genau daran hängt die
+   * Darstellung — Ungesendetes steht als Chip über dem Eingabefeld, alles
+   * andere in seiner Nachricht.
+   */
+  message_id: string | null
+  /** Wie viele Stellen beim Aufnehmen unkenntlich gemacht wurden. */
+  redacted_spans: number | null
   created_at: string
 }
 
 export type AiStreamEvent =
-  | { event: 'message'; data: { message_id: string; request_id: string } }
+  | {
+      event: 'message'
+      data: {
+        message_id: string
+        request_id: string
+        /** Die Kennung der Benutzernachricht — ersetzt die optimistisch vergebene. */
+        user_message_id?: string | null
+      }
+    }
   | { event: 'delta'; data: { content: string } }
   // Denkschritte. Eigenes Ereignis, damit die Oberflaeche sie einklappen kann
   // und niemand sie fuer die Antwort haelt.

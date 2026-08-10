@@ -133,8 +133,22 @@ def truncate_from(db: Session, conversation: AiConversation, message: AiMessage)
     betroffen sind.
     """
     from models import AiActionProposal, AiToolResult
+    from services import ai_attachment_service
 
     cutoff = message.created_at
+    # Erst die Kennungen holen, dann loeschen: danach ist nicht mehr
+    # feststellbar, welche Anhaenge zu den verschwundenen Nachrichten gehoerten.
+    # Blieben sie ungebunden liegen, gaelten sie als "noch nicht gesendet" und
+    # haengten sich an die **naechste** Frage — eine Datei aus einer
+    # zurueckgenommenen Bitte taucht dann in einem Zusammenhang wieder auf, in
+    # dem sie niemand angefordert hat.
+    betroffene = [
+        row[0] for row in db.query(AiMessage.id).filter(
+            AiMessage.conversation_id == conversation.id,
+            AiMessage.created_at >= cutoff,
+        ).all()
+    ]
+    ai_attachment_service.drop_for_messages(db, betroffene)
     removed = (
         db.query(AiMessage)
         .filter(

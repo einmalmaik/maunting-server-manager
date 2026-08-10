@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from models import AiAttachment, AiConversation, User
 from services import audit_service
 from services.ai_chat_service import get_owned_conversation
-from services.ai_redaction import redact_sensitive_text
+from services.ai_redaction import redact_and_count
 from services.dis_client import DisClient
 
 
@@ -155,34 +155,56 @@ def create_attachment(
         raise AttachmentRejected("AI_ATTACHMENT_TYPE_MISMATCH")
     attachment_id = str(uuid4())
     extracted: str | None = None
+    redigiert = 0
     if suffix in TEXT_TYPES:
         if b"\x00" in data:
             raise AttachmentRejected("AI_ATTACHMENT_CONTENT_INVALID")
         try:
-            extracted = data.decode("utf-8")
+            roh = data.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise AttachmentRejected("AI_ATTACHMENT_CONTENT_INVALID") from exc
-        if redact_sensitive_text(extracted) != extracted:
-            raise AttachmentRejected("AI_ATTACHMENT_SECRET_DETECTED")
+        # **Redigieren statt abweisen.** Hier stand vorher ein
+        # `AI_ATTACHMENT_SECRET_DETECTED`, das die ganze Datei zurueckwies,
+        # sobald irgendwo ein Tokenmuster auftauchte. Bei echten Serverlogs
+        # passiert das staendig, und der Benutzer stand vor einer Datei, die er
+        # von Hand haette saeubern muessen, um Hilfe zu bekommen.
+        #
+        # Am Schutz aendert das nichts: gespeichert und an den Anbieter geschickt
+        # wird ausschliesslich der redigierte Text — dasselbe, was mit Servertext
+        # aus `read_server_logs` seit jeher geschieht. Der Unterschied ist nur,
+        # ob der Benutzer davon erfaehrt oder abgewiesen wird.
+        extracted, redigiert = redact_and_count(roh)
     else:
         _validate_image(data, suffix)
     row = AiAttachment(
         id=attachment_id, conversation_id=conversation.id, user_id=user.id,
         original_name=safe_name, media_type=expected_type, size_bytes=len(data),
         sha256=hashlib.sha256(data).hexdigest(),
+        # Der Rohinhalt bleibt fuer Bilder erhalten; bei Text wird der
+        # **redigierte** Stand abgelegt. Das Original zu behalten hiesse, das
+        # Geheimnis doch zu speichern — nur an einer Stelle, an die niemand mehr
+        # denkt.
         content_encrypted=DisClient.encrypt(
-            base64.b64encode(data).decode("ascii"), aad=_aad(attachment_id, "content")
+            base64.b64encode(
+                extracted.encode("utf-8") if extracted is not None else data
+            ).decode("ascii"),
+            aad=_aad(attachment_id, "content"),
         ),
         extracted_text_encrypted=(
             DisClient.encrypt(extracted, aad=_aad(attachment_id, "text"))
             if extracted is not None else None
         ),
+        redacted_spans=redigiert or None,
         status="ready",
     )
     db.add(row)
     audit_service.record_privileged_action(
         db, user_id=user.id, action="ai.attachment.accepted", target_type="ai_attachment",
-        target_id=row.id, details={"media_type": expected_type, "size_bytes": len(data)},
+        target_id=row.id,
+        details={
+            "media_type": expected_type, "size_bytes": len(data),
+            **({"redacted_spans": redigiert} if redigiert else {}),
+        },
         origin="direct",
     )
     db.commit()
@@ -213,14 +235,72 @@ def delete_owned(db: Session, user: User, attachment_id: str) -> None:
     db.commit()
 
 
-def provider_attachment_messages(
-    db: Session, conversation_id: str, user_id: int
-) -> list[dict]:
+def bind_to_message(db: Session, *, conversation_id: str, user_id: int, message_id: str) -> int:
+    """Haengt alle noch nicht gesendeten Anhaenge an diese Nachricht.
+
+    Gerufen beim Anlegen der Benutzernachricht in `lauf_beginnen`. Vorher hing
+    ein Anhang nur an der Unterhaltung — er blieb als Chip stehen und ging bei
+    jeder weiteren Frage erneut an den Anbieter, bis er aus den letzten fuenf
+    herausfiel. Wer ein Log anhaengt und danach drei Dinge fragt, bezahlte es
+    viermal.
+
+    Gebunden wird beim **Absenden**, nicht beim Hochladen: bis dahin kann der
+    Benutzer den Anhang noch entfernen oder es sich anders ueberlegen.
+    """
     rows = db.query(AiAttachment).filter(
         AiAttachment.conversation_id == conversation_id,
         AiAttachment.user_id == user_id,
+        AiAttachment.message_id.is_(None),
         AiAttachment.status == "ready",
-    ).order_by(AiAttachment.created_at.desc()).limit(MAX_PROVIDER_ATTACHMENTS).all()
+    ).all()
+    for row in rows:
+        row.message_id = message_id
+    return len(rows)
+
+
+def drop_for_messages(db: Session, message_ids: list[str]) -> int:
+    """Entfernt die Anhaenge weggeschnittener Nachrichten.
+
+    Ohne das blieben sie ungebunden liegen — und ein ungebundener Anhang gilt
+    als "noch nicht gesendet" und haengte sich an die **naechste** Nachricht.
+    Eine Datei aus einer zurueckgenommenen Frage taucht so in einem
+    Zusammenhang wieder auf, in dem sie niemand angefordert hat.
+    """
+    if not message_ids:
+        return 0
+    return int(
+        db.query(AiAttachment)
+        .filter(AiAttachment.message_id.in_(message_ids))
+        .delete(synchronize_session=False)
+    )
+
+
+def provider_attachment_messages(
+    db: Session, conversation_id: str, user_id: int,
+    message_ids: list[str] | None = None,
+) -> list[dict]:
+    """Die Anhaenge, die in diese Anfrage gehoeren.
+
+    ``message_ids`` sind die Nachrichten, die gerade im Kontextfenster stehen.
+    Ist der Wert gesetzt, gehen genau deren Anhaenge mit — plus die noch
+    ungebundenen, denn die gehoeren zur Nachricht, die gerade entsteht.
+
+    Ohne den Parameter (aelterer Aufrufpfad) gilt das frueher Verhalten: die
+    letzten fuenf der Unterhaltung.
+    """
+    abfrage = db.query(AiAttachment).filter(
+        AiAttachment.conversation_id == conversation_id,
+        AiAttachment.user_id == user_id,
+        AiAttachment.status == "ready",
+    )
+    if message_ids is not None:
+        abfrage = abfrage.filter(
+            (AiAttachment.message_id.is_(None))
+            | (AiAttachment.message_id.in_(message_ids))
+        )
+    rows = abfrage.order_by(
+        AiAttachment.created_at.desc()
+    ).limit(MAX_PROVIDER_ATTACHMENTS).all()
     messages: list[dict] = []
     remaining_text_chars = MAX_PROVIDER_TEXT_CHARS
     for row in reversed(rows):

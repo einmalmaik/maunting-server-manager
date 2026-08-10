@@ -244,7 +244,10 @@
       "list": "Attachments in this conversation",
       "remove": "Remove attachment",
       "error": "Attachment could not be processed safely.",
-      "drop": "Drop file here"
+      "drop": "Drop file here",
+      "redacted": "{{count}} spots redacted",
+      "redacted_one": "{{count}} spot redacted",
+      "redacted_other": "{{count}} spots redacted"
     },
     "chat": {
       "title": "AI Assistant",

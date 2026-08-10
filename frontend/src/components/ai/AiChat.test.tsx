@@ -71,6 +71,8 @@ const attachment: AiAttachment = {
   size_bytes: 24,
   status: 'ready',
   rejection_code: null,
+  message_id: null,
+  redacted_spans: null,
   created_at: '2026-08-01T12:00:00Z',
 }
 

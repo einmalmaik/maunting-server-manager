@@ -16,10 +16,11 @@ router = APIRouter(prefix="/api/ai", tags=["ai-attachments"])
 
 def _response(row: AiAttachment) -> AiAttachmentResponse:
     return AiAttachmentResponse(
-        id=row.id, conversation_id=row.conversation_id,
+        id=row.id, conversation_id=row.conversation_id, message_id=row.message_id,
         original_name=row.original_name, media_type=row.media_type,
         size_bytes=row.size_bytes, status=row.status,
-        rejection_code=row.rejection_code, created_at=row.created_at,
+        rejection_code=row.rejection_code, redacted_spans=row.redacted_spans,
+        created_at=row.created_at,
     )
 
 
