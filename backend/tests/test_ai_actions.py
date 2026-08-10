@@ -895,3 +895,265 @@ def test_a_path_still_cannot_escape_the_server_directory(
                 db, user=owner_user, tool_name="read_config",
                 arguments={"server_id": server.id, "path": boesartig},
             )
+
+
+# ── Der Vorschlag ueberlebt den Server, den er loescht ────────────────────
+#
+# Der Betriebsanlass: "sag der KI, sie soll den Server loeschen" — die Loeschung
+# gelingt, und das Panel meldet "Aktionsvorschlag nicht gefunden".
+#
+# `ai_action_proposals.server_id` kaskadierte auf `servers.id`. Loeschte
+# `execute_proposal` den Server, vernichtete die Datenbank im selben Zug die
+# Vorschlagszeile — und vier Zeilen weiter stolperte der Aufruf ueber sie:
+# `db.get(...)` gab `None`, `AI_ACTION_NOT_FOUND` flog, der Router machte 404
+# daraus. Weder `status='succeeded'` noch der Audit-Eintrag wurden geschrieben,
+# und `_vorschlag_ergebnisse` meldete dem Modell einen Fehlschlag, den es nie
+# gab.
+#
+# Die folgenden Tests nehmen deshalb die **echte** `delete_server_completely`.
+# Der Test darueber patcht sie vollstaendig weg — das ist fuer seine Frage
+# richtig (wird der eine Weg genommen?), macht ihn fuer diese aber blind: eine
+# Funktion, die nie eine Zeile loescht, loest auch keine Kaskade aus.
+
+
+def _loeschbar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nur die Wirkungen nach aussen stillegen, nicht die Fachlogik.
+
+    Vier Dinge greifen ueber den Prozess hinaus: PostgreSQL-Ressourcen, der
+    Container, die Firewall und der Neustart-Zeitplan. Alles andere — Audit,
+    Reihenfolge, Rechtepruefung, `db.delete(server)` und der Commit — laeuft
+    echt, denn genau dort sass der Fehler.
+    """
+    monkeypatch.setattr(
+        "services.postgres_service.drop_server_resources", lambda db, server_id: None
+    )
+    monkeypatch.setattr(
+        "services.docker_service.remove", lambda name, **kwargs: {"ok": True}
+    )
+    monkeypatch.setattr(
+        "services.docker_service.repair_bind_mount_permissions", lambda path: {"ok": True}
+    )
+    monkeypatch.setattr("services.server_deletion_service.close_ports", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "services.server_deletion_service.iptables_revoke_server", lambda *a, **k: None
+    )
+    monkeypatch.setattr("services.scheduler_service.remove_restart_jobs", lambda server_id: None)
+
+
+def _panel_unterhaltung(db: Session, user: User) -> AiConversation:
+    """Die eine Unterhaltung des Benutzers — ohne Serverbezug, wie im Betrieb.
+
+    Der Helfer `_conversation` weiter oben setzt `server_id` und bildet damit
+    eine Form ab, die es seit dem Einzelchat nicht mehr gibt:
+    `get_or_create_primary_conversation` legt sie ausdruecklich mit
+    `server_id=None` an. Der Unterschied ist hier nicht kosmetisch — eine
+    serverbezogene Unterhaltung faellt beim Loeschen des Servers selbst der
+    Kaskade zum Opfer und nimmt den Vorschlag ueber `conversation_id` mit. Der
+    Test wuerde dann etwas messen, das im Panel gar nicht vorkommt.
+    """
+    row = AiConversation(id=str(uuid4()), user_id=user.id, server_id=None, title="Panel")
+    db.add(row)
+    db.commit()
+    return row
+
+
+def _loeschvorschlag(
+    db: Session, user: User, conversation: AiConversation, server: Server
+) -> AiActionProposal:
+    return ai_proposal_service.create_proposal(
+        db,
+        user=user,
+        conversation=conversation,
+        tool_name="propose_server_delete",
+        arguments={
+            "server_id": server.id,
+            "reason": "Der Benutzer will den Server entfernen.",
+            "expected_effect": "Server, Dateien und Backups sind weg.",
+        },
+        correlation_id=str(uuid4()),
+    )
+
+
+def test_a_geloeschter_server_laesst_seinen_vorschlag_stehen(
+    db: Session, owner_user: User, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Beleg ueberlebt die Tat.
+
+    Ein Aktionsvorschlag ist ein Beleg der Unterhaltung eines Benutzers, kein
+    Kind eines Servers. Er haengt zu Recht an `conversation_id` und `user_id`;
+    `server_id` ist nur ein Bezug und darf ihn nicht mitreissen.
+    """
+    _loeschbar(monkeypatch)
+    server = _server(db, owner_user, tmp_path)
+    server_id = server.id
+    conversation = _panel_unterhaltung(db, owner_user)
+    proposal = _loeschvorschlag(db, owner_user, conversation, server)
+    db.commit()
+    proposal_id = proposal.id
+
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal_id, user=owner_user
+    )
+    ausgefuehrt, _result = ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal_id, user=owner_user, confirmation_token=token
+    )
+
+    assert db.get(Server, server_id) is None, "Der Server muss wirklich weg sein"
+    uebrig = db.get(AiActionProposal, proposal_id)
+    assert uebrig is not None, "Der Vorschlag darf nicht mitgeloescht werden"
+    assert uebrig.status == "succeeded"
+    assert uebrig.executed_at is not None
+    # Der Bezug faellt, der Beleg bleibt. Welcher Server gemeint war, steht
+    # weiterhin lesbar in der Vorschau — und dort steht es fuer einen Menschen,
+    # nicht als Zahl.
+    assert uebrig.server_id is None
+    assert json.loads(uebrig.preview_json)["server_name"] == "AI Action Server"
+    assert ausgefuehrt.status == "succeeded"
+
+
+def test_a_der_lauf_erfaehrt_den_erfolg(
+    db: Session, owner_user: User, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die KI darf nicht das Gegenteil der Wahrheit erzaehlen.
+
+    Beim Aufwecken fragt `_vorschlag_ergebnisse` die Vorschlagszeilen ab und
+    meldet dem Modell, was aus ihnen geworden ist. Fehlte die Zeile, meldete es
+    `status: "failed"` mit `AI_ACTION_NOT_FOUND` — und das Modell teilte dem
+    Betreiber mit, das Loeschen sei gescheitert, waehrend der Server weg war.
+    Das ist die schlimmere Haelfte des Fehlers: eine falsche Fehlermeldung
+    kostet Zeit, eine falsche Erfolgsmeldung kostet Vertrauen.
+    """
+    from services.ai_stream_service import _vorschlag_ergebnisse
+
+    _loeschbar(monkeypatch)
+    server = _server(db, owner_user, tmp_path)
+    conversation = _panel_unterhaltung(db, owner_user)
+    proposal = _loeschvorschlag(db, owner_user, conversation, server)
+    db.commit()
+    proposal_id = proposal.id
+
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal_id, user=owner_user
+    )
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal_id, user=owner_user, confirmation_token=token
+    )
+
+    ergebnisse = _vorschlag_ergebnisse(db, [proposal_id])
+
+    assert len(ergebnisse) == 1
+    assert ergebnisse[0]["tool_name"] == "propose_server_delete"
+    assert ergebnisse[0]["status"] == "succeeded"
+    assert "error_code" not in ergebnisse[0]
+
+
+def test_a_alte_vorschlaege_bleiben_im_verlauf(
+    db: Session, owner_user: User, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Umfang war groesser als das Loeschen.
+
+    **Jeder** je fuer einen Server erzeugte Vorschlag verschwand aus dem
+    Chatverlauf, sobald dieser Server geloescht wurde — auch eine
+    Konfigaenderung von vor Wochen. Der Verlauf schrieb sich damit rueckwirkend
+    um, ohne dass jemand etwas zurueckgenommen haette.
+    """
+    _loeschbar(monkeypatch)
+    server = _server(db, owner_user, tmp_path)
+    config = Path(server.install_dir) / "server.cfg"
+    config.write_text("port=2302\n", encoding="utf-8")
+    conversation = _panel_unterhaltung(db, owner_user)
+    frueher = ai_proposal_service.create_proposal(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="propose_config_update",
+        arguments={
+            "server_id": server.id, "path": "server.cfg",
+            "content": "port=2402\n",
+            "expected_revision": content_revision(config.read_bytes()),
+            "reason": "Port anpassen.",
+            "expected_effect": "Der Server lauscht auf 2402.",
+        },
+        correlation_id=str(uuid4()),
+    )
+    loeschen = _loeschvorschlag(db, owner_user, conversation, server)
+    db.commit()
+    frueher_id, loeschen_id = frueher.id, loeschen.id
+
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=loeschen_id, user=owner_user
+    )
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=loeschen_id, user=owner_user, confirmation_token=token
+    )
+
+    verbleibend = {
+        row.id for row in db.query(AiActionProposal).filter(
+            AiActionProposal.conversation_id == conversation.id
+        ).all()
+    }
+    assert verbleibend == {frueher_id, loeschen_id}
+
+
+def test_a_execute_meldet_erfolg_statt_404(
+    client: TestClient,
+    db: Session,
+    owner_user: User,
+    owner_cookies: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dieselbe Zusage am HTTP-Rand — dort hat der Betreiber sie gebrochen gesehen.
+
+    Sein Log zeigte `GET /api/ai/actions/<uuid> 404`. Diese Anfrage stellt die
+    Oberflaeche nur im Fehlerfall: `execute` war fehlgeschlagen, die Karte holte
+    den Stand nach, und auch das lief ins Leere. Beide Antworten muessen 200
+    sein.
+    """
+    _loeschbar(monkeypatch)
+    server = _server(db, owner_user, tmp_path)
+    conversation = _panel_unterhaltung(db, owner_user)
+    proposal = _loeschvorschlag(db, owner_user, conversation, server)
+    db.commit()
+    proposal_id = proposal.id
+
+    bestaetigt = client.post(
+        f"/api/ai/actions/{proposal_id}/confirm",
+        cookies=owner_cookies, headers=_csrf(owner_cookies),
+    )
+    assert bestaetigt.status_code == 200
+
+    ausgefuehrt = client.post(
+        f"/api/ai/actions/{proposal_id}/execute",
+        json={"confirmation_token": bestaetigt.json()["confirmation_token"]},
+        cookies=owner_cookies, headers=_csrf(owner_cookies),
+    )
+    assert ausgefuehrt.status_code == 200, ausgefuehrt.text
+    assert ausgefuehrt.json()["proposal"]["status"] == "succeeded"
+
+    nachgeholt = client.get(
+        f"/api/ai/actions/{proposal_id}", cookies=owner_cookies,
+    )
+    assert nachgeholt.status_code == 200, nachgeholt.text
+    assert nachgeholt.json()["status"] == "succeeded"
+
+
+def test_a_geloeschter_server_bleibt_bestaetigungspflichtig(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Waechter: an der Sperre aendert diese Korrektur nichts.
+
+    Die Vorgabe des Betreibers lautet, dass im autonomen Modus alles durchlaeuft
+    ausser Loeschvorgaengen. Wer den Vorschlag ueberlebensfaehig macht, koennte
+    versucht sein, ihn auch gleich autonom zu machen — er bleibt unumkehrbar.
+    """
+    from services.ai_tool_registry import ALWAYS_CONFIRM_TOOLS
+
+    server = _server(db, owner_user, tmp_path)
+    conversation = _panel_unterhaltung(db, owner_user)
+    proposal = _loeschvorschlag(db, owner_user, conversation, server)
+    db.commit()
+
+    assert "propose_server_delete" in ALWAYS_CONFIRM_TOOLS
+    assert proposal.requires_confirmation is True
+    assert proposal.autonomous is False

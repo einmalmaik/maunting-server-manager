@@ -35,8 +35,21 @@ class AiActionProposal(Base):
     )
     # Optional: `propose_server_create` schlaegt einen Server vor, den es noch
     # nicht gibt. Nach erfolgreicher Ausfuehrung traegt der Vorschlag die neue ID.
+    #
+    # `SET NULL`, nicht `CASCADE`. Ein Vorschlag ist ein Beleg **der Unterhaltung
+    # eines Benutzers**, kein Kind eines Servers — er haengt an `conversation_id`
+    # und `user_id`, `server_id` ist nur ein Bezug. Mit `CASCADE` loeschte sich
+    # ein `propose_server_delete` bei der Ausfuehrung selbst: die Datenbank nahm
+    # die Zeile mit dem Server mit, `execute_proposal` fand sie danach nicht mehr
+    # und meldete den gelungenen Vorgang als "Aktionsvorschlag nicht gefunden" —
+    # ohne `status='succeeded'`, ohne Audit-Eintrag, und dem Modell gegenueber
+    # als Fehlschlag. Nebenwirkung war, dass **jeder** Vorschlag aus dem
+    # Chatverlauf verschwand, sobald sein Server geloescht wurde.
+    #
+    # Welcher Server gemeint war, bleibt lesbar: `preview_json` traegt den Namen,
+    # und das Audit traegt die ID.
     server_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=True, index=True
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True, index=True
     )
     tool_name: Mapped[str] = mapped_column(String(64), nullable=False)
     # Tool-Payload kann Config-Inhalt enthalten und ist deshalb immer DIS-

@@ -1176,7 +1176,19 @@ def execute_proposal(
             proposal.executed_at = None if queued else datetime.now(timezone.utc)
             # Ein Erstellungsvorschlag bekommt jetzt seinen Server. Danach ist er
             # ueber `server.view` adressierbar wie jeder andere Vorschlag.
-            if proposal.server_id is None and server_id is not None:
+            #
+            # Ausdruecklich **nur** dort. Ohne die Einschraenkung auf das
+            # Erstellen wuerde diese Zeile nach einem Loeschen genau das
+            # rueckgaengig machen, was die Datenbank gerade richtig getan hat:
+            # `SET NULL` loest den Bezug auf einen Server, den es nicht mehr
+            # gibt — `server_id` waere hier wieder `None`, die lokale Kopie
+            # `server_id` traegt aber noch die alte Nummer, und der Commit
+            # scheiterte an der Fremdschluesselpruefung.
+            if (
+                tool_name == "propose_server_create"
+                and proposal.server_id is None
+                and server_id is not None
+            ):
                 proposal.server_id = server_id
             audit_service.record_privileged_action(
                 db,

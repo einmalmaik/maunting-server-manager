@@ -13,8 +13,23 @@ Datenbank durchsetzt, gehoert deshalb hierher und nicht in die Tests des
 jeweiligen Dienstes: dort wuerde es niemand vermissen, wenn es wieder verschwindet.
 """
 
-from sqlalchemy import text
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
+
+import models  # noqa: F401 - registriert das vollstaendige ORM-Schema
+from config import settings
+from database import Base
+
+
+def _fremdschluessel(inspector, tabelle: str, spalte: str) -> dict:
+    for fk in inspector.get_foreign_keys(tabelle):
+        if fk.get("constrained_columns") == [spalte]:
+            return fk
+    raise AssertionError(f"{tabelle}.{spalte} hat gar keinen Fremdschluessel mehr")
 
 
 def test_fremdschluessel_sind_im_test_scharf(db: Session) -> None:
@@ -27,3 +42,54 @@ def test_fremdschluessel_sind_im_test_scharf(db: Session) -> None:
     hier ausdruecklich.
     """
     assert db.execute(text("PRAGMA foreign_keys")).scalar() == 1
+
+
+def test_ein_vorschlag_ueberlebt_seinen_server(db: Session) -> None:
+    """Die Zusage auf Datenbankebene, ohne jede Fachlogik dazwischen.
+
+    Die Dienst-Tests belegen, dass `execute_proposal` danach das Richtige tut.
+    Dieser hier belegt, worauf sie sich verlassen: dass die Datenbank die Zeile
+    stehen laesst. Beides zu trennen ist Absicht — sonst waere bei einem
+    Fehlschlag nicht zu sehen, ob das Schema oder der Ablauf schuld ist.
+    """
+    inspector = inspect(db.get_bind())
+
+    assert _fremdschluessel(inspector, "ai_action_proposals", "server_id")["options"] == {
+        "ondelete": "SET NULL"
+    }
+
+
+def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
+    """Modell und Migration duerfen nicht auseinanderlaufen.
+
+    Die Tests bauen das Schema mit `create_all` aus den Modellen, die Produktion
+    mit Alembic. Steht das `ON DELETE` nur an einer der beiden Stellen richtig,
+    ist die Suite gruen und der Betrieb kaputt — genau die Konstellation, aus
+    der dieser Fehler kam. Der Test faehrt deshalb die echte Migration und
+    vergleicht das Ergebnis mit dem Modell.
+    """
+    db_url = f"sqlite:///{tmp_path / 'constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        # Zurueck auf den Stand davor: dort galt noch CASCADE — das ist der
+        # Zustand, in dem die Datenbank eines Betreibers gerade steht.
+        command.downgrade(config, "20260810_05")
+        assert _fremdschluessel(
+            inspect(engine), "ai_action_proposals", "server_id"
+        )["options"] == {"ondelete": "CASCADE"}
+
+        command.upgrade(config, "head")
+        assert _fremdschluessel(
+            inspect(engine), "ai_action_proposals", "server_id"
+        )["options"] == {"ondelete": "SET NULL"}
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
