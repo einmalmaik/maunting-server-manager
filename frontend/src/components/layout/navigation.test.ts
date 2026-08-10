@@ -28,6 +28,7 @@ describe('buildNavigation', () => {
       canReadPanelDatabase: false,
       canViewNodes: false,
       canUseAi: false,
+      canUseSkills: false,
     })
     expect(denied.some((i) => i.to === '/admin/audit')).toBe(false)
 
@@ -41,6 +42,7 @@ describe('buildNavigation', () => {
       canReadPanelDatabase: false,
       canViewNodes: false,
       canUseAi: false,
+      canUseSkills: false,
     })
     const audit = allowed.find((i) => i.to === '/admin/audit')
     expect(audit).toBeDefined()
@@ -59,6 +61,7 @@ describe('buildNavigation', () => {
       canReadPanelDatabase: false,
       canViewNodes: false,
       canUseAi: false,
+      canUseSkills: false,
     })
     expect(nav.some((i) => i.to === '/admin/audit')).toBe(true)
   })
@@ -74,8 +77,33 @@ describe('buildNavigation', () => {
       canReadPanelDatabase: false,
       canViewNodes: false,
       canUseAi: true,
+      canUseSkills: false,
     }
     expect(buildNavigation(labels, access).some((item) => item.to === '/ai')).toBe(true)
     expect(buildNavigation(labels, { ...access, canUseAi: false }).some((item) => item.to === '/ai')).toBe(false)
+  })
+
+  it('zeigt Teams auch dem, der nur Skills lesen darf', () => {
+    // Seit die Skills aus dem Profil unter Teams gezogen sind, ist das der
+    // einzige Weg zu den eigenen. Wer lesen, aber nicht chatten darf, haette
+    // sie sonst verloren — ohne dass ihm ein Recht genommen wurde.
+    const access = {
+      owner: false,
+      canManageUsers: false,
+      canManageRoles: false,
+      canViewAudit: false,
+      canViewSettings: false,
+      canManagePanelBackups: false,
+      canReadPanelDatabase: false,
+      canViewNodes: false,
+      canUseAi: false,
+      canUseSkills: true,
+    }
+    expect(buildNavigation(labels, access).some((item) => item.to === '/teams')).toBe(true)
+    // Der Chat bleibt davon unberuehrt: Skills lesen ist kein Chatrecht.
+    expect(buildNavigation(labels, access).some((item) => item.to === '/ai')).toBe(false)
+    expect(
+      buildNavigation(labels, { ...access, canUseSkills: false }).some((item) => item.to === '/teams'),
+    ).toBe(false)
   })
 })

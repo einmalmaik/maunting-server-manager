@@ -4,119 +4,116 @@ import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiSkillManaged, type AiSkillSummary } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { teamsApi, type Team } from '@/api/teams'
-import { Button, Dropdown, Switch } from '@/Singra/UI'
+import { Button, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
 import { AiKnowledgeShell } from './AiKnowledgeShell'
-import { type AiKnowledgeScope, scopeCanManage, scopeTeamId } from './knowledgeScope'
+import { type AiSkillScope, skillScopeTeamId } from './knowledgeScope'
 
-const EMPTY_DRAFT = { skill_key: '', name: '', description: '', body: '', team_id: null as number | null }
+const EMPTY_DRAFT = { skill_key: '', name: '', description: '', body: '' }
 
 interface Props {
-  /** Ohne Angabe: alles, was dieser Benutzer sehen und verwalten darf. */
-  scope?: AiKnowledgeScope
+  /** Wessen Skills — panelweit oder die eines bestimmten Teams. */
+  scope: AiSkillScope
 }
 
 /**
- * Skills einsehen und pflegen — eigene oder die eines Teams.
+ * Eine Zeile der Liste, unabhängig davon, woher sie stammt.
  *
- * Zwei Listen, weil sie zwei verschiedene Fragen beantworten: **Verzeichnis**
- * zeigt, was die KI gerade kennt — einschließlich der mitgelieferten Vorgaben,
- * die niemand ändern kann. **Eigene** zeigt, was man selbst bearbeiten darf.
- *
- * Ein mitgelieferter Skill lässt sich ersetzen, indem man einen panelweiten mit
- * demselben Schlüssel anlegt. Das ist bewusst kein Bearbeiten: die Datei kommt
- * mit dem nächsten Update erneut, und eine überschriebene Datei wäre beim
- * nächsten Mal wieder da.
- *
- * Im Team-Bereich schrumpft das auf **eine** Liste zusammen: dort interessiert
- * nur, was dieses Team gelernt hat. Die Hülle ist dieselbe wie bei den
- * Erinnerungen ({@link AiKnowledgeShell}), damit beide Bereiche sich gleich
- * bedienen lassen.
+ * Die beiden Quellen beantworten verschiedene Fragen: `manage` liefert alles,
+ * was in diesem Bereich steht — auch Abgeschaltetes und noch nicht Freigegebenes
+ * —, `skills` nur das, was gerade wirkt. Wer verwalten darf, braucht das erste;
+ * wer nur mitliest, das zweite. Deshalb genau eine Liste mit zwei Herkünften
+ * statt zweier Listen nebeneinander.
  */
-export function AiSkillManager({ scope = { kind: 'user' } }: Props) {
-  const { t } = useTranslation()
-  const darfAendern = scopeCanManage(scope)
-  const nurTeam = scopeTeamId(scope)
+interface Zeile {
+  id: string | null
+  skill_key: string
+  name: string
+  description: string
+  body: string
+  origin: 'shipped' | 'operator' | 'ai'
+  status: 'active' | 'pending'
+  enabled: boolean
+}
 
-  const [index, setIndex] = useState<AiSkillSummary[]>([])
-  const [managed, setManaged] = useState<AiSkillManaged[]>([])
-  const [teams, setTeams] = useState<Team[]>([])
+function ausVerwaltet(row: AiSkillManaged): Zeile {
+  return {
+    id: row.id, skill_key: row.skill_key, name: row.name, description: row.description,
+    body: row.body, origin: row.origin, status: row.status, enabled: row.enabled,
+  }
+}
+
+function ausVerzeichnis(row: AiSkillSummary): Zeile {
+  return {
+    id: row.id, skill_key: row.skill_key, name: row.name, description: row.description,
+    body: '', origin: row.origin, status: row.status, enabled: row.enabled,
+  }
+}
+
+/**
+ * Die Skills **eines** Bereichs einsehen und pflegen.
+ *
+ * Der Bereich steht immer fest — panelweit unter Einstellungen, das persönliche
+ * Team oder ein beigetretenes unter Teams. Vorher gab es zusätzlich einen
+ * bereichslosen Modus, der alles zusammen zeigte und ein Bereichs-Dropdown ins
+ * Formular hängte; er stand im Profil und unter „Persönlich" und war an beiden
+ * Stellen dieselbe Ansicht. Die Frage „was kennt der Assistent insgesamt?"
+ * beantwortet jetzt {@link AiSkillDirectory} an einer Stelle.
+ *
+ * Die Hülle ist dieselbe wie bei den Erinnerungen ({@link AiKnowledgeShell}),
+ * damit beide Bereiche sich gleich bedienen lassen.
+ */
+export function AiSkillManager({ scope }: Props) {
+  const { t } = useTranslation()
+  const darfAendern = scope.canManage
+  const teamId = skillScopeTeamId(scope)
+
+  const [zeilen, setZeilen] = useState<Zeile[]>([])
   const [suche, setSuche] = useState('')
-  const [draft, setDraft] = useState({ ...EMPTY_DRAFT, team_id: nurTeam ?? null })
+  const [draft, setDraft] = useState({ ...EMPTY_DRAFT })
   const [editingId, setEditingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
   const reload = async () => {
-    const [indexRows, managedRows] = await Promise.all([
-      aiApi.listSkills(),
-      aiApi.listManagedSkills().catch(() => [] as AiSkillManaged[]),
-    ])
-    setIndex(indexRows)
-    setManaged(managedRows)
+    // Wer verwalten darf, sieht auch Abgeschaltetes und Wartendes — das
+    // Verzeichnis blendet beides aus und wäre für eine Verwaltung blind.
+    if (darfAendern) {
+      const rows = await aiApi.listManagedSkills()
+      setZeilen(rows.filter((row) => row.team_id === teamId).map(ausVerwaltet))
+      return
+    }
+    const rows = await aiApi.listSkills()
+    setZeilen(
+      rows
+        .filter((row) => row.scope !== 'shipped' && row.team_id === teamId)
+        .map(ausVerzeichnis),
+    )
   }
 
   useEffect(() => {
     let active = true
     setSuche('')
-    setDraft({ ...EMPTY_DRAFT, team_id: nurTeam ?? null })
+    setDraft({ ...EMPTY_DRAFT })
     setEditingId(null)
-    Promise.all([
-      aiApi.listSkills(),
-      aiApi.listManagedSkills().catch(() => [] as AiSkillManaged[]),
-      // Die Teamauswahl im Formular braucht es nur im persönlichen Bereich —
-      // im Teambereich steht das Team ja bereits fest.
-      nurTeam === undefined ? teamsApi.list().catch(() => [] as Team[]) : Promise.resolve([] as Team[]),
-    ])
-      .then(([indexRows, managedRows, teamRows]) => {
-        if (!active) return
-        setIndex(indexRows)
-        setManaged(managedRows)
-        setTeams(teamRows.filter((team) => team.can_manage_skills && !team.is_personal))
-      })
+    setLoading(true)
+    reload()
       .catch((error: unknown) => {
         if (active) toast.error(error instanceof SanitizedApiError ? error.message : t('ai.skills.errors.load'))
       })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [nurTeam, t])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [darfAendern, teamId, t])
 
-  // Panelweit darf nur, wer eine Zeile ohne Team verwalten darf. Statt das
-  // Recht erneut abzufragen, leiten wir es aus dem ab, was das Backend
-  // ohnehin geliefert hat — eine Wahrheit statt zweier.
-  const canWriteGlobal = useMemo(
-    () => nurTeam === undefined && (managed.some((row) => row.team_id === null) || teams.length === 0),
-    [managed, nurTeam, teams.length],
-  )
-
-  const scopeOptions = useMemo(() => [
-    ...(canWriteGlobal ? [{ value: 'global', label: t('ai.skills.scopes.global') }] : []),
-    ...teams.map((team) => ({ value: String(team.id), label: team.name })),
-  ], [canWriteGlobal, t, teams])
-
-  const passt = (text: string) => {
+  const sichtbar = useMemo(() => {
     const nadel = suche.trim().toLowerCase()
-    return !nadel || text.toLowerCase().includes(nadel)
-  }
-
-  const sichtbarerIndex = useMemo(
-    () => index
-      .filter((skill) => nurTeam === undefined || skill.team_id === nurTeam)
-      .filter((skill) => passt(`${skill.name} ${skill.skill_key} ${skill.description}`)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [index, nurTeam, suche],
-  )
-
-  const sichtbarVerwaltet = useMemo(
-    () => managed
-      .filter((row) => nurTeam === undefined || row.team_id === nurTeam)
-      .filter((row) => passt(`${row.name} ${row.skill_key} ${row.description}`)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [managed, nurTeam, suche],
-  )
+    if (!nadel) return zeilen
+    return zeilen.filter((row) =>
+      `${row.name} ${row.skill_key} ${row.description}`.toLowerCase().includes(nadel))
+  }, [zeilen, suche])
 
   const save = async () => {
     if (busy) return
@@ -127,10 +124,10 @@ export function AiSkillManager({ scope = { kind: 'user' } }: Props) {
         name: draft.name.trim(),
         description: draft.description.trim(),
         body: draft.body.trim(),
-        team_id: draft.team_id,
+        team_id: teamId,
         enabled: true,
       })
-      setDraft({ ...EMPTY_DRAFT, team_id: nurTeam ?? null })
+      setDraft({ ...EMPTY_DRAFT })
       setEditingId(null)
       await reload()
       toast.success(t('ai.skills.saved'))
@@ -141,13 +138,14 @@ export function AiSkillManager({ scope = { kind: 'user' } }: Props) {
     }
   }
 
-  const remove = async (row: AiSkillManaged) => {
+  const remove = async (row: Zeile) => {
+    if (row.id === null) return
     if (!await confirm({ message: t('ai.skills.remove'), confirmText: t('common.delete'), danger: true })) return
     setBusy(true)
     try {
       await aiApi.deleteSkill(row.id)
       if (editingId === row.id) {
-        setDraft({ ...EMPTY_DRAFT, team_id: nurTeam ?? null })
+        setDraft({ ...EMPTY_DRAFT })
         setEditingId(null)
       }
       await reload()
@@ -159,7 +157,8 @@ export function AiSkillManager({ scope = { kind: 'user' } }: Props) {
     }
   }
 
-  const toggle = async (row: AiSkillManaged, enabled: boolean) => {
+  const toggle = async (row: Zeile, enabled: boolean) => {
+    if (row.id === null) return
     setBusy(true)
     try {
       await aiApi.toggleSkill(row.id, enabled)
@@ -174,77 +173,59 @@ export function AiSkillManager({ scope = { kind: 'user' } }: Props) {
   if (loading) return null
 
   const valid = draft.skill_key.trim().length >= 2 && draft.name.trim() && draft.description.trim() && draft.body.trim()
-  const formularSichtbar = darfAendern && (nurTeam !== undefined || scopeOptions.length > 0)
+  const beschreibung = scope.kind === 'panel'
+    ? t('ai.skills.panelDescription')
+    : scope.personal ? t('ai.skills.personalDescription') : t('ai.skills.teamDescription')
 
   return (
     <AiKnowledgeShell
       icon={BookOpen}
       title={t('ai.skills.title')}
-      description={scope.kind === 'team' ? t('ai.skills.teamDescription') : t('ai.skills.description')}
-      search={index.length > 3 ? { value: suche, onChange: setSuche, label: t('ai.skills.search') } : undefined}
+      description={beschreibung}
+      search={zeilen.length > 3 ? { value: suche, onChange: setSuche, label: t('ai.skills.search') } : undefined}
     >
-      {/* ── Was die KI hier gerade kennt ────────────────────────────── */}
       <ul className="space-y-2">
-        {sichtbarerIndex.map((skill) => (
+        {sichtbar.map((row) => (
           <li
-            key={skill.skill_key}
-            className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-3"
+            key={row.skill_key}
+            className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${
+              editingId !== null && editingId === row.id
+                ? 'border-primary/50 bg-primary/5'
+                : 'border-outline-variant/40 bg-surface-container-low/35'
+            }`}
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-on-surface">{skill.name}</span>
-              <span className="rounded-full border border-outline-variant/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-on-surface-variant">
-                {t(`ai.skills.scopes.${skill.scope}`)}
-              </span>
-              {skill.origin === 'ai' && (
-                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-tertiary">
-                  <Sparkles className="h-3 w-3" aria-hidden="true" />
-                  {t('ai.skills.origins.ai')}
-                </span>
-              )}
-            </div>
-            <p className="mt-1 text-xs leading-5 text-on-surface-variant">{skill.description}</p>
-          </li>
-        ))}
-        {sichtbarerIndex.length === 0 && (
-          <li className="rounded-xl border border-dashed border-outline-variant/50 px-4 py-5 text-sm text-on-surface-variant">
-            {index.length === 0 ? t('ai.skills.empty') : t('ai.skills.noMatches')}
-          </li>
-        )}
-      </ul>
-
-      {/* ── Was dieser Benutzer davon ändern darf ───────────────────── */}
-      {darfAendern && sichtbarVerwaltet.length > 0 && (
-        <section aria-labelledby="skill-manage" className="space-y-3">
-          <h4 id="skill-manage" className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-            {t('ai.skills.manage')}
-          </h4>
-          <ul className="space-y-2">
-            {sichtbarVerwaltet.map((row) => (
-              <li
-                key={row.id}
-                className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${
-                  editingId === row.id
-                    ? 'border-primary/50 bg-primary/5'
-                    : 'border-outline-variant/40 bg-surface-container-low/35'
-                }`}
-              >
+            <div className="min-w-[10rem] flex-1">
+              {darfAendern ? (
                 <button
                   type="button"
-                  className="min-w-[10rem] flex-1 text-left"
+                  className="w-full text-left"
                   onClick={() => {
                     setDraft({
-                      skill_key: row.skill_key, name: row.name, description: row.description,
-                      body: row.body, team_id: row.team_id,
+                      skill_key: row.skill_key, name: row.name,
+                      description: row.description, body: row.body,
                     })
                     setEditingId(row.id)
                   }}
                 >
                   <span className="block text-sm font-medium text-on-surface">{row.name}</span>
-                  <span className="block text-xs text-on-surface-variant">
-                    {row.skill_key} · {t(`ai.skills.origins.${row.origin}`)}
-                    {row.status === 'pending' && ` · ${t('ai.skills.pending')}`}
-                  </span>
                 </button>
+              ) : (
+                <span className="block text-sm font-medium text-on-surface">{row.name}</span>
+              )}
+              <span className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-on-surface-variant">
+                <span>{row.skill_key}</span>
+                {row.origin === 'ai' && (
+                  <span className="inline-flex items-center gap-1 uppercase tracking-wider text-tertiary">
+                    <Sparkles className="h-3 w-3" aria-hidden="true" />
+                    {t('ai.skills.origins.ai')}
+                  </span>
+                )}
+                {row.status === 'pending' && <span>{t('ai.skills.pending')}</span>}
+              </span>
+              <p className="mt-1 text-xs leading-5 text-on-surface-variant">{row.description}</p>
+            </div>
+            {darfAendern && (
+              <>
                 <Switch
                   checked={row.enabled}
                   disabled={busy}
@@ -258,13 +239,18 @@ export function AiSkillManager({ scope = { kind: 'user' } }: Props) {
                 >
                   <Trash2 className="h-4 w-4" aria-hidden="true" />
                 </Button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+              </>
+            )}
+          </li>
+        ))}
+        {sichtbar.length === 0 && (
+          <li className="rounded-xl border border-dashed border-outline-variant/50 px-4 py-5 text-sm text-on-surface-variant">
+            {zeilen.length === 0 ? t('ai.skills.empty') : t('ai.skills.noMatches')}
+          </li>
+        )}
+      </ul>
 
-      {formularSichtbar && (
+      {darfAendern && (
         <div className="space-y-3 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
           <div className="flex flex-wrap gap-3">
             <label className="min-w-[10rem] flex-1 space-y-1.5">
@@ -288,20 +274,6 @@ export function AiSkillManager({ scope = { kind: 'user' } }: Props) {
                 aria-label={t('ai.skills.name')}
               />
             </label>
-            {nurTeam === undefined && (
-              <label className="min-w-[9rem] space-y-1.5">
-                <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                  {t('ai.skills.scope')}
-                </span>
-                <Dropdown
-                  value={draft.team_id === null ? 'global' : String(draft.team_id)}
-                  onChange={(value) => setDraft({ ...draft, team_id: value === 'global' ? null : Number(value) })}
-                  options={scopeOptions}
-                  disabled={busy}
-                  aria-label={t('ai.skills.scope')}
-                />
-              </label>
-            )}
           </div>
 
           <label className="block space-y-1.5">
@@ -339,7 +311,7 @@ export function AiSkillManager({ scope = { kind: 'user' } }: Props) {
             {editingId !== null && (
               <Button
                 type="button" variant="secondary" disabled={busy}
-                onClick={() => { setDraft({ ...EMPTY_DRAFT, team_id: nurTeam ?? null }); setEditingId(null) }}
+                onClick={() => { setDraft({ ...EMPTY_DRAFT }); setEditingId(null) }}
               >
                 <X className="h-4 w-4" aria-hidden="true" />
                 {t('common.cancel')}

@@ -3,16 +3,17 @@ import { ChevronDown, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { AiChat } from '@/components/ai/AiChat'
-import { AiSkillManager } from '@/components/ai/AiSkillManager'
+import { AiSkillDirectory } from '@/components/ai/AiSkillDirectory'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
 /**
  * Die KI-Seite ist der Chat — nicht eine Seite *mit* einem Chat.
  *
- * Die Skill-Verwaltung bleibt ein eingeklappter Bereich darunter: sie ist ein
- * Verzeichnis plus ein Formular mit einem mehrzeiligen Textfeld und wäre in
- * einem Popover unbedienbar. Eingeklappt kostet sie nichts und ist trotzdem
- * dort, wo man sie sucht — beim Assistenten.
+ * Darunter eingeklappt das Skill-**Verzeichnis**: nur lesend, dafür vollständig.
+ * Hier stand bis eben dieselbe Verwaltung wie im Profil und unter Teams — drei
+ * Stellen mit demselben Formular, und keine davon zeigte, zu welchem Bereich
+ * ein Skill gehört. Verwaltet wird jetzt dort, wo das Wissen hingehört; die
+ * Frage „was kennt er gerade?" beantwortet diese eine Liste.
  */
 export function Ai() {
   const { t } = useTranslation()
@@ -44,7 +45,7 @@ export function Ai() {
             className="flex w-full items-center gap-2 px-4 py-2 text-xs font-medium text-on-surface-variant transition-colors hover:text-on-surface"
           >
             <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            {t('ai.skills.title')}
+            {t('ai.skills.directoryTitle')}
             <ChevronDown
               className={`ml-auto h-3.5 w-3.5 transition-transform ${skillsOpen ? 'rotate-180' : ''}`}
               aria-hidden="true"
@@ -52,7 +53,7 @@ export function Ai() {
           </button>
           {skillsOpen && (
             <div className="max-h-[60vh] overflow-y-auto border-t border-outline-variant/40 p-4">
-              <AiSkillManager />
+              <AiSkillDirectory />
             </div>
           )}
         </div>

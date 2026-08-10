@@ -168,7 +168,10 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   return (
     <AiKnowledgeShell
       icon={Brain}
-      title={t('ai.memory.title')}
+      // Die Überschrift folgt dem Bereich. Sie lautete auch über dem Wissen
+      // eines Teams „Persönliches KI-Memory" — genau die Verwechslung, die
+      // persönlich und geteilt zusammenrühren lässt.
+      title={scope.kind === 'team' ? t('ai.memory.teamTitle') : t('ai.memory.title')}
       description={scope.kind === 'team' ? t('ai.memory.teamDescription') : t('ai.memory.description')}
       headerAction={scope.kind === 'user' ? (
         <label className="flex min-h-10 items-center gap-3 text-sm text-on-surface-variant">

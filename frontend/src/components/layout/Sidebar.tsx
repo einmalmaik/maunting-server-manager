@@ -31,6 +31,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   const canManageNodes = useHasPermission('nodes.manage')
   const canChatWithAi = useHasPermission('ai.chat.use')
   const canManageAiSkills = useHasPermission('ai.skills.manage')
+  const canUseSkills = useHasPermission('ai.skills.use')
   const canUseAi = canChatWithAi || canManageAiSkills
   
   const asideRef = useRef<HTMLElement>(null)
@@ -65,7 +66,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
     panelDatabase: t('nav.panelDatabase', 'Panel-Datenbank'), nodes: t('nav.nodes'), docs: t('nav.docs'), ai: t('nav.ai'),
   }, {
     owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewAudit, canViewSettings,
-    canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes, canUseAi,
+    canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes, canUseAi, canUseSkills,
   })
   const groupLabels: Record<NavGroupName, string> = {
     Overview: t('navGroups.overview', 'Overview'), Infrastructure: t('navGroups.infrastructure', 'Infrastructure'),

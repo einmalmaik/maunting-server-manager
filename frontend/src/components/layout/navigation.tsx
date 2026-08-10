@@ -15,6 +15,14 @@ interface NavigationAccess {
   canReadPanelDatabase: boolean
   canViewNodes: boolean
   canUseAi: boolean
+  /**
+   * ai.skills.use — reicht für /teams, aber nicht für den Chat.
+   *
+   * Seit die Skills aus den Profileinstellungen unter Teams gezogen sind, ist
+   * das der einzige Weg zu den eigenen. Ohne diesen Eintrag verlöre ihn, wer
+   * lesen darf, aber nicht chatten.
+   */
+  canUseSkills: boolean
 }
 
 /**
@@ -27,7 +35,7 @@ export function buildNavigation(labels: Record<string, string>, access: Navigati
     ...(access.owner || access.canUseAi ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Overview' as const }] : []),
     { to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' },
     ...(access.owner || access.canViewNodes ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),
-    ...(access.owner || access.canUseAi ? [{ to: '/teams', icon: UsersRound, label: labels.teams, group: 'Infrastructure' as const }] : []),
+    ...(access.owner || access.canUseAi || access.canUseSkills ? [{ to: '/teams', icon: UsersRound, label: labels.teams, group: 'Infrastructure' as const }] : []),
     ...(access.owner || access.canManageUsers ? [{ to: '/users', icon: Users, label: labels.users, group: 'Administration' as const }] : []),
     ...(access.owner || access.canManageRoles ? [{ to: '/roles', icon: Shield, label: labels.roles, group: 'Administration' as const }] : []),
     ...(access.owner || access.canViewAudit ? [{ to: '/admin/audit', icon: History, label: labels.audit, group: 'Administration' as const }] : []),
