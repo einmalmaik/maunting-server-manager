@@ -314,8 +314,15 @@ def test_team_memory_survives_its_author(db: Session, regular_user: User) -> Non
     assert row.owner_user_id is None
     assert row.team_id == team.id
 
-    db.delete(db.get(User, colleague.id))
-    db.commit()
+    # Ueber denselben Weg, den das Panel geht — nicht per `db.delete(user)`.
+    # Ein Benutzerkonto haengt an Zeilen, die bewusst **kein** `ondelete` haben
+    # (Audit, Sitzungen); die werden vorher aufgeloest. Seit die Tests
+    # Fremdschluessel pruefen, faellt ein Abkuerzen hier sofort auf — und das ist
+    # richtig so, denn ein Test, der anders loescht als die Anwendung, sagt
+    # nichts ueber die Anwendung.
+    from services.auth_service import AuthService
+
+    AuthService.delete_account_atomically(db, db.get(User, colleague.id))
 
     assert db.get(AiMemoryEntry, row.id) is not None
     assert "Node 2" in _context(db, regular_user)

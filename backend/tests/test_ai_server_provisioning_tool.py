@@ -15,7 +15,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Session
 
-from models import AiActionProposal, AiConversation, Role, RolePermission, User
+from models import AiActionProposal, AiConversation, Role, RolePermission, Server, User
 from services import ai_action_errors, ai_action_service, ai_proposal_service, ai_tool_registry
 from services.role_service import set_user_roles
 
@@ -192,10 +192,19 @@ def test_execution_goes_through_the_shared_provisioning_service(
 
     captured: dict = {}
 
-    @dataclass
-    class _Server:
-        id: int = 4711
-        status: str = "installing"
+    # Der Ersatz legt eine **echte** Serverzeile an, statt eine Kennung zu
+    # erfinden. Seit die Tests Fremdschluessel pruefen, wuerde das Nachtragen
+    # einer erfundenen ID an `ai_action_proposals.server_id` sofort auffliegen —
+    # und zwar zu Recht: im Betrieb gibt `provision_server` immer einen Server
+    # zurueck, den es auch gibt.
+    angelegt = Server(
+        name="ai-erstellt", game_type="dayz", install_dir="/tmp/ai-erstellt",
+        status="installing", container_name="msm-ai-erstellt",
+    )
+    db.add(angelegt)
+    db.commit()
+    db.refresh(angelegt)
+    neue_server_id = angelegt.id
 
     @dataclass
     class _Task:
@@ -203,7 +212,7 @@ def test_execution_goes_through_the_shared_provisioning_service(
 
     @dataclass
     class _Result:
-        server: _Server
+        server: Server
         task: _Task
 
     def fake_provision(db_arg, request, actor, *, idempotency_key=None, retry_of_id=None):
@@ -211,7 +220,7 @@ def test_execution_goes_through_the_shared_provisioning_service(
         captured["actor_origin"] = actor.origin
         captured["actor_user"] = actor.user.id
         captured["idempotency_key"] = idempotency_key
-        return _Result(server=_Server(), task=_Task())
+        return _Result(server=angelegt, task=_Task())
 
     monkeypatch.setattr(
         "services.server_provisioning_service.provision_server", fake_provision
@@ -229,9 +238,9 @@ def test_execution_goes_through_the_shared_provisioning_service(
     assert captured["actor_origin"] == "ai"
     assert captured["actor_user"] == regular_user.id
     assert captured["idempotency_key"] == f"ai-{proposal_id}"
-    assert result["server_id"] == 4711
+    assert result["server_id"] == neue_server_id
     # Nach der Ausfuehrung traegt der Vorschlag seinen Server.
-    assert executed.server_id == 4711
+    assert executed.server_id == neue_server_id
     assert executed.status == "succeeded"
 
 

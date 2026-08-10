@@ -217,7 +217,7 @@ def test_the_hourly_budget_falls_back_to_confirmation(
 def test_actions_older_than_an_hour_free_the_budget_again(
     db: Session, regular_user: User
 ) -> None:
-    server, _ = _setup(
+    server, conversation = _setup(
         db,
         regular_user,
         global_keys=("ai.chat.use", "ai.autonomous.use"),
@@ -227,7 +227,9 @@ def test_actions_older_than_an_hour_free_the_budget_again(
     now = datetime.now(timezone.utc)
     db.add(AiActionProposal(
         id=str(uuid4()),
-        conversation_id=str(uuid4()),
+        # Die echte Unterhaltung, nicht eine erfundene Kennung: seit die Tests
+        # Fremdschluessel pruefen, faellt eine Zeile ins Leere sofort auf.
+        conversation_id=conversation.id,
         user_id=regular_user.id,
         server_id=None,
         tool_name="propose_backup",

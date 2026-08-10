@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event as sa_event
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -35,6 +35,25 @@ db_module.engine = create_engine(
 db_module.SessionLocal = db_module.sessionmaker(
     autocommit=False, autoflush=False, bind=db_module.engine
 )
+
+
+@sa_event.listens_for(db_module.engine, "connect")
+def _fremdschluessel_scharfstellen(dbapi_connection, _record) -> None:
+    """SQLite prueft Fremdschluessel nur, wenn man es ausdruecklich verlangt.
+
+    Ohne diese drei Zeilen konnte die Testsuite **kein einziges**
+    ``ON DELETE CASCADE`` beobachten, waehrend PostgreSQL im Betrieb jedes
+    erzwingt. Genau in dieser Luecke lebte der Fehler, wegen dem das hier steht:
+    ``ai_action_proposals.server_id`` kaskadierte auf ``servers.id``, das Loeschen
+    eines Servers vernichtete den Vorschlag, der es angeordnet hatte — und das
+    Panel meldete den gelungenen Vorgang als "Aktionsvorschlag nicht gefunden".
+    2519 gruene Tests konnten das nicht sehen.
+
+    Dieselbe Technik benutzt ``scripts/migrate_sqlite_to_postgres.py`` bereits,
+    dort aus demselben Grund: eine SQLite-Datei, deren Fremdschluessel nie
+    geprueft wurden, laesst sich nicht ohne Weiteres nach PostgreSQL heben.
+    """
+    dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
 # ── DIS Sidecar mock (tests use local crypto, no Node required) ────────
 # Production code calls DisClient for all crypto. In tests we patch the
