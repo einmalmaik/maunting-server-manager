@@ -219,6 +219,15 @@ def _global_tool_definitions() -> list[dict]:
                     "description": "Die Vorgehensweise als Fliesstext, gern mit Markdown.",
                 },
                 "scope": {"type": "string", "enum": learn_scopes},
+                "team": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": (
+                        "Nur bei scope=team und nur, wenn zuvor eine Rueckfrage "
+                        "nach dem Team kam: der Name aus dieser Rueckfrage, "
+                        "genau so geschrieben. Sonst weglassen."
+                    ),
+                },
             },
             ["skill_key", "name", "description", "body", "scope"],
         ),
@@ -258,6 +267,15 @@ def _global_tool_definitions() -> list[dict]:
                 "server_id": {
                     "type": ["integer", "null"],
                     "description": "Nur bei scope=server. Sonst null.",
+                },
+                "team": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": (
+                        "Nur bei scope=team und nur, wenn zuvor eine Rueckfrage "
+                        "nach dem Team kam: der Name aus dieser Rueckfrage, "
+                        "genau so geschrieben. Sonst weglassen."
+                    ),
                 },
                 "key": {
                     "type": "string",
@@ -351,6 +369,15 @@ def _global_tool_definitions() -> list[dict]:
                     "maxItems": 25,
                     "items": {"type": "string", "maxLength": 64},
                     "description": "Die Schluessel aus dem Suchergebnis.",
+                },
+                "team": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": (
+                        "Nur bei scope=team und nur, wenn zuvor eine Rueckfrage "
+                        "nach dem Team kam: der Name aus dieser Rueckfrage, "
+                        "genau so geschrieben. Sonst weglassen."
+                    ),
                 },
             },
             ["scope", "keys"],
@@ -728,7 +755,7 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
 
     if not permission_service.has_global_permission(db, user, "ai.memory.use"):
         raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
-    if set(arguments) - {"scope", "server_id", "key", "value", "replace_user_entry"}:
+    if set(arguments) - {"scope", "server_id", "key", "value", "replace_user_entry", "team"}:
         raise AiActionValidationError("Memory-Werkzeug hat ungueltige Argumente")
 
     scope = arguments.get("scope")
@@ -759,7 +786,13 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     if scope == "team":
         from services import team_service
 
-        target, question = team_service.learning_team(db, user)
+        # `memory` und nicht `skills`: welcher Schalter zaehlt, entscheidet die
+        # Art des Wissens. Beide Erinnerungswerkzeuge fragten hier den
+        # Skill-Schalter ab und schrieben deshalb bei `memory=True,
+        # skills=False` still ins persoenliche Gedaechtnis.
+        target, question = team_service.learning_team(
+            db, user, schalter="memory", wunsch=arguments.get("team"),
+        )
         if target is None:
             return {"remembered": False, "ask_user": question}
         if target.is_personal:
@@ -882,7 +915,7 @@ def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
 
     if not permission_service.has_global_permission(db, user, "ai.memory.use"):
         raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
-    if set(arguments) - {"scope", "keys"}:
+    if set(arguments) - {"scope", "keys", "team"}:
         raise AiActionValidationError("Memory-Loeschung hat ungueltige Argumente")
     scope = arguments.get("scope")
     if scope not in {"user", "team"}:
@@ -895,7 +928,9 @@ def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
 
     team_id = None
     if scope == "team":
-        target, question = team_service.learning_team(db, user)
+        target, question = team_service.learning_team(
+            db, user, schalter="memory", wunsch=arguments.get("team"),
+        )
         if target is None:
             return {"forgotten": [], "ask_user": question}
         if target.is_personal:
@@ -1005,7 +1040,7 @@ def _execute_learn_skill(db: Session, *, user: User, arguments: dict) -> dict:
 
     if not permission_service.has_global_permission(db, user, "ai.skills.use"):
         raise AiActionValidationError("Skills sind fuer diesen Benutzer nicht freigegeben")
-    if set(arguments) - {"skill_key", "name", "description", "body", "scope"}:
+    if set(arguments) - {"skill_key", "name", "description", "body", "scope", "team"}:
         raise AiActionValidationError("Skill-Werkzeug hat ungueltige Argumente")
 
     scope = arguments.get("scope")
@@ -1032,7 +1067,9 @@ def _execute_learn_skill(db: Session, *, user: User, arguments: dict) -> dict:
             }
         status = resolved
     else:
-        target, question = team_service.learning_team(db, user)
+        target, question = team_service.learning_team(
+            db, user, schalter="skills", wunsch=arguments.get("team"),
+        )
         if target is None:
             return {"learned": False, "ask_user": question}
         team_id = target.id

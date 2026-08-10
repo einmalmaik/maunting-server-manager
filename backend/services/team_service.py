@@ -340,7 +340,41 @@ def team_server_ids(db: Session, team_id: int) -> list[int]:
     return sorted(row[0] for row in rows)
 
 
-def learning_team(db: Session, user: User) -> tuple[Team | None, str | None]:
+SCHALTER = {"skills": TeamMember.can_manage_skills, "memory": TeamMember.can_manage_memory}
+
+
+def learning_teams(db: Session, user: User, *, schalter: str) -> list[Team]:
+    """Die echten Teams, in die dieser Benutzer schreiben darf — die Kandidaten.
+
+    ``schalter`` entscheidet, welcher der beiden Mitgliedsschalter gilt. Das war
+    vorher fest `can_manage_skills`, obwohl beide Erinnerungswerkzeuge dieselbe
+    Funktion benutzten: ein Mitglied mit `memory=True, skills=False` bekam sein
+    Teamwissen still ins persoenliche Gedaechtnis geschrieben, und umgekehrt
+    endete derselbe Satz in einem 403 aus `_assert_may_write`.
+
+    Das persoenliche Team steht bewusst nicht in der Liste. Es ist kein Ziel,
+    unter dem man waehlt, sondern der Rueckfall, wenn es keines gibt.
+    """
+    spalte = SCHALTER.get(schalter)
+    if spalte is None:
+        raise ValueError(f"Unbekannter Schalter: {schalter}")
+    rows = (
+        db.query(Team)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .filter(
+            TeamMember.user_id == user.id,
+            Team.personal_for_user_id.is_(None),
+            spalte.is_(True),
+        )
+        .order_by(Team.name)
+        .all()
+    )
+    return rows
+
+
+def learning_team(
+    db: Session, user: User, *, schalter: str = "skills", wunsch: str | None = None
+) -> tuple[Team | None, str | None]:
     """Wohin die KI schreibt, wenn sie etwas fuer das Team lernt.
 
     Gibt entweder ein Team zurueck oder einen Grund, warum die KI nachfragen
@@ -348,31 +382,35 @@ def learning_team(db: Session, user: User) -> tuple[Team | None, str | None]:
 
     - genau ein echtes Team, in dem der Benutzer verwalten darf → dorthin
     - keines → das persoenliche Team, damit ueberhaupt gelernt wird
-    - mehrere → Rueckfrage, denn eine falsche Wahl waere hier nicht folgenlos:
-      Wissen landete bei Kollegen, die es nichts angeht
+    - mehrere → ``wunsch`` entscheidet; ohne ihn eine Rueckfrage
+
+    ``wunsch`` ist ein **Auswahlmittel, keine Berechtigung.** Die Kandidatenliste
+    stammt aus der Datenbank; der Name aus dem Prompt darf nur einen Eintrag
+    daraus treffen. Trifft er keinen, gibt es dieselbe Rueckfrage wie ohne ihn —
+    ausdruecklich ohne den Hinweis, ob es ein Team dieses Namens ueberhaupt gibt.
+    Vorher war der Fall eine Sackgasse: die Rueckfrage kam, aber kein Werkzeug
+    nahm die Antwort entgegen, und das Modell fragte erneut.
 
     Der zweite Rueckgabewert ist bewusst Text fuer das Modell, nicht ein Code:
     er landet direkt im Werkzeugergebnis und soll dort verstanden werden.
     """
-    memberships = (
-        db.query(TeamMember, Team)
-        .join(Team, Team.id == TeamMember.team_id)
-        .filter(
-            TeamMember.user_id == user.id,
-            Team.personal_for_user_id.is_(None),
-            TeamMember.can_manage_skills.is_(True),
-        )
-        .all()
+    kandidaten = learning_teams(db, user, schalter=schalter)
+    if len(kandidaten) == 1:
+        return kandidaten[0], None
+    if not kandidaten:
+        return personal_team(db, user), None
+
+    namen = [team.name for team in kandidaten]
+    if wunsch is not None:
+        gesucht = wunsch.strip().casefold()
+        treffer = [team for team in kandidaten if team.name.casefold() == gesucht]
+        if len(treffer) == 1:
+            return treffer[0], None
+    return None, (
+        "Der Benutzer ist in mehreren Teams: "
+        f"{', '.join(namen)}. Frage nach, welches gemeint ist, und rufe das "
+        "Werkzeug erneut mit team=\"<Name>\" auf."
     )
-    if len(memberships) == 1:
-        return memberships[0][1], None
-    if len(memberships) > 1:
-        names = ", ".join(sorted(team.name for _member, team in memberships))
-        return None, (
-            "Der Benutzer ist in mehreren Teams: "
-            f"{names}. Frage nach, in welchem Team der Skill gelten soll."
-        )
-    return personal_team(db, user), None
 
 
 def can_manage_team_skills(db: Session, user: User, team_id: int) -> bool:
