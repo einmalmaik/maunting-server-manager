@@ -48,6 +48,27 @@ def list_memory(
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
 
+@router.get("/personal", response_model=list[AiMemoryResponse])
+def list_personal_memory(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+) -> list[AiMemoryResponse]:
+    """Alles, was diesem Benutzer selbst gehoert — persoenlich und serverbezogen.
+
+    `GET /?scope=server` verlangt eine konkrete `server_id`; wer alle seine
+    Servernotizen sehen will, muesste die Server erst raten. Genau deshalb waren
+    sie ueber die Oberflaeche bisher unerreichbar, obwohl die KI sie schreibt
+    und sie in jedem Gespraech mitlaufen.
+    """
+    try:
+        return [
+            _response(row, value)
+            for row, value in ai_memory_service.personal_entries(db, user)
+        ]
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
 @router.put("", response_model=AiMemoryResponse)
 def save_memory(
     payload: AiMemoryWrite,

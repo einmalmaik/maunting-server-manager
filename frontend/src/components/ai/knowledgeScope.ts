@@ -18,10 +18,22 @@
  * anlegen ließ sich ein persönlicher Skill gar nicht.
  */
 
-/** Für Erinnerungen: entweder die eigenen oder die eines Teams. */
+/**
+ * Für Erinnerungen: die eigenen, die eines Teams oder die des Panels.
+ *
+ * `user` umfasst beides, was dem Benutzer selbst gehört — allgemeine Einträge
+ * und die Notizen zu einzelnen Servern (`server:{id}:user:{uid}`). Die
+ * serverbezogenen sind ebenso persönlich, hatten aber lange gar keine
+ * Oberfläche: die KI schrieb sie, sie liefen in jedem Gespräch mit, und
+ * niemand konnte sie sehen oder löschen.
+ *
+ * `panel` gehört dem Betreiber und gilt für **jeden** Benutzer. Er steht
+ * deshalb in den Einstellungen und nicht im Profil.
+ */
 export type AiKnowledgeScope =
   | { kind: 'user' }
   | { kind: 'team'; teamId: number; canManage: boolean }
+  | { kind: 'panel'; canManage: boolean }
 
 /**
  * Für Skills: entweder panelweit oder ein bestimmtes Team.
@@ -35,6 +47,11 @@ export type AiSkillScope =
 
 export function scopeCanManage(scope: AiKnowledgeScope): boolean {
   return scope.kind === 'user' || scope.canManage
+}
+
+/** Der Scope-Wert, den die Memory-API für diesen Bereich erwartet. */
+export function memoryScopeName(scope: AiKnowledgeScope): 'user' | 'team' | 'panel' {
+  return scope.kind
 }
 
 export function scopeTeamId(scope: AiKnowledgeScope): number | undefined {

@@ -10,7 +10,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import AiMemoryEntry, AiMemoryPreference, User
+from models import AiMemoryEntry, AiMemoryPreference, Team, User
 from services import ai_embedding_service, audit_service, permission_service
 from services.ai_redaction import redact_sensitive_text
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
@@ -18,6 +18,10 @@ from services.dis_client import DisClient
 
 
 MAX_ENTRIES_PER_SCOPE = 100
+
+#: Was diesem Benutzer gehoert und deshalb an seiner Einwilligung haengt.
+#: `team` und `panel` gehoeren dem Team bzw. dem Betreiber.
+PERSOENLICHE_SCOPES = ("user", "server")
 MAX_CONTEXT_CHARS = 6_000
 # Kennung des Modells, mit dem ein gespeicherter Vektor entstanden ist. Wechselt
 # der Betreiber das Modell, passen alte Vektoren nicht mehr — sie werden dann
@@ -184,6 +188,33 @@ def list_entries(
     return [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
 
 
+def personal_entries(db: Session, user: User) -> list[tuple[AiMemoryEntry, str]]:
+    """Alles, was diesem Benutzer selbst gehoert — persoenlich und serverbezogen.
+
+    `list_entries` fragt genau eine Scope-Kennung ab und braucht dafuer bei
+    serverbezogenen Notizen eine konkrete `server_id`. Damit war der Bereich
+    ueber die Oberflaeche nicht erreichbar: die KI schreibt solche Notizen
+    (`remember` mit scope='server'), sie fliessen in jeden Chat und zaehlen
+    gegen die 100er-Grenze — sehen oder loeschen konnte man sie nicht.
+
+    Serverbezogene Eintraege bleiben persoenlich (`owner_user_id` ist gesetzt,
+    die Kennung lautet `server:{sid}:user:{uid}`), gehoeren also ins Profil und
+    nicht zum Server. Anders als beim Kontextaufbau wird hier **nicht** auf
+    `server.view` geprueft: es ist der eigene Eintrag, und wer den Zugriff auf
+    einen Server verliert, soll seine Notiz dazu weiterhin loeschen koennen.
+    """
+    rows = (
+        db.query(AiMemoryEntry)
+        .filter(
+            AiMemoryEntry.owner_user_id == user.id,
+            AiMemoryEntry.scope.in_(PERSOENLICHE_SCOPES),
+        )
+        .order_by(AiMemoryEntry.scope, AiMemoryEntry.server_id, AiMemoryEntry.key)
+        .all()
+    )
+    return [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
+
+
 def _assert_may_write(db: Session, user: User, scope: str, team_id: int | None) -> None:
     """Wer einen geteilten Bereich veraendern darf.
 
@@ -204,6 +235,18 @@ def _assert_may_write(db: Session, user: User, scope: str, team_id: int | None) 
             raise HTTPException(
                 status_code=403,
                 detail="Du darfst das Wissen dieses Teams nicht veraendern",
+            )
+        # Ein persoenliches Team ist kein Ablageort fuer Teamwissen. Der Eintrag
+        # laege unter `team:{persoenlich}` und waere danach **nirgends**
+        # sichtbar: die persoenliche Ansicht zeigt `scope='user'`, eine
+        # Teamansicht gibt es fuer das Ein-Mann-Team nicht. Der KI-Weg stuft
+        # deshalb auf `scope='user'` herunter — genau deswegen gehoert die Regel
+        # hierher und nicht in die Aufrufer.
+        ziel = db.get(Team, team_id)
+        if ziel is not None and ziel.is_personal:
+            raise HTTPException(
+                status_code=422,
+                detail="Persoenliches Wissen gehoert nicht in ein Team",
             )
 
 
@@ -308,9 +351,13 @@ def delete_entry(db: Session, user: User, entry_id: str) -> None:
             db, user, row.team_id
         )
     else:
-        allowed = row.owner_user_id == user.id and (
-            row.server_id is None or permission_service.has_server_permission(db, user, row.server_id, "server.view")
-        )
+        # Der eigene Eintrag, ohne zusaetzliche Serverbedingung. Vorher verlangte
+        # eine serverbezogene Notiz weiterhin `server.view` — wer den Zugriff auf
+        # einen Server verlor, konnte seine eigene Notiz dazu nicht mehr
+        # loeschen. Sie blieb in der Datenbank, zaehlte gegen sein Kontingent
+        # und war fuer ihn unerreichbar. Was gelesen wird, entscheidet weiterhin
+        # `_visible_scope_rows` mit `server.view`; das ist eine andere Frage.
+        allowed = row.owner_user_id == user.id
     if not allowed:
         raise HTTPException(status_code=404, detail="Memory-Eintrag nicht gefunden")
     audit_service.record_privileged_action(
@@ -448,10 +495,6 @@ def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
 
 def _utc(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-
-
-#: Was diesem Benutzer gehoert und deshalb an seiner Einwilligung haengt.
-PERSOENLICHE_SCOPES = ("user", "server")
 
 
 def _visible_scope_rows(

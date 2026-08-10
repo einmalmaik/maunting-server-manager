@@ -9,6 +9,20 @@ import { AiTab, type AiRoleLimits } from './AiTab'
 vi.mock('@/api/client', () => ({ api: vi.fn() }))
 vi.mock('./AiProvidersSettings', () => ({ AiProvidersSettings: () => null }))
 
+// Die beiden Wissenspanels haben eigene Tests und eigene Endpunkte. Hier zaehlt
+// nur, **dass** sie eingehaengt sind und mit welchem Bereich — panelweit, nicht
+// persoenlich. Ein echtes Rendern wuerde diesen Test an ihre Ladewege binden.
+vi.mock('@/components/ai/AiSkillManager', () => ({
+  AiSkillManager: ({ scope }: { scope: { kind: string } }) => (
+    <div data-testid="skills" data-scope={scope.kind} />
+  ),
+}))
+vi.mock('@/components/ai/AiMemoryManager', () => ({
+  AiMemoryManager: ({ scope }: { scope: { kind: string } }) => (
+    <div data-testid="memory" data-scope={scope.kind} />
+  ),
+}))
+
 const permissions = vi.fn((_key: string): boolean => true)
 vi.mock('@/hooks/useHasPermission', () => ({
   useHasPermission: (key: string) => permissions(key),
@@ -125,5 +139,23 @@ describe('AiTab', () => {
 
     expect(client.api).not.toHaveBeenCalled()
     expect(screen.getByText(/keine Berechtigung/i)).toBeInTheDocument()
+  })
+
+  it('zeigt panelweite Skills und panelweites Gedächtnis — beide panelweit', async () => {
+    // Beides gilt für **jeden** Benutzer und gehört deshalb zum Betreiber.
+    // Panelweites Gedächtnis lief bisher in jedem Gespräch mit, war aber nur
+    // über die API erreichbar; panelweite Skills legte man im Profil an.
+    render(<AiTab />)
+
+    expect(await screen.findByTestId('skills')).toHaveAttribute('data-scope', 'panel')
+    expect(screen.getByTestId('memory')).toHaveAttribute('data-scope', 'panel')
+  })
+
+  it('zeigt panelweite Skills nicht ohne das Verwaltungsrecht', async () => {
+    permissions.mockImplementation((key: string) => key !== 'ai.skills.manage')
+    render(<AiTab />)
+
+    await screen.findByTestId('memory')
+    expect(screen.queryByTestId('skills')).not.toBeInTheDocument()
   })
 })

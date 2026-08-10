@@ -3,16 +3,21 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiMemoryEntry } from '@/api/ai'
-import { SanitizedApiError } from '@/api/client'
+import { api, SanitizedApiError } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Button, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
 import { AiKnowledgeShell } from './AiKnowledgeShell'
-import { type AiKnowledgeScope, scopeCanManage, scopeTeamId } from './knowledgeScope'
+import { type AiKnowledgeScope, memoryScopeName, scopeCanManage, scopeTeamId } from './knowledgeScope'
 
 type Herkunft = 'all' | 'user' | 'ai'
+
+interface ServerOption {
+  id: number
+  name: string
+}
 
 interface Props {
   /** Ohne Angabe: das eigene Gedächtnis. */
@@ -45,34 +50,50 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const [key, setKey] = useState('')
   const [value, setValue] = useState('')
   const [bearbeitet, setBearbeitet] = useState<string | null>(null)
+  const [serverNamen, setServerNamen] = useState<Map<number, string>>(new Map())
   const [busy, setBusy] = useState(false)
 
+  // Der persönliche Bereich holt beides auf einmal: allgemeine Einträge und
+  // die Notizen zu einzelnen Servern. Beides gehört dem Benutzer, beides geht
+  // in jedes Gespräch — und die serverbezogenen waren bisher nirgends sichtbar,
+  // weil `listMemory('server', …)` je Aufruf einen konkreten Server verlangt.
   const laden = async () => {
-    const rows = teamId === undefined
-      ? await aiApi.listMemory('user')
-      : await aiApi.listMemory('team', undefined, teamId)
-    setEntries(rows)
+    if (scope.kind === 'user') return setEntries(await aiApi.listPersonalMemory())
+    if (scope.kind === 'panel') return setEntries(await aiApi.listMemory('panel'))
+    setEntries(await aiApi.listMemory('team', undefined, scope.teamId))
   }
 
   useEffect(() => {
     if (!allowed) return
     let active = true
     setSuche(''); setHerkunft('all'); setKey(''); setValue(''); setBearbeitet(null)
+    const liste = scope.kind === 'user'
+      ? aiApi.listPersonalMemory()
+      : scope.kind === 'panel'
+        ? aiApi.listMemory('panel')
+        : aiApi.listMemory('team', undefined, scope.teamId)
     Promise.all([
-      teamId === undefined ? aiApi.listMemory('user') : aiApi.listMemory('team', undefined, teamId),
+      liste,
       // Der Schalter ist eine Einstellung des Benutzers, kein Merkmal des
       // Bereichs — er wird auch in der Teamansicht geladen, aber nur in der
       // persönlichen angezeigt.
       aiApi.getMemoryPreference(),
+      // Nur für die Beschriftung der Servernotizen. Fällt sie aus, steht dort
+      // die Nummer statt des Namens — kein Grund, die Liste scheitern zu lassen.
+      scope.kind === 'user'
+        ? api<ServerOption[]>('/servers').catch(() => [] as ServerOption[])
+        : Promise.resolve([] as ServerOption[]),
     ])
-      .then(([rows, preference]) => {
+      .then(([rows, preference, servers]) => {
         if (!active) return
         setEntries(rows)
         setEnabled(preference.enabled)
+        setServerNamen(new Map(servers.map((row) => [row.id, row.name])))
       })
       .catch(() => { if (active) toast.error(t('ai.memory.errors.load')) })
     return () => { active = false }
-  }, [allowed, teamId, t])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowed, scope.kind, teamId, t])
 
   const sichtbar = useMemo(() => {
     const nadel = suche.trim().toLowerCase()
@@ -97,9 +118,14 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     if (!key.trim() || !value.trim() || busy) return
     setBusy(true)
     try {
-      await aiApi.saveMemory(teamId === undefined
-        ? { scope: 'user', key: key.trim(), value: value.trim() }
-        : { scope: 'team', team_id: teamId, key: key.trim(), value: value.trim() })
+      // Von Hand angelegt wird immer im Bereich selbst, nie serverbezogen: eine
+      // Notiz „zu diesem Server" entsteht im Gespräch über ihn, und ein
+      // Serverfeld im Formular wäre ein zweiter Weg mit eigenen Fehlerquellen.
+      await aiApi.saveMemory(
+        scope.kind === 'team'
+          ? { scope: 'team', team_id: scope.teamId, key: key.trim(), value: value.trim() }
+          : { scope: scope.kind, key: key.trim(), value: value.trim() },
+      )
       setKey(''); setValue(''); setBearbeitet(null)
       await laden()
       toast.success(t('ai.memory.saved'))
@@ -132,7 +158,11 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     })) return
     setBusy(true)
     try {
-      const { removed } = await aiApi.clearMemory(teamId === undefined ? 'user' : 'team', teamId)
+      // Bewusst nur der Bereich selbst: „alles löschen" im Profil räumt die
+      // allgemeinen Einträge, nicht die Notizen zu einzelnen Servern. Die
+      // stehen sichtbar daneben und lassen sich einzeln entfernen — ein Knopf,
+      // der beides mitnimmt, wäre weiter, als er aussieht.
+      const { removed } = await aiApi.clearMemory(memoryScopeName(scope), teamId)
       setKey(''); setValue(''); setBearbeitet(null)
       await laden()
       toast.success(t('ai.memory.cleared', { count: removed }))
@@ -171,8 +201,8 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       // Die Überschrift folgt dem Bereich. Sie lautete auch über dem Wissen
       // eines Teams „Persönliches KI-Memory" — genau die Verwechslung, die
       // persönlich und geteilt zusammenrühren lässt.
-      title={scope.kind === 'team' ? t('ai.memory.teamTitle') : t('ai.memory.title')}
-      description={scope.kind === 'team' ? t('ai.memory.teamDescription') : t('ai.memory.description')}
+      title={t(`ai.memory.titles.${scope.kind}`)}
+      description={t(`ai.memory.descriptions.${scope.kind}`)}
       headerAction={scope.kind === 'user' ? (
         <label className="flex min-h-10 items-center gap-3 text-sm text-on-surface-variant">
           <span>{t('ai.memory.enabled')}</span>
@@ -224,6 +254,17 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-mono text-xs font-semibold text-primary">{entry.key}</p>
+                {/* Zu welchem Server die Notiz gehört. Ohne diese Angabe stünde
+                    „startet nur mit erhöhtem Timeout" ohne Bezug zwischen den
+                    allgemeinen Einträgen — dieselbe Verwechslungsgefahr, die
+                    beim Modell die Server-ID in der Zeile verhindert. */}
+                {entry.scope === 'server' && entry.server_id !== null && (
+                  <span className="rounded-full border border-outline-variant/50 px-2 py-0.5 text-[10px] text-on-surface-variant">
+                    {t('ai.memory.forServer', {
+                      name: serverNamen.get(entry.server_id) ?? `#${entry.server_id}`,
+                    })}
+                  </span>
+                )}
                 {/* Herkunft sichtbar machen: niemand soll raten müssen, ob er
                     das selbst hinterlegt hat oder ob die KI es abgeleitet hat. */}
                 {entry.origin === 'ai' && (

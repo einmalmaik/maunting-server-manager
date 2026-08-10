@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { aiApi, type AiMemoryEntry } from '@/api/ai'
+import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { AiMemoryManager } from './AiMemoryManager'
@@ -9,6 +10,7 @@ import { AiMemoryManager } from './AiMemoryManager'
 vi.mock('@/api/ai', () => ({
   aiApi: {
     listMemory: vi.fn(),
+    listPersonalMemory: vi.fn(),
     getMemoryPreference: vi.fn(),
     setMemoryPreference: vi.fn(),
     saveMemory: vi.fn(),
@@ -16,6 +18,11 @@ vi.mock('@/api/ai', () => ({
     clearMemory: vi.fn(),
   },
 }))
+
+vi.mock('@/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client')
+  return { ...actual, api: vi.fn().mockResolvedValue([]) }
+})
 
 vi.mock('@/stores/confirmStore', () => ({ confirm: vi.fn().mockResolvedValue(true) }))
 
@@ -61,6 +68,7 @@ describe('AiMemoryManager', () => {
       error: null,
     })
     vi.mocked(aiApi.listMemory).mockReset().mockResolvedValue([entry])
+    vi.mocked(aiApi.listPersonalMemory).mockReset().mockResolvedValue([entry])
     vi.mocked(aiApi.getMemoryPreference).mockReset().mockResolvedValue({ enabled: true, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.setMemoryPreference).mockReset().mockResolvedValue({ enabled: false, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.saveMemory).mockReset().mockResolvedValue(entry)
@@ -87,6 +95,7 @@ describe('AiMemoryManager', () => {
     // eigene Ansage ist oder eine Ableitung der KI — und genau daran haengt,
     // wie sehr man ihm trauen sollte.
     vi.mocked(aiApi.listMemory).mockResolvedValue([entry, learned])
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([entry, learned])
     render(<AiMemoryManager />)
 
     expect(await screen.findByText('von der KI gemerkt')).toBeInTheDocument()
@@ -100,6 +109,7 @@ describe('AiMemoryManager', () => {
     // "was hat sich die KI ueber mich gemerkt?" — etwas anderes als "was habe
     // ich ihr gesagt?".
     vi.mocked(aiApi.listMemory).mockResolvedValue(viele)
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(viele)
     render(<AiMemoryManager />)
 
     expect(await screen.findByText('Europe/Berlin')).toBeInTheDocument()
@@ -118,6 +128,7 @@ describe('AiMemoryManager', () => {
     // Ein gewachsenes Gedaechtnis Zeile fuer Zeile abzuraeumen hiess vorher:
     // eine Bestaetigung je Eintrag.
     vi.mocked(aiApi.listMemory).mockResolvedValue(viele)
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(viele)
     render(<AiMemoryManager />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Alle löschen' }))
@@ -146,6 +157,7 @@ describe('AiMemoryManager', () => {
     // Mitgliedschaft. Aendern verlangt den Schalter, und was man nicht darf,
     // soll gar nicht erst als Knopf dastehen.
     vi.mocked(aiApi.listMemory).mockResolvedValue([entry])
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([entry])
     render(<AiMemoryManager scope={{ kind: 'team', teamId: 7, canManage: false }} />)
 
     expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
@@ -166,5 +178,36 @@ describe('AiMemoryManager', () => {
     const { container } = render(<AiMemoryManager />)
     expect(container).toBeEmptyDOMElement()
     expect(aiApi.listMemory).not.toHaveBeenCalled()
+  })
+  it('zeigt serverbezogene Notizen im persoenlichen Bereich, mit Servernamen', async () => {
+    // Sie sind persoenlich (`server:{id}:user:{uid}`), die KI schreibt sie, und
+    // sie liefen bis eben in jedem Gespraech mit, ohne dass sie irgendwo
+    // sichtbar oder loeschbar gewesen waeren: `listMemory('server', ...)` will
+    // je Aufruf einen konkreten Server, den niemand raten kann.
+    vi.mocked(client.api).mockResolvedValue([{ id: 62, name: 'DayZ-1' }])
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([
+      entry,
+      { ...entry, id: '...-105', scope: 'server', server_id: 62, key: 'startzeit', value: 'Braucht laengeren Timeout' },
+    ])
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('Braucht laengeren Timeout')).toBeInTheDocument()
+    expect(screen.getByText('Server: DayZ-1')).toBeInTheDocument()
+    // Der allgemeine Eintrag traegt kein Serverschild.
+    expect(screen.queryByText(/^Server: #/)).not.toBeInTheDocument()
+  })
+
+  it('faellt auf die Nummer zurueck, wenn der Servername nicht zu holen ist', async () => {
+    // Etwa nach einem Rechteentzug. Die eigene Notiz bleibt sichtbar und
+    // loeschbar — eigene Daten, die man nicht mehr loeschen kann, waeren das
+    // schlechtere Ergebnis.
+    vi.mocked(client.api).mockRejectedValue(new Error('kein Zugriff'))
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([
+      { ...entry, id: '...-106', scope: 'server', server_id: 84, key: 'startzeit', value: 'Notiz zu einem entzogenen Server' },
+    ])
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('Notiz zu einem entzogenen Server')).toBeInTheDocument()
+    expect(screen.getByText('Server: #84')).toBeInTheDocument()
   })
 })

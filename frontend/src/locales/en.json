@@ -191,7 +191,18 @@
       "clearConfirm": "Really delete all {{count}} entries? This cannot be undone.",
       "cleared": "Deleted {{count}} entries.",
       "teamTitle": "This team's knowledge",
-      "enabledScopeHint": "This switch covers your own memory, including notes about individual servers. Your teams' knowledge is unaffected — it belongs to the team and lives under Teams."
+      "enabledScopeHint": "This switch covers your own memory, including notes about individual servers. Your teams' knowledge is unaffected — it belongs to the team and lives under Teams.",
+      "titles": {
+        "user": "Personal AI memory",
+        "team": "This team's knowledge",
+        "panel": "Panel-wide AI memory"
+      },
+      "descriptions": {
+        "user": "What the assistant knows about you — in general and about individual servers. Nobody else sees it.",
+        "team": "What the assistant knows for this team. Every member can read it; changing it requires the “maintain knowledge” switch.",
+        "panel": "Applies to every user of this panel and travels with every conversation. Nothing personal — everyone sees it."
+      },
+      "forServer": "Server: {{name}}"
     },
     "skills": {
       "title": "Skills",

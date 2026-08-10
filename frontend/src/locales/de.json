@@ -191,7 +191,18 @@
       "clearConfirm": "Wirklich alle {{count}} Einträge löschen? Das lässt sich nicht rückgängig machen.",
       "cleared": "{{count}} Einträge gelöscht.",
       "teamTitle": "Wissen dieses Teams",
-      "enabledScopeHint": "Der Schalter gilt für dein eigenes Gedächtnis, einschließlich der Notizen zu einzelnen Servern. Das Wissen deiner Teams ist davon nicht betroffen — es gehört dem Team und steht unter Teams."
+      "enabledScopeHint": "Der Schalter gilt für dein eigenes Gedächtnis, einschließlich der Notizen zu einzelnen Servern. Das Wissen deiner Teams ist davon nicht betroffen — es gehört dem Team und steht unter Teams.",
+      "titles": {
+        "user": "Persönliches KI-Memory",
+        "team": "Wissen dieses Teams",
+        "panel": "Panelweites KI-Gedächtnis"
+      },
+      "descriptions": {
+        "user": "Was der Assistent über dich weiß — allgemein und zu einzelnen Servern. Niemand sonst sieht es.",
+        "team": "Was der Assistent für dieses Team weiß. Alle Mitglieder sehen es; ändern darf es, wer den Schalter „Wissen pflegen“ hat.",
+        "panel": "Gilt für jeden Benutzer dieses Panels und läuft in jedem Gespräch mit. Nichts Persönliches — es sieht jeder."
+      },
+      "forServer": "Server: {{name}}"
     },
     "skills": {
       "title": "Skills",
