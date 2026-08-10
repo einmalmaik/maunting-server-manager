@@ -8,7 +8,7 @@ from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy.orm import Session
 
-from models import AiProvider, AiUserCredential
+from models import AiProvider
 from services.dis_client import DisClient
 
 
@@ -110,10 +110,6 @@ def _operator_aad(provider_id: int) -> str:
     return f"msm:ai:provider:{provider_id}:operator-key"
 
 
-def _user_aad(provider_id: int, user_id: int) -> str:
-    return f"msm:ai:provider:{provider_id}:user:{user_id}:api-key"
-
-
 def create_provider(
     db: Session,
     *,
@@ -187,49 +183,21 @@ def update_provider(
     return provider
 
 
-def set_user_credential(
-    db: Session, *, user_id: int, provider_id: int, api_key: str
-) -> AiUserCredential:
-    if not api_key.strip():
-        raise AiProviderConfigurationError("API-Key darf nicht leer sein")
-    credential = (
-        db.query(AiUserCredential)
-        .filter(
-            AiUserCredential.user_id == user_id,
-            AiUserCredential.provider_id == provider_id,
-        )
-        .first()
-    )
-    encrypted = DisClient.encrypt(api_key, aad=_user_aad(provider_id, user_id))
-    if credential is None:
-        credential = AiUserCredential(
-            user_id=user_id,
-            provider_id=provider_id,
-            api_key_encrypted=encrypted,
-            api_key_hint=_hint(api_key),
-        )
-        db.add(credential)
-    else:
-        credential.api_key_encrypted = encrypted
-        credential.api_key_hint = _hint(api_key)
-    db.flush()
-    return credential
-
-
 def resolve_api_key(db: Session, provider: AiProvider, user_id: int) -> str | None:
-    """Nutzt BYOK vor Betreiber-Key und gibt den Klartext nur an den Adapter."""
-    credential = (
-        db.query(AiUserCredential)
-        .filter(
-            AiUserCredential.user_id == user_id,
-            AiUserCredential.provider_id == provider.id,
-        )
-        .first()
-    )
-    if credential is not None:
-        return DisClient.decrypt(
-            credential.api_key_encrypted, aad=_user_aad(provider.id, user_id)
-        )
+    """Der Schluessel des Betreibers, im Klartext nur an den Adapter.
+
+    Hier stand einmal BYOK: ein Benutzerschluessel wurde **vor** dem des
+    Betreibers genommen. Das ist entfallen — der Betreiber stellt Schluessel,
+    Modell und Provider. Ein eigener Nutzerschluessel waere ein zweiter
+    Abrechnungspfad neben dem, den der Betreiber kalkuliert hat.
+
+    ``db`` und ``user_id`` bleiben in der Signatur, obwohl sie nicht mehr
+    gebraucht werden: alle Aufrufer reichen sie durch, und sie wegzunehmen waere
+    eine Aenderung an jedem Aufrufpfad fuer einen kosmetischen Gewinn. Sollte
+    der Betreiber je Schluessel je Rolle oder je Team einfuehren, sind sie
+    genau die Angaben, die es dafuer braucht.
+    """
+    del db, user_id
     if provider.operator_api_key_encrypted:
         return DisClient.decrypt(
             provider.operator_api_key_encrypted, aad=_operator_aad(provider.id)

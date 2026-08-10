@@ -3,7 +3,7 @@ from .user_role import UserRole
 from .role_ai_limit import RoleAiLimit
 from .ai_usage_event import AiUsageEvent
 from .operation_task import OperationTask
-from .ai_provider import AiProvider, AiUserCredential
+from .ai_provider import AiProvider
 from .ai_conversation import AiConversation, AiMessage
 from .ai_run import AiRun
 from .ai_action_proposal import AiActionProposal
@@ -58,7 +58,7 @@ from .hoster import (
 
 __all__ = [
     "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
-    "AiProvider", "AiUserCredential", "AiConversation", "AiMessage", "AiActionProposal",
+    "AiProvider", "AiConversation", "AiMessage", "AiActionProposal",
     "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
     "AiAutonomyGrant", "AiToolResult", "AiRun",
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",

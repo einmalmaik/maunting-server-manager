@@ -1,4 +1,13 @@
-"""Provider- und BYOK-Routen mit strikt getrennten Berechtigungen."""
+"""Provider-Routen mit strikt getrennten Berechtigungen.
+
+Zwei Haelften: `/settings/providers/*` gehoert dem Betreiber (`panel.settings.*`),
+`/providers` ist die Auswahlliste fuer den Chat (`ai.chat.use`).
+
+Es gab hier eine dritte Haelfte — vier Endpunkte, unter denen jeder Benutzer
+einen eigenen API-Key hinterlegen konnte. Sie sind entfallen: Schluessel, Modell
+und Providerkonfiguration liegen beim Betreiber, weil ein Nutzerschluessel in
+einem gehosteten Panel ein zweiter Abrechnungspfad neben dem kalkulierten waere.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -6,15 +15,13 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import require_global, verify_csrf
-from models import AiProvider, AiUserCredential, User
+from models import AiProvider, User
 from schemas.ai_provider import (
     AiProviderAvailableResponse,
     AiProviderCreate,
     AiProviderResponse,
     AiProviderTestResponse,
     AiProviderUpdate,
-    AiUserCredentialResponse,
-    AiUserCredentialUpdate,
 )
 from services import ai_provider_service, audit_service
 from services.ai_provider_service import AiProviderConfigurationError
@@ -236,103 +243,26 @@ def list_available_providers(
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> list[AiProviderAvailableResponse]:
+    """Was dieser Benutzer im Chat auswaehlen kann.
+
+    Eine Auswahl unter dem, was der Betreiber freigegeben hat — keine
+    Konfiguration. Ob ein Provider nutzbar ist, haengt seit dem Wegfall von BYOK
+    nur noch am Betreiberschluessel; ein Benutzer kann daran nichts aendern und
+    bekommt deshalb auch keinen Knopf dafuer.
+    """
+    del user
     providers = db.query(AiProvider).filter(AiProvider.enabled.is_(True)).order_by(AiProvider.name).all()
-    credential_provider_ids = {
-        row[0]
-        for row in db.query(AiUserCredential.provider_id)
-        .filter(AiUserCredential.user_id == user.id)
-        .all()
-    }
     return [
         AiProviderAvailableResponse(
             id=provider.id,
             name=provider.name,
             default_model=provider.default_model,
             requires_api_key=provider.requires_api_key,
-            user_key_configured=provider.id in credential_provider_ids,
             operator_key_available=bool(provider.operator_api_key_encrypted),
             available=(
                 not provider.requires_api_key
-                or provider.id in credential_provider_ids
                 or bool(provider.operator_api_key_encrypted)
             ),
         )
         for provider in providers
     ]
-
-
-@router.get("/providers/{provider_id}/credential", response_model=AiUserCredentialResponse)
-def get_credential_status(
-    provider_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_global("ai.chat.use")),
-) -> AiUserCredentialResponse:
-    if db.get(AiProvider, provider_id) is None:
-        raise HTTPException(status_code=404, detail="Provider nicht gefunden")
-    credential = (
-        db.query(AiUserCredential)
-        .filter(
-            AiUserCredential.user_id == user.id,
-            AiUserCredential.provider_id == provider_id,
-        )
-        .first()
-    )
-    return AiUserCredentialResponse(
-        provider_id=provider_id,
-        configured=credential is not None,
-        key_hint=credential.api_key_hint if credential else None,
-    )
-
-
-@router.put("/providers/{provider_id}/credential", response_model=AiUserCredentialResponse)
-def put_credential(
-    provider_id: int,
-    payload: AiUserCredentialUpdate,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_global("ai.chat.use")),
-    _: None = Depends(verify_csrf),
-) -> AiUserCredentialResponse:
-    provider = db.get(AiProvider, provider_id)
-    if provider is None or not provider.enabled:
-        raise HTTPException(status_code=404, detail="Provider nicht gefunden")
-    try:
-        credential = ai_provider_service.set_user_credential(
-            db,
-            user_id=user.id,
-            provider_id=provider.id,
-            api_key=payload.api_key.get_secret_value(),
-        )
-        db.commit()
-        db.refresh(credential)
-        return AiUserCredentialResponse(
-            provider_id=provider.id,
-            configured=True,
-            key_hint=credential.api_key_hint,
-        )
-    except ai_provider_service.AiProviderConfigurationError as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except DisSidecarError as exc:
-        db.rollback()
-        raise HTTPException(status_code=503, detail="API-Key konnte nicht sicher gespeichert werden") from exc
-
-
-@router.delete("/providers/{provider_id}/credential", status_code=status.HTTP_204_NO_CONTENT)
-def delete_credential(
-    provider_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_global("ai.chat.use")),
-    _: None = Depends(verify_csrf),
-) -> Response:
-    credential = (
-        db.query(AiUserCredential)
-        .filter(
-            AiUserCredential.user_id == user.id,
-            AiUserCredential.provider_id == provider_id,
-        )
-        .first()
-    )
-    if credential is not None:
-        db.delete(credential)
-        db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)

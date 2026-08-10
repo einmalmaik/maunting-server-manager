@@ -100,7 +100,7 @@ describe('AiChat', () => {
     })
     vi.mocked(client.api).mockReset().mockResolvedValue([{ id: 7, name: 'Minecraft-01' }])
     vi.mocked(aiApi.listProviders).mockReset().mockResolvedValue([
-      { id: 1, name: 'Synthetic AI', default_model: 'test-model', requires_api_key: false, user_key_configured: false, operator_key_available: true, available: true },
+      { id: 1, name: 'Synthetic AI', default_model: 'test-model', requires_api_key: false, operator_key_available: true, available: true },
     ])
     vi.mocked(aiApi.getConversation).mockReset().mockResolvedValue({ ...CONVERSATION, messages: [eigeneNachricht] })
     vi.mocked(aiApi.listActions).mockReset().mockResolvedValue([])

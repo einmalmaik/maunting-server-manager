@@ -148,25 +148,9 @@
       "testFailed": "Der Test ist fehlgeschlagen.",
       "baseUrlHint": "Nur die Basis-URL, z. B. https://openrouter.ai/api/v1 — ohne /chat/completions. MSM hängt den Endpunkt selbst an; ein mitkopierter Endpunktpfad wird beim Speichern entfernt."
     },
-    "credentials": {
-      "title": "Eigene KI-Zugangsdaten",
-      "description": "Dein API-Key wird verschlüsselt gespeichert und nur für deine Anfragen verwendet. Er wird nach dem Speichern nie wieder angezeigt.",
-      "empty": "Derzeit ist kein KI-Provider verfügbar.",
-      "available": "Verfügbar",
-      "keyRequired": "Eigener Key erforderlich",
-      "apiKey": "API-Key",
-      "configured": "Eigener Key konfiguriert; neuen Key eingeben, um ihn zu ersetzen",
-      "placeholder": "API-Key eingeben",
-      "remove": "Eigenen Key entfernen",
-      "saved": "KI-Zugangsdaten sicher gespeichert.",
-      "deleted": "Eigener KI-Key entfernt.",
-      "deleteTitle": "Eigenen API-Key entfernen?",
-      "deleteConfirm": "Deinen API-Key für {{name}} wirklich entfernen?",
-      "errors": {
-        "load": "KI-Provider konnten nicht geladen werden.",
-        "save": "API-Key konnte nicht gespeichert werden.",
-        "delete": "API-Key konnte nicht entfernt werden."
-      }
+    "profile": {
+      "title": "KI-Assistent",
+      "description": "API-Key, Modell und Anbieter legt der Betreiber des Panels fest. Hier verwaltest du, was der Assistent über dich weiß."
     },
     "memory": {
       "title": "Persönliches KI-Memory",
@@ -188,10 +172,22 @@
       "usedCount": "{{count}}× verwendet",
       "usedCount_one": "{{count}}× verwendet",
       "usedCount_other": "{{count}}× verwendet",
-      "scope": "Bereich",
-      "scopePersonal": "Persönlich",
-      "scopePersonalHint": "Nur du siehst das. Niemand sonst, unabhängig von Rechten.",
-      "scopeTeamHint": "Alle Mitglieder dieses Teams sehen es."
+      "teamDescription": "Was der Assistent für dieses Team weiß. Alle Mitglieder sehen es; ändern darf es, wer den Schalter „Wissen pflegen“ hat.",
+      "search": "Erinnerungen durchsuchen",
+      "filterOrigin": "Nach Herkunft filtern",
+      "origins": {
+        "all": "Alle",
+        "user": "Von mir",
+        "ai": "Von der KI"
+      },
+      "count": "{{shown}} von {{total}} angezeigt",
+      "noMatches": "Kein Eintrag passt zur Suche.",
+      "add": "Hinzufügen",
+      "edit": "Erinnerung bearbeiten",
+      "clearAll": "Alle löschen",
+      "clearTitle": "Gesamtes Gedächtnis löschen?",
+      "clearConfirm": "Wirklich alle {{count}} Einträge löschen? Das lässt sich nicht rückgängig machen.",
+      "cleared": "{{count}} Einträge gelöscht."
     },
     "skills": {
       "title": "Skills",
@@ -235,7 +231,11 @@
       "errors": {
         "load": "Skills konnten nicht geladen werden.",
         "save": "Skill konnte nicht gespeichert werden."
-      }
+      },
+      "teamDescription": "Die Vorgehensweisen, die dieses Team gelernt hat. Alle Mitglieder sehen sie; ändern darf sie, wer den Schalter „Skills pflegen“ hat.",
+      "search": "Skills durchsuchen",
+      "noMatches": "Kein Skill passt zur Suche.",
+      "manage": "Von dir änderbar"
     },
     "attachments": {
       "add": "Sicheren Anhang hinzufügen",
@@ -3481,6 +3481,9 @@
     "errors": {
       "load": "Teams konnten nicht geladen werden.",
       "save": "Änderung konnte nicht gespeichert werden."
-    }
+    },
+    "knowledge": "KI-Wissen",
+    "knowledgeHint": "Was sich der Assistent für dieses Team merkt und welche Vorgehensweisen er hier gelernt hat. Lesen darf jedes Mitglied; ändern nur, wer die Schalter oben hat.",
+    "personalKnowledgeHint": "Dein persönliches KI-Wissen. Niemand sonst sieht es, unabhängig von Rechten."
   }
 }

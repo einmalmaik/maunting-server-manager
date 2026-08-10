@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import require_global, verify_csrf
-from models import AiMessage, AiProvider, AiUserCredential, User
+from models import AiMessage, AiProvider, User
 from schemas.ai_chat import (
     AiChatRequest,
     AiConversationDetail,
@@ -219,16 +219,7 @@ def stream_message(
     provider = db.get(AiProvider, payload.provider_id)
     if provider is None or not provider.enabled:
         raise HTTPException(status_code=404, detail="Provider nicht gefunden")
-    has_user_key = (
-        db.query(AiUserCredential.id)
-        .filter(
-            AiUserCredential.user_id == user.id,
-            AiUserCredential.provider_id == provider.id,
-        )
-        .first()
-        is not None
-    )
-    if provider.requires_api_key and not has_user_key and not provider.operator_api_key_encrypted:
+    if provider.requires_api_key and not provider.operator_api_key_encrypted:
         raise HTTPException(status_code=409, detail="Fuer diesen Provider ist kein API-Key konfiguriert")
 
     existing = db.query(AiMessage).filter(AiMessage.request_id == str(payload.request_id)).first()

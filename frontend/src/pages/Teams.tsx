@@ -4,6 +4,9 @@ import { useTranslation } from 'react-i18next'
 
 import { api, SanitizedApiError } from '@/api/client'
 import { teamsApi, type Team, type TeamDetail, type TeamServer } from '@/api/teams'
+import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
+import { AiSkillManager } from '@/components/ai/AiSkillManager'
+import type { AiKnowledgeScope } from '@/components/ai/knowledgeScope'
 import { Button, Dropdown, MultiSelect, Switch } from '@/Singra/UI'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -13,6 +16,27 @@ import { toast } from '@/stores/toastStore'
 interface UserOption {
   id: number
   username: string
+}
+
+/**
+ * Welcher Wissensbereich zu einem Team gehört.
+ *
+ * Das persönliche Ein-Mann-Team ist kein Team im Sinne des Backends: sein
+ * Wissen liegt unter `scope=user` und verlässt den Benutzer nie. Es hier auf
+ * `team` abzubilden hieße, persönliche Einträge in eine geteilte Ablage zu
+ * schreiben — genau die Grenze, die `scope_identity` zieht.
+ *
+ * Ändern darf, wer den jeweiligen Schalter am Mitgliedseintrag hat. Die Angabe
+ * kommt aus derselben Antwort, die das Backend ohnehin liefert; sie hier erneut
+ * abzufragen wäre eine zweite Wahrheit.
+ */
+function knowledgeScope(detail: TeamDetail, art: 'memory' | 'skills'): AiKnowledgeScope {
+  if (detail.is_personal) return { kind: 'user' }
+  return {
+    kind: 'team',
+    teamId: detail.id,
+    canManage: art === 'memory' ? detail.can_manage_memory : detail.can_manage_skills,
+  }
 }
 
 /**
@@ -226,6 +250,30 @@ export function Teams() {
           </p>
         )}
       </section>
+
+      {/* ── Das KI-Wissen dieses Bereichs ─────────────────────────────
+          Für das persönliche Team ist das das eigene Wissen; für ein echtes
+          das geteilte. Bis eben zeigte diese Seite für das persönliche Team
+          gar nichts — dabei ist es genau der Ort, an dem man nachsieht, was
+          der Assistent über einen weiß.
+
+          Dieselben Panels wie im Profil, nur mit anderem Bereich. Eine zweite
+          Ansicht daneben zu bauen hätte bedeutet, dass sie auseinanderlaufen,
+          sobald jemand nur eine davon anfasst. */}
+      {detail && (
+        <section className="space-y-4" aria-labelledby="team-knowledge">
+          <div className="msm-card p-6">
+            <h2 id="team-knowledge" className="font-headline text-lg font-semibold text-on-surface">
+              {t('teams.knowledge')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">
+              {detail.is_personal ? t('teams.personalKnowledgeHint') : t('teams.knowledgeHint')}
+            </p>
+          </div>
+          <AiMemoryManager scope={knowledgeScope(detail, 'memory')} />
+          <AiSkillManager scope={knowledgeScope(detail, 'skills')} />
+        </section>
+      )}
 
       {detail && !detail.is_personal && (
         <>

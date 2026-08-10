@@ -903,6 +903,10 @@
       "waitingUser": "AI 有一个问题要问你。",
       "failed": "AI 任务失败。",
       "open": "打开助手"
+    },
+    "profile": {
+      "title": "AI 助手",
+      "description": "API 密钥、模型和服务商由面板运营方设置。你在这里管理助手对你的了解。"
     }
   }
 }

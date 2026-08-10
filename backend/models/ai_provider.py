@@ -1,8 +1,8 @@
-"""AI-Provider-Konfiguration und benutzereigene Credentials."""
+"""AI-Provider-Konfiguration — vollstaendig in der Hand des Betreibers."""
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -11,8 +11,13 @@ from database import Base
 class AiProvider(Base):
     """Vom Betreiber freigegebener OpenAI-kompatibler Endpunkt.
 
-    Benutzer koennen die Ziel-URL nicht veraendern. Dadurch bleibt BYOK ein
-    Credential-Flow und wird nicht zu einem frei steuerbaren SSRF-Kanal.
+    Ziel-URL, Modell und Schluessel legt der Betreiber fest; ein Benutzer waehlt
+    nur noch unter dem aus, was freigegeben ist. Es gab hier einmal einen
+    zweiten Weg — jeder Benutzer durfte einen eigenen API-Key mitbringen, und
+    `resolve_api_key` nahm ihn **vor** dem des Betreibers. Fuer ein Panel, das
+    ein Hoster betreibt, ist das der falsche Weg herum: der Kunde zahlt fuer den
+    Dienst, und ein eigener Schluessel waere ein zweiter Abrechnungspfad neben
+    dem kalkulierten.
     """
 
     __tablename__ = "ai_providers"
@@ -30,34 +35,6 @@ class AiProvider(Base):
     # keinen Preis: ohne diesen Wert bleiben die Kosten bei null und das
     # rollenbasierte Kostenlimit greift nicht (die Oberflaeche weist darauf hin).
     token_price_cents_per_million: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False,
-    )
-
-
-class AiUserCredential(Base):
-    """DIS-verschluesselter Benutzer-Key fuer genau einen Provider."""
-
-    __tablename__ = "ai_user_credentials"
-    __table_args__ = (
-        UniqueConstraint("user_id", "provider_id", name="uq_ai_user_credentials_user_provider"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    provider_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("ai_providers.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    api_key_encrypted: Mapped[str] = mapped_column(String(4096), nullable=False)
-    api_key_hint: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

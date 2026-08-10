@@ -7,6 +7,7 @@ from database import get_db
 from dependencies import require_global, verify_csrf
 from models import AiMemoryEntry, AiMemoryPreference, User
 from schemas.ai_memory import (
+    AiMemoryClearResponse,
     AiMemoryNoticeAnswer,
     AiMemoryPreferenceResponse,
     AiMemoryPreferenceWrite,
@@ -63,6 +64,27 @@ def save_memory(
     except DisSidecarError as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.delete("", response_model=AiMemoryClearResponse)
+def clear_memory(
+    scope: MemoryScope = Query(...),
+    server_id: int | None = Query(default=None, ge=1),
+    team_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+    _: None = Depends(verify_csrf),
+) -> AiMemoryClearResponse:
+    """Leert einen ganzen Bereich auf einmal.
+
+    Bewusst **vor** der Route mit dem Pfadparameter definiert. FastAPI wertet in
+    Definitionsreihenfolge aus, und `/{entry_id}` wuerde einen leeren Pfad zwar
+    nicht fangen — aber die Reihenfolge hier ausdruecklich richtig zu halten
+    kostet nichts und erspart die Suche, falls jemand den Pfad spaeter aendert.
+    """
+    return AiMemoryClearResponse(
+        removed=ai_memory_service.delete_all_entries(db, user, scope, server_id, team_id)
+    )
 
 
 @router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)

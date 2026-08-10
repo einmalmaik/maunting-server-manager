@@ -13,6 +13,7 @@ vi.mock('@/api/ai', () => ({
     setMemoryPreference: vi.fn(),
     saveMemory: vi.fn(),
     deleteMemory: vi.fn(),
+    clearMemory: vi.fn(),
   },
 }))
 
@@ -43,6 +44,14 @@ const learned: AiMemoryEntry = {
   last_used_at: '2026-08-05T09:00:00Z',
 }
 
+/** Genug Einträge, damit Suche, Filter und Zähler überhaupt erscheinen. */
+const viele: AiMemoryEntry[] = [
+  entry,
+  learned,
+  { ...entry, id: '...-103', key: 'zeitzone', value: 'Europe/Berlin' },
+  { ...entry, id: '...-104', key: 'anrede', value: 'Du', origin: 'ai' },
+]
+
 describe('AiMemoryManager', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('de')
@@ -55,6 +64,7 @@ describe('AiMemoryManager', () => {
     vi.mocked(aiApi.getMemoryPreference).mockReset().mockResolvedValue({ enabled: true, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.setMemoryPreference).mockReset().mockResolvedValue({ enabled: false, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.saveMemory).mockReset().mockResolvedValue(entry)
+    vi.mocked(aiApi.clearMemory).mockReset().mockResolvedValue({ removed: 4 })
   })
 
   it('loads explicit entries and persists the opt-out without exposing hidden values', async () => {
@@ -66,7 +76,7 @@ describe('AiMemoryManager', () => {
 
     fireEvent.change(screen.getByLabelText('Schlüssel, z. B. response.language'), { target: { value: 'answer.format' } })
     fireEvent.change(screen.getByLabelText('Präferenz'), { target: { value: 'Use concise synthetic output' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }))
     await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
       scope: 'user', key: 'answer.format', value: 'Use concise synthetic output',
     }))
@@ -83,6 +93,68 @@ describe('AiMemoryManager', () => {
     expect(screen.getByText('4× verwendet')).toBeInTheDocument()
     // Der selbst hinterlegte Eintrag traegt die Kennzeichnung nicht.
     expect(screen.getAllByText('von der KI gemerkt')).toHaveLength(1)
+  })
+
+  it('filters by text and by origin', async () => {
+    // Der Herkunftsfilter beantwortet die Frage, die sonst niemand beantwortet:
+    // "was hat sich die KI ueber mich gemerkt?" — etwas anderes als "was habe
+    // ich ihr gesagt?".
+    vi.mocked(aiApi.listMemory).mockResolvedValue(viele)
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('Europe/Berlin')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Erinnerungen durchsuchen'), { target: { value: 'berlin' } })
+    expect(screen.getByText('Europe/Berlin')).toBeInTheDocument()
+    expect(screen.queryByText('8 GB')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Erinnerungen durchsuchen'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Von der KI' }))
+    expect(screen.getByText('8 GB')).toBeInTheDocument()
+    expect(screen.queryByText('Europe/Berlin')).not.toBeInTheDocument()
+  })
+
+  it('clears the whole scope in one step', async () => {
+    // Ein gewachsenes Gedaechtnis Zeile fuer Zeile abzuraeumen hiess vorher:
+    // eine Bestaetigung je Eintrag.
+    vi.mocked(aiApi.listMemory).mockResolvedValue(viele)
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Alle löschen' }))
+    await waitFor(() => expect(aiApi.clearMemory).toHaveBeenCalledWith('user', undefined))
+  })
+
+  it('edits an entry in place instead of demanding the key again', async () => {
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: response.language' }))
+    const schluessel = screen.getByLabelText('Schlüssel, z. B. response.language') as HTMLInputElement
+    expect(schluessel.value).toBe('response.language')
+    // Der Schluessel ist die Identitaet des Fakts — beim Bearbeiten gesperrt,
+    // sonst legt ein Tippfehler stillschweigend einen zweiten Eintrag an.
+    expect(schluessel).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Präferenz'), { target: { value: 'Deutsch' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+    await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
+      scope: 'user', key: 'response.language', value: 'Deutsch',
+    }))
+  })
+
+  it('shows team knowledge read-only without the manage switch', async () => {
+    // Lesen darf jedes Mitglied — `scope_identity` verlangt fuer Team nur
+    // Mitgliedschaft. Aendern verlangt den Schalter, und was man nicht darf,
+    // soll gar nicht erst als Knopf dastehen.
+    vi.mocked(aiApi.listMemory).mockResolvedValue([entry])
+    render(<AiMemoryManager scope={{ kind: 'team', teamId: 7, canManage: false }} />)
+
+    expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
+    expect(aiApi.listMemory).toHaveBeenCalledWith('team', undefined, 7)
+    expect(screen.queryByRole('button', { name: 'Hinzufügen' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Erinnerung löschen/ })).not.toBeInTheDocument()
+    // Der Gedaechtnis-Schalter ist eine persoenliche Einstellung und hat in
+    // einer Teamansicht nichts verloren.
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
   })
 
   it('renders nothing without the memory permission', () => {

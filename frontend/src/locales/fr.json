@@ -903,6 +903,10 @@
       "waitingUser": "L'IA vous pose une question.",
       "failed": "La tâche de l'IA a échoué.",
       "open": "Ouvrir l'assistant"
+    },
+    "profile": {
+      "title": "Assistant IA",
+      "description": "L'exploitant du panneau fournit la cle API, le modele et les fournisseurs. Ici, vous gerez ce que l'assistant sait de vous."
     }
   }
 }

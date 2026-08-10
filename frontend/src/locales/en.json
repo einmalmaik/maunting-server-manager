@@ -148,25 +148,9 @@
       "testFailed": "The test failed.",
       "baseUrlHint": "Base URL only, e.g. https://openrouter.ai/api/v1 — without /chat/completions. MSM appends the endpoint itself; a pasted endpoint path is stripped on save."
     },
-    "credentials": {
-      "title": "Personal AI credentials",
-      "description": "Your API key is encrypted and used only for your requests. It is never shown again after saving.",
-      "empty": "No AI provider is currently available.",
-      "available": "Available",
-      "keyRequired": "Personal key required",
-      "apiKey": "API key",
-      "configured": "Personal key configured; enter a new key to replace it",
-      "placeholder": "Enter API key",
-      "remove": "Remove personal key",
-      "saved": "AI credentials stored securely.",
-      "deleted": "Personal AI key removed.",
-      "deleteTitle": "Remove personal API key?",
-      "deleteConfirm": "Really remove your API key for {{name}}?",
-      "errors": {
-        "load": "AI providers could not be loaded.",
-        "save": "API key could not be saved.",
-        "delete": "API key could not be removed."
-      }
+    "profile": {
+      "title": "AI assistant",
+      "description": "The panel operator provides the API key, the model and the providers. Here you manage what the assistant knows about you."
     },
     "memory": {
       "title": "Personal AI memory",
@@ -188,10 +172,22 @@
       "usedCount": "used {{count}}×",
       "usedCount_one": "used {{count}}×",
       "usedCount_other": "used {{count}}×",
-      "scope": "Scope",
-      "scopePersonal": "Personal",
-      "scopePersonalHint": "Only you can see this. Nobody else, regardless of permissions.",
-      "scopeTeamHint": "Every member of this team can see it."
+      "teamDescription": "What the assistant knows for this team. Every member can see it; changing it needs the “manage knowledge” switch.",
+      "search": "Search memories",
+      "filterOrigin": "Filter by origin",
+      "origins": {
+        "all": "All",
+        "user": "From me",
+        "ai": "From the AI"
+      },
+      "count": "Showing {{shown}} of {{total}}",
+      "noMatches": "No entry matches the search.",
+      "add": "Add",
+      "edit": "Edit memory",
+      "clearAll": "Delete all",
+      "clearTitle": "Delete the entire memory?",
+      "clearConfirm": "Really delete all {{count}} entries? This cannot be undone.",
+      "cleared": "Deleted {{count}} entries."
     },
     "skills": {
       "title": "Skills",
@@ -235,7 +231,11 @@
       "errors": {
         "load": "Skills could not be loaded.",
         "save": "Skill could not be saved."
-      }
+      },
+      "teamDescription": "The procedures this team has learned. Every member can see them; changing them needs the “manage skills” switch.",
+      "search": "Search skills",
+      "noMatches": "No skill matches the search.",
+      "manage": "Yours to edit"
     },
     "attachments": {
       "add": "Add safe attachment",
@@ -3481,6 +3481,9 @@
     "errors": {
       "load": "Teams could not be loaded.",
       "save": "Change could not be saved."
-    }
+    },
+    "knowledge": "AI knowledge",
+    "knowledgeHint": "What the assistant remembers for this team and which procedures it has learned here. Every member can read it; changing it needs the switches above.",
+    "personalKnowledgeHint": "Your personal AI knowledge. Nobody else sees it, regardless of permissions."
   }
 }

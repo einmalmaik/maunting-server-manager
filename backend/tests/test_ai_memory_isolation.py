@@ -20,6 +20,7 @@ andere Benutzer, nicht gegen den Betreiber.
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, Team, User
@@ -355,3 +356,95 @@ def test_parallel_writes_of_two_users_stay_separate(
     assert "A-Notiz" not in theirs
     # Das Geteilte erreicht beide.
     assert "Team-Notiz 4" in mine and "Team-Notiz 4" in theirs
+
+
+# ── Alles loeschen raeumt genau einen Bereich ─────────────────────────
+
+
+def test_clearing_my_memory_leaves_everyone_else_untouched(
+    db: Session, regular_user: User
+) -> None:
+    """Der Massenloeschung gilt dieselbe Grenze wie dem Abruf.
+
+    Sie filtert ueber dieselbe Scope-Kennung. Ein Bereich, den man nicht sehen
+    darf, laesst sich damit auch nicht leeren — nicht weil eine zusaetzliche
+    Pruefung das verhindert, sondern weil die Zeilen gar nicht erst in der
+    Auswahl stehen.
+    """
+    colleague = _user(db, "kollege")
+    _allow(db, colleague, "ai.memory.use")
+    team = _team(db, regular_user, colleague)
+
+    for index in range(3):
+        ai_memory_service.upsert_entry(
+            db, user=regular_user, scope="user", server_id=None,
+            key=f"eigen.{index}", value=f"Meins {index}",
+        )
+        ai_memory_service.upsert_entry(
+            db, user=colleague, scope="user", server_id=None,
+            key=f"eigen.{index}", value=f"Seins {index}",
+        )
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="team", server_id=None, team_id=team.id,
+        key="geteilt", value="Team-Notiz",
+    )
+    db.commit()
+
+    entfernt = ai_memory_service.delete_all_entries(db, regular_user, "user")
+
+    assert entfernt == 3
+    assert ai_memory_service.list_entries(db, regular_user, "user", None) == []
+    # Weder die des Kollegen noch das Geteilte gehen mit.
+    assert len(ai_memory_service.list_entries(db, colleague, "user", None)) == 3
+    assert len(ai_memory_service.list_entries(db, regular_user, "team", None, team.id)) == 1
+
+
+def test_a_member_without_the_switch_cannot_clear_the_team(
+    db: Session, regular_user: User
+) -> None:
+    """Lesen darf jedes Mitglied, leeren nur mit dem Schalter.
+
+    Genau dieselbe Trennung, die auch fuer das Anlegen gilt — die Massenaktion
+    bekommt keinen eigenen, laxeren Weg.
+    """
+    colleague = _user(db, "leser")
+    _allow(db, colleague, "ai.memory.use")
+    team = _team(db, regular_user)
+    team_service.add_member(
+        db, team=team, user=regular_user, new_user_id=colleague.id,
+        can_manage_skills=False, can_manage_memory=False,
+    )
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="team", server_id=None, team_id=team.id,
+        key="geteilt", value="Team-Notiz",
+    )
+    db.commit()
+
+    # Lesen: erlaubt.
+    assert len(ai_memory_service.list_entries(db, colleague, "team", None, team.id)) == 1
+
+    with pytest.raises(HTTPException) as fehler:
+        ai_memory_service.delete_all_entries(db, colleague, "team", None, team.id)
+    assert fehler.value.status_code == 403
+    assert len(ai_memory_service.list_entries(db, regular_user, "team", None, team.id)) == 1
+
+
+def test_clearing_writes_one_audit_entry_not_thirty(
+    db: Session, regular_user: User
+) -> None:
+    """Dreissig gleichartige Zeilen verdecken die Handlung, statt sie zu belegen."""
+    from models import AuditLog
+
+    _allow(db, regular_user, "ai.memory.use")
+    for index in range(8):
+        ai_memory_service.upsert_entry(
+            db, user=regular_user, scope="user", server_id=None,
+            key=f"eigen.{index}", value=f"Notiz {index}",
+        )
+    db.commit()
+
+    ai_memory_service.delete_all_entries(db, regular_user, "user")
+
+    eintraege = db.query(AuditLog).filter(AuditLog.action == "ai.memory.cleared").all()
+    assert len(eintraege) == 1
+    assert '"count": 8' in (eintraege[0].details or "") or eintraege[0].details.get("count") == 8

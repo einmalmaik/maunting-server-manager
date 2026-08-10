@@ -20,15 +20,8 @@ export interface AiProviderAvailable {
   name: string
   default_model: string
   requires_api_key: boolean
-  user_key_configured: boolean
   operator_key_available: boolean
   available: boolean
-}
-
-export interface AiCredentialStatus {
-  provider_id: number
-  configured: boolean
-  key_hint: string | null
 }
 
 export interface AiConversation {
@@ -329,11 +322,6 @@ export const aiApi = {
   }),
   deleteProvider: (id: number) => api(`/ai/settings/providers/${id}`, { method: 'DELETE' }),
   listProviders: () => api<AiProviderAvailable[]>('/ai/providers'),
-  setCredential: (providerId: number, apiKey: string) => api<AiCredentialStatus>(`/ai/providers/${providerId}/credential`, {
-    method: 'PUT',
-    body: JSON.stringify({ api_key: apiKey }),
-  }),
-  deleteCredential: (providerId: number) => api(`/ai/providers/${providerId}/credential`, { method: 'DELETE' }),
   testProvider: (id: number) => api<AiProviderTestResult>(`/ai/settings/providers/${id}/test`, {
     method: 'POST',
   }),
@@ -376,6 +364,10 @@ export const aiApi = {
     method: 'PUT', body: JSON.stringify(payload),
   }),
   deleteMemory: (id: string) => api(`/ai/memory/${id}`, { method: 'DELETE' }),
+  /** Leert einen ganzen Bereich und meldet, wie viele Einträge das waren. */
+  clearMemory: (scope: AiMemoryEntry['scope'], teamId?: number) => api<{ removed: number }>(
+    `/ai/memory?scope=${scope}${teamId ? `&team_id=${teamId}` : ''}`, { method: 'DELETE' },
+  ),
   getMemoryPreference: () => api<AiMemoryPreference>('/ai/memory/preference'),
   setMemoryPreference: (enabled: boolean) => api<AiMemoryPreference>('/ai/memory/preference', {
     method: 'PUT', body: JSON.stringify({ enabled }),

@@ -1,4 +1,4 @@
-"""Security-Invarianten fuer Provider, Credentials und persistente AI-Chats."""
+"""Security-Invarianten fuer Provider und persistente AI-Chats."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from models import (
     AiConversation,
     AiMessage,
     AiProvider,
-    AiUserCredential,
     AiUsageEvent,
     AuditLog,
     Role,
@@ -128,7 +127,7 @@ def test_provider_read_path_never_decrypts_secret(
     assert response.json()[0]["operator_key_configured"] is True
 
 
-def test_user_credential_is_aad_bound_and_preferred(
+def test_a_user_cannot_bring_their_own_key_any_more(
     client: TestClient,
     db: Session,
     regular_user: User,
@@ -136,6 +135,17 @@ def test_user_credential_is_aad_bound_and_preferred(
     user_csrf_token: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """BYOK ist entfallen — Schluessel, Modell und Provider stellt der Betreiber.
+
+    Hier stand frueher das Gegenteil: ein Test, der bewies, dass ein
+    Benutzerschluessel **vor** dem des Betreibers genommen wird. In einem Panel,
+    das ein Hoster betreibt, ist das ein zweiter Abrechnungspfad neben dem
+    kalkulierten, und die Funktion laesst sich damit nicht mehr als seine
+    anbieten.
+
+    Der Endpunkt ist weg, nicht nur die Schaltflaeche. Eine Oberflaeche, die
+    etwas nicht mehr anzeigt, ist keine Sperre.
+    """
     _enable_chat(db, regular_user)
     provider = _provider(db, monkeypatch)
 
@@ -146,17 +156,22 @@ def test_user_credential_is_aad_bound_and_preferred(
         headers={"X-CSRF-Token": user_csrf_token},
     )
 
-    assert response.status_code == 200
-    assert response.json()["key_hint"].endswith("9876")
-    assert ai_provider_service.resolve_api_key(db, provider, regular_user.id) == "user-secret-9876"
-    from services.dis_client import DisClient, DisDecryptionError
+    assert response.status_code == 404
+    assert client.get(
+        f"/api/ai/providers/{provider.id}/credential", cookies=user_cookies
+    ).status_code == 404
 
-    row = db.query(AiUserCredential).one()
-    with pytest.raises(DisDecryptionError):
-        DisClient.decrypt(
-            row.api_key_encrypted,
-            aad=f"msm:ai:provider:{provider.id}:user:999:api-key",
-        )
+
+def test_the_operator_key_is_the_only_source(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ohne Betreiberschluessel gibt es keinen — und der Provider ist gesperrt."""
+    provider = _provider(db, monkeypatch)
+    assert ai_provider_service.resolve_api_key(db, provider, regular_user.id) is not None
+
+    provider.operator_api_key_encrypted = None
+    db.commit()
+    assert ai_provider_service.resolve_api_key(db, provider, regular_user.id) is None
 
 
 def test_provider_url_policy_blocks_metadata_and_requires_private_opt_in(

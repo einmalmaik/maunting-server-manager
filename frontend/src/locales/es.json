@@ -925,6 +925,10 @@
       "waitingUser": "La IA tiene una pregunta para ti.",
       "failed": "La tarea de la IA ha fallado.",
       "open": "Ir al asistente"
+    },
+    "profile": {
+      "title": "Asistente de IA",
+      "description": "El operador del panel proporciona la clave de API, el modelo y los proveedores. Aqui gestionas lo que el asistente sabe sobre ti."
     }
   }
 }

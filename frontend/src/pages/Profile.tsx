@@ -7,7 +7,7 @@ import { PasswordTab } from './profile/PasswordTab'
 import { TwoFactorTab } from './profile/TwoFactorTab'
 import { LinkedAccountsTab } from './profile/LinkedAccountsTab'
 import { DangerZoneTab } from './profile/DangerZoneTab'
-import { AiCredentialsTab } from './profile/AiCredentialsTab'
+import { AiTab } from './profile/AiTab'
 import { CredentialsTab } from './profile/CredentialsTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -64,7 +64,7 @@ export function Profile() {
       {activeTab === '2fa' && <TwoFactorTab />}
       {activeTab === 'linked' && <LinkedAccountsTab />}
       {activeTab === 'credentials' && <CredentialsTab />}
-      {activeTab === 'ai' && canUseAi && <AiCredentialsTab />}
+      {activeTab === 'ai' && canUseAi && <AiTab />}
       {activeTab === 'danger' && <DangerZoneTab />}
     </div>
   )

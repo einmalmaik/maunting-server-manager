@@ -56,3 +56,13 @@ class AiMemoryPreferenceResponse(BaseModel):
     # jedem Client noch einmal nachgebaut werden muss.
     notice_due: bool = False
     notice_hidden: bool = False
+
+
+class AiMemoryClearResponse(BaseModel):
+    """Wieviele Eintraege das Leeren eines Bereichs entfernt hat.
+
+    Eine Zahl statt eines leeren 204: wer gerade sein Gedaechtnis geloescht hat,
+    soll sehen, was verschwunden ist — und ob ueberhaupt etwas da war.
+    """
+
+    removed: int

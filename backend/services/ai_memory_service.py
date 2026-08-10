@@ -321,6 +321,43 @@ def delete_entry(db: Session, user: User, entry_id: str) -> None:
     db.commit()
 
 
+def delete_all_entries(
+    db: Session, user: User, scope: str, server_id: int | None = None,
+    team_id: int | None = None,
+) -> int:
+    """Leert einen ganzen Bereich. Gibt die Zahl der geloeschten Eintraege zurueck.
+
+    Ohne das musste man ein gewachsenes Gedaechtnis Zeile fuer Zeile abraeumen —
+    bei dreissig abgeleiteten Eintraegen dreissig Bestaetigungen. Wer sein
+    Gedaechtnis loeschen will, will es ganz loeschen.
+
+    Die Berechtigung entsteht **nicht** neu, sondern aus denselben zwei Quellen
+    wie beim einzelnen Loeschen: `scope_identity` entscheidet, welche Zeilen
+    ueberhaupt sichtbar sind (bei `user` nur die eigenen, bei `team` nur die des
+    Teams, in dem man Mitglied ist), und `_assert_may_write` entscheidet, ob man
+    einen geteilten Bereich veraendern darf. Persoenliche Eintraege verlassen
+    den Benutzer nie und brauchen keine zweite Pruefung.
+
+    Ein Audit-Eintrag mit der Anzahl statt einem je Zeile: dreissig gleichartige
+    Zeilen im Protokoll verdecken die Handlung, statt sie zu belegen.
+    """
+    identity, _, _, _ = scope_identity(db, user, scope, server_id, team_id)
+    _assert_may_write(db, user, scope, team_id)
+    rows = db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == identity
+    ).all()
+    if not rows:
+        return 0
+    for row in rows:
+        db.delete(row)
+    audit_service.record_privileged_action(
+        db, user_id=user.id, action="ai.memory.cleared", target_type="ai_memory",
+        target_id=None, details={"scope": scope, "count": len(rows)}, origin="direct",
+    )
+    db.commit()
+    return len(rows)
+
+
 def _tokens(text: str) -> set[str]:
     """Zerlegt Text in vergleichbare Wortstaemme.
 

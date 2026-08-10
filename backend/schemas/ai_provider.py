@@ -47,11 +47,17 @@ class AiProviderResponse(BaseModel):
 
 
 class AiProviderAvailableResponse(BaseModel):
+    """Ein Provider, wie ihn der Chat zur Auswahl anbietet.
+
+    Kein ``user_key_configured`` mehr: seit der Betreiber die Schluessel stellt,
+    haengt ``available`` allein an seinem Schluessel, und der Benutzer hat
+    nichts, was er hier beitragen koennte.
+    """
+
     id: int
     name: str
     default_model: str
     requires_api_key: bool
-    user_key_configured: bool
     operator_key_available: bool
     available: bool
 
@@ -66,13 +72,3 @@ class AiProviderTestResponse(BaseModel):
     # fehlt ("No endpoints found for openrouter-free") — genau das, was ein
     # uebersetzter Code allein nicht leisten kann.
     detail: str | None = None
-
-
-class AiUserCredentialUpdate(BaseModel):
-    api_key: SecretStr = Field(min_length=1, max_length=4096)
-
-
-class AiUserCredentialResponse(BaseModel):
-    provider_id: int
-    configured: bool
-    key_hint: str | None

@@ -903,6 +903,10 @@
       "waitingUser": "AI punya pertanyaan untukmu.",
       "failed": "Tugas AI gagal.",
       "open": "Buka asisten"
+    },
+    "profile": {
+      "title": "Asisten AI",
+      "description": "Kunci API, model, dan penyedia ditetapkan oleh operator panel. Di sini kamu mengelola apa yang diketahui asisten tentang kamu."
     }
   }
 }
