@@ -225,14 +225,17 @@ def test_switching_needs_the_same_permission_as_the_panel_button(
         )
 
 
-def test_neither_blueprint_tool_ever_runs_autonomously(
+def test_both_blueprint_tools_run_under_an_autonomy_grant(
     db: Session, regular_user: User, tmp_path: Path
 ) -> None:
-    """Vorgabe des Betreibers fuer Blueprints: nur Vorschlaege, immer Bestaetigung.
+    """Vorgabe des Betreibers: im autonomen Modus laeuft der Wechsel durch.
 
-    Ein Blueprint ist die Vorlage aller Server seines Typs; ein Fehler darin
-    fuehrt zu Servern, die nicht starten. Das ist nichts, was im Hintergrund
-    passieren darf, auch nicht bei erteilter Freigabe.
+    Beide Werkzeuge sind umkehrbar. Eine Ableitung legt eine neue Datei an und
+    laesst die Vorlage stehen; ein Wechsel legt **zwingend** ein Backup an,
+    bevor er die erste Datei anfasst, und bricht ab, wenn das Backup scheitert
+    (`switch_server_blueprint`). Der Weg zurueck ist Teil des Vorgangs.
+
+    Die Freigabe ist die Entscheidung — nicht die Bestaetigung jedes Falls.
     """
     from services import ai_autonomy_service, ai_tool_registry
 
@@ -240,7 +243,10 @@ def test_neither_blueprint_tool_ever_runs_autonomously(
         db, regular_user,
         global_keys=("ai.chat.use", "ai.autonomous.use", "blueprints.manage"),
     )
-    server = _server(db, regular_user, tmp_path, "minecraft_forge")
+    server = _server(
+        db, regular_user, tmp_path, "minecraft_forge",
+        server_keys=("server.view", "server.config.write"),
+    )
     ai_autonomy_service.set_grant(
         db, user=regular_user, server_id=server.id, enabled=True,
         max_actions_per_hour=10, granted_by=regular_user.id,
@@ -248,10 +254,16 @@ def test_neither_blueprint_tool_ever_runs_autonomously(
     db.commit()
 
     for werkzeug in ("propose_blueprint_change", "propose_server_blueprint_switch"):
-        assert werkzeug in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+        assert werkzeug not in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+        assert ai_autonomy_service.autonomy_allows(
+            db, user=regular_user, server_id=server.id, tool_name=werkzeug,
+        ), f"{werkzeug} soll unter einer Freigabe durchlaufen"
+
+    # Die Gegenprobe im selben Atemzug: was Daten vernichtet, fragt trotzdem.
+    for werkzeug in ("propose_server_delete", "propose_backup_restore"):
         assert not ai_autonomy_service.autonomy_allows(
             db, user=regular_user, server_id=server.id, tool_name=werkzeug,
-        )
+        ), f"{werkzeug} darf niemals autonom laufen"
 
 
 def test_the_whole_minecraft_case_end_to_end(

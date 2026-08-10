@@ -245,7 +245,7 @@ def test_actions_older_than_an_hour_free_the_budget_again(
 def test_always_confirm_tools_are_never_autonomous(
     db: Session, regular_user: User
 ) -> None:
-    """Die Liste aus Zielbild 3.7 gilt unabhaengig von jeder Freigabe."""
+    """Die Sperrliste gilt unabhaengig von jeder Freigabe."""
     server, _ = _setup(
         db,
         regular_user,
@@ -262,6 +262,35 @@ def test_always_confirm_tools_are_never_autonomous(
         assert not ai_autonomy_service.autonomy_allows(
             db, user=regular_user, server_id=server.id, tool_name=tool
         ), f"{tool} darf niemals autonom laufen"
+
+
+def test_a_reversible_change_runs_under_a_grant(
+    db: Session, regular_user: User
+) -> None:
+    """Die Gegenprobe zur Sperrliste — sonst waere sie durch Ausweitung erfuellbar.
+
+    Ein Test, der nur prueft "diese Werkzeuge laufen nicht autonom", bliebe auch
+    dann gruen, wenn **gar nichts** mehr autonom liefe. Deshalb hier ein
+    umkehrbarer Vorgang, der durchlaufen muss: eine falsche Bind-IP macht den
+    Server unerreichbar, bis jemand sie zurueckstellt — und das kann die KI
+    selbst. Kein Datenverlust, also keine Sperre.
+    """
+    server, _ = _setup(
+        db,
+        regular_user,
+        global_keys=("ai.chat.use", "ai.autonomous.use"),
+        server_keys=("server.view", "server.network.manage"),
+    )
+    ai_autonomy_service.set_grant(
+        db, user=regular_user, server_id=server.id, enabled=True,
+        max_actions_per_hour=10, granted_by=regular_user.id,
+    )
+    db.commit()
+
+    assert ai_autonomy_service.autonomy_allows(
+        db, user=regular_user, server_id=server.id,
+        tool_name="propose_bind_ip_update",
+    )
 
 
 def test_autonomous_execution_still_rechecks_the_permission(

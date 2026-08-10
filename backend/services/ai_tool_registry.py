@@ -42,7 +42,16 @@ class Werkzeug:
     Symbol statt des allgemeinen Werkzeugsymbols.
 
     ``immer_bestaetigen`` schliesst ein Werkzeug vom autonomen Modus aus, auch
-    bei erteilter Freigabe.
+    bei erteilter Freigabe. Das Kriterium ist **Unumkehrbarkeit**, nicht Risiko:
+    was die KI selbst wieder zurueckstellen kann, darf sie im autonomen Modus
+    tun; was Daten vernichtet, die niemand zurueckholt, fragt immer.
+
+    Die Unterscheidung ist ausdrueckliche Vorgabe des Betreibers ("im autonomen
+    Modus wird alles automatisch bestaetigt, ausser Loeschvorgaenge") und
+    ersetzt eine frueher gefuehlte Einteilung nach "das klingt heikel". Nach
+    Gefuehl standen Blueprint-Wechsel und Bind-IP-Aenderung in der Sperre,
+    obwohl beide umkehrbar sind — der Wechsel legt sogar zwingend ein Backup an,
+    bevor er etwas anfasst.
 
     ``recht`` ist der Permission-Key, den ein Schreibwerkzeug verlangt. Er stand
     frueher in einer if-Kette in `ai_proposal_service._permission_for` — ein
@@ -120,19 +129,22 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # als ausdrueckliche Ausnahme in `ai_proposal_service._permission_for`.
     "propose_server_lifecycle": Werkzeug("server_write"),
     "propose_backup": Werkzeug("server_write", recht="server.backups.create"),
-    # Einspielen ueberschreibt alle Serverdaten und ist so wenig umkehrbar wie
-    # das Loeschen — ein falsch gewaehltes Backup holt niemand zurueck. Deshalb
-    # dieselbe Sperre, ausdrueckliche Vorgabe des Betreibers. Anlegen bleibt
-    # autonomiefaehig: ein zusaetzliches Backup schadet nie.
+    # Einspielen ueberschreibt den aktuellen Spielstand mit einem aelteren. Was
+    # seit dem Backup passiert ist, existiert danach nicht mehr — und kein
+    # zweites Backup holt es zurueck, weil es nie eines davon gab. Unumkehrbar,
+    # also gesperrt. Anlegen bleibt autonomiefaehig: ein zusaetzliches Backup
+    # schadet nie.
     "propose_backup_restore": Werkzeug(
         "server_write", immer_bestaetigen=True, recht="server.backups.restore"
     ),
     "propose_config_update": Werkzeug("server_write", recht="server.files.write"),
     "propose_mod_install": Werkzeug("server_write", recht="server.mods.write"),
-    # Eine Netzwerkaenderung startet den Container neu und kann einen Server
-    # unerreichbar machen, wenn die Adresse falsch ist.
+    # Eine falsche Bind-IP macht den Server unerreichbar — aber nur, bis jemand
+    # sie zurueckstellt, und das kann die KI selbst. Kein Datenverlust, also
+    # keine Sperre. Die Freigabe des Betreibers ist hier die Entscheidung, nicht
+    # die Bestaetigung jedes einzelnen Falls.
     "propose_bind_ip_update": Werkzeug(
-        "server_write", immer_bestaetigen=True, recht="server.network.manage"
+        "server_write", recht="server.network.manage"
     ),
     # Loeschen ist nicht rueckgaengig zu machen — deshalb auch im autonomen
     # Modus bestaetigungspflichtig, ausdrueckliche Vorgabe des Betreibers.
@@ -148,18 +160,21 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="servers.delete",
         recht_global=True,
     ),
-    # Ein Blueprint ist die Vorlage **aller** Server seines Typs. Eine Ableitung
-    # legt zwar nur eine neue Datei an, aber sie wird sofort auswaehlbar — und
-    # ein Fehler darin fuehrt zu Servern, die nicht starten. Deshalb
-    # bestaetigungspflichtig, wie der Betreiber es fuer Blueprints verlangt hat
-    # ("nur Vorschlaege, immer Bestaetigung").
+    # Eine Ableitung legt eine **neue** Datei an und laesst die Vorlage, aus der
+    # sie stammt, unberuehrt. Ist sie falsch, loescht man sie wieder; kein Server
+    # aendert sich, solange niemand ihn umstellt. Der Betreiber hat die Sperre
+    # hier ausdruecklich aufgehoben.
     "propose_blueprint_change": Werkzeug(
         "global_write",
-        immer_bestaetigen=True,
         recht="blueprints.manage",
         recht_global=True,
     ),
     # Der Wechsel des Spiels bzw. Blueprints eines bestehenden Servers.
+    #
+    # Autonomiefaehig auf ausdrueckliche Vorgabe des Betreibers — und es passt
+    # zum Kriterium: `switch_server_blueprint` legt **zwingend** ein Backup an,
+    # bevor es die erste Datei anfasst, und bricht ab, wenn das Backup scheitert.
+    # Der Weg zurueck ist damit Teil des Vorgangs selbst.
     #
     # `server.config.write` — dasselbe Recht wie am Panel-Knopf "Spiel /
     # Blueprint wechseln" (`routers/servers.py::switch_server_blueprint_endpoint`).
@@ -172,7 +187,6 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # bereits; es fehlte nur die Verbindung dorthin.
     "propose_server_blueprint_switch": Werkzeug(
         "server_write",
-        immer_bestaetigen=True,
         recht="server.config.write",
     ),
     "propose_server_create": Werkzeug(
@@ -183,8 +197,14 @@ WERKZEUGE: dict[str, Werkzeug] = {
 
 # Werkzeuge aus dem Zielbild, die es noch nicht gibt. Sie stehen hier, damit
 # ein kuenftiges Tool sich ausdruecklich einordnen muss, statt stillschweigend
-# autonomiefaehig zu sein. Beim Bauen wandert der Name nach oben in `WERKZEUGE`
-# — mit `immer_bestaetigen=True`.
+# autonomiefaehig zu sein.
+#
+# Die ersten beiden vernichten Daten und fallen damit unter dasselbe Kriterium
+# wie Loeschen und Einspielen. Die letzten beiden aus einem anderen Grund: eine
+# Rechteaenderung oder eine Schluesselrotation wirkt auf die Grenzen, innerhalb
+# derer die KI selbst arbeitet. Autonom ausgefuehrt waere das eine Autonomie,
+# die ihren eigenen Rahmen verschiebt — und die kann niemand mehr erteilen oder
+# entziehen.
 GEPLANT_IMMER_BESTAETIGEN = frozenset({
     "propose_server_wipe",
     "propose_server_reinstall",

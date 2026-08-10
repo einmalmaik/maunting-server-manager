@@ -596,7 +596,11 @@ def provider_tool_definitions() -> list[dict]:
             "umzustellen — so aendert man die Spielversion, denn sie steht im "
             "Blueprint und nicht am Server. Der Server muss gestoppt sein, und "
             "die Portrollen beider Blueprints muessen uebereinstimmen. Leite "
-            "vorher mit propose_blueprint_change einen passenden ab.",
+            "vorher mit propose_blueprint_change einen passenden ab. Der "
+            "Vorgang legt zwingend ein Backup an und **loescht danach alle "
+            "Serverdateien**, damit die neue Version auf einem leeren "
+            "Verzeichnis aufsetzt: Welt, Configs und Mods sind anschliessend "
+            "weg und stehen nur noch im Backup. Sage das im Grund ausdruecklich.",
             {
                 **_RATIONALE_SCHEMA,
                 "blueprint_id": {

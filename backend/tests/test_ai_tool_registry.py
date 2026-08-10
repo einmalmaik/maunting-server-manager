@@ -130,6 +130,18 @@ def test_planned_confirm_only_tools_are_not_offered() -> None:
     assert angeboten & ai_tool_registry.GEPLANT_IMMER_BESTAETIGEN == set()
 
 
-def test_the_bind_ip_tool_stays_confirm_only() -> None:
-    """Das einzige gebaute Werkzeug, das nie autonom laufen darf."""
-    assert "propose_bind_ip_update" in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+def test_only_the_irreversible_tools_are_confirm_only() -> None:
+    """Das Kriterium der Sperre ist Unumkehrbarkeit, nicht Risiko.
+
+    Vorgabe des Betreibers: im autonomen Modus laeuft alles durch, ausser was
+    Daten vernichtet. Diese Liste steht hier ausgeschrieben, damit ein
+    zusaetzlicher Eintrag eine bewusste Entscheidung ist und nicht ein
+    Bauchgefuehl, das jemand beim Bauen eines Werkzeugs hatte — genau so waren
+    Blueprint-Wechsel und Bind-IP-Aenderung hineingeraten, obwohl beide
+    umkehrbar sind.
+    """
+    gebaut = {
+        name for name, spec in ai_tool_registry.WERKZEUGE.items()
+        if spec.immer_bestaetigen
+    }
+    assert gebaut == {"propose_server_delete", "propose_backup_restore"}
