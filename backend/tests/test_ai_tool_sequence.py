@@ -65,11 +65,26 @@ def _server(db: Session, name: str) -> Server:
     return server
 
 
-def _grant(db: Session, user: User, *, server: Server, server_keys: tuple[str, ...]) -> None:
+def _grant(
+    db: Session,
+    user: User,
+    *,
+    server: Server,
+    server_keys: tuple[str, ...],
+    global_keys: tuple[str, ...] = (),
+) -> None:
+    """Gibt dem Benutzer eine Rolle: Chatrecht, globale Rechte, Serverrechte.
+
+    `global_keys` haengt an derselben Rolle statt an einer zweiten — `set_user_roles`
+    **ersetzt** die Rollenliste, eine nachtraegliche zweite Rolle wuerde die erste
+    stillschweigend verdraengen.
+    """
     role = Role(name=f"seq-{user.id}", description=None, is_system=False)
     db.add(role)
     db.flush()
     db.add(RolePermission(role_id=role.id, permission_key="ai.chat.use"))
+    for key in global_keys:
+        db.add(RolePermission(role_id=role.id, permission_key=key))
     set_role_limit(db, role.id, {field: None for field in LIMIT_FIELDS})
     db.commit()
     set_user_roles(db, user, [role.id])
@@ -154,7 +169,7 @@ async def _collect(
         reasoning=False,
     )
     if run is None:
-        code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.errors.unavailable")
+        code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
         return [ai_stream_service.sse_event("error", {"code": code, "message_key": message_key})]
 
     ai_run_broker.eroeffnen(run.id)
@@ -1036,3 +1051,90 @@ async def test_a_question_counts_as_output_and_is_not_an_empty_answer(
     # Der Zug gilt als gelungen — nicht als leer gescheitert.
     assert nachricht.status == "complete"
     assert nachricht.question_json
+
+
+@pytest.mark.asyncio
+async def test_ein_abgelehnter_schreibaufruf_nennt_den_grund_im_log(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Der Betreiber muss erfahren, **woran** ein Aufruf gescheitert ist.
+
+    Der Fall aus dem Betrieb: im Chat stand nur `AI_TOOL_REJECTED`, und im
+    Panel-Log stand dazu gar nichts — der `elif`-Zweig protokollierte als
+    einziger nicht. Der Text, der die Frage beantwortet, existierte die ganze
+    Zeit in `str(exc)` und wurde weggeworfen.
+
+    Hier der wahrscheinlichste Fall bei einem Loeschauftrag: das Modell haengt
+    ein Argument an, das es nicht geben darf. Werkzeugbeschreibung und
+    Systemprompt sagen dreimal "verlangt immer eine Bestaetigung" — `confirm`
+    ist die naheliegende Uebersetzung, und `additionalProperties: false` steht
+    zwar im Schema, wird vom Anbieter aber nicht erzwungen.
+    """
+    import logging
+
+    server = _server(db, "abgelehnt")
+    _grant(
+        db, regular_user, server=server,
+        server_keys=("server.view",), global_keys=("servers.delete",),
+    )
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="propose_server_delete", arguments={
+            "server_id": server.id,
+            "reason": "Der Benutzer will den Server entfernen.",
+            "expected_effect": "Server, Dateien und Backups sind weg.",
+            "confirm": True,
+        }),
+    ]])
+
+    with caplog.at_level(logging.WARNING):
+        events = await _collect(db, regular_user, conversation, provider)
+
+    assert "AI_TOOL_REJECTED" in _error_codes(events)
+    protokoll = "\n".join(record.getMessage() for record in caplog.records)
+    assert "AI-Werkzeugaufruf abgelehnt" in protokoll
+    assert "Loesch-Tool akzeptiert keine Argumente" in protokoll
+
+
+@pytest.mark.asyncio
+async def test_ein_abgelehnter_schreibaufruf_hinterlaesst_eine_auditspur(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein versuchter privilegierter Zugriff gehoert ins Protokoll — auch ein gescheiterter.
+
+    Vorher hinterliess er nichts: `create_proposal` schreibt sein Audit erst
+    nach `db.add`, und die Sitzung der Runde wird bei einer Ablehnung nie
+    committet. Es gab also weder einen Vorschlag noch einen Auditeintrag, an dem
+    sich der Vorgang haette nachvollziehen lassen.
+
+    Der Eintrag entsteht deshalb in **eigener** Sitzung — sonst nimmt ihn
+    derselbe Rollback mit, der die Ablehnung ausgeloest hat.
+    """
+    from models import AiActionProposal, AuditLog
+
+    server = _server(db, "auditspur")
+    _grant(
+        db, regular_user, server=server,
+        server_keys=("server.view",), global_keys=("servers.delete",),
+    )
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="propose_server_delete", arguments={
+            "server_id": server.id,
+            "reason": "Der Benutzer will den Server entfernen.",
+            "expected_effect": "Alles weg.",
+            "force": True,
+        }),
+    ]])
+
+    await _collect(db, regular_user, conversation, provider)
+    db.expire_all()
+
+    assert db.query(AiActionProposal).count() == 0, "Es darf kein halber Vorschlag bleiben"
+    eintraege = db.query(AuditLog).filter(AuditLog.action == "ai.action.rejected").all()
+    assert len(eintraege) == 1
+    assert eintraege[0].origin == "ai"
+    assert "propose_server_delete" in (eintraege[0].details or "")

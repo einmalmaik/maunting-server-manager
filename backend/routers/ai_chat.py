@@ -244,7 +244,7 @@ def stream_message(
             reasoning=payload.reasoning,
         )
         if run is None:
-            code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.errors.unavailable")
+            code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
             stream = _fehlerstrom(code, message_key)
         else:
             # Reihenfolge ist hier alles: Kanal auf, **abonnieren**, dann erst

@@ -151,6 +151,34 @@ describe('AiChat', () => {
       expect.any(AbortSignal),
     ))
   })
+  it('zeigt bei einem abgelehnten Werkzeugaufruf einen Satz statt eines Schlüssels', async () => {
+    // Der Betreiber sah `ai.errors.codes.AI_TOOL_REJECTED` in der Meldung. Der
+    // Chat gibt einen zweistufigen Rückfall mit, und der passende deutsche Satz
+    // stand seit jeher in der Sprachdatei — nur verwarf
+    // `parseMissingKeyHandler` jeden `defaultValue`, weil er einarmig war.
+    //
+    // Der Test greift bewusst am Toast-Speicher ab und nicht an einer Attrappe:
+    // was hier steht, ist genau das, was der Benutzer liest.
+    const { streamAiMessage } = await import('@/api/ai')
+    const { useToastStore } = await import('@/stores/toastStore')
+    useToastStore.setState({ toasts: [] })
+    vi.mocked(streamAiMessage).mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'error', data: {
+        code: 'AI_TOOL_REJECTED', message_key: 'ai.chat.errors.toolRejected',
+      } })
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Lösch den Server' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1))
+    const meldung = useToastStore.getState().toasts[0].message
+    expect(meldung).not.toMatch(/^ai\./)
+    expect(meldung).toBe(i18n.t('ai.chat.errors.toolRejected'))
+  })
+
   it('nennt im Verlauf den Skill-Namen statt des Werkzeugnamens', async () => {
     // "read_skill" sagt niemandem etwas. Der Betreiber will sehen, *welche*
     // erlernte Vorgehensweise gegriffen hat — sonst wirkt eine daraus

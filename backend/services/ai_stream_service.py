@@ -384,6 +384,48 @@ def _lesezugriffe_protokollieren(
         )
 
 
+def _ablehnung_protokollieren(
+    *, user_id: int, tool_name: str, grund: str, correlation_id: str
+) -> None:
+    """Haelt einen abgelehnten Schreibversuch fest — in **eigener** Sitzung.
+
+    Eigene Sitzung, weil die Ablehnung den Rollback der laufenden Runde
+    ueberleben muss. Genau daran ist der Nachweis bisher gescheitert: die
+    Transaktion, in der ein abgelehnter Aufruf entsteht, wird nie committet.
+
+    Ein versuchter Schreibzugriff auf etwas, das jemand nicht anfassen darf, ist
+    das Ereignis, das ins Protokoll gehoert — auch und gerade dann, wenn er
+    nicht durchging.
+
+    Der Grund wird redigiert und gekuerzt. Er stammt bei fast allen Werkzeugen
+    aus einer festen Menge eigener Meldungen; bei `propose_blueprint_change`
+    kann jedoch ein vom Modell gewaehlter Pfad im Text landen, und dieses Modell
+    hat seinerseits fremden Logtext gelesen. Ein Auditeintrag ist kein Ort fuer
+    ungefilterten Fremdtext.
+
+    Scheitert das Protokollieren selbst, bleibt es bei der Ablehnung — sie darf
+    nicht daran haengen, ob nebenbei ein Eintrag geschrieben werden konnte.
+    """
+    try:
+        with SessionLocal() as protokoll:
+            audit_service.record_privileged_action(
+                protokoll,
+                user_id=user_id,
+                action="ai.action.rejected",
+                target_type="ai_action",
+                target_id=None,
+                details={
+                    "tool": tool_name,
+                    "reason": redact_sensitive_text(grund)[:200],
+                },
+                origin="ai",
+                correlation_id=correlation_id,
+                commit=True,
+            )
+    except Exception:
+        logger.warning("Ablehnung konnte nicht protokolliert werden tool=%s", tool_name)
+
+
 def _persist_write_proposals(
     *, user_id: int, conversation_id: str, tool_calls, correlation_id: str, run_id: str | None = None
 ) -> list[dict]:
@@ -396,17 +438,35 @@ def _persist_write_proposals(
         conversation = get_owned_conversation(db, conversation_id, user)
         if conversation is None:
             raise AiActionValidationError("Unterhaltung ist nicht mehr verfuegbar")
-        proposals = [
-            create_proposal(
-                db,
-                user=user,
-                conversation=conversation,
-                tool_name=call.name,
-                arguments=call.arguments,
-                correlation_id=correlation_id,
-            )
-            for call in tool_calls
-        ]
+        proposals = []
+        for call in tool_calls:
+            try:
+                proposals.append(create_proposal(
+                    db,
+                    user=user,
+                    conversation=conversation,
+                    tool_name=call.name,
+                    arguments=call.arguments,
+                    correlation_id=correlation_id,
+                ))
+            except AiActionValidationError as exc:
+                # Der Versuch wird protokolliert, dann fliegt der Fehler weiter
+                # wie bisher — dieser Schritt aendert **nichts** am Verhalten des
+                # Laufs, er macht ihn nur nachvollziehbar.
+                #
+                # Vorher hinterliess eine Ablehnung keinerlei Spur: das Audit
+                # entsteht in `create_proposal` erst nach `db.add`, und die
+                # Session hier committet erst nach der ganzen Schleife. Wer den
+                # Grund suchte, fand weder einen Vorschlag noch einen
+                # Auditeintrag — und selbst ein in derselben Runde bereits
+                # gelungener Vorschlag verschwand im Rollback mit.
+                _ablehnung_protokollieren(
+                    user_id=user_id,
+                    tool_name=call.name,
+                    grund=str(exc),
+                    correlation_id=correlation_id,
+                )
+                raise
         # Der Rueckweg: welcher Lauf wartet auf diesen Vorschlag. Ohne ihn
         # wuesste der Bestaetigungsknopf spaeter nicht, wen er aufwecken soll.
         for proposal in proposals:
@@ -632,17 +692,17 @@ def _segment_vorbereiten(run_id: str) -> tuple[_Vorbereitung | None, tuple[str, 
     with SessionLocal() as db:
         run = db.get(AiRun, run_id)
         if run is None:
-            return None, ("AI_RUN_NOT_FOUND", "ai.errors.notFound")
+            return None, ("AI_RUN_NOT_FOUND", "ai.chat.errors.notFound")
         if run.status not in {"running"}:
             # Zwischen Planung und Ausfuehrung hat sich etwas geaendert — etwa
             # eine neue Nachricht, die den Lauf ueberholt hat.
             return None, None
         user = db.get(User, run.user_id)
         if user is None or not user.is_active:
-            return None, ("AI_ACCESS_REVOKED", "ai.errors.access")
+            return None, ("AI_ACCESS_REVOKED", "ai.chat.errors.access")
         provider = db.get(AiProvider, run.provider_id) if run.provider_id else None
         if provider is None or not provider.enabled:
-            return None, ("AI_RESOURCE_NOT_FOUND", "ai.errors.notFound")
+            return None, ("AI_RESOURCE_NOT_FOUND", "ai.chat.errors.notFound")
 
         zustand = ai_run_service.zustand_lesen(run)
 
@@ -663,9 +723,9 @@ def _segment_vorbereiten(run_id: str) -> tuple[_Vorbereitung | None, tuple[str, 
         try:
             api_key = resolve_api_key(db, provider, user.id)
         except DisSidecarError:
-            return None, ("AI_CREDENTIAL_UNAVAILABLE", "ai.errors.credential")
+            return None, ("AI_CREDENTIAL_UNAVAILABLE", "ai.chat.errors.credential")
         if provider.requires_api_key and not api_key:
-            return None, ("AI_PROVIDER_KEY_MISSING", "ai.errors.keyMissing")
+            return None, ("AI_PROVIDER_KEY_MISSING", "ai.chat.errors.keyMissing")
 
         if run.message_id:
             nachricht = db.get(AiMessage, run.message_id)
@@ -681,7 +741,7 @@ def _segment_vorbereiten(run_id: str) -> tuple[_Vorbereitung | None, tuple[str, 
         if not run.message_id:
             begonnen = _segment_beginnen(db, run, zustand)
             if begonnen is None:
-                return None, ("AI_RESOURCE_NOT_FOUND", "ai.errors.notFound")
+                return None, ("AI_RESOURCE_NOT_FOUND", "ai.chat.errors.notFound")
             message_id, usage_event_id, request_id = begonnen
             run.message_id = message_id
             zustand["usage_event_id"] = usage_event_id
@@ -759,7 +819,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     if client is None:
         logger.error("Kein AI-HTTP-Client, Lauf kann nicht arbeiten run_id=%s", run_id)
         ai_run_broker.veroeffentlichen(
-            run_id, "error", {"code": "AI_RUNTIME_UNAVAILABLE", "message_key": "ai.errors.unavailable"}
+            run_id, "error", {"code": "AI_RUNTIME_UNAVAILABLE", "message_key": "ai.chat.errors.unavailable"}
         )
         _lauf_abschliessen(run_id, status="failed", stop_reason="AI_RUNTIME_UNAVAILABLE")
         return
@@ -1073,12 +1133,26 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         raise
     except Exception as exc:
         if isinstance(exc, AiProviderRequestError):
-            code, message_key = exc.code, "ai.errors.provider"
+            code, message_key = exc.code, "ai.chat.errors.provider"
         elif isinstance(exc, AiActionValidationError):
-            code, message_key = "AI_TOOL_REJECTED", "ai.errors.toolRejected"
+            # Der Grund gehoert ins Log. Vorher stand hier gar nichts: der
+            # Benutzer sah `AI_TOOL_REJECTED` und der Betreiber hatte keine
+            # Moeglichkeit herauszufinden, welcher Aufruf woran gescheitert war.
+            #
+            # Redigiert und gekuerzt, obwohl die Meldungen fast alle aus einer
+            # festen Menge stammen: bei `propose_blueprint_change` kann ein vom
+            # Modell gewaehlter Pfad woertlich im Text landen
+            # (`blueprint_service.py`), und dieses Modell hat seinerseits
+            # fremden Logtext gelesen. Ein Panel-Log ist kein Ort fuer
+            # ungefilterten Fremdtext.
+            logger.warning(
+                "AI-Werkzeugaufruf abgelehnt run_id=%s grund=%s",
+                run_id, redact_sensitive_text(str(exc))[:200],
+            )
+            code, message_key = "AI_TOOL_REJECTED", "ai.chat.errors.toolRejected"
         else:
             logger.warning("AI-Lauf fehlgeschlagen error=%s", type(exc).__name__)
-            code, message_key = "AI_STREAM_FAILED", "ai.errors.unavailable"
+            code, message_key = "AI_STREAM_FAILED", "ai.chat.errors.unavailable"
         if not abgerechnet:
             _finalize_stream(
                 message_id=message_id,
@@ -1115,7 +1189,7 @@ def lauf_beginnen(
     """
     safe_content = redact_sensitive_text(content).strip()
     if not safe_content:
-        return None, ("AI_MESSAGE_EMPTY", "ai.errors.empty")
+        return None, ("AI_MESSAGE_EMPTY", "ai.chat.errors.empty")
     try:
         # Wer eine neue Nachricht schreibt, statt einen Vorschlag zu bestaetigen,
         # hat die Richtung gewechselt. Ein alter, geparkter Lauf darf danach
@@ -1191,20 +1265,20 @@ def lauf_beginnen(
         return run, None
     except IntegrityError:
         db.rollback()
-        return None, ("AI_REQUEST_CONFLICT", "ai.errors.requestConflict")
+        return None, ("AI_REQUEST_CONFLICT", "ai.chat.errors.requestConflict")
     except AiUsageConflict:
         db.rollback()
-        return None, ("AI_REQUEST_CONFLICT", "ai.errors.requestConflict")
+        return None, ("AI_REQUEST_CONFLICT", "ai.chat.errors.requestConflict")
     except AiQuotaExceeded as exc:
         db.rollback()
-        return None, (f"AI_QUOTA_{exc.reason.upper()}", "ai.errors.quota")
+        return None, (f"AI_QUOTA_{exc.reason.upper()}", "ai.chat.errors.quota")
     except DisSidecarError:
         db.rollback()
-        return None, ("AI_CREDENTIAL_UNAVAILABLE", "ai.errors.credential")
+        return None, ("AI_CREDENTIAL_UNAVAILABLE", "ai.chat.errors.credential")
     except Exception as exc:
         db.rollback()
         logger.warning("AI-Lauf konnte nicht beginnen error=%s", type(exc).__name__)
-        return None, ("AI_PREPARATION_FAILED", "ai.errors.unavailable")
+        return None, ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
 
 
 async def lauf_verfolgen(run_id: str, *, abo=None) -> AsyncIterator[str]:

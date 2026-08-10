@@ -278,7 +278,7 @@
         "credential": "Der API-Key ist vorübergehend nicht verfügbar.",
         "unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar.",
         "provider": "Der KI-Provider hat die Anfrage abgelehnt.",
-        "toolRejected": "Der angeforderte KI-Werkzeugaufruf wurde aus Sicherheitsgründen abgelehnt.",
+        "toolRejected": "Die KI hat einen Werkzeugaufruf gestellt, den das Panel nicht annehmen konnte. Der Grund steht im Panel-Log.",
         "edit": "Nachricht konnte nicht bearbeitet werden."
       },
       "clear": "Verlauf löschen",
@@ -402,7 +402,13 @@
         "AI_PROVIDER_STREAM_TIMEOUT": "Der Anbieter hat zu lange gebraucht.",
         "AI_PROVIDER_STREAM_INCOMPLETE": "Die Antwort des Anbieters brach vorzeitig ab.",
         "AI_PROVIDER_PROTOCOL_ERROR": "Der Anbieter hat eine unerwartete Antwort geliefert.",
-        "AI_PROVIDER_RESPONSE_TOO_LARGE": "Die Antwort des Anbieters war zu groß."
+        "AI_PROVIDER_RESPONSE_TOO_LARGE": "Die Antwort des Anbieters war zu groß.",
+        "AI_QUOTA_REQUESTS_PER_MINUTE": "Zu viele KI-Anfragen pro Minute.",
+        "AI_QUOTA_CONCURRENT_OPERATIONS": "Es laufen bereits zu viele KI-Anfragen gleichzeitig.",
+        "AI_QUOTA_DAILY_TOKEN_LIMIT": "Das Tageskontingent an Tokens ist ausgeschöpft.",
+        "AI_QUOTA_WEEKLY_TOKEN_LIMIT": "Das Wochenkontingent an Tokens ist ausgeschöpft.",
+        "AI_QUOTA_MONTHLY_TOKEN_LIMIT": "Das Monatskontingent an Tokens ist ausgeschöpft.",
+        "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "Das monatliche Kostenlimit ist erreicht."
       }
     },
     "webSearch": {

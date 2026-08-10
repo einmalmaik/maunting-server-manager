@@ -278,7 +278,7 @@
         "credential": "The API key is temporarily unavailable.",
         "unavailable": "The AI service is temporarily unavailable.",
         "provider": "The AI provider rejected the request.",
-        "toolRejected": "The requested AI tool call was rejected for security reasons.",
+        "toolRejected": "The AI made a tool call the panel could not accept. The reason is in the panel log.",
         "edit": "The message could not be edited."
       },
       "clear": "Clear history",
@@ -402,7 +402,13 @@
         "AI_PROVIDER_STREAM_TIMEOUT": "The provider took too long.",
         "AI_PROVIDER_STREAM_INCOMPLETE": "The provider's response ended prematurely.",
         "AI_PROVIDER_PROTOCOL_ERROR": "The provider returned an unexpected response.",
-        "AI_PROVIDER_RESPONSE_TOO_LARGE": "The provider's response was too large."
+        "AI_PROVIDER_RESPONSE_TOO_LARGE": "The provider's response was too large.",
+        "AI_QUOTA_REQUESTS_PER_MINUTE": "Too many AI requests per minute.",
+        "AI_QUOTA_CONCURRENT_OPERATIONS": "Too many AI requests are already running at once.",
+        "AI_QUOTA_DAILY_TOKEN_LIMIT": "The daily token allowance is used up.",
+        "AI_QUOTA_WEEKLY_TOKEN_LIMIT": "The weekly token allowance is used up.",
+        "AI_QUOTA_MONTHLY_TOKEN_LIMIT": "The monthly token allowance is used up.",
+        "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "The monthly cost limit has been reached."
       }
     },
     "webSearch": {

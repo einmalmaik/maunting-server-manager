@@ -61,7 +61,7 @@ def _assert_addresses_allowed(
 # URL zeigt. OpenRouter dokumentiert z. B. "https://openrouter.ai/api/v1/chat/
 # completions". Wird das als Basis-URL eingetragen, haengt der Adapter sein
 # eigenes "/chat/completions" an und jede Anfrage endet in einem 404 — sichtbar
-# nur als "ai.errors.provider". Der Eintrag ist ein naheliegender
+# nur als "ai.chat.errors.provider". Der Eintrag ist ein naheliegender
 # Bedienfehler, kein Angriff, und wird deshalb still normalisiert.
 _ENDPOINT_SUFFIXES = ("/chat/completions", "/completions", "/responses")
 
