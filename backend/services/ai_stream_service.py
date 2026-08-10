@@ -1130,6 +1130,12 @@ async def lauf_verfolgen(run_id: str, *, abo=None) -> AsyncIterator[str]:
         return
     abzug, warteschlange = abo
     yield sse_event("snapshot", abzug.als_ereignis())
+    if abzug.status != "running":
+        # Der Lauf ruht bereits — er wartet auf einen Menschen oder ist fertig.
+        # Die Verbindung offenzuhalten waere ein Warten auf nichts, und im
+        # Browser bliebe die Eingabe gesperrt, solange "es laeuft noch" gilt.
+        ai_run_broker.abmelden(run_id, warteschlange)
+        return
     try:
         while True:
             # Erst leerlaufen lassen, dann aufhoeren. Die Reihenfolge ist der
@@ -1148,7 +1154,11 @@ async def lauf_verfolgen(run_id: str, *, abo=None) -> AsyncIterator[str]:
                 yield sse_event("segment", daten)
                 continue
             yield sse_event(ereignis, daten)
-            if ereignis == "run" and daten.get("status") in AUSGELAUFEN:
+            if ereignis == "run" and daten.get("status") != "running":
+                # Fertig **oder** geparkt. Beides beendet die Anzeige: ein
+                # geparkter Lauf tut von selbst nichts mehr, und eine offene
+                # Verbindung wuerde im Browser als "arbeitet noch" gelesen —
+                # die Eingabe bliebe gesperrt, obwohl der Mensch dran ist.
                 break
     finally:
         ai_run_broker.abmelden(run_id, warteschlange)

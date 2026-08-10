@@ -50,6 +50,7 @@ def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
         status=proposal.status,
         task_id=proposal.task_id,
         error_code=proposal.error_code,
+        run_id=proposal.run_id,
         created_at=proposal.created_at,
     )
 

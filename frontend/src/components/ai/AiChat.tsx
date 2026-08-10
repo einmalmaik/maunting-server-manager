@@ -4,11 +4,15 @@ import { useTranslation } from 'react-i18next'
 
 import {
   aiApi,
+  attachAiRun,
   streamAiMessage,
   type AiActionProposal,
   type AiAttachment,
   type AiMessage,
   type AiProviderAvailable,
+  type AiRunInfo,
+  type AiRunStatus,
+  type AiStreamEvent,
   type AiToolUse,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
@@ -38,6 +42,11 @@ interface ServerOption {
 }
 
 const ATTACHMENT_ACCEPT = '.txt,.log,.cfg,.conf,.ini,.json,.properties,.toml,.yaml,.yml,.png,.jpg,.jpeg'
+
+/** Zustaende, in denen der Lauf nichts mehr von selbst tut. */
+const RUHT: readonly AiRunStatus[] = [
+  'completed', 'failed', 'cancelled', 'waiting_confirmation', 'waiting_user',
+]
 
 /**
  * Der KI-Assistent: **eine** Unterhaltung, die die Seite ausfuellt.
@@ -71,8 +80,17 @@ export function AiChat() {
   const [streaming, setStreaming] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [dragging, setDragging] = useState(false)
+  // Der Lauf, der gerade noch etwas vorhat. Er ueberlebt diese Komponente —
+  // wir merken ihn uns nur, um uns wieder anhaengen zu koennen.
+  const [runId, setRunId] = useState<string | null>(null)
+  // Was beim Oeffnen schon lief. Wird in einem eigenen Effekt angehaengt, weil
+  // das Anhaengen erst gehen kann, wenn die Verarbeitung steht.
+  const [laufBeimOeffnen, setLaufBeimOeffnen] = useState<AiRunInfo | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
+  // `streaming` ist Zustand und damit fuer die Ereignisschleife zu spaet: zwei
+  // Anhaengeversuche kurz hintereinander saehen beide noch `false`.
+  const streamingRef = useRef(false)
   const endRef = useRef<HTMLDivElement | null>(null)
   const mountedRef = useRef(true)
   const dragDepthRef = useRef(0)
@@ -99,9 +117,13 @@ export function AiChat() {
       canUseMemory
         ? aiApi.getMemoryPreference().catch(() => null)
         : Promise.resolve(null),
+      // Laeuft da noch etwas von vorhin? Scheitert die Frage, wird eben nicht
+      // angehaengt — der Verlauf steht ohnehin.
+      aiApi.getActiveRun().catch(() => null),
     ])
-      .then(([providerRows, conversation, actions, attachmentRows, serverRows, memoryPreference]) => {
+      .then(([providerRows, conversation, actions, attachmentRows, serverRows, memoryPreference, aktiverLauf]) => {
         if (!active) return
+        setLaufBeimOeffnen(aktiverLauf)
         setMemoryNoticeDue(Boolean(memoryPreference?.notice_due))
         setProviders(providerRows)
         setProviderId(providerRows.find((item) => item.available)?.id ?? null)
@@ -208,6 +230,233 @@ export function AiChat() {
     await sendContent(content)
   }
 
+  /** Aendert genau eine Nachricht im Verlauf. */
+  const aendere = useCallback((id: string, update: (message: AiMessage) => AiMessage) => {
+    setEntries((current) => current.map((entry) => (
+      entry.kind === 'message' && entry.id === id
+        ? { ...entry, message: update(entry.message) }
+        : entry
+    )))
+  }, [])
+
+  const merkeVorschlag = useCallback((proposal: AiActionProposal) => {
+    setEntries((current) => (
+      current.some((entry) => entry.kind === 'proposal' && entry.id === proposal.id)
+        ? current.map((entry) => (
+            entry.kind === 'proposal' && entry.id === proposal.id
+              ? { ...entry, proposal }
+              : entry
+          ))
+        : [...current, { kind: 'proposal', id: proposal.id, proposal }]
+    ))
+  }, [])
+
+  /**
+   * Baut den Ereignisverarbeiter eines Laufs.
+   *
+   * Bewusst **einer** fuer beide Wege — frisch gesendet und nachtraeglich
+   * angehaengt. Zwei Verarbeiter waeren zwei Wahrheiten darueber, wie ein Lauf
+   * aussieht, und genau daran bricht so etwas spaeter.
+   *
+   * `optimistischeId` ist die Blase, die beim Senden schon steht, bevor der
+   * Server seine eigene ID vergeben hat. Beim Anhaengen gibt es sie nicht.
+   */
+  const machVerarbeiter = useCallback((optimistischeId: string | null) => {
+    let aktuell: string | null = optimistischeId
+    let offeneOptimistische = optimistischeId !== null
+    let gescheitert = false
+
+    const verarbeite = ({ event: name, data }: AiStreamEvent) => {
+      if (!mountedRef.current) return
+      if (name === 'snapshot') {
+        setRunId(data.run_id)
+        // Der Abzug **ersetzt** den Stand, er ergaenzt ihn nicht: er ist die
+        // vollstaendige Antwort bis hierher. Alles anzuhaengen wuerde den Text
+        // verdoppeln, wenn man sich waehrend des Schreibens wieder anhaengt.
+        if (data.message_id) {
+          const laeuft = !RUHT.includes(data.status)
+          const id = data.message_id
+          setEntries((current) => {
+            const vorhanden = current.some(
+              (entry) => entry.kind === 'message' && entry.id === id,
+            )
+            const gesetzt = (message: AiMessage): AiMessage => ({
+              ...message,
+              content: data.content,
+              reasoning: data.reasoning || null,
+              question: data.question,
+              status: laeuft ? 'streaming' : 'complete',
+            })
+            if (vorhanden) {
+              return current.map((entry) => (
+                entry.kind === 'message' && entry.id === id
+                  ? { ...entry, message: gesetzt(entry.message) }
+                  : entry
+              ))
+            }
+            return [...current, {
+              kind: 'message',
+              id,
+              message: gesetzt({
+                id, role: 'assistant', content: '', reasoning: null, question: null,
+                status: 'streaming', provider_id: providerId, model: null,
+                created_at: new Date().toISOString(),
+              }),
+            }]
+          })
+          aktuell = id
+          offeneOptimistische = false
+        }
+        // Werkzeugspuren ueberleben kein Neuladen — der Abzug bringt sie zurueck.
+        data.tools.forEach((tool, index) => {
+          const id = `run-${data.run_id}-tool-${index}`
+          setEntries((current) => (
+            current.some((entry) => entry.kind === 'tool' && entry.id === id)
+              ? current
+              : insertBeforeStreaming(current, { kind: 'tool', id, tool })
+          ))
+        })
+        data.proposals.forEach(merkeVorschlag)
+        return
+      }
+      if (name === 'run') {
+        setRunId(RUHT.includes(data.status) ? null : data.run_id)
+        if (RUHT.includes(data.status)) setStreaming(false)
+        return
+      }
+      if (name === 'segment') {
+        // Eine Fortsetzung schreibt eine **neue** Nachricht. Die naechste
+        // `message` legt sie an; hier wird nur die alte losgelassen.
+        aktuell = null
+        return
+      }
+      if (name === 'message') {
+        if (offeneOptimistische && optimistischeId) {
+          // Ab hier kennt der Server die Nachricht unter seiner eigenen ID.
+          const neueId = data.message_id
+          setEntries((current) => current.map((entry) => (
+            entry.kind === 'message' && entry.id === optimistischeId
+              ? { ...entry, id: neueId, message: { ...entry.message, id: neueId } }
+              : entry
+          )))
+          offeneOptimistische = false
+        } else {
+          const id = data.message_id
+          setEntries((current) => (
+            current.some((entry) => entry.kind === 'message' && entry.id === id)
+              ? current
+              : [...current, {
+                  kind: 'message',
+                  id,
+                  message: {
+                    id, role: 'assistant', content: '', reasoning: null, question: null,
+                    status: 'streaming', provider_id: providerId, model: null,
+                    created_at: new Date().toISOString(),
+                  },
+                }]
+          ))
+        }
+        aktuell = data.message_id
+        return
+      }
+      if (!aktuell && (name === 'delta' || name === 'reasoning' || name === 'question' || name === 'done')) {
+        return
+      }
+      if (name === 'delta') {
+        aendere(aktuell!, (message) => ({ ...message, content: message.content + data.content }))
+      } else if (name === 'reasoning') {
+        aendere(aktuell!, (message) => ({
+          ...message, reasoning: (message.reasoning ?? '') + data.content,
+        }))
+      } else if (name === 'question') {
+        // Die Frage gehoert an die Antwort, nicht neben sie. Als eigener
+        // Eintrag stand sie frueher VOR der noch leeren Assistentenblase,
+        // unter der dann "Keine Antwort erhalten" erschien.
+        aendere(aktuell!, (message) => ({ ...message, question: data }))
+      } else if (name === 'done') {
+        aendere(aktuell!, (message) => ({ ...message, status: 'complete' }))
+      } else if (name === 'tool') {
+        setEntries((current) => insertBeforeStreaming(current, {
+          kind: 'tool', id: `${data.tool_name}-${current.length}`, tool: data,
+        }))
+      } else if (name === 'compacted') {
+        // Die Marke gehoert an den Anfang: sie beschreibt, was *vorher* war.
+        setEntries((current) => [
+          { kind: 'compacted', id: `compacted-${data.conversation_id}` },
+          ...current.filter((entry) => entry.kind !== 'compacted'),
+        ])
+      } else if (name === 'proposal' || name === 'action') {
+        merkeVorschlag(data)
+      } else if (name === 'error') {
+        gescheitert = true
+        // Der stabile Code sagt konkret, was fehlt (falscher Key, falsches
+        // Modell, falsche Basis-URL). Der allgemeine `message_key` bleibt
+        // nur der Rueckfall fuer Codes ohne eigenen Text.
+        toast.error(t(`ai.errors.codes.${data.code}`, {
+          defaultValue: t(data.message_key, { defaultValue: t('ai.chat.errors.stream') }),
+        }))
+      }
+    }
+    return { verarbeite, istGescheitert: () => gescheitert }
+  }, [aendere, merkeVorschlag, providerId, t])
+
+  /**
+   * Verfolgt einen Lauf, bis er ruht — oder bis der Benutzer weggeht.
+   *
+   * Geht er weg, bricht **nur die Anzeige** ab. Der Lauf arbeitet auf dem
+   * Server weiter; genau das war vorher nicht so.
+   */
+  const verfolge = useCallback(async (
+    beginne: (verarbeite: (event: AiStreamEvent) => void, signal: AbortSignal) => Promise<void>,
+    optimistischeId: string | null,
+  ) => {
+    const controller = new AbortController()
+    abortRef.current = controller
+    const { verarbeite, istGescheitert } = machVerarbeiter(optimistischeId)
+    let abgebrochen = false
+    try {
+      await beginne(verarbeite, controller.signal)
+    } catch (error: unknown) {
+      if (controller.signal.aborted) {
+        abgebrochen = true
+      } else {
+        toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.stream'))
+        setEntries((current) => current.map((entry) => (
+          entry.kind === 'message' && entry.message.status === 'streaming'
+            ? { ...entry, message: { ...entry.message, status: 'failed' } }
+            : entry
+        )))
+      }
+    } finally {
+      abortRef.current = null
+      if (mountedRef.current && !abgebrochen) {
+        setStreaming(false)
+        if (istGescheitert()) {
+          setEntries((current) => current.map((entry) => (
+            entry.kind === 'message' && entry.message.status === 'streaming'
+              ? { ...entry, message: { ...entry.message, status: 'failed' } }
+              : entry
+          )))
+        }
+      }
+    }
+  }, [machVerarbeiter, t])
+
+  /** Haengt sich an einen Lauf, der schon arbeitet. */
+  const haengeAn = useCallback(async (id: string) => {
+    if (streamingRef.current) return
+    setStreaming(true)
+    streamingRef.current = true
+    try {
+      await verfolge(
+        (verarbeite, signal) => attachAiRun(id, verarbeite, signal),
+        null,
+      )
+    } finally {
+      streamingRef.current = false
+    }
+  }, [verfolge])
+
   const sendContent = async (content: string) => {
     if (!content || !providerId || streaming) return
 
@@ -227,97 +476,36 @@ export function AiChat() {
       { kind: 'message', id: assistantId, message: optimisticAssistant },
     ])
     setStreaming(true)
-
-    const controller = new AbortController()
-    abortRef.current = controller
-    let streamFailed = false
-
-    /** Aendert genau die eine, gerade streamende Assistentennachricht. */
-    const patchAssistant = (update: (message: AiMessage) => AiMessage) => {
-      setEntries((current) => current.map((entry) => (
-        entry.kind === 'message' && entry.id === assistantId
-          ? { ...entry, message: update(entry.message) }
-          : entry
-      )))
-    }
-
+    streamingRef.current = true
     try {
-      await streamAiMessage({
-        content,
-        provider_id: providerId,
-        request_id: crypto.randomUUID(),
-        reasoning,
-      }, ({ event: name, data }) => {
-        if (!mountedRef.current) return
-        if (name === 'message') {
-          // Ab hier kennt der Server die Nachricht unter seiner eigenen ID.
-          patchAssistant((message) => ({ ...message, id: data.message_id }))
-          setEntries((current) => current.map((entry) => (
-            entry.kind === 'message' && entry.id === assistantId
-              ? { ...entry, id: data.message_id }
-              : entry
-          )))
-        } else if (name === 'delta') {
-          patchAssistantById(setEntries, undefined, assistantId, (message) => ({
-            ...message, content: message.content + data.content,
-          }))
-        } else if (name === 'reasoning') {
-          patchAssistantById(setEntries, undefined, assistantId, (message) => ({
-            ...message, reasoning: (message.reasoning ?? '') + data.content,
-          }))
-        } else if (name === 'tool') {
-          setEntries((current) => insertBeforeStreaming(current, {
-            kind: 'tool', id: `${data.tool_name}-${current.length}`, tool: data,
-          }))
-        } else if (name === 'question') {
-          // Die Frage gehoert an die Antwort, nicht neben sie. Als eigener
-          // Eintrag stand sie frueher VOR der noch leeren Assistentenblase,
-          // unter der dann "Keine Antwort erhalten" erschien.
-          patchAssistantById(setEntries, undefined, assistantId, (message) => ({
-            ...message, question: data,
-          }))
-        } else if (name === 'compacted') {
-          // Die Marke gehoert an den Anfang: sie beschreibt, was *vorher* war.
-          setEntries((current) => [
-            { kind: 'compacted', id: `compacted-${data.conversation_id}` },
-            ...current.filter((entry) => entry.kind !== 'compacted'),
-          ])
-        } else if (name === 'done') {
-          patchAssistantById(setEntries, undefined, assistantId, (message) => ({
-            ...message, status: 'complete',
-          }))
-        } else if (name === 'proposal' || name === 'action') {
-          setEntries((current) => current.some(
-            (entry) => entry.kind === 'proposal' && entry.id === data.id,
-          ) ? current : [...current, { kind: 'proposal', id: data.id, proposal: data }])
-        } else {
-          streamFailed = true
-          // Der stabile Code sagt konkret, was fehlt (falscher Key, falsches
-          // Modell, falsche Basis-URL). Der allgemeine `message_key` bleibt
-          // nur der Rueckfall fuer Codes ohne eigenen Text.
-          toast.error(t(`ai.errors.codes.${data.code}`, {
-            defaultValue: t(data.message_key, { defaultValue: t('ai.chat.errors.stream') }),
-          }))
-        }
-      }, controller.signal)
-    } catch (error: unknown) {
-      if (!controller.signal.aborted) {
-        streamFailed = true
-        toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.stream'))
-      }
+      await verfolge(
+        (verarbeite, signal) => streamAiMessage({
+          content,
+          provider_id: providerId,
+          request_id: crypto.randomUUID(),
+          reasoning,
+        }, verarbeite, signal),
+        assistantId,
+      )
     } finally {
-      abortRef.current = null
-      if (!mountedRef.current) return
-      setStreaming(false)
-      if (streamFailed) {
-        setEntries((current) => current.map((entry) => (
-          entry.kind === 'message' && entry.message.status === 'streaming'
-            ? { ...entry, message: { ...entry.message, status: 'failed' } }
-            : entry
-        )))
-      }
+      streamingRef.current = false
     }
   }
+
+  /**
+   * Beim Oeffnen an einen laufenden Lauf anhaengen.
+   *
+   * Das ist die andere Haelfte von "der Lauf haengt an nichts": er arbeitet
+   * weiter, waehrend man woanders ist — und wenn man zurueckkommt, sieht man
+   * ihn wieder. Ohne das stuende hier eine abgebrochene Antwort.
+   */
+  useEffect(() => {
+    if (!laufBeimOeffnen) return
+    setLaufBeimOeffnen(null)
+    if (!laufBeimOeffnen.live) return
+    setRunId(laufBeimOeffnen.id)
+    void haengeAn(laufBeimOeffnen.id)
+  }, [haengeAn, laufBeimOeffnen])
 
   if (loading) {
     return (
@@ -481,11 +669,17 @@ export function AiChat() {
                   <AiActionProposalCard
                     key={entry.id}
                     proposal={entry.proposal}
-                    onChange={(updated) => setEntries((current) => current.map((item) => (
-                      item.kind === 'proposal' && item.id === updated.id
-                        ? { ...item, proposal: updated }
-                        : item
-                    )))}
+                    onChange={(updated) => {
+                      merkeVorschlag(updated)
+                      // **Hier ging es frueher nicht weiter.** Die Aktion lief,
+                      // und der Chat blieb stumm — man musste eine neue
+                      // Nachricht schreiben, damit die KI ueberhaupt erfuhr,
+                      // wie ihr eigener Vorschlag ausgegangen ist.
+                      const lauf = updated.run_id ?? runId
+                      if (lauf && updated.status !== 'proposed') {
+                        void haengeAn(lauf)
+                      }
+                    }}
                   />
                 )
               }
@@ -737,23 +931,6 @@ function entryTimestamp(entry: Entry): string {
   if (entry.kind === 'message') return entry.message.created_at
   if (entry.kind === 'proposal') return entry.proposal.created_at
   return ''
-}
-
-/** Aendert die streamende Nachricht, egal ob sie schon die Server-ID traegt. */
-function patchAssistantById(
-  setEntries: React.Dispatch<React.SetStateAction<Entry[]>>,
-  serverId: string | undefined,
-  optimisticId: string,
-  update: (message: AiMessage) => AiMessage,
-) {
-  setEntries((current) => current.map((entry) => (
-    entry.kind === 'message'
-      && entry.message.role === 'assistant'
-      && entry.message.status === 'streaming'
-      && (entry.id === optimisticId || entry.id === serverId || serverId === undefined)
-      ? { ...entry, message: update(entry.message) }
-      : entry
-  )))
 }
 
 /** Haengt einen Werkzeugeintrag vor die noch streamende Antwort. */

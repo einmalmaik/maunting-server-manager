@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { aiApi, type AiAttachment, type AiMessage, type AiSkillSummary } from '@/api/ai'
+import {
+  aiApi,
+  attachAiRun,
+  type AiActionProposal,
+  type AiAttachment,
+  type AiMessage,
+  type AiSkillSummary,
+} from '@/api/ai'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { usePermissionsStore } from '@/stores/permissionsStore'
@@ -14,6 +21,7 @@ vi.mock('@/api/ai', async (importOriginal) => {
     aiApi: {
       listProviders: vi.fn(),
       getConversation: vi.fn(),
+      getActiveRun: vi.fn(),
       clearHistory: vi.fn(),
       editMessage: vi.fn(),
       listActions: vi.fn(),
@@ -25,6 +33,7 @@ vi.mock('@/api/ai', async (importOriginal) => {
       saveAutonomyGrant: vi.fn(),
     },
     streamAiMessage: vi.fn(),
+    attachAiRun: vi.fn(),
   }
 })
 
@@ -33,7 +42,19 @@ vi.mock('@/api/client', async (importOriginal) => {
   return { ...original, api: vi.fn() }
 })
 
-vi.mock('./AiActionProposalCard', () => ({ AiActionProposalCard: () => null }))
+// Statt einer Attrappe, die nichts kann: ein Knopf, der genau das ausloest, was
+// die echte Karte nach Bestaetigen und Ausfuehren tut. Ohne ihn liesse sich die
+// wichtigste Zusicherung dieses Bildschirms nicht pruefen — dass es nach dem
+// Bestaetigen weitergeht.
+vi.mock('./AiActionProposalCard', () => ({
+  AiActionProposalCard: ({
+    proposal, onChange,
+  }: { proposal: AiActionProposal; onChange: (p: AiActionProposal) => void }) => (
+    <button type="button" onClick={() => onChange({ ...proposal, status: 'succeeded' })}>
+      bestaetigen-attrappe
+    </button>
+  ),
+}))
 
 const CONVERSATION = {
   id: '00000000-0000-0000-0000-000000000301',
@@ -87,6 +108,10 @@ describe('AiChat', () => {
     vi.mocked(aiApi.listSkills).mockReset().mockResolvedValue(skills)
     vi.mocked(aiApi.uploadAttachment).mockReset().mockResolvedValue(attachment)
     vi.mocked(aiApi.clearHistory).mockReset().mockResolvedValue(undefined)
+    // Nichts laeuft mehr von vorhin. Der Chat fragt das beim Oeffnen, um
+    // sich an einen weiterlaufenden Lauf wieder anhaengen zu koennen.
+    vi.mocked(aiApi.getActiveRun).mockReset().mockResolvedValue(null)
+    vi.mocked(attachAiRun).mockReset().mockResolvedValue(undefined)
   })
 
   it('offers exactly one conversation and no way to create another', async () => {
@@ -240,4 +265,70 @@ describe('AiChat', () => {
     // die Antwort und wuesste nicht mehr, worauf sie sich bezieht.
     await screen.findByText('Beantwortet.')
   })
+
+  it('haengt sich beim Oeffnen an einen Lauf, der noch arbeitet', async () => {
+    // Der Fall "ich war auf einer anderen Seite" bzw. "ich habe den Browser
+    // neu gestartet". Frueher war der Lauf dann tot; jetzt arbeitet er weiter
+    // und der Chat sucht ihn beim Oeffnen.
+    vi.mocked(aiApi.getActiveRun).mockResolvedValue({
+      id: 'lauf-42', status: 'running', stop_reason: null,
+      message_id: 'msg-a', live: true, created_at: '2026-08-01T12:00:00Z',
+    })
+    vi.mocked(attachAiRun).mockResolvedValue(undefined)
+
+    render(<AiChat />)
+
+    await waitFor(() => {
+      expect(attachAiRun).toHaveBeenCalledWith('lauf-42', expect.any(Function), expect.any(AbortSignal))
+    })
+  })
+
+  it('haengt sich nicht an einen Lauf, den dieser Prozess nicht mehr kennt', async () => {
+    // Nach einem Neustart des Panels steht ein geparkter Lauf zwar noch in der
+    // Datenbank, aber niemand haelt ihn im Speicher. Ein Ladebalken, der sich
+    // nie bewegt, waere die schlechtere Antwort als gar keiner.
+    vi.mocked(aiApi.getActiveRun).mockResolvedValue({
+      id: 'lauf-43', status: 'waiting_confirmation', stop_reason: 'awaiting_confirmation',
+      message_id: null, live: false, created_at: '2026-08-01T12:00:00Z',
+    })
+
+    render(<AiChat />)
+
+    await screen.findByLabelText('Nachricht')
+    expect(attachAiRun).not.toHaveBeenCalled()
+  })
+
+  it('arbeitet nach dem Bestaetigen weiter, ohne dass man etwas schreiben muss', async () => {
+    // **Die Beschwerde aus dem Betrieb.** Vorher lief die Aktion, und der Chat
+    // blieb stumm — man musste eine neue Nachricht schicken, damit die KI
+    // ueberhaupt erfuhr, wie ihr eigener Vorschlag ausgegangen ist.
+    vi.mocked(aiApi.getActiveRun).mockResolvedValue(null)
+    vi.mocked(aiApi.listActions).mockResolvedValue([{
+      id: 'vorschlag-1',
+      conversation_id: CONVERSATION.id,
+      server_id: 7,
+      tool_name: 'propose_backup',
+      preview: {},
+      expected_revision: null,
+      requires_confirmation: true,
+      autonomous: false,
+      reason: null,
+      expected_effect: null,
+      status: 'proposed',
+      task_id: null,
+      error_code: null,
+      run_id: 'lauf-7',
+      created_at: '2026-08-01T12:00:01Z',
+    }])
+    vi.mocked(attachAiRun).mockResolvedValue(undefined)
+
+    render(<AiChat />)
+    const knopf = await screen.findByText('bestaetigen-attrappe')
+    fireEvent.click(knopf)
+
+    await waitFor(() => {
+      expect(attachAiRun).toHaveBeenCalledWith('lauf-7', expect.any(Function), expect.any(AbortSignal))
+    })
+  })
+
 })

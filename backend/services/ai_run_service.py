@@ -266,6 +266,16 @@ def lauf_fortsetzen(db: Session, *, run_id: str) -> bool:
     run.stop_reason = None
     run.updated_at = _jetzt()
     db.commit()
+    # Erst melden, dann planen — und beides **vor** der Antwort auf den
+    # Bestaetigungsaufruf. Die Oberflaeche haengt sich unmittelbar danach an;
+    # saehe sie den Lauf dort noch als "geparkt", wuerde sie sofort wieder
+    # aufhoeren und die Fortsetzung verpassen.
+    from services import ai_run_broker
+
+    ai_run_broker.eroeffnen(run.id)
+    ai_run_broker.veroeffentlichen(
+        run.id, "run", {"run_id": run.id, "status": "running", "stop_reason": None}
+    )
     if not _aufgabe_planen(run.id):
         # Keine Anwendung, also niemand, der das Segment ausfuehren koennte. Der
         # Lauf faellt in den Wartezustand zurueck, statt als "laufend" liegen zu
@@ -273,6 +283,14 @@ def lauf_fortsetzen(db: Session, *, run_id: str) -> bool:
         run.status = "waiting_confirmation"
         run.updated_at = _jetzt()
         db.commit()
+        # Die Meldung oben zuruecknehmen, sonst wartet die Oberflaeche auf eine
+        # Fortsetzung, die nie anlaeuft.
+        ai_run_broker.veroeffentlichen(
+            run.id,
+            "run",
+            {"run_id": run.id, "status": "waiting_confirmation",
+             "stop_reason": "no_runtime"},
+        )
         return False
     return True
 

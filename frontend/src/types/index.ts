@@ -7,6 +7,8 @@ export interface User {
   email_verified: boolean
   two_factor_enabled: boolean
   email_notifications: boolean
+  /** Hinweise der KI im Panel. Getrennt von den E-Mails — sie verschickt keine. */
+  ai_notifications: boolean
   role_id: number | null
   /** Alle globalen Rollen; role_id bleibt kompatible Primärrolle. */
   role_ids?: number[]

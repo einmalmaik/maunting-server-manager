@@ -438,14 +438,32 @@ def me(
 
 @router.patch("/me/notifications")
 def update_notifications(
-    enabled: bool,
+    enabled: bool | None = None,
+    ai: bool | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    user.email_notifications = enabled
+    """Schaltet E-Mail- und KI-Meldungen — einzeln.
+
+    ``enabled`` war frueher Pflicht und steuerte nur die E-Mails. Es bleibt
+    unveraendert bestehen, damit aeltere Oberflaechen weiter funktionieren; neu
+    ist ``ai``. Beide sind optional: wer nur eines umlegt, ruehrt das andere
+    nicht an.
+
+    Getrennt, weil es zwei verschiedene Dinge sind. Die KI verschickt keine
+    E-Mails, und wer keine Post will, will deswegen nicht auch keinen Hinweis
+    mehr sehen, dass ein laufender Auftrag auf seine Bestaetigung wartet.
+    """
+    if enabled is not None:
+        user.email_notifications = enabled
+    if ai is not None:
+        user.ai_notifications = ai
     db.commit()
-    return {"email_notifications": user.email_notifications}
+    return {
+        "email_notifications": user.email_notifications,
+        "ai_notifications": user.ai_notifications,
+    }
 
 
 @router.post("/change-password")

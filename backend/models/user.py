@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import hashlib
 
-from sqlalchemy import Boolean, String, DateTime, ForeignKey, Integer
+from sqlalchemy import Boolean, String, DateTime, ForeignKey, Integer, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -37,6 +37,12 @@ class User(Base):
     two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Meldungen der KI im Panel — getrennt von den E-Mails, weil es zwei
+    # verschiedene Dinge sind: die KI verschickt keine E-Mails, und wer keine
+    # Post will, will deswegen nicht auch keine Hinweise mehr sehen, dass ein
+    # laufender Auftrag auf seine Bestaetigung wartet.
+    ai_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False,
+                                                  server_default=text('1'))
 
     password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_reset_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

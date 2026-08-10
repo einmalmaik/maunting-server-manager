@@ -451,6 +451,13 @@
       "title": "Rückfrage der KI",
       "freeText": "Oder schreib einfach etwas anderes ins Eingabefeld.",
       "answered": "Beantwortet."
+    },
+    "notice": {
+      "completed": "Die KI ist mit deinem Auftrag fertig.",
+      "waitingConfirmation": "Die KI wartet auf deine Bestätigung.",
+      "waitingUser": "Die KI hat eine Rückfrage an dich.",
+      "failed": "Der KI-Auftrag ist fehlgeschlagen.",
+      "open": "Zum Assistenten"
     }
   },
   "shell": {
@@ -1793,7 +1800,12 @@
     "modUpdateAvailable": "Mod-Aktualisierung verfügbar für {{mod}} auf Server {{server}}",
     "activeLabel": "E-Mail-Benachrichtigungen: aktiv",
     "inactiveLabel": "E-Mail-Benachrichtigungen: deaktiviert",
-    "updateFailed": "Benachrichtigungseinstellung konnte nicht gespeichert werden."
+    "updateFailed": "Benachrichtigungseinstellung konnte nicht gespeichert werden.",
+    "title": "Benachrichtigungen",
+    "emailLabel": "E-Mail-Benachrichtigungen",
+    "emailHint": "Anmeldungen, Server-Ereignisse, Updates.",
+    "aiLabel": "KI-Meldungen im Panel",
+    "aiHint": "Hinweis, wenn ein Auftrag fertig ist oder wartet. Keine E-Mails."
   },
   "updater": {
     "manualConfigsRestored": "Manuelle Konfigurationen wurden automatisch wiederhergestellt.",

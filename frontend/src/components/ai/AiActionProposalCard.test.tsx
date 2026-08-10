@@ -28,6 +28,7 @@ const proposal: AiActionProposal = {
   status: 'proposed',
   task_id: null,
   error_code: null,
+  run_id: null,
   created_at: '2026-08-01T12:00:00Z',
 }
 

@@ -805,7 +805,12 @@
     "modUpdateAvailable": "Actualización de mod disponible para {{mod}} en el servidor {{server}}",
     "activeLabel": "Notificaciones por correo electrónico: activo",
     "inactiveLabel": "Notificaciones por correo electrónico: deshabilitadas",
-    "updateFailed": "No se pudo guardar la configuración de notificación."
+    "updateFailed": "No se pudo guardar la configuración de notificación.",
+    "title": "Notificaciones",
+    "emailLabel": "Notificaciones por correo",
+    "emailHint": "Inicios de sesión, eventos del servidor, actualizaciones.",
+    "aiLabel": "Avisos de la IA en el panel",
+    "aiHint": "Un aviso cuando una tarea termina o queda esperando. Sin correos."
   },
   "updater": {
     "manualConfigsRestored": "Los archivos de configuración manual se restauraron automáticamente.",
@@ -913,6 +918,13 @@
       "hint": "Puedes cambiarlo en cualquier momento en Perfil → IA, donde también puedes ver y eliminar entradas.",
       "enabled": "Memoria activada.",
       "failed": "No se pudo guardar tu respuesta."
+    },
+    "notice": {
+      "completed": "La IA ha terminado tu tarea.",
+      "waitingConfirmation": "La IA espera tu confirmación.",
+      "waitingUser": "La IA tiene una pregunta para ti.",
+      "failed": "La tarea de la IA ha fallado.",
+      "open": "Ir al asistente"
     }
   }
 }

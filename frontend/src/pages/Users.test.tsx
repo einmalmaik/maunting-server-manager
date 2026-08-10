@@ -38,6 +38,7 @@ function user(overrides: Partial<User>): User {
     email_verified: true,
     two_factor_enabled: false,
     email_notifications: false,
+    ai_notifications: true,
     role_id: null,
     role_ids: [],
     created_at: '2026-01-01T00:00:00Z',

@@ -783,7 +783,12 @@
     "modUpdateAvailable": "Pembaruan mod tersedia untuk {{mod}} di server {{server}}",
     "activeLabel": "Notifikasi email: aktif",
     "inactiveLabel": "Notifikasi email: dinonaktifkan",
-    "updateFailed": "Tidak dapat menyimpan setelan notifikasi."
+    "updateFailed": "Tidak dapat menyimpan setelan notifikasi.",
+    "title": "Notifikasi",
+    "emailLabel": "Notifikasi email",
+    "emailHint": "Login, peristiwa server, pembaruan.",
+    "aiLabel": "Pemberitahuan AI di panel",
+    "aiHint": "Pemberitahuan saat tugas selesai atau menunggu. Tanpa email."
   },
   "updater": {
     "manualConfigsRestored": "File konfigurasi manual dipulihkan secara otomatis.",
@@ -891,6 +896,13 @@
       "hint": "Anda dapat mengubahnya kapan saja di Profil → AI, tempat entri juga bisa dilihat dan dihapus.",
       "enabled": "Memori diaktifkan.",
       "failed": "Jawaban Anda tidak dapat disimpan."
+    },
+    "notice": {
+      "completed": "AI telah menyelesaikan tugasmu.",
+      "waitingConfirmation": "AI menunggu konfirmasimu.",
+      "waitingUser": "AI punya pertanyaan untukmu.",
+      "failed": "Tugas AI gagal.",
+      "open": "Buka asisten"
     }
   }
 }

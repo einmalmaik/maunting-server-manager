@@ -114,6 +114,14 @@ export interface AiActionProposal {
   status: 'proposed' | 'confirmed' | 'executing' | 'succeeded' | 'failed' | 'expired'
   task_id: string | null
   error_code: string | null
+  /**
+   * Der Lauf, der auf diesen Vorschlag wartet.
+   *
+   * Nach dem Bestaetigen haengt sich der Chat daran — sonst waere die Aktion
+   * ausgefuehrt und die KI stumm, und man muesste eine neue Nachricht
+   * schreiben, damit es weitergeht. Genau die Beschwerde aus dem Betrieb.
+   */
+  run_id: string | null
   created_at: string
 }
 
@@ -250,8 +258,52 @@ export type AiStreamEvent =
   | { event: 'action'; data: AiActionProposal }
   | { event: 'done'; data: { message_id: string; replayed?: boolean } }
   | { event: 'error'; data: { code: string; message_key: string } }
+  // Der vollstaendige Stand eines Laufs beim Anhaengen. Kommt immer zuerst.
+  //
+  // Ohne ihn saehe jemand, der sich spaeter anhaengt — nach einem Seitenwechsel,
+  // nach einem Neustart des Browsers —, nur den Rest der Antwort. Der Client
+  // **ersetzt** damit seinen Stand, er haengt ihn nicht an.
+  | { event: 'snapshot'; data: AiRunSnapshot }
+  // Der Lauf beginnt eine neue Nachricht (Fortsetzung nach einer Bestaetigung).
+  // Der Text davor gehoert zur abgeschlossenen Nachricht und darf nicht
+  // weiterwachsen.
+  | { event: 'segment'; data: { run_id: string } }
+  // Zustandswechsel des Laufs: laeuft, wartet, fertig.
+  | { event: 'run'; data: { run_id: string; status: AiRunStatus; stop_reason?: string | null; live?: boolean } }
 
-const STREAM_EVENTS = ['message', 'delta', 'reasoning', 'tool', 'question', 'compacted', 'proposal', 'action', 'done', 'error']
+export type AiRunStatus =
+  | 'running'
+  | 'waiting_confirmation'
+  | 'waiting_user'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export interface AiRunSnapshot {
+  run_id: string
+  status: AiRunStatus
+  message_id: string | null
+  content: string
+  reasoning: string
+  tools: AiToolUse[]
+  question: AiQuestion | null
+  proposals: AiActionProposal[]
+  stop_reason: string | null
+}
+
+export interface AiRunInfo {
+  id: string
+  status: AiRunStatus
+  stop_reason: string | null
+  message_id: string | null
+  live: boolean
+  created_at: string
+}
+
+const STREAM_EVENTS = [
+  'message', 'delta', 'reasoning', 'tool', 'question', 'compacted',
+  'proposal', 'action', 'done', 'error', 'snapshot', 'segment', 'run',
+]
 
 export interface AiProviderWrite {
   name: string
@@ -363,6 +415,8 @@ export const aiApi = {
     return api<AiAttachment>('/ai/conversation/attachments', { method: 'POST', body })
   },
   deleteAttachment: (id: string) => api(`/ai/attachments/${id}`, { method: 'DELETE' }),
+  /** Laeuft gerade noch etwas von vorhin? `null`, wenn nicht. */
+  getActiveRun: () => api<AiRunInfo | null>('/ai/conversation/run'),
 }
 
 /** Liest einen fragmentierten SSE-Stream, ohne unbekannte Providerdaten auszugeben. */
@@ -376,6 +430,33 @@ export async function streamAiMessage(
     body: JSON.stringify(payload),
     signal,
   })
+  await leseStrom(response, onEvent)
+}
+
+/**
+ * Haengt sich an einen bereits laufenden Lauf an.
+ *
+ * Der Gegenpart zu "der Lauf haengt an nichts": wer die Seite verlassen hat
+ * oder den Browser neu gestartet hat, findet die Arbeit hier wieder. Der Lauf
+ * schickt zuerst einen `snapshot` mit allem, was bisher passiert ist, und
+ * danach die Fortsetzung live.
+ */
+export async function attachAiRun(
+  runId: string,
+  onEvent: (event: AiStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await apiStream(`/ai/conversation/run/${runId}/stream`, {
+    method: 'GET',
+    signal,
+  })
+  await leseStrom(response, onEvent)
+}
+
+async function leseStrom(
+  response: Response,
+  onEvent: (event: AiStreamEvent) => void,
+): Promise<void> {
   if (!response.body) throw new Error('AI_STREAM_UNAVAILABLE')
 
   const reader = response.body.getReader()

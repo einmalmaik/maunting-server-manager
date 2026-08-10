@@ -783,7 +783,12 @@
     "modUpdateAvailable": "Mise à jour du mod disponible pour {{mod}} sur le serveur {{server}}",
     "activeLabel": "Notifications par e-mail : actives",
     "inactiveLabel": "Notifications par e-mail : désactivées",
-    "updateFailed": "Impossible d'enregistrer le paramètre de notification."
+    "updateFailed": "Impossible d'enregistrer le paramètre de notification.",
+    "title": "Notifications",
+    "emailLabel": "Notifications par e-mail",
+    "emailHint": "Connexions, événements serveur, mises à jour.",
+    "aiLabel": "Avis de l'IA dans le panneau",
+    "aiHint": "Un avis quand une tâche se termine ou attend. Pas d'e-mails."
   },
   "updater": {
     "manualConfigsRestored": "Les fichiers de configuration manuelle ont été automatiquement restaurés.",
@@ -891,6 +896,13 @@
       "hint": "Vous pouvez modifier cela à tout moment sous Profil → IA, où vous pouvez aussi consulter et supprimer les entrées.",
       "enabled": "Mémoire activée.",
       "failed": "Votre réponse n'a pas pu être enregistrée."
+    },
+    "notice": {
+      "completed": "L'IA a terminé votre tâche.",
+      "waitingConfirmation": "L'IA attend votre confirmation.",
+      "waitingUser": "L'IA vous pose une question.",
+      "failed": "La tâche de l'IA a échoué.",
+      "open": "Ouvrir l'assistant"
     }
   }
 }

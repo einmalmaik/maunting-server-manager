@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { VersionFooter } from '@/components/VersionFooter'
+import { AiRunNotice } from '@/components/ai/AiRunNotice'
 
 export function Shell() {
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
@@ -60,6 +61,12 @@ export function Shell() {
           <VersionFooter />
         </main>
       </div>
+
+      {/* Meldet unten rechts, wenn ein KI-Auftrag fertig ist oder wartet —
+          auf jeder Seite. Der Gegenwert dazu, dass die KI im Hintergrund
+          weiterarbeitet: sonst muesste man den Chat offen lassen, also genau
+          das tun, was nicht mehr noetig sein soll. */}
+      <AiRunNotice />
     </div>
   )
 }

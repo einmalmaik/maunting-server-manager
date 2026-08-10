@@ -451,6 +451,13 @@
       "title": "Question from the assistant",
       "freeText": "Or just type something else in the input field.",
       "answered": "Answered."
+    },
+    "notice": {
+      "completed": "The AI has finished your task.",
+      "waitingConfirmation": "The AI is waiting for your confirmation.",
+      "waitingUser": "The AI has a question for you.",
+      "failed": "The AI task failed.",
+      "open": "Open assistant"
     }
   },
   "shell": {
@@ -1793,7 +1800,12 @@
     "modUpdateAvailable": "Mod update available for {{mod}} on server {{server}}",
     "activeLabel": "Email notifications: active",
     "inactiveLabel": "Email notifications: disabled",
-    "updateFailed": "Could not save notification setting."
+    "updateFailed": "Could not save notification setting.",
+    "title": "Notifications",
+    "emailLabel": "Email notifications",
+    "emailHint": "Sign-ins, server events, updates.",
+    "aiLabel": "AI notices in the panel",
+    "aiHint": "A note when a task finishes or is waiting. No emails."
   },
   "updater": {
     "manualConfigsRestored": "Manual configuration files were automatically restored.",

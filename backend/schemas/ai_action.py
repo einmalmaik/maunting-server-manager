@@ -23,6 +23,10 @@ class AiActionProposalResponse(BaseModel):
     status: str
     task_id: str | None
     error_code: str | None
+    # Der Lauf, der auf diesen Vorschlag wartet. Die Oberflaeche haengt sich
+    # nach dem Bestaetigen daran, um die Fortsetzung zu sehen — sonst waere
+    # die Aktion ausgefuehrt und der Chat stumm.
+    run_id: str | None = None
     created_at: datetime
 
 

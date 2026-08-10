@@ -16,6 +16,7 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
     two_factor_enabled: bool | None = None
     email_notifications: bool | None = None
+    ai_notifications: bool | None = None
 
 
 class UserResponse(BaseModel):
@@ -27,6 +28,7 @@ class UserResponse(BaseModel):
     email_verified: bool
     two_factor_enabled: bool
     email_notifications: bool
+    ai_notifications: bool = True
     role_id: int | None = None
     role_ids: list[int] = Field(default_factory=list)
     created_at: datetime

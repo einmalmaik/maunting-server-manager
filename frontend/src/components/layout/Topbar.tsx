@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
-import { useConfirmStore } from '@/stores/confirmStore'
 import { useNavigate } from 'react-router-dom'
 import { Logo } from '@/components/Logo'
-import { Bell, Menu, User, LogOut } from 'lucide-react'
+import { Bell, Bot, Mail, Menu, User, LogOut } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { Switch } from '@/components/ui/Switch'
 
 interface TopbarProps {
   onOpenNavigation?: () => void
@@ -19,24 +19,33 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
   const { user, logout, updateUser } = useAuthStore()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const request = useConfirmStore(s => s.request)
 
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(user?.email_notifications ?? true)
+  const [aiNotificationsEnabled, setAiNotificationsEnabled] = useState<boolean>(user?.ai_notifications ?? true)
+  const [bellOpen, setBellOpen] = useState(false)
+  // Der Punkt an der Glocke sagt nur noch: irgendetwas ist an. Zwei Punkte
+  // fuer zwei Schalter waeren an dieser Groesse nicht mehr lesbar.
+  const irgendwasAn = notificationsEnabled || aiNotificationsEnabled
+  const bellRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (user) {
       setNotificationsEnabled(user.email_notifications)
+      setAiNotificationsEnabled(user.ai_notifications !== false)
     }
-  }, [user?.email_notifications])
+  }, [user?.email_notifications, user?.ai_notifications])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false)
       }
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+        setBellOpen(false)
+      }
     }
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setMenuOpen(false)
+      if (e.key === 'Escape') { setMenuOpen(false); setBellOpen(false) }
     }
     document.addEventListener('mousedown', handleClickOutside)
     document.addEventListener('keydown', handleKeyDown)
@@ -48,25 +57,36 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
     navigate('/login', { replace: true })
   }
 
-  const handleBellClick = async () => {
+  /**
+   * Legt einen der beiden Schalter um.
+   *
+   * Vorher hing an der Glocke **ein** Schalter mit einem Bestaetigungsdialog,
+   * und er steuerte ausschliesslich den E-Mail-Versand. Seit die KI Auftraege im
+   * Hintergrund zu Ende fuehrt, gibt es eine zweite Sorte Meldung — und sie an
+   * denselben Schalter zu haengen waere falsch: die KI verschickt keine E-Mails,
+   * und wer keine Post will, will deswegen nicht auch keinen Hinweis mehr, dass
+   * ein laufender Auftrag auf seine Bestaetigung wartet.
+   *
+   * Der Bestaetigungsdialog faellt dabei weg. Ein Schalter, den man mit einem
+   * zweiten Klick zurueckstellt, braucht keine Rueckfrage; sie stand nur im Weg.
+   */
+  const schalte = async (feld: 'email' | 'ai', naechster: boolean) => {
     if (!user) return
-    const next = user.email_notifications === false ? true : false
-    
-    const isConfirmed = await request({
-       message: next ? t('notifications.enableConfirm') : t('notifications.disableConfirm'),
-       confirmText: next ? t('notifications.enable') : t('notifications.disable'),
-       danger: !next
-    })
-    
-    if (isConfirmed) {
-      try {
-        await api(`/auth/me/notifications?enabled=${next}`, { method: 'PATCH' })
-        // Optimistisches State-Update: kein Reload, kein MIME-Problem.
-        updateUser({ email_notifications: next })
-        setNotificationsEnabled(next)
-      } catch {
-        toast.error(t('notifications.updateFailed'))
-      }
+    const vorher = feld === 'email' ? notificationsEnabled : aiNotificationsEnabled
+    // Erst anzeigen, dann senden — und bei einem Fehler zurueckdrehen. Ein
+    // Schalter, der nach dem Klick eine Sekunde nichts tut, wirkt kaputt.
+    if (feld === 'email') setNotificationsEnabled(naechster)
+    else setAiNotificationsEnabled(naechster)
+    try {
+      const param = feld === 'email' ? 'enabled' : 'ai'
+      await api(`/auth/me/notifications?${param}=${naechster}`, { method: 'PATCH' })
+      updateUser(
+        feld === 'email' ? { email_notifications: naechster } : { ai_notifications: naechster },
+      )
+    } catch {
+      if (feld === 'email') setNotificationsEnabled(vorher)
+      else setAiNotificationsEnabled(vorher)
+      toast.error(t('notifications.updateFailed'))
     }
   }
 
@@ -96,23 +116,71 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
         {/* Right Actions */}
         <div className="flex items-center gap-4">
 
-          {/* Notifications Toggle */}
-          <button
-            onClick={handleBellClick}
-            title={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
-            aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
-            className="p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary"
-          >
-            <div className="relative inline-flex">
-              <Bell className="w-[18px] h-[18px]" />
-              <span
-                className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border-2 border-background ${
-                  notificationsEnabled ? 'bg-status-success' : 'bg-status-destructive'
-                }`}
-                aria-label={notificationsEnabled ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
-              ></span>
-            </div>
-          </button>
+          {/* Benachrichtigungen: E-Mail und KI, getrennt schaltbar */}
+          <div className="relative" ref={bellRef}>
+            <button
+              onClick={() => setBellOpen((offen) => !offen)}
+              aria-expanded={bellOpen}
+              aria-haspopup="menu"
+              title={irgendwasAn ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
+              aria-label={irgendwasAn ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
+              className="p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary"
+            >
+              <div className="relative inline-flex">
+                <Bell className="w-[18px] h-[18px]" />
+                <span
+                  className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border-2 border-background ${
+                    irgendwasAn ? 'bg-status-success' : 'bg-status-destructive'
+                  }`}
+                  aria-hidden="true"
+                ></span>
+              </div>
+            </button>
+
+            {bellOpen && (
+              <div role="menu" className="absolute right-0 top-full mt-2 w-72 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg z-50 overflow-hidden">
+                <div className="p-3 border-b border-outline-variant/30">
+                  <p className="font-label-md text-sm text-on-surface font-medium">
+                    {t('notifications.title', 'Benachrichtigungen')}
+                  </p>
+                </div>
+                <label className="flex items-start gap-3 px-3 py-2.5 hover:bg-surface-container-highest transition-colors cursor-pointer">
+                  <Mail className="mt-0.5 h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm text-on-surface">
+                      {t('notifications.emailLabel', 'E-Mail-Benachrichtigungen')}
+                    </span>
+                    <span className="block text-xs text-on-surface-variant">
+                      {t('notifications.emailHint', 'Anmeldungen, Server-Ereignisse, Updates.')}
+                    </span>
+                  </span>
+                  <Switch
+                    checked={notificationsEnabled}
+                    onCheckedChange={(wert) => void schalte('email', wert)}
+                    aria-label={t('notifications.emailLabel', 'E-Mail-Benachrichtigungen')}
+                  />
+                </label>
+                <label className="flex items-start gap-3 px-3 py-2.5 hover:bg-surface-container-highest transition-colors cursor-pointer">
+                  <Bot className="mt-0.5 h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm text-on-surface">
+                      {t('notifications.aiLabel', 'KI-Meldungen im Panel')}
+                    </span>
+                    <span className="block text-xs text-on-surface-variant">
+                      {/* Die KI verschickt keine E-Mails — deshalb ein eigener
+                          Schalter und ein eigener Satz dazu. */}
+                      {t('notifications.aiHint', 'Hinweis, wenn ein Auftrag fertig ist oder wartet. Keine E-Mails.')}
+                    </span>
+                  </span>
+                  <Switch
+                    checked={aiNotificationsEnabled}
+                    onCheckedChange={(wert) => void schalte('ai', wert)}
+                    aria-label={t('notifications.aiLabel', 'KI-Meldungen im Panel')}
+                  />
+                </label>
+              </div>
+            )}
+          </div>
 
           {/* User Menu */}
           <div className="relative" ref={menuRef}>
