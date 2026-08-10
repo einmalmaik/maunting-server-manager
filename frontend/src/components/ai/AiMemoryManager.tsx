@@ -190,6 +190,9 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           />
         </label>
       ) : undefined}
+      // Der Schalter regiert nur diesen Bereich. Das stand nirgends und war
+      // auch nicht so — bis eben nahm er dem Assistenten auch das Teamwissen.
+      note={scope.kind === 'user' ? t('ai.memory.enabledScopeHint') : undefined}
       search={entries.length > 3
         ? { value: suche, onChange: setSuche, label: t('ai.memory.search') }
         : undefined}

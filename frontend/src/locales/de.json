@@ -190,7 +190,8 @@
       "clearTitle": "Gesamtes Gedächtnis löschen?",
       "clearConfirm": "Wirklich alle {{count}} Einträge löschen? Das lässt sich nicht rückgängig machen.",
       "cleared": "{{count}} Einträge gelöscht.",
-      "teamTitle": "Wissen dieses Teams"
+      "teamTitle": "Wissen dieses Teams",
+      "enabledScopeHint": "Der Schalter gilt für dein eigenes Gedächtnis, einschließlich der Notizen zu einzelnen Servern. Das Wissen deiner Teams ist davon nicht betroffen — es gehört dem Team und steht unter Teams."
     },
     "skills": {
       "title": "Skills",

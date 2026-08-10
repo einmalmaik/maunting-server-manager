@@ -450,7 +450,13 @@ def _utc(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def _visible_scope_rows(db: Session, user: User) -> list[AiMemoryEntry]:
+#: Was diesem Benutzer gehoert und deshalb an seiner Einwilligung haengt.
+PERSOENLICHE_SCOPES = ("user", "server")
+
+
+def _visible_scope_rows(
+    db: Session, user: User, *, persoenlich: bool = True
+) -> list[AiMemoryEntry]:
     """Alle Eintraege, die dieser Benutzer gerade sehen darf.
 
     Vier Bereiche, drei Sichtbarkeitsregeln:
@@ -464,6 +470,13 @@ def _visible_scope_rows(db: Session, user: User) -> list[AiMemoryEntry]:
       ist. Der Austritt wirkt damit sofort, ohne dass jemand Eintraege
       nachpflegen muss.
 
+    ``persoenlich=False`` laesst `user` und `server` weg. Beides gehoert dem
+    Benutzer und haengt an seiner Einwilligung; `team` und `panel` gehoeren dem
+    Team beziehungsweise dem Betreiber und haengen an Mitgliedschaft und
+    Betreiberentscheidung. Vorher war das ein Schalter fuer alles: wer sein
+    eigenes Gedaechtnis abschaltete, nahm dem Assistenten unbemerkt auch das
+    Wissen seiner Teams.
+
     Die Abfrage filtert ueber `scope_identity` beziehungsweise `team_id` — nie
     ueber ein Kennzeichen im Text. Das ist die Stelle, an der die Trennung
     zwischen zwei Benutzern tatsaechlich stattfindet.
@@ -471,13 +484,15 @@ def _visible_scope_rows(db: Session, user: User) -> list[AiMemoryEntry]:
     from services import team_service
 
     team_ids = team_service.user_team_ids(db, user)
-    conditions = [
-        AiMemoryEntry.scope_identity.in_(["panel", f"user:{user.id}"]),
-        and_(
-            AiMemoryEntry.scope == "server",
-            AiMemoryEntry.owner_user_id == user.id,
-        ),
-    ]
+    conditions = [AiMemoryEntry.scope_identity == "panel"]
+    if persoenlich:
+        conditions.append(AiMemoryEntry.scope_identity == f"user:{user.id}")
+        conditions.append(
+            and_(
+                AiMemoryEntry.scope == "server",
+                AiMemoryEntry.owner_user_id == user.id,
+            )
+        )
     if team_ids:
         conditions.append(
             and_(AiMemoryEntry.scope == "team", AiMemoryEntry.team_id.in_(team_ids))
@@ -569,9 +584,12 @@ def provider_memory_context(
     das Gedaechtnis des Gedaechtnisses: es entscheidet beim naechsten Engpass
     mit, was bleibt.
     """
-    if not preference(db, user.id):
-        return None
-    rows = _visible_scope_rows(db, user)
+    # Die Einwilligung gilt dem **eigenen** Gedaechtnis. Teamwissen gehoert dem
+    # Team und panelweites dem Betreiber; wer diesen Schalter umlegt, trifft
+    # eine Entscheidung ueber sich, nicht ueber seine Kollegen. Vorher endete
+    # die Funktion hier komplett — ein Mitglied ohne Einwilligung arbeitete
+    # unbemerkt ohne das Wissen seiner Teams.
+    rows = _visible_scope_rows(db, user, persoenlich=preference(db, user.id))
     if not rows:
         return None
 
@@ -642,13 +660,16 @@ def search_entries(
     dort "Bello" steht.
 
     Gesucht wird ausschliesslich in dem, was der Benutzer ohnehin sehen darf:
-    `_visible_scope_rows` ist derselbe Filter wie beim Lesen. Eine Suche kann
-    damit nichts aufdecken, was ohne sie verborgen waere.
+    `_visible_scope_rows` ist derselbe Filter wie beim Lesen — **einschliesslich
+    der Einwilligung.** Dass die hier fehlte, war ein Widerspruch: der Abruf in
+    den Kontext respektierte sie, die Suche nicht, und `search_memory` legte
+    dem Modell damit persoenliche Eintraege vor, denen nie jemand zugestimmt
+    hatte. Eine Suche kann nichts aufdecken, was ohne sie verborgen waere.
 
     Der Rueckgabewert enthaelt den Klartext. Er ist die Grundlage der
     Entscheidung — wer loeschen soll, muss sehen was.
     """
-    rows = _visible_scope_rows(db, user)
+    rows = _visible_scope_rows(db, user, persoenlich=preference(db, user.id))
     if not rows or not query.strip():
         return []
 

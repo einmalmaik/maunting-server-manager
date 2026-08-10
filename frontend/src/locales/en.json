@@ -190,7 +190,8 @@
       "clearTitle": "Delete the entire memory?",
       "clearConfirm": "Really delete all {{count}} entries? This cannot be undone.",
       "cleared": "Deleted {{count}} entries.",
-      "teamTitle": "This team's knowledge"
+      "teamTitle": "This team's knowledge",
+      "enabledScopeHint": "This switch covers your own memory, including notes about individual servers. Your teams' knowledge is unaffected — it belongs to the team and lives under Teams."
     },
     "skills": {
       "title": "Skills",
