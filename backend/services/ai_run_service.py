@@ -80,11 +80,14 @@ def leerer_zustand(provider_messages: list[dict], *, request_id: str) -> dict:
         # Verbrauchszeile.
         "request_id": request_id,
         "usage_event_id": None,
-        # Was gerade auf einen Menschen wartet: die Werkzeugaufrufe der Runde und
-        # die daraus entstandenen Vorschlaege. Beides wird beim Aufwecken
-        # gebraucht, um dem Modell zu jedem Aufruf ein Ergebnis zurueckzugeben —
-        # das Protokoll verlangt zu jeder `tool_call_id` genau eine Antwort.
+        # Was gerade auf einen Menschen wartet: die Vorschlaege der geparkten
+        # Runde. Beim Aufwecken wird daraus die Meldung, wie der Mensch
+        # entschieden hat.
         "pending": None,
+        # Welcher Lesewerkzeugaufruf wie oft lief — Grundlage der
+        # Schleifenerkennung. Wird ueber eine Rueckfrage hinweg vererbt, sonst
+        # zaehlt jede Klaerung wieder bei null.
+        "tool_signatures": {},
     }
 
 
@@ -136,29 +139,49 @@ def lauf_anlegen(
     return run
 
 
-def offene_laeufe_abbrechen(db: Session, *, conversation_id: str, ausser: str | None = None) -> int:
-    """Beendet geparkte Laeufe derselben Unterhaltung.
+def vorgaenger_abloesen(db: Session, *, conversation_id: str) -> dict:
+    """Beendet offene Laeufe derselben Unterhaltung — und gibt weiter, was zaehlt.
 
     Schreibt der Benutzer eine neue Nachricht, statt einen Vorschlag zu
     bestaetigen, hat er die Richtung gewechselt. Ein alter Lauf, der Minuten
     spaeter durch einen nachtraeglichen Klick aufwacht und in denselben Chat
-    weiterschreibt, waere ein Geist.
+    weiterschreibt, waere ein Geist. Der **Vorschlag** bleibt davon unberuehrt
+    und ausfuehrbar; nur aufwecken wird er niemanden mehr.
 
-    Der **Vorschlag** bleibt davon unberuehrt und ausfuehrbar — er ist eine
-    eigene, vom Menschen bestaetigte Aktion. Nur aufwecken wird er niemanden mehr.
+    Ein Lauf im Zustand ``waiting_user`` ist aber etwas anderes: der hat nicht
+    aufgegeben, sondern **gefragt** — und die neue Nachricht ist die Antwort.
+    Ihn "abgebrochen, ueberholt" zu nennen waere im Protokoll schlicht falsch.
+    Er gilt als abgeschlossen, Grund ``answered``.
+
+    Und er vererbt seine **Schleifensignaturen**. Ohne das setzt jede Rueckfrage
+    die Schleifenerkennung zurueck: das Modell liest dieselbe Datei, fragt etwas,
+    liest sie nach der Antwort erneut — und wieder von vorn gezaehlt. Die
+    Rundenbudgets erbt der Nachfolger dagegen **nicht**: eine Klaerung ist kein
+    Fehler des Benutzers, und ihn dafuer mit einem halben Budget zu bestrafen
+    waere die falsche Lehre.
     """
-    query = db.query(AiRun).filter(
-        AiRun.conversation_id == conversation_id,
-        AiRun.status.in_(("running", "waiting_confirmation", "waiting_user")),
+    betroffen = (
+        db.query(AiRun)
+        .filter(
+            AiRun.conversation_id == conversation_id,
+            AiRun.status.in_(("running", "waiting_confirmation", "waiting_user")),
+        )
+        .order_by(AiRun.created_at.asc())
+        .all()
     )
-    if ausser:
-        query = query.filter(AiRun.id != ausser)
-    betroffen = query.all()
+    erbe: dict = {}
     for run in betroffen:
-        run.status = "cancelled"
-        run.stop_reason = "superseded"
+        if run.status == "waiting_user":
+            run.status = "completed"
+            run.stop_reason = "answered"
+            signaturen = zustand_lesen(run).get("tool_signatures") or {}
+            if isinstance(signaturen, dict):
+                erbe.update(signaturen)
+        else:
+            run.status = "cancelled"
+            run.stop_reason = "superseded"
         run.updated_at = _jetzt()
-    return len(betroffen)
+    return erbe
 
 
 def aktiver_lauf(db: Session, *, user_id: int) -> AiRun | None:

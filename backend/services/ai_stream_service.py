@@ -32,7 +32,7 @@ from models import (
 )
 from models.ai_run import BEENDET as AUSGELAUFEN
 from services.ai_chat_service import get_owned_conversation
-from services import ai_run_broker, ai_run_service
+from services import ai_run_broker, ai_run_service, audit_service
 from services.ai_action_errors import (
     AiActionStateError,
     AiActionValidationError,
@@ -49,6 +49,7 @@ from services.ai_proposal_service import (
 from services.ai_tool_registry import (
     ASK_TOOLS,
     READ_TOOLS,
+    SERVER_READ_TOOLS,
     SKILL_TOOLS,
     WRITE_TOOLS,
 )
@@ -199,7 +200,7 @@ def _finalize_stream(
 
 
 def _tool_followup_messages(
-    *, user_id: int, conversation_id: str, tool_calls, deferred=()
+    *, user_id: int, conversation_id: str, tool_calls, deferred=(), correlation_id: str | None = None
 ) -> tuple[list[dict], list[dict]]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
@@ -333,8 +334,54 @@ def _tool_followup_messages(
                     "executed": False, "reason": reason,
                 }, ensure_ascii=True, separators=(",", ":")),
             })
+        _lesezugriffe_protokollieren(
+            db, user_id=user_id, eintraege=display, correlation_id=correlation_id
+        )
         db.commit()
         return results, display
+
+
+def _lesezugriffe_protokollieren(
+    db, *, user_id: int, eintraege: list[dict], correlation_id: str | None
+) -> None:
+    """Haelt fest, in welche Server die KI hineingesehen hat.
+
+    Die Schreibseite hinterliess vier Audit-Eintraege je Aktion, die Leseseite
+    keinen einzigen. Damit war die Frage "hat die KI meine Logs gelesen?" nicht
+    beantwortbar — obwohl `read_server_logs` bis zu 24.000 Zeichen aus einem
+    fremden Server holt und `list_server_files` dessen Verzeichnisbaum.
+
+    Protokolliert werden **serverbezogene** Lesewerkzeuge. Globale Aufrufe
+    (`list_my_servers`, `read_skill`, `search_memory`) bleiben draussen: sie
+    bewegen sich im eigenen Bereich des Benutzers, und Gedaechtnis wie Skills
+    fuehren ohnehin ihr eigenes Protokoll.
+
+    Entdoppelt je Runde: fragt das Modell neun Server nebeneinander ab, sind das
+    neun Eintraege — fragt es denselben Server neunmal, ist es einer. Ein
+    Protokoll, das man wegen Rauschen nicht mehr liest, ist keins.
+    """
+    gesehen: dict[tuple[str, int], int] = {}
+    for eintrag in eintraege:
+        name = eintrag.get("tool_name")
+        server_id = eintrag.get("server_id")
+        if name not in SERVER_READ_TOOLS or not isinstance(server_id, int):
+            continue
+        schluessel = (name, server_id)
+        gesehen[schluessel] = gesehen.get(schluessel, 0) + 1
+    for (name, server_id), anzahl in gesehen.items():
+        audit_service.record_privileged_action(
+            db,
+            user_id=user_id,
+            action="ai.tool.read",
+            target_type="server",
+            target_id=server_id,
+            details={
+                "tool": name,
+                **({"count": anzahl} if anzahl > 1 else {}),
+            },
+            origin="ai",
+            correlation_id=correlation_id,
+        )
 
 
 def _persist_write_proposals(
@@ -736,6 +783,11 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     abgerechnet = False
     gestellte_frage: dict | None = None
     geparkt = False
+    # Endete der Lauf, weil ihm die Runden ausgingen? Ein solcher Lauf sieht im
+    # Ergebnis aus wie einer, der fertig war — er ist es aber nicht, und der
+    # Unterschied gehoert ins Protokoll. Genau dafuer stand `stop_reason`
+    # ('budget') im Modell und wurde nie gesetzt.
+    budget_erschoepft = False
     try:
         tools = provider_tool_definitions()
         current_usage = usage
@@ -848,6 +900,12 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     for proposal in proposals
                 )
                 if not (ausgefuehrt and zustand["write_rounds"] < MAX_WRITE_ROUNDS):
+                    # Nur wenn die Runde *ausgefuehrt* wurde und trotzdem Schluss
+                    # ist, lag es am Budget. Endet sie, weil ein Vorschlag offen
+                    # blieb, wartet der Lauf auf einen Menschen — das ist kein
+                    # aufgebrauchtes Budget.
+                    if ausgefuehrt:
+                        budget_erschoepft = True
                     tools = None
                 current_usage = StreamUsage()
                 continue
@@ -904,6 +962,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     "AI-Werkzeugrunden erschoepft, letzte Antwort ohne Werkzeuge run_id=%s",
                     run_id,
                 )
+                budget_erschoepft = True
                 tools = None
                 current_usage = StreamUsage()
                 continue
@@ -914,6 +973,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 conversation_id=conversation_id,
                 tool_calls=current_usage.tool_calls,
                 deferred=deferred_calls,
+                correlation_id=vorbereitung.request_id,
             )
             provider_messages.extend(followup)
             for used in used_tools:
@@ -958,7 +1018,16 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 run_id, status="waiting_user", stop_reason="question", zustand=zustand
             )
             return
-        _lauf_abschliessen(run_id, status="completed", stop_reason="done", zustand=zustand)
+        _lauf_abschliessen(
+            run_id,
+            status="completed",
+            # "budget" heisst: die KI hatte noch etwas vor, durfte aber nicht
+            # mehr. Sie hat aus dem geantwortet, was sie hatte — das ist eine
+            # Antwort, aber keine erledigte Aufgabe, und wer das Protokoll liest
+            # soll den Unterschied sehen.
+            stop_reason="budget" if budget_erschoepft else "done",
+            zustand=zustand,
+        )
 
         # Erst jetzt falten — der Benutzer hat seine Antwort und wartet nicht auf
         # die Zusammenfassung.
@@ -1041,7 +1110,14 @@ def lauf_beginnen(
         # Wer eine neue Nachricht schreibt, statt einen Vorschlag zu bestaetigen,
         # hat die Richtung gewechselt. Ein alter, geparkter Lauf darf danach
         # nicht mehr in denselben Chat weiterschreiben.
-        ai_run_service.offene_laeufe_abbrechen(db, conversation_id=conversation.id)
+        #
+        # War der Vorgaenger dagegen eine **Rueckfrage**, ist diese Nachricht die
+        # Antwort darauf. Dann erbt der neue Lauf dessen Schleifensignaturen:
+        # ohne das liest das Modell nach jeder Klaerung dieselbe Datei wieder von
+        # vorn, und die Erkennung greift nie.
+        geerbte_signaturen = ai_run_service.vorgaenger_abloesen(
+            db, conversation_id=conversation.id
+        )
 
         db.add(AiMessage(
             id=str(uuid4()),
@@ -1078,6 +1154,7 @@ def lauf_beginnen(
 
         zustand = ai_run_service.leerer_zustand(provider_messages, request_id=str(request_id))
         zustand["usage_event_id"] = usage_event.id
+        zustand["tool_signatures"] = geerbte_signaturen
         run = ai_run_service.lauf_anlegen(
             db,
             conversation_id=conversation.id,

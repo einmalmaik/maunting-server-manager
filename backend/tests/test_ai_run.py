@@ -592,3 +592,141 @@ async def test_a_failed_action_still_lets_the_run_speak(
     # **Der Kern:** der Lauf steht nicht mehr auf "wartet auf einen Menschen".
     # Er wurde geweckt und darf dem Benutzer sagen, dass es schiefging.
     assert db.get(AiRun, run.id).status != "waiting_confirmation"
+
+
+# ── Drei Luecken, die beim Durchsehen auffielen ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_reading_a_server_leaves_a_trace(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Schreibseite war lueckenlos protokolliert, die Leseseite gar nicht.
+
+    Damit war "hat die KI meine Logs gelesen?" nicht beantwortbar — obwohl
+    `read_server_logs` bis zu 24.000 Zeichen aus einem fremden Server holt.
+
+    Geprueft wird zugleich die Entdoppelung: dieselbe Abfrage neunmal in einer
+    Runde ist **ein** Eintrag. Ein Protokoll, das man wegen Rauschen nicht mehr
+    liest, ist keins.
+    """
+    from models import AuditLog
+
+    server = _server(db, "protokoll")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(id=f"c{i}", name="read_server_status",
+                         arguments={"server_id": server.id})
+        for i in range(9)
+    ] + [
+        # Ein globaler Lesezugriff daneben — der gehoert **nicht** ins Audit:
+        # er bewegt sich im eigenen Bereich des Benutzers.
+        ProviderToolCall(id="global", name="list_my_servers", arguments={}),
+    ]])
+
+    await _lauf(db, regular_user, conversation, provider)
+
+    eintraege = db.query(AuditLog).filter(AuditLog.action == "ai.tool.read").all()
+    assert len(eintraege) == 1, [e.details for e in eintraege]
+    eintrag = eintraege[0]
+    assert eintrag.user_id == regular_user.id
+    assert eintrag.target_type == "server"
+    assert str(server.id) in str(eintrag.target_id)
+    assert "read_server_status" in str(eintrag.details)
+    assert eintrag.origin == "ai"
+
+
+@pytest.mark.asyncio
+async def test_loop_detection_survives_a_question(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eine Rueckfrage darf die Schleifenerkennung nicht zuruecksetzen.
+
+    Der Laufzustand wurde bei `ask_user` geschrieben und **nie gelesen** — halb
+    gebaut, und die Haelfte täuschte. Folge: das Modell liest eine Datei, fragt
+    etwas, liest sie nach der Antwort erneut, und gezaehlt wird wieder bei null.
+    So kommt man nie an die Grenze.
+
+    Der Nachfolger erbt deshalb die Signaturen. Die **Rundenbudgets** erbt er
+    ausdruecklich nicht: eine Klaerung ist kein Fehler des Benutzers.
+    """
+    server = _server(db, "frage-erbe")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    _fake_stream(monkeypatch, [
+        [ProviderToolCall(id="a", name="read_server_status",
+                          arguments={"server_id": server.id})],
+        [ProviderToolCall(id="b", name="ask_user", arguments={
+            "question": "Welchen Server meinst du?",
+            "options": [{"label": "A"}, {"label": "B"}],
+        })],
+    ])
+    erster = await _lauf(db, regular_user, conversation, provider)
+    assert erster.status == "waiting_user"
+
+    _fake_stream(monkeypatch, [])
+    zweiter = await _lauf(db, regular_user, conversation, provider, content="Den ersten")
+
+    db.expire_all()
+    # Der beantwortete Lauf ist nicht "abgebrochen, ueberholt" — er wurde
+    # beantwortet. Im Protokoll ist das ein Unterschied.
+    alt = db.get(AiRun, erster.id)
+    assert alt.status == "completed"
+    assert alt.stop_reason == "answered"
+
+    signaturen = ai_run_service.zustand_lesen(db.get(AiRun, zweiter.id))["tool_signatures"]
+    assert any("read_server_status" in schluessel for schluessel in signaturen), signaturen
+    # Budget dagegen frisch.
+    assert ai_run_service.zustand_lesen(db.get(AiRun, zweiter.id))["rounds"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_ran_out_of_rounds_says_so(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Lauf am Rundenende sieht aus wie einer, der fertig war — ist er aber nicht.
+
+    `stop_reason='budget'` stand als vorgesehener Wert im Modell und wurde
+    nirgends gesetzt. Wer das Protokoll liest, soll den Unterschied sehen:
+    "erledigt" gegen "durfte nicht mehr und hat aus dem geantwortet, was da war".
+    """
+    server = _server(db, "budgetende")
+    _grant(db, regular_user, server=server,
+           server_keys=("server.view", "server.console.read"))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    monkeypatch.setattr("services.docker_service.logs", lambda *_a, **_k: "zeile")
+    # Jede Runde etwas anderes, damit die Schleifenerkennung nicht vorher greift.
+    _fake_stream(monkeypatch, [
+        [ProviderToolCall(id=f"r{i}", name="read_server_logs",
+                          arguments={"server_id": server.id, "lines": 10 + i})]
+        for i in range(ai_stream_service.MAX_TOOL_ROUNDS + 3)
+    ])
+
+    run = await _lauf(db, regular_user, conversation, provider)
+
+    assert run.status == "completed"
+    assert run.stop_reason == "budget"
+
+
+@pytest.mark.asyncio
+async def test_a_normal_run_is_not_marked_as_out_of_budget(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Gegenprobe — sonst stuende an jedem Lauf "budget"."""
+    server = _server(db, "budgetok")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    _fake_stream(monkeypatch, [], text="Kurz und fertig.")
+
+    run = await _lauf(db, regular_user, conversation, provider)
+
+    assert run.status == "completed"
+    assert run.stop_reason == "done"
