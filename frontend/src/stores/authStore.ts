@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { api, clearCsrfTokenMemory } from '@/api/client'
 import { usePermissionsStore } from '@/stores/permissionsStore'
+import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
 import type { User } from '@/types'
 
 interface AuthState {
@@ -40,6 +41,10 @@ export const useAuthStore = create<AuthState>((set) => ({
       // Ignorieren: Backend hat Cookies geloescht, Client-State wird hier bereinigt
     }
     clearCsrfTokenMemory()
+    // Der Abfrageverlauf der SQL-Konsole liegt im localStorage und überlebt das
+    // Abmelden. Auf einem geteilten Rechner läge er sonst im Browser des
+    // nächsten Benutzers — deshalb fällt er hier zusammen mit dem CSRF-Speicher.
+    clearSqlConsoleHistory()
     usePermissionsStore.getState().reset()
     set({ user: null, isAuthenticated: false, isLoading: false })
   },

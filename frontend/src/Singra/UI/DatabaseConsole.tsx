@@ -29,6 +29,12 @@ import {
 } from 'lucide-react'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Checkbox } from '@/components/ui/Checkbox'
+import {
+  readSqlConsoleEntries,
+  sqlConsoleStorageKeys,
+  writeSqlConsoleEntries,
+} from '@/lib/sqlConsoleStorage'
+import { useAuthStore } from '@/stores/authStore'
 import type {
   PostgresDatabase,
   PostgresDatabaseStats,
@@ -62,6 +68,13 @@ export interface DatabaseConsoleProps {
   sqlText: string
   sqlResult: PostgresSqlResult | null
   history: string[]
+  /**
+   * Benennt die Konsole, zu der Verlauf und Favoriten gehören — 'panel' oder
+   * 'server-7'. Zusammen mit der Benutzerkennung ergibt das den Speicher-
+   * schlüssel (siehe lib/sqlConsoleStorage.ts). Pflicht und nicht optional,
+   * damit eine neue Einbindung die Trennung nicht stillschweigend aufhebt.
+   */
+  storageScope: string
   canAdmin: boolean
   canManagePowerUser?: boolean
   powerUserActive?: boolean
@@ -118,6 +131,7 @@ export function DatabaseConsole({
   sqlText,
   sqlResult,
   history,
+  storageScope,
   canAdmin,
   canManagePowerUser = false,
   powerUserActive = false,
@@ -161,33 +175,43 @@ export function DatabaseConsole({
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showSaveFavoriteModal, setShowSaveFavoriteModal] = useState(false)
 
+  // Verlauf und Favoriten gehören dem angemeldeten Benutzer und dieser einen
+  // Konsole. Die Benutzerkennung holt sich die Komponente selbst aus dem
+  // Auth-Store, statt sie sich reichen zu lassen: eine Prop kann jede neue
+  // Einbindung vergessen — und genau daran hing der Fehler. Der Schlüssel war
+  // global, localStorage überlebt das Abmelden, und der nächste Benutzer am
+  // selben Rechner las die Abfragen des vorigen im Verlaufsmenü mit.
+  const userId = useAuthStore((state) => state.user?.id ?? 'anonym')
+  const storageKeys = useMemo(() => sqlConsoleStorageKeys(userId, storageScope), [userId, storageScope])
+
   // Persistent History
-  const [localHistory, setLocalHistory] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('msm_sql_history')
-      if (saved) return JSON.parse(saved)
-    } catch {}
-    return history || []
-  })
+  const [localHistory, setLocalHistory] = useState<string[]>(() =>
+    readSqlConsoleEntries<string>(storageKeys.history),
+  )
+
+  // Persistent Favorites
+  const [favorites, setFavorites] = useState<SqlFavorite[]>(() =>
+    readSqlConsoleEntries<SqlFavorite>(storageKeys.favorites),
+  )
+
+  // Wechselt der Schlüssel zur Laufzeit — anderer Benutzer, andere Konsole —,
+  // muss der angezeigte Zustand mitwechseln. Sonst stünde weiter der Inhalt des
+  // alten Schlüssels auf dem Schirm und die nächste Abfrage schriebe ihn unter
+  // dem neuen fest; die Trennung wäre wieder aufgehoben.
+  useEffect(() => {
+    setLocalHistory(readSqlConsoleEntries<string>(storageKeys.history))
+    setFavorites(readSqlConsoleEntries<SqlFavorite>(storageKeys.favorites))
+  }, [storageKeys])
 
   useEffect(() => {
     if (history.length > 0) {
       setLocalHistory((prev) => {
         const merged = Array.from(new Set([...history, ...prev])).slice(0, 30)
-        try { localStorage.setItem('msm_sql_history', JSON.stringify(merged)) } catch {}
+        writeSqlConsoleEntries(storageKeys.history, merged)
         return merged
       })
     }
-  }, [history])
-
-  // Persistent Favorites
-  const [favorites, setFavorites] = useState<SqlFavorite[]>(() => {
-    try {
-      const saved = localStorage.getItem('msm_sql_favorites')
-      if (saved) return JSON.parse(saved)
-    } catch {}
-    return []
-  })
+  }, [history, storageKeys])
 
   const saveFavorite = (favTitle: string) => {
     if (!sqlText.trim()) return
@@ -199,7 +223,7 @@ export function DatabaseConsole({
     }
     setFavorites((prev) => {
       const next = [newFav, ...prev.filter((f) => f.sql !== sqlText.trim())]
-      try { localStorage.setItem('msm_sql_favorites', JSON.stringify(next)) } catch {}
+      writeSqlConsoleEntries(storageKeys.favorites, next)
       return next
     })
     setShowSaveFavoriteModal(false)
@@ -208,7 +232,7 @@ export function DatabaseConsole({
   const deleteFavorite = (id: string) => {
     setFavorites((prev) => {
       const next = prev.filter((f) => f.id !== id)
-      try { localStorage.setItem('msm_sql_favorites', JSON.stringify(next)) } catch {}
+      writeSqlConsoleEntries(storageKeys.favorites, next)
       return next
     })
   }
@@ -217,7 +241,7 @@ export function DatabaseConsole({
     if (sqlText.trim()) {
       setLocalHistory((prev) => {
         const next = [sqlText.trim(), ...prev.filter((h) => h !== sqlText.trim())].slice(0, 30)
-        try { localStorage.setItem('msm_sql_history', JSON.stringify(next)) } catch {}
+        writeSqlConsoleEntries(storageKeys.history, next)
         return next
       })
     }
@@ -515,7 +539,9 @@ export function DatabaseConsole({
                       className="text-[10px] text-on-surface-variant hover:text-on-surface"
                       onClick={() => {
                         setLocalHistory([])
-                        try { localStorage.removeItem('msm_sql_history') } catch {}
+                        // Leeren heißt leeren: der Eintrag verschwindet aus dem
+                        // Browserspeicher, nicht nur aus der Anzeige.
+                        try { localStorage.removeItem(storageKeys.history) } catch {}
                       }}
                     >
                       Leeren

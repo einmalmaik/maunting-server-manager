@@ -424,6 +424,7 @@ export function DatabaseManager({ serverId }: Props) {
         sqlText={sqlText}
         sqlResult={sqlResult}
         history={history}
+        storageScope={`server-${serverId}`}
         canAdmin={canAdmin}
         canManagePowerUser={canAdmin}
         powerUserActive={Boolean(selectedDatabase?.is_power_user)}

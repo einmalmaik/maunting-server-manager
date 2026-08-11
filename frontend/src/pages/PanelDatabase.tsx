@@ -172,6 +172,7 @@ export function PanelDatabase() {
         sqlText={sqlText}
         sqlResult={sqlResult}
         history={history}
+        storageScope="panel"
         canAdmin={canAdmin}
         busy={busy}
         error={error}
