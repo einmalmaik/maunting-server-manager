@@ -37,9 +37,8 @@ from services.role_service import set_user_roles
 
 def _provider(db: Session) -> AiProvider:
     provider = AiProvider(
-        name="Kompression", base_url="https://provider.invalid/v1",
+        name="Kompression", provider_kind="openrouter",
         default_model="model-a", enabled=True, requires_api_key=False,
-        allow_private_network=False,
     )
     db.add(provider)
     db.commit()

@@ -17,13 +17,22 @@ from database import get_db
 from dependencies import require_global, verify_csrf
 from models import AiProvider, User
 from schemas.ai_provider import (
+    AiCatalogModelResponse,
     AiProviderAvailableResponse,
     AiProviderCreate,
+    AiProviderKindResponse,
     AiProviderResponse,
     AiProviderTestResponse,
     AiProviderUpdate,
 )
-from services import ai_provider_service, audit_service
+from services import (
+    ai_limit_service,
+    ai_model_catalog,
+    ai_provider_registry,
+    ai_provider_service,
+    ai_reasoning,
+    audit_service,
+)
 from services.ai_provider_service import AiProviderConfigurationError
 from services.dis_client import DisSidecarError
 from services.openai_compatible_adapter import (
@@ -40,11 +49,13 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
     return AiProviderResponse(
         id=provider.id,
         name=provider.name,
-        base_url=provider.base_url,
+        provider_kind=provider.provider_kind,
+        # Abgeleitet, nicht gespeichert — eine Kopie in der Zeile wuerde nach
+        # einer Aenderung an der Registry still veralten.
+        base_url=ai_provider_service.base_url(provider),
         default_model=provider.default_model,
         enabled=provider.enabled,
         requires_api_key=provider.requires_api_key,
-        allow_private_network=provider.allow_private_network,
         operator_key_configured=bool(provider.operator_api_key_encrypted),
         operator_key_hint=provider.operator_api_key_hint,
         token_price_cents_per_million=provider.token_price_cents_per_million,
@@ -84,7 +95,8 @@ def create_provider(
             target_id=provider.id,
             details={
                 "name": provider.name,
-                "private_network": provider.allow_private_network,
+                "provider_kind": provider.provider_kind,
+                "model": provider.default_model,
                 "operator_key_configured": bool(provider.operator_api_key_encrypted),
             },
         )
@@ -195,9 +207,9 @@ async def test_provider(
     drei Faelle dieselbe. Hier bekommt der Betreiber die konkrete Antwort des
     Anbieters, bevor ein Benutzer darueber stolpert.
 
-    Der Test laeuft ueber denselben Adapter wie ein echter Chat und damit durch
-    dieselbe SSRF-Pruefung. Gesendet wird eine Ein-Wort-Anfrage ohne Werkzeuge;
-    verbraucht wird das, was ein Anbieter dafuer berechnet.
+    Der Test laeuft ueber denselben Adapter wie ein echter Chat. Gesendet wird
+    eine Ein-Wort-Anfrage ohne Werkzeuge; verbraucht wird das, was ein Anbieter
+    dafuer berechnet.
     """
     provider = db.get(AiProvider, provider_id)
     if provider is None:
@@ -238,22 +250,94 @@ async def test_provider(
         return AiProviderTestResponse(ok=False, code=exc.code, detail=exc.detail)
 
 
+@router.get("/settings/provider-kinds", response_model=list[AiProviderKindResponse])
+def list_provider_kinds(
+    _: User = Depends(require_global("panel.settings.read")),
+) -> list[AiProviderKindResponse]:
+    """Die Anbieter, unter denen der Betreiber waehlen kann.
+
+    Statisch aus `ai_provider_registry` — kein Datenbankzugriff. Ein weiterer
+    Anbieter ist dort ein Eintrag und erscheint hier von selbst.
+    """
+    return [
+        AiProviderKindResponse(
+            kind=spec.kind, label=spec.label, base_url=spec.base_url,
+            key_url=spec.key_url, key_prefix=spec.key_prefix,
+        )
+        for spec in ai_provider_registry.alle()
+    ]
+
+
+@router.get(
+    "/settings/provider-kinds/{kind}/models",
+    response_model=list[AiCatalogModelResponse],
+)
+async def list_catalog_models(
+    kind: str,
+    request: Request,
+    refresh: bool = False,
+    _: User = Depends(require_global("panel.settings.read")),
+) -> list[AiCatalogModelResponse]:
+    """Die Modelle eines Anbieters — die Auswahl statt eines Textfelds.
+
+    Der Betreiber tippte den Modellnamen bisher ab. Ein Tippfehler fiel erst
+    beim Testaufruf auf, und ueber die Faehigkeiten des Modells wusste MSM so
+    oder so nichts. Aus dem Katalog gewaehlt ist beides geloest: der Name stimmt,
+    und die Denkstufen stehen daneben.
+
+    ``refresh=true`` umgeht den Zwischenspeicher — der Knopf „Modelle neu
+    laden“. Der haeufigste Fall ist naemlich nicht das unbekannte Modell,
+    sondern der ein paar Stunden alte Katalog.
+    """
+    if not ai_provider_registry.bekannt(kind):
+        raise HTTPException(status_code=404, detail="Unbekannter KI-Anbieter")
+    modelle = await ai_model_catalog.modelle(
+        request.app.state.ai_http_client, kind, erzwingen=refresh
+    )
+    return [
+        AiCatalogModelResponse(
+            model_id=modell.model_id,
+            name=modell.name,
+            reasoning=modell.denkt,
+            # Ohne Deckel: der Betreiber soll sehen, was das Modell **kann**.
+            # Was ein einzelner Benutzer davon waehlen darf, entscheidet
+            # spaeter seine Rolle — das ist eine andere Frage als diese.
+            efforts=ai_reasoning.waehlbare_stufen(modell, None),
+            default_effort=modell.standard_stufe,
+            mandatory=modell.zwingend,
+        )
+        for modell in modelle
+    ]
+
+
 @router.get("/providers", response_model=list[AiProviderAvailableResponse])
-def list_available_providers(
+async def list_available_providers(
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> list[AiProviderAvailableResponse]:
-    """Was dieser Benutzer im Chat auswaehlen kann.
+    """Was dieser Benutzer im Chat auswaehlen kann — samt erlaubter Denktiefe.
 
     Eine Auswahl unter dem, was der Betreiber freigegeben hat — keine
     Konfiguration. Ob ein Provider nutzbar ist, haengt seit dem Wegfall von BYOK
     nur noch am Betreiberschluessel; ein Benutzer kann daran nichts aendern und
     bekommt deshalb auch keinen Knopf dafuer.
+
+    Die Denkstufen kommen **fertig geklemmt** heraus: der Katalog sagt, was das
+    Modell kann, die Rolle sagt, wie tief dieser Benutzer gehen darf. Die
+    Oberflaeche zeigt damit eine Liste, statt Rechte auszuwerten — und die
+    verbindliche Pruefung passiert trotzdem erneut beim Senden.
+
+    Der Katalogabruf laeuft aus dem Zwischenspeicher und kostet nichts. Ist er
+    leer und der Anbieter nicht erreichbar, bleiben die Denkangaben schlicht
+    aus; die Providerauswahl funktioniert weiter.
     """
-    del user
     providers = db.query(AiProvider).filter(AiProvider.enabled.is_(True)).order_by(AiProvider.name).all()
-    return [
-        AiProviderAvailableResponse(
+    deckel = ai_limit_service.resolve_effective_limits(db, user).max_reasoning_effort
+
+    antworten: list[AiProviderAvailableResponse] = []
+    for provider in providers:
+        antwort = AiProviderAvailableResponse(
             id=provider.id,
             name=provider.name,
             default_model=provider.default_model,
@@ -264,5 +348,17 @@ def list_available_providers(
                 or bool(provider.operator_api_key_encrypted)
             ),
         )
-        for provider in providers
-    ]
+        modell = await ai_model_catalog.finde(
+            request.app.state.ai_http_client,
+            provider.provider_kind,
+            provider.default_model,
+        )
+        if modell is not None:
+            antwort.reasoning = ai_reasoning.darf_nachdenken(modell, deckel)
+            antwort.efforts = ai_reasoning.waehlbare_stufen(modell, deckel)
+            antwort.can_disable = ai_reasoning.darf_abschalten(modell)
+            antwort.default_effort = (
+                modell.standard_stufe if modell.standard_stufe in antwort.efforts else None
+            )
+        antworten.append(antwort)
+    return antworten

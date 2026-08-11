@@ -94,9 +94,21 @@ class AiRun(Base):
     # Zug, sonst faengt die KI von vorn an zu lesen.
     state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Denkschritte fuer diesen Lauf angefordert? Gehoert zum Lauf und nicht zur
+    # Nachdenken fuer diesen Lauf angefordert? Gehoert zum Lauf und nicht zur
     # Nachricht, weil die Fortsetzung dieselbe Einstellung braucht.
     reasoning: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+    # Wie *tief* nachgedacht werden soll — "minimal" bis "max", oder NULL.
+    #
+    # Zwei Felder statt einem, weil die Anbieter selbst zwei Dinge kennen:
+    # gemessen koennen 145 der 272 denkenden Modelle bei OpenRouter **nur**
+    # an/aus und nennen gar keine Stufen. Eine Stufe als einziges Feld haette
+    # fuer die Mehrheit einen Wert erfinden muessen. Der Anbieter bekommt genau
+    # dieselbe Aufteilung: {"enabled": bool, "effort": str|None}.
+    #
+    # Welche Stufen ein Modell kennt, steht im Katalog (`ai_model_catalog`) und
+    # nicht hier — hier steht nur, was gewaehlt wurde.
+    reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     # Warum der Lauf endete: 'done' | 'question' | 'awaiting_confirmation' |
     # 'budget' | ein Fehlercode. Der Text ist fuer Menschen und Protokoll, nicht

@@ -5,6 +5,13 @@ Anlass ist ein konkreter Ausfall: eine Anfrage im Chat brach mit
 `/chat/completions` endete, bei einem Tippfehler im Modellnamen und bei einem
 abgelaufenen Key. Alle drei sind verschiedene Handlungen fuer den Betreiber, und
 keiner davon war aus der Oberflaeche erkennbar.
+
+**Der erste der drei Faelle ist entfallen** — mitsamt seinem Test
+(`test_a_pasted_endpoint_path_is_normalized_away`). Er pruefte, dass eine
+versehentlich mitkopierte Endpunkt-URL still abgeschnitten wird. Das war noetig,
+solange der Betreiber die Adresse tippte; er waehlt jetzt einen Anbieter, und
+die Adresse kommt aus `ai_provider_registry`. Ein Bedienfehler, den man nicht
+mehr begehen kann, braucht keine Korrektur.
 """
 
 from __future__ import annotations
@@ -15,7 +22,6 @@ import httpx
 import pytest
 
 from models import AiProvider
-from services.ai_provider_service import validate_provider_base_url
 from services.openai_compatible_adapter import (
     AiProviderRequestError,
     StreamUsage,
@@ -23,47 +29,19 @@ from services.openai_compatible_adapter import (
 )
 
 
-def _provider(base_url: str = "https://provider.invalid/v1") -> AiProvider:
+def _provider() -> AiProvider:
     return AiProvider(
         id=1,
         name="Diagnose",
-        base_url=base_url,
+        provider_kind="openrouter",
         default_model="model-a",
         enabled=True,
         requires_api_key=False,
-        allow_private_network=False,
     )
 
 
 def _client(handler) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
-
-
-@pytest.mark.parametrize(
-    ("entered", "expected"),
-    [
-        # Der haeufigste Bedienfehler: die Doku vieler Anbieter zeigt die
-        # vollstaendige Endpunkt-URL, MSM haengt den Endpunkt aber selbst an.
-        ("https://provider.invalid/v1/chat/completions", "https://provider.invalid/v1"),
-        ("https://provider.invalid/v1/completions", "https://provider.invalid/v1"),
-        ("https://provider.invalid/v1/responses", "https://provider.invalid/v1"),
-        ("https://provider.invalid/v1/", "https://provider.invalid/v1"),
-        ("https://provider.invalid/v1", "https://provider.invalid/v1"),
-    ],
-)
-def test_a_pasted_endpoint_path_is_normalized_away(
-    entered: str, expected: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import ipaddress
-
-    # Bewusst keine Doku-Adresse (203.0.113.0/24): Python zaehlt die zu
-    # `is_private`, und der SSRF-Schutz wuerde sie damit korrekt abweisen.
-    monkeypatch.setattr(
-        "services.ai_provider_service._resolved_addresses",
-        lambda host: {ipaddress.ip_address("93.184.216.34")},
-    )
-
-    assert validate_provider_base_url(entered, allow_private_network=False) == expected
 
 
 @pytest.mark.parametrize(
@@ -80,9 +58,6 @@ def test_a_pasted_endpoint_path_is_normalized_away(
 async def test_each_failure_gets_its_own_code_and_the_provider_reason(
     status: int, body: dict, code: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        "services.openai_compatible_adapter.assert_provider_destination", lambda _p: None
-    )
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(status, json=body)
@@ -106,9 +81,6 @@ async def test_an_error_body_is_truncated_and_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Der Fehler-Body ist Fremdtext und darf weder wachsen noch leaken."""
-    monkeypatch.setattr(
-        "services.openai_compatible_adapter.assert_provider_destination", lambda _p: None
-    )
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"error": {"message": (
@@ -138,9 +110,6 @@ async def test_reasoning_is_requested_and_arrives_as_its_own_chunk_kind(
     Kaemen sie als `content` an, stuenden sie mitten im Antworttext und flossen
     ausserdem in jede Folgeanfrage zurueck.
     """
-    monkeypatch.setattr(
-        "services.openai_compatible_adapter.assert_provider_destination", lambda _p: None
-    )
     sent: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -173,13 +142,23 @@ async def test_reasoning_is_requested_and_arrives_as_its_own_chunk_kind(
 
 
 @pytest.mark.asyncio
-async def test_without_the_switch_no_reasoning_field_is_sent(
+async def test_switching_off_says_so_explicitly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ein Anbieter, der das Feld nicht kennt, soll es gar nicht erst sehen."""
-    monkeypatch.setattr(
-        "services.openai_compatible_adapter.assert_provider_destination", lambda _p: None
-    )
+    """„Aus“ muss hinausgehen. Nichts zu senden heisst beim Anbieter nicht aus.
+
+    Hier stand vorher die umgekehrte Zusicherung — ohne Schalter kein Feld —
+    mit der Begruendung, ein Anbieter solle nicht mit Unbekanntem behelligt
+    werden. Die Begruendung traegt nicht: wer das Feld nicht kennt, ignoriert es
+    ohnehin, und wer es kennt, nimmt ohne Angabe **seinen** Default.
+
+    Und der ist bei den aktuellen Modellen an. OpenRouter meldet fuer Claude
+    Opus 5, Sonnet 5 und Gemini 3.5 Flash `default_enabled: true`, OpenAI setzt
+    ab GPT-5.5 auf `medium`. Der ausgeschaltete Schalter hat also nicht das
+    Nachdenken abgestellt, sondern nur seine Anzeige — bezahlt wurde es weiter.
+    Fuer ein Panel, dessen Rollen ein `monthly_cost_limit_cents` tragen, ist das
+    kein Schoenheitsfehler.
+    """
     sent: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -194,4 +173,4 @@ async def test_without_the_switch_no_reasoning_field_is_sent(
         ):
             pass
 
-    assert "reasoning" not in sent
+    assert sent["reasoning"] == {"enabled": False}

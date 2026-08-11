@@ -39,11 +39,10 @@ _KEIN_CLIENT = object()
 def _provider(db: Session) -> AiProvider:
     provider = AiProvider(
         name="Sequence",
-        base_url="https://api.example.invalid/v1",
+        provider_kind="openrouter",
         default_model="model-a",
         enabled=True,
         requires_api_key=False,
-        allow_private_network=False,
     )
     db.add(provider)
     db.commit()
@@ -120,7 +119,7 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, rounds: list[list[ProviderTool
 
     async def fake(
         _client, *, provider, api_key, messages, usage: StreamUsage,
-        tools=None, reasoning=False,
+        tools=None, reasoning=False, reasoning_effort=None,
     ):
         del provider, api_key, reasoning
         seen.append([dict(item) for item in messages])

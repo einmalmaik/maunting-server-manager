@@ -50,11 +50,10 @@ pytestmark = pytest.mark.skipif(
 def _provider(db: Session) -> AiProvider:
     provider = AiProvider(
         name="OpenRouter (live)",
-        base_url=LIVE_BASE_URL,
+        provider_kind="openrouter",
         default_model=LIVE_MODEL,
         enabled=True,
         requires_api_key=True,
-        allow_private_network=False,
     )
     db.add(provider)
     db.commit()

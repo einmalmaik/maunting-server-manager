@@ -592,6 +592,7 @@ class _Vorbereitung:
     usage_event_id: int
     request_id: str
     reasoning: bool
+    reasoning_effort: str | None
     token_price_cents_per_million: int | None
     zustand: dict
 
@@ -761,6 +762,11 @@ def _segment_vorbereiten(run_id: str) -> tuple[_Vorbereitung | None, tuple[str, 
             usage_event_id=int(usage_event_id),
             request_id=str(request_id),
             reasoning=bool(run.reasoning),
+            # Aus dem Lauf, nicht neu berechnet: eine Fortsetzung nach einer
+            # Bestaetigung muss dieselbe Tiefe verwenden wie der erste Zug.
+            # Neu klemmen hiesse, dass ein zwischenzeitlich geaenderter
+            # Rollendeckel mitten in einer Aufgabe wirkt.
+            reasoning_effort=run.reasoning_effort,
             token_price_cents_per_million=provider.token_price_cents_per_million,
             zustand=zustand,
         ), None
@@ -871,6 +877,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 usage=current_usage,
                 tools=tools,
                 reasoning=vorbereitung.reasoning,
+                reasoning_effort=vorbereitung.reasoning_effort,
             ):
                 if chunk.kind == "reasoning":
                     thoughts.append(chunk.text)
@@ -1178,6 +1185,7 @@ def lauf_beginnen(
     request_id: UUID,
     content: str,
     reasoning: bool,
+    reasoning_effort: str | None = None,
 ) -> tuple[AiRun | None, tuple[str, str] | None]:
     """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
 
@@ -1259,6 +1267,7 @@ def lauf_beginnen(
             provider_id=provider.id,
             message_id=message_id,
             reasoning=reasoning,
+            reasoning_effort=reasoning_effort,
             zustand=zustand,
         )
         db.commit()

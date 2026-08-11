@@ -131,6 +131,7 @@ def lauf_anlegen(
     message_id: str,
     reasoning: bool,
     zustand: dict,
+    reasoning_effort: str | None = None,
 ) -> AiRun:
     run = AiRun(
         id=str(uuid4()),
@@ -140,6 +141,7 @@ def lauf_anlegen(
         status="running",
         message_id=message_id,
         reasoning=reasoning,
+        reasoning_effort=reasoning_effort,
     )
     zustand_schreiben(run, zustand)
     db.add(run)

@@ -85,3 +85,8 @@ prompt.txt
 # Wird von install.sh/update.sh aus dem HuggingFace-Hub geladen und gehoert
 # niemals ins Repository.
 /backend/ml-models/
+
+# Versionsschnappschuesse des Dateimanagers (verschluesselte Serverdateien).
+# Entstehen zur Laufzeit bei jedem Schreibvorgang — auch bei dem, den
+# `propose_config_patch` ausloest. Betriebsdaten eines Panels, keine Quelle.
+/backend/.msm-file-history/

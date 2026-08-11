@@ -7,11 +7,12 @@ from pydantic import BaseModel, Field, SecretStr
 
 class AiProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
-    base_url: str = Field(min_length=8, max_length=1024)
+    # Schluessel aus `services/ai_provider_registry.ANBIETER`. Die Adresse
+    # dahinter gehoert dem Programm — hier steht nur noch, *welcher* Anbieter.
+    provider_kind: str = Field(min_length=1, max_length=32)
     default_model: str = Field(min_length=1, max_length=256)
     enabled: bool = True
     requires_api_key: bool = True
-    allow_private_network: bool = False
     # Preis in Cent je eine Million Tokens. ``None`` bedeutet: keine
     # belastbare Preisquelle, Kosten werden mit null verbucht.
     token_price_cents_per_million: int | None = Field(default=None, ge=0, le=10_000_000)
@@ -20,11 +21,10 @@ class AiProviderCreate(BaseModel):
 
 class AiProviderUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
-    base_url: str | None = Field(default=None, min_length=8, max_length=1024)
+    provider_kind: str | None = Field(default=None, min_length=1, max_length=32)
     default_model: str | None = Field(default=None, min_length=1, max_length=256)
     enabled: bool | None = None
     requires_api_key: bool | None = None
-    allow_private_network: bool | None = None
     # Preis in Cent je eine Million Tokens. ``None`` bedeutet: keine
     # belastbare Preisquelle, Kosten werden mit null verbucht.
     token_price_cents_per_million: int | None = Field(default=None, ge=0, le=10_000_000)
@@ -35,15 +35,44 @@ class AiProviderUpdate(BaseModel):
 class AiProviderResponse(BaseModel):
     id: int
     name: str
+    provider_kind: str
+    # Aus der Registry abgeleitet, nicht gespeichert. Steht in der Antwort,
+    # damit die Oberflaeche zeigen kann, wohin die Anfragen gehen.
     base_url: str
     default_model: str
     enabled: bool
     requires_api_key: bool
-    allow_private_network: bool
     operator_key_configured: bool
     operator_key_hint: str | None
     token_price_cents_per_million: int | None
     updated_at: datetime
+
+
+class AiProviderKindResponse(BaseModel):
+    """Ein von MSM unterstuetzter Anbieter — die Auswahl im Einrichtungsformular."""
+
+    kind: str
+    label: str
+    base_url: str
+    key_url: str
+    key_prefix: str | None
+
+
+class AiCatalogModelResponse(BaseModel):
+    """Ein Modell aus dem Katalog des Anbieters, mit seinen Denkfaehigkeiten.
+
+    ``efforts`` sind die Stufen, die dieses Modell **wirklich** kennt — direkt
+    aus dem Katalog. Eine leere Liste heisst nicht "denkt nicht", sondern "kennt
+    keine Stufen": gemessen koennen 145 der 272 denkenden Modelle bei OpenRouter
+    nur an oder aus.
+    """
+
+    model_id: str
+    name: str
+    reasoning: bool
+    efforts: list[str]
+    default_effort: str | None
+    mandatory: bool
 
 
 class AiProviderAvailableResponse(BaseModel):
@@ -52,6 +81,12 @@ class AiProviderAvailableResponse(BaseModel):
     Kein ``user_key_configured`` mehr: seit der Betreiber die Schluessel stellt,
     haengt ``available`` allein an seinem Schluessel, und der Benutzer hat
     nichts, was er hier beitragen koennte.
+
+    Die Denkangaben sind bereits **auf die Rolle dieses Benutzers geklemmt**:
+    ``efforts`` enthaelt nur, was er auch waehlen darf. Damit muss die
+    Oberflaeche keine Rechte auswerten — sie zeigt eine Liste an. Die
+    verbindliche Klemmung passiert trotzdem erneut serverseitig beim Senden;
+    diese hier ist Darstellung, nicht Durchsetzung.
     """
 
     id: int
@@ -60,6 +95,14 @@ class AiProviderAvailableResponse(BaseModel):
     requires_api_key: bool
     operator_key_available: bool
     available: bool
+    #: Ob bei diesem Modell ueberhaupt nachgedacht werden kann.
+    reasoning: bool = False
+    #: Die waehlbaren Stufen, aufsteigend. Leer = nur an/aus.
+    efforts: list[str] = []
+    #: Ob "aus" eine gueltige Wahl ist. Bei 82 der 402 Modelle nicht.
+    can_disable: bool = True
+    #: Was gilt, wenn der Benutzer nichts waehlt.
+    default_effort: str | None = None
 
 
 class AiProviderTestResponse(BaseModel):

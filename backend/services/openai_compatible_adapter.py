@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator
 import httpx
 
 from models import AiProvider
-from services.ai_provider_service import assert_provider_destination
+from services.ai_provider_service import base_url as provider_base_url
 from services.ai_redaction import redact_sensitive_text
 
 
@@ -160,6 +160,7 @@ async def stream_chat_completion(
     usage: StreamUsage,
     tools: list[dict] | None = None,
     reasoning: bool = False,
+    reasoning_effort: str | None = None,
 ) -> AsyncIterator[StreamChunk]:
     """Normalisiert Provider-SSE zu Antwort- und Denkschritt-Stuecken.
 
@@ -168,17 +169,38 @@ async def stream_chat_completion(
     und ob daraus lediglich ein Vorschlag entsteht, entscheidet die interne
     AI-Aktionsschicht; Providerdaten loesen hier niemals Aktionen aus.
 
-    ``reasoning`` schaltet die Ausgabe der Denkschritte an. Der Schalter ist
-    absichtlich generisch: gesendet wird ``{"reasoning": {"enabled": true}}``,
-    gelesen werden ``delta.reasoning`` und ``delta.reasoning_content``. Das
-    erste Feld nutzt OpenRouter, das zweite die meisten OpenAI-kompatiblen
-    Server (vLLM, DeepSeek, Ollama). Ein Anbieter, der beides nicht kennt,
-    ignoriert das zusaetzliche Feld — dann kommen schlicht keine Denkschritte,
-    und die Antwort funktioniert unveraendert. Genau deshalb wird hier kein
-    Modellkatalog gepflegt: eine Liste, welches Modell was kann, ist schneller
-    veraltet als sie gepflegt werden kann.
+    ``reasoning`` steuert das Nachdenken. Der Schalter ist absichtlich
+    generisch: gesendet wird ``{"reasoning": {"enabled": ...}}``, gelesen werden
+    ``delta.reasoning`` und ``delta.reasoning_content``. Das erste Feld nutzt
+    OpenRouter, das zweite die meisten OpenAI-kompatiblen Server (vLLM,
+    DeepSeek, Ollama). Ein Anbieter, der beides nicht kennt, ignoriert das
+    zusaetzliche Feld.
+
+    **Das Feld geht in beide Richtungen mit, auch bei ``False``.** Vorher wurde
+    es nur bei ``True`` gesendet — bei „aus“ ging gar nichts hinaus, und das ist
+    nicht dasselbe. Die Mehrheit der aktuellen Modelle denkt von sich aus:
+    OpenRouter meldet fuer Claude Opus 5, Sonnet 5 und Gemini 3.5 Flash
+    ``default_enabled: true``, und OpenAI setzt ab GPT-5.5 den Default auf
+    ``medium``. Ohne ausdrueckliches ``enabled: false`` dachte das Modell also
+    weiter und wurde abgerechnet — der Schalter blendete nur die Denkschritte
+    aus. Fuer ein Panel mit Kostenlimits je Rolle ist das die falsche
+    Voreinstellung; ein Kostenschalter darf sich nicht auf Anbieterdefaults
+    verlassen.
+
+    ``reasoning_effort`` ist die **Tiefe** — "minimal" bis "max", oder ``None``
+    fuer Modelle, die keine Stufen kennen (gemessen 145 der 272 denkenden
+    Modelle bei OpenRouter). Zwei Felder statt eines, weil die Anbieter selbst
+    zwei Dinge kennen; das Wort geht unveraendert hinaus, denn es stammt aus dem
+    Katalog desselben Anbieters. Geklemmt wurde vorher in
+    `services/ai_reasoning.klemmen` — diese Schicht entscheidet nichts, sie
+    sendet.
+
+    **Kein SSRF-Pinning mehr.** Hier stand eine Revalidierung des Ziels vor
+    jedem Request, samt Festnageln auf die gepruefte IP und eigenem
+    SNI-Hostnamen. Das war noetig, solange die Zieladresse aus einem Formular
+    stammte. Sie kommt jetzt aus `ai_provider_registry`, also aus dem Programm —
+    es gibt keine Eingabe mehr, die auf ein internes Netz zeigen koennte.
     """
-    pinned_address = assert_provider_destination(provider)
     if provider.requires_api_key and not api_key:
         raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
 
@@ -193,18 +215,18 @@ async def stream_chat_completion(
     if tools:
         request_body["tools"] = tools
         request_body["tool_choice"] = "auto"
-    if reasoning:
-        request_body["reasoning"] = {"enabled": True}
-    target = httpx.URL(provider.base_url.rstrip("/") + "/chat/completions")
+    # Immer setzen, nie weglassen: "nichts senden" heisst beim Anbieter nicht
+    # "aus", sondern "nimm deinen Default" — und der ist bei den meisten
+    # aktuellen Modellen an.
+    denken: dict[str, Any] = {"enabled": bool(reasoning)}
+    # Die Stufe nur mitgeben, wenn auch gedacht werden soll. Ein `effort` neben
+    # `enabled: false` sind zwei widerspruechliche Angaben in einer Anfrage —
+    # welche gewinnt, entscheidet dann der Anbieter und nicht MSM.
+    if reasoning and reasoning_effort:
+        denken["effort"] = reasoning_effort
+    request_body["reasoning"] = denken
+    target = httpx.URL(provider_base_url(provider).rstrip("/") + "/chat/completions")
     extensions: dict[str, Any] = {}
-    if pinned_address is not None:
-        # Verbindung auf die soeben freigegebene Adresse festnageln. Host-Header
-        # und SNI bleiben der konfigurierte Name, damit Routing und
-        # Zertifikatspruefung unveraendert gegen den echten Hostnamen laufen.
-        hostname = target.host
-        headers["Host"] = target.netloc.decode("ascii")
-        extensions["sni_hostname"] = hostname
-        target = target.copy_with(host=pinned_address)
     deadline = time.monotonic() + MAX_STREAM_SECONDS
     frames = 0
     try:

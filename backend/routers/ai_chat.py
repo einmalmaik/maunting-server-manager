@@ -7,7 +7,7 @@ Unterhaltungen mehr. Der Assistent hat genau einen Chat; geloescht wird der
 
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -24,7 +24,7 @@ from schemas.ai_chat import (
     AiQuestionPayload,
     AiRunResponse,
 )
-from services import ai_chat_service, ai_run_broker, ai_run_service
+from services import ai_chat_service, ai_reasoning, ai_run_broker, ai_run_service
 from services.ai_redaction import redact_sensitive_text
 from services.ai_stream_service import lauf_beginnen, lauf_verfolgen, sse_event
 
@@ -208,8 +208,9 @@ def attach_run(
 
 
 @router.post("/messages/stream")
-def stream_message(
+async def stream_message(
     payload: AiChatRequest,
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
     _: None = Depends(verify_csrf),
@@ -234,6 +235,19 @@ def stream_message(
         safe_content = redact_sensitive_text(payload.content).strip()
         if not safe_content:
             raise HTTPException(status_code=400, detail="Nachricht ist nach Sicherheitsfilter leer")
+        # Die Denkvorgabe wird **hier** festgelegt und nicht erst beim Senden:
+        # `lauf_beginnen` laeuft synchron, der Modellkatalog ist ein
+        # HTTP-Abruf. Wichtiger noch — der geklemmte Wert gehoert in den Lauf,
+        # damit eine Fortsetzung nach einer Bestaetigung dieselbe Tiefe
+        # verwendet wie der erste Zug.
+        denken, stufe = await ai_reasoning.vorgabe(
+            request.app.state.ai_http_client,
+            db,
+            user=user,
+            provider=provider,
+            aktiv=payload.reasoning,
+            wunsch=payload.reasoning_effort,
+        )
         run, fehler = lauf_beginnen(
             db,
             user=user,
@@ -241,7 +255,8 @@ def stream_message(
             provider=provider,
             request_id=payload.request_id,
             content=safe_content,
-            reasoning=payload.reasoning,
+            reasoning=denken,
+            reasoning_effort=stufe,
         )
         if run is None:
             code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")

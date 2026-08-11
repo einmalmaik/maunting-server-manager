@@ -56,10 +56,13 @@ class AiChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=16_000)
     provider_id: int = Field(ge=1)
     request_id: UUID
-    # Bittet das Modell, seine Denkschritte mitzuliefern. Ein Anbieter oder
-    # Modell, das damit nichts anfangen kann, ignoriert das Feld — dann kommt
-    # schlicht kein Denkschritt zurueck und die Antwort bleibt unveraendert.
+    # Ob das Modell nachdenken soll. Bei 145 der 272 denkenden Modelle bei
+    # OpenRouter ist das die einzige Wahl, die es gibt — sie kennen keine Stufen.
     reasoning: bool = False
+    # Wie *tief*, falls das Modell Stufen kennt: "minimal" bis "max". Der Wert
+    # ist ein Wunsch, keine Anweisung — `ai_reasoning.vorgabe` klemmt ihn auf
+    # das, was Modell und Rolle hergeben, bevor er den Server verlaesst.
+    reasoning_effort: str | None = Field(default=None, max_length=16)
 
 
 class AiMessageEdit(BaseModel):

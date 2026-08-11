@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import json
 from uuid import uuid4
 
@@ -40,14 +39,6 @@ def _csrf(cookies: dict) -> dict[str, str]:
     return {"X-CSRF-Token": cookies.get("__Secure-csrf_token", "")}
 
 
-def _public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        ai_provider_service,
-        "_resolved_addresses",
-        lambda _host: {ipaddress.ip_address("93.184.216.34")},
-    )
-
-
 def _enable_chat(db: Session, user: User) -> None:
     role = Role(name=f"ai-chat-{user.id}", description=None, is_system=False)
     db.add(role)
@@ -59,16 +50,14 @@ def _enable_chat(db: Session, user: User) -> None:
 
 
 def _provider(db: Session, monkeypatch: pytest.MonkeyPatch) -> AiProvider:
-    _public_dns(monkeypatch)
     provider = ai_provider_service.create_provider(
         db,
         name="Test Provider",
-        base_url="https://api.example.invalid/v1",
+        provider_kind="openrouter",
         default_model="test-model",
         enabled=True,
         requires_api_key=True,
-        allow_private_network=False,
-        operator_api_key="operator-secret-value",
+        operator_api_key="sk-or-v1-operator-secret",
     )
     db.commit()
     db.refresh(provider)
@@ -81,14 +70,13 @@ def test_provider_settings_store_only_ciphertext_and_masked_metadata(
     owner_cookies: dict,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _public_dns(monkeypatch)
-    secret = "provider-secret-1234"
+    secret = "sk-or-v1-provider-1234"
 
     response = client.post(
         "/api/ai/settings/providers",
         json={
             "name": "OpenAI Compatible",
-            "base_url": "https://api.example.invalid/v1",
+            "provider_kind": "openrouter",
             "default_model": "model-a",
             "operator_api_key": secret,
         },
@@ -174,39 +162,6 @@ def test_the_operator_key_is_the_only_source(
     assert ai_provider_service.resolve_api_key(db, provider, regular_user.id) is None
 
 
-def test_provider_url_policy_blocks_metadata_and_requires_private_opt_in(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        ai_provider_service,
-        "_resolved_addresses",
-        lambda _host: {ipaddress.ip_address("169.254.169.254")},
-    )
-    with pytest.raises(ai_provider_service.AiProviderConfigurationError):
-        ai_provider_service.validate_provider_base_url(
-            "http://169.254.169.254/v1", allow_private_network=True
-        )
-
-    monkeypatch.setattr(
-        ai_provider_service,
-        "_resolved_addresses",
-        lambda _host: {ipaddress.ip_address("127.0.0.1")},
-    )
-    with pytest.raises(ai_provider_service.AiProviderConfigurationError):
-        ai_provider_service.validate_provider_base_url(
-            "http://localhost:11434/v1", allow_private_network=False
-        )
-    assert ai_provider_service.validate_provider_base_url(
-        "http://localhost:11434/v1/", allow_private_network=True
-    ) == "http://localhost:11434/v1"
-
-    _public_dns(monkeypatch)
-    with pytest.raises(ai_provider_service.AiProviderConfigurationError):
-        ai_provider_service.validate_provider_base_url(
-            "http://api.example.invalid/v1", allow_private_network=True
-        )
-
-
 @pytest.mark.asyncio
 async def test_adapter_normalizes_sse_and_never_exposes_provider_frames(
     monkeypatch: pytest.MonkeyPatch,
@@ -214,15 +169,10 @@ async def test_adapter_normalizes_sse_and_never_exposes_provider_frames(
     provider = AiProvider(
         id=7,
         name="Adapter",
-        base_url="https://api.example.invalid/v1",
+        provider_kind="openrouter",
         default_model="model-a",
         enabled=True,
         requires_api_key=True,
-        allow_private_network=False,
-    )
-    monkeypatch.setattr(
-        "services.openai_compatible_adapter.assert_provider_destination",
-        lambda _provider: None,
     )
     captured: dict = {}
 
@@ -262,15 +212,10 @@ async def test_adapter_reassembles_fragmented_tool_calls(
     provider = AiProvider(
         id=8,
         name="Adapter Tools",
-        base_url="https://api.example.invalid/v1",
+        provider_kind="openrouter",
         default_model="model-a",
         enabled=True,
         requires_api_key=False,
-        allow_private_network=False,
-    )
-    monkeypatch.setattr(
-        "services.openai_compatible_adapter.assert_provider_destination",
-        lambda _provider: None,
     )
     captured: dict = {}
 
@@ -355,10 +300,11 @@ def test_chat_stream_persists_usage_and_replays_without_second_provider_call(
 
     async def fake_stream(
         _client, *, provider, api_key, messages, usage, tools=None, reasoning=False,
+        reasoning_effort=None,
     ):
         nonlocal calls
         calls += 1
-        assert api_key == "operator-secret-value"
+        assert api_key == "sk-or-v1-operator-secret"
         assert messages[-1]["content"] == "Wie geht es?"
         usage.total_tokens = 42
         yield StreamChunk("content", "Alles ")
@@ -781,109 +727,21 @@ def test_startup_recovery_closes_stream_and_keeps_full_reservation(
     assert usage.accounted_tokens == 321
 
 
-def test_provider_destination_returns_pinnable_address(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Die Zielpruefung muss ihr Ergebnis herausgeben, nicht nur wegwerfen.
-
-    Loest der HTTP-Client den Namen spaeter erneut auf, kann er eine andere —
-    etwa interne — Adresse erhalten. Die geprueft freigegebene Adresse ist
-    deshalb Teil des Vertrags.
-    """
-    _public_dns(monkeypatch)
-    named = AiProvider(
-        id=101,
-        name="Named",
-        base_url="https://api.example.invalid/v1",
-        default_model="model-a",
-        enabled=True,
-        requires_api_key=False,
-        allow_private_network=False,
-    )
-    assert ai_provider_service.assert_provider_destination(named) == "93.184.216.34"
-
-    literal = AiProvider(
-        id=102,
-        name="Literal",
-        base_url="https://93.184.216.34/v1",
-        default_model="model-a",
-        enabled=True,
-        requires_api_key=False,
-        allow_private_network=False,
-    )
-    # Bei einem IP-Literal gibt es nichts zu pinnen.
-    assert ai_provider_service.assert_provider_destination(literal) is None
-
-
-@pytest.mark.asyncio
-async def test_adapter_connects_to_the_validated_address(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Der Request geht an die freigegebene IP, Host-Header bleibt der Name."""
-    monkeypatch.setattr(
-        "services.openai_compatible_adapter.assert_provider_destination",
-        lambda _provider: "93.184.216.34",
-    )
-    provider = AiProvider(
-        id=103,
-        name="Pinned",
-        base_url="https://api.example.invalid/v1",
-        default_model="model-a",
-        enabled=True,
-        requires_api_key=False,
-        allow_private_network=False,
-    )
-    seen: dict = {}
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        seen["host_in_url"] = request.url.host
-        seen["host_header"] = request.headers.get("host")
-        seen["sni"] = request.extensions.get("sni_hostname")
-        return httpx.Response(
-            200,
-            text='data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
-            headers={"content-type": "text/event-stream"},
-        )
-
-    usage = StreamUsage()
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-        chunks = [
-            chunk
-            async for chunk in stream_chat_completion(
-                http_client,
-                provider=provider,
-                api_key=None,
-                messages=[{"role": "user", "content": "Hi"}],
-                usage=usage,
-            )
-        ]
-
-    assert [chunk.text for chunk in chunks] == ["ok"]
-    assert seen["host_in_url"] == "93.184.216.34"
-    assert seen["host_header"] == "api.example.invalid"
-    assert seen["sni"] == "api.example.invalid"
-
-
 @pytest.mark.asyncio
 async def test_adapter_stops_a_stream_that_never_ends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ein endlos tropfender Provider darf die Reservierung nicht ewig halten."""
     monkeypatch.setattr(
-        "services.openai_compatible_adapter.assert_provider_destination",
-        lambda _provider: None,
-    )
-    monkeypatch.setattr(
         "services.openai_compatible_adapter.MAX_STREAM_FRAMES", 5
     )
     provider = AiProvider(
         id=104,
         name="Endless",
-        base_url="https://api.example.invalid/v1",
+        provider_kind="openrouter",
         default_model="model-a",
         enabled=True,
         requires_api_key=False,
-        allow_private_network=False,
     )
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -912,20 +770,15 @@ async def test_adapter_bounds_a_single_unterminated_line(
 ) -> None:
     """Ein Provider ohne Zeilenumbruch darf den Panel-Prozess nicht fluten."""
     monkeypatch.setattr(
-        "services.openai_compatible_adapter.assert_provider_destination",
-        lambda _provider: None,
-    )
-    monkeypatch.setattr(
         "services.openai_compatible_adapter.MAX_STREAM_LINE_CHARS", 500
     )
     provider = AiProvider(
         id=105,
         name="Flood",
-        base_url="https://api.example.invalid/v1",
+        provider_kind="openrouter",
         default_model="model-a",
         enabled=True,
         requires_api_key=False,
-        allow_private_network=False,
     )
 
     async def handler(request: httpx.Request) -> httpx.Response:
