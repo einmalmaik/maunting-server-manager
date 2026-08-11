@@ -97,7 +97,16 @@ SERVER_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("server.kill",             "server", "Server erzwungen beenden (kill)"),
     PermissionDef("server.install",          "server", "Server (re)installieren"),
     PermissionDef("server.config.write",     "server", "Server-Einstellungen ändern (Name, Auto-Restart, Backup-Schedule)"),
-    PermissionDef("server.update",           "server", "Server updaten (Reinstall/Update, Outbound-Webhooks)"),
+    # Der Schluessel heisst historisch `server.update`, durchgesetzt wird er
+    # aber an genau einer Stelle: routers/webhooks_outbound.py. Die
+    # Spieldateien holt POST /servers/{id}/install, und das prueft
+    # `server.install`. Das alte Label versprach beides. Wer daraufhin eine
+    # Wartungsrolle mit `server.update` baute, vergab ein Recht, das die
+    # Wartung gar nicht oeffnet - und uebersah, dass `server.install` sie
+    # stillschweigend mitbringt. Umbenannt wird der Schluessel nicht: er steckt
+    # in bestehenden `role_permissions`- und `server_permissions`-Zeilen, eine
+    # Umbenennung waere eine Migration mit Rechteverlust als Fehlerfall.
+    PermissionDef("server.update",           "server", "Outbound-Webhooks dieses Servers verwalten"),
     PermissionDef("server.network.manage",   "server", "Ports und Bind-IP ändern"),
     PermissionDef("server.resources.manage", "server", "CPU-/RAM-/Disk-Limits ändern"),
     PermissionDef("server.console.read",     "server", "Konsole und Logs lesen"),

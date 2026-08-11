@@ -450,7 +450,10 @@
         "AI_QUOTA_DAILY_TOKEN_LIMIT": "The daily token allowance is used up.",
         "AI_QUOTA_WEEKLY_TOKEN_LIMIT": "The weekly token allowance is used up.",
         "AI_QUOTA_MONTHLY_TOKEN_LIMIT": "The monthly token allowance is used up.",
-        "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "The monthly cost limit has been reached."
+        "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "The monthly cost limit has been reached.",
+        "AI_ACTION_NOT_FOUND": "This action proposal no longer exists.",
+        "AI_ACTION_ACCESS_REVOKED": "Your permission for this server was revoked. The proposal is still there, but you may no longer run it.",
+        "AI_ACTION_STORE_UNAVAILABLE": "The panel's secure store is currently unreachable. The proposal is still there — try again in a moment."
       }
     },
     "webSearch": {

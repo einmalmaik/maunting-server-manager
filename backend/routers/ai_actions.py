@@ -34,10 +34,30 @@ router = APIRouter(prefix="/api/ai", tags=["ai-actions"])
 
 
 def _state_error(exc: ai_action_errors.AiActionStateError) -> HTTPException:
+    """Macht aus einem Zustandsfehler eine Antwort, die das Panel uebersetzen kann.
+
+    Hier standen fertige deutsche Saetze. `frontend/src/api/client.ts` schickt
+    jedes `detail` durch `i18n.t()`; ein Satz ist kein Schluessel, also gab
+    `parseMissingKeyHandler` (i18n.ts) ihn woertlich zurueck, und die
+    Vorschlagskarte zeigt genau diesen Text bevorzugt vor ihrem eigenen
+    t()-Rueckfall an. Ein Benutzer mit Sprache Englisch las deutsch.
+
+    Deshalb liefern wir den Schluessel selbst - denselben Weg gehen
+    routers/mods.py und routers/steam.py mit `errors.*` bereits. Die Saetze
+    stehen in de.json und en.json unter `ai.errors.codes`; die uebrigen
+    Sprachen fallen laut i18n.ts auf Englisch zurueck.
+
+    Der 409-Zweig bleibt unveraendert: dort traegt der strukturierte Code die
+    Aussage, und AiChat.tsx uebersetzt ihn ueber denselben Namensraum.
+    """
     if exc.code == "AI_ACTION_NOT_FOUND":
-        return HTTPException(status_code=404, detail="Aktionsvorschlag nicht gefunden")
+        return HTTPException(
+            status_code=404, detail="ai.errors.codes.AI_ACTION_NOT_FOUND"
+        )
     if exc.code == "AI_ACTION_ACCESS_REVOKED":
-        return HTTPException(status_code=403, detail="Berechtigung wurde entzogen")
+        return HTTPException(
+            status_code=403, detail="ai.errors.codes.AI_ACTION_ACCESS_REVOKED"
+        )
     return HTTPException(status_code=409, detail={"code": exc.code})
 
 
@@ -69,7 +89,9 @@ def get_action(
         # Vorschlag. `_state_error` kennt den Unterschied und macht 403 daraus.
         raise _state_error(exc) from exc
     if proposal is None:
-        raise HTTPException(status_code=404, detail="Aktionsvorschlag nicht gefunden")
+        raise HTTPException(
+            status_code=404, detail="ai.errors.codes.AI_ACTION_NOT_FOUND"
+        )
     return proposal_response(proposal)
 
 
@@ -98,7 +120,12 @@ def confirm_action(
         raise _state_error(exc) from exc
     except DisSidecarError as exc:
         db.rollback()
-        raise HTTPException(status_code=503, detail="Aktionsvorschlag ist nicht verfuegbar") from exc
+        # Nicht der Vorschlag ist weg, sondern der sichere Speicher ist gerade
+        # nicht erreichbar - der alte Satz sagte dem Benutzer das Falsche und
+        # sagte es ausserdem nur auf Deutsch.
+        raise HTTPException(
+            status_code=503, detail="ai.errors.codes.AI_ACTION_STORE_UNAVAILABLE"
+        ) from exc
 
 
 def _lauf_wecken(db: Session, run_id: str | None) -> None:
@@ -175,4 +202,6 @@ def execute_action(
         raise _state_error(exc) from exc
     except DisSidecarError as exc:
         db.rollback()
-        raise HTTPException(status_code=503, detail="Aktionsvorschlag ist nicht verfuegbar") from exc
+        raise HTTPException(
+            status_code=503, detail="ai.errors.codes.AI_ACTION_STORE_UNAVAILABLE"
+        ) from exc

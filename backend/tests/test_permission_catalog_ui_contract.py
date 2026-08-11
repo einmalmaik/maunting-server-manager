@@ -93,3 +93,70 @@ def _all_definitions():
     from services.permission_catalog import GLOBAL_PERMISSIONS, SERVER_PERMISSIONS
 
     return (*GLOBAL_PERMISSIONS, *SERVER_PERMISSIONS)
+
+
+# ── server.update: was ein Recht verspricht, muss es auch oeffnen ─────
+
+# Woerter, die eine Wirkung auf die Spieldateien zusagen. Die oeffnet
+# `server.install`, nicht `server.update`.
+INSTALL_VERSPRECHEN = ("Reinstall", "Spieldatei")
+
+
+def _permission_texts(key: str) -> tuple[str, ...]:
+    """Titel und Beschreibung eines Rechts, so wie der Rollen-Editor sie zeigt.
+
+    Gelesen werden ausdruecklich nur die beiden Textwerte und nicht der ganze
+    Block: ein erklaerender Kommentar im Editor darf Woerter enthalten, die dem
+    Betreiber nie unter die Augen kommen.
+    """
+    details_block = _block(_editor_source(), "const PERMISSION_DETAILS")
+    eintrag = re.search(
+        rf"^  '{re.escape(key)}': \{{\n(.*?)^  \}},",
+        details_block,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert eintrag, f"Kein PERMISSION_DETAILS-Eintrag fuer {key}"
+    texte = tuple(
+        re.findall(r"^\s+(?:title|desc): '(.*)',$", eintrag.group(1), re.MULTILINE)
+    )
+    assert len(texte) == 2, f"Titel oder Beschreibung fehlt bei {key}: {texte}"
+    return texte
+
+
+def test_server_update_verspricht_nur_die_outbound_webhooks() -> None:
+    """Das Recht heisst `server.update` und aktualisiert trotzdem keine Spieldateien.
+
+    Durchgesetzt wird es an genau einer Stelle: routers/webhooks_outbound.py.
+    Die Spieldateien holt POST /servers/{id}/install, und dort wird
+    `server.install` geprueft. Label und Editortext sagten aber "Reinstall/
+    Update" bzw. "Aktualisieren der Spieldateien" zu. Wer daraufhin eine
+    Wartungsrolle baute, vergab ein Recht ohne die erwartete Wirkung.
+
+    Der Test prueft beide Richtungen. Faengt jemand an, `server.update` auch
+    anderswo durchzusetzen, faellt er hier auf und muss die Texte wieder
+    weiten. Beschriftung und Durchsetzung bleiben so aneinander gebunden -
+    genau das war hier auseinandergelaufen, ohne dass es jemand bemerkte.
+    """
+    router_mit_recht = sorted(
+        pfad.name
+        for pfad in (ROOT / "backend" / "routers").glob("*.py")
+        if '"server.update"' in pfad.read_text(encoding="utf-8")
+    )
+
+    assert router_mit_recht == ["webhooks_outbound.py"], (
+        "server.update wird jetzt an anderer Stelle durchgesetzt "
+        f"({router_mit_recht}) - dann muessen Katalog-Label und Rollen-Editor "
+        "wieder beschreiben, was das Recht tatsaechlich oeffnet."
+    )
+
+    label = next(d.label for d in _all_definitions() if d.key == "server.update")
+
+    for text in (label, *_permission_texts("server.update")):
+        assert "Webhook" in text, (
+            f"server.update benennt seine einzige Wirkung nicht: {text!r}"
+        )
+        for wort in INSTALL_VERSPRECHEN:
+            assert wort not in text, (
+                f"{wort!r} sagt eine Wirkung auf die Spieldateien zu; die oeffnet "
+                f"aber server.install: {text!r}"
+            )

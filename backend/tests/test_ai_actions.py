@@ -1950,7 +1950,9 @@ def test_a_entzogene_sicht_meldet_403_und_nicht_404(
     ohne_sicht = client.get(f"/api/ai/actions/{proposal_id}", cookies=user_cookies)
 
     assert ohne_sicht.status_code == 403, ohne_sicht.text
-    assert ohne_sicht.json()["detail"] == "Berechtigung wurde entzogen"
+    # Uebersetzt wird im Panel (client.ts ruft i18n.t auf das `detail`), der
+    # Router liefert deshalb den Schluessel und nicht den fertigen Satz.
+    assert ohne_sicht.json()["detail"] == "ai.errors.codes.AI_ACTION_ACCESS_REVOKED"
     # Und die Zeile ist wirklich noch da — der 403 ist keine hoefliche Umschrift
     # fuer "geloescht".
     assert db.get(AiActionProposal, proposal_id) is not None

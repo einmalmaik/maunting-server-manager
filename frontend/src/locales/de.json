@@ -450,7 +450,10 @@
         "AI_QUOTA_DAILY_TOKEN_LIMIT": "Das Tageskontingent an Tokens ist ausgeschöpft.",
         "AI_QUOTA_WEEKLY_TOKEN_LIMIT": "Das Wochenkontingent an Tokens ist ausgeschöpft.",
         "AI_QUOTA_MONTHLY_TOKEN_LIMIT": "Das Monatskontingent an Tokens ist ausgeschöpft.",
-        "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "Das monatliche Kostenlimit ist erreicht."
+        "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "Das monatliche Kostenlimit ist erreicht.",
+        "AI_ACTION_NOT_FOUND": "Diesen Aktionsvorschlag gibt es nicht mehr.",
+        "AI_ACTION_ACCESS_REVOKED": "Die Berechtigung für diesen Server wurde entzogen. Der Vorschlag bleibt bestehen, ausführen darfst du ihn nicht mehr.",
+        "AI_ACTION_STORE_UNAVAILABLE": "Der sichere Speicher des Panels ist gerade nicht erreichbar. Der Vorschlag bleibt bestehen — versuche es in einem Moment erneut."
       }
     },
     "webSearch": {

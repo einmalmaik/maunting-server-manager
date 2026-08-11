@@ -159,9 +159,14 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'Server installieren',
     desc: 'Erlaubt das (Neu-)Installieren des Servers über das Installationsskript.',
   },
+  // Geprüft wird dieses Recht nur in routers/webhooks_outbound.py. Wer die
+  // Spieldateien neu holen darf, entscheidet 'server.install'. Der alte Text
+  // versprach beides und ließ Betreiber ein Recht vergeben, das die erwartete
+  // Wirkung nicht hat. Der Schlüssel behält seinen historischen Namen, weil er
+  // in bereits vergebenen Rollen steckt.
   'server.update': {
-    title: 'Server aktualisieren',
-    desc: 'Erlaubt das Aktualisieren der Spieldateien und Outbound-Webhooks.',
+    title: 'Outbound-Webhooks verwalten',
+    desc: 'Erlaubt das Anlegen und Ändern der Webhooks, die dieser Server an fremde Dienste sendet. Das Neuaufsetzen des Servers steckt in "Server installieren".',
   },
   'server.config.write': {
     title: 'Einstellungen anpassen',
