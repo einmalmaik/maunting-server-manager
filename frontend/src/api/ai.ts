@@ -196,7 +196,12 @@ export interface AiAutonomyGrant {
 
 export interface AiMemoryEntry {
   id: string
-  scope: 'user' | 'server' | 'team' | 'panel'
+  /**
+   * `server` ist die **eigene** Notiz zu einer Anlage, `server_shared` das
+   * Betriebswissen der Anlage selbst — sichtbar für jeden, der sie sehen darf,
+   * und es überlebt den Kollegen, der es aufgeschrieben hat.
+   */
+  scope: 'user' | 'server' | 'server_shared' | 'team' | 'panel'
   server_id: number | null
   team_id: number | null
   key: string
@@ -530,9 +535,16 @@ export const aiApi = {
     method: 'PUT', body: JSON.stringify(payload),
   }),
   deleteMemory: (id: string) => api(`/ai/memory/${id}`, { method: 'DELETE' }),
-  /** Leert einen ganzen Bereich und meldet, wie viele Einträge das waren. */
-  clearMemory: (scope: AiMemoryEntry['scope'], teamId?: number) => api<{ removed: number }>(
-    `/ai/memory?scope=${scope}${teamId ? `&team_id=${teamId}` : ''}`, { method: 'DELETE' },
+  /**
+   * Leert einen ganzen Bereich und meldet, wie viele Einträge das waren.
+   *
+   * `serverId` fehlte hier als einzigem der Memory-Aufrufe. Ohne ihn löst das
+   * Backend `scope=server_shared` gar nicht erst auf und antwortet 404 — der
+   * Knopf „alles löschen" wäre am Serverreiter tot gewesen.
+   */
+  clearMemory: (scope: AiMemoryEntry['scope'], teamId?: number, serverId?: number) => api<{ removed: number }>(
+    `/ai/memory?scope=${scope}${teamId ? `&team_id=${teamId}` : ''}${serverId ? `&server_id=${serverId}` : ''}`,
+    { method: 'DELETE' },
   ),
   getMemoryPreference: () => api<AiMemoryPreference>('/ai/memory/preference'),
   setMemoryPreference: (enabled: boolean) => api<AiMemoryPreference>('/ai/memory/preference', {

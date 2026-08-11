@@ -29,9 +29,16 @@
  *
  * `panel` gehört dem Betreiber und gilt für **jeden** Benutzer. Er steht
  * deshalb in den Einstellungen und nicht im Profil.
+ *
+ * `server_shared` gehört der **Anlage**. Zwei Dinge unterscheiden ihn von den
+ * Servernotizen unter `user`: er ist für jeden sichtbar, der den Server sehen
+ * darf, und er hat keinen Besitzer — er überlebt den Kollegen, der ihn
+ * aufgeschrieben hat, und verschwindet mit dem Server. Deshalb steht er auf
+ * einem Reiter der Serveransicht und nicht im Profil.
  */
 export type AiKnowledgeScope =
   | { kind: 'user' }
+  | { kind: 'server_shared'; serverId: number; canManage: boolean }
   | { kind: 'team'; teamId: number; canManage: boolean }
   | { kind: 'panel'; canManage: boolean }
 
@@ -50,12 +57,19 @@ export function scopeCanManage(scope: AiKnowledgeScope): boolean {
 }
 
 /** Der Scope-Wert, den die Memory-API für diesen Bereich erwartet. */
-export function memoryScopeName(scope: AiKnowledgeScope): 'user' | 'team' | 'panel' {
+export function memoryScopeName(
+  scope: AiKnowledgeScope,
+): 'user' | 'server_shared' | 'team' | 'panel' {
   return scope.kind
 }
 
 export function scopeTeamId(scope: AiKnowledgeScope): number | undefined {
   return scope.kind === 'team' ? scope.teamId : undefined
+}
+
+/** Die `server_id`, auf die dieser Bereich zeigt — sonst `undefined`. */
+export function scopeServerId(scope: AiKnowledgeScope): number | undefined {
+  return scope.kind === 'server_shared' ? scope.serverId : undefined
 }
 
 /** Die `team_id`, auf die dieser Skill-Bereich zeigt — `null` heißt panelweit. */

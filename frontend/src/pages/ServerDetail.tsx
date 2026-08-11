@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Bot,
+  Brain,
   Clock,
   Cpu,
   Database,
@@ -44,6 +45,7 @@ import { SwitchBlueprintDialog } from "@/components/server/SwitchBlueprintDialog
 import { GuardianBadge } from "@/features/guardian/GuardianBadge";
 import { GuardianQuarantineBanner } from "@/features/guardian/GuardianQuarantineBanner";
 import { GuardianTab } from "@/features/guardian/GuardianTab";
+import { AiMemoryManager } from "@/components/ai/AiMemoryManager";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
@@ -56,6 +58,7 @@ type TabKey =
   | "restarts"
   | "backups"
   | "databases" | "webhooks"
+  | "memory"
   | "guardian";
 
 const VALID_TABS: TabKey[] = [
@@ -67,6 +70,7 @@ const VALID_TABS: TabKey[] = [
   "backups",
   "databases",
   "webhooks",
+  "memory",
   "guardian",
 ];
 
@@ -174,8 +178,20 @@ export function ServerDetail() {
   const canManageResources = useHasPermission("server.resources.manage", serverId);
   const canUseAi = useHasPermission("ai.chat.use");
   const canManageCredentials = useHasPermission("server.credentials.manage", serverId);
+  // Der Reiter mit dem Wissen dieser Anlage. Zwei Rechte, zwei Rollen:
+  // `ai.memory.use` entscheidet, ob der Reiter ueberhaupt erscheint —
+  // `AiMemoryManager` zeigt ohne dieses Recht gar nichts, und ein leerer
+  // Kasten waere schlechter als kein Reiter. `server.config.write`
+  // entscheidet nur, ob die Knoepfe zum Aendern dabei sind; lesen darf
+  // jeder, der bis hierher gekommen ist.
+  const canUseAiMemory = useHasPermission("ai.memory.use");
+  const canWriteServerConfig = useHasPermission("server.config.write", serverId);
   const permissionsLoading = usePermissionsStore((s) => s.isLoading);
   const showResourceEdit = !permissionsLoading && canManageResources;
+  // Dasselbe Anti-Flacker-Muster wie eine Zeile darueber: waehrend die Rechte
+  // laden, ist `canUseAiMemory` false. Ohne diese Bedingung erschiene der
+  // Reiter kurz nach dem Laden und sprungen die uebrigen zur Seite.
+  const showMemoryTab = !permissionsLoading && canUseAiMemory;
 
   const [showEditResource, setShowEditResource] = useState(false);
   const [mobileOverviewOpen, setMobileOverviewOpen] = useState(false);
@@ -268,6 +284,13 @@ export function ServerDetail() {
       label: t("tabs.webhooks", { defaultValue: "Webhooks" }),
       icon: Webhook,
     });
+    if (showMemoryTab) {
+      list.push({
+        key: "memory",
+        label: t("tabs.memory", { defaultValue: "Wissen" }),
+        icon: Brain,
+      });
+    }
     if (server?.guardian_enabled) {
       list.push({
         key: "guardian",
@@ -276,12 +299,16 @@ export function ServerDetail() {
       });
     }
     return list;
-  }, [t, showModTab, gameInfo?.enable_exec, server?.guardian_enabled]);
+  }, [t, showModTab, showMemoryTab, gameInfo?.enable_exec, server?.guardian_enabled]);
 
   const rawTab = (searchParams.get("tab") || "files") as TabKey;
   const activeTab: TabKey =
     VALID_TABS.includes(rawTab)
       && (rawTab !== "mods" || showModTab)
+      // Ein Aufruf mit ?tab=memory ohne das Recht faellt auf "files" zurueck
+      // statt einen leeren Bereich zu zeigen. Ein Lesezeichen ueberlebt einen
+      // Rechteentzug, der Reiter nicht.
+      && (rawTab !== "memory" || showMemoryTab)
       ? rawTab
       : "files";
 
@@ -1026,6 +1053,15 @@ export function ServerDetail() {
         {activeTab === "backups" && <Backups serverId={serverId} />}
         {activeTab === "databases" && <DatabaseManager serverId={serverId} />}
         {activeTab === "webhooks" && <OutgoingWebhooksPanel serverId={serverId} />}
+        {activeTab === "memory" && showMemoryTab && (
+          <AiMemoryManager
+            scope={{
+              kind: "server_shared",
+              serverId,
+              canManage: canWriteServerConfig,
+            }}
+          />
+        )}
         {activeTab === "guardian" && (
           <GuardianTab server={server} onRefreshServer={fetchAll} />
         )}

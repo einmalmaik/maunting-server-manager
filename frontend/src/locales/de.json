@@ -198,18 +198,21 @@
       "clearTitle": "Gesamtes Gedächtnis löschen?",
       "clearConfirm": "Wirklich alle {{count}} Einträge löschen? Das lässt sich nicht rückgängig machen.",
       "cleared": "{{count}} Einträge gelöscht.",
-      "enabledScopeHint": "Der Schalter gilt für dein eigenes Gedächtnis, einschließlich der Notizen zu einzelnen Servern. Das Wissen deiner Teams ist davon nicht betroffen — es gehört dem Team und steht unter Teams.",
+      "enabledScopeHint": "Der Schalter gilt für dein eigenes Gedächtnis, einschließlich der Notizen zu einzelnen Servern. Nicht betroffen sind das Wissen deiner Teams und das eines Servers — die gehören dem Team beziehungsweise der Anlage.",
       "titles": {
         "user": "Persönliches KI-Memory",
+        "server_shared": "Wissen dieses Servers",
         "team": "Wissen dieses Teams",
         "panel": "Panelweites KI-Gedächtnis"
       },
       "descriptions": {
         "user": "Was der Assistent über dich weiß — allgemein und zu einzelnen Servern. Niemand sonst sieht es.",
+        "server_shared": "Was der Assistent über diese Anlage weiß. Jeder, der den Server sehen darf, liest es mit; ändern darf es, wer die Konfiguration ändern darf. Es bleibt bestehen, wenn ein Kollege geht, und verschwindet mit dem Server.",
         "team": "Was der Assistent für dieses Team weiß. Alle Mitglieder sehen es; ändern darf es, wer den Schalter „Wissen pflegen“ hat.",
         "panel": "Gilt für jeden Benutzer dieses Panels und läuft in jedem Gespräch mit. Nichts Persönliches — es sieht jeder."
       },
-      "forServer": "Server: {{name}}"
+      "forServer": "Server: {{name}}",
+      "serverSharedHint": "Das hier ist geteilt: alle Kollegen, die diesen Server sehen dürfen, lesen es mit. Was nur dich betrifft, gehört in dein persönliches Gedächtnis im Profil."
     },
     "skills": {
       "title": "Skills",
@@ -961,7 +964,7 @@
     "serverFileUpdateCheckFound": "Spiel-Update verfügbar — beim nächsten Start/Restart wird installiert.",
     "serverFileUpdateCheckFailed": "Spiel-Update-Check fehlgeschlagen.",
     "deleted": "Server gelöscht",
-    "confirmDelete": "Server wirklich löschen? Alle Daten werden unwiderruflich entfernt.",
+    "confirmDelete": "Server wirklich löschen? Alle Daten werden unwiderruflich entfernt — auch das Wissen, das der Assistent über diese Anlage gesammelt hat und das deine Kollegen mitlesen.",
     "switchBlueprintAction": "Spiel / Blueprint wechseln",
     "switchBlueprintTitle": "Spiel / Blueprint wechseln",
     "switchBlueprintSubtitle": "Wechsle das Spiel oder die Blueprint-Variante für diesen Server.",
@@ -1539,6 +1542,7 @@
     "backups": "Backups",
     "databases": "Datenbanken",
     "webhooks": "Webhooks",
+    "memory": "Serverwissen",
     "ai": "KI-Assistent"
   },
   "scheduler": {
@@ -2483,8 +2487,8 @@
           "context": "Übertragen werden die eingegebene Nachricht, begrenzte vorherige Nachrichten und ausschließlich freigegebene Servermetadaten; IP-Adressen, Installationspfade, vollständige Konfigurationen und erkannte Secrets werden nicht in den Modellkontext aufgenommen",
           "credentials": "Persönliche und zentrale Provider-API-Keys werden über DIS kontextgebunden verschlüsselt und nach dem Speichern nur als Konfigurationsstatus beziehungsweise Maske angezeigt",
           "usage": "Provider, Modell, Tokenreservierung, tatsächlicher oder konservativ geschätzter Verbrauch und Zeitpunkte werden zur Kontingentdurchsetzung gespeichert; Preiswerte werden ohne belastbare Preisquelle nicht behauptet",
-          "memory": "Optionale Memory-Eintraege (persoenlich, serverbezogen, teambezogen oder panelweit) werden verschluesselt und an ihren Besitzer gebunden gespeichert, sind jederzeit einsehbar und loeschbar; teambezogene Eintraege sehen alle Mitglieder des jeweiligen Teams, persoenliche niemand ausser dem Nutzer selbst",
-          "memoryConsent": "Das Gedaechtnis ist standardmaessig ausgeschaltet und wird erst nach ausdruecklicher Zustimmung im Chat aktiv; die Zustimmung ist jederzeit widerrufbar. Die Verschluesselung schuetzt die Datenbank im Ruhezustand — der Klartext gemerkter Eintraege wird bei jeder Anfrage an den gewaehlten Modellanbieter uebertragen",
+          "memory": "Optionale Memory-Eintraege werden verschluesselt und an ihren Bereich gebunden gespeichert, sind jederzeit einsehbar und loeschbar. Es gibt fuenf Bereiche: persoenliche und persoenliche serverbezogene Eintraege sieht niemand ausser dem Nutzer selbst; teambezogene sehen alle Mitglieder des jeweiligen Teams; das Wissen eines Servers sehen alle, die diesen Server sehen duerfen, und es bleibt bestehen, wenn der Verfasser das Panel verlaesst; panelweite Eintraege sieht jeder Nutzer des Panels",
+          "memoryConsent": "Das persoenliche Gedaechtnis ist standardmaessig ausgeschaltet und wird erst nach ausdruecklicher Zustimmung im Chat aktiv; die Zustimmung ist jederzeit widerrufbar und umfasst auch die eigenen serverbezogenen Notizen. Geteilte Bereiche (Team, Server, panelweit) haengen nicht an dieser Zustimmung, sondern an Berechtigungen - sie enthalten Betriebswissen und keine Angaben zur Person. Die Verschluesselung schuetzt die Datenbank im Ruhezustand; der Klartext gemerkter Eintraege wird bei jeder Anfrage an den gewaehlten Modellanbieter uebertragen",
           "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
           "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht"
