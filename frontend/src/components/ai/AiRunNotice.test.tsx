@@ -13,7 +13,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { aiApi, type AiRunInfo } from '@/api/ai'
+import { AI_RUHENDE_LAUFZUSTAENDE, aiApi, type AiRunInfo } from '@/api/ai'
 import i18n from '@/i18n'
 import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
@@ -122,5 +122,25 @@ describe('AiRunNotice', () => {
     await waitFor(() => expect(aiApi.getActiveRun).toHaveBeenCalledTimes(1))
     await vi.advanceTimersByTimeAsync(30_000)
     expect(aiApi.getActiveRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('meldet jeden ruhenden Zustand, auch einen später hinzugekommenen', async () => {
+    // Der Grund für die gemeinsame Liste in `api/ai.ts`: „ruht" ist eine
+    // Aussage über den Lauf, keine über diese Komponente. Stünde hier wieder
+    // eine eigene Aufzählung und käme im Vorrat ein Zustand dazu — etwa ein
+    // „expired" für abgelaufene Bestätigungen —, läutete die Glocke für ihn
+    // nie: außerhalb des Chats erführe niemand, dass die KI wartet. Der Test
+    // läuft deshalb über die geteilte Liste und wächst mit ihr.
+    for (const zustand of AI_RUHENDE_LAUFZUSTAENDE) {
+      vi.mocked(aiApi.getActiveRun).mockReset()
+        .mockResolvedValueOnce(lauf('running'))
+        .mockResolvedValue(lauf(zustand))
+
+      const { unmount } = zeichnen('/notes')
+      await waitFor(() => expect(aiApi.getActiveRun).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(9_000)
+      await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument())
+      unmount()
+    }
   })
 })

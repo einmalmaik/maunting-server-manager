@@ -3,17 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Bot, X } from 'lucide-react'
 
-import { aiApi, type AiRunStatus } from '@/api/ai'
+import { AI_RUHENDE_LAUFZUSTAENDE, aiApi, type AiRunStatus } from '@/api/ai'
 import { useAuthStore } from '@/stores/authStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
 /** Wie oft nachgesehen wird, solange ein Lauf arbeitet. */
 const TAKT_MS = 8_000
-
-/** Zustaende, in denen der Lauf nichts mehr von selbst tut. */
-const RUHT: readonly AiRunStatus[] = [
-  'completed', 'failed', 'cancelled', 'waiting_confirmation', 'waiting_user',
-]
 
 const TEXTE: Record<string, { key: string; fallback: string }> = {
   completed: { key: 'ai.notice.completed', fallback: 'Die KI ist mit deinem Auftrag fertig.' },
@@ -66,7 +61,7 @@ export function AiRunNotice() {
       return false
     }
     const gewechselt = !vorher || vorher.id !== lauf.id || vorher.status !== lauf.status
-    if (gewechselt && vorher?.id === lauf.id && RUHT.includes(lauf.status) && !imChat) {
+    if (gewechselt && vorher?.id === lauf.id && AI_RUHENDE_LAUFZUSTAENDE.includes(lauf.status) && !imChat) {
       setMeldung({ status: lauf.status })
     }
     letzterRef.current = { id: lauf.id, status: lauf.status }

@@ -7,7 +7,9 @@ import {
   type AiActionProposal,
   type AiAttachment,
   type AiMessage,
+  type AiRunSnapshot,
   type AiSkillSummary,
+  type AiToolUse,
 } from '@/api/ai'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
@@ -399,6 +401,65 @@ describe('AiChat', () => {
     await waitFor(() => {
       expect(attachAiRun).toHaveBeenCalledWith('lauf-7', expect.any(Function), expect.any(AbortSignal))
     })
+  })
+
+  it('zeigt eine Werkzeugzeile nach dem erneuten Anhängen nicht doppelt', async () => {
+    // Der Abzug eines Laufs trägt **alle** seine Werkzeuge: `Abzug.werkzeuge`
+    // wird auch beim Segmentwechsel nicht geleert. Wer sich nach einer
+    // bestätigten Aktion wieder anhängt, bekommt sie deshalb erneut. Trugen
+    // live gemeldete und aus dem Abzug gelesene Zeilen verschiedene Kennungen,
+    // lief die Dublettenprüfung ins Leere — jede vorher gezeigte Werkzeugzeile
+    // stand danach zweimal im Verlauf.
+    const werkzeug: AiToolUse = {
+      tool_name: 'read_server_logs', server_id: 7,
+      skill_key: null, skill_name: null, skill_status: null, skill_learned: false,
+    }
+    const abzug = (tools: AiToolUse[]): AiRunSnapshot => ({
+      run_id: 'lauf-9', status: 'running', message_id: null, content: '',
+      reasoning: '', tools, question: null, proposals: [], stop_reason: null,
+    })
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(aiApi.listActions).mockResolvedValue([{
+      id: 'vorschlag-9',
+      conversation_id: CONVERSATION.id,
+      server_id: 7,
+      tool_name: 'propose_backup',
+      preview: {},
+      expected_revision: null,
+      requires_confirmation: true,
+      autonomous: false,
+      reason: null,
+      expected_effect: null,
+      status: 'proposed',
+      task_id: null,
+      error_code: null,
+      run_id: 'lauf-9',
+      created_at: '2026-08-01T12:00:01Z',
+    }])
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'snapshot', data: abzug([]) })
+      onEvent({ event: 'tool', data: werkzeug })
+      onEvent({ event: 'run', data: { run_id: 'lauf-9', status: 'waiting_confirmation' } })
+    })
+    // Beim Wiederanhängen steht dasselbe Werkzeug im Abzug — genau die Zeile,
+    // die eben schon live gemeldet wurde.
+    vi.mocked(attachAiRun).mockReset().mockImplementation(async (_id, onEvent) => {
+      onEvent({ event: 'snapshot', data: abzug([werkzeug]) })
+    })
+
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+    await screen.findByText('Logs gelesen')
+
+    fireEvent.click(screen.getByText('bestaetigen-attrappe'))
+    await waitFor(() => expect(attachAiRun).toHaveBeenCalledWith(
+      'lauf-9', expect.any(Function), expect.any(AbortSignal),
+    ))
+
+    await waitFor(() => expect(screen.getAllByText('Logs gelesen')).toHaveLength(1))
   })
 
 })

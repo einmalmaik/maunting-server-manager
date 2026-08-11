@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
 import {
+  AI_RUHENDE_LAUFZUSTAENDE,
   aiApi,
   attachAiRun,
   streamAiMessage,
@@ -12,7 +13,6 @@ import {
   type AiMessage,
   type AiProviderAvailable,
   type AiRunInfo,
-  type AiRunStatus,
   type AiStreamEvent,
   type AiToolUse,
 } from '@/api/ai'
@@ -95,11 +95,6 @@ function denkwahlFuer(jetzt: Denkwahl, provider: AiProviderAvailable): Denkwahl 
   if (jetzt.stufe && provider.efforts.includes(jetzt.stufe)) return { an: true, stufe: jetzt.stufe }
   return { an: true, stufe: provider.default_effort ?? provider.efforts[0] }
 }
-
-/** Zustaende, in denen der Lauf nichts mehr von selbst tut. */
-const RUHT: readonly AiRunStatus[] = [
-  'completed', 'failed', 'cancelled', 'waiting_confirmation', 'waiting_user',
-]
 
 /**
  * Der KI-Assistent: **eine** Unterhaltung, die die Seite ausfuellt.
@@ -368,16 +363,31 @@ export function AiChat() {
     let offeneOptimistische = optimistischeId !== null
     let offeneBenutzerblase = optimistischeBenutzerId
     let gescheitert = false
+    // Zu welchem Lauf die Werkzeugzeilen gehören und wie viele davon schon
+    // stehen. Beides braucht ihre Kennung — und sie muss **dieselbe** sein,
+    // egal ob die Zeile live gemeldet wurde oder aus dem Abzug kam. Sonst
+    // erkennt die Dublettenprüfung im Abzug die eigenen Zeilen nicht wieder:
+    // der Abzug trägt **alle** Werkzeuge des Laufs (`Abzug.werkzeuge` wird auch
+    // beim Segmentwechsel nicht geleert), und wer sich nach einer bestätigten
+    // Aktion wieder anhängt, sähe jede vorher gezeigte Zeile ein zweites Mal.
+    //
+    // Der Abzug kommt immer zuerst (`lauf_verfolgen` sendet ihn als erstes
+    // Ereignis, auch beim frischen Senden) — die Laufkennung steht also, bevor
+    // das erste Werkzeug gemeldet wird.
+    let laufKennung: string | null = null
+    let werkzeugZaehler = 0
+    const werkzeugId = (nummer: number) => `run-${laufKennung}-tool-${nummer}`
 
     const verarbeite = ({ event: name, data }: AiStreamEvent) => {
       if (!mountedRef.current) return
       if (name === 'snapshot') {
         setRunId(data.run_id)
+        laufKennung = data.run_id
         // Der Abzug **ersetzt** den Stand, er ergaenzt ihn nicht: er ist die
         // vollstaendige Antwort bis hierher. Alles anzuhaengen wuerde den Text
         // verdoppeln, wenn man sich waehrend des Schreibens wieder anhaengt.
         if (data.message_id) {
-          const laeuft = !RUHT.includes(data.status)
+          const laeuft = !AI_RUHENDE_LAUFZUSTAENDE.includes(data.status)
           const id = data.message_id
           setEntries((current) => {
             const vorhanden = current.some(
@@ -412,19 +422,24 @@ export function AiChat() {
         }
         // Werkzeugspuren ueberleben kein Neuladen — der Abzug bringt sie zurueck.
         data.tools.forEach((tool, index) => {
-          const id = `run-${data.run_id}-tool-${index}`
+          const id = werkzeugId(index)
           setEntries((current) => (
             current.some((entry) => entry.kind === 'tool' && entry.id === id)
               ? current
               : insertBeforeStreaming(current, { kind: 'tool', id, tool })
           ))
         })
+        // Der Abzug ist vollständig: die nächste live gemeldete Werkzeugzeile
+        // ist die (n+1)-te dieses Laufs und bekommt genau die Nummer, unter der
+        // sie in einem späteren Abzug wieder auftauchen wird.
+        werkzeugZaehler = data.tools.length
         data.proposals.forEach(merkeVorschlag)
         return
       }
       if (name === 'run') {
-        setRunId(RUHT.includes(data.status) ? null : data.run_id)
-        if (RUHT.includes(data.status)) setStreaming(false)
+        const ruht = AI_RUHENDE_LAUFZUSTAENDE.includes(data.status)
+        setRunId(ruht ? null : data.run_id)
+        if (ruht) setStreaming(false)
         return
       }
       if (name === 'segment') {
@@ -500,8 +515,14 @@ export function AiChat() {
       } else if (name === 'done') {
         aendere(aktuell!, (message) => ({ ...message, status: 'complete' }))
       } else if (name === 'tool') {
+        // Dieselbe Kennung wie im Abzug — siehe `werkzeugId`. Vorher stand hier
+        // `${data.tool_name}-${current.length}`, eine Nummer aus der Länge des
+        // **ganzen** Verlaufs; die konnte im Abzug niemals wieder vorkommen,
+        // und beim Wiederanhängen stand jede Zeile ein zweites Mal da.
+        const id = werkzeugId(werkzeugZaehler)
+        werkzeugZaehler += 1
         setEntries((current) => insertBeforeStreaming(current, {
-          kind: 'tool', id: `${data.tool_name}-${current.length}`, tool: data,
+          kind: 'tool', id, tool: data,
         }))
       } else if (name === 'compacted') {
         // Die Marke gehoert an den Anfang: sie beschreibt, was *vorher* war.

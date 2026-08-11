@@ -386,13 +386,39 @@ export type AiStreamEvent =
   // Zustandswechsel des Laufs: laeuft, wartet, fertig.
   | { event: 'run'; data: { run_id: string; status: AiRunStatus; stop_reason?: string | null; live?: boolean } }
 
-export type AiRunStatus =
-  | 'running'
-  | 'waiting_confirmation'
-  | 'waiting_user'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
+/**
+ * Der erlaubte Zustandsvorrat eines Laufs — **eine** Liste, aus der sowohl der
+ * Typ als auch die Frage „ruht der?" abgeleitet wird.
+ *
+ * Der Vorrat gehört dem Backend: `ai_runs` hält ihn als CheckConstraint
+ * (backend/models/ai_run.py). Im Frontend stand er zuletzt dreimal — einmal als
+ * Typ hier und zweimal als handgeschriebene Liste der ruhenden Zustände, in
+ * AiChat und in AiRunNotice. Käme ein weiterer ruhender Zustand dazu, müsste er
+ * an zwei unverbundenen Stellen nachgetragen werden; wer nur eine fände, hätte
+ * entweder eine dauerhaft gesperrte Eingabe (AiChat gibt sie erst frei, wenn
+ * der Lauf ruht) oder eine Glocke, die für diesen Lauf nie läutet
+ * (AiRunNotice).
+ */
+export const AI_LAUFZUSTAENDE = [
+  'running',
+  'waiting_confirmation',
+  'waiting_user',
+  'completed',
+  'failed',
+  'cancelled',
+] as const
+
+export type AiRunStatus = (typeof AI_LAUFZUSTAENDE)[number]
+
+/**
+ * Zustände, in denen der Lauf nichts mehr von selbst tut.
+ *
+ * Bewusst abgeleitet statt aufgezählt: „ruht" heißt genau „arbeitet nicht".
+ * Ein neuer Zustand oben ist damit automatisch ein ruhender, und niemand muss
+ * daran denken.
+ */
+export const AI_RUHENDE_LAUFZUSTAENDE: readonly AiRunStatus[] =
+  AI_LAUFZUSTAENDE.filter((zustand) => zustand !== 'running')
 
 export interface AiRunSnapshot {
   run_id: string
