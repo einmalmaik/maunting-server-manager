@@ -16,6 +16,7 @@ from dependencies import require_global, verify_csrf
 from models import AiMessage, AiProvider, User
 from schemas.ai_chat import (
     AiChatRequest,
+    AiContextStatus,
     AiConversationDetail,
     AiConversationResponse,
     AiMessageEdit,
@@ -24,7 +25,15 @@ from schemas.ai_chat import (
     AiQuestionPayload,
     AiRunResponse,
 )
-from services import ai_chat_service, ai_reasoning, ai_run_broker, ai_run_service
+from services import (
+    ai_chat_service,
+    ai_compaction_service,
+    ai_context_service,
+    ai_context_window,
+    ai_reasoning,
+    ai_run_broker,
+    ai_run_service,
+)
 from services.ai_redaction import redact_sensitive_text
 from services.ai_stream_service import lauf_beginnen, lauf_verfolgen, sse_event
 
@@ -94,6 +103,49 @@ def get_conversation(
     return AiConversationDetail(
         **base.model_dump(),
         messages=[_message_response(message) for message in reversed(messages)],
+    )
+
+
+@router.get("/context", response_model=AiContextStatus)
+async def get_context_status(
+    request: Request,
+    provider_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+) -> AiContextStatus:
+    """Wie voll der Kontext ist, gemessen am Fenster des gewaehlten Modells.
+
+    Der Provider steht im Query und nicht im Lauf, weil die Frage schon **vor**
+    der ersten Nachricht beantwortet werden muss: die Oberflaeche zeigt den Ring
+    von Anfang an, und beim Umschalten des Modells aendert sich die Antwort
+    sofort, ohne dass jemand etwas gesendet haette.
+
+    Die Belegung kommt aus ``geschaetzte_belegung`` und nicht aus einem echten
+    Kontextaufbau. Ein Aufbau zoege Redaction, Memory-Auswahl und
+    Skill-Verzeichnis ueber den ganzen Verlauf — bei jedem Blick auf den Ring,
+    und der wird nach jeder Antwort neu geholt.
+    """
+    provider = db.get(AiProvider, provider_id)
+    if provider is None or not provider.enabled:
+        raise HTTPException(status_code=404, detail="Provider nicht gefunden")
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    db.commit()
+
+    fenster = await ai_context_window.ermitteln(
+        request.app.state.ai_http_client, provider
+    )
+    context_chars = fenster.zeichen if fenster.bekannt else None
+    grenzen = ai_context_service.teilbudgets(context_chars)
+    belegt = ai_context_service.geschaetzte_belegung(db, conversation, grenzen)
+    je_token = ai_context_window.ZEICHEN_JE_TOKEN
+    return AiContextStatus(
+        known=fenster.bekannt,
+        window_tokens=fenster.fenster_tokens if fenster.bekannt else None,
+        usable_tokens=fenster.nutzbar_tokens,
+        used_tokens=belegt // je_token,
+        compaction_at_tokens=ai_compaction_service.faltschwelle(context_chars) // je_token,
+        compaction_percent=ai_context_window.schwelle_prozent(),
+        summarized=bool(conversation.summary),
     )
 
 
@@ -248,6 +300,14 @@ async def stream_message(
             aktiv=payload.reasoning,
             wunsch=payload.reasoning_effort,
         )
+        # Aus demselben Grund hier und nicht in `lauf_beginnen`: das
+        # Kontextfenster steht im Modellkatalog, und den zu befragen ist ein
+        # HTTP-Abruf. Es gehoert ausserdem in den Lauf — eine Fortsetzung nach
+        # einer Bestaetigung muss mit demselben Budget rechnen wie der erste
+        # Zug, auch wenn der Betreiber zwischendurch das Modell wechselt.
+        fenster = await ai_context_window.ermitteln(
+            request.app.state.ai_http_client, provider
+        )
         run, fehler = lauf_beginnen(
             db,
             user=user,
@@ -257,6 +317,10 @@ async def stream_message(
             content=safe_content,
             reasoning=denken,
             reasoning_effort=stufe,
+            # Ein unbekanntes Fenster reist als `None` weiter und nicht als
+            # Rueckfallzahl: nur so kann die Kompression den Unterschied
+            # zwischen "kleines Fenster" und "kein Wissen" noch sehen.
+            context_chars=fenster.zeichen if fenster.bekannt else None,
         )
         if run is None:
             code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")

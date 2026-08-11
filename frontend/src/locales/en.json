@@ -327,6 +327,33 @@
       "editSend": "Send again",
       "reasoningLevel": "Reasoning depth"
     },
+    "context": {
+      "title": "Context and summarization",
+      "description": "How large the context is comes from the selected model — MSM reads the window from the provider's model catalog. All that remains to configure is how full it may get before the older part of the conversation is folded into a summary.",
+      "threshold": "Summarize at",
+      "percent": "{{percent}}% of the window",
+      "saved": "Compaction mark saved",
+      "costHint": "A full context window is paid for again with every message. Summarizing early lowers the cost per request; summarizing late leaves the AI more of the conversation verbatim.",
+      "hints": {
+        "60": "Cheap. The AI forgets details sooner.",
+        "70": "Economical.",
+        "75": "Default. Balanced.",
+        "80": "More memory, higher cost per request.",
+        "90": "Almost the entire window. Expensive, but hardly anything is only summarized."
+      },
+      "errors": {
+        "load": "Could not load the context setting",
+        "save": "Could not save the context setting"
+      },
+      "tooltip": {
+        "window": "Model window: {{tokens}} tokens",
+        "used": "Used: about {{tokens}} tokens ({{percent}}%)",
+        "free": "Free: about {{tokens}} tokens",
+        "compaction": "Summarization at {{percent}}% used",
+        "summarized": "An older part has already been summarized.",
+        "unknown": "The context window of this model is unknown. MSM assumes a cautious fallback."
+      }
+    },
     "actions": {
       "title": "AI action proposal",
       "tools": {

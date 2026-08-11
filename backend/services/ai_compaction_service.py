@@ -1,10 +1,18 @@
 """Faltet den aelteren Teil eines langen Chats zu einer Zusammenfassung.
 
 Der Assistent hat genau **eine** Unterhaltung, die nie endet. Ohne diesen
-Schritt hiess "lang" schlicht "abgeschnitten": `build_provider_messages` nahm
-die letzten 20 Nachrichten bzw. 24.000 Zeichen und liess den Rest weg — ohne
-Hinweis, ohne Ersatz. Nach ein paar Dutzend Nachrichten wusste die KI nicht
-mehr, worum es am Anfang ging, behauptete aber weiterhin, den Verlauf zu kennen.
+Schritt hiess "lang" schlicht "abgeschnitten": `build_provider_messages` nahm,
+was ins Budget passte, und liess den Rest weg — ohne Hinweis, ohne Ersatz. Nach
+ein paar Dutzend Nachrichten wusste die KI nicht mehr, worum es am Anfang ging,
+behauptete aber weiterhin, den Verlauf zu kennen.
+
+**Wann** gefaltet wird, haengt seit der Fensterberechnung am Modell und an einer
+Einstellung des Betreibers, nicht mehr an einer Konstante: der Katalog nennt das
+Kontextfenster, `ai_context_window.schwelle_prozent` sagt, wie voll es werden
+darf. Ein Modell mit einer Million Token faltet damit erst nach einem sehr
+langen Gespraech, eines mit 8.000 nach wenigen Nachrichten — und beides ist
+richtig. Nur wenn ueber das Modell nichts bekannt ist, gilt weiter die alte
+Konstante.
 
 Drei Entscheidungen, die den Aufbau erklaeren:
 
@@ -42,9 +50,10 @@ from models import AiConversation, AiMessage, AiProvider, User
 # Bezug — die Originalnachrichten liegen danach hinter `summarized_until`.
 # Der fuehrende Unterstrich bleibt: die Funktion gehoert dem Kontextaufbau, die
 # Verdichtung borgt sie sich nur, statt eine zweite Fassung zu pflegen.
+from services import ai_context_window
 from services.ai_context_service import (
-    MAX_SUMMARY_CHARS,
     _message_content_for_provider,
+    teilbudgets,
 )
 from services.ai_redaction import redact_sensitive_text
 from services.ai_provider_service import estimate_cost_microunits, resolve_api_key
@@ -64,31 +73,99 @@ from services.openai_compatible_adapter import (
 
 logger = logging.getLogger(__name__)
 
-# Ab wann ueberhaupt gefaltet wird. Bewusst deutlich ueber dem Kontextbudget
-# (24.000 Zeichen): darunter passt alles hinein und es gaebe nichts zu sparen.
+# Ab wann gefaltet wird, **solange ueber das Modell nichts bekannt ist**.
+# Bewusst deutlich ueber dem Rueckfallbudget (24.000 Zeichen): darunter passt
+# alles hinein und es gaebe nichts zu sparen. Kennt der Katalog das Fenster,
+# gilt stattdessen die eingestellte Marke — siehe `faltschwelle`.
 COMPACTION_THRESHOLD_CHARS = 40_000
 # So viel bleibt nach dem Falten woertlich stehen. Der juengste Teil eines
 # Gespraechs traegt den aktuellen Faden; ihn zusammenzufassen waere der
-# schaedlichste Teil der Uebung.
+# schaedlichste Teil der Uebung. Haengt bewusst **nicht** am Fenster: das hier
+# ist, was nie gefaltet wird, und das ist bei jedem Modell dasselbe.
 KEEP_RECENT_MESSAGES = 12
-# Obergrenze fuer das, was in einem Rutsch zusammengefasst wird.
+# Obergrenze fuer das, was in einem Rutsch zusammengefasst wird — Rueckfall,
+# wenn das Fenster unbekannt ist. Sonst siehe `_quellgrenze`.
 MAX_SOURCE_CHARS = 60_000
+# Wieviele Zeichen eine zusammengefasste Zeile ungefaehr braucht. Nur zur
+# Umrechnung der Laengenvorgabe in eine Satzzahl, die im Prompt stehen kann:
+# "hoechstens 34.560 Zeichen" ist keine Anweisung, mit der ein Modell etwas
+# anfangen kann, "hoechstens 138 Saetze" schon.
+ZEICHEN_JE_SATZ = 250
+# Fuenfzehn Saetze galten bisher fuer jedes Gespraech. Bei einem grossen Fenster
+# ist das die eigentliche Verlustquelle: 700.000 Zeichen Verlauf auf fuenfzehn
+# Saetze einzudampfen wirft mehr weg, als das Falten einspart. Die Obergrenze
+# steht trotzdem, denn eine Zusammenfassung, die so lang ist wie das Gespraech,
+# waere keine.
+MIN_SUMMARY_SAETZE = 15
+MAX_SUMMARY_SAETZE = 120
 
-SUMMARY_PROMPT = (
-    "Fasse den folgenden Gespraechsverlauf zwischen einem Benutzer und dem "
-    "MSM-Serverassistenten zusammen. Schreibe hoechstens 15 Saetze in der "
-    "Sprache des Gespraechs.\n"
-    "Behalte: welche Server und Spiele besprochen wurden, welche Probleme "
-    "auftraten, welche Ursachen gefunden wurden, welche Aktionen ausgefuehrt "
-    "oder abgelehnt wurden, und offene Punkte.\n"
-    "Lass weg: Hoeflichkeitsfloskeln, Wiederholungen, roh zitierte Logzeilen "
-    "und Konfigurationsinhalte.\n"
-    "Nenne niemals Passwoerter, Schluessel oder Tokens.\n"
-    "Gib nur die Zusammenfassung aus, ohne Einleitung."
-)
+
+def _summary_prompt(saetze: int) -> str:
+    return (
+        "Fasse den folgenden Gespraechsverlauf zwischen einem Benutzer und dem "
+        f"MSM-Serverassistenten zusammen. Schreibe hoechstens {saetze} Saetze "
+        "in der Sprache des Gespraechs.\n"
+        "Behalte: welche Server und Spiele besprochen wurden, welche Probleme "
+        "auftraten, welche Ursachen gefunden wurden, welche Aktionen ausgefuehrt "
+        "oder abgelehnt wurden, und offene Punkte.\n"
+        "Lass weg: Hoeflichkeitsfloskeln, Wiederholungen, roh zitierte Logzeilen "
+        "und Konfigurationsinhalte.\n"
+        "Nenne niemals Passwoerter, Schluessel oder Tokens.\n"
+        "Gib nur die Zusammenfassung aus, ohne Einleitung."
+    )
 
 
-def needs_compaction(db, conversation: AiConversation) -> bool:
+#: Der Prompt, wie er ohne Fensterwissen aussieht. Bleibt als Konstante
+#: erhalten, weil er die Vorgabe ist, gegen die alles andere gemessen wird.
+SUMMARY_PROMPT = _summary_prompt(MIN_SUMMARY_SAETZE)
+
+
+def _summary_grenzen(context_chars: int | None) -> tuple[str, int]:
+    """Prompt und Laengenschnitt fuer eine Zusammenfassung unter diesem Fenster."""
+    zeichen = teilbudgets(context_chars).zusammenfassung_zeichen
+    saetze = min(
+        max(zeichen // ZEICHEN_JE_SATZ, MIN_SUMMARY_SAETZE), MAX_SUMMARY_SAETZE
+    )
+    return _summary_prompt(saetze), zeichen
+
+
+def faltschwelle(context_chars: int | None) -> int:
+    """Ab wievielen faltbaren Zeichen zusammengefasst wird.
+
+    Ohne bekanntes Fenster die alte Konstante — 40.000 Zeichen, unabhaengig von
+    allem. Mit bekanntem Fenster der eingestellte Anteil davon. Die Konstante
+    hier auch fuer bekannte Fenster als Untergrenze zu nehmen waere falsch: bei
+    einem Modell mit 4.096 Token liegt sie **ueber** dem gesamten Kontext, es
+    wuerde also nie gefaltet und stattdessen dauerhaft abgeschnitten.
+    """
+    if not context_chars:
+        return COMPACTION_THRESHOLD_CHARS
+    return ai_context_window.faltmarke_zeichen_aus_budget(context_chars)
+
+
+def _quellgrenze(context_chars: int | None) -> int:
+    """Wieviel Verlauf in **einen** Zusammenfassungsruf geht.
+
+    Die Anfrage selbst muss ins Fenster passen — daher die Klemmung nach oben.
+    Abgezogen wird der Platz fuer die bisherige Zusammenfassung und die neue:
+    beide stehen in derselben Anfrage.
+
+    Bewusst **mehr** als die Faltmarke. Waeren beide gleich, faltete jeder
+    Durchlauf genau bis zur Marke und liesse den Ueberhang liegen — der Chat
+    haenge dann dauerhaft knapp an der Grenze, statt danach wieder Luft zu
+    haben. Ganz aufgeht es trotzdem nicht immer: ein Gespraech kann ueber das
+    Fenster hinauswachsen, bevor gefaltet wird, und der Rest kommt dann beim
+    naechsten Durchlauf dran.
+    """
+    if not context_chars:
+        return MAX_SOURCE_CHARS
+    reserve = 2 * teilbudgets(context_chars).zusammenfassung_zeichen
+    return min(context_chars, max(MAX_SOURCE_CHARS, context_chars - reserve))
+
+
+def needs_compaction(
+    db, conversation: AiConversation, context_chars: int | None = None
+) -> bool:
     """Prueft ohne Providerruf, ob sich das Falten ueberhaupt lohnt."""
     rows = _pending_messages(db, conversation)
     if len(rows) <= KEEP_RECENT_MESSAGES:
@@ -102,7 +179,7 @@ def needs_compaction(db, conversation: AiConversation) -> bool:
     # Laenge praktisch nichts.
     return sum(
         len(_message_content_for_provider(row)) for row in foldable
-    ) >= COMPACTION_THRESHOLD_CHARS
+    ) >= faltschwelle(context_chars)
 
 
 def _pending_messages(db, conversation: AiConversation) -> list[AiMessage]:
@@ -116,8 +193,10 @@ def _pending_messages(db, conversation: AiConversation) -> list[AiMessage]:
     return query.order_by(AiMessage.created_at.asc()).all()
 
 
-def _foldable_window(foldable: list[AiMessage]) -> tuple[list[AiMessage], str]:
-    """Waehlt die aeltesten Nachrichten, die zusammen in MAX_SOURCE_CHARS passen.
+def _foldable_window(
+    foldable: list[AiMessage], grenze: int = MAX_SOURCE_CHARS
+) -> tuple[list[AiMessage], str]:
+    """Waehlt die aeltesten Nachrichten, die zusammen in ``grenze`` passen.
 
     Frueher wurde der *gesamte* faltbare Bereich zu einem Text verkettet und
     dann mit `[-MAX_SOURCE_CHARS:]` am Anfang abgeschnitten, waehrend
@@ -146,9 +225,9 @@ def _foldable_window(foldable: list[AiMessage]) -> tuple[list[AiMessage], str]:
             f"{sprecher}: "
             f"{redact_sensitive_text(_message_content_for_provider(row))}"
         )
-        if fenster and laenge + len(zeile) + 1 > MAX_SOURCE_CHARS:
+        if fenster and laenge + len(zeile) + 1 > grenze:
             break
-        zeile = zeile[:MAX_SOURCE_CHARS]
+        zeile = zeile[:grenze]
         fenster.append(row)
         zeilen.append(zeile)
         laenge += len(zeile) + 1
@@ -156,13 +235,25 @@ def _foldable_window(foldable: list[AiMessage]) -> tuple[list[AiMessage], str]:
 
 
 async def compact_conversation(
-    *, client: httpx.AsyncClient, user_id: int, conversation_id: str, provider_id: int
+    *,
+    client: httpx.AsyncClient,
+    user_id: int,
+    conversation_id: str,
+    provider_id: int,
+    context_chars: int | None = None,
 ) -> bool:
     """Faltet den aelteren Teil zusammen. Liefert True, wenn etwas passiert ist.
 
     Laeuft ausdruecklich mit eigenen, kurzen DB-Sitzungen: der Aufrufer ist ein
     bereits beendeter Stream, und waehrend des Providerrufs darf keine
     Transaktion offen stehen.
+
+    ``context_chars`` kommt vom Lauf, der gerade zu Ende ging, und wird hier
+    **nicht** neu ermittelt. Der Grund ist nicht die Ersparnis eines
+    Katalogabrufs, sondern die Uebereinstimmung: gefaltet werden soll nach der
+    Marke des Modells, das gerade geantwortet hat. Waehlte der Betreiber
+    zwischendurch ein anderes Modell, faltete das Streamende sonst nach einem
+    Fenster, das fuer dieses Gespraech nie galt.
     """
     with SessionLocal() as db:
         conversation = db.get(AiConversation, conversation_id)
@@ -172,12 +263,12 @@ async def compact_conversation(
             return False
         if provider is None or not provider.enabled:
             return False
-        if not needs_compaction(db, conversation):
+        if not needs_compaction(db, conversation, context_chars):
             return False
 
         rows = _pending_messages(db, conversation)
         foldable = rows[: len(rows) - KEEP_RECENT_MESSAGES]
-        window, transcript = _foldable_window(foldable)
+        window, transcript = _foldable_window(foldable, _quellgrenze(context_chars))
         # Die Grenze steht auf der letzten *tatsaechlich uebertragenen*
         # Nachricht. Stuende sie wie vorher auf `foldable[-1]`, waere alles, was
         # nicht mehr ins Fenster passte, aus dem Kontext gefiltert, ohne je in
@@ -190,8 +281,9 @@ async def compact_conversation(
         if provider.requires_api_key and not api_key:
             return False
 
+        prompt, summary_grenze = _summary_grenzen(context_chars)
         messages = [
-            {"role": "system", "content": SUMMARY_PROMPT},
+            {"role": "system", "content": prompt},
             {
                 "role": "user",
                 "content": (
@@ -200,7 +292,7 @@ async def compact_conversation(
                 ),
             },
         ]
-        estimated = max(1, (len(SUMMARY_PROMPT) + len(transcript) + len(previous)) // 4)
+        estimated = max(1, (len(prompt) + len(transcript) + len(previous)) // 4)
         request_id = uuid4()
         try:
             usage_event = reserve_ai_usage(
@@ -240,7 +332,7 @@ async def compact_conversation(
                 db.commit()
         return False
 
-    summary = redact_sensitive_text("".join(summary_parts)).strip()[:MAX_SUMMARY_CHARS]
+    summary = redact_sensitive_text("".join(summary_parts)).strip()[:summary_grenze]
     with SessionLocal() as db:
         event = _usage_event(db, request_id)
         if event is not None and event.status == "reserved":

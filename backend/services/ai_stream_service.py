@@ -56,9 +56,11 @@ from services.ai_tool_registry import (
 )
 from services.ai_context_service import (
     anlagenwissen_nachtrag,
+    auf_budget_kuerzen,
     build_provider_messages,
     estimate_reserved_tokens,
     message_character_count,
+    teilbudgets,
 )
 from services.ai_redaction import redact_sensitive_text
 from services.ai_provider_service import estimate_cost_microunits, resolve_api_key
@@ -1054,7 +1056,15 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         tools = provider_tool_definitions()
         current_usage = usage
         signaturen: dict[str, int] = dict(zustand.get("tool_signatures") or {})
+        # Das Budget dieses Laufs. `build_provider_messages` hat es beim Start
+        # eingehalten, aber danach waechst die Liste weiter: jede Werkzeugrunde
+        # haengt einen Assistentenzug und dessen Ergebnisse an, und ein
+        # gelesener Log bringt bis zu 24.000 Zeichen mit. Ohne die Kuerzung vor
+        # jedem Ruf laeuft ein langer Lauf mitten in der Arbeit ueber das
+        # Fenster — und das ist kein knapperer Kontext, sondern eine Absage.
+        kontextgrenze = teilbudgets(zustand.get("context_chars")).gesamt
         while True:
+            provider_messages = auf_budget_kuerzen(provider_messages, kontextgrenze)
             async for chunk in stream_chat_completion(
                 client,
                 provider=vorbereitung.provider,
@@ -1355,6 +1365,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 user_id=user_id,
                 conversation_id=conversation_id,
                 provider_id=vorbereitung.provider.id,
+                context_chars=zustand.get("context_chars"),
             ):
                 ai_run_broker.veroeffentlichen(
                     run_id, "compacted", {"conversation_id": conversation_id}
@@ -1425,6 +1436,7 @@ def lauf_beginnen(
     content: str,
     reasoning: bool,
     reasoning_effort: str | None = None,
+    context_chars: int | None = None,
 ) -> tuple[AiRun | None, tuple[str, str] | None]:
     """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
 
@@ -1475,7 +1487,8 @@ def lauf_beginnen(
             db, conversation_id=conversation.id
         )
         provider_messages = build_provider_messages(
-            db, conversation, query=safe_content, server_id=serverbezug
+            db, conversation, query=safe_content, server_id=serverbezug,
+            context_chars=context_chars,
         )
         estimated_tokens = estimate_reserved_tokens(provider_messages)
         usage_event = reserve_ai_usage(
@@ -1508,6 +1521,12 @@ def lauf_beginnen(
         )
         zustand["usage_event_id"] = usage_event.id
         zustand["tool_signatures"] = geerbte_signaturen
+        # Das Budget dieses Laufs, festgehalten fuer alle Fortsetzungen. Es hier
+        # abzulegen statt es je Segment neu zu ermitteln ist dieselbe
+        # Entscheidung wie bei `reasoning_effort`: was mitten in einer Aufgabe
+        # gilt, darf sich nicht aendern, weil jemand zwischendurch das Modell
+        # umgestellt hat.
+        zustand["context_chars"] = context_chars
         run = ai_run_service.lauf_anlegen(
             db,
             conversation_id=conversation.id,

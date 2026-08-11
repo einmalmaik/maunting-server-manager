@@ -327,6 +327,33 @@
       "editSend": "Neu senden",
       "reasoningLevel": "Denktiefe"
     },
+    "context": {
+      "title": "Kontext und Zusammenfassung",
+      "description": "Wie groß der Kontext ist, sagt das gewählte Modell — MSM liest das Fenster aus dem Modellkatalog des Anbieters. Einzustellen bleibt nur, wie voll es werden darf, bevor der ältere Teil des Gesprächs zu einer Zusammenfassung gefaltet wird.",
+      "threshold": "Zusammenfassen ab",
+      "percent": "{{percent}} % des Fensters",
+      "saved": "Faltmarke gespeichert",
+      "costHint": "Ein volles Kontextfenster wird bei jeder Nachricht neu bezahlt. Früh zusammenzufassen senkt die Kosten je Anfrage, spät zusammenzufassen lässt der KI mehr vom Gespräch wörtlich vor sich.",
+      "hints": {
+        "60": "Günstig. Die KI vergisst Einzelheiten früher.",
+        "70": "Sparsam.",
+        "75": "Voreinstellung. Ausgewogen.",
+        "80": "Mehr Gedächtnis, höhere Kosten je Anfrage.",
+        "90": "Fast das ganze Fenster. Teuer, aber die KI hat kaum etwas nur zusammengefasst."
+      },
+      "errors": {
+        "load": "Kontexteinstellung konnte nicht geladen werden",
+        "save": "Kontexteinstellung konnte nicht gespeichert werden"
+      },
+      "tooltip": {
+        "window": "Fenster des Modells: {{tokens}} Token",
+        "used": "Belegt: etwa {{tokens}} Token ({{percent}} %)",
+        "free": "Frei: etwa {{tokens}} Token",
+        "compaction": "Zusammenfassung ab {{percent}} % Belegung",
+        "summarized": "Ein älterer Teil ist bereits zusammengefasst.",
+        "unknown": "Das Kontextfenster dieses Modells ist nicht bekannt. MSM rechnet mit einem vorsichtigen Rückfallwert."
+      }
+    },
     "actions": {
       "title": "KI-Aktionsvorschlag",
       "tools": {

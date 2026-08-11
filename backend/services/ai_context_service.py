@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import AiConversation, AiMessage, User
@@ -12,6 +14,11 @@ from services import ai_prompt
 from services.ai_redaction import redact_sensitive_text
 
 
+# Seit der Fensterberechnung haben diese Konstanten zwei Rollen (siehe
+# `_teilbudgets`): `MAX_CONTEXT_CHARS` ist der **Rueckfall**, wenn ueber das
+# Modell nichts bekannt ist, die uebrigen sind **Sockel** fuer die Teilbudgets.
+# Beides zusammen ergibt: ohne Katalogwissen verhaelt sich der Kontextaufbau
+# wortwoertlich wie vorher.
 MAX_CONTEXT_CHARS = 24_000
 MAX_HISTORY_MESSAGES = 20
 MAX_SUMMARY_CHARS = 4_000
@@ -37,6 +44,70 @@ TOOL_RESULT_TRUNCATION_MARK = " [...gekuerzt]"
 # `services.ai_context_service` erreichbar — das haelt aeltere Importpfade am
 # Leben. Neuer Code nimmt `services.ai_redaction` direkt: nur wer *dort*
 # importiert, ist vom frueheren Zyklus unabhaengig.
+
+
+@dataclass(frozen=True)
+class Teilbudgets:
+    """Wie sich ein Kontextbudget auf die Bestandteile einer Anfrage verteilt.
+
+    Eine eigene, reine Rechnung, weil dieselben Zahlen an drei Stellen
+    gebraucht werden — Kontextaufbau, Kompression und Anzeige — und drei
+    Kopien derselben Formeln unweigerlich auseinanderlaufen.
+
+    Jede Grenze hat einen **Sockel** (den Wert von vor der Fensterberechnung)
+    und einen **Deckel**. Der Sockel sorgt dafuer, dass ein unbekanntes Modell
+    nicht schlechter dasteht als vorher. Der Deckel ist wichtiger: bei einem
+    Fenster von einer Million Token wuerde ein rein anteiliges Budget einem
+    einzigen gelesenen Logfile eine Viertelmillion Token zugestehen, und dann
+    haette die Anlage zwar ein grosses Gedaechtnis, aber es waere voller Log
+    statt voller Gespraech.
+    """
+
+    #: Das Gesamtbudget in Zeichen — was alle Teile zusammen fuellen duerfen.
+    gesamt: int
+    #: Zeichen fuer zurueckfliessende Werkzeugergebnisse.
+    werkzeug_zeichen: int
+    #: Wieviele davon hoechstens beruecksichtigt werden.
+    werkzeug_anzahl: int
+    #: Obergrenze der gespeicherten Zusammenfassung.
+    zusammenfassung_zeichen: int
+    #: Wieviele Nachrichten die Historienabfrage hoechstens laedt. Keine Grenze
+    #: mehr, sondern eine Schranke: was wirklich mitgeht, entscheidet
+    #: ``gesamt``. Frueher waren das feste 20 — bei einem grossen Fenster die
+    #: eigentliche Ursache dafuer, dass der Chat trotzdem vergass.
+    historie_zeilen: int
+
+
+def _teilbudgets(zeichen: int) -> Teilbudgets:
+    # Der jeweils letzte Term ist der Anteil am Ganzen. Er bindet nur bei
+    # wirklich kleinen Fenstern — der Katalog fuehrt Modelle mit 4.096 Token,
+    # und dort ist der Sockel von 8.000 Zeichen fuer Werkzeugdaten groesser als
+    # der gesamte Kontext. Ohne den Anteil bekaeme ausgerechnet das engste
+    # Modell einen Kontext, der fast nur aus Logauszuegen besteht.
+    return Teilbudgets(
+        gesamt=zeichen,
+        werkzeug_zeichen=min(
+            max(zeichen // 4, MAX_TOOL_RESULT_CONTEXT_CHARS), 200_000, zeichen // 2
+        ),
+        werkzeug_anzahl=min(max(zeichen // 20_000, MAX_TOOL_RESULTS), 40),
+        zusammenfassung_zeichen=min(
+            max(zeichen // 10, MAX_SUMMARY_CHARS), 40_000, zeichen // 4
+        ),
+        historie_zeilen=min(max(zeichen // 400, MAX_HISTORY_MESSAGES), 2_000),
+    )
+
+
+def teilbudgets(context_chars: int | None) -> Teilbudgets:
+    """Die Teilbudgets zu einem Kontextbudget; ohne Angabe die alten Konstanten.
+
+    ``context_chars`` ist ueberall in der Kette die **eine** Waehrung: eine Zahl
+    oder ``None``. ``None`` heisst „ueber das Modell ist nichts bekannt“ und
+    fuehrt zu genau den Werten von vor der Fensterberechnung. Eine Zahl kommt
+    aus ``ai_context_window`` und traegt schon alles in sich — sie ueberlebt
+    damit auch die Reise durch den JSON-Zustand eines Laufs, was ein
+    Dataclass-Objekt nicht taete.
+    """
+    return _teilbudgets(context_chars if context_chars else MAX_CONTEXT_CHARS)
 
 
 def _skill_index_block(db: Session, user: User | None, query: str) -> str:
@@ -117,7 +188,9 @@ def _message_content_for_provider(row: AiMessage) -> str:
     return f"{text}\n{frageblock}" if text else frageblock
 
 
-def _recent_tool_results(db: Session, conversation_id: str) -> str | None:
+def _recent_tool_results(
+    db: Session, conversation_id: str, grenzen: Teilbudgets | None = None
+) -> str | None:
     """Speist zuletzt gelesene Tool-Daten wieder in den Kontext ein.
 
     Ohne das sah eine Rueckfrage im selben Chat den soeben gelesenen Log nicht
@@ -130,11 +203,13 @@ def _recent_tool_results(db: Session, conversation_id: str) -> str | None:
     """
     from models import AiToolResult
 
+    if grenzen is None:
+        grenzen = _teilbudgets(MAX_CONTEXT_CHARS)
     rows = (
         db.query(AiToolResult)
         .filter(AiToolResult.conversation_id == conversation_id)
         .order_by(AiToolResult.created_at.desc())
-        .limit(MAX_TOOL_RESULTS)
+        .limit(grenzen.werkzeug_anzahl)
         .all()
     )
     if not rows:
@@ -153,7 +228,7 @@ def _recent_tool_results(db: Session, conversation_id: str) -> str | None:
     # ein Ausschnitt des Logs ist mehr wert als gar nichts, und die Marke sagt
     # dem Modell, dass es nur einen Ausschnitt sieht.
     for row in rows:
-        rest = MAX_TOOL_RESULT_CONTEXT_CHARS - used
+        rest = grenzen.werkzeug_zeichen - used
         if rest <= 0:
             break
         line = f"- {row.tool_name}: {row.result_json}"
@@ -230,6 +305,7 @@ def build_provider_messages(
     conversation: AiConversation,
     query: str = "",
     server_id: int | None = None,
+    context_chars: int | None = None,
 ) -> list[dict[str, Any]]:
     """Baut eine neueste, begrenzte Historie unter einer Zeichenobergrenze.
 
@@ -241,7 +317,14 @@ def build_provider_messages(
     Anlagenwissen *dieses* Servers kommt mit. Ohne Bezug kommt keines mit: ein
     Betreiber sieht leicht zwanzig Server, und zwanzig Betriebsanleitungen
     nebeneinander waeren nicht Kontext, sondern Rauschen.
+
+    ``context_chars`` ist das Kontextfenster des Modells in Zeichen, ermittelt
+    ueber ``ai_context_window.ermitteln``. Ohne Angabe gelten die alten
+    Konstanten — das ist kein Notbehelf, sondern der Weg, auf dem jeder
+    Aufrufer, der kein Modell kennt (Tests, aeltere Pfade), unveraendert
+    weiterlaeuft.
     """
+    grenzen = teilbudgets(context_chars)
     user = db.get(User, conversation.user_id)
     result: list[dict[str, Any]] = [
         {"role": "system", "content": _system_message(db, conversation, user, query)}
@@ -279,7 +362,7 @@ def build_provider_messages(
     rows = (
         query_set
         .order_by(AiMessage.created_at.desc())
-        .limit(MAX_HISTORY_MESSAGES)
+        .limit(grenzen.historie_zeilen)
         .all()
     )
 
@@ -295,10 +378,12 @@ def build_provider_messages(
             ))
 
     if conversation.summary:
-        summary = redact_sensitive_text(conversation.summary[:MAX_SUMMARY_CHARS])
+        summary = redact_sensitive_text(
+            conversation.summary[:grenzen.zusammenfassung_zeichen]
+        )
         result.append({"role": "system", "content": f"Fruehere Zusammenfassung: {summary}"})
 
-    tool_context = _recent_tool_results(db, conversation.id)
+    tool_context = _recent_tool_results(db, conversation.id, grenzen)
     if tool_context:
         result.append({"role": "user", "content": tool_context})
 
@@ -316,7 +401,7 @@ def build_provider_messages(
     # ohne die Frage, zu der er gehoert. Der Sockel kostet im schlimmsten Fall
     # `MIN_HISTORY_CHARS` ueber dem Ziel — neben einem Bildanhang faellt das
     # nicht ins Gewicht, eine Frage ohne Frage dagegen schon.
-    budget = max(MAX_CONTEXT_CHARS - used, MIN_HISTORY_CHARS)
+    budget = max(grenzen.gesamt - used, MIN_HISTORY_CHARS)
     for row in rows:
         if budget <= 0:
             break
@@ -326,6 +411,115 @@ def build_provider_messages(
         budget -= len(content)
     result.extend(reversed(selected))
     return result
+
+
+#: Was einer gekuerzten Nachricht mindestens bleibt. Weniger waere kein
+#: Ausschnitt mehr, sondern ein Fragment, aus dem das Modell nichts mehr
+#: entnehmen kann — dann ist der Platz besser ganz woanders.
+MIN_GEKUERZTE_ZEICHEN = 200
+
+
+def _gekuerzt(text: str, ziel: int) -> str:
+    """Kuerzt sichtbar. Die Marke ist Teil der Aussage, nicht Zierde."""
+    if len(text) <= ziel:
+        return text
+    return text[: max(ziel - len(TOOL_RESULT_TRUNCATION_MARK), 0)] + TOOL_RESULT_TRUNCATION_MARK
+
+
+def auf_budget_kuerzen(
+    messages: list[dict[str, Any]], zeichen: int
+) -> list[dict[str, Any]]:
+    """Bringt eine gewachsene Nachrichtenliste zurueck unter das Budget.
+
+    ``build_provider_messages`` haelt das Budget beim **Start** eines Laufs ein.
+    Danach waechst die Liste weiter: jede Werkzeugrunde haengt einen
+    Assistentenzug und dessen Ergebnisse an (`_tool_followup_messages`), und
+    ein gelesener Log bringt bis zu 24.000 Zeichen mit. Ein Lauf, der
+    hineinpasste, kann so mitten in der Arbeit ueber das Fenster laufen — und
+    das ist kein gekuerzter Kontext, sondern eine Absage des Anbieters.
+
+    Gekuerzt werden **Inhalte**, nie ganze Nachrichten. Ein geloeschtes
+    Werkzeugergebnis liesse seinen ``tool_call`` unbeantwortet, und das
+    Protokoll verlangt zu jeder ``tool_call_id`` genau ein Ergebnis; manche
+    Anbieter weisen die Anfrage sonst rundheraus ab. Aus demselben Grund faellt
+    auch der zugehoerige Assistentenzug mit den ``tool_calls`` nicht weg.
+
+    Die Reihenfolge ist Absicht: zuerst die aeltesten Werkzeugergebnisse, dann
+    der uebrige Verlauf, und die **letzte** Nachricht nie. Was zuletzt kam, ist
+    die aktuelle Frage oder das gerade gelesene Ergebnis — genau das, worauf
+    geantwortet werden soll.
+    """
+    gesamt = message_character_count(messages)
+    if gesamt <= zeichen:
+        return messages
+
+    ergebnis = [dict(item) for item in messages]
+    # Zwei Durchgaenge mit derselben Mechanik, nur anderer Auswahl. Der erste
+    # opfert Werkzeugdaten, der zweite das Gespraech — in dieser Reihenfolge,
+    # weil ein Logausschnitt ersetzbar ist und eine Frage nicht.
+    for nur_werkzeug in (True, False):
+        for index, item in enumerate(ergebnis):
+            if gesamt <= zeichen:
+                return ergebnis
+            if index == len(ergebnis) - 1 or item.get("role") == "system":
+                continue
+            if nur_werkzeug != (item.get("role") == "tool"):
+                continue
+            inhalt = item.get("content")
+            if not isinstance(inhalt, str) or len(inhalt) <= MIN_GEKUERZTE_ZEICHEN:
+                continue
+            ziel = max(len(inhalt) - (gesamt - zeichen), MIN_GEKUERZTE_ZEICHEN)
+            gekuerzt = _gekuerzt(inhalt, ziel)
+            gesamt -= len(inhalt) - len(gekuerzt)
+            item["content"] = gekuerzt
+    return ergebnis
+
+
+def geschaetzte_belegung(
+    db: Session, conversation: AiConversation, grenzen: Teilbudgets | None = None
+) -> int:
+    """Wieviele Zeichen die naechste Anfrage ungefaehr traegt.
+
+    Fuer die Anzeige neben dem Absendeknopf. Bewusst **nicht** ueber
+    ``build_provider_messages``: das zoege Redaction, Memory-Auswahl und
+    Skill-Verzeichnis ueber den gesamten Verlauf, und zwar bei jedem Blick auf
+    den Ring. Hier reichen drei Summen aus der Datenbank.
+
+    Gezaehlt wird das **ungekuerzte** Material, nicht das bereits beschnittene.
+    Genau darum geht es ja: der Ring soll zeigen, wie nah das Gespraech an der
+    Faltmarke ist — nicht, dass die Kuerzung noch funktioniert.
+    """
+    from models import AiToolResult
+
+    if grenzen is None:
+        grenzen = _teilbudgets(MAX_CONTEXT_CHARS)
+
+    # Der Systemprompt ohne Skill-Verzeichnis: er ist der feste Sockel jeder
+    # Anfrage und mit Abstand der groesste unter den nicht-historischen Teilen.
+    belegung = len(ai_prompt.build(""))
+    belegung += min(len(conversation.summary or ""), grenzen.zusammenfassung_zeichen)
+
+    historie = db.query(
+        func.coalesce(
+            func.sum(
+                func.length(AiMessage.content)
+                + func.length(func.coalesce(AiMessage.question_json, ""))
+            ),
+            0,
+        )
+    ).filter(
+        AiMessage.conversation_id == conversation.id,
+        AiMessage.status == "complete",
+    )
+    if conversation.summarized_until is not None:
+        historie = historie.filter(AiMessage.created_at > conversation.summarized_until)
+    belegung += int(historie.scalar() or 0)
+
+    werkzeug = db.query(
+        func.coalesce(func.sum(func.length(AiToolResult.result_json)), 0)
+    ).filter(AiToolResult.conversation_id == conversation.id).scalar()
+    belegung += min(int(werkzeug or 0), grenzen.werkzeug_zeichen)
+    return belegung
 
 
 def message_character_count(messages: list[dict[str, Any]]) -> int:

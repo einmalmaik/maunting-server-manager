@@ -10,6 +10,7 @@ import {
   streamAiMessage,
   type AiActionProposal,
   type AiAttachment,
+  type AiContextStatus,
   type AiMessage,
   type AiProviderAvailable,
   type AiRunInfo,
@@ -22,6 +23,7 @@ import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 import { AiActionProposalCard } from './AiActionProposalCard'
 import { AiAutonomyButton } from './AiAutonomyButton'
+import { AiContextMeter } from './AiContextMeter'
 import { AiMarkdown } from './AiMarkdown'
 import { AiMemoryNotice } from './AiMemoryNotice'
 import { AiQuestionCard } from './AiQuestionCard'
@@ -140,6 +142,9 @@ export function AiChat() {
   // Was beim Oeffnen schon lief. Wird in einem eigenen Effekt angehaengt, weil
   // das Anhaengen erst gehen kann, wenn die Verarbeitung steht.
   const [laufBeimOeffnen, setLaufBeimOeffnen] = useState<AiRunInfo | null>(null)
+  // Wie voll der Kontext ist. `null` heisst „noch nicht geladen oder nicht
+  // abrufbar“ — der Ring bleibt dann schlicht weg.
+  const [contextStatus, setContextStatus] = useState<AiContextStatus | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   // `streaming` ist Zustand und damit fuer die Ereignisschleife zu spaet: zwei
@@ -202,6 +207,30 @@ export function AiChat() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' })
   }, [entries])
+
+  /**
+   * Die Zahlen hinter dem Ring — abhaengig vom **Modell**, nicht nur vom Chat.
+   *
+   * Deshalb neu geholt, sobald der Provider wechselt: dasselbe Gespraech fuellt
+   * ein 128k-Fenster fast und ein 1M-Fenster kaum. Ohne das zeigte der Ring nach
+   * einem Modellwechsel weiter den Fuellstand des alten.
+   */
+  const ladeKontext = useCallback(async () => {
+    if (!providerId) {
+      setContextStatus(null)
+      return
+    }
+    try {
+      const status = await aiApi.getContextStatus(providerId)
+      if (mountedRef.current) setContextStatus(status)
+    } catch {
+      // Der Ring ist eine Zusatzauskunft. Faellt sie aus, verschwindet er —
+      // ein Fehlertoast fuer eine Anzeige waere laestiger als die fehlende Zahl.
+      if (mountedRef.current) setContextStatus(null)
+    }
+  }, [providerId])
+
+  useEffect(() => { void ladeKontext() }, [ladeKontext])
 
   const availableProviders = useMemo(
     () => providers.filter((provider) => provider.available),
@@ -514,6 +543,9 @@ export function AiChat() {
         aendere(aktuell!, (message) => ({ ...message, question: data }))
       } else if (name === 'done') {
         aendere(aktuell!, (message) => ({ ...message, status: 'complete' }))
+        // Der Zug ist durch: Frage, Antwort und alles Gelesene stehen jetzt im
+        // Kontext. Genau hier hat sich der Fuellstand geaendert.
+        void ladeKontext()
       } else if (name === 'tool') {
         // Dieselbe Kennung wie im Abzug — siehe `werkzeugId`. Vorher stand hier
         // `${data.tool_name}-${current.length}`, eine Nummer aus der Länge des
@@ -530,6 +562,9 @@ export function AiChat() {
           { kind: 'compacted', id: `compacted-${data.conversation_id}` },
           ...current.filter((entry) => entry.kind !== 'compacted'),
         ])
+        // Nach dem Falten ist der Ring die halbe Erklaerung fuer die Zeile
+        // darueber: er faellt sichtbar zurueck.
+        void ladeKontext()
       } else if (name === 'proposal' || name === 'action') {
         merkeVorschlag(data)
       } else if (name === 'error') {
@@ -543,7 +578,7 @@ export function AiChat() {
       }
     }
     return { verarbeite, istGescheitert: () => gescheitert }
-  }, [aendere, canAttach, merkeVorschlag, providerId, t])
+  }, [aendere, canAttach, ladeKontext, merkeVorschlag, providerId, t])
 
   /**
    * Verfolgt einen Lauf, bis er ruht — oder bis der Benutzer weggeht.
@@ -1037,6 +1072,11 @@ export function AiChat() {
               disabled={busy || availableProviders.length === 0}
               aria-label={t('ai.chat.message')}
             />
+            {/* Direkt neben dem Absenden, weil dort die Entscheidung faellt:
+                wer sieht, dass der Kontext gleich zusammengefasst wird, formuliert
+                die naechste Frage anders. In einer Einstellungsseite haette
+                dieselbe Zahl niemanden erreicht. */}
+            <AiContextMeter status={contextStatus} />
             <Button
               type="submit"
               size="sm"

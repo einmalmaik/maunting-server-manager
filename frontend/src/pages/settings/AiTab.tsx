@@ -17,6 +17,7 @@ import { AiSkillManager } from '@/components/ai/AiSkillManager'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
+import { AiContextSettings } from './AiContextSettings'
 import { AiLearningSettings } from './AiLearningSettings'
 import { AiProvidersSettings } from './AiProvidersSettings'
 import { AiUsageSettings } from './AiUsageSettings'
@@ -180,6 +181,10 @@ export function AiTab() {
   return (
     <div className="space-y-5">
       <AiProvidersSettings canWrite={canWrite} />
+      {/* Direkt unter der Providerwahl: wie groß der Kontext ist, entscheidet
+          das dort gewählte Modell — einzustellen bleibt nur, wie voll er werden
+          darf, bevor zusammengefasst wird. */}
+      <AiContextSettings canWrite={canWrite} />
       <AiWebSearchSettings canWrite={canWrite} />
       <AiLearningSettings canWrite={canWrite} />
 

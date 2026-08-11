@@ -254,6 +254,37 @@ export interface AiLearningPolicy {
 }
 
 /**
+ * Wie voll der Kontext dieses Gesprächs ist — die Zahlen hinter dem Ring.
+ *
+ * `known` trennt „kleines Fenster" von „über das Modell ist nichts bekannt".
+ * Im zweiten Fall zeigt der Ring ausdrücklich keinen Prozentwert: ein
+ * geschätzter sähe aus wie ein gemessener, und man würde ihm glauben.
+ *
+ * Alle Zahlen sind Schätzungen (vier Zeichen je Token). Für „noch viel Platz"
+ * gegen „gleich wird zusammengefasst" reicht das — die Oberfläche sagt deshalb
+ * „etwa".
+ */
+export interface AiContextStatus {
+  known: boolean
+  /** Das volle Fenster des Modells. `null`, wenn unbekannt. */
+  window_tokens: number | null
+  /** Was die Eingabe davon füllen darf; Antwort und Sicherheit sind ab. */
+  usable_tokens: number
+  /** Belegt. Darf `usable_tokens` überschreiten — dann wird gleich gefaltet. */
+  used_tokens: number
+  compaction_at_tokens: number
+  compaction_percent: number
+  summarized: boolean
+}
+
+/** Die panelweite Faltmarke, plus die Grenzen, die der Server zulässt. */
+export interface AiContextPolicy {
+  compaction_percent: number
+  min_percent: number
+  max_percent: number
+}
+
+/**
  * Der Verbrauch eines Benutzers in denselben Zeiträumen wie die Grenzen.
  *
  * Kosten kommen bereits in **Cent** — dieselbe Einheit, in der die Grenze
@@ -565,6 +596,18 @@ export const aiApi = {
   setLearningPolicy: (policy: AiLearningPolicy['policy']) => api<AiLearningPolicy>('/ai/settings/learning', {
     method: 'PUT', body: JSON.stringify({ policy }),
   }),
+  getContextPolicy: () => api<AiContextPolicy>('/ai/settings/context'),
+  setContextPolicy: (percent: number) => api<AiContextPolicy>('/ai/settings/context', {
+    method: 'PUT', body: JSON.stringify({ compaction_percent: percent }),
+  }),
+  /**
+   * Der Provider steht im Query, weil die Frage schon vor der ersten Nachricht
+   * beantwortet sein muss — und weil ein Modellwechsel die Antwort sofort
+   * ändert, ohne dass jemand etwas gesendet hätte.
+   */
+  getContextStatus: (providerId: number) => api<AiContextStatus>(
+    `/ai/conversation/context?provider_id=${providerId}`,
+  ),
   listAttachments: () => api<AiAttachment[]>('/ai/conversation/attachments'),
   uploadAttachment: (file: File) => {
     const body = new FormData()

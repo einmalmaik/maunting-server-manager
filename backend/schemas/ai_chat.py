@@ -98,3 +98,40 @@ class AiRunResponse(BaseModel):
     message_id: str | None = None
     live: bool = False
     created_at: datetime
+
+
+class AiContextStatus(BaseModel):
+    """Wie voll der Kontext dieses Gespraechs ist — fuer den Ring beim Absenden.
+
+    ``known`` trennt „das Modell hat ein kleines Fenster“ von „ueber das Modell
+    ist nichts bekannt“. Im zweiten Fall zeigt die Oberflaeche ausdruecklich
+    keinen Prozentwert: ein geschaetzter saehe genauso aus wie ein gemessener,
+    und man wuerde ihm glauben.
+
+    Alle Zahlen sind **Schaetzungen**. MSM rechnet vier Zeichen je Token, statt
+    fuer jede Anbieterfamilie einen eigenen Tokenizer mitzuschleppen und ihn mit
+    jedem neuen Modell nachzuziehen. Fuer eine Anzeige, deren Zweck „noch viel
+    Platz“ oder „gleich wird zusammengefasst“ ist, reicht das; die Oberflaeche
+    sagt deshalb „etwa“.
+    """
+
+    known: bool
+    #: Das volle Fenster des Modells. ``None``, wenn unbekannt.
+    window_tokens: int | None = None
+    #: Was die Eingabe davon fuellen darf — Antwort und Sicherheit sind ab.
+    usable_tokens: int
+    #: Was das Gespraech davon gerade belegt. Kann ``usable_tokens``
+    #: ueberschreiten: dann wird beim naechsten Zug gekuerzt und gefaltet.
+    used_tokens: int
+    #: Ab wieviel belegten Tokens zusammengefasst wird. Die Marke wird eher
+    #: erreicht als das Falten stattfindet: gefaltet wird nur der **aeltere**
+    #: Teil, und die letzten zwoelf Nachrichten zaehlen nie dazu
+    #: (`ai_compaction_service.KEEP_RECENT_MESSAGES`). Der Ring darf also kurz
+    #: an der Marke stehen, bevor sich etwas tut — das ist richtig so und nicht
+    #: die haeufigere Sorte Fehler, naemlich eine Marke, die vorgibt, das Falten
+    #: sei schon passiert.
+    compaction_at_tokens: int
+    #: Dieselbe Marke als Prozentsatz — die Einstellung des Betreibers.
+    compaction_percent: int
+    #: Ob bereits eine Zusammenfassung im Kontext steckt.
+    summarized: bool

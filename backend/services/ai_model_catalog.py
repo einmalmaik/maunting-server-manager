@@ -1,8 +1,9 @@
-"""Der Modellkatalog eines Anbieters — inklusive dessen Denkfähigkeiten.
+"""Der Modellkatalog eines Anbieters — Denkfähigkeiten und Kontextfenster.
 
-Dies ist die Antwort auf die Frage, die eine handgepflegte Liste sonst
-beantworten müsste: *welches Modell kann wie tief nachdenken?* OpenRouter führt
-das je Modell selbst und gibt es ohne Schlüssel heraus, also pflegt MSM nichts.
+Dies ist die Antwort auf zwei Fragen, die eine handgepflegte Liste sonst
+beantworten müsste: *welches Modell kann wie tief nachdenken?* und *wieviel
+Text fasst es auf einmal?* OpenRouter führt beides je Modell selbst und gibt es
+ohne Schlüssel heraus, also pflegt MSM nichts.
 
 Gemessen am 2026-08-11 über alle 402 Einträge des Katalogs:
 
@@ -18,6 +19,12 @@ Die zweite Zahl ist der Grund, warum die Auswahl aus diesem Katalog kommen muss
 und nicht aus einer Konstante im Programm: eine feste Liste von Stufen wäre bei
 der Mehrheit der Modelle falsch. Sie zeigte Stufen an, die es nicht gibt, und
 verschwiege welche, die es gibt.
+
+Für das Kontextfenster gilt dasselbe Argument, nur mit anderen Zahlen: derselbe
+Katalog führt Fenster von 4.096 bis 1.000.000 Token nebeneinander. Eine feste
+Zahl wäre für fast jedes Modell falsch — und anders als bei den Stufen fiele es
+niemandem auf, denn ein zu klein angenommenes Fenster schlägt nicht fehl, es
+lässt den Chat nur früher vergessen.
 
 **Ein Ausfall des Katalogs hält nichts an.** Der zuletzt geholte Stand bleibt
 gültig, auch über die Frist hinaus — ein veralteter Katalog ist unbrauchbarer
@@ -78,6 +85,19 @@ class Modell:
     ``zwingend`` heißt, dass Nachdenken nicht abschaltbar ist. Für diese
     Modelle darf die Oberfläche kein „aus“ anbieten, sonst verspricht sie
     etwas, das der Anbieter ablehnt.
+
+    ``kontext_tokens`` ist das Kontextfenster — wieviel Text das Modell auf
+    einmal lesen kann. Es steht aus demselben Grund hier wie die Denkstufen:
+    die Werte gehen von 4.000 bis 1.000.000 und ändern sich mit jedem neuen
+    Modell. Eine Zahl im Programm wäre bei fast jedem Modell falsch, und die
+    Folge sähe man nicht — der Chat vergäße nur früher als nötig.
+
+    ``max_ausgabe_tokens`` ist, was das Modell antworten darf. Der Platz dafür
+    geht vom Fenster ab; wer ihn nicht abzieht, schickt eine Anfrage, die
+    hineinpasst, und bekommt trotzdem eine Absage.
+
+    Beides darf ``None`` sein. Der Auto Router führt gar kein Fenster, manche
+    Modelle keine Ausgabegrenze.
     """
 
     model_id: str
@@ -86,6 +106,8 @@ class Modell:
     stufen: tuple[str, ...] = ()
     standard_stufe: str | None = None
     zwingend: bool = False
+    kontext_tokens: int | None = None
+    max_ausgabe_tokens: int | None = None
 
 
 @dataclass
@@ -120,6 +142,41 @@ def _antwortet_ohne_abruf(eintrag: _Eintrag, jetzt: datetime) -> bool:
     return eintrag.fehler_am is not None and jetzt - eintrag.fehler_am < FEHLER_RUHE
 
 
+def _positive_zahl(wert: object) -> int | None:
+    """Eine Tokenzahl aus fremden Daten, oder ``None``.
+
+    ``bool`` wird ausdruecklich abgewiesen: in Python ist ``True`` eine 1, und
+    ein Fenster von einem Token waere schlimmer als gar keine Angabe — es
+    schluege nicht fehl, sondern kuerzte den Kontext auf nichts.
+    """
+    if isinstance(wert, bool) or not isinstance(wert, int):
+        return None
+    return wert if wert > 0 else None
+
+
+def _fenster_aus_openrouter(rohdaten: dict) -> tuple[int | None, int | None]:
+    """Kontextfenster und Ausgabegrenze eines Katalogeintrags.
+
+    OpenRouter nennt das Fenster **zweimal**: einmal oben als groesstes Fenster
+    ueber alle Anbieter dieses Modells, und einmal in ``top_provider`` fuer den
+    Anbieter, zu dem im Standardfall geroutet wird. Vorrang hat ``top_provider``
+    — das ist das Fenster, das man tatsaechlich bekommt. Der obere Wert kann
+    hoeher liegen, und danach zu rechnen hiesse, eine Anfrage zu bauen, die beim
+    tatsaechlichen Anbieter nicht mehr hineinpasst.
+
+    ``None`` ist ein regulaeres Ergebnis und kein Fehler: der Auto Router fuehrt
+    ``top_provider.context_length: null`` ohne oberen Wert, weil er erst zur
+    Laufzeit entscheidet, wohin er geht. Ein solcher Eintrag bleibt gueltig — er
+    faellt spaeter nur auf das Rueckfallfenster zurueck.
+    """
+    top = rohdaten.get("top_provider")
+    top = top if isinstance(top, dict) else {}
+    kontext = _positive_zahl(top.get("context_length"))
+    if kontext is None:
+        kontext = _positive_zahl(rohdaten.get("context_length"))
+    return kontext, _positive_zahl(top.get("max_completion_tokens"))
+
+
 def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
     """Liest einen Katalogeintrag von OpenRouter.
 
@@ -131,12 +188,19 @@ def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
     if not isinstance(model_id, str) or not model_id.strip():
         return None
 
+    kontext, ausgabe = _fenster_aus_openrouter(rohdaten)
     reasoning = rohdaten.get("reasoning")
     if not isinstance(reasoning, dict):
         # Kein Denk-Objekt heißt: dieses Modell denkt nicht. Der Katalog führt
         # das Feld bei allen 272 denkenden Modellen; sein Fehlen ist eine
         # Aussage und keine Lücke.
-        return Modell(model_id=model_id, name=str(rohdaten.get("name") or model_id), denkt=False)
+        return Modell(
+            model_id=model_id,
+            name=str(rohdaten.get("name") or model_id),
+            denkt=False,
+            kontext_tokens=kontext,
+            max_ausgabe_tokens=ausgabe,
+        )
 
     rohe_stufen = reasoning.get("supported_efforts")
     stufen = (
@@ -158,6 +222,8 @@ def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
         # verspricht eine Faehigkeit, die es nicht gibt — und der naechste Leser
         # haelt es fuer eine benutzte Quelle.
         zwingend=bool(reasoning.get("mandatory")),
+        kontext_tokens=kontext,
+        max_ausgabe_tokens=ausgabe,
     )
 
 

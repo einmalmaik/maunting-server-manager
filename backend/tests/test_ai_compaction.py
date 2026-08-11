@@ -29,11 +29,21 @@ from models import (
     RolePermission,
     User,
 )
-from services import ai_compaction_service, ai_usage_service
+from services import ai_compaction_service, ai_context_window, ai_usage_service
 from services.ai_context_service import build_provider_messages
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
+from services.ai_model_catalog import Modell
+from services.panel_settings_service import PanelSettingsService
 from services.openai_compatible_adapter import AiProviderRequestError, StreamChunk
 from services.role_service import set_user_roles
+
+
+@pytest.fixture(autouse=True)
+def _standardmarke():
+    """Die Faltmarke ist panelweit und bleibt sonst zwischen den Tests stehen."""
+    PanelSettingsService.invalidate_cache()
+    yield
+    PanelSettingsService.invalidate_cache()
 
 
 def _provider(db: Session) -> AiProvider:
@@ -344,6 +354,87 @@ async def test_nothing_falls_between_the_summary_and_the_boundary(
     # dass keine Nachricht zwischen Zusammenfassung und Grenze faellt.
     offen = ai_compaction_service._pending_messages(db, conversation)
     assert offen[0].content.startswith("Nachricht 29 ")
+
+
+def test_a_large_window_postpones_the_fold(db: Session, regular_user: User) -> None:
+    """Dieselbe Unterhaltung, zwei Modelle, zwei Antworten.
+
+    Rund 80.000 faltbare Zeichen: ueber der alten Konstante von 40.000, aber
+    weit unter drei Vierteln eines 128k-Fensters. Vorher wurde hier gefaltet,
+    obwohl das Modell den ganzen Verlauf muehelos getragen haette — genau der
+    Fall, den diese Aenderung abschafft.
+    """
+    conversation = _conversation(db, regular_user, messages=40, chars=3_000)
+    gross = ai_context_window.aus_modell(
+        Modell(model_id="m", name="m", denkt=False, kontext_tokens=128_000)
+    )
+
+    assert ai_compaction_service.needs_compaction(db, conversation) is True
+    assert ai_compaction_service.needs_compaction(
+        db, conversation, gross.zeichen
+    ) is False
+
+
+def test_the_operator_mark_moves_the_fold(db: Session, regular_user: User) -> None:
+    """Die Marke ist eine Einstellung und keine Konstante — hier ist der Beweis."""
+    conversation = _conversation(db, regular_user, messages=40, chars=3_000)
+    # Faltbar sind rund 84.000 Zeichen (28 Nachrichten zu je ~3.000). Das
+    # Budget ist so gewaehlt, dass die Marke genau dazwischen faellt: bei 75 %
+    # liegt sie mit 105.000 darueber, bei 50 % mit 70.000 darunter.
+    budget = 140_000
+
+    ai_context_window.set_schwelle_prozent(75)
+    assert ai_compaction_service.needs_compaction(db, conversation, budget) is False
+    ai_context_window.set_schwelle_prozent(50)
+    assert ai_compaction_service.needs_compaction(db, conversation, budget) is True
+
+
+def test_an_unknown_window_keeps_the_old_constant(
+    db: Session, regular_user: User
+) -> None:
+    """Ohne Fensterwissen bleibt alles, wie es war.
+
+    Wichtig gerade fuer den Rueckfall: dessen Budget sind 24.000 Zeichen, und
+    75 % davon waeren 18.000 — es wuerde also frueher gefaltet als vorher, ohne
+    dass sich irgendetwas am Modell geaendert haette.
+    """
+    conversation = _conversation(db, regular_user, messages=20, chars=1_200)
+
+    ai_context_window.set_schwelle_prozent(50)
+    assert ai_compaction_service.needs_compaction(db, conversation, None) is False
+    assert ai_compaction_service.faltschwelle(None) == (
+        ai_compaction_service.COMPACTION_THRESHOLD_CHARS
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_large_window_allows_a_longer_summary(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sonst waere ein grosses Fenster an der schmalsten Stelle wieder eng.
+
+    Fuenfzehn Saetze galten fuer jedes Gespraech. Bei einem 1M-Modell werden
+    Hunderttausende Zeichen Verlauf gefaltet — auf fuenfzehn Saetze eingedampft
+    waere der Verlust groesser als die Ersparnis.
+    """
+    _enable(db, regular_user)
+    provider = _provider(db)
+    # Rund 288.000 faltbare Zeichen — mehr als das Vierfache der frueher fest
+    # verdrahteten Quellgrenze von 60.000.
+    conversation = _conversation(db, regular_user, messages=60, chars=6_000)
+    seen = _fake_summary(monkeypatch, "Zusammenfassung.")
+
+    done = await ai_compaction_service.compact_conversation(
+        client=None, user_id=regular_user.id,
+        conversation_id=conversation.id, provider_id=provider.id,
+        context_chars=300_000,
+    )
+
+    assert done is True
+    prompt = str(seen["messages"][0]["content"])
+    assert f"{ai_compaction_service.MAX_SUMMARY_SAETZE} Saetze" in prompt
+    # Und es geht in einem Zug deutlich mehr hinaus als die alten 60.000.
+    assert len(str(seen["messages"][1]["content"])) > 200_000
 
 
 def test_an_orphaned_reservation_is_released_at_startup(

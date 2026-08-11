@@ -115,6 +115,12 @@ def leerer_zustand(
         # Schleifenerkennung. Wird ueber eine Rueckfrage hinweg vererbt, sonst
         # zaehlt jede Klaerung wieder bei null.
         "tool_signatures": {},
+        # Wieviele Zeichen Kontext das Modell dieses Laufs traegt, oder None,
+        # wenn der Katalog es nicht kennt. Steht im Zustand und nicht in einer
+        # Konstante, weil jede Fortsetzung mit demselben Budget rechnen muss wie
+        # der erste Zug — auch wenn der Betreiber inzwischen ein anderes Modell
+        # eingestellt hat.
+        "context_chars": None,
     }
 
 

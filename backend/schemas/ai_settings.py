@@ -83,6 +83,27 @@ class AiLearningPolicyUpdate(BaseModel):
     policy: Literal["off", "review", "instant"]
 
 
+class AiContextPolicyUpdate(BaseModel):
+    """Ab wieviel Prozent des Kontextfensters zusammengefasst wird.
+
+    Die Grenzen stehen auch im Service (`ai_context_window.set_schwelle_prozent`)
+    und sind dort die verbindlichen. Hier wiederholt, damit ein Tippfehler eine
+    422 mit Feldbezug ergibt statt einer Fehlermeldung ohne Ort.
+    """
+
+    compaction_percent: int = Field(ge=50, le=95)
+
+
+class AiContextPolicyStatus(BaseModel):
+    compaction_percent: int
+    #: Die zulaessigen Grenzen, damit die Oberflaeche sie nicht selbst kennen
+    #: muss. Unter 50 % faltet der Chat staendig und verliert mehr Verlauf, als
+    #: er Kosten spart; ueber 95 % bleibt kein Platz mehr fuer die Antwort und
+    #: fuer die Anfrage, die das Falten ausloest.
+    min_percent: int
+    max_percent: int
+
+
 class AiUsageEntry(BaseModel):
     """Der Verbrauch eines Benutzers, in denselben Zeitraeumen wie die Grenzen.
 

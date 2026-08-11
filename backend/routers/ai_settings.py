@@ -13,6 +13,8 @@ from database import SessionLocal, get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from models import Role, User
 from schemas.ai_settings import (
+    AiContextPolicyStatus,
+    AiContextPolicyUpdate,
     AiLearningPolicyStatus,
     AiLearningPolicyUpdate,
     AiRoleLimitsResponse,
@@ -202,6 +204,60 @@ def set_learning_policy(
     db.commit()
     return AiLearningPolicyStatus(
         policy=current, pending_count=len(ai_skill_service.pending_skills(db))
+    )
+
+
+@router.get("/settings/context", response_model=AiContextPolicyStatus)
+def get_context_policy(
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiContextPolicyStatus:
+    from services import ai_context_window
+
+    return AiContextPolicyStatus(
+        compaction_percent=ai_context_window.schwelle_prozent(),
+        min_percent=ai_context_window.MIN_SCHWELLE,
+        max_percent=ai_context_window.MAX_SCHWELLE,
+    )
+
+
+@router.put("/settings/context", response_model=AiContextPolicyStatus)
+def set_context_policy(
+    payload: AiContextPolicyUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiContextPolicyStatus:
+    """Ab wieviel Prozent des Kontextfensters zusammengefasst wird.
+
+    Die Abwaegung dahinter ist Kosten gegen Gedaechtnis, und sie faellt bei
+    einem Hoster anders aus als bei einer Privatinstallation: frueh falten heisst
+    kleinere und billigere Anfragen, spaet falten heisst, dass die KI mehr vom
+    Gespraech woertlich vor sich hat. Beides ist vertretbar — deshalb eine
+    Einstellung und keine Konstante.
+
+    Sie wirkt panelweit und nicht je Rolle: sonst waere dieselbe Unterhaltung
+    je nachdem, wer sie zuletzt fortgesetzt hat, verschieden stark gefaltet.
+    """
+    from services import ai_context_window
+
+    try:
+        current = ai_context_window.set_schwelle_prozent(payload.compaction_percent)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Ungueltige Faltmarke") from exc
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="ai.context.compaction.updated",
+        target_type="panel_setting",
+        target_id=None,
+        details={"compaction_percent": current},
+    )
+    db.commit()
+    return AiContextPolicyStatus(
+        compaction_percent=current,
+        min_percent=ai_context_window.MIN_SCHWELLE,
+        max_percent=ai_context_window.MAX_SCHWELLE,
     )
 
 

@@ -26,6 +26,16 @@ ANTWORT = {
         {
             "id": "anthropic/claude-opus-5",
             "name": "Claude Opus 5",
+            # Der Katalog nennt das Fenster zweimal. Oben steht das groesste
+            # ueber alle Anbieter dieses Modells, in ``top_provider`` das des
+            # Anbieters, zu dem im Standardfall geroutet wird — und nur das
+            # bekommt man auch.
+            "context_length": 1_000_000,
+            "top_provider": {
+                "context_length": 200_000,
+                "max_completion_tokens": 64_000,
+                "is_moderated": True,
+            },
             "reasoning": {
                 "mandatory": False,
                 # ``default_enabled`` steht hier, weil der Anbieter es liefert —
@@ -42,6 +52,10 @@ ANTWORT = {
             # Der häufigste Fall: denkt, kennt aber keine Stufen.
             "id": "qwen/qwen3.7-flash",
             "name": "Qwen3.7 Flash",
+            # Nur oben ein Fenster, ``top_provider`` ohne Ausgabegrenze — auch
+            # das kommt im echten Katalog vor.
+            "context_length": 128_000,
+            "top_provider": {"context_length": None, "max_completion_tokens": None},
             "reasoning": {
                 "mandatory": False,
                 "default_enabled": True,
@@ -100,6 +114,44 @@ async def test_the_catalog_reports_exactly_what_the_provider_says() -> None:
 
     # Kein reasoning-Objekt ist eine Aussage, keine Lücke.
     assert nach_id["openai/gpt-4o-mini"].denkt is False
+
+
+@pytest.mark.asyncio
+async def test_the_window_comes_from_the_provider_that_will_actually_serve() -> None:
+    """``top_provider`` schlägt den oberen Wert — sonst planen wir zu grosszügig.
+
+    Oben steht das grösste Fenster über alle Anbieter dieses Modells, in
+    ``top_provider`` das des Anbieters, zu dem im Standardfall geroutet wird.
+    Nach dem oberen zu rechnen hiesse, eine Anfrage zu bauen, die beim
+    tatsächlichen Anbieter nicht mehr hineinpasst.
+    """
+    async with _client(lambda _r: httpx.Response(200, json=ANTWORT)) as client:
+        modelle = await ai_model_catalog.modelle(client, "openrouter")
+
+    nach_id = {m.model_id: m for m in modelle}
+    opus = nach_id["anthropic/claude-opus-5"]
+    assert opus.kontext_tokens == 200_000
+    assert opus.max_ausgabe_tokens == 64_000
+
+    # ``top_provider.context_length: null`` ist keine Aussage über das Fenster,
+    # sondern eine Lücke — dann gilt der obere Wert.
+    qwen = nach_id["qwen/qwen3.7-flash"]
+    assert qwen.kontext_tokens == 128_000
+    assert qwen.max_ausgabe_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_a_model_without_any_window_is_still_a_valid_entry() -> None:
+    """Der Auto Router führt gar kein Fenster — er entscheidet erst zur Laufzeit.
+
+    Ihn deswegen zu verwerfen hiesse, ein wählbares Modell aus der Liste zu
+    nehmen. Es fällt später nur auf den Rückfallwert zurück.
+    """
+    async with _client(lambda _r: httpx.Response(200, json=ANTWORT)) as client:
+        modelle = await ai_model_catalog.modelle(client, "openrouter")
+
+    ohne = {m.model_id: m for m in modelle}["openai/gpt-4o-mini"]
+    assert ohne.kontext_tokens is None
 
 
 @pytest.mark.asyncio
