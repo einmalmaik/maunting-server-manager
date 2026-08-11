@@ -17,9 +17,11 @@ import io
 from contextlib import redirect_stdout
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import models  # noqa: F401 - registriert das vollstaendige ORM-Schema
@@ -76,6 +78,58 @@ def test_ein_lauf_ueberlebt_seinen_server(db: Session) -> None:
     }
 
 
+def _scope_check(inspector) -> str:
+    for pruefung in inspector.get_check_constraints("ai_memory_entries"):
+        if pruefung.get("name") == "ck_ai_memory_entries_scope":
+            return pruefung.get("sqltext") or ""
+    raise AssertionError("Der Scope-CHECK des Gedaechtnisses ist verschwunden")
+
+
+def test_die_datenbank_kennt_genau_fuenf_gedaechtnisbereiche(db: Session) -> None:
+    """Der Scope ist eine Aufzaehlung — und zwar eine, die die Datenbank haelt.
+
+    Der Wert entscheidet, wer einen Eintrag lesen darf. Eine Aufzaehlung, die
+    nur im Python-Code steht, ist gegen einen Tippfehler in einer Migration
+    oder einen direkten Datenbankzugriff wehrlos: `scope='server_share'` waere
+    ein Eintrag, den niemand mehr sieht und niemand mehr loeschen kann.
+
+    Anders als bei den Fremdschluesseln nebenan setzt SQLite CHECK-Bedingungen
+    von sich aus durch, der Test misst hier also dieselbe Zusage wie im Betrieb.
+    """
+    gueltig = ("user", "server", "server_shared", "team", "panel")
+    for scope in gueltig:
+        db.execute(
+            text(
+                "INSERT INTO ai_memory_entries "
+                "(id, scope, scope_identity, key, value_encrypted, origin, "
+                " aad_version, use_count, created_at, updated_at) "
+                "VALUES (:id, :scope, :ident, 'k', 'x', 'user', 2, 0, "
+                " '2026-08-11', '2026-08-11')"
+            ),
+            {"id": f"id-{scope}", "scope": scope, "ident": f"ident-{scope}"},
+        )
+
+    with pytest.raises(IntegrityError):
+        db.execute(
+            text(
+                "INSERT INTO ai_memory_entries "
+                "(id, scope, scope_identity, key, value_encrypted, origin, "
+                " aad_version, use_count, created_at, updated_at) "
+                "VALUES ('id-x', 'server_share', 'ident-x', 'k', 'x', 'user', "
+                " 2, 0, '2026-08-11', '2026-08-11')"
+            )
+        )
+    db.rollback()
+
+    assert set(gueltig) == {
+        wert.strip().strip("'")
+        for wert in _scope_check(inspect(db.get_bind()))
+        .split("(", 1)[1]
+        .rsplit(")", 1)[0]
+        .split(",")
+    }
+
+
 def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
     """Modell und Migration duerfen nicht auseinanderlaufen.
 
@@ -120,6 +174,14 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
         assert _fremdschluessel(inspect(engine), "ai_runs", "last_server_id")[
             "options"
         ] == {"ondelete": "SET NULL"}
+
+        # Und derselbe Nachweis fuer den fuenften Gedaechtnisbereich. Ein CHECK,
+        # der nur aus `create_all` stammt, laesst den Betrieb genau dann
+        # auflaufen, wenn die Migration ihn vergessen hat.
+        command.downgrade(config, "20260811_02")
+        assert "server_shared" not in _scope_check(inspect(engine))
+        command.upgrade(config, "head")
+        assert "server_shared" in _scope_check(inspect(engine))
     finally:
         engine.dispose()
         settings.database_url = vorher

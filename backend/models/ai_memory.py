@@ -52,7 +52,11 @@ class AiMemoryEntry(Base):
     __tablename__ = "ai_memory_entries"
     __table_args__ = (
         CheckConstraint(
-            "scope IN ('user', 'server', 'team', 'panel')",
+            # 'server' und 'server_shared' sind beide an einen Server gebunden
+            # und trotzdem verschieden: 'server' ist die **persoenliche** Notiz
+            # eines Menschen zu dieser Anlage, 'server_shared' gehoert der
+            # Anlage selbst und ueberlebt jeden, der sie aufgeschrieben hat.
+            "scope IN ('user', 'server', 'server_shared', 'team', 'panel')",
             name="ck_ai_memory_entries_scope",
         ),
         CheckConstraint("origin IN ('user', 'ai')", name="ck_ai_memory_entries_origin"),
@@ -63,6 +67,11 @@ class AiMemoryEntry(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    # Gesetzt in den Scopes "server" und "server_shared". `CASCADE` ist hier
+    # richtig und bei `ai_runs.last_server_id` falsch, und der Unterschied ist
+    # nicht willkuerlich: eine Notiz *ueber* einen Server hat ohne ihn keinen
+    # Gegenstand mehr, ein Lauf dagegen ist ein Beleg der Unterhaltung und
+    # gehoert dem Benutzer.
     server_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=True, index=True)
     # Gesetzt nur im Scope "team". Der Eintrag gehoert dann dem Team, nicht dem
     # Benutzer, der ihn angelegt hat — er bleibt bestehen, wenn dieser geht.

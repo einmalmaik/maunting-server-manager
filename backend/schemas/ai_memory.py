@@ -6,7 +6,17 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-MemoryScope = Literal["user", "server", "team", "panel"]
+#: Die fuenf Schubladen des Gedaechtnisses. Zwei davon haengen an einem Server
+#: und sind trotzdem verschieden:
+#:
+#: * ``server``        — *meine* Notiz zu dieser Anlage. Sieht nur ich.
+#: * ``server_shared`` — Betriebswissen der Anlage selbst. Sieht jeder, der den
+#:   Server sehen darf; sie ueberlebt den Kollegen, der sie aufschrieb, und
+#:   verschwindet mit dem Server.
+#:
+#: Die Aufzaehlung ist Teil des API-Vertrags: fehlt ein Wert hier, weist
+#: FastAPI die Anfrage mit 422 ab, bevor irgendein Dienst sie sieht.
+MemoryScope = Literal["user", "server", "server_shared", "team", "panel"]
 
 
 class AiMemoryWrite(BaseModel):
