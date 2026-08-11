@@ -129,6 +129,28 @@ def update_user(
     # Super-Admin-Recovery vorhanden).
     if user.is_owner and req.is_active is False:
         raise HTTPException(status_code=400, detail="Owner-Account darf nicht deaktiviert werden")
+
+    # Dieselbe Grenze wie beim Loeschen darunter — und aus demselben Grund.
+    #
+    # Geschuetzt war bisher nur der Owner. Ein Konto mit `users.manage` und
+    # sonst nichts konnte damit jeden Administrator uebernehmen, ohne je ein
+    # Recht zu vergeben:
+    #
+    #   1. `PATCH /api/admin/users/{admin}` mit neuer E-Mail und
+    #      `two_factor_enabled: false`. Der Setter schreibt `email_hash` mit.
+    #   2. `POST /api/auth/forgot-password` mit dieser Adresse — der Reset-Link
+    #      geht ins eigene Postfach.
+    #   3. Passwort setzen, anmelden. Der zweite Faktor ist in Schritt 1 gefallen.
+    #
+    # Rechte lassen sich also nicht nur vergeben, sondern auch **erben**, indem
+    # man sich das Konto nimmt, das sie hat. `delete_user` zieht diese Grenze
+    # seit jeher; hier fehlte sie.
+    _ensure_no_global_escalation(
+        db,
+        actor,
+        effective_user_role_permission_keys(db, user),
+    )
+
     if req.email is not None:
         user.email = req.email
     if req.is_active is not None:

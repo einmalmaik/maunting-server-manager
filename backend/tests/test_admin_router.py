@@ -37,6 +37,97 @@ def _attach_role_with_keys(
     return role
 
 
+class TestUpdateUserEscalation:
+    """Ein Konto uebernehmen ist ein Weg, seine Rechte zu erben.
+
+    `delete_user` zieht diese Grenze seit jeher und begruendet sie im Code:
+    wer einen Benutzer anfassen darf, dessen Rolle Keys haelt, die er selbst
+    nicht hat, verschiebt damit indirekt Berechtigungen. `update_user` schuetzte
+    dagegen nur den Owner.
+
+    Der vollstaendige Weg ohne ein einziges vergebenes Recht:
+
+      1. E-Mail des Administrators auf die eigene Adresse setzen und
+         `two_factor_enabled` abschalten — beides in einem PATCH.
+      2. Passwort-vergessen mit dieser Adresse; der Link kommt ins eigene Fach.
+      3. Anmelden. Der zweite Faktor ist in Schritt 1 gefallen.
+    """
+
+    def test_users_manage_alone_cannot_take_over_an_admin_account(
+        self,
+        client: TestClient,
+        db: Session,
+        regular_user: User,
+        user_cookies: dict,
+        owner_user: User,
+    ):
+        # Das Opfer: ein Administrator mit allen globalen Keys.
+        opfer = User(
+            username="ziel-admin",
+            email="ziel-admin@example.com",
+            password_hash=regular_user.password_hash,
+            is_active=True,
+            # Ausdruecklich an, damit das Abschalten unten etwas zu bewegen
+            # haette. Bei einem Konto ohne zweiten Faktor waere die Zusicherung
+            # danach wertlos.
+            two_factor_enabled=True,
+        )
+        db.add(opfer)
+        db.commit()
+        _promote_to_admin_role(db, opfer)
+
+        # Der Angreifer: `users.manage` und sonst nichts.
+        _attach_role_with_keys(db, regular_user, "nur-benutzerverwaltung", ["users.manage"])
+
+        antwort = client.patch(
+            f"/api/admin/users/{opfer.id}",
+            json={"email": "angreifer@example.com", "two_factor_enabled": False},
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+
+        assert antwort.status_code == 403
+        db.refresh(opfer)
+        # Weder die Adresse, ueber die der Reset-Link laeuft ...
+        assert opfer.email == "ziel-admin@example.com"
+        # ... noch der zweite Faktor haben sich bewegt.
+        assert opfer.two_factor_enabled is True
+
+    def test_managing_a_user_at_the_same_level_still_works(
+        self,
+        client: TestClient,
+        db: Session,
+        regular_user: User,
+        user_cookies: dict,
+    ):
+        """Die Gegenprobe — sonst waere die Benutzerverwaltung unbenutzbar.
+
+        Die Grenze ist „nicht mehr als ich selbst habe“, nicht „gar nichts“.
+        """
+        kollege = User(
+            username="kollege",
+            email="kollege@example.com",
+            password_hash=regular_user.password_hash,
+            is_active=True,
+        )
+        db.add(kollege)
+        db.commit()
+        _attach_role_with_keys(db, kollege, "harmlos", ["ai.chat.use"])
+        _attach_role_with_keys(
+            db, regular_user, "verwaltung-plus", ["users.manage", "ai.chat.use"]
+        )
+
+        antwort = client.patch(
+            f"/api/admin/users/{kollege.id}",
+            json={"is_active": False},
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        )
+        assert antwort.status_code == 200
+        db.refresh(kollege)
+        assert kollege.is_active is False
+
+
 class TestUpdateUserOwnerProtection:
     def test_non_owner_admin_cannot_modify_owner(
         self,
