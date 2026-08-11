@@ -61,3 +61,35 @@ numpy==2.5.1
 # still das Falsche tun — und genau solche Zeichen stehen in
 # Skill-Beschreibungen. Gelesen wird ausschliesslich mit `safe_load`.
 pyyaml==6.0.2
+# QR-Code fuer die 2FA-Einrichtung, erzeugt im Panel.
+# Zweck: Bis hierher liess die Oberflaeche das Bild von api.qrserver.com holen
+# und schickte die vollstaendige otpauth://-URI als Query-Parameter mit — also
+# das Base32-TOTP-Geheimnis und die Kennung des Benutzers in das Zugriffslog
+# eines Fremden. Das Geheimnis allein genuegt fuer gueltige Codes (reines
+# RFC 6238, kein serverseitiger Zusatzfaktor), der zweite Faktor waere damit
+# keiner mehr.
+# Notwendigkeit: Vorhandener Code kann es nicht. Ein eigener Encoder waere
+# GF(256)-Arithmetik, Reed-Solomon, Kapazitaets- und Blocktabellen, acht Masken
+# mit vier Strafregeln und zwei BCH-Codes — geschaetzt 350-450 Zeilen mitten im
+# Auth-Pfad, das Zwei- bis Dreifache dessen, was adr-0007 beim OAuth-Eigenbau
+# noch fuer vertretbar hielt. Ein QR-Encoder kennt zudem keine Teilpunkte: eine
+# falsche Maske ergibt einen Code, der bei einer App scannt und bei der
+# naechsten nicht.
+# Security: beruehrt das TOTP-Geheimnis, aber nur lesend und nur im Speicher —
+# hinein geht die fertige URI, heraus kommt ein Bild. Kein Netzzugriff, kein
+# Dateizugriff, kein globaler Zustand. Genau das ist der Gewinn: das Geheimnis
+# verlaesst den Prozess nicht mehr.
+# Transitive Flaeche: null. `pip show segno` meldet ein leeres Requires; die
+# einzige Requires-Dist ist auf python_version < 3.10 bedingt, wir fahren 3.13.
+# Reines Python, keine kompilierte Erweiterung.
+# API: eine Funktion (`segno.make`) und ein Serialisierer. Schwer falsch zu
+# benutzen.
+# Lizenz: BSD (OSI-anerkannt), vertraeglich mit Projekt und Auslieferung.
+# Kapselung: ausschliesslich in services/totp_qr.py.
+# Entfernbarkeit: faellt die Bibliothek weg, ersetzt man diese eine Funktion;
+# `qr_datenuri` liefert dann None, und die Oberflaeche zeigt weiterhin
+# Geheimnis und otpauth-Link zum Abschreiben.
+# Alternativen geprueft: ein npm-Paket im Frontend (gleiche Wirkung, aber die
+# feindlichere Lieferkette und ein Paket mehr im Browser-Bundle, ohne
+# Sicherheitsgewinn) und der Eigenbau (siehe Notwendigkeit).
+segno==1.6.6

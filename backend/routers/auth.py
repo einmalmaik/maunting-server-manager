@@ -25,6 +25,7 @@ from services.permission_catalog import SYSTEM_ROLE_USER
 from services.role_service import get_role_by_name, set_user_roles
 from services.panel_settings_service import PanelSettingsService
 from services.session_service import issue_session
+from services.totp_qr import qr_datenuri
 
 from services.captcha_service import CaptchaService
 
@@ -641,7 +642,11 @@ def setup_2fa(
     user.two_factor_enabled = False
     db.commit()
     uri = DisClient.build_totp_uri("Maunting Server Manager", user.email, secret)
-    return {"secret": secret, "uri": uri}
+    # Der QR-Code entsteht hier und nicht im Browser: die Antwort traegt das
+    # Geheimnis ohnehin, ein zusaetzliches Bild verraet also nichts Neues — im
+    # Gegensatz zum frueheren Weg ueber einen fremden Bilddienst, der es aus dem
+    # Panel herausgetragen hat. Siehe services/totp_qr.py.
+    return {"secret": secret, "uri": uri, "qr_data_uri": qr_datenuri(uri)}
 
 
 @router.post("/2fa/enable")

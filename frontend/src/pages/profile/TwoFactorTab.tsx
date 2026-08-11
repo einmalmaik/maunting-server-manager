@@ -27,14 +27,19 @@ export function TwoFactorTab() {
   const [otpCode, setOtpCode] = useState('')
   const [faSecret, setFaSecret] = useState('')
   const [faUri, setFaUri] = useState('')
+  const [qrDataUri, setQrDataUri] = useState('')
   const [backupCodes, setBackupCodes] = useState<string[]>([])
 
   const handleSetup2FA = async () => {
     setError('')
     try {
-      const res = await api<{ secret: string; uri: string }>('/auth/2fa/setup', { method: 'POST' })
+      const res = await api<{ secret: string; uri: string; qr_data_uri: string | null }>(
+        '/auth/2fa/setup',
+        { method: 'POST' },
+      )
       setFaSecret(res.secret)
       setFaUri(res.uri)
+      setQrDataUri(res.qr_data_uri ?? '')
       setShow2FASetup(true)
     } catch (err: any) {
       setError(err.message)
@@ -55,6 +60,12 @@ export function TwoFactorTab() {
       }
       setShow2FASetup(false)
       setOtpCode('')
+      // Ist 2FA einmal aktiv, hat das Geheimnis in der Oberflaeche nichts mehr
+      // verloren — es bliebe sonst bis zum Seitenwechsel im Zustand stehen und
+      // in der Komponentenansicht jedes Entwicklerwerkzeugs lesbar.
+      setFaSecret('')
+      setFaUri('')
+      setQrDataUri('')
       setSuccess(t('profile.2faEnabled'))
       setTimeout(() => setSuccess(''), 5000)
     } catch (err: any) {
@@ -182,20 +193,27 @@ export function TwoFactorTab() {
               Benutzers. Wer diese Zugriffslogs liest, erzeugt dauerhaft gueltige
               Codes; der zweite Faktor waere damit keiner mehr.
 
-              Gewirkt hat das Bild ohnehin nie: unsere eigene CSP erlaubt
-              `img-src 'self' data:` und nennt den Dienst nicht (main.py). Der
-              Browser hat die Anfrage also blockiert, und der Kasten blieb leer —
-              ein Leck in jeder Aufstellung ohne diese CSP und eine kaputte
-              Anzeige in jeder mit ihr.
+              Der Code entsteht jetzt im Panel (backend/services/totp_qr.py) und
+              kommt als `data:`-URI mit der Antwort von /2fa/setup. `data:` steht
+              in der img-src-Liste unserer CSP, die Anzeige traegt also auch dort,
+              wo FastAPI das SPA-Dokument selbst ausliefert und seine CSP damit
+              auf dem Dokument liegt.
 
-              Ein lokal erzeugter QR-Code braucht eine Bibliothek; das ist eine
-              Entscheidung des Betreibers und keine, die nebenbei in einem
-              Reviewfix faellt. Solange sie aussteht, ist der Weg ohne Kamera
-              vollstaendig: Geheimnis zum Abschreiben und ein Link, den die
-              Authenticator-Apps selbst oeffnen. */}
+              Das Bild bleibt eine Beigabe: Geheimnis und Link stehen weiterhin
+              darunter. Laesst sich kein Code erzeugen, liefert das Backend null
+              und der Weg ohne Kamera ist unveraendert vollstaendig. */}
           <p className="font-body-md text-sm text-on-surface-variant">{t('profile.2faScan')}</p>
           {faUri && (
             <div className="flex flex-col items-center gap-3">
+              {qrDataUri && (
+                <img
+                  src={qrDataUri}
+                  alt={t('profile.2faQrCode')}
+                  width={192}
+                  height={192}
+                  className="h-48 w-48 rounded border border-outline-variant"
+                />
+              )}
               <p className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-high px-3 py-1.5 rounded border border-outline-variant select-all">
                 {faSecret}
               </p>
