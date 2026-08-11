@@ -49,7 +49,12 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const [herkunft, setHerkunft] = useState<Herkunft>('all')
   const [key, setKey] = useState('')
   const [value, setValue] = useState('')
-  const [bearbeitet, setBearbeitet] = useState<string | null>(null)
+  // Nicht nur die id, sondern der ganze Eintrag: beim Speichern zählt der
+  // Bereich des Eintrags, nicht der der Ansicht. Der persönliche Bereich listet
+  // bewusst auch die Notizen zu einzelnen Servern mit — wer davon nur die id
+  // festhält, schickt sie beim Ändern als `scope: 'user'` zurück und legt damit
+  // eine Kopie an, statt sie zu ändern.
+  const [bearbeitet, setBearbeitet] = useState<AiMemoryEntry | null>(null)
   const [serverNamen, setServerNamen] = useState<Map<number, string>>(new Map())
   const [busy, setBusy] = useState(false)
 
@@ -111,6 +116,16 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       })
   }, [entries, herkunft, suche])
 
+  // Suche, Herkunftsfilter und Zähler erscheinen erst, wenn die Liste lang genug
+  // ist, um sie zu brauchen — aber sie verschwinden nicht, solange sie noch
+  // etwas bewirken. Genau das war der Fehler: löschte man aus vier Einträgen den
+  // einzigen Suchtreffer, hängte die Schranke das Suchfeld ab, während `sichtbar`
+  // weiter nach dem alten Wort filterte. Übrig blieb „Kein Eintrag passt zur
+  // Suche" ohne ein Bedienelement, mit dem man da wieder herauskommt — half nur
+  // ein Bereichswechsel oder Neuladen. Eine Bedingung für alle drei, damit sie
+  // nicht wieder auseinanderlaufen.
+  const werkzeugleiste = entries.length > 3 || suche !== '' || herkunft !== 'all'
+
   if (!allowed) return null
 
   const speichern = async (event: React.FormEvent) => {
@@ -118,13 +133,27 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     if (!key.trim() || !value.trim() || busy) return
     setBusy(true)
     try {
-      // Von Hand angelegt wird immer im Bereich selbst, nie serverbezogen: eine
-      // Notiz „zu diesem Server" entsteht im Gespräch über ihn, und ein
-      // Serverfeld im Formular wäre ein zweiter Weg mit eigenen Fehlerquellen.
+      // Beim Ändern gilt der Bereich des Eintrags, beim Anlegen der der Ansicht.
+      //
+      // Der persönliche Bereich zeigt auch die Notizen zu einzelnen Servern; die
+      // liegen unter `server:{sid}:user:{uid}`. Ging eine Korrektur daran als
+      // `scope: 'user'` hinaus, suchte das Backend unter `user:{uid}`, fand dort
+      // nichts und legte eine zweite Zeile mit demselben Schlüssel an: die alte
+      // Notiz wirkte unverändert weiter, und ab da gingen beide Werte gemeinsam
+      // ins Gespräch über diesen Server. Dass eine Änderung an Ort und Stelle
+      // gemeint ist, sagt schon das gesperrte Schlüsselfeld weiter unten.
+      //
+      // Von Hand angelegt wird dagegen immer im Bereich selbst, nie
+      // serverbezogen: eine Notiz „zu diesem Server" entsteht im Gespräch über
+      // ihn, und ein Serverfeld im Formular wäre ein zweiter Weg mit eigenen
+      // Fehlerquellen.
+      const feld = { key: key.trim(), value: value.trim() }
       await aiApi.saveMemory(
-        scope.kind === 'team'
-          ? { scope: 'team', team_id: scope.teamId, key: key.trim(), value: value.trim() }
-          : { scope: scope.kind, key: key.trim(), value: value.trim() },
+        bearbeitet?.scope === 'server' && bearbeitet.server_id !== null
+          ? { scope: 'server', server_id: bearbeitet.server_id, ...feld }
+          : scope.kind === 'team'
+            ? { scope: 'team', team_id: scope.teamId, ...feld }
+            : { scope: scope.kind, ...feld },
       )
       setKey(''); setValue(''); setBearbeitet(null)
       await laden()
@@ -142,7 +171,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     setBusy(true)
     try {
       await aiApi.deleteMemory(entry.id)
-      if (bearbeitet === entry.id) { setKey(''); setValue(''); setBearbeitet(null) }
+      if (bearbeitet?.id === entry.id) { setKey(''); setValue(''); setBearbeitet(null) }
       await laden()
     } catch { toast.error(t('ai.memory.errors.delete')) } finally { setBusy(false) }
   }
@@ -172,7 +201,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   }
 
   const bearbeiten = (entry: AiMemoryEntry) => {
-    setKey(entry.key); setValue(entry.value); setBearbeitet(entry.id)
+    setKey(entry.key); setValue(entry.value); setBearbeitet(entry)
   }
 
   const herkunftsFilter = (
@@ -223,12 +252,12 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       // Der Schalter regiert nur diesen Bereich. Das stand nirgends und war
       // auch nicht so — bis eben nahm er dem Assistenten auch das Teamwissen.
       note={scope.kind === 'user' ? t('ai.memory.enabledScopeHint') : undefined}
-      search={entries.length > 3
+      search={werkzeugleiste
         ? { value: suche, onChange: setSuche, label: t('ai.memory.search') }
         : undefined}
       filters={(
         <>
-          {entries.length > 3 && herkunftsFilter}
+          {werkzeugleiste && herkunftsFilter}
           {darfAendern && entries.length > 0 && (
             <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void allesEntfernen()}>
               <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -237,7 +266,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           )}
         </>
       )}
-      count={entries.length > 3
+      count={werkzeugleiste
         ? t('ai.memory.count', { shown: sichtbar.length, total: entries.length })
         : undefined}
     >
@@ -246,7 +275,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           <div
             key={entry.id}
             className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
-              bearbeitet === entry.id
+              bearbeitet?.id === entry.id
                 ? 'border-primary/50 bg-primary/5'
                 : 'border-outline-variant/40 bg-surface-container-low/35'
             }`}

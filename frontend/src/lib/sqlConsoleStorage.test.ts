@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// `clearSqlConsoleHistory` wird hier bewusst nicht direkt eingebunden: der
+// Test unten ruft `logout()` und prueft damit zugleich, dass der authStore die
+// Aufraeumfunktion ueberhaupt aufruft. Ein Direktaufruf haette genau diese
+// Verdrahtung nicht mitgeprueft — und sie ist die Stelle, die brechen kann.
 import {
-  clearSqlConsoleHistory,
   readSqlConsoleEntries,
   sqlConsoleStorageKeys,
   writeSqlConsoleEntries,

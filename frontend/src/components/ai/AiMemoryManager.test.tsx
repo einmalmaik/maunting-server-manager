@@ -163,7 +163,7 @@ describe('AiMemoryManager', () => {
     expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
     expect(aiApi.listMemory).toHaveBeenCalledWith('team', undefined, 7)
     expect(screen.queryByRole('button', { name: 'Hinzufügen' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Erinnerung löschen/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Memory-Eintrag löschen/ })).not.toBeInTheDocument()
     // Der Gedaechtnis-Schalter ist eine persoenliche Einstellung und hat in
     // einer Teamansicht nichts verloren.
     expect(screen.queryByRole('switch')).not.toBeInTheDocument()
@@ -209,5 +209,50 @@ describe('AiMemoryManager', () => {
 
     expect(await screen.findByText('Notiz zu einem entzogenen Server')).toBeInTheDocument()
     expect(screen.getByText('Server: #84')).toBeInTheDocument()
+  })
+
+  it('ändert eine Servernotiz an Ort und Stelle statt eine persönliche Kopie anzulegen', async () => {
+    // Ohne den Bereich des Eintrags geht die Korrektur als `scope: 'user'`
+    // hinaus. Das Backend sucht dann unter `user:{id}`, findet die Notiz dort
+    // nicht und legt eine zweite Zeile mit demselben Schlüssel an: die alte
+    // wirkt mit dem alten Wert weiter, und ab da gehen beide Werte gemeinsam in
+    // jedes Gespräch über diesen Server.
+    vi.mocked(client.api).mockResolvedValue([{ id: 62, name: 'DayZ-1' }])
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([
+      { ...entry, id: '...-107', scope: 'server', server_id: 62, key: 'start-timeout', value: 'braucht 120s' },
+    ])
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: start-timeout' }))
+    fireEvent.change(screen.getByLabelText('Präferenz'), { target: { value: 'braucht 300s' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+
+    await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
+      scope: 'server', server_id: 62, key: 'start-timeout', value: 'braucht 300s',
+    }))
+  })
+
+  it('behält Suchfeld und Herkunftsfilter, solange sie noch etwas bewirken', async () => {
+    // Vier Einträge, Suche auf den einzigen Treffer, Treffer gelöscht: die
+    // Schranke „erst ab vier" hängte das Suchfeld ab, `sichtbar` filterte aber
+    // weiter. Die drei verbliebenen Einträge waren damit unsichtbar, und es gab
+    // kein Bedienelement mehr, um den Filter zu leeren.
+    const ohneTreffer = viele.filter((row) => row.id !== learned.id)
+    vi.mocked(aiApi.listPersonalMemory)
+      .mockReset()
+      .mockResolvedValueOnce(viele)
+      .mockResolvedValue(ohneTreffer)
+    render(<AiMemoryManager />)
+
+    fireEvent.change(await screen.findByLabelText('Erinnerungen durchsuchen'), { target: { value: 'ram' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Memory-Eintrag löschen: ram.bevorzugt' }))
+    await waitFor(() => expect(aiApi.deleteMemory).toHaveBeenCalledWith(learned.id))
+
+    const feld = await screen.findByLabelText('Erinnerungen durchsuchen')
+    expect(feld).toHaveValue('ram')
+    expect(screen.getByRole('group', { name: 'Nach Herkunft filtern' })).toBeInTheDocument()
+    // Und man kommt auch wieder heraus.
+    fireEvent.change(feld, { target: { value: '' } })
+    expect(screen.getByText('Europe/Berlin')).toBeInTheDocument()
   })
 })

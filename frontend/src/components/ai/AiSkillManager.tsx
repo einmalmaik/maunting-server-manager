@@ -13,6 +13,18 @@ import { type AiSkillScope, skillScopeTeamId } from './knowledgeScope'
 
 const EMPTY_DRAFT = { skill_key: '', name: '', description: '', body: '' }
 
+/**
+ * Dieselbe Regel, die `AiSkillWrite` im Backend erzwingt.
+ *
+ * Sie hier zu wiederholen ist bewusst: ohne sie geht „Valheim RAM" ab —
+ * `save()` macht daraus nur Kleinbuchstaben, das Leerzeichen bleibt stehen —
+ * und als Antwort kommt die durchgereichte Pydantic-Meldung „String should
+ * match pattern …". Richtig, aber englisch und für einen Betreiber unlesbar,
+ * und sie kommt erst, nachdem er alles getippt hat. Der Hinweis unter dem Feld
+ * sagt dieselbe Regel vorher und in Worten.
+ */
+const SCHLUESSEL_MUSTER = /^[a-z0-9][a-z0-9-]{1,63}$/
+
 interface Props {
   /** Wessen Skills — panelweit oder die eines bestimmten Teams. */
   scope: AiSkillScope
@@ -119,13 +131,25 @@ export function AiSkillManager({ scope }: Props) {
     if (busy) return
     setBusy(true)
     try {
+      // Der Schalter der Zeile entscheidet, nicht das Formular. Vorher stand
+      // hier fest `enabled: true`, und das Backend übernimmt den Wert im
+      // Update-Zweig ungefragt: wer an einem abgeschalteten Skill einen
+      // Tippfehler in der Beschreibung ausbesserte, hat ihn damit stillschweigend
+      // wieder für alle im Bereich scharf gestellt — nirgends stand, dass
+      // Speichern auch einschaltet.
+      //
+      // Gelesen wird aus `zeilen`, nicht aus einer Kopie im Entwurf: sonst gäbe
+      // ein Klick auf den Schalter während des Bearbeitens einen zweiten,
+      // veralteten Wahrheitsstand, der die Umschaltung beim Speichern wieder
+      // zurücknähme.
+      const bestand = editingId === null ? null : zeilen.find((row) => row.id === editingId)
       await aiApi.saveSkill({
         skill_key: draft.skill_key.trim().toLowerCase(),
         name: draft.name.trim(),
         description: draft.description.trim(),
         body: draft.body.trim(),
         team_id: teamId,
-        enabled: true,
+        enabled: bestand?.enabled ?? true,
       })
       setDraft({ ...EMPTY_DRAFT })
       setEditingId(null)
@@ -172,7 +196,8 @@ export function AiSkillManager({ scope }: Props) {
 
   if (loading) return null
 
-  const valid = draft.skill_key.trim().length >= 2 && draft.name.trim() && draft.description.trim() && draft.body.trim()
+  const valid = SCHLUESSEL_MUSTER.test(draft.skill_key.trim().toLowerCase())
+    && draft.name.trim() && draft.description.trim() && draft.body.trim()
   const beschreibung = scope.kind === 'panel'
     ? t('ai.skills.panelDescription')
     : scope.personal ? t('ai.skills.personalDescription') : t('ai.skills.teamDescription')
@@ -182,7 +207,14 @@ export function AiSkillManager({ scope }: Props) {
       icon={BookOpen}
       title={t('ai.skills.title')}
       description={beschreibung}
-      search={zeilen.length > 3 ? { value: suche, onChange: setSuche, label: t('ai.skills.search') } : undefined}
+      // Dieselbe Schranke wie bei den Erinnerungen, und aus demselben Grund an
+      // den Suchbegriff gekoppelt: löscht man aus vier Skills den einzigen
+      // Treffer, greift „erst ab vier", das Feld ist weg, `sichtbar` filtert aber
+      // weiter — es bliebe „Kein Skill passt zur Suche" und kein Bedienelement,
+      // um da wieder herauszukommen.
+      search={zeilen.length > 3 || suche !== ''
+        ? { value: suche, onChange: setSuche, label: t('ai.skills.search') }
+        : undefined}
     >
       <ul className="space-y-2">
         {sichtbar.map((row) => (
@@ -263,6 +295,11 @@ export function AiSkillManager({ scope }: Props) {
                 placeholder="valheim-ram"
                 aria-label={t('ai.skills.key')}
               />
+              {/* Der Schlüssel ist das einzige Feld mit einer Formatregel und war
+                  das einzige ohne Hinweis — der Satz dazu lag ungenutzt in den
+                  Sprachdateien. Ohne ihn erfährt man die Regel erst aus der
+                  Fehlermeldung des Backends. */}
+              <span className="block text-xs text-on-surface-variant">{t('ai.skills.keyHint')}</span>
             </label>
             <label className="min-w-[10rem] flex-1 space-y-1.5">
               <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
