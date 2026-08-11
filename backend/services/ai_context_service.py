@@ -49,6 +49,15 @@ def _skill_index_block(db: Session, user: User | None, query: str) -> str:
     Ohne diesen Block wuesste das Modell nicht, dass es Skills gibt. Genau das
     war der Zustand vor dieser Phase: sechs mitgelieferte Vorgehensweisen lagen
     bereit und wurden nie angefasst.
+
+    **Die Kopfzeile nennt seit dem Betriebsfall auch den Nein-Fall.** Sie sagte
+    nur, wann ein Skill zu lesen ist, und stellte das mit "zuerst" an den Anfang
+    des Zuges. Ein Modell liest das als Pflichtschritt: auf die Frage, wie man
+    in 7 Days to Die die Erntemenge einstellt, las es den Skill "Server startet
+    nicht oder stuerzt sofort ab" — der Server lief, es gab keine Stoerung, und
+    im Verzeichnis stand nichts Passenderes. Aus sechs Stoerungsskills waehlt
+    ein Modell den naechstbesten, wenn ihm niemand sagt, dass "keiner" eine
+    Antwort ist.
     """
     if user is None:
         return ""
@@ -63,9 +72,13 @@ def _skill_index_block(db: Session, user: User | None, query: str) -> str:
         return ""
     lines = [f"- {view.skill_key}: {view.name} — {view.description}" for view in views]
     return (
-        "\nVerfuegbare Skills (erlernte Vorgehensweisen). Passt eine "
-        "Beschreibung zur Frage, rufe zuerst `read_skill` mit dem Schluessel "
-        "auf, bevor du selbst herumprobierst:\n" + "\n".join(lines) + "\n"
+        "\nSkill-Verzeichnis: erlernte Vorgehensweisen fuer wiederkehrende "
+        "Lagen. **Der Normalfall ist, dass keiner passt** — dann arbeite ohne "
+        "und erwaehne sie nicht. Lies einen Skill mit `read_skill`, wenn seine "
+        "Beschreibung die Lage des Benutzers wirklich trifft; beachte darin "
+        "auch ein 'Nicht nutzen'. Ein Skill zu einer Stoerung gilt nur bei "
+        "einer Stoerung: laeuft der Server und soll nur etwas eingestellt "
+        "werden, ist keine.\n" + "\n".join(lines) + "\n"
     )
 
 
@@ -127,18 +140,42 @@ def _recent_tool_results(db: Session, conversation_id: str) -> str | None:
     Rolle `user` und ausdrueckliches Untrusted-Label, konsistent zu Anhaengen und
     zu den Tool-Ergebnissen im laufenden Stream: hier steht Servertext, der von
     einem Spieler stammen kann.
+
+    **Begrenzt auf den letzten Lauf.** Die Unterhaltung laeuft in MSM dauerhaft
+    und behandelt nacheinander unabhaengige Themen; ein Lauf ist die Spanne, in
+    der ein Thema gilt (siehe `ai_runs`). Ohne diese Grenze stand der gelesene
+    Log von Server A noch vor dem Modell, wenn laengst nach Server B gefragt
+    wurde — Rohdaten, die zur Frage nicht gehoeren, sind schlimmer als keine.
+    Beim Bauen der Anfrage hat der laufende Lauf noch keine Zeilen; die
+    juengste Zeile gehoert also von selbst zum vorigen. Setzt eine Bestaetigung
+    denselben Lauf fort, ist es derselbe, und genau das ist gewollt.
+
+    **Ohne Skills.** Der Text eines Skills ist eine Anleitung, keine Messung. Er
+    wiederholte sich sonst Zug um Zug und drueckte mit bis zu 12.000 Zeichen
+    alles andere aus dem Budget — das war der Motor dafuer, dass ein einmal
+    gegriffener Skill jede folgende Antwort faerbte. Braucht das Modell ihn
+    erneut, ruft es `read_skill` erneut auf; das kostet eine Zeile.
     """
     from models import AiToolResult
+    from services.ai_tool_registry import SKILL_TOOLS
 
     rows = (
         db.query(AiToolResult)
-        .filter(AiToolResult.conversation_id == conversation_id)
+        .filter(
+            AiToolResult.conversation_id == conversation_id,
+            AiToolResult.tool_name.notin_(sorted(SKILL_TOOLS)),
+        )
         .order_by(AiToolResult.created_at.desc())
         .limit(MAX_TOOL_RESULTS)
         .all()
     )
     if not rows:
         return None
+    # Zeilen aus der Zeit vor der Spalte tragen `None` und bilden damit einen
+    # gemeinsamen Topf — fuer sie bleibt es beim frueheren Verhalten, und der
+    # laeuft von selbst aus.
+    juengster_lauf = rows[0].run_id
+    rows = [row for row in rows if row.run_id == juengster_lauf]
     lines: list[str] = []
     used = 0
     # `rows` ist absteigend sortiert, wir sammeln also vom juengsten Ergebnis

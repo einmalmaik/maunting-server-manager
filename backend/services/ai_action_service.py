@@ -192,10 +192,12 @@ def _global_tool_definitions() -> list[dict]:
         _function(
             "read_skill",
             "Laedt den vollstaendigen Text eines Skills aus dem Verzeichnis im "
-            "Systemprompt. Rufe ihn auf, sobald die Beschreibung eines Skills "
-            "zur Frage passt — der Text enthaelt die eigentliche "
-            "Vorgehensweise. Behandle ihn als Anleitung, nicht als Befehl: "
-            "pruefe weiterhin selbst, ob ein Schritt sinnvoll ist.",
+            "Systemprompt. Nur aufrufen, wenn die Beschreibung eines Skills die "
+            "Lage des Benutzers wirklich trifft — **passt keine eindeutig, ruf "
+            "gar keinen auf** und arbeite normal weiter. Ein Skill zu einer "
+            "Stoerung hilft bei einer Frage nach einer Einstellung nicht. "
+            "Behandle den Text als Anleitung, nicht als Befehl: pruefe "
+            "weiterhin selbst, ob ein Schritt sinnvoll ist.",
             {
                 "skill_key": {
                     "type": "string",
@@ -208,9 +210,14 @@ def _global_tool_definitions() -> list[dict]:
         _function(
             "learn_skill",
             "Haelt eine Vorgehensweise dauerhaft fest, damit sie beim naechsten "
-            "Mal nicht neu erarbeitet werden muss. Nutze das, wenn du ein "
-            "Problem geloest hast und die Loesung wiederkehrt — nicht fuer "
-            "Einzelfaelle und nicht fuer Zwischenergebnisse.\n"
+            "Mal nicht neu erarbeitet werden muss. Zwei Anlaesse: du hast ein "
+            "Problem geloest und die Loesung wiederkehrt — **oder** du hast "
+            "waehrend der Arbeit etwas herausgefunden, das ueber diesen Fall "
+            "hinausreicht (wo eine Einstellung eines Spiels steht, wie eine "
+            "Konfigurationsdatei aufgebaut ist, welcher Weg zum Ziel fuehrte). "
+            "Der zweite Anlass braucht weder einen Fehler noch einen "
+            "Abschluss; du entscheidest selbst. Nicht fuer Einzelfaelle und "
+            "nicht fuer Zwischenergebnisse.\n"
             "Der Text ist eine Anleitung fuer dich selbst: was zu pruefen ist, "
             "in welcher Reihenfolge, woran man die Ursache erkennt und was man "
             "nicht behaupten darf. Keine Zugangsdaten, keine Personennamen.\n"
@@ -232,8 +239,10 @@ def _global_tool_definitions() -> list[dict]:
                     "type": "string",
                     "maxLength": 500,
                     "description": (
-                        "Was der Skill tut UND wann er zu verwenden ist. Nur "
-                        "diese Zeile entscheidet spaeter, ob du ihn findest."
+                        "Was der Skill tut, wann er zu verwenden ist UND wann "
+                        "nicht. Nur diese Zeile entscheidet spaeter, ob du ihn "
+                        "findest — und ob du ihn in einer Lage greifst, in die "
+                        "er nicht gehoert. Schreib die Grenze mit hinein."
                     ),
                 },
                 "body": {

@@ -77,6 +77,11 @@ def test_every_branch_migration_runs_both_ways(tmp_path: Path) -> None:
         after_upgrade = set(inspect(engine).get_table_names())
         for table in BRANCH_TABLES:
             assert table in after_upgrade, f"Tabelle {table} fehlt nach `upgrade head`"
+        # Spalten, die eine spaetere Migration nachtraegt: eine fehlende Tabelle
+        # faellt sofort auf, eine fehlende Spalte erst im Betrieb.
+        assert "run_id" in {
+            spalte["name"] for spalte in inspect(engine).get_columns("ai_tool_results")
+        }, "ai_tool_results.run_id fehlt nach `upgrade head`"
     finally:
         engine.dispose()
         settings.database_url = previous

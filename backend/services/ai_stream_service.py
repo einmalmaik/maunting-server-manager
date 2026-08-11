@@ -312,6 +312,7 @@ def _tool_followup_messages(
             db.add(AiToolResult(
                 id=str(uuid4()),
                 conversation_id=conversation.id,
+                run_id=run_id,
                 tool_name=call.name,
                 result_json=json.dumps(value, ensure_ascii=True, separators=(",", ":")),
             ))
@@ -591,7 +592,7 @@ def _persist_write_proposals(
 
 
 def _write_followup_messages(
-    *, conversation_id: str, tool_calls, proposals: list[dict]
+    *, conversation_id: str, tool_calls, proposals: list[dict], run_id: str | None = None
 ) -> list[dict]:
     """Gibt dem Modell zurueck, was aus seinen Schreib-Aufrufen geworden ist.
 
@@ -649,6 +650,7 @@ def _write_followup_messages(
                 db.add(AiToolResult(
                     id=str(uuid4()),
                     conversation_id=conversation_id,
+                    run_id=run_id,
                     tool_name=tool_name,
                     result_json=json.dumps(
                         {"outcomes": outcomes}, ensure_ascii=True, separators=(",", ":")
@@ -1127,6 +1129,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     conversation_id=conversation_id,
                     tool_calls=current_usage.tool_calls,
                     proposals=proposals,
+                    run_id=run_id,
                 ))
                 zustand["write_rounds"] = int(zustand.get("write_rounds", 0)) + 1
 

@@ -420,6 +420,19 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
 
     Ohne Modell bleibt die alphabetische Reihenfolge. Schlechter als Bedeutung,
     aber besser als gar kein Verzeichnis.
+
+    **Die Aehnlichkeit ordnet, sie waehlt nicht aus.** Der naheliegende Ausbau
+    — eine Mindestaehnlichkeit, unter der ein Skill aus dem Verzeichnis faellt —
+    ist gemessen worden und traegt nicht. Gegen die sechs mitgelieferten Skills:
+    eine reine Konfigurationsfrage ("wieviel Holz bekomme ich pro Baum") liegt
+    bei `node-problem` auf 0,49, waehrend die passende Frage nach Erreichbarkeit
+    ihren eigenen Skill nur auf 0,37 bringt. Statische Embeddings messen die
+    thematische Naehe zu "Gameserver", nicht die Frage "ist das ueberhaupt eine
+    Stoerung" — und genau die entscheidet hier. Jede Schwelle wuerde also
+    richtige Treffer verwerfen und falsche behalten.
+    Die Unterscheidung steht deshalb dort, wo sie hingehoert: in den
+    Beschreibungen (jede sagt auch, wann sie *nicht* gilt) und in der Kopfzeile
+    des Verzeichnisses (`ai_context_service._skill_index_block`).
     """
     views = visible_skills(db, user)
     if len(views) <= MAX_INDEXED_SKILLS or not query.strip():
