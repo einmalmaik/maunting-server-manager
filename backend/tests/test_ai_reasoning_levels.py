@@ -165,6 +165,68 @@ def test_a_mandatory_model_still_obeys_the_cap_for_its_depth() -> None:
     assert (aktiv, stufe) == (True, "low")
 
 
+# ── Wenn der Deckel unter der Untergrenze des Modells liegt ───────────
+#
+# Die drei folgenden Zusicherungen hat eine Reviewrunde am 2026-08-11 als
+# fehlend nachgewiesen — alle drei Fälle waren falsch, und alle drei hatten
+# dieselbe Ursache: „das Modell kennt keine Stufen“ und „der Deckel hat alle
+# Stufen weggeschnitten“ liefen durch denselben Zweig. Das Ergebnis war jeweils
+# „an, ohne Stufe“, und ein fehlendes ``effort`` ist bei OpenRouter keine
+# Sparsamkeit, sondern die Vorgabe des Anbieters.
+
+
+def test_a_cap_below_the_models_floor_switches_thinking_off() -> None:
+    """Die Rolle darf ``low``, das Modell fängt bei ``high`` an — also aus.
+
+    Der teure Irrtum war „an, ohne Stufe“: OpenRouter setzt dann seinen
+    ``default_effort`` ein, hier ``high``. Die Rolle durfte ``low`` und
+    bezahlte ``high`` — der Deckel stand da, wirkte aber nicht.
+    """
+    modell = _modell(stufen=("max", "xhigh", "high"), standard_stufe="high")
+    assert ai_reasoning.waehlbare_stufen(modell, ai_reasoning.rang("low")) == []
+    assert ai_reasoning.klemmen(
+        modell, wunsch=None, aktiv=True, deckel=ai_reasoning.rang("low")
+    ) == (False, None)
+
+
+def test_a_mandatory_model_under_a_low_cap_gets_the_shallowest_it_knows() -> None:
+    """Abschalten geht nicht — dann wenigstens so flach wie möglich.
+
+    ``None`` wäre hier das Gegenteil von sparsam: es überlässt die Tiefe dem
+    Anbieter. Genannt wird deshalb die flachste Stufe, die das Modell führt.
+    """
+    modell = _modell(stufen=("max", "high"), standard_stufe="max", zwingend=True)
+    assert ai_reasoning.klemmen(
+        modell, wunsch=None, aktiv=True, deckel=ai_reasoning.rang("low")
+    ) == (True, "high")
+
+
+def test_a_wish_below_the_models_floor_is_raised_to_the_shallowest_not_the_deepest() -> None:
+    """Wer um wenig bittet, darf nicht das Teuerste bekommen.
+
+    Bisher galt jede Abweichung als „zu hoch“ und wurde auf ``erlaubt[-1]``
+    gesetzt. Bei einem Modell ab ``high`` wurde aus der Bitte um ``low`` damit
+    ``max`` — die Klemmung lief in die falsche Richtung.
+    """
+    modell = _modell(stufen=("max", "high"), standard_stufe="high")
+    assert ai_reasoning.klemmen(
+        modell, wunsch="low", aktiv=True, deckel=None
+    ) == (True, "high")
+
+
+def test_a_model_without_levels_still_sends_no_level() -> None:
+    """Die Gegenprobe: hier ist „an, ohne Stufe“ richtig und bleibt es.
+
+    145 der 272 denkenden Modelle kennen keine Stufen. Für sie gibt es keine,
+    die man nennen könnte — der Fall darf durch die Trennung oben nicht
+    versehentlich mit abgeschaltet werden.
+    """
+    modell = _modell(stufen=(), standard_stufe=None)
+    assert ai_reasoning.klemmen(
+        modell, wunsch=None, aktiv=True, deckel=ai_reasoning.rang("low")
+    ) == (True, None)
+
+
 # ── Modelle, die gar nicht denken ─────────────────────────────────────
 
 

@@ -139,20 +139,40 @@ def klemmen(
     Ein Wunsch, der über dem Deckel liegt, wird auf den Deckel **gesenkt** statt
     abgewiesen. Der Benutzer bekommt so eine Antwort statt einer Fehlermeldung,
     und die Grenze wirkt trotzdem — sie ist eine Kostengrenze, kein Verbot.
+
+    **Weglassen ist keine Grenze.** Wer keine Stufe mitschickt, bekommt nicht
+    die billigste, sondern die Vorgabe des Anbieters — bei OpenRouter ist das
+    für die meisten Modelle ``medium``, für manche ``high``. Deshalb darf ein
+    fehlendes ``effort`` nur dort stehen, wo das Modell wirklich keine Stufen
+    kennt. Überall sonst wird eine Stufe genannt, auch wenn die Rechnung dafür
+    einen Umweg braucht.
     """
     if not modell.denkt:
         return False, None
     if not aktiv and darf_abschalten(modell):
         return False, None
 
+    # Ohne Deckel: was das Modell überhaupt kann. Mit Deckel: was diese Rolle
+    # davon darf. Der Vergleich der beiden trennt zwei Zustände, die sich von
+    # außen gleich anfühlen und völlig verschieden zu behandeln sind.
+    kann = waehlbare_stufen(modell, None)
     erlaubt = waehlbare_stufen(modell, deckel)
+
     if not erlaubt:
-        # Das Modell kennt keine Stufen (die Mehrheit) oder der Deckel lässt
-        # keine übrig. Bei einem zwingend denkenden Modell bleibt es trotzdem
-        # an — abschalten geht dort nicht, und ein `enabled: false` würde
-        # abgewiesen statt befolgt.
-        if not aktiv and modell.zwingend:
-            return True, None
+        if kann:
+            # Der Deckel hat **alles** weggeschnitten: die Rolle darf höchstens
+            # `low`, das Modell fängt erst bei `high` an. Bisher fiel dieser
+            # Fall mit „Modell ohne Stufen" zusammen und ergab „an, ohne
+            # Stufe" — also genau die Vorgabe des Anbieters, die über dem
+            # Deckel liegt. Die Rolle durfte `low` und bezahlte `high`.
+            if darf_abschalten(modell):
+                return False, None
+            # Denkzwang: abschalten geht nicht. Dann wenigstens die flachste
+            # Stufe, die das Modell kennt, statt der Vorgabe des Anbieters.
+            return True, kann[0]
+        # Das Modell kennt gar keine Stufen — für 145 der 272 denkenden
+        # Modelle ist das der Normalfall. Hier ist „an, ohne Stufe" richtig
+        # und nicht bloß die Notlösung.
         if deckel is not None and deckel <= MIN_RANG and darf_abschalten(modell):
             return False, None
         return bool(aktiv) or modell.zwingend, None
@@ -167,8 +187,13 @@ def klemmen(
         if modell.standard_stufe in erlaubt:
             return True, modell.standard_stufe
         return True, erlaubt[0]
-    # Über dem Deckel: auf die höchste erlaubte senken.
-    return True, erlaubt[-1]
+    # Der Wunsch ist einzuordnen, aber nicht wählbar — und das geht in **zwei**
+    # Richtungen. Bisher wurde jede Abweichung als „zu hoch" behandelt und auf
+    # `erlaubt[-1]` gesetzt; wer bei einem Modell ab `high` um `low` bat, bekam
+    # dadurch `max`. Die Bitte um wenig darf nicht das Teuerste auslösen.
+    if gewuenschter_rang > rang(erlaubt[-1]):
+        return True, erlaubt[-1]
+    return True, erlaubt[0]
 
 
 # ── Zusammenführung ───────────────────────────────────────────────────
