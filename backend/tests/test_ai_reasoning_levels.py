@@ -28,7 +28,6 @@ def _modell(**overrides) -> Modell:
         "denkt": True,
         "stufen": ("max", "xhigh", "high", "medium", "low"),
         "standard_stufe": "high",
-        "standard_an": True,
         "zwingend": False,
     }
     werte.update(overrides)

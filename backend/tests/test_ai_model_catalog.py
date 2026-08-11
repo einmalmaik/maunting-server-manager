@@ -28,6 +28,11 @@ ANTWORT = {
             "name": "Claude Opus 5",
             "reasoning": {
                 "mandatory": False,
+                # ``default_enabled`` steht hier, weil der Anbieter es liefert —
+                # MSM liest es absichtlich nicht. Der Sendepfad nennt
+                # ``enabled`` immer selbst (siehe test_ai_provider_diagnostics),
+                # die Voreinstellung des Modells waere also eine Quelle, auf die
+                # sich nichts stuetzen darf.
                 "default_enabled": True,
                 "supported_efforts": ["max", "xhigh", "high", "medium", "low"],
                 "default_effort": "high",
@@ -173,6 +178,66 @@ async def test_without_any_catalog_the_result_is_empty_not_an_exception() -> Non
     async with _client(lambda _r: httpx.Response(503, json={})) as client:
         assert await ai_model_catalog.modelle(client, "openrouter") == []
         assert await ai_model_catalog.finde(client, "openrouter", "irgendwas") is None
+
+
+@pytest.mark.asyncio
+async def test_a_hanging_provider_costs_one_attempt_not_one_per_call() -> None:
+    """Ein Fehlschlag wird gemerkt — sonst wartet jeder Aufruf erneut die volle Zeit.
+
+    Vorher versuchte jeder Aufruf den Abruf neu, und zwar unter dem modulweiten
+    Schloss und mit ``timeout=ABRUF_TIMEOUT``. Ein GET /api/ai/providers fragt
+    den Katalog je aktiviertem Provider, das Absenden einer Chatnachricht ueber
+    ``ai_reasoning.vorgabe`` noch einmal: aus einem nicht erreichbaren Anbieter
+    wurden so 30 Sekunden **mal Anzahl der Aufrufe** fuer eine einzige Anfrage,
+    seriell auch fuer alle anderen Benutzer. Der Zaehler hier ist genau dieses
+    Vielfache — deshalb zaehlt der Test Versuche und nicht Sekunden.
+    """
+    versuche = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal versuche
+        versuche += 1
+        return httpx.Response(503, json={})
+
+    async with _client(handler) as client:
+        assert await ai_model_catalog.modelle(client, "openrouter") == []
+        assert await ai_model_catalog.modelle(client, "openrouter") == []
+        assert await ai_model_catalog.finde(client, "openrouter", "irgendwas") is None
+    assert versuche == 1
+
+
+@pytest.mark.asyncio
+async def test_the_pause_ends_and_the_reload_button_never_waits_for_it() -> None:
+    """Die Ruhefrist darf nicht zum zweiten Zwischenspeicher werden.
+
+    Zwei Wege zurueck zum Anbieter muessen offen bleiben: der Knopf „Modelle neu
+    laden“ sofort, und der gewoehnliche Aufruf nach Ablauf der Frist. Ohne den
+    ersten sagte der Knopf eine Minute lang nichts Neues, obwohl der Betreiber
+    gerade nachgesehen hat; ohne den zweiten waere eine einzige Stoerung
+    dauerhaft.
+    """
+    versuche = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal versuche
+        versuche += 1
+        return httpx.Response(503, json={})
+
+    async with _client(handler) as client:
+        await ai_model_catalog.modelle(client, "openrouter")
+        assert versuche == 1
+        # Innerhalb der Frist: gar keine Frage an den Anbieter.
+        await ai_model_catalog.modelle(client, "openrouter")
+        assert versuche == 1
+        # Der Knopf des Betreibers wartet nicht auf die Frist.
+        await ai_model_catalog.modelle(client, "openrouter", erzwingen=True)
+        assert versuche == 2
+        # Nach Ablauf fragt auch der gewoehnliche Weg wieder. Die Zeit wird
+        # zurueckgedreht statt abgewartet — der Zustand liegt im selben Modul,
+        # und eine Minute Testlaufzeit waere der falsche Preis dafuer.
+        ai_model_catalog._cache["openrouter"].fehler_am -= ai_model_catalog.FEHLER_RUHE
+        await ai_model_catalog.modelle(client, "openrouter")
+        assert versuche == 3
 
 
 @pytest.mark.asyncio

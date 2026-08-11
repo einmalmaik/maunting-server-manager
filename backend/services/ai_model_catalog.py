@@ -23,6 +23,14 @@ verschwiege welche, die es gibt.
 gültig, auch über die Frist hinaus — ein veralteter Katalog ist unbrauchbarer
 als ein frischer, aber unendlich viel brauchbarer als gar keiner. Nur beim
 allerersten Abruf gibt es nichts zu retten; dann meldet die Oberfläche das.
+
+Ein Ausfall wird ausserdem **vermerkt**. Nach einem Fehlversuch wird eine
+Minute lang gar nicht erst gefragt, sonst zahlte jeder einzelne Aufruf erneut
+die volle ``ABRUF_TIMEOUT`` — und da das Schloss ueber dem Abruf gehalten wird,
+warteten alle gleichzeitigen Anfragen hintereinander mit. Ein nicht
+erreichbarer Anbieter haette den Chat dann nicht nur ausgebremst, sondern
+gestaut: die Providerliste fragt den Katalog je Provider, das Absenden einer
+Nachricht noch einmal.
 """
 
 from __future__ import annotations
@@ -44,6 +52,16 @@ logger = logging.getLogger(__name__)
 #: Liste aktuell genug und die Zahl der Abrufe klein.
 CACHE_TTL = timedelta(hours=6)
 ABRUF_TIMEOUT = 30.0
+#: Wie lange nach einem gescheiterten Abruf gar nicht erst wieder gefragt wird.
+#: Ohne diese Frist kostet ein haengender Anbieter **jeden** Aufruf die volle
+#: ``ABRUF_TIMEOUT``, und weil das Schloss ueber dem Abruf gehalten wird, warten
+#: alle gleichzeitigen Anfragen zusaetzlich hintereinander. Ein einziges
+#: GET /api/ai/providers fragt den Katalog je aktiviertem Provider, das Absenden
+#: einer Chatnachricht ueber ``ai_reasoning.vorgabe`` noch einmal — aus 30
+#: Sekunden werden so Minuten. Eine Minute Ruhe ist kurz genug, dass ein wieder
+#: erreichbarer Anbieter praktisch sofort wirkt, und lang genug, dass ein
+#: Ausfall einmal bezahlt wird statt bei jeder Anfrage neu.
+FEHLER_RUHE = timedelta(seconds=60)
 #: Schutz gegen eine Antwort, die kein Katalog mehr ist. Der echte Katalog liegt
 #: bei rund 660 KB; alles jenseits dieser Grenze wird nicht erst geparst.
 MAX_KATALOG_BYTES = 8 * 1024 * 1024
@@ -67,7 +85,6 @@ class Modell:
     denkt: bool
     stufen: tuple[str, ...] = ()
     standard_stufe: str | None = None
-    standard_an: bool = False
     zwingend: bool = False
 
 
@@ -75,10 +92,32 @@ class Modell:
 class _Eintrag:
     modelle: list[Modell] = field(default_factory=list)
     geholt_am: datetime | None = None
+    #: Wann der letzte Abruf gescheitert ist. Getrennt von ``geholt_am``, weil
+    #: beides gleichzeitig gelten kann und Verschiedenes bedeutet: ein alter,
+    #: aber brauchbarer Stand plus ein frischer Fehlschlag.
+    fehler_am: datetime | None = None
 
 
 _cache: dict[str, _Eintrag] = {}
 _lock = asyncio.Lock()
+
+
+def _antwortet_ohne_abruf(eintrag: _Eintrag, jetzt: datetime) -> bool:
+    """Beantwortet dieser Eintrag die Frage, ohne den Anbieter zu fragen?
+
+    Zwei Gruende sprechen gegen einen erneuten Abruf, und sie stehen hier
+    zusammen, weil dieselbe Entscheidung zweimal faellt — einmal vor dem
+    Schloss und einmal darin:
+
+    * Der Stand ist frisch genug (``geholt_am`` innerhalb ``CACHE_TTL``).
+    * Der letzte Versuch ist gerade erst gescheitert (``fehler_am`` innerhalb
+      ``FEHLER_RUHE``). Dann ist der alte Stand — notfalls die leere Liste —
+      die richtige Antwort, denn ein zweiter Versuch im selben Atemzug kostet
+      nur dieselbe Wartezeit noch einmal und liefert dasselbe Nichts.
+    """
+    if eintrag.geholt_am is not None and jetzt - eintrag.geholt_am < CACHE_TTL:
+        return True
+    return eintrag.fehler_am is not None and jetzt - eintrag.fehler_am < FEHLER_RUHE
 
 
 def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
@@ -112,7 +151,12 @@ def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
         denkt=True,
         stufen=stufen,
         standard_stufe=standard if isinstance(standard, str) and standard else None,
-        standard_an=bool(reasoning.get("default_enabled")),
+        # ``default_enabled`` liefert der Anbieter mit, MSM uebernimmt es
+        # bewusst **nicht**: der Sendepfad nennt ``enabled`` immer ausdruecklich
+        # (siehe openai_compatible_adapter), fragt also nie nach der
+        # Voreinstellung des Modells. Ein gefuelltes, aber nie gelesenes Feld
+        # verspricht eine Faehigkeit, die es nicht gibt — und der naechste Leser
+        # haelt es fuer eine benutzte Quelle.
         zwingend=bool(reasoning.get("mandatory")),
     )
 
@@ -155,29 +199,28 @@ async def modelle(
     ``erzwingen=True`` umgeht die Frist — das ist der Knopf „Modelle neu laden“
     in den Provider-Einstellungen. Er ist nötig, weil der häufigste Fall nicht
     „unbekanntes Modell“ ist, sondern „der Katalog ist ein paar Stunden alt“.
+    Er umgeht **auch** die Ruhefrist nach einem Fehlversuch: wer den Knopf
+    drueckt, hat gerade beim Anbieter nachgesehen und will jetzt eine Antwort,
+    keine gespeicherte Absage.
     """
     spec = anbieter(kind)
     jetzt = datetime.now(timezone.utc)
 
     eintrag = _cache.get(kind)
-    if (
-        not erzwingen
-        and eintrag is not None
-        and eintrag.geholt_am is not None
-        and jetzt - eintrag.geholt_am < CACHE_TTL
-    ):
+    if not erzwingen and eintrag is not None and _antwortet_ohne_abruf(eintrag, jetzt):
         return eintrag.modelle
 
     async with _lock:
         # Zweite Prüfung im Schloss: während des Wartens kann ein anderer
-        # Aufruf den Katalog bereits geholt haben. Ohne sie holen ihn beim
-        # Start alle gleichzeitig wartenden Anfragen nacheinander erneut.
+        # Aufruf den Katalog bereits geholt haben — oder erfolglos versucht
+        # haben, ihn zu holen. Ohne sie holen ihn beim Start alle gleichzeitig
+        # wartenden Anfragen nacheinander erneut, und bei einem haengenden
+        # Anbieter wartet jede von ihnen ihre eigene volle ``ABRUF_TIMEOUT``.
         eintrag = _cache.get(kind)
         if (
             not erzwingen
             and eintrag is not None
-            and eintrag.geholt_am is not None
-            and datetime.now(timezone.utc) - eintrag.geholt_am < CACHE_TTL
+            and _antwortet_ohne_abruf(eintrag, datetime.now(timezone.utc))
         ):
             return eintrag.modelle
         try:
@@ -186,9 +229,18 @@ async def modelle(
             logger.warning(
                 "Modellkatalog %s nicht abrufbar error=%s", kind, type(exc).__name__
             )
-            # Der alte Stand überlebt den Fehlversuch — ohne aufgefrischten
-            # Zeitstempel, damit der nächste Aufruf es erneut versucht.
-            return eintrag.modelle if eintrag is not None else []
+            # Der alte Stand überlebt den Fehlversuch — ohne aufgefrischtes
+            # ``geholt_am``, damit nach der Ruhefrist wirklich wieder abgerufen
+            # wird. Der Fehlschlag selbst wird jedoch vermerkt: ohne diesen
+            # Vermerk liefe der naechste Aufruf sofort wieder in dieselbe
+            # 30-Sekunden-Wartezeit, und zwar unter demselben Schloss.
+            gescheitert = eintrag if eintrag is not None else _Eintrag()
+            gescheitert.fehler_am = datetime.now(timezone.utc)
+            _cache[kind] = gescheitert
+            return gescheitert.modelle
+        # Erfolg setzt den Eintrag neu auf und loescht damit auch einen
+        # frueheren ``fehler_am`` — ein geglueckter Abruf ist die Antwort auf
+        # alles, was vorher schiefging.
         _cache[kind] = _Eintrag(modelle=frisch, geholt_am=datetime.now(timezone.utc))
         return frisch
 
