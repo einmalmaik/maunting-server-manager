@@ -71,7 +71,7 @@ def scope_identity(
         if server_id is not None or team_id is not None:
             raise HTTPException(status_code=422, detail="User-Memory akzeptiert keinen Bezug")
         return f"user:{user.id}", user.id, None, None
-    if scope == "server":
+    if scope in ("server", "server_shared"):
         if team_id is not None:
             raise HTTPException(status_code=422, detail="Server-Memory akzeptiert kein Team")
         # Existenz **und** Recht — vorher stand hier nur das Recht.
@@ -96,7 +96,18 @@ def scope_identity(
             )
         ):
             raise HTTPException(status_code=404, detail="Server nicht gefunden")
-        return f"server:{server_id}:user:{user.id}", user.id, server_id, None
+        if scope == "server":
+            return f"server:{server_id}:user:{user.id}", user.id, server_id, None
+        # Das Wissen der Anlage. Bewusst **ohne** Besitzer, genau wie bei `team`
+        # weiter unten: es soll stehenbleiben, wenn der Kollege geht, der es
+        # aufgeschrieben hat — und `owner_user_id` traegt ein CASCADE auf
+        # `users.id`, das es mitnehmen wuerde.
+        #
+        # Die Kennung endet auf `:shared` und nicht auf der blossen Servernummer.
+        # `server:62` waere ein **Praefix** von `server:62:user:7`; jede
+        # Vergleichslogik, die je mit `startswith` arbeitet, saehe die
+        # persoenliche Notiz eines Kollegen dann als Anlagenwissen an.
+        return f"server:{server_id}:shared", None, server_id, None
     if scope == "team":
         from services import team_service
 
@@ -236,7 +247,10 @@ def personal_entries(db: Session, user: User) -> list[tuple[AiMemoryEntry, str]]
     return [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
 
 
-def _assert_may_write(db: Session, user: User, scope: str, team_id: int | None) -> None:
+def _assert_may_write(
+    db: Session, user: User, scope: str, team_id: int | None,
+    server_id: int | None = None,
+) -> None:
     """Wer einen geteilten Bereich veraendern darf.
 
     Persoenliche Eintraege brauchen keine Pruefung — sie verlassen den Benutzer
@@ -244,7 +258,25 @@ def _assert_may_write(db: Session, user: User, scope: str, team_id: int | None) 
     fuer denselben Schritt braeuchte. Genau darin liegt die Zusicherung, die
     ueber jedem KI-Schreibvorgang steht: **die KI kann nie mehr teilen, als der
     Benutzer selbst teilen duerfte.**
+
+    ``server_id`` ist bereits durch `scope_identity` gegangen und damit gegen
+    `server.view` geprueft. Hier steht die zweite, engere Frage: Lesen reicht,
+    um das Wissen einer Anlage zu **sehen**; um es zu **aendern**, muss man an
+    der Anlage auch etwas aendern duerfen. Sonst schriebe ein Gast eine Ansage
+    in die Betriebsanleitung, nach der sich alle anderen richten.
     """
+    if scope == "server_shared":
+        if server_id is None or not permission_service.has_server_permission(
+            db=db, user=user, server_id=server_id, key="server.config.write"
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Du darfst das Wissen dieses Servers nicht veraendern. Fuer "
+                    "eine eigene Notiz dazu nimm scope='server'."
+                ),
+            )
+        return
     if scope == "panel":
         if not permission_service.has_global_permission(db, user, "panel.settings.write"):
             raise HTTPException(status_code=403, detail="Keine Berechtigung")
@@ -293,7 +325,7 @@ def upsert_entry(
     identity, owner_id, normalized_server_id, normalized_team_id = scope_identity(
         db, user, scope, server_id, team_id
     )
-    _assert_may_write(db, user, scope, normalized_team_id)
+    _assert_may_write(db, user, scope, normalized_team_id, normalized_server_id)
     safe_value = _safe_value(value)
     row = db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == identity, AiMemoryEntry.key == key
@@ -349,7 +381,14 @@ def upsert_entry(
     row.updated_at = datetime.now(timezone.utc)
     audit_service.record_privileged_action(
         db, user_id=user.id, action=action, target_type="ai_memory", target_id=row.id,
-        details={"scope": scope, "origin": origin},
+        # Die Servernummer gehoert ins Protokoll, sobald der Bereich sie hat.
+        # Ohne sie stuende dort "jemand hat Anlagenwissen geaendert" und nicht
+        # bei welcher Anlage — und genau das ist die Frage, die ein Betreiber
+        # spaeter stellt.
+        details={
+            "scope": scope, "origin": origin,
+            **({"server_id": normalized_server_id} if normalized_server_id else {}),
+        },
         origin="ai" if origin == "ai" else "direct",
     )
     try:
@@ -384,6 +423,19 @@ def delete_entry(db: Session, user: User, entry_id: str) -> None:
         allowed = row.team_id is not None and team_service.can_manage_team_memory(
             db, user, row.team_id
         )
+    elif row.scope == "server_shared":
+        # Ein eigener Zweig und nicht der `else` darunter. Dort steht
+        # `row.owner_user_id == user.id`, und Anlagenwissen hat bewusst keinen
+        # Besitzer: der Vergleich waere gegen NULL immer False, der Eintrag
+        # damit fuer **niemanden** loeschbar — auch nicht fuer den Betreiber.
+        #
+        # Und auch die Begruendung des `else` traegt hier nicht: sie gilt dem
+        # eigenen Eintrag, den man behalten koennen soll, wenn der Serverzugang
+        # wegfaellt. Fremdes Wissen zu loeschen, das man nicht mehr sehen darf,
+        # ist das Gegenteil davon.
+        allowed = row.server_id is not None and permission_service.has_server_permission(
+            db=db, user=user, server_id=row.server_id, key="server.config.write"
+        )
     else:
         # Der eigene Eintrag, ohne zusaetzliche Serverbedingung. Vorher verlangte
         # eine serverbezogene Notiz weiterhin `server.view` — wer den Zugriff auf
@@ -396,7 +448,12 @@ def delete_entry(db: Session, user: User, entry_id: str) -> None:
         raise HTTPException(status_code=404, detail="Memory-Eintrag nicht gefunden")
     audit_service.record_privileged_action(
         db, user_id=user.id, action="ai.memory.deleted", target_type="ai_memory",
-        target_id=row.id, details={"scope": row.scope}, origin="direct",
+        target_id=row.id,
+        details={
+            "scope": row.scope,
+            **({"server_id": row.server_id} if row.server_id else {}),
+        },
+        origin="direct",
     )
     db.delete(row)
     db.commit()
@@ -422,8 +479,14 @@ def delete_all_entries(
     Ein Audit-Eintrag mit der Anzahl statt einem je Zeile: dreissig gleichartige
     Zeilen im Protokoll verdecken die Handlung, statt sie zu belegen.
     """
-    identity, _, _, _ = scope_identity(db, user, scope, server_id, team_id)
-    _assert_may_write(db, user, scope, team_id)
+    # Die **normalisierten** Werte weitergeben und nicht die rohen. Vorher stand
+    # hier `team_id` direkt aus der Anfrage; bei einem Bereich, dessen Kennung
+    # aus etwas anderem entsteht, laeuft die Rechtepruefung damit gegen einen
+    # anderen Gegenstand als das Loeschen darunter.
+    identity, _, normalized_server_id, normalized_team_id = scope_identity(
+        db, user, scope, server_id, team_id
+    )
+    _assert_may_write(db, user, scope, normalized_team_id, normalized_server_id)
     rows = db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == identity
     ).all()
@@ -433,7 +496,12 @@ def delete_all_entries(
         db.delete(row)
     audit_service.record_privileged_action(
         db, user_id=user.id, action="ai.memory.cleared", target_type="ai_memory",
-        target_id=None, details={"scope": scope, "count": len(rows)}, origin="direct",
+        target_id=None,
+        details={
+            "scope": scope, "count": len(rows),
+            **({"server_id": normalized_server_id} if normalized_server_id else {}),
+        },
+        origin="direct",
     )
     db.commit()
     return len(rows)
@@ -581,17 +649,32 @@ def _visible_scope_rows(
     # Zeile einzeln nach — bei einem Betreiber mit vielen Servern eine Abfrage
     # je Zeile und Chatnachricht.
     sichtbare = permission_service.list_visible_server_ids(db, user)
+
+    def _serverbezogen(*bedingungen):
+        """Dieselbe Mengenbegrenzung fuer jeden serverbezogenen Bereich."""
+        if sichtbare is None:
+            return and_(*bedingungen)
+        if not sichtbare:
+            return None
+        return and_(*bedingungen, AiMemoryEntry.server_id.in_(sichtbare))
+
     conditions = [AiMemoryEntry.scope_identity == "panel"]
+    # Anlagenwissen haengt **nicht** am persoenlichen Einwilligungsschalter.
+    # Derselbe Gedanke wie bei `team` und `panel`: der Schalter ist eine
+    # Entscheidung ueber das eigene Gedaechtnis, nicht ueber das der Kollegen.
+    # Wer ihn ausschaltet, soll nicht nebenbei die Betriebsanleitung seines
+    # Servers verlieren — die hat er nicht angelegt und kann sie nicht ersetzen.
+    anlagenwissen = _serverbezogen(AiMemoryEntry.scope == "server_shared")
+    if anlagenwissen is not None:
+        conditions.append(anlagenwissen)
     if persoenlich:
         conditions.append(AiMemoryEntry.scope_identity == f"user:{user.id}")
-        eigene_notiz = [
+        eigene_notiz = _serverbezogen(
             AiMemoryEntry.scope == "server",
             AiMemoryEntry.owner_user_id == user.id,
-        ]
-        if sichtbare is None:
-            conditions.append(and_(*eigene_notiz))
-        elif sichtbare:
-            conditions.append(and_(*eigene_notiz, AiMemoryEntry.server_id.in_(sichtbare)))
+        )
+        if eigene_notiz is not None:
+            conditions.append(eigene_notiz)
     if team_ids:
         conditions.append(
             and_(AiMemoryEntry.scope == "team", AiMemoryEntry.team_id.in_(team_ids))
@@ -602,7 +685,7 @@ def _visible_scope_rows(
 
     visible: list[AiMemoryEntry] = []
     for row in rows:
-        if row.scope == "server":
+        if row.scope in ("server", "server_shared"):
             if row.server_id is None or not permission_service.has_server_permission(
                 db=db, user=user, server_id=row.server_id, key="server.view"
             ):
@@ -658,6 +741,13 @@ def _memory_line(row: AiMemoryEntry, value: str) -> str:
     # Antworten auf dieselbe Frage.
     if row.scope == "server":
         scope = f"server:{row.server_id}"
+    elif row.scope == "server_shared":
+        # Nummer **und** Unterscheidung zur eigenen Notiz. Der `else`-Zweig
+        # unten schriebe bloss "server_shared" ohne Nummer — also genau die
+        # Verwechslung, die der Kommentar darueber verhindern soll. Das Wort
+        # "anlage" statt "shared", weil das Etikett das Modell erreicht und der
+        # Rest der Zeile ebenfalls deutsch ist.
+        scope = f"server:{row.server_id}:anlage"
     elif row.scope == "team":
         scope = f"team:{row.team_id}"
     else:
@@ -831,12 +921,12 @@ def delete_by_keys(
 
     Rechte wie beim Schreiben: persoenliche Eintraege gehoeren dem Benutzer,
     Team-Eintraege verlangen `can_manage_memory`, panelweite
-    `panel.settings.write`.
+    `panel.settings.write`, das Wissen einer Anlage `server.config.write`.
     """
-    identity, _owner_id, _server_id, normalized_team_id = scope_identity(
+    identity, _owner_id, normalized_server_id, normalized_team_id = scope_identity(
         db, user, scope, server_id, team_id
     )
-    _assert_may_write(db, user, scope, normalized_team_id)
+    _assert_may_write(db, user, scope, normalized_team_id, normalized_server_id)
 
     wanted = [key for key in keys if isinstance(key, str) and key.strip()]
     if not wanted:
@@ -853,7 +943,11 @@ def delete_by_keys(
     for row in rows:
         audit_service.record_privileged_action(
             db, user_id=user.id, action="ai.memory.deleted", target_type="ai_memory",
-            target_id=row.id, details={"scope": row.scope, "key": row.key},
+            target_id=row.id,
+            details={
+                "scope": row.scope, "key": row.key,
+                **({"server_id": row.server_id} if row.server_id else {}),
+            },
             origin="ai",
         )
         removed.append(row.key)

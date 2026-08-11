@@ -1,0 +1,514 @@
+"""Wissen, das der Anlage gehoert — und nicht dem, der es aufgeschrieben hat.
+
+Der Anlass steht in einem Satz aus dem Betrieb: *"Bei diesem Server muss man
+nach jedem Neustart die Whitelist neu laden, sonst kommt keiner rein."* Die KI
+legte ihn im persoenlichen Gedaechtnis ab. Nicht falsch angewandt — eine
+fehlende Schublade. Der Kollege, der morgen Dienst hat, findet ihn dort nie.
+
+Was `server_shared` von den vier vorhandenen Bereichen unterscheidet, sind vier
+Zusagen, und jede hat hier ihren Fall:
+
+1. **Sehen darf, wer den Server sehen darf** (`server.view`) — aendern nur, wer
+   an der Anlage etwas aendern darf (`server.config.write`).
+2. **Es gehoert niemandem.** `owner_user_id` ist NULL; das Wissen ueberlebt das
+   Konto seines Verfassers und verschwindet mit dem Server.
+3. **Es haengt nicht am persoenlichen Einwilligungsschalter.** Der ist eine
+   Entscheidung ueber das eigene Gedaechtnis, nicht ueber das der Kollegen.
+4. **Es ist eine gemeinsame Kasse.** Die 100er-Grenze gilt je Server, nicht je
+   Mensch.
+"""
+
+from __future__ import annotations
+
+import pytest
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from models import (
+    AiMemoryEntry,
+    Role,
+    RolePermission,
+    Server,
+    ServerPermission,
+    User,
+)
+from services import ai_memory_service
+from services.auth_service import AuthService
+from services.role_service import set_user_roles
+
+
+def _user(db: Session, name: str) -> User:
+    user = AuthService.create_user(db, name, f"{name}@test.de", "MemPass123!")
+    user.email_verified = True
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _server(db: Session, name: str) -> Server:
+    server = Server(
+        name=name, game_type="dayz", install_dir=f"/tmp/{name}", status="stopped"
+    )
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+    return server
+
+
+def _allow(
+    db: Session, user: User, server: Server, *server_keys: str, memory: bool = True
+) -> None:
+    role = Role(name=f"rolle-{user.username}", description=None, is_system=False)
+    db.add(role)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_key="ai.memory.use"))
+    db.commit()
+    set_user_roles(db, user, [role.id])
+    for key in server_keys:
+        db.add(ServerPermission(
+            user_id=user.id, server_id=server.id, permission_key=key
+        ))
+    db.commit()
+    ai_memory_service.set_preference(db, user, memory)
+
+
+def _merken(db: Session, user: User, server: Server, key: str, value: str):
+    return ai_memory_service.upsert_entry(
+        db, user=user, scope="server_shared", server_id=server.id,
+        key=key, value=value, origin="ai",
+    )
+
+
+def _kontext(db: Session, user: User, query: str = "") -> str:
+    block = ai_memory_service.provider_memory_context(db, user, query)
+    db.commit()
+    return block or ""
+
+
+# ── Die Schublade tut, wozu es sie gibt ───────────────────────────────
+
+
+def test_the_note_reaches_the_colleague_who_never_wrote_it(
+    db: Session, regular_user: User
+) -> None:
+    """Der eigentliche Zweck, in einem Fall.
+
+    Genau das konnte das persoenliche Gedaechtnis nicht: der Satz stand da, aber
+    nur fuer den, der ihn aufgeschrieben hatte. Der Kollege braucht ihn
+    dringender — er war beim Vorfall nicht dabei.
+    """
+    server = _server(db, "whitelist")
+    kollege = _user(db, "kollege")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+    _allow(db, kollege, server, "server.view")
+
+    _merken(db, regular_user, server, "whitelist",
+            "Nach jedem Neustart die Whitelist neu laden, sonst kommt keiner rein.")
+
+    assert "Whitelist neu laden" in _kontext(db, kollege, "Warum kommt keiner rein?")
+
+
+def test_the_label_names_the_server(db: Session, regular_user: User) -> None:
+    """Ohne Nummer wendet das Modell eine Eigenheit auf den falschen Server an.
+
+    Und ohne die Unterscheidung zur persoenlichen Notiz waere nicht zu sehen, ob
+    eine Zeile fuer alle gilt oder nur fuer einen selbst.
+    """
+    server = _server(db, "beschriftet")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+
+    _merken(db, regular_user, server, "port", "Aussen 30015, innen 27015.")
+
+    assert f"[server:{server.id}:anlage/gemerkt]" in _kontext(db, regular_user)
+
+
+def test_a_server_only_shows_its_own_knowledge(
+    db: Session, regular_user: User
+) -> None:
+    """Zwei Anlagen, zwei Betriebsanleitungen — und keine Vermischung."""
+    einer = _server(db, "eins")
+    anderer = _server(db, "zwei")
+    _allow(db, regular_user, einer, "server.view", "server.config.write")
+    db.add_all([
+        ServerPermission(user_id=regular_user.id, server_id=anderer.id,
+                         permission_key=key)
+        for key in ("server.view", "server.config.write")
+    ])
+    db.commit()
+
+    _merken(db, regular_user, einer, "eigenheit", "Braucht zwei Minuten zum Start.")
+    _merken(db, regular_user, anderer, "eigenheit", "Startet sofort.")
+
+    eintraege = ai_memory_service.list_entries(
+        db, regular_user, "server_shared", einer.id
+    )
+
+    assert [wert for _row, wert in eintraege] == ["Braucht zwei Minuten zum Start."]
+
+
+# ── Wer sehen darf, darf noch lange nicht schreiben ────────────────────
+
+
+def test_reading_a_server_is_not_enough_to_write_its_manual(
+    db: Session, regular_user: User
+) -> None:
+    """Ein Gast schreibt keine Ansage, nach der sich alle anderen richten.
+
+    Der Text der Absage ist Teil der Zusage: er nennt den Weg, der offensteht.
+    Ohne ihn glaubt ein Benutzer — oder das Modell —, es gaebe gar keinen.
+    """
+    server = _server(db, "nurlesen")
+    _allow(db, regular_user, server, "server.view")
+
+    with pytest.raises(HTTPException) as fehler:
+        _merken(db, regular_user, server, "eigenheit", "Wird nicht geschrieben.")
+
+    assert fehler.value.status_code == 403
+    assert "scope='server'" in str(fehler.value.detail)
+    assert db.query(AiMemoryEntry).count() == 0
+
+
+def test_clearing_the_area_needs_the_same_right_as_writing(
+    db: Session, regular_user: User
+) -> None:
+    """Loeschen ist Schreiben.
+
+    Diese Stelle hat der Vorlauf beinahe verloren: `delete_all_entries` reichte
+    die **rohe** `team_id` an die Rechtepruefung weiter statt der aus
+    `scope_identity`. Ein Bereich, dessen Kennung aus etwas anderem entsteht,
+    waere damit ungeprueft durchgelaufen.
+    """
+    server = _server(db, "leeren")
+    schreiber = _user(db, "schreiber")
+    _allow(db, schreiber, server, "server.view", "server.config.write")
+    _allow(db, regular_user, server, "server.view")
+    _merken(db, schreiber, server, "bleibt", "Diese Zeile bleibt stehen.")
+
+    with pytest.raises(HTTPException) as fehler:
+        ai_memory_service.delete_all_entries(
+            db, regular_user, "server_shared", server_id=server.id
+        )
+
+    assert fehler.value.status_code == 403
+    assert db.query(AiMemoryEntry).count() == 1
+
+
+def test_clearing_the_area_works_and_stops_at_the_server_border(
+    db: Session, regular_user: User
+) -> None:
+    """Die Gegenprobe zum Test darueber — und die schaerfere von beiden.
+
+    Eine Absage laesst sich versehentlich richtig hinbekommen: reicht der
+    Aufrufer statt der aufgeloesten Servernummer gar keine weiter, weist die
+    Rechtepruefung **jeden** ab, und ein Test, der nur 403 erwartet, bleibt
+    gruen. Erst der Erfolgsweg zeigt, ob die richtige Nummer ankommt.
+
+    Der Nachbarserver steht daneben, weil "alles geloescht" sonst genauso gruen
+    waere wie "den richtigen Bereich geloescht".
+    """
+    server = _server(db, "geleert")
+    nachbar = _server(db, "unberuehrt")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+    db.add_all([
+        ServerPermission(user_id=regular_user.id, server_id=nachbar.id,
+                         permission_key=key)
+        for key in ("server.view", "server.config.write")
+    ])
+    db.commit()
+    _merken(db, regular_user, server, "eins", "Verschwindet.")
+    _merken(db, regular_user, server, "zwei", "Verschwindet auch.")
+    _merken(db, regular_user, nachbar, "eins", "Bleibt stehen.")
+
+    entfernt = ai_memory_service.delete_all_entries(
+        db, regular_user, "server_shared", server_id=server.id
+    )
+
+    assert entfernt == 2
+    uebrig = db.query(AiMemoryEntry).all()
+    assert len(uebrig) == 1 and uebrig[0].server_id == nachbar.id
+
+
+def test_the_row_check_holds_even_when_the_prefilter_lets_everything_through(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die zweite Verteidigungslinie, fuer sich allein gemessen.
+
+    Der Vorfilter in der Abfrage ist eine Mengenbegrenzung; die Autoritaet ist
+    die zeilenweise Nachpruefung darunter. Solange beide dieselbe Menge meinen,
+    verdeckt der Vorfilter jeden Fehler in der Nachpruefung — sie bliebe
+    ungeprueft, bis die beiden eines Tages auseinanderlaufen.
+
+    `None` heisst fuer den Vorfilter "alle Server" und ist der Zustand eines
+    Betreibers mit pauschalem `server.view`. Genau dort filtert die Abfrage gar
+    nichts, und ab da entscheidet allein die Schleife.
+
+    Das ist die Spiegelung des Tests in `test_ai_memory_recall.py`, der
+    umgekehrt die Nachpruefung aushaengt, um den Vorfilter zu messen.
+    """
+    fremder = _server(db, "fremd")
+    eigener = _server(db, "eigen")
+    _allow(db, regular_user, eigener, "server.view", "server.config.write")
+    schreiber = _user(db, "schreiber")
+    _allow(db, schreiber, fremder, "server.view", "server.config.write")
+    _merken(db, schreiber, fremder, "geheim", "Nicht fuer jeden.")
+    _merken(db, regular_user, eigener, "offen", "Fuer mich schon.")
+
+    monkeypatch.setattr(
+        ai_memory_service.permission_service, "list_visible_server_ids",
+        lambda *_args, **_kwargs: None,
+    )
+    rows = ai_memory_service._visible_scope_rows(db, regular_user)
+
+    assert [row.server_id for row in rows if row.scope == "server_shared"] == [
+        eigener.id
+    ]
+
+
+def test_a_shared_note_is_deletable_at_all(db: Session, regular_user: User) -> None:
+    """Ohne eigenen Zweig waere sie fuer **niemanden** loeschbar.
+
+    Der `else`-Zweig von `delete_entry` vergleicht `owner_user_id == user.id`.
+    Anlagenwissen hat bewusst keinen Besitzer; gegen NULL ist der Vergleich
+    immer False. Der Eintrag stuende fuer immer da, zaehlte gegen die Grenze des
+    Servers und liesse sich ueber die Oberflaeche nicht mehr entfernen.
+    """
+    server = _server(db, "loeschbar")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+    row, _wert = _merken(db, regular_user, server, "weg", "Kommt wieder weg.")
+    assert row.owner_user_id is None
+
+    ai_memory_service.delete_entry(db, regular_user, row.id)
+
+    assert db.query(AiMemoryEntry).count() == 0
+
+
+def test_only_the_write_right_removes_a_single_shared_note(
+    db: Session, regular_user: User
+) -> None:
+    """Und der eigene Zweig darf nicht zu weit sein.
+
+    404 statt 403, wie ueberall beim einzelnen Loeschen: die Antwort soll nicht
+    verraten, dass es die Zeile gibt.
+    """
+    server = _server(db, "fremdloeschen")
+    schreiber = _user(db, "schreiber")
+    _allow(db, schreiber, server, "server.view", "server.config.write")
+    _allow(db, regular_user, server, "server.view")
+    row, _wert = _merken(db, schreiber, server, "bleibt", "Bleibt stehen.")
+
+    with pytest.raises(HTTPException) as fehler:
+        ai_memory_service.delete_entry(db, regular_user, row.id)
+
+    assert fehler.value.status_code == 404
+    assert db.query(AiMemoryEntry).count() == 1
+
+
+def test_an_invented_server_is_indistinguishable_from_a_hidden_one(
+    db: Session, regular_user: User
+) -> None:
+    """Sonst waere die Fehlermeldung ein Existenzorakel ueber fremde Server."""
+    fremder = _server(db, "fremd")
+    eigener = _server(db, "eigen")
+    _allow(db, regular_user, eigener, "server.view", "server.config.write")
+
+    fehler = []
+    for nummer in (fremder.id, 999_999):
+        with pytest.raises(HTTPException) as ausnahme:
+            ai_memory_service.upsert_entry(
+                db, user=regular_user, scope="server_shared", server_id=nummer,
+                key="k", value="v", origin="ai",
+            )
+        fehler.append((ausnahme.value.status_code, str(ausnahme.value.detail)))
+
+    assert fehler[0] == fehler[1] == (404, "Server nicht gefunden")
+
+
+# ── Das Wissen haengt am Server, nicht an Menschen ─────────────────────
+
+
+def test_the_knowledge_outlives_the_colleague_who_wrote_it(
+    db: Session, regular_user: User
+) -> None:
+    """Genau dafuer ist `owner_user_id` NULL.
+
+    Mit einem Besitzer haette das `ondelete="CASCADE"` auf `users.id` die Zeile
+    beim naechsten geloeschten Konto mitgenommen — und niemand haette gemerkt,
+    dass die Betriebsanleitung fehlt, bis der Server nicht mehr hochkommt.
+    """
+    server = _server(db, "nachlass")
+    schreiber = _user(db, "geht")
+    _allow(db, schreiber, server, "server.view", "server.config.write")
+    _allow(db, regular_user, server, "server.view")
+    row, _wert = _merken(db, schreiber, server, "eigenheit",
+                         "Ueberlebt seinen Verfasser.")
+    assert row.owner_user_id is None
+
+    # Ueber denselben Weg, den das Panel geht — nicht per `db.delete(user)`.
+    # Ein Konto haengt an Zeilen, die bewusst kein `ondelete` tragen (Audit,
+    # Sitzungen); die werden vorher aufgeloest. Ein Test, der anders loescht als
+    # die Anwendung, sagt nichts ueber die Anwendung.
+    AuthService.delete_account_atomically(db, db.get(User, schreiber.id))
+
+    assert db.get(AiMemoryEntry, row.id) is not None
+    assert "Ueberlebt seinen Verfasser" in _kontext(db, regular_user)
+
+
+def test_the_knowledge_goes_when_the_server_goes(
+    db: Session, regular_user: User
+) -> None:
+    """Und der Nachbar bleibt unberuehrt.
+
+    Die Kaskade steht am Fremdschluessel; hier steht, was sie bedeutet. Ohne die
+    zweite Anlage waere der Test auch mit einem Loeschen aller Zeilen gruen.
+    """
+    weg = _server(db, "weg")
+    bleibt = _server(db, "bleibt")
+    _allow(db, regular_user, weg, "server.view", "server.config.write")
+    db.add_all([
+        ServerPermission(user_id=regular_user.id, server_id=bleibt.id,
+                         permission_key=key)
+        for key in ("server.view", "server.config.write")
+    ])
+    db.commit()
+    _merken(db, regular_user, weg, "eigenheit", "Verschwindet mit der Anlage.")
+    _merken(db, regular_user, bleibt, "eigenheit", "Bleibt bestehen.")
+
+    db.delete(db.get(Server, weg.id))
+    db.commit()
+
+    uebrig = db.query(AiMemoryEntry).all()
+    assert len(uebrig) == 1
+    assert uebrig[0].server_id == bleibt.id
+
+
+def test_losing_sight_of_the_server_hides_its_knowledge(
+    db: Session, regular_user: User
+) -> None:
+    """Der Entzug wirkt sofort und ohne Nachpflege.
+
+    Geprueft wird beides: es faellt aus dem Kontext, und es laesst sich auch
+    nicht mehr loeschen. Das zweite ist bewusst so — anders als bei der eigenen
+    Notiz, die man behalten koennen soll. Fremdes Wissen wegzuraeumen, das man
+    nicht mehr sehen darf, ist das Gegenteil davon.
+    """
+    server = _server(db, "entzogen")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+    row, _wert = _merken(db, regular_user, server, "eigenheit", "Nur mit Zugriff.")
+
+    for recht in db.query(ServerPermission).filter(
+        ServerPermission.user_id == regular_user.id
+    ).all():
+        db.delete(recht)
+    db.commit()
+
+    assert "Nur mit Zugriff" not in _kontext(db, regular_user)
+    with pytest.raises(HTTPException) as fehler:
+        ai_memory_service.delete_entry(db, regular_user, row.id)
+    assert fehler.value.status_code == 404
+
+
+# ── Nicht am Einwilligungsschalter, und eine gemeinsame Kasse ──────────
+
+
+def test_the_consent_switch_does_not_govern_the_machines_manual(
+    db: Session, regular_user: User
+) -> None:
+    """Der Schalter ist eine Entscheidung ueber sich, nicht ueber die Kollegen.
+
+    Dieselbe Ueberlegung wie bei `team` und `panel`. Wer sein persoenliches
+    Gedaechtnis abschaltet, soll nicht nebenbei die Betriebsanleitung seines
+    Servers verlieren: er hat sie nicht angelegt und kann sie nicht ersetzen.
+    """
+    server = _server(db, "ohneschalter")
+    schreiber = _user(db, "schreiber")
+    _allow(db, schreiber, server, "server.view", "server.config.write")
+    _allow(db, regular_user, server, "server.view", memory=False)
+    _merken(db, schreiber, server, "eigenheit", "Gilt fuer alle hier.")
+    ai_memory_service.upsert_entry(
+        db, user=schreiber, scope="user", server_id=None,
+        key="privat", value="Nur fuer mich.", origin="ai",
+    )
+
+    block = _kontext(db, regular_user)
+
+    assert "Gilt fuer alle hier" in block
+    assert "Nur fuer mich" not in block
+
+
+def test_the_shared_area_does_not_show_up_in_a_personal_profile(
+    db: Session, regular_user: User
+) -> None:
+    """Die Profilseite zeigt, was einem gehoert. Das hier gehoert dem Server.
+
+    Getragen wird die Trennung vom fehlenden Besitzer: `personal_entries`
+    filtert auf `owner_user_id == user.id`. Bekaeme Anlagenwissen je einen
+    Besitzer — etwa weil jemand "der Verfasser sollte doch dranstehen" fuer eine
+    Verbesserung haelt —, stuende es unter "Meine Erinnerungen" und saehe aus
+    wie etwas, das man selbst hinterlegt hat und allein aendern kann. Der Nachbar
+    dieses Tests haelt dieselbe Eigenschaft von der anderen Seite fest: ohne
+    Besitzer ueberlebt der Eintrag das Konto seines Verfassers.
+    """
+    server = _server(db, "nichtimprofil")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+    _merken(db, regular_user, server, "anlage", "Gehoert dem Server.")
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="server", server_id=server.id,
+        key="notiz", value="Gehoert mir.", origin="ai",
+    )
+
+    eigene = ai_memory_service.personal_entries(db, regular_user)
+
+    assert [wert for _row, wert in eigene] == ["Gehoert mir."]
+
+
+def test_two_colleagues_share_one_key_instead_of_doubling_it(
+    db: Session, regular_user: User
+) -> None:
+    """Eine gemeinsame Kasse heisst auch: ein gemeinsamer Schluesselraum.
+
+    Der zweite Kollege korrigiert den Eintrag, statt einen zweiten mit demselben
+    Namen danebenzustellen. Das ist der Sinn des Bereichs — es gibt genau eine
+    Betriebsanleitung.
+    """
+    server = _server(db, "geteilt")
+    zweiter = _user(db, "zweiter")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+    _allow(db, zweiter, server, "server.view", "server.config.write")
+
+    _merken(db, regular_user, server, "port", "Aussen 30015.")
+    _merken(db, zweiter, server, "port", "Aussen 30016, wurde umgestellt.")
+
+    eintraege = ai_memory_service.list_entries(
+        db, regular_user, "server_shared", server.id
+    )
+    assert [wert for _row, wert in eintraege] == ["Aussen 30016, wurde umgestellt."]
+
+
+def test_the_area_fills_up_per_server_and_says_so(
+    db: Session, regular_user: User
+) -> None:
+    """Die 100er-Grenze zaehlt je Anlage, nicht je Mensch.
+
+    Das ist neu und bewusst angenommen: bisher fuellte jeder seine eigene Kasse.
+    Hier kann ein Kollege sie fuer alle vollmachen. Ein Verdraengungsmechanismus
+    existiert nicht — die Meldung ist deshalb das Einzige, was den naechsten
+    davor bewahrt, den Fehler bei sich zu suchen.
+    """
+    server = _server(db, "voll")
+    nachbar = _server(db, "nachbar")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+    db.add_all([
+        ServerPermission(user_id=regular_user.id, server_id=nachbar.id,
+                         permission_key=key)
+        for key in ("server.view", "server.config.write")
+    ])
+    db.commit()
+    for nummer in range(ai_memory_service.MAX_ENTRIES_PER_SCOPE):
+        _merken(db, regular_user, server, f"eigenheit{nummer}", f"Wert {nummer}")
+
+    with pytest.raises(HTTPException) as fehler:
+        _merken(db, regular_user, server, "einer_zuviel", "Passt nicht mehr.")
+    assert fehler.value.status_code == 409
+
+    # Die Nachbaranlage hat ihre eigene Kasse und ist davon unberuehrt.
+    _merken(db, regular_user, nachbar, "eigenheit", "Passt.")
