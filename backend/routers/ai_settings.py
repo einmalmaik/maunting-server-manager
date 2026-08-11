@@ -17,11 +17,14 @@ from schemas.ai_settings import (
     AiLearningPolicyUpdate,
     AiRoleLimitsResponse,
     AiRoleLimitsUpdate,
+    AiUsageEntry,
+    AiUsageMine,
+    AiUsageOverview,
     AiWebSearchKeyUpdate,
     AiWebSearchStatus,
     EffectiveAiLimitsResponse,
 )
-from services import ai_limit_service, audit_service
+from services import ai_limit_service, ai_usage_service, audit_service
 from services.dis_client import DisSidecarError
 from services.role_service import effective_user_role_ids
 
@@ -212,4 +215,77 @@ def get_my_effective_limits(
     return EffectiveAiLimitsResponse(
         role_ids=effective_user_role_ids(db, user),
         **limits.__dict__,
+    )
+
+
+def _cents(microunits: int) -> int:
+    """Rechnet Mikroeinheiten in Cent um — **aufgerundet**.
+
+    Die Richtung ist Absicht: eine Kostenanzeige, die zu niedrig ist, laesst
+    jemanden glauben, er habe noch Luft. Zu hoch ist die harmlosere Seite.
+    """
+    per_cent = ai_usage_service.MICROUNITS_PER_CENT
+    return -(-int(microunits) // per_cent)
+
+
+def _entry(row: ai_usage_service.AiUsageSummary) -> AiUsageEntry:
+    return AiUsageEntry(
+        user_id=row.user_id,
+        username=row.username,
+        tokens_today=row.tokens_today,
+        tokens_week=row.tokens_week,
+        tokens_month=row.tokens_month,
+        cost_month_cents=_cents(row.cost_month_microunits),
+        requests_month=row.requests_month,
+        last_request_at=row.last_request_at,
+    )
+
+
+@router.get("/usage/me", response_model=AiUsageMine)
+def get_my_usage(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AiUsageMine:
+    """Der eigene Verbrauch mit den eigenen Grenzen daneben.
+
+    Bewusst **ohne** Sonderrecht: es sind die eigenen Zahlen, und wer wissen
+    will, warum die KI ihn abgewiesen hat, muss sie sehen duerfen. Der Zugang
+    zur KI selbst haengt an `ai.chat.use`; das hier ist die Rechnung dazu.
+    """
+    limits = ai_limit_service.resolve_effective_limits(db, user)
+    return AiUsageMine(
+        **_entry(ai_usage_service.usage_for_user(db, user)).model_dump(),
+        limits=EffectiveAiLimitsResponse(
+            role_ids=effective_user_role_ids(db, user), **limits.__dict__
+        ),
+    )
+
+
+@router.get("/usage", response_model=AiUsageOverview)
+def get_usage_overview(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_global("ai.usage.read.all")),
+) -> AiUsageOverview:
+    """Der Verbrauch **aller** Benutzer — die Wirkung von `ai.usage.read.all`.
+
+    Der Key stand seit dem ersten Entwurf im Katalog und wurde an keiner Stelle
+    geprueft; der Rollen-Editor musste ihn als „noch ohne Funktion“ beschriften.
+    Das ist derselbe Fall wie frueher bei `ai.web_search.use`: ein Schalter, der
+    nichts bewirkt, ist schlimmer als ein fehlender — der Betreiber haelt etwas
+    fuer vergeben oder entzogen, was gar nicht existiert.
+
+    Bewusst **nicht** an `panel.settings.read` gehaengt, obwohl die Ansicht dort
+    steht: wer Verbraeuche einsehen darf, sieht damit das Nutzungsverhalten
+    fremder Kunden. Das ist eine eigene Entscheidung und kein Nebeneffekt der
+    Einstellungsberechtigung — genau deswegen gibt es den eigenen Key.
+    """
+    rows = ai_usage_service.usage_overview(db)
+    entries = [_entry(row) for row in rows]
+    return AiUsageOverview(
+        entries=entries,
+        total_tokens_month=sum(entry.tokens_month for entry in entries),
+        # Die Summe entsteht aus den **Mikroeinheiten**, nicht aus den bereits
+        # gerundeten Cent-Werten je Zeile. Sonst addieren sich zweihundert
+        # Aufrundungen zu einem Betrag, den niemand verbraucht hat.
+        total_cost_month_cents=_cents(sum(row.cost_month_microunits for row in rows)),
     )

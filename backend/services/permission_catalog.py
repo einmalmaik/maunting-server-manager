@@ -60,11 +60,12 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # Durchgesetzt in ai_action_service._execute_web_search. Ohne hinterlegten
     # Suchschluessel wird das Werkzeug dem Modell gar nicht erst angeboten.
     PermissionDef("ai.web_search.use",         "ai",      "Websuche über die KI verwenden"),
-    # NOCH NICHT DURCHGESETZT: dieser Key existiert im Katalog, wird aber an
-    # keiner Stelle im Backend geprueft. Der Rollen-Editor weist im
-    # Beschreibungstext ausdruecklich darauf hin. Wer die Funktion baut, prueft
-    # das Recht — und entfernt hier diesen Kommentar.
-    PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen (noch ohne Funktion)"),
+    # Durchgesetzt in routers/ai_settings.py::get_usage_overview. Bewusst nicht
+    # an `panel.settings.read` gehaengt: wer Verbraeuche sieht, sieht das
+    # Nutzungsverhalten fremder Kunden. Den *eigenen* Verbrauch zeigt
+    # `/api/ai/usage/me` ohne Sonderrecht — wer abgewiesen wird, muss erfahren
+    # duerfen, warum.
+    PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen"),
     # Durchgesetzt in routers/ai_autonomy.py und services/ai_autonomy_service.py.
     PermissionDef("ai.autonomous.use",         "ai",      "Autonomen KI-Modus verwenden"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).

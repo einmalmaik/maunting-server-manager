@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react'
-import { AlertCircle, CheckCircle2, KeyRound, PlugZap, Plus, Save, Trash2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, KeyRound, PlugZap, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { aiApi, type AiProviderAdmin, type AiProviderTestResult, type AiProviderWrite } from '@/api/ai'
+import {
+  aiApi,
+  type AiCatalogModel,
+  type AiProviderAdmin,
+  type AiProviderKind,
+  type AiProviderTestResult,
+  type AiProviderWrite,
+} from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { Button, NumberStepper, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
@@ -16,11 +23,10 @@ interface ProviderDraft extends AiProviderWrite {
 
 const EMPTY_PROVIDER: ProviderDraft = {
   name: '',
-  base_url: '',
+  provider_kind: '',
   default_model: '',
   enabled: true,
   requires_api_key: true,
-  allow_private_network: false,
   token_price_cents_per_million: null,
   operator_api_key: '',
 }
@@ -29,11 +35,10 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
   return {
     id: provider.id,
     name: provider.name,
-    base_url: provider.base_url,
+    provider_kind: provider.provider_kind,
     default_model: provider.default_model,
     enabled: provider.enabled,
     requires_api_key: provider.requires_api_key,
-    allow_private_network: provider.allow_private_network,
     token_price_cents_per_million: provider.token_price_cents_per_million,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
@@ -47,6 +52,17 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
   const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<number | 'new' | null>(null)
+  const [kinds, setKinds] = useState<AiProviderKind[]>([])
+
+  // Die Anbieterliste ist statisch und kommt aus `ai_provider_registry` — ein
+  // Abruf fuer die ganze Seite, nicht einer je Formular.
+  useEffect(() => {
+    let active = true
+    aiApi.listProviderKinds()
+      .then((rows) => { if (active) setKinds(rows) })
+      .catch(() => undefined)
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -71,11 +87,10 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
     setBusyId(target)
     const payload: AiProviderWrite = {
       name: draft.name.trim(),
-      base_url: draft.base_url.trim(),
+      provider_kind: draft.provider_kind,
       default_model: draft.default_model.trim(),
       enabled: draft.enabled,
       requires_api_key: draft.requires_api_key,
-      allow_private_network: draft.allow_private_network,
       token_price_cents_per_million: draft.token_price_cents_per_million ?? null,
       ...(draft.operator_api_key ? { operator_api_key: draft.operator_api_key } : {}),
       ...(draft.clear_operator_api_key ? { clear_operator_api_key: true } : {}),
@@ -144,6 +159,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
         <ProviderForm
           key={provider.id}
           draft={provider}
+          kinds={kinds}
           disabled={!canWrite || busyId !== null}
           saving={busyId === provider.id}
           onChange={(patch) => update(index, patch)}
@@ -157,7 +173,8 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       )}
       {creating && (
         <ProviderForm
-          draft={EMPTY_PROVIDER}
+          draft={{ ...EMPTY_PROVIDER, provider_kind: kinds[0]?.kind ?? '' }}
+          kinds={kinds}
           disabled={busyId !== null}
           saving={busyId === 'new'}
           onChange={() => undefined}
@@ -172,6 +189,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
 
 function ProviderForm({
   draft: initialDraft,
+  kinds,
   disabled,
   saving,
   localDraft = false,
@@ -183,6 +201,7 @@ function ProviderForm({
   onTest,
 }: {
   draft: ProviderDraft
+  kinds: AiProviderKind[]
   disabled: boolean
   saving: boolean
   localDraft?: boolean
@@ -197,7 +216,43 @@ function ProviderForm({
   const [local, setLocal] = useState<ProviderDraft>({ ...initialDraft })
   const [testResult, setTestResult] = useState<AiProviderTestResult | null>(null)
   const [testing, setTesting] = useState(false)
+  const [models, setModels] = useState<AiCatalogModel[] | null>(null)
+  const [loadingModels, setLoadingModels] = useState(false)
   const draft = localDraft ? local : initialDraft
+  const spec = kinds.find((item) => item.kind === draft.provider_kind) ?? null
+
+  /**
+   * Der Modellkatalog des gewaehlten Anbieters.
+   *
+   * `null` heisst „noch nicht geladen oder nicht erreichbar" — dann bleibt das
+   * Modell ein Textfeld statt einer Auswahl. Ein leeres Dropdown waere die
+   * schlechtere Antwort: der Betreiber koennte nichts mehr eintragen, obwohl
+   * sein Modell existiert.
+   */
+  const ladeModelle = async (refresh = false) => {
+    if (!draft.provider_kind || loadingModels) return
+    setLoadingModels(true)
+    try {
+      setModels(await aiApi.listCatalogModels(draft.provider_kind, refresh))
+    } catch {
+      setModels(null)
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    if (!draft.provider_kind) { setModels(null); return }
+    setLoadingModels(true)
+    aiApi.listCatalogModels(draft.provider_kind)
+      .then((rows) => { if (active) setModels(rows) })
+      .catch(() => { if (active) setModels(null) })
+      .finally(() => { if (active) setLoadingModels(false) })
+    return () => { active = false }
+  }, [draft.provider_kind])
+
+  const gewaehltesModell = models?.find((item) => item.model_id === draft.default_model) ?? null
 
   /**
    * Schickt eine echte Mini-Anfrage an den Anbieter.
@@ -226,7 +281,7 @@ function ProviderForm({
     if (localDraft) setLocal((current) => ({ ...current, ...patch }))
     else onChange(patch)
   }
-  const valid = Boolean(draft.name.trim() && draft.base_url.trim() && draft.default_model.trim())
+  const valid = Boolean(draft.name.trim() && draft.provider_kind && draft.default_model.trim())
 
   return (
     <form className="msm-card space-y-5 p-6" onSubmit={(event) => {
@@ -236,14 +291,64 @@ function ProviderForm({
     }}>
       <fieldset disabled={disabled} className="grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
         <ProviderInput label={t('ai.providers.name')} value={draft.name} onChange={(name) => change({ name })} />
-        <ProviderInput label={t('ai.providers.model')} value={draft.default_model} onChange={(default_model) => change({ default_model })} />
+        <label className="space-y-1.5">
+          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.kind')}</span>
+          <select
+            className="msm-input"
+            value={draft.provider_kind}
+            onChange={(event) => change({ provider_kind: event.target.value, default_model: '' })}
+          >
+            {/* Eine Zeile ohne bekannten Anbieter gibt es nur nach der Migration
+                20260811_01, die fremde Zugaenge geparkt hat. Sie steht in der
+                Auswahl, damit der Betreiber sieht, was los ist — und nicht
+                stillschweigend auf den ersten Anbieter umgestellt wird. */}
+            {!draft.provider_kind && <option value="">{t('ai.providers.kindMissing')}</option>}
+            {kinds.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}
+          </select>
+          {spec && (
+            <p className="text-xs text-on-surface-variant">
+              {t('ai.providers.kindHint', { url: spec.base_url })}
+              {' '}
+              <a href={spec.key_url} target="_blank" rel="noreferrer" className="underline">{t('ai.providers.keyLink')}</a>
+            </p>
+          )}
+          {!draft.provider_kind && (
+            <p className="text-xs text-status-error">{t('ai.providers.kindMissingHint')}</p>
+          )}
+        </label>
         <div className="md:col-span-2">
-          <ProviderInput type="url" label={t('ai.providers.baseUrl')} value={draft.base_url} onChange={(base_url) => change({ base_url })} />
-          {/* Der haeufigste Konfigurationsfehler: die Doku vieler Anbieter zeigt
-              die vollstaendige Endpunkt-URL. MSM haengt "/chat/completions"
-              selbst an und schneidet es beim Speichern wieder ab — der Hinweis
-              erklaert, warum die gespeicherte URL kuerzer ist als die eingegebene. */}
-          <p className="mt-1.5 text-xs text-on-surface-variant">{t('ai.providers.baseUrlHint')}</p>
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              {/* Ausgewaehlt statt getippt: ein Tippfehler fiel bisher erst beim
+                  Testaufruf auf, und ueber die Denkfaehigkeiten des Modells
+                  wusste MSM so oder so nichts. */}
+              {models && models.length > 0 ? (
+                <label className="space-y-1.5 block">
+                  <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.model')}</span>
+                  <select className="msm-input" value={draft.default_model} onChange={(event) => change({ default_model: event.target.value })}>
+                    <option value="">{t('ai.providers.modelChoose')}</option>
+                    {models.map((item) => (
+                      <option key={item.model_id} value={item.model_id}>{item.model_id}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <ProviderInput
+                  label={t('ai.providers.model')}
+                  value={draft.default_model}
+                  onChange={(default_model) => change({ default_model })}
+                />
+              )}
+            </div>
+            <Button type="button" variant="ghost" disabled={!draft.provider_kind || loadingModels} onClick={() => void ladeModelle(true)}>
+              <RefreshCw className={`h-4 w-4 ${loadingModels ? 'animate-spin' : ''}`} aria-hidden="true" />
+              <span className="sr-only">{t('ai.providers.reloadModels')}</span>
+            </Button>
+          </div>
+          {models === null && !loadingModels && draft.provider_kind && (
+            <p className="mt-1.5 text-xs text-on-surface-variant">{t('ai.providers.catalogUnavailable')}</p>
+          )}
+          {gewaehltesModell && <ModelCapabilities model={gewaehltesModell} />}
         </div>
         <ProviderInput
           className="md:col-span-2"
@@ -262,10 +367,6 @@ function ProviderForm({
         )}
         <Toggle label={t('ai.providers.enabled')} checked={draft.enabled} onChange={(enabled) => change({ enabled })} />
         <Toggle label={t('ai.providers.requiresKey')} checked={draft.requires_api_key} onChange={(requires_api_key) => change({ requires_api_key })} />
-        <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-          <Toggle label={t('ai.providers.privateNetwork')} checked={draft.allow_private_network} onChange={(allow_private_network) => change({ allow_private_network })} />
-          <p className="mt-2 text-xs text-on-surface-variant">{t('ai.providers.privateNetworkHint')}</p>
-        </div>
         <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
           <label className="space-y-1.5 block">
             <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.tokenPrice')}</span>
@@ -314,6 +415,37 @@ function ProviderForm({
         <Button type="submit" disabled={disabled || !valid}><Save className="h-4 w-4" />{saving ? t('common.loading') : t('settings.save')}</Button>
       </div>
     </form>
+  )
+}
+
+/**
+ * Was das gewaehlte Modell kann — direkt aus dem Katalog des Anbieters.
+ *
+ * Der Betreiber soll vor dem Speichern sehen, worauf er sich einlaesst. Drei
+ * Faelle, die sich wirklich unterscheiden und gemessen alle haeufig sind:
+ * Stufen (127 von 402 Modellen), nur an/aus (145) und nicht abschaltbar (82).
+ */
+function ModelCapabilities({ model }: { model: AiCatalogModel }) {
+  const { t } = useTranslation()
+  if (!model.reasoning) {
+    return <p className="mt-2 text-xs text-on-surface-variant">{t('ai.providers.caps.none')}</p>
+  }
+  return (
+    <div className="mt-2 space-y-1 text-xs text-on-surface-variant">
+      {model.efforts.length > 0 ? (
+        <p>
+          {t('ai.providers.caps.levels')}{' '}
+          {model.efforts.map((effort) => (
+            <span key={effort} className="mr-1 inline-block rounded-md border border-outline-variant/50 px-1.5 py-0.5 font-mono text-[11px]">
+              {t(`ai.reasoning.levels.${effort}`, { defaultValue: effort })}
+            </span>
+          ))}
+        </p>
+      ) : (
+        <p>{t('ai.providers.caps.toggleOnly')}</p>
+      )}
+      {model.mandatory && <p className="text-status-warning">{t('ai.providers.caps.mandatory')}</p>}
+    </div>
   )
 }
 

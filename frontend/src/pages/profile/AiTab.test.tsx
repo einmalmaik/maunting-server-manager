@@ -6,9 +6,35 @@ import i18n from '@/i18n'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { AiTab } from './AiTab'
 
+/**
+ * Der Mock antwortet **pfadabhängig**, nicht pauschal mit `[]`.
+ *
+ * Vorher tat er Letzteres, und jede neue Abfrage auf dieser Seite brach ihn:
+ * eine Antwort, die für eine Liste gedacht war, landete in einer Komponente,
+ * die ein Objekt erwartete. Der Fehler sah dann nach einem Bug in der neuen
+ * Komponente aus, war aber einer im Mock.
+ */
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client')
-  return { ...actual, api: vi.fn().mockResolvedValue([]) }
+  return {
+    ...actual,
+    api: vi.fn((path: string) => {
+      if (path === '/ai/usage/me') {
+        return Promise.resolve({
+          user_id: 1, username: 'tester',
+          tokens_today: 120, tokens_week: 800, tokens_month: 2_400,
+          cost_month_cents: 250, requests_month: 12, last_request_at: null,
+          limits: {
+            daily_token_limit: 1_000, weekly_token_limit: null,
+            monthly_token_limit: null, requests_per_minute: null,
+            concurrent_operations: null, monthly_cost_limit_cents: null,
+            role_ids: [],
+          },
+        })
+      }
+      return Promise.resolve([])
+    }),
+  }
 })
 
 vi.mock('@/stores/confirmStore', () => ({ confirm: vi.fn().mockResolvedValue(true) }))
@@ -39,6 +65,23 @@ describe('Profil → KI', () => {
   it('zeigt das persönliche Gedächtnis', async () => {
     render(<MemoryRouter><AiTab /></MemoryRouter>)
     expect(await screen.findByLabelText('Persönliches KI-Memory')).toBeInTheDocument()
+  })
+
+  it('zeigt das eigene Kontingent samt Grenze', async () => {
+    // Ohne diese Karte war „Kontingent ausgeschöpft" für den Betroffenen von
+    // einem Fehler nicht zu unterscheiden: die Zahlen lagen im Backend, aber
+    // an keiner Stelle, die er aufrufen konnte.
+    render(<MemoryRouter><AiTab /></MemoryRouter>)
+
+    const karte = await screen.findByLabelText('Dein KI-Kontingent')
+    expect(karte).toBeInTheDocument()
+    // Verbrauch und Grenze stehen nebeneinander — einzeln sagt keins von
+    // beiden etwas aus.
+    expect(karte).toHaveTextContent('120')
+    expect(karte).toHaveTextContent('1.000')
+    // Wo nichts hinterlegt ist, steht das ausdrücklich statt einer leeren
+    // Fortschrittsleiste, die nach „0 %" aussähe.
+    expect(karte).toHaveTextContent('Keine Grenze hinterlegt')
   })
 
   it('zeigt keine Skill-Verwaltung mehr, sondern den Weg dorthin', async () => {

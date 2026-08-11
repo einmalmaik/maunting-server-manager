@@ -113,25 +113,23 @@
     "noPermission": "Keine Berechtigung zum Lesen der KI-Einstellungen.",
     "loadFailed": "KI-Limits konnten nicht geladen werden.",
     "saveFailed": "KI-Limits konnten nicht gespeichert werden.",
-    "saved": "KI-Limits gespeichert."
+    "saved": "KI-Limits gespeichert.",
+    "maxReasoningEffort": "Höchste Denkstufe"
   },
   "ai": {
     "providers": {
       "title": "KI-Provider",
-      "description": "Konfiguriere vertrauenswürdige OpenAI-kompatible Endpunkte. Zieladresse und Operator-Key sind ausschließlich für Panel-Administratoren sichtbar.",
+      "description": "Wähle einen unterstützten Anbieter und ein Modell aus dessen Katalog. Anbieter und Operator-Key sind ausschließlich für Panel-Administratoren sichtbar.",
       "add": "Provider hinzufügen",
       "empty": "Noch kein KI-Provider konfiguriert.",
       "name": "Name",
       "model": "Standardmodell",
-      "baseUrl": "Basis-URL",
       "operatorKey": "Operator-API-Key",
       "keyConfigured": "Key konfiguriert ({{hint}}); leer lassen, um ihn beizubehalten",
       "keyOptional": "Optionaler zentraler API-Key",
       "clearOperatorKey": "Zentralen Operator-Key beim Speichern entfernen",
       "enabled": "Provider aktiviert",
       "requiresKey": "API-Key erforderlich",
-      "privateNetwork": "Private Netzwerkziele erlauben",
-      "privateNetworkHint": "Nur für bewusst betriebene interne Provider aktivieren. Link-local, reservierte und unspezifizierte Ziele bleiben blockiert.",
       "saved": "KI-Provider gespeichert.",
       "deleted": "KI-Provider gelöscht.",
       "deleteTitle": "KI-Provider löschen?",
@@ -146,7 +144,20 @@
       "test": "Verbindung testen",
       "testOk": "Verbindung erfolgreich. Der Anbieter hat geantwortet.",
       "testFailed": "Der Test ist fehlgeschlagen.",
-      "baseUrlHint": "Nur die Basis-URL, z. B. https://openrouter.ai/api/v1 — ohne /chat/completions. MSM hängt den Endpunkt selbst an; ein mitkopierter Endpunktpfad wird beim Speichern entfernt."
+      "kind": "Anbieter",
+      "kindHint": "Anfragen gehen an {{url}}.",
+      "keyLink": "Schlüssel erstellen",
+      "kindMissing": "— kein unterstützter Anbieter —",
+      "kindMissingHint": "Dieser Zugang zeigte auf eine Adresse, die MSM nicht mehr unterstützt. Wähle einen Anbieter, bevor du ihn aktivierst.",
+      "modelChoose": "Modell wählen …",
+      "reloadModels": "Modelle neu laden",
+      "catalogUnavailable": "Der Modellkatalog des Anbieters ist gerade nicht erreichbar. Du kannst den Modellnamen so lange von Hand eintragen; die Denkstufen bleiben dann unbekannt.",
+      "caps": {
+        "none": "Dieses Modell denkt nicht nach.",
+        "levels": "Denkstufen:",
+        "toggleOnly": "Dieses Modell denkt nach, kennt aber keine Stufen — nur an oder aus.",
+        "mandatory": "Nachdenken lässt sich bei diesem Modell nicht abschalten."
+      }
     },
     "profile": {
       "title": "KI-Assistent",
@@ -317,7 +328,8 @@
       "compacted": "Ältere Nachrichten wurden zusammengefasst",
       "edit": "Nachricht bearbeiten",
       "editHint": "Diese Nachricht und alles danach wird entfernt. Die KI kennt die alte Fassung dann nicht mehr.",
-      "editSend": "Neu senden"
+      "editSend": "Neu senden",
+      "reasoningLevel": "Denktiefe"
     },
     "actions": {
       "title": "KI-Aktionsvorschlag",
@@ -451,6 +463,26 @@
         "save": "Suchschlüssel konnte nicht gespeichert werden."
       }
     },
+    "usage": {
+      "title": "KI-Nutzung",
+      "description": "Wer wieviel verbraucht hat. Dieselben Zahlen, gegen die auch die Kontingente laufen — abgebrochene Anfragen zählen nicht mit, weil sie beim Anbieter nie angekommen sind.",
+      "empty": "In diesem Zeitraum hat noch niemand die KI genutzt.",
+      "user": "Benutzer",
+      "today": "Heute",
+      "week": "Diese Woche",
+      "month": "Dieser Monat",
+      "requests": "Anfragen",
+      "cost": "Kosten (€)",
+      "total": "Gesamt",
+      "hint": "Wer nichts verbraucht hat, steht nicht in der Liste. Die Woche beginnt am Montag, alle Zeiträume in UTC.",
+      "mineTitle": "Dein KI-Kontingent",
+      "mineDescription": "Dein Verbrauch und die Grenzen, die für deine Rollen gelten. Wirst du mit „Kontingent ausgeschöpft“ abgewiesen, steht hier, woran es liegt.",
+      "noLimit": "Keine Grenze hinterlegt",
+      "mineCost": "Diesen Monat: {{requests}} Anfragen, {{cost}} € Kosten.",
+      "errors": {
+        "load": "KI-Nutzung konnte nicht geladen werden."
+      }
+    },
     "memoryNotice": {
       "title": "Die KI kann sich Dinge über dich merken",
       "body": "Wenn du es erlaubst, merkt sich der Assistent dauerhaft Vorlieben und Eigenheiten — auch Persönliches. Diese Notizen werden bei jeder Anfrage an den KI-Anbieter übertragen. Achte darauf, was du teilst. Derzeit ist das Gedächtnis deaktiviert.",
@@ -492,6 +524,17 @@
       "waitingUser": "Die KI hat eine Rückfrage an dich.",
       "failed": "Der KI-Auftrag ist fehlgeschlagen.",
       "open": "Zum Assistenten"
+    },
+    "reasoning": {
+      "off": "Kein Nachdenken",
+      "levels": {
+        "minimal": "Minimal",
+        "low": "Niedrig",
+        "medium": "Mittel",
+        "high": "Hoch",
+        "xhigh": "Sehr hoch",
+        "max": "Maximal"
+      }
     }
   },
   "shell": {

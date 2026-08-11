@@ -38,6 +38,8 @@ const row: AiRoleLimits = {
   requests_per_minute: 20,
   concurrent_operations: 2,
   monthly_cost_limit_cents: 5_000,
+  // Rang 4 = "hoch". Diese Rolle darf tief denken lassen, aber nicht maximal.
+  max_reasoning_effort: 4,
   updated_at: '2026-08-01T12:00:00Z',
 }
 
@@ -52,7 +54,38 @@ const blankRow: AiRoleLimits = {
   requests_per_minute: null,
   concurrent_operations: null,
   monthly_cost_limit_cents: null,
+  max_reasoning_effort: null,
   updated_at: null,
+}
+
+/** Zwei Benutzer mit Verbrauch — die Antwort von `/ai/usage`. */
+const usage = {
+  entries: [
+    {
+      user_id: 9, username: 'viel-verbraucher', tokens_today: 1_200,
+      tokens_week: 9_000, tokens_month: 40_000, cost_month_cents: 350,
+      requests_month: 88, last_request_at: '2026-08-10T09:00:00Z',
+    },
+    {
+      user_id: 4, username: 'gelegentlich', tokens_today: 0,
+      tokens_week: 40, tokens_month: 120, cost_month_cents: 1,
+      requests_month: 2, last_request_at: '2026-08-04T11:00:00Z',
+    },
+  ],
+  total_tokens_month: 40_120,
+  total_cost_month_cents: 351,
+}
+
+/**
+ * Antwortet pfadabhängig statt pauschal.
+ *
+ * Die Seite hängt inzwischen mehrere Endpunkte ein, und die liefern
+ * unterschiedliche Formen. Ein Mock, der jedem davon dieselbe Liste gibt,
+ * lässt eine Komponente an einer Antwort scheitern, die es so nie gibt.
+ */
+function respond(path: string): Promise<unknown> {
+  if (path === '/ai/usage') return Promise.resolve(usage)
+  return Promise.resolve([row])
 }
 
 describe('AiTab', () => {
@@ -61,7 +94,7 @@ describe('AiTab', () => {
     permissions.mockReturnValue(true)
     useToastStore.setState({ toasts: [] })
     vi.mocked(client.api).mockReset()
-    vi.mocked(client.api).mockResolvedValue([row])
+    vi.mocked(client.api).mockImplementation((path: string) => respond(path) as never)
   })
 
   it('loads role limits and saves a complete set including unlimited', async () => {
@@ -86,6 +119,11 @@ describe('AiTab', () => {
           requests_per_minute: 20,
           concurrent_operations: 2,
           monthly_cost_limit_cents: 5_000,
+          // Der Rumpf entsteht aus FIELD_DEFINITIONS — ein neues Limit ist
+          // damit automatisch mit im Speichern. Genau das prüft diese Zeile:
+          // ein Feld hinzuzufügen, ohne den Speicherpfad anzufassen, darf nicht
+          // dazu führen, dass der Wert im Formular steht und nie ankommt.
+          max_reasoning_effort: 4,
         }),
       })
     })
@@ -157,5 +195,30 @@ describe('AiTab', () => {
 
     await screen.findByTestId('memory')
     expect(screen.queryByTestId('skills')).not.toBeInTheDocument()
+  })
+
+  it('zeigt die KI-Nutzung aller Benutzer mit dem passenden Recht', async () => {
+    render(<AiTab />)
+
+    const tabelle = await screen.findByLabelText('KI-Nutzung')
+    expect(tabelle).toHaveTextContent('viel-verbraucher')
+    expect(tabelle).toHaveTextContent('gelegentlich')
+    // Die Summe steht als eigene Zeile: sie ist die Zahl, wegen der jemand
+    // diese Seite überhaupt aufruft.
+    expect(tabelle).toHaveTextContent('Gesamt')
+    expect(tabelle).toHaveTextContent('3,51')
+  })
+
+  it('zeigt die KI-Nutzung nicht ohne ai.usage.read.all', async () => {
+    // Der Kern dieses Rechts: es hängt **nicht** an panel.settings.read. Wer
+    // Kontingente einstellen darf, sieht damit nicht automatisch, wer wieviel
+    // verbraucht — das ist fremdes Nutzungsverhalten und eine eigene
+    // Entscheidung des Betreibers.
+    permissions.mockImplementation((key: string) => key !== 'ai.usage.read.all')
+    render(<AiTab />)
+
+    await screen.findByTestId('memory')
+    expect(screen.queryByLabelText('KI-Nutzung')).not.toBeInTheDocument()
+    expect(client.api).not.toHaveBeenCalledWith('/ai/usage')
   })
 })

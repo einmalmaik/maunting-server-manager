@@ -99,13 +99,9 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'Autonomen KI-Modus verwenden',
     desc: 'Erlaubt dem Benutzer, den autonomen Modus pro Server oder panelweit freizugeben. Ohne zusätzliche Freigabe bleibt jede Aktion bestätigungspflichtig; Berechtigungen gelten unverändert.',
   },
-  // Dieses Recht ist vergeben, aber im Backend noch nirgends geprüft. Der
-  // Hinweis steht bewusst im Text: ein Schalter, der nichts bewirkt, ist
-  // schlimmer als ein fehlender — der Betreiber hält sonst etwas für begrenzt
-  // oder freigeschaltet, was es nicht ist.
   'ai.usage.read.all': {
     title: 'Gesamte KI-Nutzung einsehen',
-    desc: 'Vorgesehen für die aggregierte Nutzung aller Benutzer. Noch nicht implementiert — dieses Recht bewirkt derzeit nichts.',
+    desc: 'Zeigt unter Einstellungen → KI, welcher Benutzer wieviele Tokens und Kosten verbraucht hat. Damit wird das Nutzungsverhalten fremder Benutzer sichtbar — deshalb ein eigenes Recht und nicht Teil der Einstellungsberechtigung. Den eigenen Verbrauch sieht jeder ohne dieses Recht.',
   },
   'panel.oauth.read': {
     title: 'OAuth-Anbieter anzeigen',

@@ -7,10 +7,11 @@ verhindert zusätzlich Doppelzählung bei Retries.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -264,3 +265,123 @@ def fail_ai_usage(db: Session, event: AiUsageEvent) -> AiUsageEvent:
     event.completed_at = datetime.now(timezone.utc)
     db.flush()
     return event
+
+
+# ── Auswertung ────────────────────────────────────────────────────────
+#
+# Getrennt von der Reservierung, weil es eine andere Frage beantwortet: dort
+# „darf diese Anfrage noch“, hier „wer hat wieviel verbraucht“. Gemeinsam ist
+# beiden die Grundlage — dieselben Zeitraeume aus `_period_starts` und dieselben
+# `ACTIVE_STATUSES`. Das ist keine Kosmetik: eine Ansicht, die andere Zahlen
+# zeigt als die Sperre durchsetzt, ist schlimmer als gar keine. Wer sich fragt,
+# warum jemand mit „noch 20 % frei“ abgewiesen wird, findet die Antwort dann
+# nirgends.
+#
+# `failed` faellt damit heraus, und zwar richtig: `fail_ai_usage` setzt den
+# verbuchten Verbrauch auf 0 zurueck: eine Anfrage, die nie beim Anbieter
+# ankam, hat nichts gekostet.
+
+
+@dataclass(frozen=True)
+class AiUsageSummary:
+    """Verbrauch eines Benutzers in den Zeitraeumen, die auch die Grenzen kennen.
+
+    ``last_request_at`` ist die letzte Anfrage **innerhalb des ausgewerteten
+    Fensters**, nicht die letzte ueberhaupt. Das Fenster ist genau der Zeitraum,
+    den die Ansicht zeigt — ein Datum von ausserhalb waere dort nicht einzuordnen.
+    """
+
+    user_id: int
+    username: str
+    tokens_today: int
+    tokens_week: int
+    tokens_month: int
+    cost_month_microunits: int
+    requests_month: int
+    last_request_at: datetime | None
+
+
+def _since(column, threshold: datetime):
+    """Summiert eine Spalte nur fuer Zeilen ab ``threshold``.
+
+    Alle drei Zeitraeume in **einer** Abfrage statt in dreien je Benutzer. Bei
+    einem Hoster mit einigen hundert Kunden waere die naheliegende Schleife
+    dreihundert Abfragen fuer eine Tabelle.
+    """
+    return func.coalesce(func.sum(case((AiUsageEvent.created_at >= threshold, column), else_=0)), 0)
+
+
+def _usage_rows(
+    db: Session, *, user_id: int | None, now: datetime | None = None
+) -> list[AiUsageSummary]:
+    current_time = now or datetime.now(timezone.utc)
+    day_start, week_start, month_start = _period_starts(current_time)
+    # Die ISO-Woche kann vor dem Monatsanfang beginnen — am Ersten eines Monats
+    # regelmaessig. Wer hier nur ab Monatsanfang laedt, zeigt in den ersten
+    # Tagen eine zu niedrige Wochenzahl.
+    earliest = min(week_start, month_start)
+
+    query = (
+        db.query(
+            AiUsageEvent.user_id.label("user_id"),
+            User.username.label("username"),
+            _since(AiUsageEvent.accounted_tokens, day_start).label("tokens_today"),
+            _since(AiUsageEvent.accounted_tokens, week_start).label("tokens_week"),
+            _since(AiUsageEvent.accounted_tokens, month_start).label("tokens_month"),
+            _since(AiUsageEvent.accounted_cost_microunits, month_start).label("cost_month"),
+            _since(1, month_start).label("requests_month"),
+            func.max(AiUsageEvent.created_at).label("last_request_at"),
+        )
+        .join(User, User.id == AiUsageEvent.user_id)
+        .filter(
+            AiUsageEvent.status.in_(ACTIVE_STATUSES),
+            AiUsageEvent.created_at >= earliest,
+        )
+        .group_by(AiUsageEvent.user_id, User.username)
+    )
+    if user_id is not None:
+        query = query.filter(AiUsageEvent.user_id == user_id)
+
+    return [
+        AiUsageSummary(
+            user_id=int(row.user_id),
+            username=row.username,
+            tokens_today=int(row.tokens_today or 0),
+            tokens_week=int(row.tokens_week or 0),
+            tokens_month=int(row.tokens_month or 0),
+            cost_month_microunits=int(row.cost_month or 0),
+            requests_month=int(row.requests_month or 0),
+            last_request_at=row.last_request_at,
+        )
+        for row in query.all()
+    ]
+
+
+def usage_overview(db: Session, *, now: datetime | None = None) -> list[AiUsageSummary]:
+    """Der Verbrauch aller Benutzer, die im Zeitraum ueberhaupt etwas verbraucht haben.
+
+    Wer nichts verbraucht hat, fehlt — bewusst. Die Frage hinter dieser Ansicht
+    ist „wohin fliessen die Kosten“, und eine Liste, in der zweihundert Kunden
+    mit lauter Nullen stehen, beantwortet sie schlechter als eine mit den zwoelf,
+    die tatsaechlich etwas verbrauchen.
+
+    Sortiert nach Monatsverbrauch: die teuerste Zeile steht oben, weil sie die
+    ist, wegen der jemand diese Seite aufruft.
+    """
+    rows = _usage_rows(db, user_id=None, now=now)
+    return sorted(rows, key=lambda row: (-row.tokens_month, row.username.lower()))
+
+
+def usage_for_user(db: Session, user: User, *, now: datetime | None = None) -> AiUsageSummary:
+    """Der eigene Verbrauch. Ohne Ereignisse eine Null-Zeile statt ``None``.
+
+    Ein Benutzer, der die KI noch nie benutzt hat, soll „0 von 50.000“ sehen und
+    nicht eine leere Ansicht, die nach einem Fehler aussieht.
+    """
+    rows = _usage_rows(db, user_id=user.id, now=now)
+    if rows:
+        return rows[0]
+    return AiUsageSummary(
+        user_id=user.id, username=user.username, tokens_today=0, tokens_week=0,
+        tokens_month=0, cost_month_microunits=0, requests_month=0, last_request_at=None,
+    )

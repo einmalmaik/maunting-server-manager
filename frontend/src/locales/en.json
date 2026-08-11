@@ -113,25 +113,23 @@
     "noPermission": "No permission to read AI settings.",
     "loadFailed": "AI limits could not be loaded.",
     "saveFailed": "AI limits could not be saved.",
-    "saved": "AI limits saved."
+    "saved": "AI limits saved.",
+    "maxReasoningEffort": "Maximum reasoning depth"
   },
   "ai": {
     "providers": {
       "title": "AI providers",
-      "description": "Configure trusted OpenAI-compatible endpoints. The target URL and operator key are visible only to panel administrators.",
+      "description": "Pick a supported provider and a model from its catalog. Provider and operator key are visible to panel administrators only.",
       "add": "Add provider",
       "empty": "No AI provider is configured yet.",
       "name": "Name",
       "model": "Default model",
-      "baseUrl": "Base URL",
       "operatorKey": "Operator API key",
       "keyConfigured": "Key configured ({{hint}}); leave empty to keep it",
       "keyOptional": "Optional central API key",
       "clearOperatorKey": "Remove the central operator key when saving",
       "enabled": "Provider enabled",
       "requiresKey": "API key required",
-      "privateNetwork": "Allow private network targets",
-      "privateNetworkHint": "Enable only for intentionally operated internal providers. Link-local, reserved, and unspecified targets remain blocked.",
       "saved": "AI provider saved.",
       "deleted": "AI provider deleted.",
       "deleteTitle": "Delete AI provider?",
@@ -146,7 +144,20 @@
       "test": "Test connection",
       "testOk": "Connection successful. The provider responded.",
       "testFailed": "The test failed.",
-      "baseUrlHint": "Base URL only, e.g. https://openrouter.ai/api/v1 — without /chat/completions. MSM appends the endpoint itself; a pasted endpoint path is stripped on save."
+      "kind": "Provider",
+      "kindHint": "Requests go to {{url}}.",
+      "keyLink": "Create a key",
+      "kindMissing": "— no supported provider —",
+      "kindMissingHint": "This access pointed at an address MSM no longer supports. Pick a provider before enabling it.",
+      "modelChoose": "Choose a model …",
+      "reloadModels": "Reload models",
+      "catalogUnavailable": "The provider's model catalog is currently unreachable. You can type the model name by hand meanwhile; reasoning levels stay unknown.",
+      "caps": {
+        "none": "This model does not reason.",
+        "levels": "Reasoning levels:",
+        "toggleOnly": "This model reasons but knows no levels — only on or off.",
+        "mandatory": "Reasoning cannot be turned off for this model."
+      }
     },
     "profile": {
       "title": "AI assistant",
@@ -317,7 +328,8 @@
       "compacted": "Older messages were summarized",
       "edit": "Edit message",
       "editHint": "This message and everything after it will be removed. The assistant will no longer know the earlier wording.",
-      "editSend": "Send again"
+      "editSend": "Send again",
+      "reasoningLevel": "Reasoning depth"
     },
     "actions": {
       "title": "AI action proposal",
@@ -451,6 +463,26 @@
         "save": "Search key could not be saved."
       }
     },
+    "usage": {
+      "title": "AI usage",
+      "description": "Who consumed how much. The same numbers the quotas are enforced against — aborted requests are not counted, because they never reached the provider.",
+      "empty": "Nobody has used the AI in this period yet.",
+      "user": "User",
+      "today": "Today",
+      "week": "This week",
+      "month": "This month",
+      "requests": "Requests",
+      "cost": "Cost (€)",
+      "total": "Total",
+      "hint": "Users without consumption are not listed. Weeks start on Monday, all periods in UTC.",
+      "mineTitle": "Your AI quota",
+      "mineDescription": "Your consumption and the limits that apply to your roles. If the AI turns you away with “quota exhausted”, this is where you see why.",
+      "noLimit": "No limit configured",
+      "mineCost": "This month: {{requests}} requests, {{cost}} € in cost.",
+      "errors": {
+        "load": "AI usage could not be loaded."
+      }
+    },
     "memoryNotice": {
       "title": "The assistant can remember things about you",
       "body": "If you allow it, the assistant keeps lasting notes on your preferences and habits — including personal ones. These notes are sent to the AI provider with every request. Be mindful of what you share. Memory is currently disabled.",
@@ -492,6 +524,17 @@
       "waitingUser": "The AI has a question for you.",
       "failed": "The AI task failed.",
       "open": "Open assistant"
+    },
+    "reasoning": {
+      "off": "No reasoning",
+      "levels": {
+        "minimal": "Minimal",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Very high",
+        "max": "Maximum"
+      }
     }
   },
   "shell": {

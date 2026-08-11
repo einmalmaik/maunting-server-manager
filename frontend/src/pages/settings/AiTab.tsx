@@ -19,6 +19,7 @@ import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { AiLearningSettings } from './AiLearningSettings'
 import { AiProvidersSettings } from './AiProvidersSettings'
+import { AiUsageSettings } from './AiUsageSettings'
 import { AiWebSearchSettings } from './AiWebSearchSettings'
 
 export interface AiRoleLimits {
@@ -32,8 +33,24 @@ export interface AiRoleLimits {
   requests_per_minute: number | null
   concurrent_operations: number | null
   monthly_cost_limit_cents: number | null
+  /**
+   * Hoechste erlaubte Denktiefe als Rang: 0 = gar nicht, 1 = minimal … 6 = max.
+   * `null` heisst unbegrenzt — dieselbe Bedeutung wie bei den Kontingenten.
+   *
+   * Ein Rang und kein Wort, weil jedes Modell andere Stufen kennt: gemessen
+   * gibt es bei OpenRouter 20 verschiedene Stufenlisten. Gewaehlt wird spaeter
+   * aus den echten Stufen des Modells, der Rang vergleicht nur.
+   */
+  max_reasoning_effort: number | null
   updated_at: string | null
 }
+
+/**
+ * Die Woerter zu den Raengen — dieselbe Reihenfolge wie
+ * `services/ai_reasoning.RANGFOLGE` im Backend. Rang 0 ist „gar nicht" und hat
+ * dort kein Wort; hier bekommt es eines, weil es in der Auswahl stehen muss.
+ */
+const REASONING_RANKS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
 type LimitField = Exclude<
   keyof AiRoleLimits,
@@ -45,6 +62,12 @@ const FIELD_DEFINITIONS: Array<{
   labelKey: string
   max: number
   step: number
+  /**
+   * Statt eines Zahlenfelds eine Auswahl mit Woertern. Nur fuer die Denktiefe:
+   * „4" sagt niemandem etwas, „hoch" schon. Alle uebrigen Felder sind echte
+   * Mengen und bleiben Zahlen.
+   */
+  ranks?: readonly string[]
 }> = [
   { key: 'daily_token_limit', labelKey: 'aiSettings.dailyTokens', max: 1_000_000_000_000, step: 1_000 },
   { key: 'weekly_token_limit', labelKey: 'aiSettings.weeklyTokens', max: 1_000_000_000_000, step: 10_000 },
@@ -52,6 +75,13 @@ const FIELD_DEFINITIONS: Array<{
   { key: 'requests_per_minute', labelKey: 'aiSettings.requestsPerMinute', max: 10_000, step: 1 },
   { key: 'concurrent_operations', labelKey: 'aiSettings.concurrentOperations', max: 100, step: 1 },
   { key: 'monthly_cost_limit_cents', labelKey: 'aiSettings.monthlyCostCents', max: 1_000_000_000, step: 100 },
+  {
+    key: 'max_reasoning_effort',
+    labelKey: 'aiSettings.maxReasoningEffort',
+    max: REASONING_RANKS.length - 1,
+    step: 1,
+    ranks: REASONING_RANKS,
+  },
 ]
 
 /** Wandelt Stepper-Text nur dann um, wenn er eine sichere Ganzzahl darstellt. */
@@ -66,6 +96,9 @@ export function AiTab() {
   const canRead = useHasPermission('panel.settings.read')
   const canWrite = useHasPermission('panel.settings.write')
   const canManageSkills = useHasPermission('ai.skills.manage')
+  // Eigenes Recht, nicht `panel.settings.read`: wer Verbraeuche sieht, sieht
+  // das Nutzungsverhalten fremder Benutzer.
+  const canReadUsage = useHasPermission('ai.usage.read.all')
   const [rows, setRows] = useState<AiRoleLimits[]>([])
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null)
   const [loading, setLoading] = useState(canRead)
@@ -156,6 +189,10 @@ export function AiTab() {
           Betreiber es sieht. */}
       <AiMemoryManager scope={{ kind: 'panel', canManage: canWrite }} />
 
+      {/* Der Verbrauch steht direkt vor den Kontingenten: erst sehen, wohin die
+          Kosten fliessen, dann entscheiden, wo eine Grenze hingehoert. */}
+      {canReadUsage && <AiUsageSettings />}
+
       <div className="msm-card p-6">
         <div className="mb-3 flex items-center gap-2">
           <Bot className="h-5 w-5 text-primary" aria-hidden="true" />
@@ -208,7 +245,7 @@ export function AiTab() {
           )}
 
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {FIELD_DEFINITIONS.map(({ key, labelKey, max, step }) => {
+            {FIELD_DEFINITIONS.map(({ key, labelKey, max, step, ranks }) => {
               const unlimited = selected[key] === null
               const label = t(labelKey)
               const fieldId = `ai-${selected.role_id}-${key}`
@@ -217,19 +254,38 @@ export function AiTab() {
                   <label htmlFor={fieldId} className="block min-h-10 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
                     {label}
                   </label>
-                  <NumberStepper
-                    id={fieldId}
-                    min={0}
-                    max={max}
-                    step={step}
-                    value={selected[key] ?? 0}
-                    disabled={!canWrite || unlimited || saving}
-                    onValueChange={(raw) => {
-                      const parsed = parseLimitValue(raw, max)
-                      if (parsed !== null) updateField(selected.role_id, key, parsed)
-                    }}
-                    aria-label={`${label}: ${selected.role_name}`}
-                  />
+                  {ranks ? (
+                    <select
+                      id={fieldId}
+                      className="msm-input"
+                      value={String(selected[key] ?? 0)}
+                      disabled={!canWrite || unlimited || saving}
+                      onChange={(event) => updateField(selected.role_id, key, Number(event.target.value))}
+                      aria-label={`${label}: ${selected.role_name}`}
+                    >
+                      {ranks.map((rank, rang) => (
+                        <option key={rank} value={rang}>
+                          {rang === 0
+                            ? t('ai.reasoning.off')
+                            : t(`ai.reasoning.levels.${rank}`, { defaultValue: rank })}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <NumberStepper
+                      id={fieldId}
+                      min={0}
+                      max={max}
+                      step={step}
+                      value={selected[key] ?? 0}
+                      disabled={!canWrite || unlimited || saving}
+                      onValueChange={(raw) => {
+                        const parsed = parseLimitValue(raw, max)
+                        if (parsed !== null) updateField(selected.role_id, key, parsed)
+                      }}
+                      aria-label={`${label}: ${selected.role_name}`}
+                    />
+                  )}
                   <div className="flex min-h-10 items-center justify-between gap-3">
                     <span className="text-xs text-on-surface-variant">{t('aiSettings.unlimited')}</span>
                     <Switch

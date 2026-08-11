@@ -3,11 +3,13 @@ import { api, apiStream } from './client'
 export interface AiProviderAdmin {
   id: number
   name: string
+  /** Schluessel aus der Anbieterliste, z. B. "openrouter". */
+  provider_kind: string
+  /** Abgeleitet aus dem Anbieter — nur zur Anzeige, nicht editierbar. */
   base_url: string
   default_model: string
   enabled: boolean
   requires_api_key: boolean
-  allow_private_network: boolean
   operator_key_configured: boolean
   operator_key_hint: string | null
   /** Preis in Cent je 1 Mio. Tokens. null = keine Preisquelle, Kosten bleiben 0. */
@@ -22,6 +24,38 @@ export interface AiProviderAvailable {
   requires_api_key: boolean
   operator_key_available: boolean
   available: boolean
+  /** Ob bei diesem Modell ueberhaupt nachgedacht werden kann. */
+  reasoning: boolean
+  /**
+   * Die waehlbaren Denkstufen, flach nach tief — **bereits auf die Rolle des
+   * Benutzers geklemmt**. Leer heisst nicht "denkt nicht", sondern "kennt
+   * keine Stufen": gemessen koennen 145 der 272 denkenden Modelle bei
+   * OpenRouter nur an oder aus.
+   */
+  efforts: string[]
+  /** Ob "aus" eine gueltige Wahl ist. Bei 82 der 402 Modelle nicht. */
+  can_disable: boolean
+  /** Was gilt, wenn nichts gewaehlt wird. */
+  default_effort: string | null
+}
+
+/** Ein von MSM unterstuetzter Anbieter — die Auswahl im Einrichtungsformular. */
+export interface AiProviderKind {
+  kind: string
+  label: string
+  base_url: string
+  key_url: string
+  key_prefix: string | null
+}
+
+/** Ein Modell aus dem Katalog des Anbieters, mit seinen Denkfaehigkeiten. */
+export interface AiCatalogModel {
+  model_id: string
+  name: string
+  reasoning: boolean
+  efforts: string[]
+  default_effort: string | null
+  mandatory: boolean
 }
 
 export interface AiConversation {
@@ -192,6 +226,45 @@ export interface AiLearningPolicy {
   pending_count: number
 }
 
+/**
+ * Der Verbrauch eines Benutzers in denselben Zeiträumen wie die Grenzen.
+ *
+ * Kosten kommen bereits in **Cent** — dieselbe Einheit, in der die Grenze
+ * `monthly_cost_limit_cents` eingestellt wird. Die Mikroeinheiten der Datenbank
+ * erreichen die Oberfläche bewusst nie.
+ */
+export interface AiUsageEntry {
+  user_id: number
+  username: string
+  tokens_today: number
+  tokens_week: number
+  tokens_month: number
+  cost_month_cents: number
+  requests_month: number
+  /** Letzte Anfrage im ausgewerteten Zeitraum, nicht die letzte überhaupt. */
+  last_request_at: string | null
+}
+
+/** Alle Benutzer mit Verbrauch. Wer nichts verbraucht hat, fehlt. */
+export interface AiUsageOverview {
+  entries: AiUsageEntry[]
+  total_tokens_month: number
+  total_cost_month_cents: number
+}
+
+/** Der eigene Verbrauch — mit den Grenzen daneben, gegen die er läuft. */
+export interface AiUsageMine extends AiUsageEntry {
+  limits: {
+    daily_token_limit: number | null
+    weekly_token_limit: number | null
+    monthly_token_limit: number | null
+    requests_per_minute: number | null
+    concurrent_operations: number | null
+    monthly_cost_limit_cents: number | null
+    role_ids: number[]
+  }
+}
+
 /** Eine Datenbankzeile in der Verwaltung — auch abgeschaltete und wartende. */
 export interface AiSkillManaged {
   id: string
@@ -318,11 +391,10 @@ const STREAM_EVENTS = [
 
 export interface AiProviderWrite {
   name: string
-  base_url: string
+  provider_kind: string
   default_model: string
   enabled: boolean
   requires_api_key: boolean
-  allow_private_network: boolean
   token_price_cents_per_million?: number | null
   operator_api_key?: string
   clear_operator_api_key?: boolean
@@ -340,9 +412,21 @@ export const aiApi = {
   }),
   deleteProvider: (id: number) => api(`/ai/settings/providers/${id}`, { method: 'DELETE' }),
   listProviders: () => api<AiProviderAvailable[]>('/ai/providers'),
+  listProviderKinds: () => api<AiProviderKind[]>('/ai/settings/provider-kinds'),
+  /** Die Modelle eines Anbieters. `refresh` umgeht den Zwischenspeicher. */
+  listCatalogModels: (kind: string, refresh = false) => api<AiCatalogModel[]>(
+    `/ai/settings/provider-kinds/${encodeURIComponent(kind)}/models${refresh ? '?refresh=true' : ''}`,
+  ),
   testProvider: (id: number) => api<AiProviderTestResult>(`/ai/settings/providers/${id}/test`, {
     method: 'POST',
   }),
+  /**
+   * Der eigene Verbrauch. Ohne Sonderrecht — wer von der KI wegen des
+   * Kontingents abgewiesen wird, muss nachsehen können, woran es lag.
+   */
+  getMyUsage: () => api<AiUsageMine>('/ai/usage/me'),
+  /** Alle Benutzer. Verlangt `ai.usage.read.all`. */
+  getUsageOverview: () => api<AiUsageOverview>('/ai/usage'),
   getWebSearchStatus: () => api<AiWebSearchStatus>('/ai/settings/web-search'),
   /** Leerer Schluessel entfernt ihn — dann verschwindet auch das Werkzeug. */
   setWebSearchKey: (apiKey: string) => api<AiWebSearchStatus>('/ai/settings/web-search', {
@@ -439,7 +523,14 @@ export const aiApi = {
 
 /** Liest einen fragmentierten SSE-Stream, ohne unbekannte Providerdaten auszugeben. */
 export async function streamAiMessage(
-  payload: { content: string; provider_id: number; request_id: string; reasoning: boolean },
+  payload: {
+    content: string
+    provider_id: number
+    request_id: string
+    reasoning: boolean
+    /** Die gewuenschte Denkstufe. Der Server klemmt sie auf Modell und Rolle. */
+    reasoning_effort?: string | null
+  },
   onEvent: (event: AiStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {

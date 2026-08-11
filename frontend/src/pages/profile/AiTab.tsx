@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
+import { AiUsageCard } from '@/components/ai/AiUsageCard'
 
 /**
  * Der persönliche KI-Bereich im Profil — und nur der.
@@ -38,6 +39,10 @@ export function AiTab() {
           </Link>
         </p>
       </div>
+      {/* Das eigene Kontingent gehört hierher: es ist die Antwort auf „warum
+          hat die KI mich abgewiesen?", und die darf nicht nur der Betreiber
+          nachschlagen können. */}
+      <AiUsageCard />
       <AiMemoryManager />
     </section>
   )

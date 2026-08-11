@@ -102,7 +102,14 @@ describe('AiChat', () => {
     })
     vi.mocked(client.api).mockReset().mockResolvedValue([{ id: 7, name: 'Minecraft-01' }])
     vi.mocked(aiApi.listProviders).mockReset().mockResolvedValue([
-      { id: 1, name: 'Synthetic AI', default_model: 'test-model', requires_api_key: false, operator_key_available: true, available: true },
+      {
+        id: 1, name: 'Synthetic AI', default_model: 'test-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        // Ein Modell mit Stufen — der Fall, den 127 der 402 Katalogmodelle
+        // treffen. Die Liste kommt vom Server bereits auf die Rolle geklemmt.
+        reasoning: true, efforts: ['low', 'medium', 'high'],
+        can_disable: true, default_effort: 'medium',
+      },
     ])
     vi.mocked(aiApi.getConversation).mockReset().mockResolvedValue({ ...CONVERSATION, messages: [eigeneNachricht] })
     vi.mocked(aiApi.listActions).mockReset().mockResolvedValue([])
@@ -135,21 +142,52 @@ describe('AiChat', () => {
     await waitFor(() => expect(aiApi.uploadAttachment).toHaveBeenCalledWith(file))
   })
 
-  it('sends the reasoning switch state along with the message', async () => {
+  it('sends the chosen reasoning level along with the message', async () => {
+    // Aus dem Schalter ist eine Stufenwahl geworden. Die Stufen stehen nicht
+    // im Code, sondern kommen je Modell vom Server — gemessen gibt es bei
+    // OpenRouter 20 verschiedene Stufenlisten, eine feste Skala waere falsch.
     const { streamAiMessage } = await import('@/api/ai')
     vi.mocked(streamAiMessage).mockResolvedValue(undefined)
     render(<AiChat />)
     await screen.findByText('synthetic-note.txt')
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Nachdenken' }))
+    const stufen = screen.getByLabelText('Denktiefe')
+    expect(Array.from(stufen.querySelectorAll('option')).map((o) => o.textContent))
+      .toEqual(['Kein Nachdenken', 'Niedrig', 'Mittel', 'Hoch'])
+
+    fireEvent.change(stufen, { target: { value: 'high' } })
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Hallo' } })
     fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
 
+    // Beide Felder gehen mit: der Boolean, weil 145 der 272 denkenden Modelle
+    // nur an/aus koennen, und die Stufe fuer die uebrigen.
     await waitFor(() => expect(streamAiMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ content: 'Hallo', reasoning: true }),
+      expect.objectContaining({ content: 'Hallo', reasoning: true, reasoning_effort: 'high' }),
       expect.any(Function),
       expect.any(AbortSignal),
     ))
+  })
+
+  it('bietet bei einem Modell mit Denkzwang kein „aus" an', async () => {
+    // 82 der 402 Katalogmodelle tragen `mandatory: true` — dort ist Nachdenken
+    // nicht abschaltbar. Ein „aus" in der Liste waere eine Wahl, die der
+    // Server anschliessend stillschweigend zuruecknehmen muesste.
+    vi.mocked(aiApi.listProviders).mockResolvedValue([
+      {
+        id: 1, name: 'Synthetic AI', default_model: 'test-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: true, efforts: ['low', 'high'],
+        can_disable: false, default_effort: 'low',
+      },
+    ])
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    const stufen = screen.getByLabelText('Denktiefe')
+    expect(Array.from(stufen.querySelectorAll('option')).map((o) => o.textContent))
+      .toEqual(['Niedrig', 'Hoch'])
+    // Und die Vorauswahl faellt auf die Vorgabe des Modells, nicht auf nichts.
+    expect(stufen).toHaveValue('low')
   })
   it('zeigt bei einem abgelehnten Werkzeugaufruf einen Satz statt eines Schlüssels', async () => {
     // Der Betreiber sah `ai.errors.codes.AI_TOOL_REJECTED` in der Meldung. Der
