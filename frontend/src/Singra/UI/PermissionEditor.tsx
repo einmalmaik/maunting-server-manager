@@ -554,17 +554,34 @@ export function PermissionEditor({
                         >
                           {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
                         </div>
+                        {/*
+                          Der zugängliche Name hängt an aria-labelledby und bewusst nicht an
+                          einem <label htmlFor>: Den Umschalter trägt das umschließende <div>
+                          mit onClick. Ein Label würde beim Klick auf den Titel zusätzlich
+                          einen Klick auf das Eingabefeld auslösen, sodass derselbe Handler
+                          zweimal liefe (nachgemessen: zwei Aufrufe pro Klick) — heute
+                          unauffällig, weil React beide aus demselben Zustand berechnet, aber
+                          eine Falle, die wir uns für einen bloßen Namen nicht einhandeln.
+                          aria-labelledby vergibt den Namen, ohne den Klickweg anzufassen.
+                          Ohne ihn meldet ein Screenreader für jedes der rund 90 Rechte nur
+                          "Kontrollkästchen, nicht aktiviert", weil sr-only clip ist und die
+                          Checkbox damit im Fokus bleibt, aber namenlos.
+                        */}
                         <input
                           id={id}
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => {}} // handled by click container
                           disabled={disabled}
+                          aria-labelledby={`${id}-title`}
                           className="sr-only"
                         />
                       </div>
                       <div className="flex flex-col gap-0.5 min-w-0">
-                        <span className="font-label-md text-xs font-semibold text-on-surface group-hover:text-primary transition-colors truncate">
+                        <span
+                          id={`${id}-title`}
+                          className="font-label-md text-xs font-semibold text-on-surface group-hover:text-primary transition-colors truncate"
+                        >
                           {title}
                         </span>
                         <span className="font-mono text-[10px] text-on-surface-variant/80 truncate">
