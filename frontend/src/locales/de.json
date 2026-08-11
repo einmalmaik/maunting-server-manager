@@ -486,6 +486,7 @@
       "mineTitle": "Dein KI-Kontingent",
       "mineDescription": "Dein Verbrauch und die Grenzen, die für deine Rollen gelten. Wirst du mit „Kontingent ausgeschöpft“ abgewiesen, steht hier, woran es liegt.",
       "noLimit": "Keine Grenze hinterlegt",
+      "blocked": "Gesperrt: Für diesen Zeitraum ist kein Kontingent freigegeben.",
       "mineCost": "Diesen Monat: {{requests}} Anfragen, {{cost}} € Kosten.",
       "errors": {
         "load": "KI-Nutzung konnte nicht geladen werden."

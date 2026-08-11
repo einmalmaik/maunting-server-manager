@@ -54,9 +54,23 @@ export function AiUsageCard() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {periods.map(({ key, used, limit }) => {
-          // Ein Limit von 0 ist eine echte Sperre, kein „unbegrenzt" — deshalb
-          // die Prüfung auf null und nicht auf Falsyness.
-          const share = limit !== null && limit > 0 ? Math.min(100, (used / limit) * 100) : null
+          // Drei Zustände, nicht zwei. `null` heißt „keine Grenze hinterlegt“,
+          // 0 heißt „gesperrt“ — und das ist das Gegenteil davon. Vorher fielen
+          // beide in denselben Zweig, sodass ausgerechnet der Gesperrte unter
+          // seinem „0 / 0“ las, es sei gar keine Grenze gesetzt. Die Sperre ist
+          // echt: `_ensure_within` im Backend weist mit 0 jede Anfrage ab.
+          // Die 0 bleibt dabei weiterhin aus der Division heraus.
+          let share: number | null = null
+          if (limit === 0) share = 100
+          else if (limit !== null) share = Math.min(100, (used / limit) * 100)
+
+          // Dieselben Schwellen wie bei den CPU-/RAM-Balken (`Singra/UI/ProgressBar`
+          // mit `heat`): Wer 90 % seines Kontingents verbraucht hat, soll das sehen,
+          // ohne die Zahl darüber selbst ins Verhältnis setzen zu müssen. Eine
+          // Grenze von 0 landet über die 100 von oben automatisch im roten Bereich.
+          let barColor = 'bg-primary'
+          if (share !== null && share >= 90) barColor = 'bg-status-error'
+          else if (share !== null && share >= 70) barColor = 'bg-status-warning'
           return (
             <div key={key} className="space-y-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
@@ -73,16 +87,24 @@ export function AiUsageCard() {
               {share === null ? (
                 <p className="text-xs text-on-surface-variant">{t('ai.usage.noLimit')}</p>
               ) : (
-                <div
-                  className="h-1.5 overflow-hidden rounded-full bg-surface-container-high"
-                  role="progressbar"
-                  aria-valuenow={Math.round(share)}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label={t(`ai.usage.${key}`)}
-                >
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${share}%` }} />
-                </div>
+                <>
+                  <div
+                    className="h-1.5 overflow-hidden rounded-full bg-surface-container-high"
+                    role="progressbar"
+                    aria-valuenow={Math.round(share)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={t(`ai.usage.${key}`)}
+                  >
+                    <div className={`h-full rounded-full ${barColor}`} style={{ width: `${share}%` }} />
+                  </div>
+                  {limit === 0 && (
+                    // Der volle rote Balken allein bliebe zweideutig — er sieht aus
+                    // wie „heute aufgebraucht, morgen wieder da“. Der Satz nennt den
+                    // Unterschied: hier war nie etwas freigegeben.
+                    <p className="text-xs text-status-error">{t('ai.usage.blocked')}</p>
+                  )}
+                </>
               )}
             </div>
           )

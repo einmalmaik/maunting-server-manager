@@ -486,6 +486,7 @@
       "mineTitle": "Your AI quota",
       "mineDescription": "Your consumption and the limits that apply to your roles. If the AI turns you away with “quota exhausted”, this is where you see why.",
       "noLimit": "No limit configured",
+      "blocked": "Blocked: no quota is granted for this period.",
       "mineCost": "This month: {{requests}} requests, {{cost}} € in cost.",
       "errors": {
         "load": "AI usage could not be loaded."
