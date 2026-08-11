@@ -499,3 +499,77 @@ def test_ein_persoenliches_team_nimmt_kein_teamwissen(
     assert db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == f"team:{persoenlich.id}"
     ).count() == 0
+
+
+def test_eine_erfundene_server_id_heisst_server_nicht_gefunden(
+    db: Session, regular_user: User
+) -> None:
+    """Recht ohne Existenz reicht nicht — sonst luegt die Fehlermeldung.
+
+    Ein Benutzer mit pauschalem `server.view` (hier ueber die Rolle, beim Owner
+    genauso) kommt an `has_server_permission` vorbei, ohne dass der Server je
+    geladen wird. Nannte das Modell eine Nummer, die es gar nicht gibt, wurde
+    die Zeile angelegt und erst der Fremdschluessel beim Commit warf sie
+    zurueck — als "Bitte erneut versuchen". Das Modell befolgte die
+    Aufforderung und wiederholte denselben aussichtslosen Aufruf, statt mit
+    `list_my_servers` nach der richtigen Nummer zu suchen.
+    """
+    _allow(db, regular_user, "ai.memory.use", "server.view")
+
+    with pytest.raises(AiActionValidationError) as exc:
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="remember",
+            arguments={
+                "scope": "server", "server_id": 424242,
+                "key": "startzeit", "value": "Startet nur mit erhoehtem Timeout",
+            },
+        )
+    # Die Diagnose entscheidet, was das Modell als naechstes tut.
+    assert "Server nicht gefunden" in str(exc.value)
+    assert "erneut versuchen" not in str(exc.value)
+    db.rollback()
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.server_id == 424242
+    ).count() == 0
+
+
+def test_eine_erlaubte_korrektur_nimmt_dem_eintrag_nicht_dauerhaft_den_schutz(
+    db: Session, regular_user: User
+) -> None:
+    """Nach "nein, korrigier das" bleibt es trotzdem eine Ansage des Benutzers.
+
+    Vorher stufte die ausdruecklich erlaubte Korrektur den Eintrag auf
+    `origin='ai'` herunter. Der Schutz gegen das stillschweigende Ueberschreiben
+    haengt aber genau an diesem Feld — er galt danach fuer immer nicht mehr, und
+    die naechste beilaeufige Ableitung der KI durfte den Wert ohne
+    `replace_user_entry` ersetzen.
+    """
+    _allow(db, regular_user, "ai.memory.use")
+    _remember(db, regular_user, "ram.bevorzugt", "Ich nehme immer 16 GB")
+
+    ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="remember",
+        arguments={
+            "scope": "user", "key": "ram.bevorzugt",
+            "value": "Ich nehme immer 8 GB", "replace_user_entry": True,
+        },
+    )
+
+    zeile = db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"user:{regular_user.id}",
+        AiMemoryEntry.key == "ram.bevorzugt",
+    ).one()
+    assert zeile.origin == "user"
+
+    # Und deshalb greift der Schutz beim naechsten Mal wieder.
+    with pytest.raises(AiActionValidationError) as exc:
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="remember",
+            arguments={
+                "scope": "user", "key": "ram.bevorzugt",
+                "value": "Ich nehme immer 4 GB",
+            },
+        )
+    assert "replace_user_entry" in str(exc.value)
+    _row, wert = ai_memory_service.list_entries(db, regular_user, "user", None)[0]
+    assert "8 GB" in wert

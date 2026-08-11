@@ -10,7 +10,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import AiMemoryEntry, AiMemoryPreference, Team, User
+from models import AiMemoryEntry, AiMemoryPreference, Server, Team, User
 from services import ai_embedding_service, audit_service, permission_service
 from services.ai_redaction import redact_sensitive_text
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
@@ -71,8 +71,26 @@ def scope_identity(
     if scope == "server":
         if team_id is not None:
             raise HTTPException(status_code=422, detail="Server-Memory akzeptiert kein Team")
-        if server_id is None or not permission_service.has_server_permission(
-            db=db, user=user, server_id=server_id, key="server.view"
+        # Existenz **und** Recht — vorher stand hier nur das Recht.
+        # `has_server_permission` laedt den Server nie: fuer einen Owner oder
+        # eine Rolle mit pauschalem `server.view` ist damit jede beliebige
+        # Nummer erlaubt. Eine erfundene ID kam so bis zum `db.commit()` durch
+        # und scheiterte erst am Fremdschluessel auf `servers.id`; der
+        # IntegrityError-Handler weiter unten deutet das als Schreibkonflikt und
+        # antwortet "Bitte erneut versuchen". Das Modell befolgt diese
+        # Aufforderung und wiederholt denselben aussichtslosen Aufruf, statt mit
+        # `list_my_servers` nach der richtigen Nummer zu suchen. Die Diagnose
+        # muss stimmen, sonst fuehrt sie das Modell in die Irre.
+        #
+        # Ein nicht existierender und ein nicht sichtbarer Server bleiben
+        # ununterscheidbar — dieselbe Zusage wie in `_resolve_server`: sonst
+        # waere die Fehlermeldung ein Existenzorakel ueber fremde Server.
+        if (
+            server_id is None
+            or db.get(Server, server_id) is None
+            or not permission_service.has_server_permission(
+                db=db, user=user, server_id=server_id, key="server.view"
+            )
         ):
             raise HTTPException(status_code=404, detail="Server nicht gefunden")
         return f"server:{server_id}:user:{user.id}", user.id, server_id, None
@@ -303,7 +321,20 @@ def upsert_entry(
             ),
         )
     else:
-        row.origin = origin
+        # Eine ausdrueckliche Ansage bleibt eine ausdrueckliche Ansage.
+        # Vorher stand hier bedingungslos `row.origin = origin`: eine einmal vom
+        # Benutzer verlangte Korrektur (`replace_user_entry`) stufte den Eintrag
+        # dauerhaft auf "ai" herunter — und der Schutz im Zweig darueber haengt
+        # genau an diesem Feld. Er galt danach fuer immer nicht mehr, die
+        # naechste beilaeufige Ableitung der KI durfte den Wert wieder
+        # stillschweigend ersetzen. Das ist das Gegenteil dessen, was der
+        # Docstring zusichert.
+        #
+        # Nur diese eine Richtung ist gesperrt. Die Hochstufung "ai" -> "user"
+        # bleibt erlaubt: wer eine Ableitung selbst bestaetigt, macht sie damit
+        # zu seiner eigenen Ansage und sie verdient den Schutz.
+        if not (origin == "ai" and row.origin == "user"):
+            row.origin = origin
     # Jeder Schreibvorgang hebt den Eintrag auf die gebundene AAD. Bestandsdaten
     # aus Phase C wandern damit von selbst mit, sobald sie angefasst werden —
     # ohne Migrationsschritt, der den DIS-Sidecar voraussetzt.
