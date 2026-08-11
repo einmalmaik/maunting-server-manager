@@ -67,6 +67,31 @@ describe('AiProvidersSettings', () => {
     await waitFor(() => expect(keyInput).toHaveValue(''))
   })
 
+  it('lässt einen Provider nach dem Löschen des Keys wieder einen bekommen', async () => {
+    // `update()` merged in die vorhandene Zeile, und `toDraft` nannte
+    // `clear_operator_api_key` nicht — die einmal gefasste Absicht „Key
+    // entfernen" überlebte damit das Speichern. Danach war das Schlüsselfeld
+    // dauerhaft gesperrt, und der Umschalter zum Zurücknehmen verschwand, weil
+    // er nur bei `operator_key_configured` erscheint — das der Server gerade
+    // auf `false` gesetzt hatte. Ohne Neuladen der Seite ging gar nichts mehr.
+    vi.mocked(aiApi.updateProvider).mockResolvedValue({
+      ...provider, operator_key_configured: false, operator_key_hint: null,
+    })
+    render(<AiProvidersSettings canWrite />)
+
+    fireEvent.click(await screen.findByLabelText('Zentralen Operator-Key beim Speichern entfernen'))
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+
+    await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(4, expect.objectContaining({
+      clear_operator_api_key: true,
+    })))
+
+    // Nach dem Speichern ist die Absicht verbraucht: das Feld nimmt wieder
+    // einen Schlüssel an.
+    const keyInput = await screen.findByLabelText('Operator-API-Key')
+    await waitFor(() => expect(keyInput).not.toBeDisabled())
+  })
+
   it('offers the models from the catalog instead of a free text field', async () => {
     render(<AiProvidersSettings canWrite />)
 

@@ -43,6 +43,18 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
     operator_key_hint: provider.operator_key_hint,
+    // Ausdruecklich zuruecksetzen. `update()` **merged** in die vorhandene
+    // Zeile, und was `toDraft` nicht nennt, ueberlebt das Speichern. Ohne diese
+    // Zeile blieb die einmal gefasste Absicht „Key entfernen" stehen: das
+    // Schluesselfeld war danach dauerhaft gesperrt (`disabled` haengt daran),
+    // und der Umschalter zum Zuruecknehmen verschwand, weil er nur bei
+    // `operator_key_configured` erscheint — das der Server gerade auf `false`
+    // gesetzt hatte. Der Provider liess sich dann nicht mehr mit einem
+    // Schluessel versehen, ohne die Seite neu zu laden.
+    //
+    // „Ich will loeschen" ist eine Absicht fuer genau einen Speichervorgang,
+    // kein Zustand des Providers.
+    clear_operator_api_key: false,
   }
 }
 
@@ -259,6 +271,7 @@ function ProviderForm({
   // die auch bei zwei Formularen auf derselben Seite eindeutig bleibt.
   const kindId = useId()
   const modelId = useId()
+  const preisId = useId()
 
   /**
    * Schickt eine echte Mini-Anfrage an den Anbieter.
@@ -386,16 +399,25 @@ function ProviderForm({
         <Toggle label={t('ai.providers.enabled')} checked={draft.enabled} onChange={(enabled) => change({ enabled })} />
         <Toggle label={t('ai.providers.requiresKey')} checked={draft.requires_api_key} onChange={(requires_api_key) => change({ requires_api_key })} />
         <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-          <label className="space-y-1.5 block">
-            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.tokenPrice')}</span>
+          {/* `htmlFor` statt Umschliessen: der `NumberStepper` ist eine
+              Knopfgruppe, und ein umschliessendes `<label>` benennt das erste
+              bedienbare Element darin — den **Minus**-Knopf. Ein Klick auf die
+              Beschriftung senkte den Preis damit um `step`, bei noch leerem
+              Feld sogar von „kein Preis“ auf 0, also auf „kostenlos“. */}
+          <div className="space-y-1.5">
+            <label htmlFor={preisId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('ai.providers.tokenPrice')}
+            </label>
             <NumberStepper
+              id={preisId}
               value={draft.token_price_cents_per_million === null || draft.token_price_cents_per_million === undefined ? '' : String(draft.token_price_cents_per_million)}
               onValueChange={(value) => change({ token_price_cents_per_million: value === '' ? null : Number(value) })}
               min={0}
               max={10000000}
               step={10}
+              aria-label={t('ai.providers.tokenPrice')}
             />
-          </label>
+          </div>
           <p className="mt-2 text-xs text-on-surface-variant">{t('ai.providers.tokenPriceHint')}</p>
         </div>
       </fieldset>
