@@ -96,6 +96,32 @@ def test_the_picture_belongs_to_this_very_secret(
     assert zweite["qr_data_uri"] == totp_qr.qr_datenuri(zweite["uri"])
 
 
+def test_a_missing_drawing_library_does_not_take_the_panel_down(
+    client: TestClient, owner_cookies: dict, monkeypatch
+) -> None:
+    """Eine fehlende Zeichenbibliothek kostet das Bild, nicht das Panel.
+
+    Am 11.08.2026 war der Import hart. `routers/auth.py` laedt dieses Modul
+    beim Start, `routers/__init__.py` laedt `auth`, `main.py` laedt `routers` —
+    aus dem fehlenden `segno` wurde damit ein ModuleNotFoundError im
+    Anwendungsimport: kein Login, keine Server, nichts, und systemd in einer
+    Neustartschleife (Restart-Zaehler 43). Der Docstring des Moduls hatte zu
+    dem Zeitpunkt bereits versprochen, ein Wegfall koste nur das Bild.
+
+    Der Test stellt den Zustand nach: `segno is None` ist genau das, was der
+    Rueckfall im Modulkopf hinterlaesst.
+    """
+    monkeypatch.setattr(totp_qr, "segno", None)
+
+    assert totp_qr.qr_datenuri("otpauth://totp/x?secret=A") is None
+
+    # Und der Weg zum zweiten Faktor bleibt vollstaendig begehbar.
+    daten = _setup(client, owner_cookies)
+    assert daten["qr_data_uri"] is None
+    assert daten["secret"]
+    assert daten["uri"].startswith("otpauth://")
+
+
 def test_a_picture_that_cannot_be_drawn_does_not_block_the_second_factor(
     client: TestClient, owner_cookies: dict, monkeypatch
 ) -> None:

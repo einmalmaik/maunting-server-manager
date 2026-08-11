@@ -23,9 +23,32 @@ from __future__ import annotations
 
 import logging
 
-import segno
+try:
+    import segno
+except ImportError:  # pragma: no cover - exercised on systems before deps install
+    # Weich und nicht hart, und das ist keine Bequemlichkeit: `routers/auth.py`
+    # importiert dieses Modul beim Start, `routers/__init__.py` importiert
+    # `auth`, und `main.py` importiert `routers`. Ein harter Import macht aus
+    # einer fehlenden Zeichenbibliothek einen Totalausfall des Panels — kein
+    # Login, keine Server, nichts, in einer Neustartschleife von systemd.
+    # Genau so ist es am 11.08.2026 im Betrieb passiert, weil der Code ohne
+    # `update.sh` (und damit ohne `pip install -r requirements.txt`) auf den
+    # Server kam.
+    #
+    # Der Docstring oben verspricht ohnehin, dass ein Wegfall der Bibliothek
+    # nur das Bild kostet. Der harte Import hat dieses Versprechen gebrochen.
+    # Dieselbe Form benutzt `services/docker_service.py` seit jeher.
+    segno = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+if segno is None:
+    # Beim Start und nicht erst beim ersten Einrichten: der Betreiber schaut
+    # nach einem Update ins journalctl, nicht in die 2FA-Maske.
+    logger.warning(
+        "segno fehlt — die 2FA-Einrichtung zeigt keinen QR-Code. "
+        "Behebung: venv/bin/pip install -r requirements.txt"
+    )
 
 # Fehlerkorrektur M ist die uebliche Wahl fuer Authenticator-Codes. Ein Bild am
 # Schirm nimmt keinen Schaden, hoehere Stufen wuerden den Code also nur dichter
@@ -53,7 +76,7 @@ def qr_datenuri(otpauth_uri: str) -> str | None:
     `light="white"` ist nicht kosmetisch: das Panel ist dunkel, und ein Code
     ohne hellen Untergrund verliert den Kontrast, den ein Leser braucht.
     """
-    if not otpauth_uri:
+    if segno is None or not otpauth_uri:
         return None
     try:
         code = segno.make(otpauth_uri, error=FEHLERKORREKTUR)
