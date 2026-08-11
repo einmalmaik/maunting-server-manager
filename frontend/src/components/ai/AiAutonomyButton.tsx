@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { ShieldAlert, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -33,6 +33,14 @@ export function AiAutonomyButton({
   const [budget, setBudget] = useState(DEFAULT_BUDGET)
   const [busy, setBusy] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  // Unser `Dropdown` und der `NumberStepper` sind Knopfgruppen, keine
+  // `<select>`/`<input>`-Elemente. Ein umschliessendes `<label>` beschriftet
+  // sie deshalb nicht, sondern leitet den Klick an das erste bedienbare Element
+  // darin weiter — beim Stepper ist das der **Minus**-Knopf.
+  const panelId = useId()
+  const scopeId = useId()
+  const budgetId = useId()
 
   const serverId = scope === PANEL_SCOPE ? null : Number(scope)
   const grant = grants.find((row) => row.server_id === serverId) ?? null
@@ -60,9 +68,26 @@ export function AiAutonomyButton({
   useEffect(() => {
     if (!open) return
     const onClick = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
+      const ziel = event.target as HTMLElement | null
+      if (!ziel || !rootRef.current) return
+      // Das Optionsmenue unseres `Dropdown` haengt per Portal an
+      // `document.body` und liegt damit ausserhalb von `rootRef`. Ohne diese
+      // zweite Pruefung schloss ein Klick auf eine Option das Panel — und zwar
+      // auf `mousedown`, also **bevor** das `click` der Option feuerte.
+      // `setScope` lief nie, der Bereich blieb auf „Panelweit“, und eine
+      // serverbezogene Freigabe liess sich ueber die Oberflaeche gar nicht
+      // einstellen.
+      if (ziel.closest?.('[data-msm-dropdown-menu]')) return
+      if (!rootRef.current.contains(ziel)) setOpen(false)
     }
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      // Der Fokus fiel beim Schliessen auf `<body>`: der naechste Tab begann
+      // wieder ganz oben auf der Seite. Er gehoert dorthin zurueck, wo er
+      // herkam.
+      triggerRef.current?.focus()
+    }
     document.addEventListener('mousedown', onClick)
     document.addEventListener('keydown', onKey)
     return () => {
@@ -104,9 +129,11 @@ export function AiAutonomyButton({
     <div className="relative" ref={rootRef}>
       <button
         type="button"
+        ref={triggerRef}
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
+        aria-controls={panelId}
         aria-label={t('ai.autonomy.title')}
         className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
           anyEnabled
@@ -119,17 +146,23 @@ export function AiAutonomyButton({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-outline-variant bg-surface-container-high p-4 shadow-panel">
+        <div id={panelId} className="absolute left-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-outline-variant bg-surface-container-high p-4 shadow-panel">
           <h3 className="text-sm font-semibold text-on-surface">{t('ai.autonomy.title')}</h3>
           <p className="mt-1 text-xs leading-5 text-on-surface-variant">
-            {t('ai.autonomy.descriptionPanel')}
+            {/* Der Text stand fest auf „panelweit ... auf allen deinen Servern“
+                und beschrieb damit genau den Fall, den jemand gerade abgewaehlt
+                hatte. Die Verzweigung gab es in `save` (Bestaetigungsdialog)
+                laengst, nur hier nicht — und `descriptionServer` lag deshalb
+                unbenutzt in allen Sprachdateien. */}
+            {t(serverId === null ? 'ai.autonomy.descriptionPanel' : 'ai.autonomy.descriptionServer')}
           </p>
 
-          <label className="mt-3 block space-y-1.5">
-            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+          <div className="mt-3 space-y-1.5">
+            <label htmlFor={scopeId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
               {t('ai.autonomy.scope')}
-            </span>
+            </label>
             <Dropdown
+              id={scopeId}
               value={scope}
               onChange={setScope}
               options={[
@@ -139,7 +172,7 @@ export function AiAutonomyButton({
               disabled={busy}
               aria-label={t('ai.autonomy.scope')}
             />
-          </label>
+          </div>
 
           <div className="mt-3 flex items-center justify-between gap-3">
             <span className="text-sm text-on-surface">{t('ai.autonomy.toggle')}</span>
@@ -153,9 +186,12 @@ export function AiAutonomyButton({
 
           {enabled && (
             <div className="mt-3 space-y-2">
-              <label className="block">
-                <span className="mb-1 block text-xs text-on-surface-variant">{t('ai.autonomy.budget')}</span>
+              <div>
+                <label htmlFor={budgetId} className="mb-1 block text-xs text-on-surface-variant">
+                  {t('ai.autonomy.budget')}
+                </label>
                 <NumberStepper
+                  id={budgetId}
                   value={budget}
                   min={0}
                   max={1000}
@@ -164,7 +200,7 @@ export function AiAutonomyButton({
                   onValueChange={(next) => setBudget(Number(next) || 0)}
                   aria-label={t('ai.autonomy.budget')}
                 />
-              </label>
+              </div>
               <p className="text-xs text-on-surface-variant">
                 {t('ai.autonomy.budgetHint', { used: grant?.used_last_hour ?? 0 })}
               </p>

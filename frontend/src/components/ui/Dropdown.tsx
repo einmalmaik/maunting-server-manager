@@ -170,6 +170,15 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
                 <div
                   ref={menuRef}
                   style={menuStyle}
+                  // Merkmal fuer Aussenklick-Waechter. Das Menue haengt per
+                  // Portal an `document.body` und liegt damit ausserhalb jedes
+                  // Elements, das es geoeffnet hat. Ein Popover, das sich bei
+                  // einem Klick "ausserhalb" schliesst, haelt eine Option
+                  // deshalb faelschlich fuer draussen — und schliesst sich weg,
+                  // bevor die Auswahl ueberhaupt ankommt. Wer so einen Waechter
+                  // baut, prueft zusaetzlich auf
+                  // `closest('[data-msm-dropdown-menu]')`.
+                  data-msm-dropdown-menu=""
                   className="flex flex-col overflow-hidden rounded-lg border border-outline-variant bg-surface-container-high shadow-panel"
                 >
                   {/* `max-h-64` stand hier fest verdrahtet und ueberstimmte die
