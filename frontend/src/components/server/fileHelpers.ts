@@ -103,13 +103,27 @@ export function detectIndentation(content: string): string {
   return prefix.startsWith('\t') ? 'Tabs' : `Leerzeichen: ${prefix.length}`
 }
 
-/** Praezise Anzeige fuer Bytes — KISS ohne Locale. */
+/**
+ * Praezise Anzeige fuer Bytes — KISS ohne Locale.
+ *
+ * Null Bytes sind im Serveralltag ein Normalzustand: eine frisch angelegte
+ * `eula.txt`, eine gerade rotierte `latest.log`, ein leerer Ordner in der
+ * Summenzeile. Frueher stand dort derselbe Strich, den die Oberflaeche daneben
+ * fuer "nicht ermittelbar" benutzt (Rechte und Eigentuemer im Inspektor fallen
+ * auf `files.notAvailable` zurueck) — die Anzeige verschwieg damit eine
+ * Groesse, die sehr wohl bekannt ist. Der Strich bleibt darum den Faellen
+ * vorbehalten, in denen wirklich keine Zahl vorliegt.
+ *
+ * Die TB-Stufe fehlte, obwohl Backup-Archive sie erreichen: 2 TB standen als
+ * "2048.00 GB" da.
+ */
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '-'
+  if (!Number.isFinite(bytes) || bytes < 0) return '-'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  if (bytes < 1024 * 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  return `${(bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2)} TB`
 }
 
 /** Pruefen, ob ein neuer Pfad innerhalb eines bestehenden Pfads liegt

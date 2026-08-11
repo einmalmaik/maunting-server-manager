@@ -46,9 +46,6 @@ export const teamsApi = {
   create: (name: string) => api<Team>('/teams', {
     method: 'POST', body: JSON.stringify({ name }),
   }),
-  rename: (teamId: number, name: string) => api<Team>(`/teams/${teamId}`, {
-    method: 'PUT', body: JSON.stringify({ name }),
-  }),
   remove: (teamId: number) => api(`/teams/${teamId}`, { method: 'DELETE' }),
   addMember: (teamId: number, payload: {
     user_id: number; can_manage_skills: boolean; can_manage_memory: boolean

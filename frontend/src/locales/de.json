@@ -166,8 +166,6 @@
       "skillsMovedLink": "Teams → Persönlich"
     },
     "memory": {
-      "title": "Persönliches KI-Memory",
-      "description": "Verwalte explizite Präferenzen, die deinen KI-Unterhaltungen als nicht vertrauenswürdiger Kontext bereitgestellt werden können.",
       "enabled": "Memory im KI-Kontext verwenden",
       "empty": "Noch keine persönlichen Memory-Einträge vorhanden.",
       "key": "Schlüssel, z. B. response.language",
@@ -185,7 +183,6 @@
       "usedCount": "{{count}}× verwendet",
       "usedCount_one": "{{count}}× verwendet",
       "usedCount_other": "{{count}}× verwendet",
-      "teamDescription": "Was der Assistent für dieses Team weiß. Alle Mitglieder sehen es; ändern darf es, wer den Schalter „Wissen pflegen“ hat.",
       "search": "Erinnerungen durchsuchen",
       "filterOrigin": "Nach Herkunft filtern",
       "origins": {
@@ -201,7 +198,6 @@
       "clearTitle": "Gesamtes Gedächtnis löschen?",
       "clearConfirm": "Wirklich alle {{count}} Einträge löschen? Das lässt sich nicht rückgängig machen.",
       "cleared": "{{count}} Einträge gelöscht.",
-      "teamTitle": "Wissen dieses Teams",
       "enabledScopeHint": "Der Schalter gilt für dein eigenes Gedächtnis, einschließlich der Notizen zu einzelnen Servern. Das Wissen deiner Teams ist davon nicht betroffen — es gehört dem Team und steht unter Teams.",
       "titles": {
         "user": "Persönliches KI-Memory",
@@ -3163,6 +3159,8 @@
     "rotateApiKey": "API-Key rotieren",
     "rotateWebhookSecret": "Webhook-Secret rotieren",
     "rotated": "Neues Geheimnis erzeugt",
+    "enabled": "Anbindung aktiv",
+    "updated": "Anbindung aktualisiert",
     "deleted": "Integration entfernt",
     "deleteTitle": "Integration entfernen",
     "deleteConfirm": "Integration {{name}} wirklich entfernen?",
@@ -3561,7 +3559,6 @@
     "name": "Teamname",
     "select": "Team",
     "personal": "persönlich",
-    "personalHint": "Das persönliche Team gehört zu deinem Konto. Es nimmt keine Mitglieder auf und lässt sich nicht löschen — es ist der Ort, an dem die KI für dich allein lernt. Wer teilen möchte, gründet ein echtes Team.",
     "memberCount": "{{count}} Mitglied",
     "memberCount_other": "{{count}} Mitglieder",
     "members": "Mitglieder",

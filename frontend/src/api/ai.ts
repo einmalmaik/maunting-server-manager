@@ -242,10 +242,6 @@ export interface AiSkillSummary {
   editable: boolean
 }
 
-export interface AiSkillDetail extends AiSkillSummary {
-  body: string
-}
-
 /**
  * Ob und wie die KI panelweit gültige Skills anlegen darf.
  *
@@ -512,10 +508,13 @@ export const aiApi = {
     body: JSON.stringify({ confirmation_token: confirmationToken }),
   }),
   listAutonomyGrants: () => api<AiAutonomyGrant[]>('/ai/autonomy'),
+  /**
+   * Freigabe anlegen oder ändern. Es gibt bewusst kein Löschen: abgeschaltet
+   * wird über `enabled: false` (AiAutonomyButton), damit die einmal erteilte
+   * Freigabe samt Stundenlimit sichtbar bleibt, statt spurlos zu verschwinden.
+   */
   saveAutonomyGrant: (payload: { server_id: number | null; enabled: boolean; max_actions_per_hour: number }) =>
     api<AiAutonomyGrant>('/ai/autonomy', { method: 'PUT', body: JSON.stringify(payload) }),
-  deleteAutonomyGrant: (serverId: number | null) =>
-    api(`/ai/autonomy${serverId === null ? '' : `?server_id=${serverId}`}`, { method: 'DELETE' }),
   listMemory: (scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number) => api<AiMemoryEntry[]>(
     `/ai/memory?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}${teamId ? `&team_id=${teamId}` : ''}`,
   ),
@@ -551,7 +550,6 @@ export const aiApi = {
   listSkills: () => api<AiSkillSummary[]>('/ai/skills'),
   listManagedSkills: () => api<AiSkillManaged[]>('/ai/skills/manage'),
   listPendingSkills: () => api<AiSkillManaged[]>('/ai/skills/pending'),
-  readSkill: (skillKey: string) => api<AiSkillDetail>(`/ai/skills/${encodeURIComponent(skillKey)}`),
   saveSkill: (payload: {
     skill_key: string; name: string; description: string; body: string
     team_id: number | null; enabled: boolean

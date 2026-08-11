@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Copy, KeyRound, Plug, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
+import { Copy, KeyRound, Pencil, Plug, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 
 import {
   hosterApi,
@@ -42,6 +42,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState(false)
   // Ein einmalig angezeigtes Geheimnis. Bewusst nur im Komponentenzustand und
   // nie in localStorage: es soll den Reload nicht ueberleben.
   const [revealed, setRevealed] = useState<{ label: string; value: string } | null>(null)
@@ -187,8 +188,11 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
                 <Fact label={t('hoster.webhookUrl')} value={selected.webhook_url ?? t('hoster.notConfigured')} />
                 <Fact label={t('hoster.graceDays')} value={String(selected.terminate_grace_days)} />
               </dl>
-              {canWrite && (
+              {canWrite && !editing && (
                 <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" disabled={busy} onClick={() => setEditing(true)}>
+                    <Pencil className="h-4 w-4" aria-hidden="true" />{t('common.edit')}
+                  </Button>
                   <Button type="button" variant="secondary" disabled={busy} onClick={() => void rotate('api-key')}>
                     <RefreshCw className="h-4 w-4" aria-hidden="true" />{t('hoster.rotateApiKey')}
                   </Button>
@@ -199,6 +203,18 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
                     <Trash2 className="h-4 w-4" aria-hidden="true" />{t('common.delete')}
                   </Button>
                 </div>
+              )}
+              {canWrite && editing && (
+                <IntegrationEditForm
+                  key={selected.id}
+                  integration={selected}
+                  disabled={busy}
+                  onCancel={() => setEditing(false)}
+                  onSaved={async () => {
+                    setEditing(false)
+                    await load()
+                  }}
+                />
               )}
             </>
           )}
@@ -319,6 +335,89 @@ function IntegrationForm({
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>{t('common.cancel')}</Button>
         <Button type="submit" disabled={disabled || saving || !valid}>
+          <Save className="h-4 w-4" aria-hidden="true" />{saving ? t('common.loading') : t('settings.save')}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+/**
+ * Nachtraegliches Aendern einer bestehenden Anbindung.
+ *
+ * Ohne diesen Weg war ein Tippfehler in der Webhook-Adresse endgueltig: das
+ * Loeschen lehnt das Backend ab, solange noch ein Vertrag laeuft
+ * (hoster_admin.delete_integration antwortet mit 409), und ein Neuanlegen
+ * erzeugt zwangslaeufig einen neuen API-Key — den kennt der Shop nicht, die
+ * Anbindung waere danach tot.
+ *
+ * Bewusst nur die drei Felder, die sich im Betrieb wirklich aendern. Name,
+ * Slug und Dienstbenutzer bleiben aussen vor: der Slug steckt in den Adressen
+ * des Shops, und ein Wechsel des Dienstbenutzers wuerde die Rechte aller
+ * bereits erzeugten Server stillschweigend verschieben.
+ */
+function IntegrationEditForm({
+  integration,
+  disabled,
+  onCancel,
+  onSaved,
+}: {
+  integration: HosterIntegration
+  disabled: boolean
+  onCancel: () => void
+  onSaved: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [webhookUrl, setWebhookUrl] = useState(integration.webhook_url ?? '')
+  const [graceDays, setGraceDays] = useState(String(integration.terminate_grace_days))
+  const [enabled, setEnabled] = useState(integration.enabled)
+  const [saving, setSaving] = useState(false)
+
+  return (
+    <form
+      className="space-y-5 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (saving) return
+        setSaving(true)
+        hosterApi
+          .updateIntegration(integration.id, {
+            webhook_url: webhookUrl.trim() || null,
+            terminate_grace_days: Number(graceDays) || 0,
+            enabled,
+          })
+          .then(async () => {
+            toast.success(t('hoster.updated'))
+            await onSaved()
+          })
+          .catch((error: unknown) => {
+            toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.save'))
+          })
+          .finally(() => setSaving(false))
+      }}
+    >
+      <fieldset disabled={disabled || saving} className="grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
+        <Field
+          label={t('hoster.webhookUrl')}
+          value={webhookUrl}
+          onChange={setWebhookUrl}
+          type="url"
+          placeholder="https://shop.example/hooks/msm"
+        />
+        <label className="space-y-1.5">
+          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+            {t('hoster.graceDays')}
+          </span>
+          <NumberStepper value={graceDays} onValueChange={setGraceDays} min={0} max={365} step={1} />
+        </label>
+        <label className="flex min-h-10 items-center justify-between gap-4 text-sm text-on-surface md:col-span-2">
+          <span>{t('hoster.enabled')}</span>
+          <Switch checked={enabled} onCheckedChange={setEnabled} />
+        </label>
+      </fieldset>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>{t('common.cancel')}</Button>
+        <Button type="submit" disabled={disabled || saving}>
           <Save className="h-4 w-4" aria-hidden="true" />{saving ? t('common.loading') : t('settings.save')}
         </Button>
       </div>

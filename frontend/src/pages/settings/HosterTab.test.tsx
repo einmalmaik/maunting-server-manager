@@ -71,6 +71,33 @@ describe('HosterTab', () => {
     )
   })
 
+  /**
+   * Eine falsch getippte Webhook-Adresse war eine Sackgasse: Loeschen lehnt das
+   * Backend ab, solange ein Vertrag laeuft (409), und Neuanlegen erzeugt einen
+   * neuen API-Key, den der Shop nicht kennt. Ohne diesen Weg gab es keinen.
+   */
+  it('lets the operator correct the webhook URL of an existing integration', async () => {
+    vi.mocked(hosterApi.updateIntegration).mockReset().mockResolvedValue({
+      ...integration,
+      webhook_url: 'https://shop.example/hooks/neu',
+    })
+    render(<HosterTab canWrite />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bearbeiten' }))
+    fireEvent.change(screen.getByDisplayValue('https://shop.example/hooks/msm'), {
+      target: { value: 'https://shop.example/hooks/neu' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+
+    await waitFor(() =>
+      expect(hosterApi.updateIntegration).toHaveBeenCalledWith(3, {
+        webhook_url: 'https://shop.example/hooks/neu',
+        terminate_grace_days: 7,
+        enabled: true,
+      }),
+    )
+  })
+
   it('hides every write action for a read-only operator', async () => {
     render(<HosterTab canWrite={false} />)
 

@@ -166,8 +166,6 @@
       "skillsMovedLink": "Teams → Personal"
     },
     "memory": {
-      "title": "Personal AI memory",
-      "description": "Manage explicit preferences that can be provided to your AI conversations as untrusted context.",
       "enabled": "Use memory in AI context",
       "empty": "No personal memory entries exist yet.",
       "key": "Key, for example response.language",
@@ -185,7 +183,6 @@
       "usedCount": "used {{count}}×",
       "usedCount_one": "used {{count}}×",
       "usedCount_other": "used {{count}}×",
-      "teamDescription": "What the assistant knows for this team. Every member can see it; changing it needs the “manage knowledge” switch.",
       "search": "Search memories",
       "filterOrigin": "Filter by origin",
       "origins": {
@@ -201,7 +198,6 @@
       "clearTitle": "Delete the entire memory?",
       "clearConfirm": "Really delete all {{count}} entries? This cannot be undone.",
       "cleared": "Deleted {{count}} entries.",
-      "teamTitle": "This team's knowledge",
       "enabledScopeHint": "This switch covers your own memory, including notes about individual servers. Your teams' knowledge is unaffected — it belongs to the team and lives under Teams.",
       "titles": {
         "user": "Personal AI memory",
@@ -3163,6 +3159,8 @@
     "rotateApiKey": "Rotate API key",
     "rotateWebhookSecret": "Rotate webhook secret",
     "rotated": "New secret generated",
+    "enabled": "Integration active",
+    "updated": "Integration updated",
     "deleted": "Integration removed",
     "deleteTitle": "Remove integration",
     "deleteConfirm": "Really remove integration {{name}}?",
@@ -3561,7 +3559,6 @@
     "name": "Team name",
     "select": "Team",
     "personal": "personal",
-    "personalHint": "Your personal team belongs to your account. It takes no members and cannot be deleted — it is where the assistant learns for you alone. To share, create a real team.",
     "memberCount": "{{count}} member",
     "memberCount_other": "{{count}} members",
     "members": "Members",
