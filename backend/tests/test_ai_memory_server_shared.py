@@ -79,8 +79,17 @@ def _merken(db: Session, user: User, server: Server, key: str, value: str):
     )
 
 
-def _kontext(db: Session, user: User, query: str = "") -> str:
-    block = ai_memory_service.provider_memory_context(db, user, query)
+def _kontext(
+    db: Session, user: User, server: Server | None = None, query: str = ""
+) -> str:
+    """Der Kontext eines Laufs, der um genau diesen Server geht.
+
+    Ohne Server ist es ein Lauf ohne Thema — dann kommt bewusst kein
+    Anlagenwissen mit, und die Tests unten nutzen genau das als Gegenprobe.
+    """
+    block = ai_memory_service.provider_memory_context(
+        db, user, query, server.id if server is not None else None
+    )
     db.commit()
     return block or ""
 
@@ -105,7 +114,9 @@ def test_the_note_reaches_the_colleague_who_never_wrote_it(
     _merken(db, regular_user, server, "whitelist",
             "Nach jedem Neustart die Whitelist neu laden, sonst kommt keiner rein.")
 
-    assert "Whitelist neu laden" in _kontext(db, kollege, "Warum kommt keiner rein?")
+    assert "Whitelist neu laden" in _kontext(
+        db, kollege, server, "Warum kommt keiner rein?"
+    )
 
 
 def test_the_label_names_the_server(db: Session, regular_user: User) -> None:
@@ -119,7 +130,7 @@ def test_the_label_names_the_server(db: Session, regular_user: User) -> None:
 
     _merken(db, regular_user, server, "port", "Aussen 30015, innen 27015.")
 
-    assert f"[server:{server.id}:anlage/gemerkt]" in _kontext(db, regular_user)
+    assert f"[server:{server.id}:anlage/gemerkt]" in _kontext(db, regular_user, server)
 
 
 def test_a_server_only_shows_its_own_knowledge(
@@ -144,6 +155,97 @@ def test_a_server_only_shows_its_own_knowledge(
     )
 
     assert [wert for _row, wert in eintraege] == ["Braucht zwei Minuten zum Start."]
+
+
+def test_only_the_manual_of_the_server_in_question_enters_the_context(
+    db: Session, regular_user: User
+) -> None:
+    """Der Bezug ist eine Verengung und keine Zierde.
+
+    Ein Betreiber sieht leicht zwanzig Server. Kaeme das Wissen aller zwanzig
+    gleichzeitig mit, waere das Budget von 6.000 Zeichen mit
+    Betriebsanleitungen gefuellt, die mit der Frage nichts zu tun haben — die
+    persoenlichen Vorlieben des Benutzers fielen als Erstes heraus, und das
+    Modell wendete die Eigenheit des einen Servers auf den anderen an.
+
+    Und ohne Bezug kommt bewusst **gar keines** mit statt alles: ein Lauf, in
+    dem noch kein Werkzeug einen Server angefasst hat, hat kein Thema, auf das
+    sich ein Ausschnitt beziehen liesse.
+    """
+    einer = _server(db, "gefragt")
+    anderer = _server(db, "ungefragt")
+    _allow(db, regular_user, einer, "server.view", "server.config.write")
+    db.add_all([
+        ServerPermission(user_id=regular_user.id, server_id=anderer.id,
+                         permission_key=key)
+        for key in ("server.view", "server.config.write")
+    ])
+    db.commit()
+    _merken(db, regular_user, einer, "eigenheit", "Gehoert zur gefragten Anlage.")
+    _merken(db, regular_user, anderer, "eigenheit", "Gehoert zur anderen.")
+
+    block = _kontext(db, regular_user, einer)
+    assert "gefragten Anlage" in block
+    assert "Gehoert zur anderen" not in block
+
+    ohne_bezug = _kontext(db, regular_user)
+    assert "gefragten Anlage" not in ohne_bezug
+    assert "Gehoert zur anderen" not in ohne_bezug
+
+
+def test_the_manual_arrives_in_the_same_round_the_server_becomes_known(
+    db: Session, regular_user: User
+) -> None:
+    """Der Nachtrag mitten im Lauf — sonst kaeme das Wissen eine Frage zu spaet.
+
+    Der Kontext entsteht einmal, beim Anlegen des Laufs. Da schreibt der
+    Benutzer "warum kommt keiner rein?" und niemand weiss, welcher Server
+    gemeint ist; erst das erste Werkzeug klaert die Nummer. Ohne Nachtrag
+    antwortete das Modell genau auf diese Frage ohne den Satz, der die Antwort
+    ist — und haette ihn erst bei der naechsten.
+    """
+    from services import ai_context_service
+
+    server = _server(db, "nachtrag")
+    kollege = _user(db, "kollege")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+    _allow(db, kollege, server, "server.view")
+    _merken(db, regular_user, server, "whitelist", "Whitelist nach dem Start laden.")
+
+    nachricht = ai_context_service.anlagenwissen_nachtrag(
+        db, user_id=kollege.id, server_id=server.id
+    )
+
+    assert nachricht is not None
+    # Dieselbe Kennzeichnung wie beim uebrigen Gedaechtnis: der Text ist frei
+    # befuellt und darf nicht die Autoritaet des Systemprompts bekommen.
+    assert nachricht["role"] == "user"
+    assert "Unvertrauenswuerdige" in nachricht["content"]
+    assert "Whitelist nach dem Start laden" in nachricht["content"]
+
+
+def test_nothing_is_supplemented_for_a_server_one_may_not_see(
+    db: Session, regular_user: User
+) -> None:
+    """Der Nachtrag ist ein Leseweg und traegt dieselbe Pruefung wie jeder.
+
+    Er wird aus dem Serverbezug des Laufs aufgerufen, und der stammt aus einem
+    erfolgreichen Werkzeugaufruf. Sich darauf zu verlassen waere trotzdem
+    falsch: eine zweite Stelle, die dieselbe Frage stellt, ist eine zweite
+    Stelle, an der sie eines Tages anders beantwortet wird.
+    """
+    from services import ai_context_service
+
+    fremder = _server(db, "fremd")
+    eigener = _server(db, "eigen")
+    schreiber = _user(db, "schreiber")
+    _allow(db, schreiber, fremder, "server.view", "server.config.write")
+    _allow(db, regular_user, eigener, "server.view")
+    _merken(db, schreiber, fremder, "geheim", "Nicht fuer jeden.")
+
+    assert ai_context_service.anlagenwissen_nachtrag(
+        db, user_id=regular_user.id, server_id=fremder.id
+    ) is None
 
 
 # ── Wer sehen darf, darf noch lange nicht schreiben ────────────────────
@@ -350,7 +452,7 @@ def test_the_knowledge_outlives_the_colleague_who_wrote_it(
     AuthService.delete_account_atomically(db, db.get(User, schreiber.id))
 
     assert db.get(AiMemoryEntry, row.id) is not None
-    assert "Ueberlebt seinen Verfasser" in _kontext(db, regular_user)
+    assert "Ueberlebt seinen Verfasser" in _kontext(db, regular_user, server)
 
 
 def test_the_knowledge_goes_when_the_server_goes(
@@ -401,7 +503,7 @@ def test_losing_sight_of_the_server_hides_its_knowledge(
         db.delete(recht)
     db.commit()
 
-    assert "Nur mit Zugriff" not in _kontext(db, regular_user)
+    assert "Nur mit Zugriff" not in _kontext(db, regular_user, server)
     with pytest.raises(HTTPException) as fehler:
         ai_memory_service.delete_entry(db, regular_user, row.id)
     assert fehler.value.status_code == 404
@@ -429,7 +531,7 @@ def test_the_consent_switch_does_not_govern_the_machines_manual(
         key="privat", value="Nur fuer mich.", origin="ai",
     )
 
-    block = _kontext(db, regular_user)
+    block = _kontext(db, regular_user, server)
 
     assert "Gilt fuer alle hier" in block
     assert "Nur fuer mich" not in block

@@ -783,10 +783,53 @@ def _similarities(query: str, rows: list[AiMemoryEntry]) -> list[float | None]:
     return result
 
 
+def server_shared_context(
+    db: Session, user: User, server_id: int, query: str = ""
+) -> str | None:
+    """Nur das Wissen **einer** Anlage, als fertiger Block.
+
+    Gebraucht wird das mitten im Lauf: der Kontext entsteht einmal, beim
+    Anlegen, und da weiss noch niemand, um welchen Server es geht. Der Benutzer
+    schreibt "warum kommt keiner rein?", und erst das erste Werkzeug klaert die
+    Nummer. Ohne Nachreichen kaeme die Betriebsanleitung genau eine Nachricht zu
+    spaet — also gerade nicht bei der Frage, fuer die sie gedacht ist.
+
+    Ueber denselben Leseweg wie der ganze Kontext, nur auf einen Bereich und
+    einen Server eingeschraenkt. Die Sichtbarkeitspruefung steckt in
+    `_visible_scope_rows`; hier steht keine zweite Kopie davon, und deshalb
+    kann sie hier auch nicht abweichen.
+
+    Der Nutzungszaehler laeuft mit. Diese Zeilen sind gelesen worden wie jede
+    andere auch, und bei knappem Platz soll das mitentscheiden.
+    """
+    rows = [
+        row
+        for row in _visible_scope_rows(db, user, persoenlich=preference(db, user.id))
+        if row.scope == "server_shared" and row.server_id == server_id
+    ]
+    if not rows:
+        return None
+    decoded = _entschluesseln(rows)
+    if not decoded:
+        return None
+    jetzt = datetime.now(timezone.utc)
+    for row, _wert in decoded:
+        row.use_count = int(row.use_count or 0) + 1
+        row.last_used_at = jetzt
+    db.flush()
+    # Kein Budgetschnitt und keine Rangfolge: eine Anlage hat hoechstens 100
+    # Zeilen, und anders als beim Gesamtkontext steht hier nichts daneben, mit
+    # dem sie um Platz konkurrieren muessten. `query` bleibt trotzdem in der
+    # Signatur — wird die Grenze eines Tages doch erreicht, ist die Auswahl an
+    # dieser Stelle zu treffen und nicht beim Aufrufer.
+    return "\n".join(_memory_line(row, wert) for row, wert in decoded)
+
+
 def provider_memory_context(
     db: Session,
     user: User,
     query: str = "",
+    server_id: int | None = None,
 ) -> str | None:
     """Baut den Memory-Block fuer eine konkrete Anfrage.
 
@@ -810,6 +853,23 @@ def provider_memory_context(
     # die Funktion hier komplett — ein Mitglied ohne Einwilligung arbeitete
     # unbemerkt ohne das Wissen seiner Teams.
     rows = _visible_scope_rows(db, user, persoenlich=preference(db, user.id))
+    # Anlagenwissen kommt **nur** fuer den Server mit, um den es gerade geht.
+    #
+    # Sichtbar sind einem Betreiber leicht zwanzig Server. Faende alles
+    # Anlagenwissen dieser zwanzig gleichzeitig in den Kontext, waere das Budget
+    # von 6.000 Zeichen von Betriebsanleitungen aufgebraucht, die mit der Frage
+    # nichts zu tun haben — und die persoenlichen Vorlieben des Benutzers fielen
+    # als Erstes heraus. Schlimmer noch: das Modell saehe zwanzig Anleitungen
+    # nebeneinander und wendete die Eigenheit des einen auf den anderen an.
+    #
+    # Ohne Serverbezug kommt bewusst gar keines mit statt alles. `ai_runs.
+    # last_server_id` liefert den Bezug, sobald ein Werkzeug einen Server
+    # angefasst hat; vorher gibt es schlicht kein Thema, auf das man einen
+    # Ausschnitt beziehen koennte.
+    rows = [
+        row for row in rows
+        if row.scope != "server_shared" or row.server_id == server_id
+    ]
     if not rows:
         return None
 

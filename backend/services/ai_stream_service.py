@@ -55,6 +55,7 @@ from services.ai_tool_registry import (
     WRITE_TOOLS,
 )
 from services.ai_context_service import (
+    anlagenwissen_nachtrag,
     build_provider_messages,
     estimate_reserved_tokens,
     message_character_count,
@@ -232,7 +233,7 @@ def _serverbezug(eintraege: list[dict]) -> int | None:
 def _tool_followup_messages(
     *, user_id: int, conversation_id: str, tool_calls, deferred=(),
     correlation_id: str | None = None, run_id: str | None = None,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], dict | None]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
     ``deferred`` sind Paare aus Aufruf und Begruendung: Aufrufe, die in dieser
@@ -247,6 +248,11 @@ def _tool_followup_messages(
     ist das eine Auskunft an das Modell — kein Grund, dem Benutzer die ganze
     Antwort wegzunehmen. Die Rechtepruefung hat ihre Arbeit getan: ausgefuehrt
     wurde nichts.
+
+    Der dritte Rueckgabewert ist ein **Nachtrag zum Kontext**: das Wissen der
+    Anlage, um die es in dieser Runde ging. Vorher konnte es nicht dabei sein —
+    beim Anlegen des Laufs war der Server noch nicht bekannt. Ist nichts
+    nachzureichen, ist er None.
     """
     deferred = [(call, reason) for call, reason in deferred]
     if len(tool_calls) + len(deferred) > MAX_TOOL_CALLS:
@@ -371,11 +377,23 @@ def _tool_followup_messages(
         # In derselben Sitzung und demselben Commit wie das Zugriffsprotokoll.
         # Beide halten dieselbe Tatsache fest — in welchen Server die KI gesehen
         # hat —, und beide sollen entweder stehen oder nicht.
-        ai_run_service.serverbezug_merken(
-            db, run_id=run_id, server_id=_serverbezug(display)
+        bezug = _serverbezug(display)
+        ai_run_service.serverbezug_merken(db, run_id=run_id, server_id=bezug)
+        # Jetzt erst steht fest, um welche Anlage es geht. Ihr Betriebswissen
+        # gehoert in **diese** Runde und nicht erst in die naechste Nachricht:
+        # sonst antwortet das Modell auf "warum kommt keiner rein?" ohne den
+        # Satz, der die Antwort ist.
+        #
+        # `nachtrag` faehrt als dritter Rueckgabewert mit, statt hier an
+        # `provider_messages` zu haengen: die Funktion kennt die Liste nicht,
+        # und sie soll sie auch nicht kennen — sie fuehrt Werkzeuge aus.
+        nachtrag = (
+            anlagenwissen_nachtrag(db, user_id=user_id, server_id=bezug)
+            if bezug is not None
+            else None
         )
         db.commit()
-        return results, display
+        return results, display, nachtrag
 
 
 def _lesezugriffe_protokollieren(
@@ -1229,7 +1247,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 continue
             if not current_usage.tool_calls and not deferred_calls:
                 break
-            followup, used_tools = _tool_followup_messages(
+            followup, used_tools, nachtrag = _tool_followup_messages(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 tool_calls=current_usage.tool_calls,
@@ -1238,6 +1256,13 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 run_id=run_id,
             )
             provider_messages.extend(followup)
+            # Das Betriebswissen der Anlage, sobald feststeht welche. Genau
+            # einmal je Lauf: `zustand` ueberlebt die Unterbrechung, und nach
+            # einer Bestaetigung wuerde es sonst erneut angehaengt — dieselben
+            # Zeilen ein zweites Mal, mit anderem Zaehlerstand daneben.
+            if nachtrag is not None and not zustand.get("anlagenwissen_gereicht"):
+                zustand["anlagenwissen_gereicht"] = True
+                provider_messages.append(nachtrag)
             for used in used_tools:
                 ai_run_broker.veroeffentlichen(run_id, "tool", used)
             current_usage = StreamUsage()
@@ -1442,7 +1467,16 @@ def lauf_beginnen(
             message_id=benutzernachricht_id,
         )
         db.flush()
-        provider_messages = build_provider_messages(db, conversation, query=safe_content)
+        # Das Thema laeuft weiter, auch wenn der Lauf wechselt: "und jetzt
+        # starte ihn neu" nennt keinen Server, gemeint ist der aus der Frage
+        # davor. Einmal ermittelt und zweimal gebraucht — fuer den Kontext
+        # dieser Nachricht und als Startwert des neuen Laufs.
+        serverbezug = ai_run_service.letzter_serverbezug(
+            db, conversation_id=conversation.id
+        )
+        provider_messages = build_provider_messages(
+            db, conversation, query=safe_content, server_id=serverbezug
+        )
         estimated_tokens = estimate_reserved_tokens(provider_messages)
         usage_event = reserve_ai_usage(
             db,
@@ -1483,13 +1517,7 @@ def lauf_beginnen(
             reasoning=reasoning,
             reasoning_effort=reasoning_effort,
             zustand=zustand,
-            # Das Thema laeuft weiter, auch wenn der Lauf wechselt. "Und jetzt
-            # starte ihn neu" nennt keinen Server; gemeint ist der aus der
-            # Frage davor. Ohne dieses Erbe endete der Bezug an jeder
-            # Nachrichtengrenze.
-            last_server_id=ai_run_service.letzter_serverbezug(
-                db, conversation_id=conversation.id
-            ),
+            last_server_id=serverbezug,
         )
         db.commit()
         return run, None
