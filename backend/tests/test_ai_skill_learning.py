@@ -298,6 +298,69 @@ def test_a_customer_learns_globally_into_the_queue(db: Session, regular_user: Us
     assert [row.skill_key for row in ai_skill_service.pending_skills(db)] == ["wartend"]
 
 
+def test_a_waiting_skill_does_not_hide_a_shipped_one(
+    db: Session, regular_user: User
+) -> None:
+    """Die Warteschlange darf keine mitgelieferte Anleitung abschalten.
+
+    Der Weg dorthin war offen und brauchte keine Berechtigung: unter der
+    Lernpolitik `review` legt jedes Kundengespraech wartende Zeilen an, und
+    `visible_skills` blendete die gleichnamige mitgelieferte Datei aus, sobald
+    eine solche Zeile existierte. Ein einziger `learn_skill`-Aufruf unter dem
+    Schluessel `portkonflikt` haette damit die Portkonflikt-Anleitung fuer
+    **jeden** Benutzer des Panels entfernt — ohne dass irgendjemand etwas
+    freigegeben oder auch nur gesehen haette.
+
+    Abschalten ist eine Handlung des Betreibers. Warten ist keine.
+    """
+    ai_learning_policy.set_policy("review")
+    _allow(db, regular_user, "ai.skills.use")
+    ai_skill_service.reset_shipped_cache_for_tests()
+    assert "portkonflikt" in ai_skill_service.shipped_skills()
+
+    ergebnis = _learn_global(db, regular_user, "portkonflikt")
+    assert ergebnis["status"] == "pending"
+
+    sichtbar = {
+        view.skill_key: view for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+    assert "portkonflikt" in sichtbar
+    # Und zwar unveraendert die mitgelieferte, nicht die wartende Fassung.
+    assert sichtbar["portkonflikt"].scope == "shipped"
+    _, body = ai_skill_service.read_body(db, regular_user, "portkonflikt")
+    assert body != "Gilt ueberall."
+
+
+def test_a_waiting_skill_does_not_devalue_a_released_one(
+    db: Session, regular_user: User
+) -> None:
+    """Dasselbe eine Ebene tiefer: der Update-Zweig setzte den Status mit.
+
+    Ein bereits freigegebener globaler Skill wurde beim Ueberschreiben aus
+    einem Kundengespraech auf `pending` zurueckgestuft — und war damit fuer
+    alle weg, obwohl der Betreiber ihn genau dafuer freigegeben hatte.
+    Ablehnen ist hier richtiger als Ersetzen: die Warteschlange ist fuer neue
+    Erkenntnisse da, nicht zum Zuruecknehmen bestehender.
+    """
+    ai_learning_policy.set_policy("review")
+    betreiber = _user(db, "betreiber-skills")
+    _allow(db, betreiber, "ai.skills.use", "ai.skills.manage")
+    _allow(db, regular_user, "ai.skills.use")
+
+    assert _learn_global(db, betreiber, "geteilt")["status"] == "active"
+
+    with pytest.raises(AiActionValidationError) as fehler:
+        _learn_global(db, regular_user, "geteilt")
+    assert "team" in str(fehler.value).lower()
+
+    # Der freigegebene Skill steht unveraendert und wirkt weiter.
+    zeile = db.query(AiSkill).filter(AiSkill.skill_key == "geteilt").one()
+    assert zeile.status == "active"
+    assert "geteilt" in {
+        view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+
+
 def test_instant_policy_lets_everyone_write_globally(
     db: Session, regular_user: User
 ) -> None:

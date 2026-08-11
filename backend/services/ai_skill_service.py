@@ -183,9 +183,20 @@ def visible_skills(db: Session, user: User) -> list[SkillView]:
 
     Reihenfolge der Ueberlagerung: mitgeliefert zuerst, danach die Datenbank.
     Eine globale Zeile mit demselben Schluessel ersetzt die Datei — das ist der
-    Weg, eine MSM-Vorgabe zu ueberschreiben. Eine abgeschaltete oder noch nicht
-    freigegebene Zeile blendet die Datei aus, ohne selbst zu gelten: sonst
-    koennte man eine mitgelieferte Vorgabe nicht loswerden.
+    Weg, eine MSM-Vorgabe zu ueberschreiben. Eine **abgeschaltete** globale Zeile
+    blendet die Datei aus, ohne selbst zu gelten: sonst koennte man eine
+    mitgelieferte Vorgabe nicht loswerden.
+
+    Eine **wartende** Zeile tut das ausdruecklich nicht. Der Unterschied sieht
+    klein aus und ist es nicht: `pending` entsteht ohne jede Entscheidung eines
+    Menschen — unter der Lernpolitik `review` legt jedes Kundengespraech solche
+    Zeilen an. Wuerden sie ausblenden, koennte ein einziger `learn_skill`-Aufruf
+    unter dem Schluessel `portkonflikt` die mitgelieferte Anleitung fuer **alle**
+    Benutzer des Panels abschalten, bevor irgendjemand sie gesehen hat. Genau
+    davor soll die Warteschlange schuetzen.
+
+    Abschalten ist eine Handlung des Betreibers, Warten ist keine. Nur die
+    Handlung darf wirken.
 
     Teamgrenzen entstehen hier ueber `scope_identity`, nicht ueber eine
     nachtraegliche Filterung — wer nicht im Team ist, dessen Abfrage fragt gar
@@ -208,7 +219,10 @@ def visible_skills(db: Session, user: User) -> list[SkillView]:
         .all()
     )
     for row in rows:
-        if not row.enabled or row.status != "active":
+        if row.status != "active":
+            # Wartet auf Freigabe: gilt nicht — und verdeckt auch nichts.
+            continue
+        if not row.enabled:
             if row.team_id is None:
                 by_key.pop(row.skill_key, None)
             continue
@@ -388,6 +402,25 @@ def upsert_skill(
             detail=(
                 "Dieser Skill stammt von einem Menschen und wird nicht automatisch "
                 "ueberschrieben. Verwende einen anderen Schluessel."
+            ),
+        )
+    elif status == "pending" and row.status == "active":
+        # Die Warteschlange ist fuer **neue** Erkenntnisse da, nicht zum
+        # Zuruecknehmen freigegebener. Ohne diese Regel setzt der Update-Zweig
+        # unten `row.status = "pending"` — ein bereits freigegebener, panelweit
+        # wirksamer Skill waere damit aus einem beliebigen Kundengespraech heraus
+        # abschaltbar, und zwar ohne dass jemand etwas bestaetigt haette.
+        #
+        # Denselben Weg gab es einen Schritt frueher schon einmal: eine wartende
+        # Zeile blendete die mitgelieferte Datei desselben Schluessels aus. Beides
+        # ist derselbe Fehler in zwei Gestalten — Warten ist keine Entscheidung
+        # und darf nichts entwerten.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Dieser Skill ist bereits panelweit freigegeben und laesst sich "
+                "ohne die Berechtigung `ai.skills.manage` nicht aendern. Lege die "
+                "Erkenntnis mit scope='team' an."
             ),
         )
     else:

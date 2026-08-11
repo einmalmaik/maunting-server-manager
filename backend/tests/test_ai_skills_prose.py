@@ -289,6 +289,32 @@ def test_pending_skills_reach_nobody(db: Session, regular_user: User) -> None:
     assert ai_skill_service.pending_skills(db) == []
 
 
+def test_only_switching_off_hides_a_shipped_skill(db: Session, regular_user: User) -> None:
+    """Der Unterschied zwischen „abgeschaltet“ und „wartend“, an einem Schluessel.
+
+    Beides sind Zeilen, die nicht selbst gelten — aber nur eine davon ist eine
+    Entscheidung. Eine abgeschaltete globale Zeile muss die mitgelieferte Datei
+    weiterhin verdecken, sonst liesse sich eine MSM-Vorgabe gar nicht loswerden.
+    Eine wartende darf es nicht, denn sie entsteht ohne jedes Zutun eines
+    Menschen.
+    """
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
+    ai_skill_service.reset_shipped_cache_for_tests()
+
+    wartend = ai_skill_service.upsert_skill(
+        db, user=regular_user, skill_key="portkonflikt", name="Eigene Fassung",
+        description="Eine gelernte Fassung, die noch auf die Freigabe des Betreibers wartet.",
+        body="Wartet.", team_id=None, origin="ai", status="pending",
+    )
+    assert "portkonflikt" in _keys(ai_skill_service.visible_skills(db, regular_user))
+
+    # Dieselbe Zeile, jetzt ausdruecklich abgeschaltet: nun verdeckt sie.
+    ai_skill_service.approve(db, user=regular_user, skill_id=wartend.id)
+    ai_skill_service.set_enabled(db, user=regular_user, skill_id=wartend.id, enabled=False)
+
+    assert "portkonflikt" not in _keys(ai_skill_service.visible_skills(db, regular_user))
+
+
 def test_approval_requires_the_manage_permission(db: Session, regular_user: User) -> None:
     other = _user(db, "ohne-recht")
     _allow(db, other, "ai.skills.use")
