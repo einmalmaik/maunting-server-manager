@@ -32,7 +32,13 @@ from models import (
 )
 from models.ai_run import BEENDET as AUSGELAUFEN
 from services.ai_chat_service import get_owned_conversation
-from services import ai_attachment_service, ai_run_broker, ai_run_service, audit_service
+from services import (
+    ai_attachment_service,
+    ai_model_catalog,
+    ai_run_broker,
+    ai_run_service,
+    audit_service,
+)
 from services.ai_action_errors import (
     AiActionStateError,
     AiActionValidationError,
@@ -1056,6 +1062,27 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     budget_erschoepft = False
     try:
         tools = provider_tool_definitions()
+        # Zwischenspeichern des Prompts, sofern dieses Modell es ausdruecklich
+        # verlangt. Einmal je Segment ermittelt und nicht je Runde: der Katalog
+        # antwortet zwar aus seinem eigenen Speicher, aber die Antwort kann sich
+        # innerhalb eines Laufs ohnehin nicht aendern.
+        #
+        # Warum das hier steht und nicht in `_Vorbereitung`: die Frage geht
+        # ueber das Netz, die Vorbereitung laeuft in einer kurzen
+        # Datenbanktransaktion. Warum es nicht am Lauf haengt wie
+        # `reasoning_effort`: es ist keine Wahl des Benutzers, die eine
+        # Fortsetzung stabil halten muesste, sondern eine Eigenschaft des
+        # Modells.
+        #
+        # Kennt der Katalog das Modell nicht — nicht erreichbar, oder ein Name,
+        # den es nicht mehr gibt — geht keine Marke mit. Der Lauf kostet dann,
+        # was er vorher auch gekostet hat.
+        modell = await ai_model_catalog.finde(
+            client,
+            vorbereitung.provider.provider_kind,
+            vorbereitung.provider.default_model,
+        )
+        cache_marke = modell is not None and modell.cache_marke_noetig
         current_usage = usage
         signaturen: dict[str, int] = dict(zustand.get("tool_signatures") or {})
         # Das Budget dieses Laufs. `build_provider_messages` hat es beim Start
@@ -1076,6 +1103,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 tools=tools,
                 reasoning=vorbereitung.reasoning,
                 reasoning_effort=vorbereitung.reasoning_effort,
+                cache_marke=cache_marke,
             ):
                 if chunk.kind == "reasoning":
                     thoughts.append(chunk.text)

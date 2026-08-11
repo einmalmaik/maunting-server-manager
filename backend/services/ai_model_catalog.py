@@ -20,6 +20,25 @@ und nicht aus einer Konstante im Programm: eine feste Liste von Stufen wäre bei
 der Mehrheit der Modelle falsch. Sie zeigte Stufen an, die es nicht gibt, und
 verschwiege welche, die es gibt.
 
+Dasselbe gilt für das **Zwischenspeichern des Prompts**, und aus demselben
+Grund. Gemessen am 2026-08-12 über alle 406 Einträge:
+
+* **240** Modelle führen einen Lesepreis (``pricing.input_cache_read``), können
+  also überhaupt zwischenspeichern; 166 führen keinen.
+* Davon nennen **71** zusätzlich einen Schreibpreis
+  (``pricing.input_cache_write``) — und genau diese verlangen eine ausdrückliche
+  Marke in der Anfrage. Es sind die Familien, die OpenRouter auch namentlich als
+  „explizit“ führt: Anthropic (28), Google (17), Alibaba Qwen (13), OpenAI ab
+  GPT-5.6 (6).
+* Die übrigen **174** speichern von selbst zwischen (OpenAI bis GPT-5.5, Grok,
+  DeepSeek, Moonshot, Mistral, Z.AI). Für sie ist nichts zu tun — eine Marke
+  wäre dort bestenfalls wirkungslos.
+
+Beide Preisfelder sind im Katalog durchweg Zeichenketten und nie ``"0"``: ihr
+Vorhandensein ist die Aussage, nicht ihr Wert. Deshalb liest
+``_modell_aus_openrouter`` sie als Ja/Nein und rechnet nicht mit ihnen — MSM
+stellt keine Preise dar, es entscheidet nur, ob eine Marke mitgeht.
+
 Für das Kontextfenster gilt dasselbe Argument, nur mit anderen Zahlen: derselbe
 Katalog führt Fenster von 4.096 bis 1.000.000 Token nebeneinander. Eine feste
 Zahl wäre für fast jedes Modell falsch — und anders als bei den Stufen fiele es
@@ -98,6 +117,13 @@ class Modell:
 
     Beides darf ``None`` sein. Der Auto Router führt gar kein Fenster, manche
     Modelle keine Ausgabegrenze.
+
+    ``cache_marke_noetig`` heißt: dieses Modell speichert den Prompt nur dann
+    zwischen, wenn die Anfrage es ausdrücklich verlangt. ``False`` deckt **zwei**
+    Fälle ab, die für den Sendepfad dasselbe bedeuten — das Modell speichert von
+    selbst zwischen, oder es kann es gar nicht. Beide Male ist nichts zu tun,
+    und beide Male wäre eine Marke falsch: dort wirkungslos, hier eine Bitte um
+    etwas, das nicht angeboten wird.
     """
 
     model_id: str
@@ -108,6 +134,7 @@ class Modell:
     zwingend: bool = False
     kontext_tokens: int | None = None
     max_ausgabe_tokens: int | None = None
+    cache_marke_noetig: bool = False
 
 
 @dataclass
@@ -177,6 +204,32 @@ def _fenster_aus_openrouter(rohdaten: dict) -> tuple[int | None, int | None]:
     return kontext, _positive_zahl(top.get("max_completion_tokens"))
 
 
+def _cache_marke_noetig(rohdaten: dict) -> bool:
+    """Verlangt dieses Modell eine ausdrueckliche Cache-Marke?
+
+    Der Katalog sagt es nicht mit einem Schalter, sondern mit einem **Preis**:
+    wer einen Schreibpreis fuehrt, rechnet das Anlegen des Zwischenspeichers
+    gesondert ab — und rechnet es nur ab, wenn man es verlangt. Wer nur einen
+    Lesepreis fuehrt, speichert von selbst zwischen; das Anlegen ist dort
+    kostenlos und deshalb nicht aufgefuehrt.
+
+    Die Ableitung ist gemessen und nicht geraten: die 71 Modelle mit
+    Schreibpreis sind genau die Familien, die OpenRouter in seiner Doku als
+    „explizit“ auffuehrt (Anthropic, Google, Alibaba Qwen, OpenAI ab GPT-5.6).
+    Deckungsgleich, ohne Ausreisser in beide Richtungen.
+
+    Geprueft wird nur auf **Vorhandensein**, nicht auf den Wert. Der Katalog
+    fuehrt beide Felder durchweg als Zeichenkette und nie als ``"0"``; eine
+    Umrechnung in eine Zahl waere eine Genauigkeit, die hier niemand braucht,
+    und ein ``float()`` ueber Fremddaten ein Fehlerfall mehr.
+    """
+    preise = rohdaten.get("pricing")
+    if not isinstance(preise, dict):
+        return False
+    schreibpreis = preise.get("input_cache_write")
+    return isinstance(schreibpreis, str) and bool(schreibpreis.strip())
+
+
 def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
     """Liest einen Katalogeintrag von OpenRouter.
 
@@ -189,6 +242,7 @@ def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
         return None
 
     kontext, ausgabe = _fenster_aus_openrouter(rohdaten)
+    cache_marke = _cache_marke_noetig(rohdaten)
     reasoning = rohdaten.get("reasoning")
     if not isinstance(reasoning, dict):
         # Kein Denk-Objekt heißt: dieses Modell denkt nicht. Der Katalog führt
@@ -200,6 +254,7 @@ def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
             denkt=False,
             kontext_tokens=kontext,
             max_ausgabe_tokens=ausgabe,
+            cache_marke_noetig=cache_marke,
         )
 
     rohe_stufen = reasoning.get("supported_efforts")
@@ -224,6 +279,7 @@ def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
         zwingend=bool(reasoning.get("mandatory")),
         kontext_tokens=kontext,
         max_ausgabe_tokens=ausgabe,
+        cache_marke_noetig=cache_marke,
     )
 
 

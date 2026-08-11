@@ -161,6 +161,7 @@ async def stream_chat_completion(
     tools: list[dict] | None = None,
     reasoning: bool = False,
     reasoning_effort: str | None = None,
+    cache_marke: bool = False,
 ) -> AsyncIterator[StreamChunk]:
     """Normalisiert Provider-SSE zu Antwort- und Denkschritt-Stuecken.
 
@@ -186,6 +187,28 @@ async def stream_chat_completion(
     aus. Fuer ein Panel mit Kostenlimits je Rolle ist das die falsche
     Voreinstellung; ein Kostenschalter darf sich nicht auf Anbieterdefaults
     verlassen.
+
+    ``cache_marke`` laesst den Anbieter den Prompt zwischenspeichern. Gesendet
+    wird das **oberste** ``cache_control`` neben ``model`` und ``messages``, nicht
+    eine Marke mitten in einer Nachricht. Der Unterschied ist der ganze Grund,
+    warum das hier eine Zeile ist und kein Umbau: die oberste Form setzt die
+    Marke selbst an den letzten wiederverwendbaren Block und schiebt sie mit dem
+    Gespraech weiter. Marken je Nachricht haetten dagegen verlangt, dass diese
+    Schicht weiss, welcher Teil des Kontexts stabil ist — und das weiss sie
+    nicht, das weiss `ai_context_service`.
+
+    Gesendet wird sie **nur**, wenn der Katalog dieses Modell als „verlangt eine
+    ausdrueckliche Marke“ fuehrt (``Modell.cache_marke_noetig``). Der Rest
+    speichert entweder von selbst zwischen oder gar nicht; in beiden Faellen ist
+    das Feld ueberfluessig. Anders als bei ``reasoning`` ist Weglassen hier also
+    richtig: es gibt keinen Anbieterdefault, der sich unbemerkt einschaltet und
+    abgerechnet wird — die Voreinstellung ist ueberall „kein Zwischenspeicher“.
+
+    Ohne ``ttl`` und damit die kurze Frist. Die lange (``"1h"``) kostet das
+    Anlegen das Doppelte statt des 1,25-Fachen und traegt sich nur, wenn
+    derselbe Prompt eine Stunde spaeter unveraendert wiederkommt. Innerhalb
+    eines Laufs liegen die Runden Sekunden auseinander — dort zahlt die kurze
+    Frist, und zwischen zwei Fragen eines Menschen ist beides unsicher.
 
     ``reasoning_effort`` ist die **Tiefe** — "minimal" bis "max", oder ``None``
     fuer Modelle, die keine Stufen kennen (gemessen 145 der 272 denkenden
@@ -225,6 +248,8 @@ async def stream_chat_completion(
     if reasoning and reasoning_effort:
         denken["effort"] = reasoning_effort
     request_body["reasoning"] = denken
+    if cache_marke:
+        request_body["cache_control"] = {"type": "ephemeral"}
     target = httpx.URL(provider_base_url(provider).rstrip("/") + "/chat/completions")
     extensions: dict[str, Any] = {}
     deadline = time.monotonic() + MAX_STREAM_SECONDS

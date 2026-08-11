@@ -120,7 +120,7 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, rounds: list[list[ProviderTool
 
     async def fake(
         _client, *, provider, api_key, messages, usage: StreamUsage,
-        tools=None, reasoning=False, reasoning_effort=None,
+        tools=None, reasoning=False, reasoning_effort=None, cache_marke=False,
     ):
         del provider, api_key, reasoning
         seen.append([dict(item) for item in messages])

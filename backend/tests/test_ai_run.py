@@ -104,7 +104,8 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, runden: list[list[ProviderTool
     zaehler = {"runde": 0}
 
     async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
-                   tools=None, reasoning=False, reasoning_effort=None):
+                   tools=None, reasoning=False, reasoning_effort=None,
+                   cache_marke=False):
         del provider, api_key, reasoning
         gesehen.append([dict(item) for item in messages])
         if tools is None:
@@ -1129,7 +1130,8 @@ async def test_a_superseded_run_performs_no_write_actions(
     stand = {"abgeloest": False}
 
     async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
-                   tools=None, reasoning=False, reasoning_effort=None):
+                   tools=None, reasoning=False, reasoning_effort=None,
+                   cache_marke=False):
         del provider, api_key, messages, reasoning, reasoning_effort
         usage.total_tokens = 10
         if tools is not None and not stand["abgeloest"]:
