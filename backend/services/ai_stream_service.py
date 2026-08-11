@@ -740,7 +740,36 @@ def _segment_vorbereiten(run_id: str) -> tuple[_Vorbereitung | None, tuple[str, 
                 # Zustand kaputt und ein neues Segment ehrlicher als raten.
                 run.message_id = None
         if not run.message_id:
-            begonnen = _segment_beginnen(db, run, zustand)
+            # `_segment_beginnen` reserviert Verbrauch — und das kann scheitern.
+            # Ohne diese Behandlung verliess eine `AiQuotaExceeded` die ganze
+            # Funktion und damit auch `segment_ausfuehren`: die asyncio-Aufgabe
+            # starb, `_lauf_abschliessen` lief nie, kein `error` ging an den
+            # Vermittler. Der Lauf stand danach **fuer immer** auf `running`,
+            # und die Oberflaeche zeigte einen tippenden Assistenten, der nie
+            # wieder etwas sagt.
+            #
+            # Der haeufigste Weg dorthin ist kein Sonderfall: ein Lauf parkt auf
+            # `waiting_confirmation`, in der Zwischenzeit ist das Tageskontingent
+            # aufgebraucht, der Mensch bestaetigt — und genau dann greift die
+            # Reservierung ins Leere.
+            #
+            # Dieselben Fehlerformen wie in `lauf_beginnen`, damit ein
+            # erschoepftes Kontingent an beiden Stellen gleich heisst.
+            try:
+                begonnen = _segment_beginnen(db, run, zustand)
+            except AiUsageConflict:
+                db.rollback()
+                return None, ("AI_REQUEST_CONFLICT", "ai.chat.errors.requestConflict")
+            except AiQuotaExceeded as exc:
+                db.rollback()
+                return None, (f"AI_QUOTA_{exc.reason.upper()}", "ai.chat.errors.quota")
+            except Exception as exc:
+                db.rollback()
+                logger.warning(
+                    "AI-Segment konnte nicht beginnen run_id=%s error=%s",
+                    run_id, type(exc).__name__,
+                )
+                return None, ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
             if begonnen is None:
                 return None, ("AI_RESOURCE_NOT_FOUND", "ai.chat.errors.notFound")
             message_id, usage_event_id, request_id = begonnen
@@ -808,7 +837,26 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     Ergebnisse gehen an den Vermittler (``ai_run_broker``), nicht an einen
     Generator. Wer zusieht, ist dem Lauf gleichgueltig.
     """
-    vorbereitung, fehler = _segment_vorbereiten(run_id)
+    # Die Vorbereitung stand ausserhalb jeder Absicherung. Fiel dort etwas um,
+    # verliess die Ausnahme diese Koroutine, die asyncio-Aufgabe starb still,
+    # und der Lauf blieb auf `running` stehen — ohne Ereignis, ohne Abschluss,
+    # ohne Aufraeumen. Ein Lauf, der nie endet, ist schlimmer als einer, der
+    # scheitert: der Benutzer sieht einen tippenden Assistenten und wartet.
+    #
+    # Die bekannten Fehler behandelt `_segment_vorbereiten` selbst und gibt sie
+    # als Tupel zurueck. Dieser Block ist fuer das Uebrige da.
+    try:
+        vorbereitung, fehler = _segment_vorbereiten(run_id)
+    except Exception as exc:
+        logger.exception("AI-Segment-Vorbereitung abgebrochen run_id=%s", run_id)
+        ai_run_broker.veroeffentlichen(
+            run_id, "error",
+            {"code": "AI_PREPARATION_FAILED", "message_key": "ai.chat.errors.unavailable"},
+        )
+        _lauf_abschliessen(
+            run_id, status="failed", stop_reason=f"AI_PREPARATION_FAILED:{type(exc).__name__}"
+        )
+        return
     if vorbereitung is None:
         if fehler is not None:
             code, message_key = fehler

@@ -442,6 +442,63 @@ async def test_deleting_always_asks_even_with_autonomy(
 
 
 @pytest.mark.asyncio
+async def test_a_run_never_stays_stuck_on_running_when_the_quota_runs_out(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Lauf, der nie endet, ist schlimmer als einer, der scheitert.
+
+    Der Weg dorthin ist kein Sonderfall: ein Lauf parkt auf
+    `waiting_confirmation`, in der Zwischenzeit ist das Tageskontingent
+    aufgebraucht, der Mensch bestaetigt. `_segment_beginnen` reserviert dann
+    Verbrauch — und `AiQuotaExceeded` verliess frueher `_segment_vorbereiten`
+    **und** `segment_ausfuehren`. Die asyncio-Aufgabe starb still:
+    `_lauf_abschliessen` lief nie, kein `error` ging an den Vermittler.
+
+    Der Lauf stand danach fuer immer auf `running`, und die Oberflaeche zeigte
+    einen tippenden Assistenten, der nie wieder etwas sagt — kein Fehler, den
+    man wegklicken kann, und keiner, der von selbst aufhoert.
+
+    Geprueft wird deshalb nicht die Ausnahme, sondern der **Endzustand**.
+    """
+    from services.ai_usage_service import AiQuotaExceeded
+
+    server = _server(db, "kontingent-leer")
+    _grant(db, regular_user, server=server,
+           server_keys=("server.view", "server.backups.create"))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr(
+        "services.backup_orchestrator.create_server_backup",
+        lambda server_id, _db, name=None: type("B", (), {"id": 99})(),
+    )
+    _fake_stream(monkeypatch, [[_backup_aufruf(server)]])
+
+    run = await _lauf(db, regular_user, conversation, provider)
+    assert run.status == "waiting_confirmation"
+
+    # Der Mensch bestaetigt, der Lauf wird wieder aufgenommen — und genau
+    # jetzt ist das Kontingent leer.
+    db.expire_all()
+    run = db.get(AiRun, run.id)
+    run.status = "running"
+    db.commit()
+
+    def _kein_kontingent(*args, **kwargs):
+        raise AiQuotaExceeded("daily_token_limit")
+
+    monkeypatch.setattr(
+        "services.ai_stream_service.reserve_ai_usage", _kein_kontingent
+    )
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+
+    db.expire_all()
+    run = db.get(AiRun, run.id)
+    assert run.status == "failed", "Der Lauf haengt auf `running` fest"
+    # Und der Grund steht dran, statt dass jemand raten muss.
+    assert run.stop_reason == "AI_QUOTA_DAILY_TOKEN_LIMIT"
+
+
+@pytest.mark.asyncio
 async def test_a_new_message_supersedes_a_parked_run(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
