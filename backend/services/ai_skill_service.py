@@ -40,7 +40,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
-import yaml
+try:
+    import yaml
+except ImportError:  # pragma: no cover - exercised on systems before deps install
+    # Weich, weil dieses Modul im Startpfad liegt: main -> routers -> ai_skills
+    # -> hier. Ein harter Import macht aus einem fehlenden Parser einen
+    # Totalausfall des Panels, obwohl `_parse_shipped` unten ausdruecklich
+    # zusichert, dass nicht einmal eine beschaedigte Skill-Datei den Start
+    # verhindern darf. Ohne yaml faellt jede mitgelieferte Datei aus dem
+    # Verzeichnis — Skills aus der Datenbank tragen eigene Spalten und laufen
+    # weiter.
+    yaml = None  # type: ignore[assignment]
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -108,8 +118,16 @@ def _parse_shipped(path: Path) -> ShippedSkill | None:
 
     Eine beschaedigte mitgelieferte Datei darf das Panel nicht am Start
     hindern — sie faellt aus dem Verzeichnis, wird protokolliert, und alles
-    Uebrige laeuft weiter.
+    Uebrige laeuft weiter. Dasselbe gilt fuer einen fehlenden Parser: ohne
+    `yaml` ist jede Datei unlesbar, keine ist ein Grund zum Abbruch.
     """
+    if yaml is None:
+        logger.warning(
+            "yaml fehlt — mitgelieferte Skills bleiben aus. "
+            "Behebung: venv/bin/pip install -r requirements.txt"
+        )
+        return None
+
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
