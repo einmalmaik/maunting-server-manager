@@ -813,6 +813,52 @@ async def test_a_write_proposal_also_sets_the_topic(
     assert run.last_server_id == server.id
 
 
+@pytest.mark.asyncio
+async def test_the_machines_manual_reaches_the_provider_in_the_same_round(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Das Ganze am laufenden Zug, nicht nur an den Bausteinen.
+
+    Der Benutzer fragt "warum kommt keiner rein?" und nennt keinen Server. Beim
+    Anlegen des Laufs weiss deshalb niemand, um welche Anlage es geht — der
+    Kontext dieser ersten Anfrage kann ihre Betriebsanleitung gar nicht
+    enthalten. Erst das Lesewerkzeug klaert die Nummer.
+
+    Geprueft wird die Reihenfolge: **nicht** in der ersten Anfrage, **schon**
+    in der zweiten. Ohne den Nachtrag antwortete das Modell auf genau die
+    Frage, fuer die der Satz gedacht ist, ohne ihn zu kennen.
+    """
+    from services import ai_memory_service
+
+    server = _server(db, "handbuch")
+    _grant(db, regular_user, server=server,
+           server_keys=("server.view", "server.config.write"),
+           global_keys=("ai.memory.use",))
+    ai_memory_service.set_preference(db, regular_user, True)
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="server_shared", server_id=server.id,
+        key="whitelist", value="Nach jedem Neustart die Whitelist neu laden.",
+        origin="ai",
+    )
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    gesehen = _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="read_server_status",
+                         arguments={"server_id": server.id}),
+    ]])
+
+    await _lauf(db, regular_user, conversation, provider,
+                content="Warum kommt keiner rein?")
+
+    def enthaelt(runde: list[dict]) -> bool:
+        return any("Whitelist neu laden" in str(m.get("content")) for m in runde)
+
+    assert len(gesehen) >= 2
+    assert not enthaelt(gesehen[0])
+    assert enthaelt(gesehen[1])
+
+
 def test_a_deleted_server_does_not_take_the_run_with_it(
     db: Session, regular_user: User
 ) -> None:
