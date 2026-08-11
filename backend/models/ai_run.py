@@ -40,6 +40,11 @@ WARTEND = ("waiting_confirmation", "waiting_user")
 # Endzustaende. Ab hier weckt nichts den Lauf mehr auf.
 BEENDET = ("completed", "failed", "cancelled")
 ZUSTAENDE = ("running", *WARTEND, *BEENDET)
+# Diese drei sind die Wahrheitsquelle und keine Beschreibung: der
+# CheckConstraint unten wird aus ZUSTAENDE **erzeugt**, ``ai_run_service``
+# filtert ueber WARTEND, ``ai_stream_service`` liest BEENDET. Vorher stand
+# dieselbe Aufzaehlung viermal woertlich im Code — wer einen Zustand ergaenzte,
+# trug ihn in die Konstante ein und aenderte damit nichts.
 
 
 class AiRun(Base):
@@ -53,9 +58,11 @@ class AiRun(Base):
 
     __tablename__ = "ai_runs"
     __table_args__ = (
+        # Erzeugt statt abgeschrieben. Die Migration traegt ihre eigene Kopie —
+        # das ist Absicht: eine bereits angewandte Migration ist Geschichte und
+        # wird nicht nachtraeglich umgeschrieben.
         CheckConstraint(
-            "status IN ('running', 'waiting_confirmation', 'waiting_user', "
-            "'completed', 'failed', 'cancelled')",
+            "status IN (" + ", ".join(f"'{zustand}'" for zustand in ZUSTAENDE) + ")",
             name="ck_ai_runs_status",
         ),
         # Fuer "hat dieser Benutzer gerade etwas laufen?" — die Frage, die die

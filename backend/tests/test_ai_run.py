@@ -786,3 +786,258 @@ async def test_a_normal_run_is_not_marked_as_out_of_budget(
 
     assert run.status == "completed"
     assert run.stop_reason == "done"
+
+
+# ── 4. Ein Lauf gehoert immer nur einem ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_run_cannot_report_itself_as_completed(
+    db: Session, regular_user: User
+) -> None:
+    """Ein Endzustand ist endgueltig — auch gegenueber dem eigenen Segment.
+
+    Der Fall aus dem Betrieb: die KI streamt, der Benutzer schiebt ungeduldig
+    eine zweite Nachricht nach. Der erste Lauf wird auf 'cancelled/superseded'
+    gesetzt. Bringt seine Aufgabe die angefangene Runde trotzdem zu Ende,
+    meldete sie danach 'completed/done' und ueberschrieb den Abbruch — im
+    Protokoll stand ein Lauf als erledigt, den der Benutzer laengst ueberholt
+    hatte.
+    """
+    conversation = _conversation(db, regular_user)
+    provider = _provider(db)
+    laufend = ai_run_service.lauf_anlegen(
+        db, conversation_id=conversation.id, user_id=regular_user.id,
+        provider_id=provider.id, message_id=None, reasoning=False,
+        zustand=ai_run_service.leerer_zustand([], request_id=str(uuid4())),
+    )
+    db.commit()
+    assert laufend.status == "running"
+
+    ai_run_service.vorgaenger_abloesen(db, conversation_id=conversation.id)
+    db.commit()
+
+    # Und jetzt meldet sich die alte Aufgabe zurueck, als waere nichts gewesen.
+    ai_stream_service._lauf_abschliessen(
+        laufend.id, status="completed", stop_reason="done"
+    )
+
+    db.expire_all()
+    ueberholt = db.get(AiRun, laufend.id)
+    assert ueberholt.status == "cancelled", "Der abgeloeste Lauf hat sich wiederbelebt"
+    assert ueberholt.stop_reason == "superseded"
+
+
+@pytest.mark.asyncio
+async def test_a_new_message_cancels_the_task_of_a_running_predecessor(
+    db: Session, regular_user: User
+) -> None:
+    """Abloesen heisst anhalten, nicht nur umetikettieren.
+
+    Der Status wurde gesetzt, die asyncio-Aufgabe lief weiter: sie fuehrte
+    Werkzeuge aus, legte Vorschlaege in dieselbe Unterhaltung und antwortete
+    **nach** der neuen Frage des Benutzers.
+    """
+    conversation = _conversation(db, regular_user)
+    provider = _provider(db)
+    laufend = ai_run_service.lauf_anlegen(
+        db, conversation_id=conversation.id, user_id=regular_user.id,
+        provider_id=provider.id, message_id=None, reasoning=False,
+        zustand=ai_run_service.leerer_zustand([], request_id=str(uuid4())),
+    )
+    db.commit()
+
+    laeuft_schon = asyncio.Event()
+
+    async def _endlos() -> None:
+        laeuft_schon.set()
+        await asyncio.sleep(3600)
+
+    aufgabe = asyncio.ensure_future(_endlos())
+    await laeuft_schon.wait()
+    ai_run_service.laufzeit_setzen(asyncio.get_running_loop(), None)
+    ai_run_service._AUFGABEN[laufend.id] = aufgabe
+    try:
+        ai_run_service.vorgaenger_abloesen(db, conversation_id=conversation.id)
+        db.commit()
+        # Der Abbruch wird auf der Schleife zugestellt, nicht im Aufrufer.
+        await asyncio.sleep(0.05)
+        assert aufgabe.cancelled(), "Die Aufgabe des abgeloesten Laufs arbeitet weiter"
+    finally:
+        aufgabe.cancel()
+        ai_run_service.zuruecksetzen_fuer_tests()
+        ai_run_service.laufzeit_setzen(None, None)
+
+
+def test_the_cancelled_predecessor_does_not_erase_why_it_was_cancelled(
+    db: Session, regular_user: User
+) -> None:
+    """„Ueberholt" und „Panel faehrt herunter" muessen unterscheidbar bleiben.
+
+    Der abgeloeste Lauf steht auf 'cancelled/superseded'. Seine Aufgabe bekommt
+    den Abbruch erst am naechsten Haltepunkt zugestellt und meldet dann aus dem
+    CancelledError-Zweig ihrerseits 'cancelled', aber mit stop_reason
+    'cancelled'. Der Status ist in beiden Faellen derselbe — ein Waechter, der
+    zusaetzlich auf einen *anderen* Status prueft, faellt hier durch und
+    ueberschreibt 'superseded'. Danach steht im Protokoll nicht mehr, ob der
+    Benutzer den Lauf ueberholt hat oder ob der Prozess herunterfuhr.
+
+    Der Test faehrt genau den Weg, den `test_a_new_message_cancels_the_task...`
+    mit seiner Ersatzaufgabe nicht faehrt.
+    """
+    conversation = _conversation(db, regular_user)
+    provider = _provider(db)
+    laufend = ai_run_service.lauf_anlegen(
+        db, conversation_id=conversation.id, user_id=regular_user.id,
+        provider_id=provider.id, message_id=None, reasoning=False,
+        zustand=ai_run_service.leerer_zustand([], request_id=str(uuid4())),
+    )
+    db.commit()
+
+    ai_run_service.vorgaenger_abloesen(db, conversation_id=conversation.id)
+    db.commit()
+
+    # Das ist es, was der Vorgaenger meldet, wenn ihn der Abbruch erreicht.
+    ai_stream_service._lauf_abschliessen(
+        laufend.id, status="cancelled", stop_reason="cancelled"
+    )
+
+    db.expire_all()
+    run = db.get(AiRun, laufend.id)
+    assert run.status == "cancelled"
+    assert run.stop_reason == "superseded", run.stop_reason
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_run_performs_no_write_actions(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der teuerste Teil des Geistes: er handelt noch.
+
+    Der Abbruch einer Aufgabe wird erst am naechsten Haltepunkt zugestellt —
+    und zwischen dem Ende des Anbieterstroms und dem Anlegen der Vorschlaege
+    liegt keiner. Ein ueberholter Lauf legte deshalb noch Aktionskarten in die
+    Unterhaltung des Nachfolgers und fuehrte autonome Aktionen wirklich aus.
+    """
+    server = _server(db, "abgeloest-schreibt")
+    _grant(db, regular_user, server=server,
+           server_keys=("server.view", "server.backups.create"))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr(
+        "services.backup_orchestrator.create_server_backup",
+        lambda server_id, _db, name=None: type("B", (), {"id": 99})(),
+    )
+
+    stand = {"abgeloest": False}
+
+    async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
+                   tools=None, reasoning=False, reasoning_effort=None):
+        del provider, api_key, messages, reasoning, reasoning_effort
+        usage.total_tokens = 10
+        if tools is not None and not stand["abgeloest"]:
+            usage.tool_calls = [_backup_aufruf(server)]
+            yield StreamChunk("content", "ich sichere gleich")
+            # Genau jetzt schreibt der Benutzer etwas Neues: der Lauf ist ab
+            # hier abgeloest, hat seine Werkzeugrunde aber schon in der Hand.
+            ai_run_service.vorgaenger_abloesen(db, conversation_id=conversation.id)
+            db.commit()
+            stand["abgeloest"] = True
+            return
+        yield StreamChunk("content", "ok")
+
+    monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake)
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Sicher den Server", reasoning=False,
+    )
+    assert run is not None, f"Lauf konnte nicht beginnen: {fehler}"
+    ai_run_broker.eroeffnen(run.id)
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+
+    db.expire_all()
+    assert db.query(AiActionProposal).count() == 0, "Ein abgeloester Lauf hat gehandelt"
+    ueberholt = db.get(AiRun, run.id)
+    assert ueberholt.status == "cancelled"
+    assert ueberholt.stop_reason == "superseded"
+
+
+def test_two_confirmations_at_once_plan_only_one_segment(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zwei Klicks, zwei Threads, ein Lauf — und trotzdem nur ein Segment.
+
+    Die Sperre las ``_AUFGABEN``, eingetragen wurde die Aufgabe aber erst in der
+    Koroutine ``_starten`` auf der Ereignisschleife. Beide Aufrufer sahen darum
+    einen leeren Eintrag und planten je ein Segment: zwei Anbieteraufrufe auf
+    demselben Zustand, zwei Abrechnungen und dieselbe Schreibaktion zweimal.
+
+    Nachgestellt ohne Threads, weil das Fenster genau dasselbe ist: die Schleife
+    laeuft zwischen den beiden Planungen kein einziges Mal.
+    """
+    gestartet: list[str] = []
+
+    async def _fake_segment(run_id: str, *, client=None) -> None:
+        del client
+        gestartet.append(run_id)
+
+    monkeypatch.setattr(ai_stream_service, "segment_ausfuehren", _fake_segment)
+    schleife = asyncio.new_event_loop()
+    run_id = str(uuid4())
+    try:
+        ai_run_service.laufzeit_setzen(schleife, None)
+        assert ai_run_service.lauf_starten(run_id) is True
+        assert ai_run_service.lauf_starten(run_id) is True
+        schleife.run_until_complete(asyncio.sleep(0.05))
+    finally:
+        ai_run_service.laufzeit_setzen(None, None)
+        ai_run_service.zuruecksetzen_fuer_tests()
+        schleife.close()
+
+    assert gestartet == [run_id], f"Ein Lauf, zwei Segmente: {gestartet}"
+
+
+def test_the_waiting_states_have_exactly_one_home(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``WARTEND`` muss tragen, nicht danebenstehen.
+
+    Die Wartezustaende standen viermal woertlich im Code: in der Konstante, im
+    CheckConstraint und in zwei Abfragen. Wer einen Zustand ergaenzte, trug ihn
+    in die Konstante ein — mit null Wirkung, weil niemand sie las.
+
+    Geprueft wird deshalb die Kopplung selbst: wird die Konstante enger, muessen
+    die Abfragen enger werden.
+    """
+    from models.ai_run import ZUSTAENDE
+
+    conversation = _conversation(db, regular_user)
+    provider = _provider(db)
+    wartend = ai_run_service.lauf_anlegen(
+        db, conversation_id=conversation.id, user_id=regular_user.id,
+        provider_id=provider.id, message_id=None, reasoning=False,
+        zustand=ai_run_service.leerer_zustand([], request_id=str(uuid4())),
+    )
+    wartend.status = "waiting_confirmation"
+    db.commit()
+
+    monkeypatch.setattr(ai_run_service, "WARTEND", ("waiting_user",))
+
+    assert ai_run_service.aktiver_lauf(db, user_id=regular_user.id) is None, (
+        "aktiver_lauf haelt eine eigene Kopie der Wartezustaende"
+    )
+    ai_run_service.vorgaenger_abloesen(db, conversation_id=conversation.id)
+    db.commit()
+    db.expire_all()
+    assert db.get(AiRun, wartend.id).status == "waiting_confirmation", (
+        "vorgaenger_abloesen haelt eine eigene Kopie der Wartezustaende"
+    )
+
+    # Hier stand einmal eine dritte Zusicherung, die den CheckConstraint der
+    # Tabelle mit einer aus ZUSTAENDE gebauten Zeichenkette verglich. Sie ist
+    # bewusst geloescht: seit die Einschraenkung selbst aus ZUSTAENDE erzeugt
+    # wird, vergleicht sie dieselbe Liste mit sich selbst und kann per
+    # Konstruktion nie umfallen. Dass die Datenbankgrenze und die Konstante
+    # dieselbe Quelle haben, ist eine Wartbarkeitsaenderung ohne Testwirkung —
+    # und eine Zusicherung, die immer haelt, behauptet nur Absicherung.

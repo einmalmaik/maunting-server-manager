@@ -17,14 +17,18 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Any
-from uuid import UUID, uuid4
+import threading
+from uuid import uuid4
 
 import httpx
 from sqlalchemy.orm import Session
 
-from database import SessionLocal
 from models import AiActionProposal, AiRun, User
+# Die Wartezustaende kommen aus dem Modell und nicht aus einer Literalkopie:
+# wer dort einen Zustand ergaenzt, soll ihn hier nicht ein zweites Mal
+# eintragen muessen — sonst sieht die Konstante wie die Wahrheitsquelle aus und
+# ist doch nur eine Beschreibung.
+from models.ai_run import WARTEND
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +46,21 @@ _HTTP: httpx.AsyncClient | None = None
 # Aufgabe abraeumen, auf die niemand mehr zeigt — asyncio haelt selbst nur eine
 # schwache Referenz, und der Lauf verschwaende mitten in der Arbeit.
 _AUFGABEN: dict[str, asyncio.Task] = {}
+
+# Wer plant, belegt den Platz **sofort** — im eigenen Thread, unter Schloss.
+#
+# _AUFGABEN taugt dafuer nicht: der Eintrag entsteht erst, wenn die
+# Ereignisschleife die Koroutine `_starten` ausfuehrt. Zwei Bestaetigungen, die
+# in zwei Threadpool-Arbeitern ankommen, sahen darum beide "nichts unterwegs"
+# und planten je ein Segment — zwei Anbieteraufrufe auf demselben Zustand, zwei
+# Abrechnungen (die zweite scheitert an AiUsageConflict und wirft den bereits
+# beantworteten Lauf auf 'failed') und dieselbe Schreibaktion zweimal.
+#
+# Ein gewoehnliches Set unter threading.Lock, kein Framework: der Zustand ist
+# eine Menge von Kennungen, und die Sperre wird nur um zwei Zeilen gehalten, in
+# denen nichts wartet.
+_GEPLANT: set[str] = set()
+_PLANUNGSSCHLOSS = threading.Lock()
 
 
 def laufzeit_setzen(
@@ -169,12 +188,20 @@ def vorgaenger_abloesen(db: Session, *, conversation_id: str) -> dict:
     Rundenbudgets erbt der Nachfolger dagegen **nicht**: eine Klaerung ist kein
     Fehler des Benutzers, und ihn dafuer mit einem halben Budget zu bestrafen
     waere die falsche Lehre.
+
+    Abloesen **haelt an**, es etikettiert nicht nur um. Bisher wurde nur die
+    Zeile umgeschrieben; die asyncio-Aufgabe des Vorgaengers lief weiter, fuehrte
+    Werkzeuge aus, legte Vorschlaege in eine Unterhaltung, die inzwischen dem
+    Nachfolger gehoerte, und meldete sich am Ende als 'completed' zurueck — der
+    Geist, den dieser Docstring auszuschliessen behauptet. Zugestellt wird der
+    Abbruch erst am naechsten Haltepunkt der Ereignisschleife, also nach dem
+    Commit dieses Aufrufers und nie mitten in dessen Transaktion.
     """
     betroffen = (
         db.query(AiRun)
         .filter(
             AiRun.conversation_id == conversation_id,
-            AiRun.status.in_(("running", "waiting_confirmation", "waiting_user")),
+            AiRun.status.in_(("running", *WARTEND)),
         )
         .order_by(AiRun.created_at.asc())
         .all()
@@ -190,6 +217,8 @@ def vorgaenger_abloesen(db: Session, *, conversation_id: str) -> dict:
         else:
             run.status = "cancelled"
             run.stop_reason = "superseded"
+            # Der Status allein hat noch nie etwas gestoppt.
+            aufgabe_abbrechen(run.id)
         run.updated_at = _jetzt()
     return erbe
 
@@ -200,7 +229,7 @@ def aktiver_lauf(db: Session, *, user_id: int) -> AiRun | None:
         db.query(AiRun)
         .filter(
             AiRun.user_id == user_id,
-            AiRun.status.in_(("running", "waiting_confirmation", "waiting_user")),
+            AiRun.status.in_(("running", *WARTEND)),
         )
         .order_by(AiRun.created_at.desc())
         .first()
@@ -238,6 +267,30 @@ def darf_fortsetzen(db: Session, run: AiRun) -> bool:
 # ── Planung ──────────────────────────────────────────────────────────────
 
 
+def _platz_belegen(run_id: str) -> bool:
+    """Belegt den Planungsplatz eines Laufs. ``False`` heisst: einer war schneller."""
+    with _PLANUNGSSCHLOSS:
+        # Ein Platz gilt als frei, sobald die Aufgabe fertig ist. Der
+        # done_callback raeumt ihn erst einen Schleifendurchlauf spaeter
+        # (`call_soon`), und eine Bestaetigung, die genau dazwischen ankommt —
+        # POST /api/ai/actions/{id}/execute ist ein synchrones `def` und laeuft
+        # nebenlaeufig im Threadpool —, saehe sonst ein "schon unterwegs", das
+        # niemand mehr einloest: der Lauf steht dann fuer immer auf 'running'.
+        #
+        # Zwischen dieser Pruefung und dem Eintrag in `_AUFGABEN` ist `aufgabe`
+        # None; der Platz bleibt dort belegt, das eigentliche Fenster also zu.
+        aufgabe = _AUFGABEN.get(run_id)
+        if run_id in _GEPLANT and not (aufgabe is not None and aufgabe.done()):
+            return False
+        _GEPLANT.add(run_id)
+        return True
+
+
+def _platz_freigeben(run_id: str) -> None:
+    with _PLANUNGSSCHLOSS:
+        _GEPLANT.discard(run_id)
+
+
 def _aufgabe_planen(run_id: str) -> bool:
     """Plant ein Segment auf der Ereignisschleife der Anwendung.
 
@@ -249,11 +302,18 @@ def _aufgabe_planen(run_id: str) -> bool:
     gewoehnlichen, synchronen FastAPI-Endpunkt, der in einem Arbeitsthread
     laeuft. ``run_coroutine_threadsafe`` ist die Bruecke zurueck auf die
     Schleife, auf der der HTTP-Client des Anbieters lebt.
+
+    Und der Platz wird **vor** der Uebergabe belegt, nicht danach. Frueher
+    fragte diese Stelle ``_AUFGABEN`` — ein Verzeichnis, in das erst die
+    Koroutine ``_starten`` eintraegt, also erst spaeter und in einem anderen
+    Thread. Zwei gleichzeitige Bestaetigungen sahen deshalb beide "nichts
+    unterwegs", und der Kommentar unten beschrieb ein Ziel, das die Pruefung
+    gar nicht erreichen konnte.
     """
     schleife = _SCHLEIFE
     if schleife is None or schleife.is_closed():
         return False
-    if run_id in _AUFGABEN and not _AUFGABEN[run_id].done():
+    if not _platz_belegen(run_id):
         # Schon unterwegs. Zwei Segmente desselben Laufs gleichzeitig waeren
         # zwei Schreiber auf einem Zustand.
         return True
@@ -266,6 +326,10 @@ def _aufgabe_planen(run_id: str) -> bool:
 
         def _fertig(_: asyncio.Task) -> None:
             _AUFGABEN.pop(run_id, None)
+            # Erst mit dem Ende der Arbeit ist der Platz wieder frei. Frueher
+            # freigegeben waere die naechste Planung wieder ein zweiter
+            # Schreiber auf demselben Zustand.
+            _platz_freigeben(run_id)
 
         aufgabe.add_done_callback(_fertig)
 
@@ -273,11 +337,49 @@ def _aufgabe_planen(run_id: str) -> bool:
         laufende_schleife = asyncio.get_running_loop()
     except RuntimeError:
         laufende_schleife = None
-    if laufende_schleife is schleife:
-        # Schon auf der richtigen Schleife (der Streamendpunkt selbst).
-        asyncio.ensure_future(_starten())
+    try:
+        if laufende_schleife is schleife:
+            # Schon auf der richtigen Schleife (der Streamendpunkt selbst).
+            asyncio.ensure_future(_starten())
+        else:
+            asyncio.run_coroutine_threadsafe(_starten(), schleife)
+    except RuntimeError:
+        # Die Schleife ist zwischen Pruefung und Uebergabe gestorben. Den Platz
+        # zurueckgeben — sonst gaelte dieser Lauf fuer immer als "unterwegs"
+        # und liesse sich nie wieder wecken.
+        _platz_freigeben(run_id)
+        return False
+    return True
+
+
+def aufgabe_abbrechen(run_id: str) -> bool:
+    """Haelt die laufende Aufgabe eines Laufs an — aus jedem Thread heraus.
+
+    Das Gegenstueck zum Planen und die fehlende Haelfte des Abloesens. Ein Lauf,
+    dessen Zeile auf 'cancelled' steht, dessen Aufgabe aber weiterarbeitet, ist
+    der schlechteste aller Zustaende: er fuehrt Werkzeuge aus, legt Vorschlaege
+    in eine Unterhaltung, die dem Nachfolger gehoert, und antwortet **nach** der
+    neuen Frage des Benutzers.
+
+    Der Abbruch ist eine Bitte, kein Befehl — asyncio stellt ihn erst am
+    naechsten Haltepunkt zu. Deshalb steht er nicht allein: ein Endzustand
+    bleibt endgueltig (``_lauf_abschliessen``), und vor einer Schreibrunde wird
+    nachgesehen, wem der Lauf noch gehoert (``segment_ausfuehren``).
+    """
+    aufgabe = _AUFGABEN.get(run_id)
+    if aufgabe is None or aufgabe.done():
+        return False
+    schleife = _SCHLEIFE
+    try:
+        laufende_schleife = asyncio.get_running_loop()
+    except RuntimeError:
+        laufende_schleife = None
+    if schleife is None or laufende_schleife is schleife:
+        aufgabe.cancel()
     else:
-        asyncio.run_coroutine_threadsafe(_starten(), schleife)
+        # ``Task.cancel`` gehoert der Schleife, nicht dem Arbeitsthread, aus dem
+        # eine Bestaetigung oder eine neue Nachricht hereinkommt.
+        schleife.call_soon_threadsafe(aufgabe.cancel)
     return True
 
 
@@ -354,16 +456,11 @@ def unterbrochene_laeufe_abgleichen(db: Session) -> int:
 
 def zuruecksetzen_fuer_tests() -> None:
     _AUFGABEN.clear()
+    # Sonst schleppt der naechste Test die Platzbelegung des vorherigen mit und
+    # bekaeme ein "schon unterwegs" fuer einen Lauf, den es nicht mehr gibt.
+    _platz_freigeben_alle()
 
 
-def laufende_aufgaben() -> dict[str, Any]:
-    """Nur fuer Tests und Diagnose: was gerade tatsaechlich arbeitet."""
-    return dict(_AUFGABEN)
-
-
-def ist_uuid(wert: str) -> bool:
-    try:
-        UUID(wert)
-    except (TypeError, ValueError):
-        return False
-    return True
+def _platz_freigeben_alle() -> None:
+    with _PLANUNGSSCHLOSS:
+        _GEPLANT.clear()

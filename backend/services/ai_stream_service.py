@@ -840,6 +840,37 @@ def _lauf_abschliessen(
         run = db.get(AiRun, run_id)
         if run is None:
             return
+        if run.status in AUSGELAUFEN:
+            # Ein Endzustand ist endgueltig — auch gegenueber dem eigenen Segment,
+            # und auch dann, wenn der Zweitschreiber denselben Status meldet.
+            #
+            # Die Zusatzbedingung `run.status != status`, die hier naheliegt,
+            # waere ausgerechnet im Zielfall falsch: nach `vorgaenger_abloesen`
+            # steht der Lauf auf 'cancelled/superseded', und der abgebrochene
+            # Vorgaenger meldet aus seinem CancelledError-Zweig ebenfalls
+            # 'cancelled', nur mit stop_reason 'cancelled'. Der Status waere
+            # gleich, der Waechter fiele durch, und 'superseded' ginge verloren
+            # — also genau die Unterscheidung, die dieser Waechter schuetzen
+            # soll: wurde der Lauf ueberholt, oder fuhr das Panel herunter?
+            #
+            # Der Fall aus dem Betrieb: der Benutzer schiebt waehrend des Streams
+            # eine zweite Nachricht nach. `vorgaenger_abloesen` schreibt diesen
+            # Lauf auf 'cancelled/superseded', der Abbruch seiner Aufgabe wird
+            # aber erst am naechsten Haltepunkt zugestellt. Brachte sie ihre
+            # Runde vorher zu Ende, meldete sie hier 'completed/done' und
+            # ueberschrieb den Abbruch: im Protokoll stand ein Lauf als erledigt,
+            # den der Benutzer laengst ueberholt hatte.
+            #
+            # Gemeldet wird der **tatsaechliche** Zustand und nicht der
+            # gewuenschte: die Oberflaeche soll den Abbruch sehen und nicht auf
+            # eine Antwort warten, die nicht mehr kommt.
+            ai_run_broker.veroeffentlichen(
+                run_id,
+                "run",
+                {"run_id": run_id, "status": run.status, "stop_reason": run.stop_reason},
+            )
+            ai_run_broker.beenden(run_id)
+            return
         run.status = status
         run.stop_reason = stop_reason
         if zustand is not None:
@@ -939,6 +970,10 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     abgerechnet = False
     gestellte_frage: dict | None = None
     geparkt = False
+    # Wurde dieser Lauf waehrend der Arbeit von einer neuen Nachricht abgeloest?
+    # Dann gehoert er nicht mehr uns: abgerechnet wird noch ehrlich, geschrieben
+    # wird nichts mehr.
+    abgeloest = False
     # Endete der Lauf, weil ihm die Runden ausgingen? Ein solcher Lauf sieht im
     # Ergebnis aus wie einer, der fertig war — er ist es aber nicht, und der
     # Unterschied gehoert ins Protokoll. Genau dafuer stand `stop_reason`
@@ -1003,6 +1038,22 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 for call in current_usage.tool_calls
             }
             if kinds == {"write"}:
+                # Ein abgeloester Lauf darf die Aussenwelt nicht mehr anfassen.
+                #
+                # Zwischen dem Beginn dieses Segments und dieser Runde koennen
+                # Minuten liegen. Schreibt der Benutzer in der Zwischenzeit etwas
+                # Neues, steht dieser Lauf auf 'cancelled' — sein Abbruch wird
+                # aber erst am naechsten Haltepunkt zugestellt, und zwischen dem
+                # Ende des Anbieterstroms und `_persist_write_proposals` liegt
+                # keiner. Ohne diese Frage legte ein ueberholter Lauf noch
+                # Vorschlaege in die Unterhaltung und fuehrte autonome Aktionen
+                # am Server tatsaechlich aus.
+                #
+                # Gefragt wird genau hier und nicht in jeder Runde: das ist der
+                # einzige Punkt, an dem der Lauf etwas veraendert.
+                if _lauf_status(run_id) != "running":
+                    abgeloest = True
+                    break
                 proposals = _persist_write_proposals(
                     user_id=user_id,
                     conversation_id=conversation_id,
@@ -1136,6 +1187,35 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             for used in used_tools:
                 ai_run_broker.veroeffentlichen(run_id, "tool", used)
             current_usage = StreamUsage()
+
+        if abgeloest:
+            # Kein `done` an den Vermittler und kein Zustand in die Datenbank:
+            # der Nachfolger arbeitet bereits in derselben Unterhaltung, und ein
+            # zweiter Schreiber auf demselben Lauf waere genau der Geist, den das
+            # Abloesen verhindern soll.
+            #
+            # Die Verbrauchszeile wird trotzdem geschlossen — nicht, weil hier
+            # etwas abzurechnen waere, sondern weil eine offene Reservierung
+            # Kontingent und Nebenlaeuferplatz des Benutzers dauerhaft blockiert.
+            # Kam Text durch, wird er abgerechnet; kam keiner durch, und das ist
+            # bei einer reinen Schreibrunde der Normalfall, gibt `had_output`
+            # False und die Reserve wird freigegeben.
+            _finalize_stream(
+                message_id=message_id,
+                usage_event_id=vorbereitung.usage_event_id,
+                content="".join(chunks),
+                provider_total_tokens=usage.total_tokens,
+                estimated_actual_tokens=0,
+                failed=True,
+                had_output=bool(chunks),
+                token_price_cents_per_million=vorbereitung.token_price_cents_per_million,
+                reasoning="".join(thoughts),
+            )
+            abgerechnet = True
+            # Schreibt nichts um: `_lauf_abschliessen` laesst Endzustaende stehen
+            # und meldet der Oberflaeche den tatsaechlichen.
+            _lauf_abschliessen(run_id, status="cancelled", stop_reason="superseded")
+            return
 
         zustand["tool_signatures"] = signaturen
         zustand["provider_messages"] = provider_messages
