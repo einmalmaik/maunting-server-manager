@@ -911,6 +911,32 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
         else:
             team_id = target.id
 
+    # Die Einwilligung gilt dem **eigenen** Gedaechtnis, also `user` und
+    # `server` — `team` und `panel` haengen an Mitgliedschaft und
+    # Betreiberentscheidung (siehe `_visible_scope_rows`).
+    #
+    # Geprueft wurde sie bisher nur beim **Lesen**. Beim abgeschalteten Schalter
+    # legte die KI also weiter Zeilen an; sie wurden nur nicht mehr vorgelesen.
+    # Zwei Folgen, beide schlecht: der Hinweis in der Oberflaeche sagt „Derzeit
+    # ist das Gedaechtnis deaktiviert“, waehrend im Hintergrund mitgeschrieben
+    # wird — und wer den Schalter spaeter umlegt, bekommt schlagartig alles zu
+    # sehen, was in der Zwischenzeit ueber ihn gesammelt wurde. Der Systemprompt
+    # weist das Modell ausdruecklich an, Vorlieben **ungefragt** abzulegen; ohne
+    # diese Pruefung ist die Einstellung eine Anzeige und keine Entscheidung.
+    #
+    # Bewusst nur hier und nicht in `upsert_entry`: ueber den Router legt der
+    # Benutzer selbst eine Notiz an, und das ist eine ausdrueckliche Handlung.
+    # Sie darf an dem Schalter nicht scheitern, der die *KI* betrifft.
+    if scope in {"user", "server"} and not ai_memory_service.preference(db, user.id):
+        return {
+            "remembered": False,
+            "reason": "memory_disabled",
+            "message": (
+                "Der Benutzer hat sein persoenliches Gedaechtnis abgeschaltet. "
+                "Es wurde nichts gespeichert."
+            ),
+        }
+
     try:
         row, stored = ai_memory_service.upsert_entry(
             db, user=user, scope=scope, server_id=server_id if scope == "server" else None,

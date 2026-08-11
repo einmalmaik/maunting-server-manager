@@ -18,8 +18,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.orm import Session
 
-from models import AiMemoryPreference, Role, RolePermission, User
-from services import ai_memory_service
+from models import AiMemoryEntry, AiMemoryPreference, Role, RolePermission, User
+from services import ai_action_service, ai_memory_service
 from services.role_service import set_user_roles
 
 
@@ -57,6 +57,54 @@ def test_nothing_reaches_the_model_while_memory_is_off(
 
     ai_memory_service.set_preference(db, regular_user, False)
     assert ai_memory_service.provider_memory_context(db, regular_user) is None
+
+
+def test_the_ai_does_not_write_while_memory_is_off(
+    db: Session, regular_user: User
+) -> None:
+    """Stummschalten ist nicht dasselbe wie nicht mitschreiben.
+
+    Die Einwilligung wurde bisher nur beim **Lesen** geprüft. Bei
+    abgeschaltetem Schalter legte `remember` weiter Zeilen an — sie wurden nur
+    nicht mehr in den Kontext gegeben. Zwei Folgen, beide schlecht:
+
+    * Die Oberfläche sagt „Derzeit ist das Gedächtnis deaktiviert", während im
+      Hintergrund gesammelt wird. Der Systemprompt weist das Modell
+      ausdrücklich an, Vorlieben **ungefragt** abzulegen — es genügt also, dass
+      der Benutzer beiläufig „ich nehme immer 8 GB" schreibt.
+    * Wer den Schalter später umlegt, bekommt schlagartig alles zu sehen, was
+      in der Zwischenzeit über ihn gesammelt wurde. Das ist die Umkehrung
+      dessen, wofür die Einwilligung da ist.
+
+    Das Ergebnis ist bewusst eine Auskunft und keine Ausnahme: das Modell soll
+    dem Benutzer sagen können, warum es sich nichts merkt.
+    """
+    _allow(db, regular_user)
+    assert ai_memory_service.preference(db, regular_user.id) is False
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="remember",
+        arguments={"scope": "user", "key": "ram.bevorzugt", "value": "8 GB"},
+    )
+    assert ergebnis["remembered"] is False
+    assert ergebnis["reason"] == "memory_disabled"
+    # Und es liegt wirklich nichts in der Datenbank.
+    assert db.query(AiMemoryEntry).count() == 0
+
+    # Mit Einwilligung geht es — sonst wäre der Test oben auch dann grün, wenn
+    # `remember` gar nicht mehr funktionierte.
+    ai_memory_service.set_preference(db, regular_user, True)
+    db.commit()
+    ergebnis = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="remember",
+        arguments={"scope": "user", "key": "ram.bevorzugt", "value": "8 GB"},
+    )
+    assert ergebnis["remembered"] is True
+    assert db.query(AiMemoryEntry).count() == 1
 
 
 def test_the_notice_is_due_for_a_fresh_account(db: Session, regular_user: User) -> None:
